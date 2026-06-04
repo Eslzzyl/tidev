@@ -131,14 +131,15 @@ fn parse_ws_msg(msg: &Message) -> Result<(String, Vec<serde_json::Value>), Strin
         _ => return Err("unexpected message type".to_string()),
     };
 
-    let arr: Vec<serde_json::Value> = serde_json::from_str(&text)
-        .map_err(|e| format!("invalid JSON array: {e}"))?;
+    let arr: Vec<serde_json::Value> =
+        serde_json::from_str(&text).map_err(|e| format!("invalid JSON array: {e}"))?;
 
     if arr.is_empty() {
         return Err("empty message array".to_string());
     }
 
-    let msg_type = arr[0].as_str()
+    let msg_type = arr[0]
+        .as_str()
         .ok_or_else(|| "first element must be a string type".to_string())?;
 
     Ok((msg_type.to_string(), arr[1..].to_vec()))
@@ -203,9 +204,7 @@ async fn list_shells(State(_state): State<AppState>) -> Json<ShellsResponse> {
 }
 
 /// List running terminal sessions.
-async fn list_sessions(
-    State(state): State<AppState>,
-) -> Json<SessionListResponse> {
+async fn list_sessions(State(state): State<AppState>) -> Json<SessionListResponse> {
     let entries = state.terminal_manager.list_sessions().await;
     Json(SessionListResponse {
         sessions: entries
@@ -248,17 +247,19 @@ fn detect_shells() -> Vec<ShellEntry> {
 
     // 1. Always include $SHELL first
     if let Ok(s) = std::env::var("SHELL")
-        && !s.is_empty() && std::path::Path::new(&s).exists() {
-            let name = std::path::Path::new(&s)
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| s.clone());
-            shells.push(ShellEntry {
-                path: s.clone(),
-                name,
-            });
-            seen.insert(s);
-        }
+        && !s.is_empty()
+        && std::path::Path::new(&s).exists()
+    {
+        let name = std::path::Path::new(&s)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| s.clone());
+        shells.push(ShellEntry {
+            path: s.clone(),
+            name,
+        });
+        seen.insert(s);
+    }
 
     // 2. Read /etc/shells
     if let Ok(content) = std::fs::read_to_string("/etc/shells") {
@@ -295,13 +296,11 @@ fn detect_shells() -> Vec<ShellEntry> {
     ]
     .into_iter()
     .map(|s| s.to_string())
-    .chain(
-        [
-            format!("{}/.cargo/bin", home),
-            format!("{}/.local/bin", home),
-            format!("{}/.nix-profile/bin", home),
-        ],
-    )
+    .chain([
+        format!("{}/.cargo/bin", home),
+        format!("{}/.local/bin", home),
+        format!("{}/.nix-profile/bin", home),
+    ])
     .collect();
 
     let shell_names = [
@@ -620,9 +619,9 @@ async fn handle_terminal_ws(mut ws: WebSocket, state: AppState) {
                 return;
             }
             Ok(None) | Err(_) => {
-                let _ = ws.send(Message::Text(
-                    json_msg(["disconnect", "bind timeout"]),
-                )).await;
+                let _ = ws
+                    .send(Message::Text(json_msg(["disconnect", "bind timeout"])))
+                    .await;
                 return;
             }
         };
@@ -630,26 +629,27 @@ async fn handle_terminal_ws(mut ws: WebSocket, state: AppState) {
         let (msg_type, args) = match parse_ws_msg(&msg) {
             Ok(v) => v,
             Err(e) => {
-                let _ = ws.send(Message::Text(
-                    json_msg(["disconnect", &e]),
-                )).await;
+                let _ = ws.send(Message::Text(json_msg(["disconnect", &e]))).await;
                 continue;
             }
         };
 
         if msg_type != "bind" {
-            let _ = ws.send(Message::Text(
-                json_msg(["disconnect", "expected bind"]),
-            )).await;
+            let _ = ws
+                .send(Message::Text(json_msg(["disconnect", "expected bind"])))
+                .await;
             continue;
         }
 
         let session_id_str = match args.first().and_then(|v| v.as_str()) {
             Some(s) => s,
             None => {
-                let _ = ws.send(Message::Text(
-                    json_msg(["disconnect", "bind missing session_id"]),
-                )).await;
+                let _ = ws
+                    .send(Message::Text(json_msg([
+                        "disconnect",
+                        "bind missing session_id",
+                    ])))
+                    .await;
                 continue;
             }
         };
@@ -657,17 +657,20 @@ async fn handle_terminal_ws(mut ws: WebSocket, state: AppState) {
         let sid = match Uuid::parse_str(session_id_str) {
             Ok(id) => id,
             Err(e) => {
-                let _ = ws.send(Message::Text(
-                    json_msg(["disconnect", &format!("invalid session_id: {e}")]),
-                )).await;
+                let _ = ws
+                    .send(Message::Text(json_msg([
+                        "disconnect",
+                        &format!("invalid session_id: {e}"),
+                    ])))
+                    .await;
                 continue;
             }
         };
 
         if !terminal_manager.has_session(sid).await {
-            let _ = ws.send(Message::Text(
-                json_msg(["disconnect", "session not found"]),
-            )).await;
+            let _ = ws
+                .send(Message::Text(json_msg(["disconnect", "session not found"])))
+                .await;
             continue;
         }
 
@@ -801,14 +804,15 @@ async fn handle_terminal_ws(mut ws: WebSocket, state: AppState) {
 /// Parse a JSON array from a text WebSocket message (string slice).
 /// Returns (message_type, args).
 fn parse_ws_msg_raw(text: &str) -> Result<(String, Vec<serde_json::Value>), String> {
-    let arr: Vec<serde_json::Value> = serde_json::from_str(text)
-        .map_err(|e| format!("invalid JSON array: {e}"))?;
+    let arr: Vec<serde_json::Value> =
+        serde_json::from_str(text).map_err(|e| format!("invalid JSON array: {e}"))?;
 
     if arr.is_empty() {
         return Err("empty message array".to_string());
     }
 
-    let msg_type = arr[0].as_str()
+    let msg_type = arr[0]
+        .as_str()
         .ok_or_else(|| "first element must be a string type".to_string())?;
 
     Ok((msg_type.to_string(), arr[1..].to_vec()))

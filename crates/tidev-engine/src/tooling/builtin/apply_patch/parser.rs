@@ -39,10 +39,7 @@ pub(crate) const EMPTY_CHANGE_CONTEXT_MARKER: &str = "@@";
 #[derive(Debug, PartialEq, Clone)]
 pub enum ParseError {
     InvalidPatch(String),
-    InvalidHunk {
-        message: String,
-        line_number: usize,
-    },
+    InvalidHunk { message: String, line_number: usize },
 }
 
 impl fmt::Display for ParseError {
@@ -180,10 +177,7 @@ fn parse_environment_id_preamble<'a>(
     let Some(first_line) = hunk_lines.first() else {
         return Ok((None, hunk_lines, 2));
     };
-    let Some(environment_id) = first_line
-        .trim_start()
-        .strip_prefix(ENVIRONMENT_ID_MARKER)
-    else {
+    let Some(environment_id) = first_line.trim_start().strip_prefix(ENVIRONMENT_ID_MARKER) else {
         return Ok((None, hunk_lines, 2));
     };
     let environment_id = environment_id.trim();
@@ -192,11 +186,7 @@ fn parse_environment_id_preamble<'a>(
             "Environment ID marker found but no ID provided".to_string(),
         ));
     }
-    Ok((
-        Some(environment_id.to_string()),
-        &hunk_lines[1..],
-        3,
-    ))
+    Ok((Some(environment_id.to_string()), &hunk_lines[1..], 3))
 }
 
 fn parse_one_hunk(lines: &[&str], line_number: usize) -> Result<(Hunk, usize), ParseError> {
@@ -393,15 +383,16 @@ mod tests {
 
     #[test]
     fn test_missing_begin_marker() {
-        let err =
-            parse_patch("*** Update File: x\n@@\n-old\n+new\n*** End Patch\n").unwrap_err();
-        assert!(err.to_string().contains("must start with '*** Begin Patch'"));
+        let err = parse_patch("*** Update File: x\n@@\n-old\n+new\n*** End Patch\n").unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("must start with '*** Begin Patch'")
+        );
     }
 
     #[test]
     fn test_missing_end_marker() {
-        let err =
-            parse_patch("*** Begin Patch\n*** Update File: x\n@@\n-old\n+new\n").unwrap_err();
+        let err = parse_patch("*** Begin Patch\n*** Update File: x\n@@\n-old\n+new\n").unwrap_err();
         assert!(err.to_string().contains("must end with '*** End Patch'"));
     }
 
@@ -434,8 +425,7 @@ mod tests {
 
     #[test]
     fn test_update_file() {
-        let patch =
-            "*** Begin Patch\n*** Update File: main.rs\n@@\n-foo\n+bar\n*** End Patch\n";
+        let patch = "*** Begin Patch\n*** Update File: main.rs\n@@\n-foo\n+bar\n*** End Patch\n";
         let parsed = parse_patch(patch).unwrap();
         assert_eq!(parsed.hunks.len(), 1);
         match &parsed.hunks[0] {
@@ -456,11 +446,12 @@ mod tests {
 
     #[test]
     fn test_update_file_with_move() {
-        let patch =
-            "*** Begin Patch\n*** Update File: src.rs\n*** Move to: dst.rs\n@@\n-old\n+new\n*** End Patch\n";
+        let patch = "*** Begin Patch\n*** Update File: src.rs\n*** Move to: dst.rs\n@@\n-old\n+new\n*** End Patch\n";
         let parsed = parse_patch(patch).unwrap();
         match &parsed.hunks[0] {
-            Hunk::UpdateFile { path, move_path, .. } => {
+            Hunk::UpdateFile {
+                path, move_path, ..
+            } => {
                 // path is the original from *** Update File: header
                 assert_eq!(path, &PathBuf::from("src.rs"));
                 // move_path is the destination from *** Move to: header

@@ -499,7 +499,9 @@ struct CacheControl {
 
 impl CacheControl {
     fn ephemeral() -> Self {
-        Self { cache_type: "ephemeral".to_string() }
+        Self {
+            cache_type: "ephemeral".to_string(),
+        }
     }
 }
 
@@ -721,11 +723,19 @@ enum AnthropicContentBlockStart {
 #[serde(tag = "type")]
 #[serde(rename_all = "snake_case")]
 enum AnthropicDelta {
-    Text { text: String },
-    InputJson { partial_json: String },
-    Thinking { thinking: String },
+    Text {
+        text: String,
+    },
+    InputJson {
+        partial_json: String,
+    },
+    Thinking {
+        thinking: String,
+    },
     #[allow(dead_code)]
-    Signature { signature: String },
+    Signature {
+        signature: String,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize)]

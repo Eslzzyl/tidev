@@ -309,10 +309,7 @@ pub async fn send_message(
         if let Some(revert_id) = store.load_revert_message_id(session_id)? {
             let all_messages = store.load_messages(session_id)?;
             if let Some(rev_idx) = all_messages.iter().position(|m| m.id == revert_id) {
-                let hidden_ids: Vec<Uuid> = all_messages[rev_idx..]
-                    .iter()
-                    .map(|m| m.id)
-                    .collect();
+                let hidden_ids: Vec<Uuid> = all_messages[rev_idx..].iter().map(|m| m.id).collect();
                 if !hidden_ids.is_empty() {
                     store.delete_messages(session_id, &hidden_ids)?;
                 }

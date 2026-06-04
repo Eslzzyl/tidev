@@ -479,12 +479,10 @@ impl App {
                     let pruned = self.auth.prune_orphan_providers(&known_ids);
                     if pruned > 0 {
                         self.auth.save(&self.paths)?;
-                        self.last_notice = Some(format!(
-                            "Pruned {pruned} orphan provider(s) from auth file"
-                        ));
-                    } else {
                         self.last_notice =
-                            Some("No orphan auth entries to prune".to_string());
+                            Some(format!("Pruned {pruned} orphan provider(s) from auth file"));
+                    } else {
+                        self.last_notice = Some("No orphan auth entries to prune".to_string());
                     }
                 }
                 _ => {

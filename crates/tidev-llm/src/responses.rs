@@ -34,7 +34,8 @@ pub(crate) async fn stream_responses(
         .clone()
         .with_context(|| format!("missing API key for provider '{}'", model.provider_id))?;
 
-    let request = build_responses_request(&model, messages, true, &tools, Some(session_id.to_string()))?;
+    let request =
+        build_responses_request(&model, messages, true, &tools, Some(session_id.to_string()))?;
     let request_body = serde_json::to_string(&request).unwrap_or_default();
     let request_body_size = request_body.len();
     save_request_for_debugging(&request_body, save_request_body, max_request_files);
@@ -687,7 +688,9 @@ fn build_responses_request(
     };
 
     let thinking = model.thinking_config();
-    let include = thinking.as_ref().map(|_| vec!["reasoning.encrypted_content".to_string()]);
+    let include = thinking
+        .as_ref()
+        .map(|_| vec!["reasoning.encrypted_content".to_string()]);
 
     Ok(ResponsesRequest {
         model: model.request_model_id.clone().unwrap_or_default(),

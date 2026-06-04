@@ -27,27 +27,18 @@ pub fn restart_self() -> ! {
     let exe = std::env::current_exe().expect("cannot determine current executable path");
     let args: Vec<String> = std::env::args().collect();
 
-    log::info!(
-        "Restarting: {} {}",
-        exe.display(),
-        args[1..].join(" ")
-    );
+    log::info!("Restarting: {} {}", exe.display(), args[1..].join(" "));
 
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
-        let err = std::process::Command::new(&exe)
-            .args(&args[1..])
-            .exec();
+        let err = std::process::Command::new(&exe).args(&args[1..]).exec();
         panic!("restart_self: exec failed: {err}");
     }
 
     #[cfg(not(unix))]
     {
-        match std::process::Command::new(&exe)
-            .args(&args[1..])
-            .spawn()
-        {
+        match std::process::Command::new(&exe).args(&args[1..]).spawn() {
             Ok(_) => std::process::exit(0),
             Err(e) => panic!("restart_self: spawn failed: {e}"),
         }

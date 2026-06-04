@@ -90,9 +90,7 @@ pub fn static_routes(config: StaticConfig) -> Router<AppState> {
 /// Unique identifier for this process instance, generated at startup.
 /// The frontend uses this to detect when the server has restarted.
 /// Uses a UUID string so the value is guaranteed unique across process restarts.
-static BOOT_ID: LazyLock<String> = LazyLock::new(|| {
-    uuid::Uuid::new_v4().to_string()
-});
+static BOOT_ID: LazyLock<String> = LazyLock::new(|| uuid::Uuid::new_v4().to_string());
 
 /// Health check endpoint
 async fn health_check() -> impl IntoResponse {

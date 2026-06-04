@@ -26,4 +26,4 @@ mod parser;
 mod seek_sequence;
 
 pub use apply::{ApplyPatchResult, apply_patch};
-pub use parser::{ParseError, ParsedPatch, Hunk, UpdateFileChunk, parse_patch};
+pub use parser::{Hunk, ParseError, ParsedPatch, UpdateFileChunk, parse_patch};

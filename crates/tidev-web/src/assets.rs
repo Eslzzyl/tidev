@@ -1,6 +1,6 @@
 use axum::{
     body::Body,
-    http::{StatusCode, Uri, header, HeaderValue},
+    http::{HeaderValue, StatusCode, Uri, header},
     response::{IntoResponse, Response},
 };
 
@@ -37,7 +37,10 @@ pub fn serve_file(path: &str) -> Option<Response> {
     let response = Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, mime.as_ref())
-        .header(header::CACHE_CONTROL, HeaderValue::from_static(cache_control))
+        .header(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static(cache_control),
+        )
         .body(Body::from(asset))
         .ok()?;
 

@@ -119,12 +119,9 @@ pub fn execute_tool_call(
         }
         Some("apply_patch") => {
             let args = decode_tool_args::<ApplyPatchArgs>(tool_name, arguments)?;
-            let patch_result = apply_patch::apply_patch(
-                workspace_root,
-                &args.patch_text,
-                allow_outside,
-            )
-            .with_context(|| format!("failed to apply patch for tool '{}'", tool_name))?;
+            let patch_result =
+                apply_patch::apply_patch(workspace_root, &args.patch_text, allow_outside)
+                    .with_context(|| format!("failed to apply patch for tool '{}'", tool_name))?;
 
             // Build output summary (matching codex format)
             let mut output = String::from("Success. Updated the following files:\n");
@@ -154,8 +151,7 @@ pub fn execute_tool_call(
                 .or_else(|| patch_result.added.first())
                 .or_else(|| patch_result.deleted.first());
             let mut metadata = ToolMetadata {
-                filepath: first_path
-                    .map(|p| display_workspace_relative(workspace_root, p)),
+                filepath: first_path.map(|p| display_workspace_relative(workspace_root, p)),
                 exists: Some(true),
                 ..Default::default()
             };

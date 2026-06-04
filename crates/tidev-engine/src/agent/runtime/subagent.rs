@@ -452,11 +452,8 @@ impl AgentRuntime {
                     // Forward the tool result to the child session view in TUI
                     // (persist_tool_result emits ToolCompleted with request_sequence,
                     //  which is ignored by the TUI — we use parent_request_id here)
-                    let tool_msg = Message::tool_result(
-                        &tool_call.id,
-                        &tool_call.name,
-                        result.clone(),
-                    );
+                    let tool_msg =
+                        Message::tool_result(&tool_call.id, &tool_call.name, result.clone());
                     let _ = event_tx.send(BackendEvent::SubagentToolResult {
                         session_id: child_session_id,
                         request_id: parent_request_id,
@@ -488,11 +485,8 @@ impl AgentRuntime {
                     // execute_tool_calls already called persist_tool_result which
                     // emits ToolCompleted with request_sequence (ignored by TUI),
                     // so we use SubagentToolResult with parent_request_id instead.
-                    let tool_msg = Message::tool_result(
-                        &tool_call.id,
-                        &tool_call.name,
-                        result.clone(),
-                    );
+                    let tool_msg =
+                        Message::tool_result(&tool_call.id, &tool_call.name, result.clone());
                     let _ = event_tx.send(BackendEvent::SubagentToolResult {
                         session_id: child_session_id,
                         request_id: parent_request_id,

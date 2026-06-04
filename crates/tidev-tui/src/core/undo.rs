@@ -349,9 +349,9 @@ impl App {
                 log::warn!("revert_to_message: failed to persist context state: {e}");
             }
         } else {
-            if let Err(e) = self
-                .store
-                .update_session_context_state(self.conversation.session_id, None, 0)
+            if let Err(e) =
+                self.store
+                    .update_session_context_state(self.conversation.session_id, None, 0)
             {
                 log::warn!("revert_to_message: failed to clear context state: {e}");
             }
@@ -396,9 +396,9 @@ impl App {
         self.clear_revert_state()?;
         self.context_manager = ContextManager::new();
         self.conversation.clear_context_state();
-        if let Err(e) = self
-            .store
-            .update_session_context_state(self.conversation.session_id, None, 0)
+        if let Err(e) =
+            self.store
+                .update_session_context_state(self.conversation.session_id, None, 0)
         {
             log::warn!("unrevert: failed to clear context state: {e}");
         }
@@ -619,9 +619,9 @@ impl App {
         self.clear_revert_state()?;
         self.context_manager = ContextManager::new();
         self.conversation.clear_context_state();
-        if let Err(e) = self
-            .store
-            .update_session_context_state(self.conversation.session_id, None, 0)
+        if let Err(e) =
+            self.store
+                .update_session_context_state(self.conversation.session_id, None, 0)
         {
             log::warn!("discard_reverted_branch: failed to clear context state: {e}");
         }

@@ -13,7 +13,9 @@ use crate::state::AppState;
 /// Returns `202 Accepted` immediately. The actual restart happens after
 /// all in-flight requests complete and the SSE connections are closed.
 pub async fn restart_handler(State(state): State<AppState>) -> impl axum::response::IntoResponse {
-    state.restart_requested.store(true, std::sync::atomic::Ordering::Relaxed);
+    state
+        .restart_requested
+        .store(true, std::sync::atomic::Ordering::Relaxed);
     state.cancel_token.cancel();
     (
         StatusCode::ACCEPTED,

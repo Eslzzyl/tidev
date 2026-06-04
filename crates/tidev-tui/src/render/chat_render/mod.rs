@@ -1283,10 +1283,7 @@ impl App {
             };
 
             let retry_after_str = format!("Retrying in {remaining}s");
-            let msg = format!(
-                "Retrying ({}/{}): {}",
-                attempt, max_attempts, reason
-            );
+            let msg = format!("Retrying ({}/{}): {}", attempt, max_attempts, reason);
 
             let text_width = body_width.saturating_sub(2).max(1);
             let mut retry_lines = Vec::new();
@@ -1503,10 +1500,7 @@ impl App {
                 format!("@{}", subagent_type),
                 Style::default().fg(palette.accent_soft),
             ),
-            Span::styled(
-                " subagent: ",
-                Style::default().fg(palette.muted),
-            ),
+            Span::styled(" subagent: ", Style::default().fg(palette.muted)),
             Span::styled(
                 description.to_string(),
                 Style::default()
@@ -1515,19 +1509,16 @@ impl App {
             ),
         ]);
         lines.extend(
-            word_wrap_line(
-                &header_line,
-                WrapOptions::new(body_width).break_words(true),
-            )
-            .into_iter()
-            .map(|l| {
-                Line::from(
-                    l.spans
-                        .into_iter()
-                        .map(|s| Span::styled(s.content.to_string(), s.style))
-                        .collect::<Vec<_>>(),
-                )
-            }),
+            word_wrap_line(&header_line, WrapOptions::new(body_width).break_words(true))
+                .into_iter()
+                .map(|l| {
+                    Line::from(
+                        l.spans
+                            .into_iter()
+                            .map(|s| Span::styled(s.content.to_string(), s.style))
+                            .collect::<Vec<_>>(),
+                    )
+                }),
         );
 
         // Status line
@@ -2118,12 +2109,14 @@ impl App {
                         // This eliminates the dual-card problem (tool call card + running overlay).
                         if tool_result.is_none()
                             && tool_call.name == "task"
-                            && let Some(exec_index) = self.running_subagent_executions
+                            && let Some(exec_index) = self
+                                .running_subagent_executions
                                 .iter()
                                 .position(|e| e.tool_call.id == tool_call.id)
                         {
                             let execution = &self.running_subagent_executions[exec_index];
-                            let running_lines = self.render_running_subagent_lines(execution, body_width);
+                            let running_lines =
+                                self.render_running_subagent_lines(execution, body_width);
                             let start_line = current_line_offset + lines.len();
                             let mut card_bg = palette.panel;
                             if self.hovered_inline_subagent == Some(exec_index) {

@@ -63,9 +63,7 @@ fn apply_hunk(
         Hunk::AddFile { path, contents } => {
             apply_add_file(workspace_root, path, contents, allow_outside, result)
         }
-        Hunk::DeleteFile { path } => {
-            apply_delete_file(workspace_root, path, allow_outside, result)
-        }
+        Hunk::DeleteFile { path } => apply_delete_file(workspace_root, path, allow_outside, result),
         Hunk::UpdateFile {
             path,
             move_path,
@@ -111,7 +109,10 @@ fn apply_delete_file(
     let abs_path = resolve_workspace_path(workspace_root, patch_path, allow_outside)?;
 
     if abs_path.is_dir() {
-        anyhow::bail!("cannot delete directory {} via apply_patch", abs_path.display());
+        anyhow::bail!(
+            "cannot delete directory {} via apply_patch",
+            abs_path.display()
+        );
     }
 
     if abs_path.exists() {
@@ -181,16 +182,15 @@ fn derive_new_contents(
     old_content: &str,
     chunks: &[UpdateFileChunk],
 ) -> Result<String> {
-    let mut original_lines: Vec<String> =
-        old_content.split('\n').map(String::from).collect();
+    let mut original_lines: Vec<String> = old_content.split('\n').map(String::from).collect();
 
     // Drop trailing empty element from final newline (like codex does)
     if original_lines.last().is_some_and(String::is_empty) {
         original_lines.pop();
     }
 
-    let replacements = compute_replacements(&original_lines, path, chunks)
-        .map_err(|e| anyhow!("{e}"))?;
+    let replacements =
+        compute_replacements(&original_lines, path, chunks).map_err(|e| anyhow!("{e}"))?;
 
     let new_lines = apply_replacements(original_lines, &replacements);
 
@@ -244,12 +244,7 @@ fn compute_replacements(
 
         // Try to match old_lines in the file
         let mut pattern: &[String] = &chunk.old_lines;
-        let mut found = seek_sequence(
-            original_lines,
-            pattern,
-            line_index,
-            chunk.is_end_of_file,
-        );
+        let mut found = seek_sequence(original_lines, pattern, line_index, chunk.is_end_of_file);
 
         let mut new_slice: &[String] = &chunk.new_lines;
 
@@ -259,12 +254,7 @@ fn compute_replacements(
             if new_slice.last().is_some_and(String::is_empty) {
                 new_slice = &new_slice[..new_slice.len() - 1];
             }
-            found = seek_sequence(
-                original_lines,
-                pattern,
-                line_index,
-                chunk.is_end_of_file,
-            );
+            found = seek_sequence(original_lines, pattern, line_index, chunk.is_end_of_file);
         }
 
         if let Some(start_idx) = found {

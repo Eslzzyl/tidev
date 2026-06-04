@@ -89,9 +89,8 @@ pub(super) fn render_tool_call_with_result(
     // with the description and subagent_type from the tool call arguments.
     if canonical_name == "task"
         && tool_result.is_some()
-        && let Ok(task_args) = serde_json::from_str::<tidev_engine::tooling::TaskArgs>(
-            &tool_call.arguments,
-        )
+        && let Ok(task_args) =
+            serde_json::from_str::<tidev_engine::tooling::TaskArgs>(&tool_call.arguments)
     {
         let output = tool_output_from_message(tool_result.unwrap(), ctx);
         let is_expanded = ctx.expanded_tool_results.contains(&tool_result.unwrap().id);
@@ -1054,10 +1053,7 @@ pub(super) fn render_subagent_task_preview(
             format!("@{}", subagent_type),
             Style::default().fg(palette.accent_soft),
         ),
-        Span::styled(
-            " subagent: ",
-            Style::default().fg(palette.muted),
-        ),
+        Span::styled(" subagent: ", Style::default().fg(palette.muted)),
         Span::styled(
             description.to_string(),
             Style::default()
@@ -1066,19 +1062,16 @@ pub(super) fn render_subagent_task_preview(
         ),
     ]);
     lines.extend(
-        word_wrap_line(
-            &header_line,
-            WrapOptions::new(body_width).break_words(true),
-        )
-        .into_iter()
-        .map(|l| {
-            Line::from(
-                l.spans
-                    .into_iter()
-                    .map(|s| Span::styled(s.content.to_string(), s.style))
-                    .collect::<Vec<_>>(),
-            )
-        }),
+        word_wrap_line(&header_line, WrapOptions::new(body_width).break_words(true))
+            .into_iter()
+            .map(|l| {
+                Line::from(
+                    l.spans
+                        .into_iter()
+                        .map(|s| Span::styled(s.content.to_string(), s.style))
+                        .collect::<Vec<_>>(),
+                )
+            }),
     );
     lines.push(Line::from(""));
 

@@ -86,8 +86,7 @@ impl LlmProviderConfig {
                 }
             }
             ApiType::GoogleGemini => {
-                if base.ends_with(":generateContent") || base.contains(":streamGenerateContent")
-                {
+                if base.ends_with(":generateContent") || base.contains(":streamGenerateContent") {
                     base.to_string()
                 } else {
                     format!(

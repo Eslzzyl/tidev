@@ -8,8 +8,8 @@ pub mod state;
 pub mod terminal;
 
 use std::path::PathBuf;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use anyhow::Context;
 use tokio::sync::Mutex;

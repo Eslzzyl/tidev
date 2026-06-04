@@ -89,32 +89,52 @@ mod tests {
     #[test]
     fn test_exact_match() {
         let lines = ls(&["foo", "bar", "baz"]);
-        assert_eq!(seek_sequence(&lines, &["bar".to_string()], 0, false), Some(1));
+        assert_eq!(
+            seek_sequence(&lines, &["bar".to_string()], 0, false),
+            Some(1)
+        );
     }
 
     #[test]
     fn test_trim_end_match() {
         let lines = ls(&["foo  ", "bar  "]);
-        assert_eq!(seek_sequence(&lines, &["foo".to_string()], 0, false), Some(0));
+        assert_eq!(
+            seek_sequence(&lines, &["foo".to_string()], 0, false),
+            Some(0)
+        );
     }
 
     #[test]
     fn test_trim_both_match() {
         let lines = ls(&["  foo", "  bar"]);
-        assert_eq!(seek_sequence(&lines, &["foo".to_string()], 0, false), Some(0));
+        assert_eq!(
+            seek_sequence(&lines, &["foo".to_string()], 0, false),
+            Some(0)
+        );
     }
 
     #[test]
     fn test_pattern_longer_than_lines() {
         let lines = ls(&["a", "b"]);
-        assert_eq!(seek_sequence(&lines, &["a".to_string(), "b".to_string(), "c".to_string()], 0, false), None);
+        assert_eq!(
+            seek_sequence(
+                &lines,
+                &["a".to_string(), "b".to_string(), "c".to_string()],
+                0,
+                false
+            ),
+            None
+        );
     }
 
     #[test]
     fn test_eof_mode() {
         let lines = ls(&["a", "b", "c", "d", "e"]);
         // Pattern "d", "e" appears at end, eof=true should find it at index 3.
-        assert_eq!(seek_sequence(&lines, &["d".to_string(), "e".to_string()], 0, true), Some(3));
+        assert_eq!(
+            seek_sequence(&lines, &["d".to_string(), "e".to_string()], 0, true),
+            Some(3)
+        );
     }
 
     #[test]

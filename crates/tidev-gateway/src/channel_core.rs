@@ -746,11 +746,7 @@ impl ChannelCore {
             }
             "restart" => {
                 sender
-                    .send_message(
-                        recipient,
-                        "🔄 Restarting gateway...",
-                        reply_to,
-                    )
+                    .send_message(recipient, "🔄 Restarting gateway...", reply_to)
                     .await?;
                 // Small delay so the message has a chance to be delivered
                 // before the process is replaced.
