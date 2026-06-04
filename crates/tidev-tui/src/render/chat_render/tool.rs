@@ -40,7 +40,7 @@ pub(super) fn render_tool_call_with_result(
         && !matches!(canonical_name, "read" | "glob" | "grep")
         && !tool_call_arguments_are_complete(&tool_call.arguments);
 
-    // Precompute line counts for write/edit tools (used by both
+    // Precompute line counts for write/edit/patch tools (used by both
     // is_waiting_result and the progress render block below).
     let write_lines = if matches!(canonical_name, "write") && tool_result.is_none() {
         count_lines_in_partial_json(&tool_call.arguments, "content")
@@ -56,17 +56,25 @@ pub(super) fn render_tool_call_with_result(
         } else {
             (0, 0)
         };
+    let (patch_add_lines, patch_del_lines, patch_file_ops) =
+        if matches!(canonical_name, "apply_patch") && tool_result.is_none() {
+            count_patch_changes(&tool_call.arguments)
+        } else {
+            (0, 0, 0)
+        };
 
-    // For write/edit, also show progress when arguments are complete but
-    // the tool hasn't executed yet (covers rapid chunks that skip is_pending).
+    // For write/edit/apply_patch, also show progress when arguments are
+    // complete but the tool hasn't executed yet (covers rapid chunks that
+    // skip is_pending).
     // Requires is_streaming so the spinner stops when streaming ends—otherwise
     // a rejected/abandoned tool call would keep the spinner spinning forever.
     let is_waiting_result = tool_result.is_none()
         && is_streaming
-        && matches!(canonical_name, "write" | "edit")
+        && matches!(canonical_name, "write" | "edit" | "apply_patch")
         && match canonical_name {
             "write" => write_lines > 0,
             "edit" => edit_old_lines > 0 || edit_new_lines > 0,
+            "apply_patch" => patch_file_ops > 0,
             _ => false,
         };
 
@@ -111,10 +119,14 @@ pub(super) fn render_tool_call_with_result(
     let mut lines = Vec::new();
     lines.push(Line::from(""));
 
-    // For write/edit that have live line count info, skip the
+    // For write/edit/apply_patch that have live line count info, skip the
     // generic "Preparing" state and show title + progress directly.
-    let has_live_progress = matches!(canonical_name, "write" | "edit")
-        && (write_lines > 0 || edit_old_lines > 0 || edit_new_lines > 0);
+    let has_live_progress = match canonical_name {
+        "write" => write_lines > 0,
+        "edit" => edit_old_lines > 0 || edit_new_lines > 0,
+        "apply_patch" => patch_file_ops > 0,
+        _ => false,
+    };
 
     if is_pending && !has_live_progress {
         // No live progress data yet → show generic preparing state
@@ -154,6 +166,25 @@ pub(super) fn render_tool_call_with_result(
             }
             "edit" if edit_new_lines > 0 => {
                 format!("Replacing 0 lines with {} lines...", edit_new_lines)
+            }
+            "apply_patch" if patch_file_ops > 0 => {
+                let mut parts = vec![];
+                if patch_add_lines > 0 {
+                    parts.push(format!("+{}", patch_add_lines));
+                }
+                if patch_del_lines > 0 {
+                    parts.push(format!("-{}", patch_del_lines));
+                }
+                let change_summary = if parts.is_empty() {
+                    String::new()
+                } else {
+                    format!(" ({} lines)", parts.join(" "))
+                };
+                format!(
+                    "Applying patch to {}{}...",
+                    pluralize(patch_file_ops, "file", "files"),
+                    change_summary,
+                )
             }
             _ => unreachable!(),
         };
@@ -225,6 +256,94 @@ fn count_lines_in_partial_json(args: &str, field: &str) -> usize {
         newlines + 1
     } else {
         0
+    }
+}
+
+/// Count patch changes (additions, deletions, file operations) from a partial
+/// `patch_text` JSON field. Returns `(additions, deletions, file_ops)`.
+///
+/// This works on incomplete JSON during LLM streaming — it finds the string
+/// value for `"patch_text":` and counts `+` lines, `-` lines, and `***` file
+/// operation markers inside it.
+fn count_patch_changes(args: &str) -> (usize, usize, usize) {
+    let key = "\"patch_text\":";
+    let start = match args.find(key) {
+        Some(s) => s,
+        None => return (0, 0, 0),
+    };
+    let after_colon = &args[start + key.len()..];
+    let value_start = after_colon.trim_start();
+    if !value_start.starts_with('"') {
+        return (0, 0, 0);
+    }
+    let rest = &value_start[1..]; // skip opening quote
+
+    let mut i = 0usize;
+    let mut adds = 0usize;
+    let mut dels = 0usize;
+    let mut ops = 0usize;
+    let bytes = rest.as_bytes();
+    let mut line_start = true;
+    let mut was_cr = false; // track \r for \r\n sequences
+
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            // JSON escape: check for \n (which represents a literal newline
+            // in JSON), then process the decoded line.
+            if i + 1 < bytes.len() && bytes[i + 1] == b'n' {
+                line_start = true;
+            }
+            // Skip other escapes like \\, \", \t, etc.
+            i += 2;
+            continue;
+        }
+        if bytes[i] == b'"' {
+            // Unescaped quote = end of value (or nested JSON — skip)
+            break;
+        }
+        if bytes[i] == b'\r' {
+            was_cr = true;
+            line_start = true;
+            i += 1;
+            continue;
+        }
+        if bytes[i] == b'\n' {
+            was_cr = false;
+            line_start = true;
+            i += 1;
+            continue;
+        }
+        if line_start && !was_cr {
+            match bytes[i] {
+                b'+' => adds += 1,
+                b'-' => dels += 1,
+                b'*' => {
+                    // Check if this starts a *** marker like *** Update File:
+                    if bytes[i..].starts_with(b"*** ") {
+                        ops += 1;
+                    }
+                }
+                _ => {}
+            }
+        }
+        if bytes[i] == b'\n' || bytes[i] == b'\r' {
+            // handled above
+        } else {
+            line_start = false;
+        }
+        was_cr = false;
+        i += 1;
+    }
+
+    (adds, dels, ops)
+}
+
+/// Simple pluralization helper.
+fn pluralize(n: usize, singular: &str, plural: &str) -> String {
+    if n == 1 {
+        format!("{n} {singular}")
+    } else {
+        format!("{n} {plural}")
     }
 }
 
