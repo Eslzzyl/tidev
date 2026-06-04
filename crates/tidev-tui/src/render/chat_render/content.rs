@@ -19,7 +19,7 @@ use crate::core::state::{
 };
 use crate::diff_render::render_unified_diff_text;
 use crate::render::render::{
-    line_with_prefix, line_with_style, line_with_style_right_aligned, shorten_single_line,
+    line_with_prefix, line_with_style, line_with_style_right_aligned, wrap_text_lines,
 };
 
 pub(super) fn render_reasoning_lines(
@@ -108,13 +108,31 @@ pub(super) fn render_error_body_lines(
         message.content.clone()
     };
 
+    let text_width = body_width.saturating_sub(2).max(1);
     for line in error_text.lines() {
-        lines.push(line_with_prefix(
-            "!",
-            &shorten_single_line(line, body_width.saturating_sub(2)),
-            Style::default().fg(palette.error),
-            Style::default().fg(palette.error),
-        ));
+        if line.is_empty() {
+            lines.push(Line::from(""));
+            continue;
+        }
+        let wrapped = wrap_text_lines(line, text_width, usize::MAX);
+        for (i, wrapped_line) in wrapped.iter().enumerate() {
+            if i == 0 {
+                lines.push(line_with_prefix(
+                    "!",
+                    wrapped_line,
+                    Style::default().fg(palette.error),
+                    Style::default().fg(palette.error),
+                ));
+            } else {
+                // Continuation line — indent to align with text after "! "
+                lines.push(line_with_prefix(
+                    " ",
+                    wrapped_line,
+                    Style::default().fg(palette.error),
+                    Style::default().fg(palette.error),
+                ));
+            }
+        }
     }
 
     if lines.is_empty() {
