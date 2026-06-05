@@ -1478,6 +1478,37 @@ impl App {
         map
     }
 
+    /// Count the number of visual lines a running subagent card will occupy.
+    ///
+    /// This mirrors render_running_subagent_lines() but only computes the count.
+    /// Used by update_message_layout_index() to correct the layout index height
+    /// for blocks containing running subagent task tool calls — the generic tool
+    /// call card (2 lines) is replaced at render time by the taller running card.
+    fn count_running_subagent_card_lines(
+        execution: &RunningSubagentExecution,
+        body_width: usize,
+    ) -> usize {
+        let mut count = 0;
+        // Top padding
+        count += 1;
+        // Header line (word-wrapped)
+        let header_text = format!(
+            "@{} subagent: {}",
+            execution.subagent_type,
+            execution.task_description.trim()
+        );
+        count += word_wrap_line(
+            &Line::from(header_text),
+            WrapOptions::new(body_width).break_words(true),
+        )
+        .len();
+        // Status line
+        count += 1;
+        // Bottom padding
+        count += 1;
+        count
+    }
+
     fn render_running_subagent_lines(
         &self,
         execution: &RunningSubagentExecution,
@@ -1711,14 +1742,42 @@ impl App {
                 let mut current_line = 0;
                 let mut cache = self.message_render_cache.borrow_mut();
                 for (comp_idx, comp) in computations.iter().enumerate() {
+                    // Adjust line count for running subagent task tool calls:
+                    // compute_block_data uses render_tool_call_with_result which returns
+                    // a small 2-line generic card for task tools with no result, but
+                    // render_message_block_to_lines replaces it with a taller running
+                    // subagent card (4+ lines). Correct the layout index to match.
+                    let start_idx = blocks_info[comp_idx].start_idx;
+                    let mut line_count = comp.line_count;
+                    if let Some(msg) = messages.get(start_idx) {
+                        if msg.role == MessageRole::Assistant {
+                            for tool_call in &msg.tool_calls {
+                                if tool_call.name == "task" {
+                                    if let Some(execution) = self
+                                        .running_subagent_executions
+                                        .iter()
+                                        .find(|e| e.tool_call.id == tool_call.id)
+                                    {
+                                        let running_height = Self::count_running_subagent_card_lines(
+                                            execution,
+                                            body_width,
+                                        );
+                                        // Generic tool call card: 1 empty + 1 summary = 2 lines
+                                        line_count = line_count.saturating_sub(2) + running_height;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     let block = super::MessageBlock {
                         message_id: comp.message_id,
                         message_start_idx: blocks_info[comp_idx].start_idx,
                         message_count: comp.message_count,
                         start_line: current_line,
-                        line_count: comp.line_count,
+                        line_count,
                     };
-                    current_line += comp.line_count;
+                    current_line += line_count;
                     index.blocks.push(block);
 
                     // Insert cache entries with fresh ticks
@@ -1784,11 +1843,37 @@ impl App {
                         is_round_end,
                     );
 
+                    // Apply the same running-subagent line-count adjustment as in
+                    // the full rebuild path above.
+                    let mut adjusted_line_count = comp.line_count;
+                    if let Some(msg) = messages.get(block.message_start_idx) {
+                        if msg.role == MessageRole::Assistant {
+                            for tool_call in &msg.tool_calls {
+                                if tool_call.name == "task" {
+                                    if let Some(execution) = self
+                                        .running_subagent_executions
+                                        .iter()
+                                        .find(|e| e.tool_call.id == tool_call.id)
+                                    {
+                                        let running_height =
+                                            Self::count_running_subagent_card_lines(
+                                                execution,
+                                                body_width,
+                                            );
+                                        adjusted_line_count =
+                                            adjusted_line_count.saturating_sub(2) + running_height;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     let old_line_count = index.blocks[i].line_count;
-                    let line_count_diff = comp.line_count as isize - old_line_count as isize;
+                    let line_count_diff =
+                        adjusted_line_count as isize - old_line_count as isize;
 
                     // Update the block
-                    index.blocks[i].line_count = comp.line_count;
+                    index.blocks[i].line_count = adjusted_line_count;
                     index.blocks[i].message_count = comp.message_count;
 
                     // Adjust subsequent blocks' start_line
