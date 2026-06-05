@@ -667,16 +667,12 @@ impl App {
 
             self.push_message(MessageRole::System, content)?;
 
-            // Merge newly loaded sources — store canonical absolute paths
-            // so the DB and in-memory list are consistent across restarts.
+            // Track newly loaded sources in memory so we don't show
+            // duplicate "Loaded instructions" notifications.
+            // DB tracking is handled by the agent loop's inject_new_instructions()
+            // after it successfully injects the instruction content.
             for source in newly_loaded {
                 if !self.loaded_instruction_sources.contains(&source) {
-                    if let Err(e) = self
-                        .store
-                        .append_instruction_source(self.conversation.session_id, &source)
-                    {
-                        log::warn!("Failed to save instruction source to database: {}", e);
-                    }
                     self.loaded_instruction_sources.push(source);
                 }
             }
