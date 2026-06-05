@@ -124,6 +124,18 @@ pub fn tool_output_preview(tool_name: Option<&str>, output: &str) -> String {
     )
 }
 
+/// Describes a single file change within an `apply_patch` tool result.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FileChangeInfo {
+    /// Workspace-relative file path.
+    pub path: String,
+    /// Unified diff text for this file, if available (absent for deletions).
+    #[serde(default)]
+    pub diff: Option<String>,
+    /// Operation type: "A" (added), "M" (modified), "D" (deleted).
+    pub operation: String,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ToolMetadata {
     #[serde(default)]
@@ -144,6 +156,11 @@ pub struct ToolMetadata {
     /// Persisted so click-to-enter-subsession works after restart.
     #[serde(default)]
     pub child_session_id: Option<Uuid>,
+    /// Per-file change details for `apply_patch` results.
+    /// Preserves insertion order from the patch and allows interleaved
+    /// file-path + diff rendering in the TUI.
+    #[serde(default)]
+    pub file_changes: Vec<FileChangeInfo>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]

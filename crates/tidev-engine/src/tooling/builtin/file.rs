@@ -9,7 +9,9 @@ use super::utils::{display_workspace_relative, read_existing_text, resolve_works
 use crate::instructions::resolve_nearby_instructions;
 use crate::tooling::tools::{ApplyPatchArgs, EditArgs, ReadArgs, WriteArgs, decode_tool_args};
 use crate::tooling::{ToolDefinition, ToolPermission};
-use tidev_session::session::{MessageAttachment, ToolExecutionResult, ToolMetadata};
+use tidev_session::session::{
+    FileChangeInfo, MessageAttachment, ToolExecutionResult, ToolMetadata,
+};
 
 const MAX_LINE_LENGTH: usize = 2000;
 const MAX_LINE_SUFFIX: &str = "... (line truncated to 2000 chars)";
@@ -156,10 +158,42 @@ pub fn execute_tool_call(
                 ..Default::default()
             };
 
-            // Store the first diff in metadata if available
+            // Store the first diff in metadata for backward compatibility
             if let Some(diff) = patch_result.diffs.values().next() {
                 metadata.diff = Some(diff.clone());
             }
+
+            // Build structured per-file change info for interleaved TUI rendering.
+            // Order matches the patch: added, modified, deleted.
+            let mut file_changes: Vec<FileChangeInfo> = Vec::new();
+            for path in &patch_result.added {
+                let rel = display_workspace_relative(workspace_root, path);
+                // Generate a diff from empty content to show the full file as added.
+                let diff = generate_added_file_diff(workspace_root, path);
+                file_changes.push(FileChangeInfo {
+                    path: rel,
+                    diff,
+                    operation: "A".to_string(),
+                });
+            }
+            for path in &patch_result.modified {
+                let rel = display_workspace_relative(workspace_root, path);
+                let diff = patch_result.diffs.get(path).cloned();
+                file_changes.push(FileChangeInfo {
+                    path: rel,
+                    diff,
+                    operation: "M".to_string(),
+                });
+            }
+            for path in &patch_result.deleted {
+                let rel = display_workspace_relative(workspace_root, path);
+                file_changes.push(FileChangeInfo {
+                    path: rel,
+                    diff: None,
+                    operation: "D".to_string(),
+                });
+            }
+            metadata.file_changes = file_changes;
 
             if output.is_empty() {
                 output = String::from("No changes made");
@@ -179,6 +213,21 @@ pub fn execute_tool_call(
         Some(other) => bail!("unsupported file tool '{}'", other),
         None => bail!("unknown tool '{}'", tool_name),
     }
+}
+
+/// Generate a unified diff showing all content as added for a newly created file.
+fn generate_added_file_diff(workspace_root: &Path, abs_path: &Path) -> Option<String> {
+    let content = read_existing_text(abs_path).ok()?;
+    let relative = display_workspace_relative(workspace_root, abs_path);
+    let mut options = DiffOptions::new();
+    options.set_context_len(0);
+    options.set_original_filename(String::new());
+    options.set_modified_filename(format!("b/{relative}"));
+    let patch = options.create_patch("", &content);
+    if patch.hunks().is_empty() {
+        return None;
+    }
+    Some(patch.to_string())
 }
 
 fn truncate_line_to_limit(line: &str) -> String {

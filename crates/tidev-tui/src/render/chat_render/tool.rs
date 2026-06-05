@@ -861,6 +861,39 @@ pub(super) fn render_tool_call_lines(
             }
             lines.push(Line::from(title_spans));
         }
+        "apply_patch" => {
+            // Attempt to parse file paths from the streaming patch_text argument.
+            let patch_text = serde_json::from_str::<serde_json::Value>(&tool_call.arguments)
+                .ok()
+                .and_then(|v| {
+                    v.get("patch_text")
+                        .and_then(|s| s.as_str().map(String::from))
+                })
+                .unwrap_or_default();
+            let file_paths: Vec<&str> = patch_text
+                .lines()
+                .filter_map(|line| {
+                    let trimmed = line.trim();
+                    trimmed
+                        .strip_prefix("*** Add File: ")
+                        .or_else(|| trimmed.strip_prefix("*** Update File: "))
+                        .or_else(|| trimmed.strip_prefix("*** Delete File: "))
+                })
+                .collect();
+            let title = if file_paths.is_empty() {
+                "Apply patch".to_string()
+            } else if file_paths.len() == 1 {
+                format!("Apply patch to {}", file_paths[0])
+            } else {
+                format!("Apply patch to {} files", file_paths.len())
+            };
+            lines.push(Line::from(vec![Span::styled(
+                title,
+                Style::default()
+                    .fg(palette.text)
+                    .add_modifier(Modifier::BOLD),
+            )]));
+        }
         _ => {
             let summary = summarize_tool_call(
                 &tool_call.name,
@@ -906,6 +939,53 @@ pub(super) fn render_tool_result_detail_lines(
             None,
             vec![],
         );
+    }
+
+    // apply_patch with structured file_changes: interleave file label + diff
+    if canonical_name == "apply_patch"
+        && !is_error
+        && !message.metadata.file_changes.is_empty()
+    {
+        let mut lines = Vec::new();
+        let mut regions = Vec::new();
+        let mut line_offset = 0usize;
+
+        for change in &message.metadata.file_changes {
+            let label = match change.operation.as_str() {
+                "A" => "Write",
+                "M" => "Edit",
+                "D" => "Delete",
+                _ => "Edit",
+            };
+
+            // File label line: bold, no extra color
+            lines.push(Line::from(vec![Span::styled(
+                format!("{} {}", label, change.path),
+                Style::default().add_modifier(Modifier::BOLD),
+            )]));
+            line_offset += 1;
+
+            // Render diff for this file if available
+            if let Some(diff) = &change.diff
+                && let Some((diff_lines, diff_regions)) =
+                    render_unified_diff_text(diff, body_width.saturating_sub(2), palette)
+            {
+                let n_diff = diff_lines.len();
+                for mut r in diff_regions {
+                    r.start_line += line_offset;
+                    r.end_line += line_offset;
+                    regions.push(r);
+                }
+                lines.extend(diff_lines);
+                line_offset += n_diff;
+            }
+
+            // Blank line between files
+            lines.push(Line::from(""));
+            line_offset += 1;
+        }
+
+        return (lines, None, regions);
     }
 
     // Try to render diff from metadata first (preferred, full diff not truncated)
