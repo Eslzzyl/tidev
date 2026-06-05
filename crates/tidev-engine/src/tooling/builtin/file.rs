@@ -314,11 +314,14 @@ pub(super) fn read_path(
     if !path.exists() {
         let suggestions = find_fuzzy_suggestions(workspace_root, relative_path.as_ref())?;
         if suggestions.is_empty() {
-            bail!("failed to read {}: file not found", path.display());
+            bail!(
+                "failed to read {}: file not found",
+                display_workspace_relative(workspace_root, &path)
+            );
         } else {
             bail!(
                 "failed to read {}: file not found. Did you mean one of these?\n{}",
-                path.display(),
+                display_workspace_relative(workspace_root, &path),
                 suggestions.join("\n")
             );
         }
@@ -341,8 +344,12 @@ pub(super) fn read_path(
     let mime_str = mime.to_string();
 
     if mime_str.starts_with("image/") {
-        let content =
-            fs::read(&path).with_context(|| format!("failed to read image {}", path.display()))?;
+        let content = fs::read(&path).with_context(|| {
+            format!(
+                "failed to read image {}",
+                display_workspace_relative(workspace_root, &path)
+            )
+        })?;
         let data_url = format!(
             "data:{};base64,{}",
             mime_str,
@@ -363,12 +370,19 @@ pub(super) fn read_path(
 
     // Detect if binary but not an image
     if is_binary_file(&path)? {
-        bail!("Cannot read binary file: {}", path.display());
+        bail!(
+            "Cannot read binary file: {}",
+            display_workspace_relative(workspace_root, &path)
+        );
     }
 
     // Treat as text file
-    let file =
-        fs::File::open(&path).with_context(|| format!("failed to read {}", path.display()))?;
+    let file = fs::File::open(&path).with_context(|| {
+        format!(
+            "failed to read {}",
+            display_workspace_relative(workspace_root, &path)
+        )
+    })?;
     let mut reader = std::io::BufReader::new(file);
 
     let has_requested_range = offset.is_some() || limit.is_some();
@@ -563,11 +577,20 @@ pub(super) fn write_file(
     let path = resolve_workspace_path(workspace_root, relative_path.as_ref(), allow_outside)?;
 
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create directory {}", parent.display()))?;
+        fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "failed to create directory {}",
+                display_workspace_relative(workspace_root, parent)
+            )
+        })?;
     }
 
-    fs::write(&path, content).with_context(|| format!("failed to write {}", path.display()))?;
+    fs::write(&path, content).with_context(|| {
+        format!(
+            "failed to write {}",
+            display_workspace_relative(workspace_root, &path)
+        )
+    })?;
     Ok(())
 }
 
@@ -579,17 +602,33 @@ pub(super) fn list_dir(
     let path = resolve_workspace_path(workspace_root, relative_path.as_ref(), allow_outside)?;
 
     if !path.is_dir() {
-        bail!("{} is not a directory", path.display());
+        bail!(
+            "{} is not a directory",
+            display_workspace_relative(workspace_root, &path)
+        );
     }
 
     let mut entries = Vec::new();
     for entry in
-        fs::read_dir(&path).with_context(|| format!("failed to read {}", path.display()))?
+        fs::read_dir(&path).with_context(|| {
+            format!(
+                "failed to read {}",
+                display_workspace_relative(workspace_root, &path)
+            )
+        })?
     {
-        let entry = entry.with_context(|| format!("failed to read entry in {}", path.display()))?;
-        let file_type = entry
-            .file_type()
-            .with_context(|| format!("failed to inspect {}", entry.path().display()))?;
+        let entry = entry.with_context(|| {
+            format!(
+                "failed to read entry in {}",
+                display_workspace_relative(workspace_root, &path)
+            )
+        })?;
+        let file_type = entry.file_type().with_context(|| {
+            format!(
+                "failed to inspect {}",
+                display_workspace_relative(workspace_root, &entry.path())
+            )
+        })?;
         let mut name = entry.file_name().to_string_lossy().to_string();
         if file_type.is_dir() {
             name.push('/');
@@ -620,12 +659,20 @@ pub(super) fn edit_file(
 ) -> Result<ToolExecutionResult> {
     let path = resolve_workspace_path(workspace_root, relative_path.as_ref(), allow_outside)?;
     let original_exists = path.exists();
-    let old_contents =
-        fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
+    let old_contents = fs::read_to_string(&path).with_context(|| {
+        format!(
+            "failed to read {}",
+            display_workspace_relative(workspace_root, &path)
+        )
+    })?;
 
     let new_contents = apply_edit_contents(&old_contents, old_text, new_text, replace_all)?;
-    fs::write(&path, &new_contents)
-        .with_context(|| format!("failed to write {}", path.display()))?;
+    fs::write(&path, &new_contents).with_context(|| {
+        format!(
+            "failed to write {}",
+            display_workspace_relative(workspace_root, &path)
+        )
+    })?;
 
     Ok(file_change_output(
         workspace_root,
@@ -1163,7 +1210,10 @@ pub fn read_file_for_at_reference(
     let path = resolve_workspace_path(workspace_root, Path::new(relative_path), allow_outside)?;
 
     if !path.exists() {
-        bail!("File not found: {}", path.display());
+        bail!(
+            "File not found: {}",
+            display_workspace_relative(workspace_root, &path)
+        );
     }
 
     if path.is_dir() {
@@ -1176,8 +1226,12 @@ pub fn read_file_for_at_reference(
     let mime_str = mime.to_string();
 
     if mime_str.starts_with("image/") {
-        let content =
-            fs::read(&path).with_context(|| format!("failed to read image {}", path.display()))?;
+        let content = fs::read(&path).with_context(|| {
+            format!(
+                "failed to read image {}",
+                display_workspace_relative(workspace_root, &path)
+            )
+        })?;
         let _data_url = format!(
             "data:{};base64,{}",
             mime_str,
@@ -1189,12 +1243,15 @@ pub fn read_file_for_at_reference(
 
     // Detect if binary but not an image
     if is_binary_file(&path)? {
-        bail!("Cannot read binary file: {}", path.display());
+        bail!(
+            "Cannot read binary file: {}",
+            display_workspace_relative(workspace_root, &path)
+        );
     }
 
     // Treat as text file with truncation
-    let file =
-        fs::File::open(&path).with_context(|| format!("failed to read {}", path.display()))?;
+    let file = fs::File::open(&path)
+        .with_context(|| format!("failed to read {}", display_workspace_relative(workspace_root, &path)))?;
     let mut reader = std::io::BufReader::new(file);
 
     const DEFAULT_READ_LIMIT: i64 = 2000;

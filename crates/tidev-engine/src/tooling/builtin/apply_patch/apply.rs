@@ -12,7 +12,7 @@ use diffy::DiffOptions;
 
 use super::parser::{Hunk, UpdateFileChunk};
 use super::seek_sequence::seek_sequence;
-use crate::tooling::builtin::utils::{read_existing_text, resolve_workspace_path};
+use crate::tooling::builtin::utils::{display_workspace_relative, read_existing_text, resolve_workspace_path};
 
 /// Result of applying a patch — which files were added / modified / deleted.
 #[derive(Debug, Default)]
@@ -89,12 +89,20 @@ fn apply_add_file(
     let abs_path = resolve_workspace_path(workspace_root, patch_path, allow_outside)?;
 
     if let Some(parent) = abs_path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create directory {}", parent.display()))?;
+        fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "failed to create directory {}",
+                display_workspace_relative(workspace_root, parent)
+            )
+        })?;
     }
 
-    fs::write(&abs_path, contents)
-        .with_context(|| format!("failed to write {}", abs_path.display()))?;
+    fs::write(&abs_path, contents).with_context(|| {
+        format!(
+            "failed to write {}",
+            display_workspace_relative(workspace_root, &abs_path)
+        )
+    })?;
 
     result.added.push(abs_path);
     Ok(())
@@ -111,13 +119,17 @@ fn apply_delete_file(
     if abs_path.is_dir() {
         anyhow::bail!(
             "cannot delete directory {} via apply_patch",
-            abs_path.display()
+            display_workspace_relative(workspace_root, &abs_path)
         );
     }
 
     if abs_path.exists() {
-        fs::remove_file(&abs_path)
-            .with_context(|| format!("failed to delete {}", abs_path.display()))?;
+        fs::remove_file(&abs_path).with_context(|| {
+            format!(
+                "failed to delete {}",
+                display_workspace_relative(workspace_root, &abs_path)
+            )
+        })?;
     }
 
     result.deleted.push(abs_path);
@@ -133,35 +145,70 @@ fn apply_update_file(
     result: &mut ApplyPatchResult,
 ) -> Result<()> {
     let abs_path = resolve_workspace_path(workspace_root, patch_path, allow_outside)?;
-    let old_content = read_existing_text(&abs_path)?;
+
+    // Check file existence early to give a clear error
+    if !abs_path.exists() {
+        anyhow::bail!(
+            "File does not exist: {}",
+            display_workspace_relative(workspace_root, &abs_path)
+        );
+    }
+
+    let old_content = read_existing_text(&abs_path)
+        .with_context(|| {
+            format!(
+                "failed to read {}",
+                display_workspace_relative(workspace_root, &abs_path)
+            )
+        })?;
 
     // Compute new content from chunks
-    let new_content = derive_new_contents(&abs_path, &old_content, chunks)?;
+    let new_content = derive_new_contents(workspace_root, &abs_path, &old_content, chunks)?;
 
     // Determine the final path (handle MoveTo)
     let final_path = if let Some(move_target) = move_target {
         let dest = resolve_workspace_path(workspace_root, move_target, allow_outside)?;
         if let Some(parent) = dest.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("failed to create directory {}", parent.display()))?;
+            fs::create_dir_all(parent).with_context(|| {
+                format!(
+                    "failed to create directory {}",
+                    display_workspace_relative(workspace_root, parent)
+                )
+            })?;
         }
         // Write to destination
-        fs::write(&dest, &new_content)
-            .with_context(|| format!("failed to write {}", dest.display()))?;
+        fs::write(&dest, &new_content).with_context(|| {
+            format!(
+                "failed to write {}",
+                display_workspace_relative(workspace_root, &dest)
+            )
+        })?;
         // Remove original
         if abs_path.exists() && abs_path != dest {
-            fs::remove_file(&abs_path)
-                .with_context(|| format!("failed to remove original {}", abs_path.display()))?;
+            fs::remove_file(&abs_path).with_context(|| {
+                format!(
+                    "failed to remove original {}",
+                    display_workspace_relative(workspace_root, &abs_path)
+                )
+            })?;
         }
         dest
     } else {
         // Write to original path
         if let Some(parent) = abs_path.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("failed to create directory {}", parent.display()))?;
+            fs::create_dir_all(parent).with_context(|| {
+                format!(
+                    "failed to create directory {}",
+                    display_workspace_relative(workspace_root, parent)
+                )
+            })?;
         }
-        fs::write(&abs_path, &new_content)
-            .with_context(|| format!("failed to write {}", abs_path.display()))?;
+        fs::write(&abs_path, &new_content).with_context(|| {
+            format!(
+                "failed to write {}",
+                display_workspace_relative(workspace_root, &abs_path)
+            )
+        })?;
         abs_path.clone()
     };
 
@@ -178,6 +225,7 @@ fn apply_update_file(
 
 /// Apply chunks to file content using seek‑and‑replace (ported from codex).
 fn derive_new_contents(
+    workspace_root: &Path,
     path: &Path,
     old_content: &str,
     chunks: &[UpdateFileChunk],
@@ -189,8 +237,8 @@ fn derive_new_contents(
         original_lines.pop();
     }
 
-    let replacements =
-        compute_replacements(&original_lines, path, chunks).map_err(|e| anyhow!("{e}"))?;
+    let replacements = compute_replacements(&original_lines, workspace_root, path, chunks)
+        .map_err(|e| anyhow!("{e}"))?;
 
     let new_lines = apply_replacements(original_lines, &replacements);
 
@@ -206,6 +254,7 @@ fn derive_new_contents(
 /// the new lines. Each replacement is `(start_index, old_len, new_lines)`.
 fn compute_replacements(
     original_lines: &[String],
+    workspace_root: &Path,
     path: &Path,
     chunks: &[UpdateFileChunk],
 ) -> std::result::Result<Vec<(usize, usize, Vec<String>)>, String> {
@@ -226,7 +275,7 @@ fn compute_replacements(
                 return Err(format!(
                     "Failed to find context '{}' in {}",
                     ctx_line,
-                    path.display()
+                    display_workspace_relative(workspace_root, path)
                 ));
             }
         }
@@ -261,16 +310,28 @@ fn compute_replacements(
             replacements.push((start_idx, pattern.len(), new_slice.to_vec()));
             line_index = start_idx + pattern.len();
         } else {
+            let truncated = truncate_lines(&chunk.old_lines, 5);
             return Err(format!(
                 "Failed to find expected lines in {}:\n{}",
-                path.display(),
-                chunk.old_lines.join("\n"),
+                display_workspace_relative(workspace_root, path),
+                truncated,
             ));
         }
     }
 
+    // Sort by position (should already be in order, but be safe)
     replacements.sort_by_key(|(a, _, _)| *a);
     Ok(replacements)
+}
+
+/// Truncate lines to at most `max` items, appending a summary if truncated.
+fn truncate_lines(lines: &[String], max: usize) -> String {
+    if lines.len() <= max {
+        lines.join("\n")
+    } else {
+        let shown = lines[..max].join("\n");
+        format!("{}\n... ({} more lines)", shown, lines.len() - max)
+    }
 }
 
 /// Apply replacements in reverse order so indices stay valid.

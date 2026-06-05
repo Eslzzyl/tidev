@@ -71,7 +71,10 @@ fn glob_paths(
     let search_root =
         resolve_workspace_path(workspace_root, relative_path.as_ref(), allow_outside)?;
     if !search_root.exists() {
-        bail!("{} does not exist", search_root.display());
+        bail!(
+            "{} does not exist",
+            display_workspace_relative(workspace_root, &search_root)
+        );
     }
 
     let matcher = GlobBuilder::new(pattern)
@@ -190,7 +193,10 @@ fn grep_paths(
     let search_root =
         resolve_workspace_path(workspace_root, relative_path.as_ref(), allow_outside)?;
     if !search_root.exists() {
-        bail!("{} does not exist", search_root.display());
+        bail!(
+            "{} does not exist",
+            display_workspace_relative(workspace_root, &search_root)
+        );
     }
 
     let matcher = RegexMatcherBuilder::new()
