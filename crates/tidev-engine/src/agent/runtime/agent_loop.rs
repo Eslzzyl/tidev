@@ -50,9 +50,10 @@ fn build_goal_prompt(goal: &Goal) -> String {
          - If any requirement lacks proof, the goal is not complete — \
          continue working.\n\n\
          Task decomposition:\n\
-         If this objective is large, consider using the task tool to spawn \
-         sub-agents for independent sub-tasks. Each sub-agent works in its \
-         own context, keeping the main context focused on orchestration.\n\n\
+         If this objective is large, consider using the task tool to spawn\n\
+         sub-agents for independent sub-tasks — but only when sub-tasks are\n\
+         substantial enough to justify the overhead (each costs a full LLM\n\
+         turn with its own context window).\n\n\
          Resource usage:\n\
          - Tokens used: {tokens_used}\n\
          - Time spent: {time_used_seconds} seconds\n\
