@@ -14,7 +14,10 @@ impl App {
         }
 
         let palette = self.palette();
-        let width = area.width.min(72);
+        let width = area
+            .width
+            .min(72)
+            .min(frame.area().width.saturating_sub(area.x));
         let height = (self.command_palette.suggestions.len() as u16)
             .min(6)
             .saturating_add(2);
@@ -71,7 +74,10 @@ impl App {
         }
 
         let palette = self.palette();
-        let width = area.width.min(72);
+        let width = area
+            .width
+            .min(72)
+            .min(frame.area().width.saturating_sub(area.x));
         let height = (self.at_mention.suggestions.len() as u16)
             .min(6)
             .saturating_add(2);
@@ -136,7 +142,10 @@ impl App {
         }
 
         let palette = self.palette();
-        let width = area.width.min(72);
+        let width = area
+            .width
+            .min(72)
+            .min(frame.area().width.saturating_sub(area.x));
         let height = (self.snippet_state.snippets.len() as u16)
             .min(6)
             .saturating_add(2);
@@ -195,7 +204,10 @@ impl App {
         }
 
         let palette = self.palette();
-        let width = area.width.min(72);
+        let width = area
+            .width
+            .min(72)
+            .min(frame.area().width.saturating_sub(area.x));
         let height = (self.shell_completion.candidates.len() as u16)
             .min(6)
             .saturating_add(2);
