@@ -173,6 +173,7 @@ macro_rules! tool_args {
         $(#[$struct_meta:meta])*
         $vis:vis struct $name:ident {
             $(
+                $(#[$field_meta:meta])*
                 $field:ident : $kind:ident ( $($kind_args:tt)+ )
             ),* $(,)?
         }
@@ -182,6 +183,7 @@ macro_rules! tool_args {
         #[serde(deny_unknown_fields)]
         $vis struct $name {
             $(
+                $(#[$field_meta])*
                 pub $field: tool_field_type!($kind($($kind_args)+)),
             )*
         }
@@ -231,7 +233,9 @@ tool_args! {
 tool_args! {
     pub struct EditArgs {
         file_path: string("Path to edit (relative to workspace root, or absolute)"),
+        #[serde(alias = "old_string")]
         old_text: string("Text to replace; must match exactly"),
+        #[serde(alias = "new_string")]
         new_text: string("Replacement text"),
         replace_all: optional_boolean("Replace all matches instead of only the first"),
     }
