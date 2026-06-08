@@ -671,7 +671,9 @@ struct ChatCompletionChoice {
 struct ChatCompletionDelta {
     #[serde(default)]
     content: Option<String>,
-    #[serde(default)]
+    /// Accept both `reasoning` (OpenCode Go, some providers) and
+    /// `reasoning_content` (DeepSeek, standard) field names.
+    #[serde(default, alias = "reasoning")]
     reasoning_content: Option<String>,
     #[serde(default)]
     tool_calls: Option<Vec<ChatCompletionToolCallDelta>>,
