@@ -1631,7 +1631,7 @@ mod tests {
 
         let messages = vec![Message::new(MessageRole::User, "Hello")];
 
-        let request = build_responses_request(&model, messages, true, &[]).unwrap();
+        let request = build_responses_request(&model, messages, true, &[], None).unwrap();
 
         assert_eq!(request.model, "gpt-4.5");
         assert_eq!(request.instructions, Some("You are helpful.".to_string()));
@@ -1662,7 +1662,7 @@ mod tests {
             Message::new(MessageRole::User, "Hello"),
         ];
 
-        let request = build_responses_request(&model, messages, false, &[]).unwrap();
+        let request = build_responses_request(&model, messages, false, &[], None).unwrap();
 
         assert!(request.instructions.is_some());
         let instructions = request.instructions.unwrap();
@@ -1696,7 +1696,7 @@ mod tests {
             Message::new(MessageRole::Tool, "Tool result: success"),
         ];
 
-        let request = build_responses_request(&model, messages, false, &[]).unwrap();
+        let request = build_responses_request(&model, messages, false, &[], None).unwrap();
 
         // Input should be a string with conversation history
         assert!(request.input.contains("User: Run command"));
