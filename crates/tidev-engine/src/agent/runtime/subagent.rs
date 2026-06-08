@@ -89,7 +89,13 @@ impl AgentRuntime {
         // Helper to emit SubagentStatus events to BOTH parent and child sessions.
         // The child-session event updates the subsession conversation in the TUI;
         // the parent-session event updates the subagent card overlay.
+        //
+        // The child session event uses `child_request_id` (the child's per-turn
+        // `request_sequence`) so that the TUI's `is_active_request` check passes —
+        // the child session's `active_request_id` is set to `request_sequence` by
+        // `TurnStarting`.  The parent session event keeps `parent_request_id`.
         let send_status = |event_tx: &UnboundedSender<BackendEvent>,
+                           child_request_id: u64,
                            status_text: String,
                            current_tool_call: Option<ToolCall>,
                            content_delta: Option<String>,
@@ -97,7 +103,7 @@ impl AgentRuntime {
             // Send to child session (for subsession conversation view)
             let _ = event_tx.send(BackendEvent::SubagentStatus {
                 session_id: child_session_id,
-                request_id: parent_request_id,
+                request_id: child_request_id,
                 child_session_id,
                 status_text: status_text.clone(),
                 current_tool_call: current_tool_call.clone(),
@@ -188,6 +194,7 @@ impl AgentRuntime {
 
         send_status(
             event_tx,
+            request_sequence,
             format!("Thinking ({})", agent_type.display_name()),
             None,
             None,
@@ -227,7 +234,7 @@ impl AgentRuntime {
             let mut model_for_turn = child_model.clone();
             model_for_turn.system_prompt = static_system_prompt.clone();
 
-            send_status(event_tx, "Thinking".to_string(), None, None, None);
+            send_status(event_tx, request_sequence, "Thinking".to_string(), None, None, None);
 
             // Emit TurnStarting
             let _ = event_tx.send(BackendEvent::TurnStarting {
@@ -305,6 +312,7 @@ impl AgentRuntime {
                                 }
                                 send_status(
                                     event_tx,
+                                    request_sequence,
                                     "Writing output".to_string(),
                                     None,
                                     Some(content),
@@ -316,12 +324,12 @@ impl AgentRuntime {
                                     turn.created_at = Some(Utc::now());
                                 }
                                 turn.reasoning.push_str(&content);
-                                send_status(event_tx, "Thinking".to_string(), None, None, Some(content));
+                                send_status(event_tx, request_sequence, "Thinking".to_string(), None, None, Some(content));
                             }
                             BackendEvent::ToolCallUpdated { tool_call, .. } => {
                                 let tc = tool_call.clone();
                                 turn.upsert_tool_call(tool_call);
-                                send_status(event_tx, "Tool".to_string(), Some(tc), None, None);
+                                send_status(event_tx, request_sequence, "Tool".to_string(), Some(tc), None, None);
                             }
                             BackendEvent::UsageStats {
                                 input_tokens,
@@ -407,7 +415,7 @@ impl AgentRuntime {
                 assistant_msg.streaming = false;
                 let _ = event_tx.send(BackendEvent::SubagentStatus {
                     session_id: child_session_id,
-                    request_id: parent_request_id,
+                    request_id: request_sequence,
                     child_session_id,
                     status_text: if turn.tool_calls.is_empty() {
                         "Completed".to_string()
@@ -423,7 +431,7 @@ impl AgentRuntime {
 
             // If no tool calls, done
             if turn.tool_calls.is_empty() {
-                send_status(event_tx, "Completed".to_string(), None, None, None);
+                send_status(event_tx, request_sequence, "Completed".to_string(), None, None, None);
                 break;
             }
 
@@ -449,14 +457,15 @@ impl AgentRuntime {
                         event_tx,
                     )
                     .await?;
-                    // Forward the tool result to the child session view in TUI
-                    // (persist_tool_result emits ToolCompleted with request_sequence,
-                    //  which is ignored by the TUI — we use parent_request_id here)
+                    // Forward the tool result to the child session view in TUI.
+                    // Use request_sequence (not parent_request_id) so the TUI's
+                    // is_active_request check passes — TurnStarting sets the
+                    // child session's active_request_id to request_sequence.
                     let tool_msg =
                         Message::tool_result(&tool_call.id, &tool_call.name, result.clone());
                     let _ = event_tx.send(BackendEvent::SubagentToolResult {
                         session_id: child_session_id,
-                        request_id: parent_request_id,
+                        request_id: request_sequence,
                         child_session_id,
                         message: tool_msg,
                     });
@@ -465,7 +474,7 @@ impl AgentRuntime {
 
                 let canonical = canonical_tool_name(&tool_call.name).unwrap_or(&tool_call.name);
                 let summary = format!("Tool: {canonical}");
-                send_status(event_tx, summary, Some(tool_call.clone()), None, None);
+                send_status(event_tx, request_sequence, summary, Some(tool_call.clone()), None, None);
 
                 let call_with_allow = [(tool_call.clone(), false, false)];
                 let results = self
@@ -483,19 +492,19 @@ impl AgentRuntime {
                 for (_, result) in results {
                     // Forward the tool result to the child session view in TUI.
                     // execute_tool_calls already called persist_tool_result which
-                    // emits ToolCompleted with request_sequence (ignored by TUI),
-                    // so we use SubagentToolResult with parent_request_id instead.
+                    // emits ToolCompleted with request_sequence (ignored by TUI).
+                    // Use request_sequence here so is_active_request passes.
                     let tool_msg =
                         Message::tool_result(&tool_call.id, &tool_call.name, result.clone());
                     let _ = event_tx.send(BackendEvent::SubagentToolResult {
                         session_id: child_session_id,
-                        request_id: parent_request_id,
+                        request_id: request_sequence,
                         child_session_id,
                         message: tool_msg,
                     });
                 }
 
-                send_status(event_tx, "Working".to_string(), None, None, None);
+                send_status(event_tx, request_sequence, "Working".to_string(), None, None, None);
             }
 
             // Next turn
