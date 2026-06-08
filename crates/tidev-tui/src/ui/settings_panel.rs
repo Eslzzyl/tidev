@@ -29,6 +29,7 @@ pub enum SettingKey {
     LoggingEnabled,
     LogLevel,
     SaveRequestBody,
+    SaveResponseBody,
     ScrollSpeed,
     RtkEnabled,
     MemoryEnabled,
@@ -89,6 +90,15 @@ impl SettingsPanelState {
                     .to_string(),
                 setting_type: SettingType::Toggle(config.logging.save_request_body),
                 key: SettingKey::SaveRequestBody,
+                disabled: false,
+            },
+            SettingItem {
+                name: "Save Response Body".to_string(),
+                description:
+                    "Save LLM streaming response payloads to /tmp/tidev-responses/ for debugging"
+                        .to_string(),
+                setting_type: SettingType::Toggle(config.logging.save_response_body),
+                key: SettingKey::SaveResponseBody,
                 disabled: false,
             },
             SettingItem {
@@ -313,6 +323,11 @@ impl SettingsPanelState {
                 SettingKey::SaveRequestBody => {
                     if let SettingType::Toggle(val) = item.setting_type {
                         config.logging.save_request_body = val;
+                    }
+                }
+                SettingKey::SaveResponseBody => {
+                    if let SettingType::Toggle(val) = item.setting_type {
+                        config.logging.save_response_body = val;
                     }
                 }
                 SettingKey::ScrollSpeed => {

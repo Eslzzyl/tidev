@@ -12,7 +12,7 @@ use tidev_types::reasoning::ThinkingLevelType;
 use log::{debug as log_debug, error as log_error};
 
 use crate::attachments::{image_attachments, message_text_with_file_references};
-use crate::debug::save_request_for_debugging;
+use crate::debug::{save_raw_response_for_debugging, save_request_for_debugging};
 use crate::error::classify_response_status;
 use crate::think_parser::ThinkParser;
 use crate::tool_call_format::ToolCallBuilder;
@@ -30,6 +30,8 @@ pub(crate) async fn stream_openai(
     thinking_level: ThinkingLevelType,
     save_request_body: bool,
     max_request_files: usize,
+    save_response_body: bool,
+    max_response_files: usize,
 ) -> Result<()> {
     let api_key = model
         .api_key
@@ -90,6 +92,7 @@ pub(crate) async fn stream_openai(
     let mut tool_calls: BTreeMap<usize, ToolCallBuilder> = BTreeMap::new();
     let mut think_parser = ThinkParser::default();
     let mut first_delta_time: Option<std::time::Instant> = None;
+    let mut raw_payloads: Vec<String> = Vec::new();
 
     use futures_util::StreamExt;
 
@@ -108,7 +111,15 @@ pub(crate) async fn stream_openai(
             if let Some(payload) = line.strip_prefix("data:") {
                 let payload = payload.trim();
 
+                raw_payloads.push(payload.to_string());
                 if payload == "[DONE]" {
+                    save_raw_response_for_debugging(
+                        session_id,
+                        request_id,
+                        &raw_payloads,
+                        save_response_body,
+                        max_response_files,
+                    );
                     let turn = finalize_turn(
                         assistant_text.clone(),
                         reasoning_text.clone(),
@@ -225,6 +236,14 @@ pub(crate) async fn stream_openai(
             }
         }
     }
+
+    save_raw_response_for_debugging(
+        session_id,
+        request_id,
+        &raw_payloads,
+        save_response_body,
+        max_response_files,
+    );
 
     let turn = finalize_turn(
         assistant_text.clone(),

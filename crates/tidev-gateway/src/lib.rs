@@ -52,6 +52,8 @@ impl ChannelResources {
         let llm = LlmClient::new(
             config.logging.save_request_body,
             config.logging.max_request_files,
+            config.logging.save_response_body,
+            config.logging.max_response_files,
         )?;
         memory_store.set_models(llm.clone(), default_model.clone(), None);
         tidev_engine::memory::start_background_tasks(

@@ -38,12 +38,19 @@ pub struct LlmClient {
     http: Client,
     pub save_request_body: bool,
     pub max_request_files: usize,
+    pub save_response_body: bool,
+    pub max_response_files: usize,
 }
 
 impl LlmClient {
-    /// Build a new client.  Only the two debug knobs are needed — all other
+    /// Build a new client.  Only the debug knobs are needed — all other
     /// configuration comes per-request via [`LlmProviderConfig`].
-    pub fn new(save_request_body: bool, max_request_files: usize) -> Result<Self> {
+    pub fn new(
+        save_request_body: bool,
+        max_request_files: usize,
+        save_response_body: bool,
+        max_response_files: usize,
+    ) -> Result<Self> {
         let http = Client::builder()
             .user_agent("tidev/0.1")
             .timeout(Duration::from_secs(1800))
@@ -55,6 +62,8 @@ impl LlmClient {
             http,
             save_request_body,
             max_request_files,
+            save_response_body,
+            max_response_files,
         })
     }
 
@@ -266,6 +275,8 @@ impl LlmClient {
                     tx,
                     self.save_request_body,
                     self.max_request_files,
+                    self.save_response_body,
+                    self.max_response_files,
                 )
                 .await
             }
@@ -281,6 +292,8 @@ impl LlmClient {
                     thinking_level,
                     self.save_request_body,
                     self.max_request_files,
+                    self.save_response_body,
+                    self.max_response_files,
                 )
                 .await
             }
@@ -295,6 +308,8 @@ impl LlmClient {
                     tx,
                     self.save_request_body,
                     self.max_request_files,
+                    self.save_response_body,
+                    self.max_response_files,
                 )
                 .await
             }
@@ -309,6 +324,8 @@ impl LlmClient {
                     tx,
                     self.save_request_body,
                     self.max_request_files,
+                    self.save_response_body,
+                    self.max_response_files,
                 )
                 .await
             }

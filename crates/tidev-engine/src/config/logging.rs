@@ -18,6 +18,12 @@ pub struct LogConfig {
     /// Maximum request body files to keep before rotating (default: 100).
     #[serde(default = "default_max_request_files")]
     pub max_request_files: usize,
+    /// Save LLM response bodies to /tmp/tidev-responses/ for debugging.
+    #[serde(default)]
+    pub save_response_body: bool,
+    /// Maximum response body files to keep before rotating (default: 100).
+    #[serde(default = "default_max_response_files")]
+    pub max_response_files: usize,
 }
 
 fn default_enabled() -> bool {
@@ -44,6 +50,10 @@ fn default_max_request_files() -> usize {
     100
 }
 
+fn default_max_response_files() -> usize {
+    100
+}
+
 impl Default for LogConfig {
     fn default() -> Self {
         Self {
@@ -54,6 +64,8 @@ impl Default for LogConfig {
             console: false,
             save_request_body: false,
             max_request_files: 100,
+            save_response_body: false,
+            max_response_files: 100,
         }
     }
 }

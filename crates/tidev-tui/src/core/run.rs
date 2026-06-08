@@ -59,6 +59,8 @@ impl App {
         let llm = LlmClient::new(
             config.logging.save_request_body,
             config.logging.max_request_files,
+            config.logging.save_response_body,
+            config.logging.max_response_files,
         )?;
         log::info!("startup: LlmClient::new in {:?}", _t4.elapsed());
         let http_client = Arc::new(llm.http().clone());

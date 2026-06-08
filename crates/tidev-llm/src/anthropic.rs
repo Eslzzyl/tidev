@@ -28,6 +28,8 @@ pub(crate) async fn stream_anthropic(
     tx: UnboundedSender<BackendEvent>,
     save_request_body: bool,
     max_request_files: usize,
+    _save_response_body: bool,
+    _max_response_files: usize,
 ) -> Result<()> {
     let api_key = model
         .api_key

@@ -93,6 +93,8 @@ pub async fn run(options: WebOptions) -> anyhow::Result<()> {
     let llm_client = LlmClient::new(
         config.logging.save_request_body,
         config.logging.max_request_files,
+        config.logging.save_response_body,
+        config.logging.max_response_files,
     )?;
 
     // Create event bus

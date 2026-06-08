@@ -888,6 +888,8 @@ skills = []
 # max_files: number of rotated log files to keep (default: 5)
 # save_request_body: save LLM request bodies to /tmp/tidev-requests/ (default: false)
 # max_request_files: max request body files before rotation (default: 100)
+# save_response_body: save LLM streaming response payloads to /tmp/tidev-responses/ (default: false)
+# max_response_files: max response body files before rotation (default: 100)
 #[logging]
 #enabled = false
 #level = "INFO"
@@ -895,6 +897,8 @@ skills = []
 #max_files = 5
 #save_request_body = false
 #max_request_files = 100
+#save_response_body = false
+#max_response_files = 100
 
 # RTK (Rust Token Killer) configuration.
 # When enabled, command outputs are compressed to save tokens.

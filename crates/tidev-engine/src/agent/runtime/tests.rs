@@ -60,7 +60,7 @@ fn agent_runtime() -> (AgentRuntime, tempfile::TempDir) {
         config: crate::config::AppConfig::default(),
         auth: crate::config::AuthStore::default(),
         store: Arc::new(Mutex::new(store)),
-        llm_client: LlmClient::new(false, 100).unwrap(),
+        llm_client: LlmClient::new(false, 100, false, 100).unwrap(),
         tools: crate::tooling::ToolRegistry::new(
             tmp.path().join("workspace"),
             tmp.path().join("config"),
