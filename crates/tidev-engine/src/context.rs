@@ -217,12 +217,35 @@ impl ContextManager {
                             ));
                         }
                     }
-                    pending_tool_calls = message
+
+                    // Validate tool call arguments: if any tool call has
+                    // arguments that are not valid JSON (e.g. truncated by
+                    // the model's output token limit), replace them with an
+                    // empty object so the provider does not reject the request.
+                    let mut fixed_message = message.clone();
+                    for tc in &mut fixed_message.tool_calls {
+                        if tc.arguments.is_empty() {
+                            tc.arguments = "{}".to_string();
+                        } else if serde_json::from_str::<serde_json::Value>(&tc.arguments)
+                            .is_err()
+                        {
+                            log::warn!(
+                                "build_request_messages: tool call id={} name={} has invalid \
+                                 JSON arguments ({} chars), replacing with empty object",
+                                tc.id,
+                                tc.name,
+                                tc.arguments.len(),
+                            );
+                            tc.arguments = "{}".to_string();
+                        }
+                    }
+
+                    pending_tool_calls = fixed_message
                         .tool_calls
                         .iter()
                         .map(|tool_call| (tool_call.id.clone(), tool_call.name.clone()))
                         .collect();
-                    messages.push(message.clone());
+                    messages.push(fixed_message);
                 }
                 MessageRole::Tool => {
                     let Some(tool_call_id) = message.tool_call_id.as_ref() else {
@@ -530,6 +553,110 @@ mod tests {
         assert!(
             synthetic_tool.content.contains("interrupted"),
             "synthetic tool result should mention interruption"
+        );
+    }
+
+    #[test]
+    fn build_request_messages_sanitizes_invalid_tool_call_arguments() {
+        // Regression: when the model's output is truncated mid-JSON, the
+        // tool call arguments are stored as incomplete JSON.  Providers
+        // reject the request if the arguments are not valid JSON.
+        // build_request_messages must replace them with "{}" so the
+        // provider accepts the request.
+        let mut assistant = Message::new(MessageRole::Assistant, "writing files");
+        assistant.tool_calls = vec![
+            ToolCall {
+                id: "call-ok".to_string(),
+                name: "write".to_string(),
+                arguments: r#"{"content":"valid file content"}"#.to_string(),
+                thought_signature: None,
+            },
+            ToolCall {
+                id: "call-bad".to_string(),
+                name: "write".to_string(),
+                arguments: r#"{"content":"truncated at line 1 col"#.to_string(),
+                thought_signature: None,
+            },
+        ];
+
+        let conversation = test_conversation(vec![
+            Message::new(MessageRole::User, "write files"),
+            assistant,
+            Message::tool_result("call-ok", "write", ToolExecutionResult::new("Wrote file")),
+            Message::tool_result(
+                "call-bad",
+                "write",
+                ToolExecutionResult::new("Error: failed to parse arguments"),
+            ),
+            Message::new(MessageRole::Assistant, "done"),
+        ]);
+
+        let manager = ContextManager::new();
+        let request_messages =
+            manager.build_request_messages(&conversation, SessionMode::Build);
+
+        // Find the assistant message in the request and check its tool calls.
+        let assistant_msg = request_messages
+            .iter()
+            .find(|m| m.role == MessageRole::Assistant && !m.tool_calls.is_empty())
+            .expect("should have an assistant message with tool_calls");
+
+        let bad_tc = assistant_msg
+            .tool_calls
+            .iter()
+            .find(|tc| tc.id == "call-bad")
+            .expect("bad tool call should still be present");
+
+        assert_eq!(
+            bad_tc.arguments, "{}",
+            "invalid arguments should be replaced with empty JSON object"
+        );
+
+        // The good tool call should be unchanged.
+        let ok_tc = assistant_msg
+            .tool_calls
+            .iter()
+            .find(|tc| tc.id == "call-ok")
+            .expect("ok tool call should be present");
+
+        assert_eq!(
+            ok_tc.arguments,
+            r#"{"content":"valid file content"}"#,
+            "valid arguments should be preserved"
+        );
+    }
+
+    #[test]
+    fn build_request_messages_replaces_empty_arguments() {
+        // Empty arguments string is also invalid for some providers.
+        let mut assistant = Message::new(MessageRole::Assistant, "running tool");
+        assistant.tool_calls = vec![ToolCall {
+            id: "call-empty".to_string(),
+            name: "bash".to_string(),
+            arguments: String::new(),
+            thought_signature: None,
+        }];
+
+        let conversation = test_conversation(vec![
+            Message::new(MessageRole::User, "run command"),
+            assistant,
+            Message::tool_result("call-empty", "bash", ToolExecutionResult::new("output")),
+            Message::new(MessageRole::Assistant, "done"),
+        ]);
+
+        let manager = ContextManager::new();
+        let request_messages =
+            manager.build_request_messages(&conversation, SessionMode::Build);
+
+        let assistant_msg = request_messages
+            .iter()
+            .find(|m| m.role == MessageRole::Assistant && !m.tool_calls.is_empty())
+            .expect("should have an assistant message with tool_calls");
+
+        let tc = &assistant_msg.tool_calls[0];
+        assert_eq!(
+            tc.arguments, "{}",
+            "empty arguments should be replaced with empty JSON object"
         );
     }
 
