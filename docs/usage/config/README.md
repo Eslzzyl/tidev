@@ -94,21 +94,23 @@ root.
 
 ## [ui]
 
-Controls aspects of the terminal interface.
+Controls aspects of the terminal interface. All settings have sensible
+defaults, so you only need to add this section to `~/.config/tidev/config.toml`
+if you want to override them.
 
 ```
 [ui]
-sidebar_width = 30
-welcome_width = 72
+sidebar_width = 40
+welcome_width = 90
 max_input_lines = 6
-scroll_speed = 3
+scroll_speed = 3.0
 external_editor = "code --wait"
 ```
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `sidebar_width` | `35` | Width of the session sidebar in characters |
-| `welcome_width` | `72` | Width of the welcome screen content |
+| `sidebar_width` | `40` | Width of the session sidebar in characters |
+| `welcome_width` | `90` | Width of the welcome screen content |
 | `max_input_lines` | `6` | Maximum number of lines for the input area |
 | `scroll_speed` | `3.0` | Scroll speed multiplier for scrollable panes |
 | `external_editor` | none | Command to launch an external editor (e.g. `code --wait`). Falls back to `$VISUAL`, then `$EDITOR`, then auto-detection |

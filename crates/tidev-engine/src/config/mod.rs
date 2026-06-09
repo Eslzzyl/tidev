@@ -927,13 +927,6 @@ skills = []
 
 [mcp]
 
-[ui]
-sidebar_width = 30
-welcome_width = 72
-max_input_lines = 6
-# Scroll speed multiplier (default: 3)
-# scroll_speed = 3
-
 [notifications]
 # Enable notifications (default: true)
 # enabled = true
