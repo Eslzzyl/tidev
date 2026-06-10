@@ -532,6 +532,11 @@ fn call_tool_result_data(
                 filename: image_filename(tool_name, attachments.len(), &image.mime_type),
                 mime: image.mime_type.clone(),
                 data_url: format!("data:{};base64,{}", image.mime_type, image.data),
+                file_size: {
+                    let data = &image.data;
+                    let padding = data.bytes().rev().take(2).filter(|&b| b == b'=').count() as u64;
+                    (data.len() as u64).saturating_mul(3) / 4 - padding
+                },
             });
             continue;
         }
@@ -611,10 +616,12 @@ mod tests {
                 filename,
                 mime,
                 data_url,
+                file_size,
             } => {
                 assert_eq!(filename, "webfetch-attachment-1.png");
                 assert_eq!(mime, "image/png");
                 assert_eq!(data_url, "data:image/png;base64,aGVsbG8=");
+                assert_eq!(*file_size, 5);
             }
             other => panic!("expected image attachment, got {other:?}"),
         }

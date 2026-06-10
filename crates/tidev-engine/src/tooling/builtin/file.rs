@@ -339,17 +339,18 @@ pub(super) fn read_path(
         return Ok(result);
     }
 
-    // Treat as potential image
+    // Treat as potential image (but SVG is XML text, not a bitmap)
     let mime = mime_guess::from_path(&path).first_or_octet_stream();
     let mime_str = mime.to_string();
 
-    if mime_str.starts_with("image/") {
+    if mime_str.starts_with("image/") && mime_str != "image/svg+xml" {
         let content = fs::read(&path).with_context(|| {
             format!(
                 "failed to read image {}",
                 display_workspace_relative(workspace_root, &path)
             )
         })?;
+        let file_size = content.len() as u64;
         let data_url = format!(
             "data:{};base64,{}",
             mime_str,
@@ -364,6 +365,7 @@ pub(super) fn read_path(
                 .unwrap_or_default(),
             mime: mime_str,
             data_url,
+            file_size,
         });
         return Ok(result);
     }
@@ -1221,11 +1223,11 @@ pub fn read_file_for_at_reference(
         return Ok((output, false));
     }
 
-    // Treat as potential image
+    // Treat as potential image (but SVG is XML text, not a bitmap)
     let mime = mime_guess::from_path(&path).first_or_octet_stream();
     let mime_str = mime.to_string();
 
-    if mime_str.starts_with("image/") {
+    if mime_str.starts_with("image/") && mime_str != "image/svg+xml" {
         let content = fs::read(&path).with_context(|| {
             format!(
                 "failed to read image {}",

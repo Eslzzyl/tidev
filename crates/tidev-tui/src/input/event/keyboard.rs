@@ -872,10 +872,21 @@ impl App {
             }
         };
 
+        let file_size = data_url
+            .find("base64,")
+            .and_then(|i| {
+                let b64 = &data_url[i + 7..];
+                let decoded_len = (b64.len() as u64).saturating_mul(3) / 4;
+                let padding = b64.bytes().rev().take(2).filter(|&b| b == b'=').count() as u64;
+                Some(decoded_len.saturating_sub(padding))
+            })
+            .unwrap_or(0);
+
         self.draft_attachments.push(MessageAttachment::Image {
             filename: format!("pasted-image-{}.png", Uuid::new_v4()),
             mime: "image/png".to_string(),
             data_url,
+            file_size,
         });
         self.composer.insert_str("[Image]");
         self.last_notice = Some("Image pasted into draft".to_string());

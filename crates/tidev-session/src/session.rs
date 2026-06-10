@@ -27,6 +27,8 @@ pub enum MessageAttachment {
         filename: String,
         mime: String,
         data_url: String,
+        /// Exact file size in bytes (from `fs::read().len()`).
+        file_size: u64,
     },
 }
 

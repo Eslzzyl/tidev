@@ -417,6 +417,7 @@ impl App {
 
         if let Some(mime) = image_mime_from_path(&absolute) {
             let bytes = std::fs::read(&absolute)?;
+            let file_size = bytes.len() as u64;
             let filename = absolute
                 .file_name()
                 .and_then(|value| value.to_str())
@@ -428,6 +429,7 @@ impl App {
                     filename,
                     mime: mime.to_string(),
                     data_url,
+                    file_size,
                 },
                 Vec::new(),
             )));
@@ -504,6 +506,7 @@ impl App {
 
         if let Some(mime) = image_mime_from_path(absolute) {
             let bytes = std::fs::read(absolute)?;
+            let file_size = bytes.len() as u64;
             let filename = absolute
                 .file_name()
                 .and_then(|value| value.to_str())
@@ -514,6 +517,7 @@ impl App {
                 filename,
                 mime: mime.to_string(),
                 data_url,
+                file_size,
             }));
         }
 

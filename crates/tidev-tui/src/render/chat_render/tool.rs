@@ -4,7 +4,7 @@ use tidev_engine::{
     tooling::builtin::utils::display_workspace_relative,
     tooling::{TodoItem, canonical_tool_name},
 };
-use tidev_session::session::{Message, ToolCall};
+use tidev_session::session::{Message, MessageAttachment, ToolCall};
 
 use crate::core::state::SelectableRegionRange;
 use ratatui::{
@@ -442,7 +442,7 @@ pub(super) fn render_tool_call_summary_line(
 
     let result_suffix = if let Some(result_msg) = tool_result {
         let output = tool_output_from_message(result_msg, ctx).trim();
-        compute_tool_result_suffix(canonical_name, output)
+        compute_tool_result_suffix(canonical_name, output, &result_msg.attachments)
     } else {
         " ...".to_string()
     };
@@ -484,7 +484,11 @@ pub(super) fn render_tool_call_summary_line(
         .collect()
 }
 
-pub(super) fn compute_tool_result_suffix(canonical_name: &str, output: &str) -> String {
+pub(super) fn compute_tool_result_suffix(
+    canonical_name: &str,
+    output: &str,
+    attachments: &[MessageAttachment],
+) -> String {
     match canonical_name {
         "grep" | "glob" => {
             if tool_output_is_error(output) {
@@ -526,15 +530,46 @@ pub(super) fn compute_tool_result_suffix(canonical_name: &str, output: &str) -> 
                 } else {
                     " → error".to_string()
                 }
-            } else if output.contains("Image read successfully") {
-                " → image".to_string()
-            } else if output.contains("<type>directory</type>") {
-                let count = output
-                    .lines()
-                    .filter(|line| !line.trim().is_empty())
-                    .count()
-                    .saturating_sub(2); // Approximate, list_dir output is different now
-                format!(" → directory ({} entries)", count)
+            } else if has_image_attachment(attachments) {
+                // Enriched image suffix: " → TYPE, SIZE"
+                let image = attachments.iter().find_map(|a| {
+                    if let MessageAttachment::Image { mime, file_size, .. } = a {
+                        Some((mime.as_str(), *file_size))
+                    } else {
+                        None
+                    }
+                });
+                if let Some((mime, size)) = image {
+                    let type_label = mime.strip_prefix("image/").unwrap_or(mime);
+                    format!(" → {}, {}", type_label, format_file_size(size))
+                } else {
+                    " → image".to_string()
+                }
+            } else if has_directory_attachment(attachments) {
+                // Count files and subdirectories from list_dir output
+                let mut files = 0u64;
+                let mut dirs = 0u64;
+                for line in output.lines().skip(1) {
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+                    if trimmed.ends_with('/') {
+                        dirs += 1;
+                    } else {
+                        files += 1;
+                    }
+                }
+                let total = files + dirs;
+                if total == 0 {
+                    " → empty".to_string()
+                } else if dirs == 0 {
+                    format!(" → {} items ({} files)", total, files)
+                } else if files == 0 {
+                    format!(" → {} items ({} dirs)", total, dirs)
+                } else {
+                    format!(" → {} items ({} files, {} dirs)", total, files, dirs)
+                }
             } else {
                 let metadata = parse_read_content_metadata(output);
                 let is_size_truncated = output.contains("Output capped at 50 KB");
@@ -623,9 +658,9 @@ pub(super) fn compute_tool_result_suffix(canonical_name: &str, output: &str) -> 
                                 if total_lines == 0 {
                                     " → empty".to_string()
                                 } else if truncated {
-                                    format!(" → First {} lines (truncated)", total_lines)
+                                    format!(" → {} lines (truncated)", total_lines)
                                 } else {
-                                    format!(" → All {} lines", total_lines)
+                                    format!(" → {} lines", total_lines)
                                 }
                             }
                         }
@@ -633,47 +668,57 @@ pub(super) fn compute_tool_result_suffix(canonical_name: &str, output: &str) -> 
                 }
             }
         }
-        "memory" => {
-            if output.starts_with("Memory saved:") || output.starts_with("Memory updated:") {
-                if output.starts_with("Memory saved:") {
-                    " → saved".to_string()
-                } else {
-                    " → updated".to_string()
-                }
-            } else if output.starts_with("Memory ") && output.ends_with(" deleted.") {
-                " → deleted".to_string()
-            } else if output.starts_with("Found ") {
-                // "Found N memories:"
-                if let Some(count) = output.split_whitespace().nth(1) {
-                    format!(" → {} memories", count)
-                } else {
-                    String::new()
-                }
-            } else if let Some(rest) = output.strip_prefix("Workspace memories (") {
-                // "Workspace memories (N active):"
-                if let Some(count) = rest.split_whitespace().next() {
-                    format!(" → {} memories", count)
-                } else {
-                    String::new()
-                }
-            } else if output.starts_with("# [") {
-                // Read output: count content lines after metadata
-                let content_lines: Vec<&str> = output
+        "skill" => {
+            if tool_output_is_error(output) {
+                " → error".to_string()
+            } else {
+                let content_lines: Vec<_> = output
                     .lines()
                     .skip_while(|l| l.starts_with('#') || l.starts_with("**"))
                     .filter(|l| !l.is_empty())
                     .collect();
                 format!(" → {} lines", content_lines.len())
-            } else {
-                String::new()
             }
         }
         _ => String::new(),
     }
 }
 
-pub(super) fn tool_output_is_truncated(output: &str) -> bool {
-    output.contains("output truncated:")
+/// Check if the attachment list contains a `DirectoryReference`.
+fn has_directory_attachment(attachments: &[MessageAttachment]) -> bool {
+    attachments
+        .iter()
+        .any(|a| matches!(a, MessageAttachment::DirectoryReference { .. }))
+}
+
+/// Check if the attachment list contains an `Image`.
+fn has_image_attachment(attachments: &[MessageAttachment]) -> bool {
+    attachments
+        .iter()
+        .any(|a| matches!(a, MessageAttachment::Image { .. }))
+}
+
+/// Format a file size in bytes into a human-readable string (e.g., "2.4 MB").
+fn format_file_size(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = KB * 1024;
+    const GB: u64 = MB * 1024;
+
+    if bytes >= GB {
+        let val = bytes as f64 / GB as f64;
+        format!("{:.1} GB", val)
+    } else if bytes >= MB {
+        let val = bytes as f64 / MB as f64;
+        format!("{:.1} MB", val)
+    } else if bytes >= KB {
+        let val = bytes as f64 / KB as f64;
+        format!("{:.1} KB", val)
+    } else {
+        format!("{} B", bytes)
+    }
+}
+
+pub(super) fn tool_output_is_truncated(output: &str) -> bool {    output.contains("output truncated:")
         || output.contains("... (truncated)")
         || output.contains("(Output capped at")
         || output.contains("[truncated]")
