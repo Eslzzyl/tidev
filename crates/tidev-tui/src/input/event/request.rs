@@ -106,10 +106,33 @@ impl App {
         // Handle running tool execution cancellations: same orphan prevention
         if !self.running_tool_executions.is_empty() {
             let session_id = self.conversation.session_id;
-            let cancel_output = "User cancelled the request".to_string();
 
             for running in self.running_tool_executions.drain(..) {
-                let result = ToolExecutionResult::new(cancel_output.clone());
+                // For bash calls, capture partial output that was already
+                // streamed via ShellOutput events before the drain.
+                let cancel_output = if running.tool_call.name == "bash" {
+                    if let Some(idx) = self.conversation.messages.iter().rposition(|m| {
+                        m.role == MessageRole::Tool
+                            && m.streaming
+                            && m.tool_call_id.as_deref() == Some(&running.tool_call.id)
+                    }) {
+                        let partial = &self.conversation.messages[idx].content;
+                        if partial.is_empty() {
+                            "User cancelled the request".to_string()
+                        } else {
+                            format!(
+                                "User cancelled\n\nPartial output before termination:\n{}",
+                                partial
+                            )
+                        }
+                    } else {
+                        "User cancelled the request".to_string()
+                    }
+                } else {
+                    "User cancelled the request".to_string()
+                };
+
+                let result = ToolExecutionResult::new(cancel_output);
                 let msg = Message::tool_result(
                     running.tool_call.id.clone(),
                     running.tool_call.name.clone(),

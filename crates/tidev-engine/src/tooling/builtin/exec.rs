@@ -395,7 +395,21 @@ fn run_shell_inner(
             kill_process_group(child_pid);
             let _ = process.wait();
             unregister_child(child_pid);
-            return Err(anyhow::anyhow!("shell command cancelled"));
+
+            // Send final ShellOutput event so UI consumers see the last state
+            if let Some(ref tx) = event_tx {
+                let _ = tx.send(BackendEvent::ShellOutput {
+                    session_id,
+                    content: output_buf.clone(),
+                    finished: true,
+                    exit_code: None,
+                });
+            }
+
+            return Err(anyhow::anyhow!(
+                "shell command cancelled\n\nPartial output before termination:\n{}",
+                output_buf
+            ));
         }
 
         // Check timeout
@@ -405,11 +419,23 @@ fn run_shell_inner(
             kill_process_group(child_pid);
             let _ = process.wait();
             unregister_child(child_pid);
+
+            // Send final ShellOutput event so UI consumers see the last state
+            if let Some(ref tx) = event_tx {
+                let _ = tx.send(BackendEvent::ShellOutput {
+                    session_id,
+                    content: output_buf.clone(),
+                    finished: true,
+                    exit_code: None,
+                });
+            }
+
             return Err(anyhow::anyhow!(
                 "bash tool terminated command after exceeding timeout {} ms. \
                  If this command is expected to take longer and is not waiting for interactive input, \
-                 retry with a larger timeout value in milliseconds.",
-                timeout_ms
+                 retry with a larger timeout value in milliseconds.\n\n\
+                 Partial output before termination:\n{}",
+                timeout_ms, output_buf
             ));
         }
 
