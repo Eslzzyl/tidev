@@ -1127,6 +1127,9 @@ pub(super) fn render_subagent_task_preview(
         return lines;
     }
 
+    // Top padding
+    lines.push(Line::from(""));
+
     // Unified header: [@type] subagent: description (word-wrapped)
     let header_line = Line::from(vec![
         Span::styled(
