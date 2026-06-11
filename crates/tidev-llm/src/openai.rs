@@ -383,6 +383,7 @@ fn build_openai_request(
             }
             MessageRole::Tool => request_messages.push(ChatMessagePayload::tool(
                 message_text_with_file_references(message),
+                image_attachments(message).collect(),
                 message.tool_call_id.clone(),
                 message.tool_name.clone(),
             )),
@@ -507,10 +508,41 @@ impl ChatMessagePayload {
         }
     }
 
-    fn tool(content: String, tool_call_id: Option<String>, name: Option<String>) -> Self {
+    fn tool(
+        content: String,
+        images: Vec<&MessageAttachment>,
+        tool_call_id: Option<String>,
+        name: Option<String>,
+    ) -> Self {
+        let content = if images.is_empty() {
+            Some(serde_json::Value::String(content))
+        } else {
+            let mut parts = Vec::new();
+            if !content.trim().is_empty() {
+                parts.push(serde_json::json!({
+                    "type": "text",
+                    "text": content,
+                }));
+            }
+            for attachment in images {
+                if let MessageAttachment::Image { data_url, .. } = attachment {
+                    parts.push(serde_json::json!({
+                        "type": "image_url",
+                        "image_url": { "url": data_url },
+                    }));
+                }
+            }
+            if parts.is_empty() {
+                parts.push(serde_json::json!({
+                    "type": "text",
+                    "text": "",
+                }));
+            }
+            Some(serde_json::Value::Array(parts))
+        };
         Self {
             role: "tool".to_string(),
-            content: Some(serde_json::Value::String(content)),
+            content,
             reasoning_content: None,
             tool_calls: None,
             tool_call_id,

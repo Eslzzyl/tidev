@@ -432,7 +432,34 @@ fn build_anthropic_request(
             }
             MessageRole::Tool => {
                 let tool_call_id = message.tool_call_id.clone().unwrap_or_default();
-                let content = message_text_with_file_references(&message);
+                let text = message_text_with_file_references(&message);
+                let images: Vec<&MessageAttachment> = image_attachments(&message).collect();
+
+                // Build content blocks: text block + optional image blocks
+                // (same pattern as user_message_content())
+                let mut content: Vec<AnthropicContentBlock> = Vec::new();
+                if !text.trim().is_empty() || images.is_empty() {
+                    content.push(AnthropicContentBlock::Text {
+                        text,
+                        cache_control: None,
+                    });
+                }
+                for attachment in images {
+                    if let MessageAttachment::Image { mime, data_url, .. } = attachment {
+                        let data = data_url
+                            .split_once(',')
+                            .map(|(_, data)| data.to_string())
+                            .unwrap_or_else(|| data_url.clone());
+                        content.push(AnthropicContentBlock::Image {
+                            source: AnthropicImageSource {
+                                kind: "base64".to_string(),
+                                media_type: mime.clone(),
+                                data,
+                            },
+                        });
+                    }
+                }
+
                 let block = AnthropicContentBlock::ToolResult {
                     tool_use_id: tool_call_id,
                     content,
@@ -570,7 +597,7 @@ enum AnthropicContentBlock {
     },
     ToolResult {
         tool_use_id: String,
-        content: String,
+        content: Vec<AnthropicContentBlock>,
         #[serde(skip_serializing_if = "Option::is_none")]
         cache_control: Option<CacheControl>,
     },

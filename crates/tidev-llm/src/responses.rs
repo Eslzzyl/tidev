@@ -6,11 +6,11 @@ use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 
 use crate::{types::LlmProviderConfig, types::ToolDefinition};
-use tidev_session::session::{BackendEvent, Message, MessageRole, ToolCall};
+use tidev_session::session::{BackendEvent, Message, MessageAttachment, MessageRole, ToolCall};
 
 use log::{debug as log_debug, error as log_error};
 
-use crate::attachments::message_text_with_file_references;
+use crate::attachments::{image_attachments, message_text_with_file_references};
 use crate::debug::save_request_for_debugging;
 use crate::error::classify_response_status;
 
@@ -636,8 +636,9 @@ fn build_responses_request(
         Some(model.system_prompt.clone().unwrap_or_default())
     };
 
-    // Build conversation history as a string (this backend only supports string input)
-    let mut conversation_parts: Vec<String> = Vec::new();
+    // Build conversation history as an array of input items.
+    // This supports image attachments in user and tool messages.
+    let mut input_items: Vec<serde_json::Value> = Vec::new();
     for message in &messages {
         if message.streaming {
             continue;
@@ -647,14 +648,38 @@ fn build_responses_request(
             MessageRole::System => {}
             MessageRole::User => {
                 let text = message_text_with_file_references(message);
-                if !text.is_empty() {
-                    conversation_parts.push(format!("User: {}", text));
+                let images: Vec<&MessageAttachment> = image_attachments(message).collect();
+
+                let mut content = Vec::new();
+                if !text.trim().is_empty() {
+                    content.push(serde_json::json!({
+                        "type": "input_text",
+                        "text": text,
+                    }));
+                }
+                for attachment in images {
+                    if let MessageAttachment::Image { data_url, .. } = attachment {
+                        content.push(serde_json::json!({
+                            "type": "input_image",
+                            "image_url": data_url,
+                            "detail": "auto",
+                        }));
+                    }
+                }
+
+                if !content.is_empty() {
+                    input_items.push(serde_json::json!({
+                        "type": "message",
+                        "role": "user",
+                        "content": content,
+                    }));
                 }
             }
             MessageRole::Assistant => {
                 let text = message_text_with_file_references(message);
                 let has_tool_calls = !message.tool_calls.is_empty();
 
+                let mut content_parts = Vec::new();
                 if has_tool_calls {
                     let mut combined = text;
                     for tool_call in &message.tool_calls {
@@ -664,16 +689,61 @@ fn build_responses_request(
                         ));
                     }
                     if !combined.is_empty() {
-                        conversation_parts.push(format!("Assistant: {}", combined));
+                        content_parts.push(serde_json::json!({
+                            "type": "input_text",
+                            "text": combined,
+                        }));
                     }
                 } else if !text.is_empty() {
-                    conversation_parts.push(format!("Assistant: {}", text));
+                    content_parts.push(serde_json::json!({
+                        "type": "input_text",
+                        "text": text,
+                    }));
+                }
+
+                if !content_parts.is_empty() {
+                    input_items.push(serde_json::json!({
+                        "type": "message",
+                        "role": "assistant",
+                        "content": content_parts,
+                    }));
                 }
             }
             MessageRole::Tool => {
                 let text = message_text_with_file_references(message);
-                if !text.is_empty() {
-                    conversation_parts.push(format!("Tool: {}", text));
+                let call_id = message.tool_call_id.clone().unwrap_or_default();
+
+                // FunctionCallOutput only supports a string output, so images
+                // on tool messages cannot be embedded inline. Instead, append
+                // a separate user message with the image content so the model
+                // can see it in context.
+                input_items.push(serde_json::json!({
+                    "type": "function_call_output",
+                    "call_id": call_id,
+                    "output": text,
+                }));
+
+                // If there are image attachments, add them as a user message
+                // following the tool result.
+                let images: Vec<&MessageAttachment> = image_attachments(message).collect();
+                if !images.is_empty() {
+                    let mut image_content = Vec::new();
+                    for attachment in images {
+                        if let MessageAttachment::Image { data_url, .. } = attachment {
+                            image_content.push(serde_json::json!({
+                                "type": "input_image",
+                                "image_url": data_url,
+                                "detail": "auto",
+                            }));
+                        }
+                    }
+                    if !image_content.is_empty() {
+                        input_items.push(serde_json::json!({
+                            "type": "message",
+                            "role": "user",
+                            "content": image_content,
+                        }));
+                    }
                 }
             }
             MessageRole::Error => {}
@@ -681,7 +751,11 @@ fn build_responses_request(
         }
     }
 
-    let input = conversation_parts.join("\n\n");
+    let input = if input_items.is_empty() {
+        serde_json::Value::String(String::new())
+    } else {
+        serde_json::Value::Array(input_items)
+    };
 
     let chat_tools = if tools.is_empty() {
         None
@@ -794,7 +868,7 @@ struct ResponsesRequest {
     model: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     instructions: Option<String>,
-    input: String,
+    input: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Vec<ResponseTool>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1638,7 +1712,13 @@ mod tests {
         assert_eq!(request.model, "gpt-4.5");
         assert_eq!(request.instructions, Some("You are helpful.".to_string()));
         assert!(request.stream);
-        assert_eq!(request.input, "User: Hello");
+        // Input should be an array with a single user message item
+        let input = request.input.as_array().expect("input should be an array");
+        assert_eq!(input.len(), 1);
+        assert_eq!(input[0]["type"], "message");
+        assert_eq!(input[0]["role"], "user");
+        assert_eq!(input[0]["content"][0]["type"], "input_text");
+        assert_eq!(input[0]["content"][0]["text"], "Hello");
     }
 
     #[test]
@@ -1700,14 +1780,20 @@ mod tests {
 
         let request = build_responses_request(&model, messages, false, &[], None).unwrap();
 
-        // Input should be a string with conversation history
-        assert!(request.input.contains("User: Run command"));
-        assert!(
-            request
-                .input
-                .contains("Assistant: I'll help you run a command.")
+        // Input should be an array with 3 items: user message, assistant message, tool result
+        let input = request.input.as_array().expect("input should be an array");
+        assert_eq!(input.len(), 3);
+        assert_eq!(input[0]["type"], "message");
+        assert_eq!(input[0]["role"], "user");
+        assert_eq!(input[0]["content"][0]["text"], "Run command");
+        assert_eq!(input[1]["type"], "message");
+        assert_eq!(input[1]["role"], "assistant");
+        assert_eq!(
+            input[1]["content"][0]["text"],
+            "I'll help you run a command."
         );
-        assert!(request.input.contains("Tool: Tool result: success"));
+        assert_eq!(input[2]["type"], "function_call_output");
+        assert_eq!(input[2]["output"], "Tool result: success");
     }
 
     #[test]

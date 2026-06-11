@@ -536,7 +536,8 @@ fn build_gemini_request(
             MessageRole::Tool => {
                 // Tool results are sent as functionResponse parts in a user-role message.
                 // Multiple consecutive tool results should be merged into a single
-                // user-role content entry.
+                // user-role content entry. If images are attached, they are sent as
+                // additional inline_data parts alongside the function_response part.
                 let tool_call_id = message.tool_call_id.clone().unwrap_or_default();
                 let tool_name = message.tool_name.clone().unwrap_or_default();
                 let content_text = message_text_with_file_references(&message);
@@ -545,7 +546,10 @@ fn build_gemini_request(
                 let response_value: serde_json::Value = serde_json::from_str(&content_text)
                     .unwrap_or(serde_json::Value::String(content_text));
 
-                let part = GeminiPart {
+                let mut parts: Vec<GeminiPart> = Vec::new();
+
+                // Function response part (always present)
+                parts.push(GeminiPart {
                     text: None,
                     inline_data: None,
                     file_data: None,
@@ -563,18 +567,55 @@ fn build_gemini_request(
                     code_execution_result: None,
                     thought: None,
                     thought_signature: None,
-                };
+                });
+
+                // Image parts (same logic as user_message_parts)
+                for attachment in image_attachments(&message) {
+                    if !model.supports_images {
+                        anyhow::bail!("current model does not support image attachments");
+                    }
+
+                    if let MessageAttachment::Image { data_url, .. } = attachment {
+                        // Parse "data:mime/type;base64,<data>" format
+                        if let Some(rest) = data_url.strip_prefix("data:")
+                            && let Some(semicolon) = rest.find(';')
+                        {
+                            let mime_type = &rest[..semicolon];
+                            let after_semi = &rest[semicolon + 1..];
+                            if let Some(comma) = after_semi.find(',') {
+                                let encoding = &after_semi[..comma];
+                                let data = &after_semi[comma + 1..];
+                                if encoding == "base64" {
+                                    parts.push(GeminiPart {
+                                        text: None,
+                                        inline_data: Some(GeminiBlob {
+                                            mime_type: mime_type.to_string(),
+                                            data: data.to_string(),
+                                        }),
+                                        file_data: None,
+                                        function_call: None,
+                                        function_response: None,
+                                        executable_code: None,
+                                        code_execution_result: None,
+                                        thought: None,
+                                        thought_signature: None,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
 
                 // Merge with the last user message if present, so all tool results
                 // for the same assistant turn live in a single user message.
                 if let Some(last) = contents.last_mut()
                     && last.role.as_deref() == Some("user")
                 {
-                    last.parts.push(part);
+                    last.parts.extend(parts);
                 } else {
                     contents.push(GeminiContent {
                         role: Some("user".to_string()),
-                        parts: vec![part],
+                        parts,
                     });
                 }
             }
