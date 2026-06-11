@@ -186,6 +186,8 @@ struct App {
     compacting_sessions: std::collections::HashSet<Uuid>,
     leader_key_pending: bool,
     composer: Composer,
+    /// Saved composer text before question dialog opened, restored on dialog close.
+    saved_composer_text: Option<String>,
     draft_attachments: Vec<MessageAttachment>,
     pending_request: bool,
     /// Display-only queue of messages waiting to be processed by the agent loop.

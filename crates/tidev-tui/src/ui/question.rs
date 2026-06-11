@@ -439,6 +439,13 @@ impl App {
 
         let dialog = QuestionDialogState::new(tool_call, args.questions);
         self.question_dialog = Some(dialog);
+
+        // Save composer content so it can be restored after the dialog closes
+        let text = self.composer.text().to_string();
+        if !text.is_empty() {
+            self.saved_composer_text = Some(text);
+        }
+
         self.composer.clear();
         self.composer
             .set_placeholder("Type your own answer and press Enter");
@@ -517,9 +524,15 @@ impl App {
                 )?;
                 self.advance_pending_tool_execution();
             }
-            self.composer.clear();
-            self.composer
-                .set_placeholder("Ask tidev about your code, task, or question...");
+            if let Some(saved) = self.saved_composer_text.take() {
+                self.composer.set_text(saved);
+                self.composer
+                    .set_placeholder("Ask tidev about your code, task, or question...");
+            } else {
+                self.composer.clear();
+                self.composer
+                    .set_placeholder("Ask tidev about your code, task, or question...");
+            }
             self.last_notice = Some("Question dialog dismissed, request stopped".to_string());
             self.abort_current_request();
             return Ok(());
@@ -677,9 +690,15 @@ impl App {
             self.pending_rejected_tools.push((dialog.tool_call, result));
         }
 
-        self.composer.clear();
-        self.composer
-            .set_placeholder("Ask tidev about your code, task, or question...");
+        if let Some(saved) = self.saved_composer_text.take() {
+            self.composer.set_text(saved);
+            self.composer
+                .set_placeholder("Ask tidev about your code, task, or question...");
+        } else {
+            self.composer.clear();
+            self.composer
+                .set_placeholder("Ask tidev about your code, task, or question...");
+        }
         self.advance_pending_tool_execution();
         self.process_pending_tool_execution(runtime)
     }

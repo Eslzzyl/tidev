@@ -251,6 +251,7 @@ impl App {
             compacting_sessions: std::collections::HashSet::new(),
             leader_key_pending: false,
             composer,
+            saved_composer_text: None,
             draft_attachments: Vec::new(),
             pending_prompt_queue: std::collections::VecDeque::new(),
             pending_request: false,
