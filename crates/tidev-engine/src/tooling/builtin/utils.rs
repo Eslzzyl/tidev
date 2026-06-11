@@ -468,7 +468,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let file = dir.path().join("sub/file.txt");
         let result = display_workspace_relative(dir.path(), &file);
-        assert_eq!(result, "sub/file.txt");
+        let expected = Path::new("sub").join("file.txt").display().to_string();
+        assert_eq!(result, expected);
     }
 
     #[test]
@@ -492,7 +493,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let non_existent = dir.path().join("does/not/exist.rs");
         let result = display_workspace_relative(dir.path(), &non_existent);
-        assert_eq!(result, "does/not/exist.rs");
+        let expected = Path::new("does").join("not").join("exist.rs").display().to_string();
+        assert_eq!(result, expected);
     }
 
     #[cfg(unix)]
