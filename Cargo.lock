@@ -4030,6 +4030,7 @@ dependencies = [
  "diffy",
  "dirs",
  "dunce",
+ "encoding_rs",
  "fancy-regex 0.18.0",
  "fast_html2md",
  "futures-util",

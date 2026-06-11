@@ -26,6 +26,8 @@ use crate::sandbox::{
 };
 use crate::tooling::tools::{BashArgs, decode_tool_args};
 use crate::tooling::{ToolDefinition, ToolPermission};
+use crate::encoding::decode_command_output;
+use crate::encoding::prepare_command_for_shell;
 use tidev_session::session::{BackendEvent, tool_output_preview};
 use uuid::Uuid;
 
@@ -297,15 +299,31 @@ fn run_shell_inner(
         // No sandbox: direct execution (original behavior)
         if cfg!(target_os = "windows") {
             let shell = crate::shell::get();
+
+            // Prepend shell-specific encoding setup so that Windows programs
+            // output UTF-8 instead of the system ANSI code page.
+            let shell_command = prepare_command_for_shell(
+                &actual_command,
+                &shell.program,
+                &shell.arg,
+            );
+
             let mut cmd = std::process::Command::new(&shell.program);
             // arg may contain spaces (e.g. "-NoProfile -Command")
             let mut all_args: Vec<&str> = shell.arg.split_whitespace().collect();
-            all_args.push(&actual_command);
+            all_args.push(&shell_command);
             cmd.args(&all_args)
                 .current_dir(workspace_root)
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
+
+            // Set environment variables to encourage UTF-8 output from child
+            // processes.  This helps Git Bash / MSYS2 / Python / etc.
+            cmd.env("LANG", "C.UTF-8");
+            cmd.env("LC_ALL", "C.UTF-8");
+            cmd.env("MSYS2_ENCODING", "UTF-8");
+            cmd.env("PYTHONIOENCODING", "utf-8:surrogateescape");
 
             // Inject SUDO_ASKPASS for privilege escalation handling
             if let Some(ref guard) = sudo_guard {
@@ -444,11 +462,9 @@ fn run_shell_inner(
                 raw_bytes.extend_from_slice(&chunk);
 
                 // Convert accumulated bytes to string for display.
-                // Using from_utf8_lossy on the whole buffer is safe across chunk
-                // boundaries — any leftover partial UTF-8 from a previous chunk
-                // is now complete in this chunk.
-                let output_str = String::from_utf8_lossy(&raw_bytes);
-                output_buf = output_str.into_owned();
+                // Using decode_command_output handles Windows code page
+                // encoding when UTF-8 decoding fails.
+                output_buf = decode_command_output(&raw_bytes);
 
                 // If the string was truncated in a previous iteration, align
                 // raw_bytes to match so we don't accumulate forever.
@@ -461,8 +477,7 @@ fn run_shell_inner(
                     if raw_bytes.len() > max_output_bytes {
                         // Safety: ensure raw_bytes doesn't exceed max
                         raw_bytes.truncate(max_output_bytes);
-                        let safe = String::from_utf8_lossy(&raw_bytes);
-                        output_buf = safe.into_owned();
+                        output_buf = decode_command_output(&raw_bytes);
                     }
                 } else {
                     truncate_in_place(&mut output_buf, max_output_bytes);
@@ -493,8 +508,9 @@ fn run_shell_inner(
     // Merge stderr output
     let mut combined = output_buf;
     if let Some(mut handle) = stderr.take() {
-        let mut error_output = String::new();
-        let _ = handle.read_to_string(&mut error_output);
+        let mut stderr_bytes = Vec::new();
+        let _ = handle.read_to_end(&mut stderr_bytes);
+        let error_output = decode_command_output(&stderr_bytes);
         if !error_output.is_empty() {
             if !combined.is_empty() {
                 combined.push('\n');
