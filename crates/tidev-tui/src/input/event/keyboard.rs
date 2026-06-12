@@ -232,6 +232,13 @@ impl App {
             }
         }
 
+        if self.at_mention.visible {
+            log::info!(
+                "handle_key_event: at_mention visible, suggestions={}, key={:?}",
+                self.at_mention.suggestions.len(),
+                key.code,
+            );
+        }
         if self.at_mention.visible && !self.at_mention.suggestions.is_empty() {
             match key.code {
                 KeyCode::Esc => {
@@ -247,6 +254,7 @@ impl App {
                     return Ok(());
                 }
                 KeyCode::Tab | KeyCode::Enter => {
+                    log::info!("handle_key_event: accepting @mention suggestion");
                     self.accept_at_mention();
                     return Ok(());
                 }
@@ -454,6 +462,10 @@ impl App {
         }
 
         if let Some(submission) = self.composer.handle_key_with_history(key, true) {
+            log::info!(
+                "handle_key_event: composer returned submission = {:?}, calling handle_submission",
+                submission,
+            );
             self.handle_submission(submission, runtime)?;
             self.at_mention.clear();
             self.snippet_state.clear();
@@ -582,6 +594,8 @@ impl App {
         submission: String,
         runtime: &Runtime,
     ) -> Result<()> {
+        log::info!("handle_submission: ENTER submission={:?}", submission);
+
         if self.shell_mode {
             self.shell_mode = false;
             // Clean up any previously running shell command before starting a new one
@@ -591,10 +605,12 @@ impl App {
 
         let trimmed = submission.trim();
         if trimmed.starts_with('/') {
+            log::info!("handle_submission: is command");
             self.execute_command_line(trimmed, runtime)?;
             self.at_mention.clear();
             self.draft_attachments.clear();
         } else {
+            log::info!("handle_submission: is prompt, calling submit_prompt");
             self.submit_prompt(submission, runtime)?;
         }
 

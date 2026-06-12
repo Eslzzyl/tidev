@@ -653,11 +653,21 @@ impl App {
 
     pub(crate) fn submit_prompt(&mut self, prompt: String, runtime: &Runtime) -> Result<()> {
         let prompt = prompt.trim().to_string();
+        log::info!(
+            "submit_prompt: ENTER prompt={:?}, draft_attachments={}",
+            prompt,
+            self.draft_attachments.len(),
+        );
         if prompt.is_empty() && self.draft_attachments.is_empty() {
+            log::info!("submit_prompt: empty prompt and no attachments, returning");
             return Ok(());
         }
 
         let (attachments, instruction_sources) = self.build_prompt_attachments(&prompt)?;
+        log::info!(
+            "submit_prompt: build_prompt_attachments returned {} attachments",
+            attachments.len(),
+        );
         if attachments.iter().any(MessageAttachment::is_image) && !self.active_model.supports_images
         {
             self.last_notice = Some("This model does not support image attachments".to_string());

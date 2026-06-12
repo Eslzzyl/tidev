@@ -26,14 +26,28 @@ impl App {
     }
 
     pub(crate) fn accept_at_mention(&mut self) {
+        let text = self.composer.text().to_string();
+        let cursor = self.composer.cursor();
+        log::info!(
+            "accept_at_mention: text={:?}, cursor={}",
+            text,
+            cursor,
+        );
         let Some((start, _query)) =
             current_at_fragment(self.composer.text(), self.composer.cursor())
         else {
+            log::info!("accept_at_mention: current_at_fragment returned None, clearing");
             self.at_mention.clear();
             return;
         };
+        log::info!(
+            "accept_at_mention: start={}, cursor={}",
+            start,
+            self.composer.cursor(),
+        );
 
         let Some(selection) = self.at_mention.selected().cloned() else {
+            log::info!("accept_at_mention: no selection, clearing");
             self.at_mention.clear();
             return;
         };
@@ -42,6 +56,12 @@ impl App {
             AtMentionKind::Directory => format!("@{}/", selection.path.trim_end_matches('/')),
             _ => format!("@{}", selection.path),
         };
+        log::info!(
+            "accept_at_mention: replacing range {}..{} with {:?}",
+            start,
+            self.composer.cursor(),
+            replacement,
+        );
         self.composer
             .replace_range(start, self.composer.cursor(), &replacement);
         self.at_mention.clear();

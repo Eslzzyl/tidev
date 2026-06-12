@@ -1,4 +1,5 @@
 use ignore::WalkBuilder;
+use log;
 use notify::{
     Config as NotifyConfig, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher,
     event::ModifyKind,
@@ -435,7 +436,16 @@ pub fn current_at_fragment(input: &str, cursor: usize) -> Option<(usize, String)
         return None;
     }
 
-    Some((at_index, query.to_string()))
+    let result = Some((at_index, query.to_string()));
+    log::info!(
+        "current_at_fragment: input={:?}, cursor={}, at_index={}, query={:?}, returning={:?}",
+        input,
+        cursor,
+        at_index,
+        query,
+        result,
+    );
+    result
 }
 
 fn walk_workspace_entries<F>(workspace_root: &Path, mut visit: F)

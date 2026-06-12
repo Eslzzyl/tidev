@@ -406,12 +406,24 @@ impl App {
         use tidev_engine::tooling::builtin::file::read_file_for_at_reference;
 
         let absolute = self.resolve_workspace_path(path);
+        log::info!(
+            "build_at_reference_attachment: path={:?}, absolute={:?}",
+            path,
+            absolute,
+        );
         let metadata = match std::fs::metadata(&absolute) {
             Ok(metadata) => metadata,
-            Err(_error) => return Ok(None),
+            Err(error) => {
+                log::info!(
+                    "build_at_reference_attachment: metadata failed: {}",
+                    error,
+                );
+                return Ok(None);
+            }
         };
 
         if metadata.is_dir() {
+            log::info!("build_at_reference_attachment: is_dir, building tree");
             let tree = build_directory_tree(&absolute, 2, 80)?;
             return Ok(Some((
                 MessageAttachment::DirectoryReference {
@@ -423,7 +435,14 @@ impl App {
         }
 
         if let Some(mime) = image_mime_from_path(&absolute) {
-            let bytes = std::fs::read(&absolute)?;
+            log::info!("build_at_reference_attachment: is image, mime={}", mime);
+            let bytes = match std::fs::read(&absolute) {
+                Ok(b) => b,
+                Err(e) => {
+                    log::warn!("build_at_reference_attachment: read image failed: {}", e);
+                    return Ok(None);
+                }
+            };
             let file_size = bytes.len() as u64;
             let filename = absolute
                 .file_name()
@@ -443,6 +462,7 @@ impl App {
         }
 
         // For text files, read with truncation like opencode's read tool
+        log::info!("build_at_reference_attachment: reading as text file");
         match read_file_for_at_reference(&self.workspace_root, path, false) {
             Ok((mut tool_output, truncated)) => {
                 // Load nearby instruction files (like the read tool does)
@@ -546,31 +566,43 @@ impl App {
     /// Uses look-behind to ensure @ is not preceded by word characters or backticks.
     fn inline_file_references(&self, prompt: &str) -> Vec<String> {
         use fancy_regex::Regex;
+        log::info!("inline_file_references: prompt={:?}", prompt);
         // Look-behind: (?<![\w`]) ensures @ is not preceded by word chars or backticks
         let re = Regex::new(r"(?<![\w`])@(\.?[^\s`.,]*(?:\.[^\s`.,]+)*)").unwrap();
         let mut paths = Vec::new();
         let mut seen = std::collections::BTreeSet::new();
 
         let mut start = 0;
+        log::info!("inline_file_references: about to call re.captures()");
         while let Some(caps) = re.captures(&prompt[start..]).unwrap() {
+            log::info!("inline_file_references: regex matched");
             if let Some(path_match) = caps.get(1) {
                 let path = path_match.as_str();
+                log::info!(
+                    "inline_file_references: captured path={:?}, start={}, path_match.start()={}",
+                    path,
+                    start,
+                    path_match.start(),
+                );
                 if path.is_empty() {
+                    log::info!("inline_file_references: empty path, breaking");
                     break;
                 }
                 if !seen.insert(path.to_string()) {
                     // Move to next position
-                    start += path_match.start() + 1;
+                    start += path_match.end();
                     continue;
                 }
                 paths.push(path.to_string());
                 // Move past this match
-                start += path_match.start() + 1;
+                start += path_match.end();
             } else {
+                log::info!("inline_file_references: no group 1 match, breaking");
                 break;
             }
         }
 
+        log::info!("inline_file_references: returning {:?}", paths);
         paths
     }
 
@@ -1834,11 +1866,20 @@ impl App {
         let _t_submit = std::time::Instant::now();
         let prompt = prompt.trim().to_string();
 
+        log::info!(
+            "submit_prompt_now: ENTER prompt={:?}, attachments={}, screen={:?}",
+            prompt,
+            attachments.len(),
+            self.screen,
+        );
+
         if prompt.is_empty() && attachments.is_empty() {
+            log::info!("submit_prompt_now: empty, returning");
             return Ok(());
         }
 
         if self.screen == Screen::Welcome {
+            log::info!("submit_prompt_now: on Welcome screen, creating session");
             let _t_session = std::time::Instant::now();
             let session_exists = self
                 .store
@@ -1890,6 +1931,7 @@ impl App {
             self.active_request_id = self.active_request_id.wrapping_add(1);
         }
 
+        log::info!("submit_prompt_now: transitioning to Chat screen");
         self.screen = Screen::Chat;
         self.command_palette.clear();
         self.connect_dialog = None;
