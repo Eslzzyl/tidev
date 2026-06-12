@@ -284,6 +284,7 @@ impl App {
         self.session_panel = None;
         self.at_mention.clear();
         self.draft_attachments.clear();
+        self.restored_attachments.clear();
 
         let mut panel = self.mcp_panel.clone().unwrap_or_default();
         panel.begin_create_editor(previous_query);
@@ -324,6 +325,7 @@ impl App {
         self.session_panel = None;
         self.at_mention.clear();
         self.draft_attachments.clear();
+        self.restored_attachments.clear();
 
         let mut panel = self.mcp_panel.clone().unwrap_or_default();
         panel.begin_edit_editor(previous_query, server_name, &config);

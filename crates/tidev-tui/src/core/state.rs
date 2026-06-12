@@ -237,6 +237,9 @@ pub(crate) struct UiStateSnapshot {
     pub(crate) leader_key_pending: bool,
     pub(crate) composer: Composer,
     pub(crate) draft_attachments: Vec<MessageAttachment>,
+    /// Attachments restored from an undone user message.
+    /// Consumed by build_prompt_attachments on the next prompt submission.
+    pub(crate) restored_attachments: Vec<MessageAttachment>,
     pub(crate) last_notice: Option<String>,
     pub(crate) toast: Option<(String, Instant)>,
     pub(crate) mouse_selection: MouseSelectionState,

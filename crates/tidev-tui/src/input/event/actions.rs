@@ -281,6 +281,7 @@ impl App {
         self.command_palette.clear();
         self.at_mention.clear();
         self.draft_attachments.clear();
+        self.restored_attachments.clear();
         self.connect_dialog = None;
         self.theme_panel = None;
         self.model_panel = None;
@@ -402,6 +403,7 @@ impl App {
         self.command_palette.clear();
         self.at_mention.clear();
         self.draft_attachments.clear();
+        self.restored_attachments.clear();
         self.composer.clear();
         self.composer
             .set_placeholder("Ask tidev about your code, task, or question...");
@@ -420,24 +422,26 @@ impl App {
             return Ok(());
         };
 
-        // 查找选中的消息并克隆所需数据
-        let message_data = self
+        // 查找选中的消息并克隆完整数据（含 attachments）
+        let Some(msg) = self
             .conversation
             .messages
             .iter()
             .find(|m| m.id == dialog.selected_message_id)
-            .map(|m| (m.id, m.content.clone()));
-
-        let Some((message_id, message_content)) = message_data else {
+            .cloned()
+        else {
             self.last_notice = Some("Selected message not found".to_string());
             return Ok(());
         };
+
+        // Save attachments so they can be restored after revert
+        self.restored_attachments = msg.attachments.clone();
 
         // 关闭 message_panel
         self.close_message_panel();
 
         // 调用 revert_to_message 执行 undo
-        self.revert_to_message(message_id, message_content, runtime)?;
+        self.revert_to_message(msg.id, msg.content.clone(), runtime)?;
         self.last_notice = Some("Undo complete".to_string());
 
         Ok(())
@@ -486,6 +490,7 @@ impl App {
         self.agents_panel = None;
         self.at_mention.clear();
         self.draft_attachments.clear();
+        self.restored_attachments.clear();
 
         self.rename_dialog = Some(RenameSessionDialogState::new(
             self.conversation.title.clone(),
@@ -623,6 +628,7 @@ impl App {
         self.command_palette.clear();
         self.at_mention.clear();
         self.draft_attachments.clear();
+        self.restored_attachments.clear();
         self.composer.clear();
         self.composer
             .set_placeholder("Ask tidev about your code, task, or question...");
@@ -661,6 +667,7 @@ impl App {
         if self.pending_request {
             self.queue_prompt(prompt, attachments, instruction_sources);
             self.draft_attachments.clear();
+            self.restored_attachments.clear();
             return Ok(());
         }
 

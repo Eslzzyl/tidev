@@ -27,6 +27,7 @@ impl App {
         self.command_palette.clear();
         self.at_mention.clear();
         self.draft_attachments.clear();
+        self.restored_attachments.clear();
         self.mcp_panel = None;
 
         self.composer.clear();
@@ -85,6 +86,7 @@ impl App {
             .unwrap_or_else(|| provider_id.clone());
         self.at_mention.clear();
         self.draft_attachments.clear();
+        self.restored_attachments.clear();
         self.composer.clear();
         self.composer
             .set_placeholder(format!("Enter API key for {label}"));
@@ -148,6 +150,7 @@ impl App {
     ) {
         self.at_mention.clear();
         self.draft_attachments.clear();
+        self.restored_attachments.clear();
         self.composer.clear();
         if let Some(model_step) = model_step {
             self.composer.set_placeholder(format!(
@@ -369,6 +372,7 @@ impl App {
     fn show_new_provider_step(&mut self, step: NewProviderStep, draft: NewProviderDraft) {
         self.at_mention.clear();
         self.draft_attachments.clear();
+        self.restored_attachments.clear();
         self.composer.clear();
         self.composer
             .set_placeholder(format!("{} · {}", step.label(), step.help()));
@@ -380,6 +384,7 @@ impl App {
         self.connect_dialog = None;
         self.at_mention.clear();
         self.draft_attachments.clear();
+        self.restored_attachments.clear();
         self.composer.clear();
         self.composer
             .set_placeholder("Ask tidev about your code, task, or question...");

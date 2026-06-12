@@ -189,6 +189,9 @@ struct App {
     /// Saved composer text before question dialog opened, restored on dialog close.
     saved_composer_text: Option<String>,
     draft_attachments: Vec<MessageAttachment>,
+    /// Attachments restored from an undone user message.
+    /// Consumed by build_prompt_attachments on the next prompt submission.
+    restored_attachments: Vec<MessageAttachment>,
     pending_request: bool,
     /// Display-only queue of messages waiting to be processed by the agent loop.
     /// Kept for UI rendering — actual queueing goes through AgentRuntime.
@@ -360,7 +363,7 @@ impl App {
     /// Returns (attachments, instruction_sources) where instruction_sources contains
     /// the deduplicated paths of nearby instruction files that were loaded.
     fn build_prompt_attachments(
-        &self,
+        &mut self,
         prompt: &str,
     ) -> Result<(Vec<MessageAttachment>, Vec<String>)> {
         let mut attachments = Vec::new();
@@ -388,6 +391,8 @@ impl App {
 
         // Add draft attachments (pasted files) without truncation
         attachments.extend(self.draft_attachments.iter().cloned());
+        // Add attachments restored from an undone user message
+        attachments.append(&mut self.restored_attachments);
         Ok((attachments, all_instruction_sources))
     }
 
@@ -1921,6 +1926,7 @@ impl App {
         }
 
         self.draft_attachments.clear();
+        self.restored_attachments.clear();
 
         if let Err(error) = self.capture_prompt_snapshot(user_message.id, runtime) {
             self.last_notice = Some(format!("Workspace snapshot unavailable: {error}"));

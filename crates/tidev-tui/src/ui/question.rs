@@ -436,6 +436,7 @@ impl App {
         self.command_palette.clear();
         self.at_mention.clear();
         self.draft_attachments.clear();
+        self.restored_attachments.clear();
 
         let dialog = QuestionDialogState::new(tool_call, args.questions);
         self.question_dialog = Some(dialog);

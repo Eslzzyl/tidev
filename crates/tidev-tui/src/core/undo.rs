@@ -225,6 +225,7 @@ impl App {
             message.content.len()
         );
 
+        self.restored_attachments = message.attachments.clone();
         self.revert_to_message(message.id, message.content.clone(), runtime)?;
         self.last_notice = Some("Undid previous user message".to_string());
         log::info!("undo_last_user_message: completed successfully");

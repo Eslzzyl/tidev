@@ -253,6 +253,7 @@ impl App {
             composer,
             saved_composer_text: None,
             draft_attachments: Vec::new(),
+            restored_attachments: Vec::new(),
             pending_prompt_queue: std::collections::VecDeque::new(),
             pending_request: false,
             active_request_id: 0,
@@ -607,6 +608,7 @@ impl App {
             leader_key_pending: self.leader_key_pending,
             composer: self.composer.clone(),
             draft_attachments: self.draft_attachments.clone(),
+            restored_attachments: self.restored_attachments.clone(),
             last_notice: self.last_notice.clone(),
             toast: self.toast.clone(),
             mouse_selection: self.mouse_selection.clone(),
@@ -635,6 +637,7 @@ impl App {
         self.leader_key_pending = snapshot.leader_key_pending;
         self.composer = snapshot.composer;
         self.draft_attachments = snapshot.draft_attachments;
+        self.restored_attachments = snapshot.restored_attachments;
         self.last_notice = snapshot.last_notice;
         self.toast = snapshot.toast;
         self.mouse_selection = snapshot.mouse_selection;
