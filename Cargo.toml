@@ -40,8 +40,8 @@ include = ["/src", "/README.md", "/LICENSE"]
 [dependencies]
 anyhow = "1.0.102"
 clap = { version = "4.6.1", features = ["derive"] }
-log = "0.4.30"
-rusqlite = { version = "0.40.0", features = ["bundled", "functions", "vtab"] }
+log = "0.4.32"
+rusqlite = { version = "0.40.1", features = ["bundled", "functions", "vtab"] }
 tokio = { version = "=1.52.3", features = [
     "rt-multi-thread",
     "macros",
@@ -52,7 +52,7 @@ tokio = { version = "=1.52.3", features = [
     "io-std",
     "signal",
 ] }
-uuid = { version = "1.23.1", features = ["v4", "serde"] }
+uuid = { version = "1.23.3", features = ["v4", "serde"] }
 tidev-types = { path = "crates/tidev-types" }
 tidev-engine = { path = "crates/tidev-engine" }
 tidev-storage = { path = "crates/tidev-storage" }

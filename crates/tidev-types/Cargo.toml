@@ -9,8 +9,8 @@ license.workspace = true
 default = []
 
 [dependencies]
-chrono = { version = "0.4.44", features = ["serde"] }
+chrono = { version = "0.4.45", features = ["serde"] }
 serde = { version = "1.0.228", features = ["derive", "rc"] }
 serde_json = "1.0.150"
-uuid = { version = "1.23.1", features = ["v4", "serde"] }
+uuid = { version = "1.23.3", features = ["v4", "serde"] }
 log = "0.4"
