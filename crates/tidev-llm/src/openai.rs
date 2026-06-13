@@ -425,7 +425,7 @@ fn build_openai_request(
         } else {
             None
         },
-        extra_body: model.merged_extra_body_with_thinking(thinking_level),
+        extra_body: model.merged_extra_body_with_thinking(thinking_level, model.api_type),
     })
 }
 

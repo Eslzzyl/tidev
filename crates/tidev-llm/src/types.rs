@@ -115,15 +115,17 @@ impl LlmProviderConfig {
 
     /// Merge provider-level `extra_body` with the thinking-level extra body.
     pub fn merged_extra_body(&self) -> Option<Value> {
-        self.merged_extra_body_with_thinking(self.thinking_level.clone())
+        self.merged_extra_body_with_thinking(self.thinking_level.clone(), self.api_type)
     }
 
-    /// Merge `extra_body` with a specific thinking level's extra body.
+    /// Merge `extra_body` with a specific thinking level's extra body,
+    /// filtering by API type.
     pub fn merged_extra_body_with_thinking(
         &self,
         thinking_level: tidev_types::reasoning::ThinkingLevelType,
+        api_type: ApiType,
     ) -> Option<Value> {
-        let thinking_extra = thinking_level.extra_body();
+        let thinking_extra = thinking_level.extra_body_for_api(api_type.as_str());
 
         match (&self.extra_body, thinking_extra) {
             (Some(base), Some(extra)) => {

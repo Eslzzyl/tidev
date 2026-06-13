@@ -335,6 +335,23 @@ impl ThinkingLevelType {
         }
     }
 
+    /// Returns the extra body for a specific API type.
+    ///
+    /// Some thinking level formats are only compatible with certain API protocols.
+    /// For example, Qwen's `chat_template_kwargs` format is specific to OpenAI
+    /// Chat Completions and is not valid for Anthropic Messages API.
+    ///
+    /// `api_type` should be one of: `"anthropic"`, `"openai_chat_completions"`,
+    /// `"openai_responses"`, `"google_gemini"`.
+    pub fn extra_body_for_api(&self, api_type: &str) -> Option<serde_json::Value> {
+        match (self, api_type) {
+            // Qwen's chat_template_kwargs is designed for OpenAI Chat Completions,
+            // not for the Anthropic Messages API. Skip it for Anthropic.
+            (Self::Qwen(_), "anthropic") => None,
+            _ => self.extra_body(),
+        }
+    }
+
     pub fn thinking_config(&self) -> Option<serde_json::Value> {
         match self {
             Self::None => None,
