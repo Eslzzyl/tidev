@@ -247,13 +247,19 @@ pub(crate) async fn stream_anthropic(
                             finish_reason = Some(stop_reason);
                         }
                         if let Some(usage) = usage {
-                            let total_tokens = usage.input_tokens + usage.output_tokens;
+                            // Normalize to OpenAI semantics: input_tokens = total input (including cache).
+                            // Anthropic returns input_tokens, cache_read_input_tokens, and
+                            // cache_creation_input_tokens as three separate additive values.
+                            let total_input = usage.input_tokens
+                                + usage.cache_read_input_tokens
+                                + usage.cache_creation_input_tokens;
+                            let total_tokens = total_input + usage.output_tokens;
                             let duration_ms =
                                 first_delta_time.map(|start| start.elapsed().as_millis() as u64);
                             let _ = tx.send(BackendEvent::UsageStats {
                                 session_id,
                                 request_id,
-                                input_tokens: usage.input_tokens,
+                                input_tokens: total_input,
                                 output_tokens: usage.output_tokens,
                                 total_tokens,
                                 cache_read_tokens: usage.cache_read_input_tokens,
