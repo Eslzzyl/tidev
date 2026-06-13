@@ -17,6 +17,21 @@ pub fn save_request_for_debugging(request_body: &str, enabled: bool, max_files: 
 
     rotate_files(dir, max_files);
 
+    // Pretty-print the request JSON with trailing newline
+    let formatted = match serde_json::from_str::<serde_json::Value>(request_body) {
+        Ok(val) => {
+            let mut s = serde_json::to_string_pretty(&val)
+                .unwrap_or_else(|_| request_body.to_string());
+            s.push('\n');
+            s
+        }
+        Err(_) => {
+            let mut s = request_body.to_string();
+            s.push('\n');
+            s
+        }
+    };
+
     let cst_offset = match chrono::FixedOffset::east_opt(8 * 3600) {
         Some(offset) => offset,
         None => return,
@@ -25,7 +40,7 @@ pub fn save_request_for_debugging(request_body: &str, enabled: bool, max_files: 
     let suffix = Uuid::new_v4().simple();
     let filename = format!("{}_{}.json", now_cst.format("%Y%m%d_%H%M%S_%3f"), suffix);
     let filepath = dir.join(&filename);
-    if let Err(e) = std::fs::write(&filepath, request_body) {
+    if let Err(e) = std::fs::write(&filepath, formatted) {
         log::debug!("debug_request: failed to write {}: {}", filename, e);
     }
 }
