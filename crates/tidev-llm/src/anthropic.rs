@@ -212,6 +212,10 @@ pub(crate) async fn stream_anthropic(
                                 tool_call: entry.clone().into_tool_call(index),
                             });
                         }
+                        AnthropicContentBlockStart::Fallback { .. } => {
+                            // Server-side fallback blocks have no deltas;
+                            // nothing to accumulate.
+                        }
                     },
                     AnthropicStreamEvent::MessageStop => {
                         save_raw_response_for_debugging(
@@ -256,7 +260,28 @@ pub(crate) async fn stream_anthropic(
                             });
                         }
                     }
-                    _ => {}
+                    AnthropicStreamEvent::MessageStart { .. } => {
+                        // Message metadata is not needed; content arrives via deltas.
+                    }
+                    AnthropicStreamEvent::ContentBlockStop { .. } => {
+                        // Content block end signal; no data to process.
+                    }
+                    AnthropicStreamEvent::Ping => {
+                        log_debug!("anthropic stream ping received");
+                    }
+                    AnthropicStreamEvent::Error { error } => {
+                        log_error!(
+                            "anthropic stream error: type={} message={}",
+                            error.error_type,
+                            error.message
+                        );
+                        let _ = tx.send(BackendEvent::Failed {
+                            session_id,
+                            request_id,
+                            error: format!("{}: {}", error.error_type, error.message),
+                        });
+                        return Ok(());
+                    }
                 }
             }
         }
@@ -716,6 +741,13 @@ enum AnthropicContentBlockResponse {
         name: String,
         input: serde_json::Value,
     },
+    Thinking {
+        thinking: String,
+        signature: Option<String>,
+    },
+    RedactedThinking {
+        data: String,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -742,6 +774,10 @@ enum AnthropicStreamEvent {
         usage: Option<AnthropicUsage>,
     },
     MessageStop,
+    Ping,
+    Error {
+        error: AnthropicStreamError,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -772,21 +808,28 @@ enum AnthropicContentBlockStart {
         id: String,
         name: String,
     },
+    Fallback {
+        #[allow(dead_code)]
+        reason: Option<String>,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "type")]
-#[serde(rename_all = "snake_case")]
 enum AnthropicDelta {
+    #[serde(rename = "text_delta")]
     Text {
         text: String,
     },
+    #[serde(rename = "input_json_delta")]
     InputJson {
         partial_json: String,
     },
+    #[serde(rename = "thinking_delta")]
     Thinking {
         thinking: String,
     },
+    #[serde(rename = "signature_delta")]
     #[allow(dead_code)]
     Signature {
         signature: String,
@@ -808,4 +851,13 @@ struct AnthropicUsage {
     cache_read_input_tokens: u32,
     #[serde(default)]
     cache_creation_input_tokens: u32,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct AnthropicStreamError {
+    #[serde(rename = "type")]
+    #[allow(dead_code)]
+    error_type: String,
+    #[allow(dead_code)]
+    message: String,
 }
