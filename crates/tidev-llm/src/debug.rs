@@ -30,6 +30,49 @@ pub fn save_request_for_debugging(request_body: &str, enabled: bool, max_files: 
     }
 }
 
+/// Save a non-streaming (complete) response as a pretty-printed JSON file.
+/// Saves to /tmp/tidev-responses/ when `enabled` is true and `max_files > 0`.
+/// Rotates old files when the count exceeds `max_files`.
+pub fn save_complete_response_for_debugging(
+    response_body: &str,
+    enabled: bool,
+    max_files: usize,
+) {
+    if !enabled || max_files == 0 || response_body.is_empty() {
+        return;
+    }
+
+    let dir = std::path::Path::new("/tmp/tidev-responses");
+    if let Err(e) = std::fs::create_dir_all(dir) {
+        log::debug!("save_complete_response: failed to create dir: {}", e);
+        return;
+    }
+
+    rotate_files(dir, max_files);
+
+    // Pretty-print the response JSON
+    let formatted = match serde_json::from_str::<serde_json::Value>(response_body) {
+        Ok(val) => serde_json::to_string_pretty(&val).unwrap_or_else(|_| response_body.to_string()),
+        Err(_) => response_body.to_string(),
+    };
+
+    let cst_offset = match chrono::FixedOffset::east_opt(8 * 3600) {
+        Some(offset) => offset,
+        None => return,
+    };
+    let now_cst = Utc::now().with_timezone(&cst_offset);
+    let suffix = Uuid::new_v4().simple();
+    let filename = format!(
+        "response_{}_{}.json",
+        now_cst.format("%Y%m%d_%H%M%S_%3f"),
+        suffix
+    );
+    let filepath = dir.join(&filename);
+    if let Err(e) = std::fs::write(&filepath, &formatted) {
+        log::debug!("save_complete_response: failed to write {}: {}", filename, e);
+    }
+}
+
 /// Save raw SSE payloads from a streaming response to a JSONL file for debugging.
 /// Each line is one `data:` payload (the JSON part after stripping the prefix).
 /// Saves to /tmp/tidev-responses/ when `enabled` is true and `max_files > 0`.

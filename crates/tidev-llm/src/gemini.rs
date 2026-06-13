@@ -32,7 +32,10 @@ use tidev_session::session::{BackendEvent, Message, MessageAttachment, MessageRo
 use log::{debug as log_debug, error as log_error};
 
 use crate::attachments::{image_attachments, message_text_with_file_references};
-use crate::debug::save_request_for_debugging;
+use crate::debug::{
+    save_complete_response_for_debugging, save_raw_response_for_debugging,
+    save_request_for_debugging,
+};
 use crate::error::classify_response_status;
 use crate::think_parser::ThinkParser;
 use crate::tool_call_format::ToolCallBuilder;
@@ -54,8 +57,8 @@ pub(crate) async fn stream_gemini(
     tx: UnboundedSender<BackendEvent>,
     save_request_body: bool,
     max_request_files: usize,
-    _save_response_body: bool,
-    _max_response_files: usize,
+    save_response_body: bool,
+    max_response_files: usize,
 ) -> Result<()> {
     let api_key = model
         .api_key
@@ -121,6 +124,7 @@ pub(crate) async fn stream_gemini(
     let mut first_delta_time: Option<std::time::Instant> = None;
     // Track the last usage metadata received (Gemini sends it in every chunk)
     let mut last_usage: Option<GeminiUsage> = None;
+    let mut raw_payloads: Vec<String> = Vec::new();
 
     use futures_util::StreamExt;
 
@@ -143,6 +147,8 @@ pub(crate) async fn stream_gemini(
             } else {
                 continue;
             };
+
+            raw_payloads.push(payload.clone());
 
             if payload.trim().is_empty() {
                 continue;
@@ -303,6 +309,15 @@ pub(crate) async fn stream_gemini(
         reasoning_text.push_str(&remaining_reasoning);
     }
 
+    // ── Save raw response payloads ────────────────────────────────────────
+    save_raw_response_for_debugging(
+        session_id,
+        request_id,
+        &raw_payloads,
+        save_response_body,
+        max_response_files,
+    );
+
     // ── Send usage stats ──────────────────────────────────────────────────
     if let Some(usage) = last_usage {
         let _ = tx.send(BackendEvent::UsageStats {
@@ -345,6 +360,8 @@ pub(crate) async fn complete_gemini(
     tools: Vec<ToolDefinition>,
     save_request_body: bool,
     max_request_files: usize,
+    save_response_body: bool,
+    max_response_files: usize,
 ) -> Result<String> {
     let api_key = model
         .api_key
@@ -399,7 +416,10 @@ pub(crate) async fn complete_gemini(
         response.status()
     );
 
-    let gemini_response: GeminiResponse = response.json().await?;
+    let body_text = response.text().await?;
+    save_complete_response_for_debugging(&body_text, save_response_body, max_response_files);
+
+    let gemini_response: GeminiResponse = serde_json::from_str(&body_text)?;
 
     // Extract text from the first candidate's parts
     let text = gemini_response

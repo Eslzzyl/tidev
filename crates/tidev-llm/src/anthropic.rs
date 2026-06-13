@@ -11,7 +11,10 @@ use tidev_session::session::{BackendEvent, Message, MessageAttachment, MessageRo
 use log::{debug as log_debug, error as log_error};
 
 use crate::attachments::{image_attachments, message_text_with_file_references};
-use crate::debug::save_request_for_debugging;
+use crate::debug::{
+    save_complete_response_for_debugging, save_raw_response_for_debugging,
+    save_request_for_debugging,
+};
 use crate::error::classify_response_status;
 use crate::think_parser::ThinkParser;
 use crate::tool_call_format::ToolCallBuilder;
@@ -28,8 +31,8 @@ pub(crate) async fn stream_anthropic(
     tx: UnboundedSender<BackendEvent>,
     save_request_body: bool,
     max_request_files: usize,
-    _save_response_body: bool,
-    _max_response_files: usize,
+    save_response_body: bool,
+    max_response_files: usize,
 ) -> Result<()> {
     let api_key = model
         .api_key
@@ -93,6 +96,7 @@ pub(crate) async fn stream_anthropic(
     let mut thinking_blocks: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
     let mut think_parser = ThinkParser::default();
     let mut first_delta_time: Option<std::time::Instant> = None;
+    let mut raw_payloads: Vec<String> = Vec::new();
 
     use futures_util::StreamExt;
 
@@ -114,6 +118,8 @@ pub(crate) async fn stream_anthropic(
                 if payload.is_empty() {
                     continue;
                 }
+
+                raw_payloads.push(payload.to_string());
 
                 let event: AnthropicStreamEvent = match serde_json::from_str(payload) {
                     Ok(event) => event,
@@ -208,6 +214,13 @@ pub(crate) async fn stream_anthropic(
                         }
                     },
                     AnthropicStreamEvent::MessageStop => {
+                        save_raw_response_for_debugging(
+                            session_id,
+                            request_id,
+                            &raw_payloads,
+                            save_response_body,
+                            max_response_files,
+                        );
                         let turn = finalize_turn(
                             assistant_text.clone(),
                             reasoning_text.clone(),
@@ -249,6 +262,14 @@ pub(crate) async fn stream_anthropic(
         }
     }
 
+    save_raw_response_for_debugging(
+        session_id,
+        request_id,
+        &raw_payloads,
+        save_response_body,
+        max_response_files,
+    );
+
     let turn = finalize_turn(
         assistant_text.clone(),
         reasoning_text.clone(),
@@ -271,6 +292,8 @@ pub(crate) async fn complete_anthropic(
     tools: Vec<ToolDefinition>,
     save_request_body: bool,
     max_request_files: usize,
+    save_response_body: bool,
+    max_response_files: usize,
 ) -> Result<String> {
     let api_key = model
         .api_key
@@ -325,7 +348,10 @@ pub(crate) async fn complete_anthropic(
         response.status()
     );
 
-    let response: AnthropicResponse = response.json().await?;
+    let body_text = response.text().await?;
+    save_complete_response_for_debugging(&body_text, save_response_body, max_response_files);
+
+    let response: AnthropicResponse = serde_json::from_str(&body_text)?;
     let content = response
         .content
         .into_iter()

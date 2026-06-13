@@ -12,7 +12,10 @@ use tidev_types::reasoning::ThinkingLevelType;
 use log::{debug as log_debug, error as log_error};
 
 use crate::attachments::{image_attachments, message_text_with_file_references};
-use crate::debug::{save_raw_response_for_debugging, save_request_for_debugging};
+use crate::debug::{
+    save_complete_response_for_debugging, save_raw_response_for_debugging,
+    save_request_for_debugging,
+};
 use crate::error::classify_response_status;
 use crate::think_parser::ThinkParser;
 use crate::tool_call_format::ToolCallBuilder;
@@ -267,6 +270,8 @@ pub(crate) async fn complete_openai(
     tools: Vec<ToolDefinition>,
     save_request_body: bool,
     max_request_files: usize,
+    save_response_body: bool,
+    max_response_files: usize,
 ) -> Result<String> {
     let api_key = model
         .api_key
@@ -325,7 +330,10 @@ pub(crate) async fn complete_openai(
         response.status()
     );
 
-    let response: ChatCompletionResponse = response.json().await?;
+    let body_text = response.text().await?;
+    save_complete_response_for_debugging(&body_text, save_response_body, max_response_files);
+
+    let response: ChatCompletionResponse = serde_json::from_str(&body_text)?;
     let content = response
         .choices
         .into_iter()

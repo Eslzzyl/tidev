@@ -186,6 +186,8 @@ impl LlmClient {
                         tools.clone(),
                         self.save_request_body,
                         self.max_request_files,
+                        self.save_response_body,
+                        self.max_response_files,
                     )
                     .await
                 }
@@ -197,6 +199,8 @@ impl LlmClient {
                         tools.clone(),
                         self.save_request_body,
                         self.max_request_files,
+                        self.save_response_body,
+                        self.max_response_files,
                     )
                     .await
                 }
@@ -208,6 +212,8 @@ impl LlmClient {
                         tools.clone(),
                         self.save_request_body,
                         self.max_request_files,
+                        self.save_response_body,
+                        self.max_response_files,
                     )
                     .await
                 }
@@ -219,6 +225,8 @@ impl LlmClient {
                         tools.clone(),
                         self.save_request_body,
                         self.max_request_files,
+                        self.save_response_body,
+                        self.max_response_files,
                     )
                     .await
                 }

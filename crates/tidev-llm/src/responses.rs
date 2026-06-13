@@ -11,7 +11,10 @@ use tidev_session::session::{BackendEvent, Message, MessageAttachment, MessageRo
 use log::{debug as log_debug, error as log_error};
 
 use crate::attachments::{image_attachments, message_text_with_file_references};
-use crate::debug::save_request_for_debugging;
+use crate::debug::{
+    save_complete_response_for_debugging, save_raw_response_for_debugging,
+    save_request_for_debugging,
+};
 use crate::error::classify_response_status;
 
 /// Responses API endpoint
@@ -28,8 +31,8 @@ pub(crate) async fn stream_responses(
     tx: UnboundedSender<BackendEvent>,
     save_request_body: bool,
     max_request_files: usize,
-    _save_response_body: bool,
-    _max_response_files: usize,
+    save_response_body: bool,
+    max_response_files: usize,
 ) -> Result<()> {
     let api_key = model
         .api_key
@@ -98,6 +101,7 @@ pub(crate) async fn stream_responses(
     let mut tool_calls: BTreeMap<String, ToolCallBuilder> = BTreeMap::new();
     let mut first_delta_time: Option<std::time::Instant> = None;
     let mut current_event_type: Option<String> = None;
+    let mut raw_payloads: Vec<String> = Vec::new();
 
     use futures_util::StreamExt;
 
@@ -124,7 +128,16 @@ pub(crate) async fn stream_responses(
                 let payload = payload.trim().to_string();
                 let _event_type = current_event_type.take();
 
+                raw_payloads.push(payload.clone());
+
                 if payload == "[DONE]" {
+                    save_raw_response_for_debugging(
+                        session_id,
+                        request_id,
+                        &raw_payloads,
+                        save_response_body,
+                        max_response_files,
+                    );
                     let turn = finalize_turn(
                         &assistant_text,
                         &reasoning_text,
@@ -500,6 +513,14 @@ pub(crate) async fn stream_responses(
         }
     }
 
+    save_raw_response_for_debugging(
+        session_id,
+        request_id,
+        &raw_payloads,
+        save_response_body,
+        max_response_files,
+    );
+
     let turn = finalize_turn(
         &assistant_text,
         &reasoning_text,
@@ -521,6 +542,8 @@ pub(crate) async fn complete_responses(
     tools: Vec<ToolDefinition>,
     save_request_body: bool,
     max_request_files: usize,
+    save_response_body: bool,
+    max_response_files: usize,
 ) -> Result<String> {
     let api_key = model
         .api_key
@@ -580,7 +603,10 @@ pub(crate) async fn complete_responses(
         response.status()
     );
 
-    let response: ResponsesCompleteResponse = response.json().await?;
+    let body_text = response.text().await?;
+    save_complete_response_for_debugging(&body_text, save_response_body, max_response_files);
+
+    let response: ResponsesCompleteResponse = serde_json::from_str(&body_text)?;
 
     // Check for error in response
     if let Some(error) = response.error {
