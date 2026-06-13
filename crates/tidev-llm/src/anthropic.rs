@@ -47,7 +47,10 @@ pub(crate) async fn stream_anthropic(
         .post(model.endpoint())
         .header("x-api-key", &api_key)
         .header("anthropic-version", "2023-06-01")
-        .header("anthropic-dangerous-direct-browser-access", "true")
+        .header(
+            "anthropic-beta",
+            "interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14",
+        )
         .json(&request)
         .send()
         .await;
@@ -333,7 +336,10 @@ pub(crate) async fn complete_anthropic(
         .post(model.endpoint())
         .header("x-api-key", &api_key)
         .header("anthropic-version", "2023-06-01")
-        .header("anthropic-dangerous-direct-browser-access", "true")
+        .header(
+            "anthropic-beta",
+            "interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14",
+        )
         .json(&request)
         .send()
         .await;
@@ -567,7 +573,7 @@ fn build_anthropic_request(
         stream: true,
         temperature: model.temperature,
         tools: anthropic_tools,
-        extra_body: model.extra_body.clone(),
+        extra_body: model.merged_extra_body(),
     })
 }
 

@@ -174,6 +174,49 @@ impl GlmThinkingLevel {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+pub enum MiniMaxThinkingLevel {
+    #[default]
+    Off,
+    Adaptive,
+}
+
+impl MiniMaxThinkingLevel {
+    pub fn extra_body(&self) -> serde_json::Value {
+        match self {
+            Self::Off => serde_json::json!({
+                "thinking": { "type": "disabled" }
+            }),
+            Self::Adaptive => serde_json::json!({
+                "thinking": { "type": "adaptive" }
+            }),
+        }
+    }
+
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::Off => "Off",
+            Self::Adaptive => "Adaptive",
+        }
+    }
+
+    pub fn next(&self) -> Self {
+        match self {
+            Self::Off => Self::Adaptive,
+            Self::Adaptive => Self::Off,
+        }
+    }
+
+    pub fn from_display_name(name: &str) -> Self {
+        match name.to_lowercase().as_str() {
+            "off" => Self::Off,
+            "adaptive" => Self::Adaptive,
+            _ => Self::Off,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum Gpt5ThinkingLevel {
     #[default]
     Off,
@@ -255,6 +298,7 @@ pub enum ThinkingLevelType {
     Qwen(Qwen35ThinkingLevel),
     Glm(GlmThinkingLevel),
     Gpt5(Gpt5ThinkingLevel),
+    MiniMax(MiniMaxThinkingLevel),
 }
 
 impl ThinkingLevelType {
@@ -265,6 +309,7 @@ impl ThinkingLevelType {
             Self::Qwen(level) => level.display_name(),
             Self::Glm(level) => level.display_name(),
             Self::Gpt5(level) => level.display_name(),
+            Self::MiniMax(level) => level.display_name(),
         }
     }
 
@@ -275,6 +320,7 @@ impl ThinkingLevelType {
             Self::Qwen(level) => Self::Qwen(level.next()),
             Self::Glm(level) => Self::Glm(level.next()),
             Self::Gpt5(level) => Self::Gpt5(level.next()),
+            Self::MiniMax(level) => Self::MiniMax(level.next()),
         }
     }
 
@@ -285,6 +331,7 @@ impl ThinkingLevelType {
             Self::Qwen(level) => Some(level.extra_body()),
             Self::Glm(level) => Some(level.extra_body()),
             Self::Gpt5(level) => Some(level.extra_body()),
+            Self::MiniMax(level) => Some(level.extra_body()),
         }
     }
 
@@ -307,6 +354,7 @@ impl ThinkingLevelType {
             Self::Qwen(_) => None,
             Self::Glm(_) => None,
             Self::Gpt5(level) => level.thinking_config(),
+            Self::MiniMax(_) => None,
         }
     }
 
@@ -329,6 +377,9 @@ impl fmt::Display for ThinkingLevelType {
             Self::Qwen(level) => write!(f, "qwen:{}", level.display_name().to_lowercase()),
             Self::Glm(level) => write!(f, "glm:{}", level.display_name().to_lowercase()),
             Self::Gpt5(level) => write!(f, "gpt5:{}", level.display_name().to_lowercase()),
+            Self::MiniMax(level) => {
+                write!(f, "minimax:{}", level.display_name().to_lowercase())
+            }
         }
     }
 }
@@ -344,6 +395,7 @@ impl ThinkingLevelType {
             ["qwen", level] => Self::Qwen(Qwen35ThinkingLevel::from_display_name(level)),
             ["glm", level] => Self::Glm(GlmThinkingLevel::from_display_name(level)),
             ["gpt5", level] => Self::Gpt5(Gpt5ThinkingLevel::from_display_name(level)),
+            ["minimax", level] => Self::MiniMax(MiniMaxThinkingLevel::from_display_name(level)),
             _ => Self::None,
         }
     }

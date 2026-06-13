@@ -6,8 +6,8 @@
 //! callers that import via `crate::config::reasoning::X`.
 
 pub use tidev_types::reasoning::{
-    DeepSeekV4ThinkingLevel, GlmThinkingLevel, Gpt5ThinkingLevel, Qwen35ThinkingLevel,
-    ThinkingLevel, ThinkingLevelType,
+    DeepSeekV4ThinkingLevel, GlmThinkingLevel, Gpt5ThinkingLevel, MiniMaxThinkingLevel,
+    Qwen35ThinkingLevel, ThinkingLevel, ThinkingLevelType,
 };
 
 /// Model name pattern matching rules.
@@ -26,6 +26,8 @@ impl ThinkingMatcher {
             ThinkingLevelType::Glm(GlmThinkingLevel::On)
         } else if model_lower.contains("gpt") && model_lower.contains("5") {
             ThinkingLevelType::Gpt5(Gpt5ThinkingLevel::Medium)
+        } else if model_lower.contains("minimax") && model_lower.contains("m3") {
+            ThinkingLevelType::MiniMax(MiniMaxThinkingLevel::Adaptive)
         } else {
             ThinkingLevelType::None
         }
