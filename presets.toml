@@ -241,17 +241,17 @@ max_output_tokens = 32768
 supports_streaming = true
 supports_images = false
 
-[providers.opencode-go.models.kimi-k2-5]
-request_model_id = "kimi-k2.5"
-display_name = "Kimi-K2.5"
+[providers.opencode-go.models.kimi-k2-6]
+request_model_id = "kimi-k2.6"
+display_name = "Kimi-K2.6"
 context_window = 200000
 max_output_tokens = 32768
 supports_streaming = true
 supports_images = true
 
-[providers.opencode-go.models.kimi-k2-6]
-request_model_id = "kimi-k2.6"
-display_name = "Kimi-K2.6"
+[providers.opencode-go.models.kimi-k2-7]
+request_model_id = "kimi-k2.7"
+display_name = "Kimi-K2.7-Code"
 context_window = 200000
 max_output_tokens = 32768
 supports_streaming = true
