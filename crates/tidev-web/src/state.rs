@@ -76,8 +76,14 @@ impl AppState {
     ) -> anyhow::Result<Self> {
         log::debug!("Creating new AppState");
 
-        // Create snapshot service for undo operations
-        let snapshot = SnapshotService::new(&workspace_root, paths)?;
+        // Create snapshot service for undo operations. We read the
+        // snapshot config out of the shared `AppConfig` here; if the
+        // caller mutates the config later the snapshot service keeps
+        // its initial view (this is fine for a process-lifetime
+        // service). Callers that need hot-reloadable snapshot config
+        // should restart the process.
+        let snapshot_config = std::sync::Arc::new(config.snapshot.clone());
+        let snapshot = SnapshotService::new(&workspace_root, paths, snapshot_config)?;
 
         // Create terminal manager
         let terminal_manager = Arc::new(TerminalManager::new());

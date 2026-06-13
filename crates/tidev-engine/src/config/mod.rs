@@ -5,6 +5,7 @@ mod paths;
 mod provider;
 pub mod reasoning;
 pub mod sandbox;
+mod snapshot;
 mod tmp;
 mod ui;
 use anyhow::{Context, Result, bail};
@@ -27,6 +28,7 @@ pub use paths::ConfigPaths;
 pub use provider::{ModelConfig, ProviderConfig, ProviderSource};
 pub use tidev_llm::ApiType;
 pub use tmp::TmpConfig;
+pub use snapshot::SnapshotConfig;
 pub use ui::UiConfig;
 
 pub use self::sandbox::SandboxConfig;
@@ -179,6 +181,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub memory: MemoryConfig,
     #[serde(default)]
+    pub snapshot: SnapshotConfig,
+    #[serde(default)]
     pub sync: SyncConfig,
     #[serde(skip)]
     pub bundled_providers: BTreeMap<String, ProviderConfig>,
@@ -211,6 +215,7 @@ impl Default for AppConfig {
             hooks: crate::hooks::HooksConfig::default(),
             websearch: WebSearchConfig::default(),
             memory: MemoryConfig::default(),
+            snapshot: SnapshotConfig::default(),
             sync: SyncConfig::default(),
             bundled_providers: bundled_provider_catalog().unwrap_or_default(),
         }

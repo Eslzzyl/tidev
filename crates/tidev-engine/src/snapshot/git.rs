@@ -1,21 +1,54 @@
 use anyhow::{Context, Result, bail};
-use std::{collections::HashSet, ffi::OsString, fs, path::Path, process::Command};
+use std::{
+    collections::HashSet,
+    ffi::OsString,
+    fs, path::Path,
+    process::Command,
+};
+use tokio::task::JoinSet;
 
 const DEFAULT_IGNORED_DIRS: &[&str] = &[
+    // VCS / SCM
     ".git",
+    // JS / Node
     "node_modules",
+    // Python
     ".venv",
     "venv",
     "env",
     ".env",
-    "dist",
-    "build",
+    "__pycache__",
     ".pytest_cache",
     ".mypy_cache",
-    ".cache",
     ".tox",
-    "__pycache__",
+    // Build / dist outputs
+    "dist",
+    "build",
     "target",
+    ".cache",
+    // IDE / editor
+    ".idea",
+    ".vscode",
+    // Platform junk
+    ".DS_Store",
+    "Thumbs.db",
+    // Build ecosystem directories
+    ".gradle",
+    "Pods",
+    ".terraform",
+    // Frontend framework caches
+    ".next",
+    ".nuxt",
+    ".parcel-cache",
+    // Home directory bloat — the user almost never wants these in a
+    // session snapshot (Library on macOS, AppData on Windows can be
+    // tens of GB).
+    "Library",
+    "AppData",
+    // Secrets / credentials commonly present in `~`
+    ".ssh",
+    ".gnupg",
+    ".aws",
 ];
 
 pub fn init_snapshot_repo(gitdir: &Path) -> Result<()> {
@@ -37,6 +70,12 @@ pub fn init_snapshot_repo(gitdir: &Path) -> Result<()> {
         ("core.longpaths", "true"),
         ("core.symlinks", "true"),
         ("core.fsmonitor", "false"),
+        // Tuning for very large worktrees so the first add stays bounded.
+        // See https://git-scm.com/docs/git-config#Documentation/git-config.txt-featuremanyFiles
+        ("feature.manyFiles", "true"),
+        ("index.version", "4"),
+        ("index.threads", "true"),
+        ("core.untrackedCache", "true"),
     ] {
         let status = Command::new("git")
             .args(["--git-dir", &gitdir.to_string_lossy(), "config", key, value])
@@ -78,8 +117,10 @@ pub fn sync_exclude(gitdir: &Path, worktree: &Path, extra: &[String]) -> Result<
     Ok(())
 }
 
-pub fn find_changed_files(gitdir: &Path, worktree: &Path) -> Result<Vec<String>> {
-    let args: Vec<OsString> = vec![
+pub async fn find_changed_files(gitdir: &Path, worktree: &Path) -> Result<Vec<String>> {
+    use tokio::process::Command;
+
+    let diff_args: Vec<OsString> = vec![
         OsString::from("-c"),
         OsString::from("core.autocrlf=false"),
         OsString::from("-c"),
@@ -99,18 +140,7 @@ pub fn find_changed_files(gitdir: &Path, worktree: &Path) -> Result<Vec<String>>
         OsString::from("."),
     ];
 
-    let diff_output = Command::new("git")
-        .args(&args)
-        .output()
-        .context("failed to run git diff-files")?;
-
-    let tracked: Vec<String> = String::from_utf8_lossy(&diff_output.stdout)
-        .split('\0')
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .collect();
-
-    let args: Vec<OsString> = vec![
+    let ls_args: Vec<OsString> = vec![
         OsString::from("-c"),
         OsString::from("core.autocrlf=false"),
         OsString::from("-c"),
@@ -131,10 +161,34 @@ pub fn find_changed_files(gitdir: &Path, worktree: &Path) -> Result<Vec<String>>
         OsString::from("."),
     ];
 
-    let untracked_output = Command::new("git")
-        .args(&args)
-        .output()
-        .context("failed to run git ls-files")?;
+    // Run `git diff-files` and `git ls-files --others` in parallel.
+    // On a huge worktree (e.g. user home) each of these can take tens of
+    // seconds; running them concurrently roughly halves the wall time
+    // of the discovery phase.
+    let (diff_output, untracked_output) = tokio::try_join!(
+        Command::new("git").args(&diff_args).output(),
+        Command::new("git").args(&ls_args).output(),
+    )
+    .map_err(|e| anyhow::anyhow!("failed to spawn git file-listing subprocess: {e}"))?;
+
+    if !diff_output.status.success() {
+        bail!(
+            "git diff-files failed: {}",
+            String::from_utf8_lossy(&diff_output.stderr)
+        );
+    }
+    if !untracked_output.status.success() {
+        bail!(
+            "git ls-files --others failed: {}",
+            String::from_utf8_lossy(&untracked_output.stderr)
+        );
+    }
+
+    let tracked: Vec<String> = String::from_utf8_lossy(&diff_output.stdout)
+        .split('\0')
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect();
 
     let untracked: Vec<String> = String::from_utf8_lossy(&untracked_output.stdout)
         .split('\0')
@@ -219,22 +273,47 @@ pub fn check_ignored(gitdir: &Path, worktree: &Path, files: &[String]) -> Result
     Ok(HashSet::new())
 }
 
-pub fn filter_large_files(worktree: &Path, files: &[String], limit: u64) -> Result<Vec<String>> {
-    let mut large = Vec::new();
-
-    for file in files {
-        let path = worktree.join(file);
-        match fs::metadata(&path) {
-            Ok(meta) => {
-                if meta.is_file() && meta.len() > limit {
-                    large.push(file.clone());
-                }
-            }
-            Err(_) => continue,
-        }
+pub async fn filter_large_files(
+    worktree: &Path,
+    files: &[String],
+    limit: u64,
+    concurrency: usize,
+) -> Result<Vec<String>> {
+    if files.is_empty() {
+        return Ok(Vec::new());
     }
 
-    Ok(large)
+    // Honour the caller's "disable parallelism" intent. We never go
+    // above the number of files (no point spawning idle workers).
+    let workers = concurrency.max(1).min(files.len());
+    let chunk_size = (files.len() + workers - 1) / workers;
+
+    let mut set: JoinSet<Vec<String>> = JoinSet::new();
+    for chunk in files.chunks(chunk_size) {
+        let worktree = worktree.to_path_buf();
+        let chunk = chunk.to_vec();
+        set.spawn_blocking(move || {
+            let mut large = Vec::new();
+            for file in &chunk {
+                let path = worktree.join(file);
+                match fs::metadata(&path) {
+                    Ok(meta) => {
+                        if meta.is_file() && meta.len() > limit {
+                            large.push(file.clone());
+                        }
+                    }
+                    Err(_) => continue,
+                }
+            }
+            large
+        });
+    }
+
+    let mut out = Vec::new();
+    while let Some(res) = set.join_next().await {
+        out.extend(res?);
+    }
+    Ok(out)
 }
 
 pub fn stage_files(gitdir: &Path, worktree: &Path, files: &[String]) -> Result<()> {
@@ -719,5 +798,56 @@ mod tests {
         assert!(should_ignore_path("repo/.git/info/exclude"));
         assert!(!should_ignore_path(".gitignore"));
         assert!(!should_ignore_path("src/git.rs"));
+    }
+
+    #[test]
+    fn ignores_common_build_outputs() {
+        assert!(should_ignore_path("node_modules/foo"));
+        assert!(should_ignore_path("project/node_modules/foo"));
+        assert!(should_ignore_path("target/debug/build"));
+        assert!(should_ignore_path("dist/bundle.js"));
+        assert!(should_ignore_path("build/output"));
+        assert!(should_ignore_path(".venv/lib/python"));
+        assert!(should_ignore_path("__pycache__/x.pyc"));
+        assert!(should_ignore_path(".pytest_cache/v"));
+        assert!(should_ignore_path(".mypy_cache/x"));
+        assert!(should_ignore_path(".tox/x"));
+        assert!(should_ignore_path(".cache/foo"));
+    }
+
+    #[test]
+    fn ignores_ide_and_platform_junk() {
+        assert!(should_ignore_path(".idea/workspace.xml"));
+        assert!(should_ignore_path(".vscode/settings.json"));
+        assert!(should_ignore_path(".DS_Store"));
+        assert!(should_ignore_path("Thumbs.db"));
+    }
+
+    #[test]
+    fn ignores_home_directory_bloat() {
+        // macOS / Windows home-directory directories that are often
+        // tens of GB and should never be in a session snapshot.
+        assert!(should_ignore_path("Library/Caches/foo"));
+        assert!(should_ignore_path("AppData/Local/foo"));
+        assert!(should_ignore_path(".ssh/id_rsa"));
+        assert!(should_ignore_path(".gnupg/pubring.kbx"));
+        assert!(should_ignore_path(".aws/credentials"));
+        // Frontend framework caches
+        assert!(should_ignore_path(".next/cache/webpack"));
+        assert!(should_ignore_path(".nuxt/dist"));
+        assert!(should_ignore_path(".parcel-cache/x"));
+        // Build ecosystem
+        assert!(should_ignore_path(".gradle/caches"));
+        assert!(should_ignore_path("Pods/Headers"));
+        assert!(should_ignore_path(".terraform/plugins"));
+    }
+
+    #[test]
+    fn does_not_match_substring_components() {
+        // Must match on a complete path component, not a substring.
+        // "node_modules_legacy" is not a node_modules directory.
+        assert!(!should_ignore_path("node_modules_legacy/foo"));
+        assert!(!should_ignore_path("my_target/x"));
+        assert!(!should_ignore_path("src/LibraryParser.rs"));
     }
 }

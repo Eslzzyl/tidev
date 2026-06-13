@@ -182,7 +182,11 @@ impl App {
         let last_notice = None;
         let retrying_hint = None;
 
-        let snapshot = SnapshotService::new(&workspace_root, &paths)?;
+        let snapshot = SnapshotService::new(
+            &workspace_root,
+            &paths,
+            Arc::new(config.snapshot.clone()),
+        )?;
         let cleanup_cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let notifications = notifications::NotificationManager::new(config.notifications.clone());
 
@@ -357,6 +361,29 @@ impl App {
             }
         });
         log::info!("startup: MCP refresh spawned in {:?}", _t_run.elapsed());
+
+        // Background pre-warm of the workspace snapshot index. On a
+        // huge worktree (e.g. user home) the first track takes
+        // seconds-to-minutes; running it in the background means the
+        // user's first message only pays the wait if the prewarm has
+        // not finished by the time they press Enter.
+        let prewarm_snapshot = self.snapshot.clone();
+        runtime.spawn(async move {
+            let start = std::time::Instant::now();
+            match prewarm_snapshot.track_async().await {
+                Ok(Some(h)) => log::info!(
+                    "snapshot prewarm complete in {:?} (hash={})",
+                    start.elapsed(),
+                    &h[..8.min(h.len())]
+                ),
+                Ok(None) => log::info!(
+                    "snapshot prewarm returned None in {:?}",
+                    start.elapsed()
+                ),
+                Err(e) => log::warn!("snapshot prewarm failed: {e}"),
+            }
+        });
+        log::info!("startup: snapshot prewarm spawned in {:?}", _t_run.elapsed());
         self.terminal_session = Some(super::TerminalSession::enter()?);
         log::info!("startup: TerminalSession::enter in {:?}", _t_run.elapsed());
         let backend = CrosstermBackend::new(io::stdout());

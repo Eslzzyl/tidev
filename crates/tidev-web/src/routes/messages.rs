@@ -792,7 +792,7 @@ pub async fn revert_to_message(
         None => {
             log::info!("Capturing new redo snapshot");
             drop(store); // Release lock before async operation
-            match state.snapshot.track().await {
+            match state.snapshot.track() {
                 Ok(Some(hash)) => {
                     log::info!("Captured redo snapshot hash={}", hash);
                     hash
