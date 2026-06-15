@@ -1,4 +1,5 @@
 use anyhow::Result;
+use tidev_session::session::MessageRole;
 use tokio::runtime::Runtime;
 use uuid::Uuid;
 
@@ -542,7 +543,7 @@ impl App {
     pub(crate) fn capture_prompt_snapshot(
         &mut self,
         message_id: Uuid,
-        runtime: &Runtime,
+        _runtime: &Runtime,
     ) -> Result<()> {
         log::info!("capture_prompt_snapshot: message_id={}", message_id);
 
@@ -551,62 +552,60 @@ impl App {
         self.step_cached_file_lists.clear();
         self.step_cached_file_diffs = None;
 
-        // Use the previous round's hash (if any) as the step-tracking
-        // baseline so subsequent `capture_step_snapshot` calls have a
-        // valid `prev` to diff against. On the very first message of a
-        // brand-new session, fall back to the empty-tree SHA — that
-        // yields a "diff of everything" which is at worst verbose but
-        // never wrong. `EMPTY_TREE_HASH` is intentionally *not* written
-        // to the message's `snapshot_hash` (see the constant's doc
-        // comment) so a revert to this message can never silently wipe
-        // the worktree.
+        // Seed step_prev_hash from the previous user message's snapshot
+        // hash.  Load from the database (not the in-memory conversation)
+        // because the previous round's background track may have updated
+        // only the DB.  On the very first message of a brand-new session
+        // there is no previous hash, so fall back to EMPTY_TREE_HASH.
         let prev_hash = self
-            .conversation
-            .last_visible_user_message()
-            .and_then(|m| m.snapshot_hash.clone())
+            .store
+            .load_messages(self.conversation.session_id)
+            .ok()
+            .and_then(|msgs| {
+                msgs.iter()
+                    .rev()
+                    .find(|m| {
+                        matches!(m.role, MessageRole::User) && m.id != message_id
+                    })
+                    .and_then(|m| m.snapshot_hash.clone())
+            })
             .unwrap_or_else(|| tidev_engine::snapshot::EMPTY_TREE_HASH.to_string());
         self.step_prev_hash = Some(prev_hash);
 
-        // Kick off the real track on a background task. The TUI does
-        // not wait for the scan to finish — the agent loop continues
-        // and the user's first message is delivered immediately even
-        // on a huge worktree. The background task updates the
-        // message's persisted snapshot_hash when it completes; the
-        // next round (or session reload) sees the real hash. The
-        // in-memory message is left untouched for this round, which
-        // matches the existing graceful-skip behaviour when
-        // `track()` returns Err.
-        let snapshot = self.snapshot.clone();
-        let store = self.store.clone();
-        let session_id = self.conversation.session_id;
-        runtime.spawn(async move {
-            let start = std::time::Instant::now();
-            match snapshot.track_async().await {
-                Ok(Some(hash)) => {
-                    log::info!(
-                        "capture_prompt_snapshot: background track took {:?} for msg {}",
-                        start.elapsed(),
-                        message_id
-                    );
-                    if let Err(e) =
-                        store.update_message_snapshot(session_id, message_id, &hash)
-                    {
-                        log::warn!(
-                            "capture_prompt_snapshot: update_message_snapshot failed: {e}"
-                        );
-                    }
+        // Synchronous track — ensures snapshot_hash is available in
+        // memory before the agent loop or finalize_snapshot needs it.
+        match self.snapshot.track() {
+            Ok(Some(hash)) => {
+                log::info!("capture_prompt_snapshot: captured hash={}", hash);
+                self.store.update_message_snapshot(
+                    self.conversation.session_id,
+                    message_id,
+                    &hash,
+                )?;
+
+                if let Some(msg) = self
+                    .conversation
+                    .messages
+                    .iter_mut()
+                    .find(|m| m.id == message_id)
+                {
+                    msg.snapshot_hash = Some(hash.clone());
                 }
-                Ok(None) => {
-                    log::info!(
-                        "capture_prompt_snapshot: background track returned None after {:?}",
-                        start.elapsed()
-                    );
-                }
-                Err(e) => {
-                    log::warn!("capture_prompt_snapshot: background track failed: {e}");
-                }
+
+                // Use the freshly captured hash as the step-tracking
+                // baseline so subsequent capture_step_snapshot calls diff
+                // against the real pre-round state.
+                self.step_prev_hash = Some(hash);
             }
-        });
+            Ok(None) => {
+                log::info!(
+                    "capture_prompt_snapshot: track() returned None (not a git repo or no changes)"
+                );
+            }
+            Err(error) => {
+                log::warn!("capture_prompt_snapshot: track() failed: {}", error);
+            }
+        }
 
         Ok(())
     }
@@ -804,47 +803,6 @@ mod tests {
         let message = add_user_message(&mut app, "prompt");
         app.capture_prompt_snapshot(message.id, &runtime)
             .expect("prompt snapshot should capture");
-
-        // `capture_prompt_snapshot` now fires the real `track_async`
-        // on a background task (so the TUI stays responsive on huge
-        // worktrees). The background task only updates the DB; the
-        // in-memory `msg.snapshot_hash` is intentionally left as
-        // `None` for the first message of a brand-new session, which
-        // matches the existing graceful-skip behaviour when `track()`
-        // returns `Err`. In the test, the production-like flow is:
-        //   1. spawn background track
-        //   2. wait for DB to be populated
-        //   3. re-hydrate the in-memory message from the DB
-        //      (production code does this when the message is
-        //      reloaded between rounds / on session resume)
-        //   4. run finalize / undo
-        let wait_start = std::time::Instant::now();
-        let timeout = std::time::Duration::from_secs(10);
-        let db_hash: Option<String> = loop {
-            let messages = app
-                .store
-                .load_messages(app.conversation.session_id)
-                .expect("messages should load");
-            if let Some(m) = messages.iter().find(|m| m.id == message.id)
-                && m.snapshot_hash.is_some()
-            {
-                break m.snapshot_hash.clone();
-            }
-            if wait_start.elapsed() > timeout {
-                panic!(
-                    "background snapshot track did not complete within {timeout:?}"
-                );
-            }
-            std::thread::sleep(std::time::Duration::from_millis(50));
-        };
-        if let Some(target) = app
-            .conversation
-            .messages
-            .iter_mut()
-            .find(|m| m.id == message.id)
-        {
-            target.snapshot_hash = db_hash;
-        }
 
         fs::write(&file_path, "after\n").expect("file should be modified");
         app.finalize_snapshot_for_last_user_message_sync(&runtime)
