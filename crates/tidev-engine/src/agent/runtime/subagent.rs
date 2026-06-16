@@ -403,16 +403,33 @@ impl AgentRuntime {
                 anyhow::bail!("Subagent stream ended without a final turn");
             }
 
-            // Persist assistant message
-            self.persist_assistant_message(child_session_id, &turn)
+            // Persist assistant message and reuse its ID for the frontend
+            // event so the TUI's SubagentStatus handler finds the existing
+            // DB-loaded message (by ID) and updates it in place instead of
+            // pushing a duplicate.
+            let persisted_msg = self
+                .persist_assistant_message(child_session_id, &turn)
                 .await?;
 
             // Send assistant message to subsession conversation
             {
-                let mut assistant_msg = Message::new(MessageRole::Assistant, &turn.content);
+                let mut assistant_msg = Message::persisted(
+                    persisted_msg.id,
+                    MessageRole::Assistant,
+                    &turn.content,
+                    persisted_msg.created_at,
+                    false,
+                );
+                assistant_msg.completed_at = persisted_msg.completed_at;
                 assistant_msg.reasoning = turn.reasoning.clone();
                 assistant_msg.tool_calls = turn.tool_calls.clone();
-                assistant_msg.streaming = false;
+                assistant_msg.input_tokens = turn.input_tokens;
+                assistant_msg.output_tokens = turn.output_tokens;
+                assistant_msg.total_tokens = turn.total_tokens;
+                assistant_msg.cache_read_tokens = turn.cache_read_tokens;
+                assistant_msg.cache_write_tokens = turn.cache_write_tokens;
+                assistant_msg.model_id = turn.model_id.clone();
+                assistant_msg.tokens_per_second = turn.tokens_per_second;
                 let _ = event_tx.send(BackendEvent::SubagentStatus {
                     session_id: child_session_id,
                     request_id: request_sequence,

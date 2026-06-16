@@ -1633,9 +1633,38 @@ impl App {
                 // loop.  If no cancel token exists, no agent loop is
                 // running to serve this turn.
                 if self.request_cancel_token.is_none() {
+                    // For child sessions, still set active_request_id so
+                    // subsequent SubagentStatus/SubagentToolResult events
+                    // pass the is_active_request gate.  A more general
+                    // child-session check runs below (after this branch).
+                    if self.conversation.parent_session_id.is_some() {
+                        log::info!(
+                            "TurnStarting: child session (no cancel token), setting active_request_id"
+                        );
+                        self.active_request_id = request_id;
+                        return Ok(());
+                    }
                     log::info!(
                         "TurnStarting ignored: no active cancel token (request was aborted)"
                     );
+                    return Ok(());
+                }
+
+                // When on a child session (subsession), never create a
+                // streaming assistant message here — SubagentStatus will
+                // push the finalized message instead.
+                //
+                // This must be checked AFTER the request_cancel_token gate
+                // above because the parent's cancel token is not part of
+                // CachedSessionRuntime and survives session swaps: when the
+                // user is directly on a child session whose parent loop is
+                // still running, request_cancel_token is non-None but we
+                // still must not create a streaming message.
+                if self.conversation.parent_session_id.is_some() {
+                    log::info!(
+                        "TurnStarting: child session, skipping streaming message"
+                    );
+                    self.active_request_id = request_id;
                     return Ok(());
                 }
 

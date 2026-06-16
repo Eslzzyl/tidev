@@ -60,11 +60,16 @@ impl AgentRuntime {
     }
 
     /// Persist an [`AssistantTurn`] as a persisted assistant message.
+    ///
+    /// Returns the persisted [`Message`] so callers can reuse its ID for
+    /// frontend events (e.g. [`BackendEvent::SubagentStatus`]) — avoiding
+    /// duplicate messages when the TUI loads the session from the database
+    /// and then also receives the live event.
     pub async fn persist_assistant_message(
         &self,
         session_id: uuid::Uuid,
         turn: &AssistantTurn,
-    ) -> Result<()> {
+    ) -> Result<Message> {
         let created_at = turn.created_at.unwrap_or_else(Utc::now);
         let completed_at = turn.completed_at.unwrap_or_else(Utc::now);
         let mut msg = Message::persisted(
@@ -99,6 +104,6 @@ impl AgentRuntime {
                 _t_elapsed
             );
         }
-        Ok(())
+        Ok(msg)
     }
 }
