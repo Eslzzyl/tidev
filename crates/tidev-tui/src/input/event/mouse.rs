@@ -194,6 +194,7 @@ impl App {
                 // on an Image span in the input area.
                 if !self.mouse_selection.is_dragging() {
                     if let Some(picker) = &self.image_picker {
+                        // Check composer image badges first
                         if let Some(inner) = self.input_area.get()
                             && inner.contains(position)
                         {
@@ -226,6 +227,40 @@ impl App {
                                         .release(position, self.message_scroll_offset);
                                     return;
                                 }
+                            }
+                        }
+
+                        // Check user message card image badges
+                        if let Some((_, _, data_url)) = self
+                            .user_image_badge_bounds
+                            .iter()
+                            .find(|(_, rect, _)| rect.contains(position))
+                        {
+                            let data_url = data_url.clone();
+                            // Derive filename from data URL mime type
+                            let filename = data_url
+                                .find("data:")
+                                .and_then(|i| {
+                                    let rest = &data_url[i + 5..];
+                                    let mime_end = rest.find(';')?;
+                                    let mime = &rest[..mime_end];
+                                    let ext = mime
+                                        .strip_prefix("image/")
+                                        .unwrap_or(mime);
+                                    Some(format!("image.{ext}"))
+                                })
+                                .unwrap_or_else(|| "image".to_string());
+                            if let Some(viewer) =
+                                crate::ui::image_viewer::ImageViewerState::new(
+                                    picker, &data_url, &filename,
+                                )
+                            {
+                                self.image_viewer = Some(viewer);
+                                self.image_viewer_consume_next_up = true;
+                                self.dirty = true;
+                                self.mouse_selection
+                                    .release(position, self.message_scroll_offset);
+                                return;
                             }
                         }
                     }

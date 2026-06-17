@@ -6,6 +6,8 @@ mod utils;
 
 pub(crate) use content::strip_system_reminder_tags;
 
+use content::IMAGE_BADGE_RE;
+
 use tidev_types::GoalStatus;
 use tidev_types::prompts::SessionMode;
 
@@ -663,7 +665,7 @@ impl App {
 
         // Calculate screen positions for user message cards
         self.user_card_bounds.clear();
-        for (message_id, start_line, end_line) in user_card_ranges {
+        for &(message_id, start_line, end_line) in &user_card_ranges {
             let screen_start = start_line.saturating_sub(render_scroll);
             let screen_end = end_line.saturating_sub(render_scroll);
 
@@ -711,6 +713,72 @@ impl App {
                 };
                 self.inline_subagent_card_bounds
                     .push((card_range.execution_index, card_rect));
+            }
+        }
+
+        // Scan user message cards for image badge spans and record their
+        // screen positions so mouse clicks can open the image viewer.
+        self.user_image_badge_bounds.clear();
+        {
+            let messages = self.conversation.visible_messages();
+            for &(message_id, start_line, end_line) in &user_card_ranges {
+                // Collect data_urls from Image attachments for this message
+                let mut data_urls: Vec<String> = Vec::new();
+                if let Some(msg) = messages.iter().find(|m| m.id == message_id) {
+                    for att in &msg.attachments {
+                        if let tidev_session::session::MessageAttachment::Image {
+                            data_url, ..
+                        } = att
+                        {
+                            data_urls.push(data_url.clone());
+                        }
+                    }
+                }
+                if data_urls.is_empty() {
+                    continue;
+                }
+                let mut url_idx = 0;
+                for line_idx in start_line..end_line.min(text.lines.len()) {
+                    let line = &text.lines[line_idx];
+                    let mut col_offset = 0usize;
+                    for span in &line.spans {
+                        let span_text: &str = span.content.as_ref();
+                        // Find all image badge patterns in this span
+                        let mut search_start = 0;
+                        while let Some(m) = IMAGE_BADGE_RE
+                            .find(&span_text[search_start..])
+                            .unwrap()
+                        {
+                            let badge_col =
+                                col_offset + search_start + m.start();
+                            let badge_width = m.end() - m.start();
+                            let screen_line =
+                                line_idx.saturating_sub(render_scroll);
+                            if screen_line < self.message_viewport_lines {
+                                let screen_x =
+                                    content_area.x + badge_col as u16;
+                                let screen_y =
+                                    content_area.y + screen_line as u16;
+                                let data_url =
+                                    data_urls[url_idx % data_urls.len()]
+                                        .clone();
+                                self.user_image_badge_bounds.push((
+                                    message_id,
+                                    Rect {
+                                        x: screen_x,
+                                        y: screen_y,
+                                        width: badge_width as u16,
+                                        height: 1,
+                                    },
+                                    data_url,
+                                ));
+                            }
+                            url_idx += 1;
+                            search_start += m.end();
+                        }
+                        col_offset += unicode_width::UnicodeWidthStr::width(span_text);
+                    }
+                }
             }
         }
 

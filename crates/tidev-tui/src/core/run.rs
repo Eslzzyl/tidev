@@ -314,6 +314,7 @@ impl App {
             tool_result_card_bounds: Vec::new(),
             hovered_card: None,
             user_card_bounds: Vec::new(),
+            user_image_badge_bounds: Vec::new(),
             queued_card_bounds: Vec::new(),
             hovered_queued_index: None,
             subagent_task_map: std::collections::HashMap::new(),

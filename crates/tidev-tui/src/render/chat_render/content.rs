@@ -1,5 +1,7 @@
 use crate::markdown::render_markdown_text_with_width_and_cwd;
+use crate::theme::ThemePalette;
 use chrono::Local;
+use fancy_regex::Regex;
 use ratatui::{
     prelude::{Modifier, Style},
     style::Color,
@@ -7,6 +9,7 @@ use ratatui::{
 };
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::LazyLock;
 use tidev_session::session::{COMPACTION_MESSAGE_LABEL, Message, MessageRole};
 use tidev_types::prompts::SessionMode;
 use uuid::Uuid;
@@ -21,6 +24,166 @@ use crate::diff_render::render_unified_diff_text;
 use crate::render::render::{
     line_with_prefix, line_with_style, line_with_style_right_aligned, wrap_text_lines,
 };
+
+// ---------------------------------------------------------------------------
+// Inline badge detection for user message content
+// ---------------------------------------------------------------------------
+
+/// Regex for image badge patterns like `[100.0 KB PNG]` produced by
+/// `format_image_badge()`. The type label is uppercase (PNG, JPEG, etc.).
+pub(crate) static IMAGE_BADGE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\[\d[\d.]*\s+(?:B|KB|MB|GB)\s+[A-Z][A-Z0-9]*\]").unwrap()
+});
+
+/// Kind of inline badge detected in user message content.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MessageBadgeKind {
+    /// `@file` / `@dir` reference (rendered as bold accent).
+    AtReference,
+    /// Image attachment placeholder like `[100KB PNG]` (rendered as white-on-teal).
+    Image,
+}
+
+/// A byte range in the message content that should be rendered as a styled badge.
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+pub(crate) struct MessageBadge {
+    pub start: usize,
+    pub end: usize,
+    pub kind: MessageBadgeKind,
+}
+
+/// Scan `text` for `@path` references and `[size TYPE]` image badge patterns.
+/// Returns a sorted, non-overlapping list of badge regions.
+#[allow(dead_code)]
+pub(crate) fn detect_message_badges(text: &str) -> Vec<MessageBadge> {
+    let mut badges: Vec<MessageBadge> = Vec::new();
+
+    // Detect @ references using the same regex as the composer.
+    {
+        let mut start = 0;
+        while let Some(caps) = crate::input::composer::AT_REF_RE
+            .captures(&text[start..])
+            .unwrap()
+        {
+            if let Some(path_match) = caps.get(1) {
+                if path_match.as_str().is_empty() {
+                    break;
+                }
+                let abs_start = start + path_match.start() - 1; // include the '@'
+                let abs_end = start + path_match.end();
+                badges.push(MessageBadge {
+                    start: abs_start,
+                    end: abs_end,
+                    kind: MessageBadgeKind::AtReference,
+                });
+                start += path_match.end();
+            } else {
+                break;
+            }
+        }
+    }
+
+    // Detect image badge patterns like `[100KB PNG]`.
+    if let Some(m) = IMAGE_BADGE_RE.find(text).unwrap() {
+        badges.push(MessageBadge {
+            start: m.start(),
+            end: m.end(),
+            kind: MessageBadgeKind::Image,
+        });
+    }
+
+    // Sort by start position and remove overlaps (AtReference takes priority
+    // since it appears first in text order for typical usage).
+    badges.sort_by_key(|b| b.start);
+    badges.dedup_by(|a, b| a.start < b.end && b.start < a.end);
+    badges
+}
+
+/// Post-process rendered markdown lines to replace badge text with styled spans.
+///
+/// Scans each span for `@path` and `[size TYPE]` patterns and splits the span
+/// at badge boundaries, applying the same visual style as the composer:
+/// - `AtReference` → bold accent color
+/// - `Image` → white-on-teal badge
+pub(crate) fn apply_badge_styling(lines: &mut [Line<'static>], palette: ThemePalette) {
+    for line in lines.iter_mut() {
+        let old_spans: Vec<Span<'static>> = line.spans.drain(..).collect();
+        for span in old_spans {
+            let text = span.content.to_string();
+            let mut parts: Vec<(String, Style)> = Vec::new();
+            let mut offset = 0usize;
+
+            // Find all badge patterns within this span's text
+            let mut badges_in_span: Vec<(usize, usize, MessageBadgeKind)> = Vec::new();
+
+            // @ references
+            {
+                let mut search_start = 0;
+                while let Some(caps) = crate::input::composer::AT_REF_RE
+                    .captures(&text[search_start..])
+                    .unwrap()
+                {
+                    if let Some(path_match) = caps.get(1) {
+                        if path_match.as_str().is_empty() {
+                            break;
+                        }
+                        let abs_start = search_start + path_match.start() - 1; // include '@'
+                        let abs_end = search_start + path_match.end();
+                        badges_in_span
+                            .push((abs_start, abs_end, MessageBadgeKind::AtReference));
+                        search_start += path_match.end();
+                    } else {
+                        break;
+                    }
+                }
+            }
+
+            // Image badge patterns like `[100KB PNG]`
+            {
+                let mut search_start = 0;
+                while let Some(m) = IMAGE_BADGE_RE.find(&text[search_start..]).unwrap() {
+                    let abs_start = search_start + m.start();
+                    let abs_end = search_start + m.end();
+                    badges_in_span.push((abs_start, abs_end, MessageBadgeKind::Image));
+                    search_start += m.end();
+                }
+            }
+
+            badges_in_span.sort_by_key(|b| b.0);
+
+            if badges_in_span.is_empty() {
+                parts.push((text, span.style));
+            } else {
+                for (start, end, kind) in &badges_in_span {
+                    // Plain text before the badge
+                    if *start > offset {
+                        parts.push((text[offset..*start].to_string(), span.style));
+                    }
+                    let badge_style = match kind {
+                        MessageBadgeKind::AtReference => {
+                            Style::default().fg(palette.accent).add_modifier(Modifier::BOLD)
+                        }
+                        MessageBadgeKind::Image => Style::default()
+                            .bg(palette.selection_bg)
+                            .fg(palette.selection_fg)
+                            .add_modifier(Modifier::BOLD),
+                    };
+                    parts.push((text[*start..*end].to_string(), badge_style));
+                    offset = *end;
+                }
+                // Plain text after the last badge
+                if offset < text.len() {
+                    parts.push((text[offset..].to_string(), span.style));
+                }
+            }
+
+            for (content, style) in parts {
+                line.spans.push(Span::styled(content, style));
+            }
+        }
+    }
+}
 
 pub(super) fn render_reasoning_lines(
     ctx: &RenderContext<'_>,
@@ -298,12 +461,14 @@ pub(super) fn render_message_cards_inner(
             } else {
                 vec![(palette.panel_alt, {
                     let display_content = strip_system_reminder_tags(&message.content);
-                    let content_lines = render_text_body_lines(
+                    let mut content_lines = render_text_body_lines(
                         ctx,
                         &display_content,
                         body_width.saturating_sub(2),
                         Some(ctx.workspace_root),
                     );
+                    // Apply inline badge styling for @ references and image placeholders
+                    apply_badge_styling(&mut content_lines, palette);
                     let mut lines = Vec::new();
                     let mode_color = message.mode.map_or(palette.accent, |m| match m {
                         SessionMode::Build => palette.mode_build,

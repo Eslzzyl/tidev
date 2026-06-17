@@ -6,7 +6,7 @@ use unicode_width::UnicodeWidthChar;
 
 /// Regex for detecting @ file/directory references in composer text.
 /// Look-behind ensures @ is not preceded by word chars or backticks.
-static AT_REF_RE: LazyLock<Regex> = LazyLock::new(|| {
+pub(crate) static AT_REF_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?<![\w`])@(\.?[^\s`.,]*(?:\.[^\s`.,]+)*)").unwrap()
 });
 

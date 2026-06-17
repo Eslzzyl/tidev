@@ -276,6 +276,10 @@ struct App {
     /// User message card screen bounds: (message_id, screen_rect)
     /// Recalculated every frame in render_chat()
     user_card_bounds: Vec<(Uuid, Rect)>,
+    /// Image badge screen bounds within user message cards:
+    /// (message_id, screen_rect, data_url)
+    /// Recalculated every frame in render_chat()
+    user_image_badge_bounds: Vec<(Uuid, Rect, String)>,
     /// Queued prompt card screen bounds: (queue_index, screen_rect)
     /// Recalculated every frame in render_queued_prompts()
     queued_card_bounds: Vec<(usize, Rect)>,
