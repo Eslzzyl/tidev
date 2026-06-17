@@ -9,4 +9,5 @@ pub mod shell_completion;
 pub mod snippet;
 
 pub use composer::Composer;
+pub(crate) use composer::InlineSpanKind;
 pub use snippet::SnippetState;

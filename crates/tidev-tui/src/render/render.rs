@@ -1,3 +1,4 @@
+use crate::input::composer::{InlineSpan, InlineSpanKind};
 use crate::theme::ThemePalette;
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Position, Rect},
@@ -406,59 +407,99 @@ impl App {
         } else {
             let width = text_area.width as usize;
             let selection = composer.selection_range();
+            let composer_spans = composer.spans();
 
-            // Build lines with selection highlighting
+            // Build lines with selection highlighting and inline span badges
             let visual_lines = composer.visual_lines(width);
             let mut lines = Vec::new();
 
             for range in visual_lines.iter() {
-                let line_text = &composer.text()[range.clone()];
+                let line_start = range.start;
+                let line_end = range.end;
 
-                if let Some((sel_start, sel_end)) = selection {
-                    // This line may have selection
-                    let line_start = range.start;
-                    let line_end = range.end;
+                // Collect composer spans that overlap this visual line
+                let overlapping: Vec<&InlineSpan> = composer_spans
+                    .iter()
+                    .filter(|s| s.start < line_end && s.end > line_start)
+                    .collect();
 
-                    // Calculate intersection of selection with this line
-                    let sel_in_line_start = sel_start.max(line_start);
-                    let sel_in_line_end = sel_end.min(line_end);
-
-                    if sel_in_line_start < sel_in_line_end {
-                        // Selection overlaps this line
-                        let mut spans = Vec::new();
-
-                        // Before selection
-                        if sel_in_line_start > line_start {
-                            let before = &composer.text()[line_start..sel_in_line_start];
-                            spans.push(Span::styled(
-                                before.to_string(),
-                                Style::default().fg(palette.text),
-                            ));
-                        }
-
-                        // Selection
-                        let selected = &composer.text()[sel_in_line_start..sel_in_line_end];
-                        spans.push(Span::styled(
-                            selected.to_string(),
-                            Style::default().fg(palette.text).bg(palette.accent),
-                        ));
-
-                        // After selection
-                        if sel_in_line_end < line_end {
-                            let after = &composer.text()[sel_in_line_end..line_end];
-                            spans.push(Span::styled(
-                                after.to_string(),
-                                Style::default().fg(palette.text),
-                            ));
-                        }
-
-                        lines.push(Line::from(spans));
-                    } else {
-                        // No selection on this line
-                        lines.push(Line::from(line_text.to_string()));
-                    }
+                if overlapping.is_empty() {
+                    // No spans on this line — render plain (with selection if active)
+                    lines.push(render_composer_line_plain(
+                        &composer.text()[line_start..line_end],
+                        line_start,
+                        line_end,
+                        selection,
+                        palette,
+                    ));
                 } else {
-                    lines.push(Line::from(line_text.to_string()));
+                    // Build segments split at span boundaries
+                    let mut segments: Vec<(usize, usize, Option<&InlineSpan>)> = Vec::new();
+                    let mut pos = line_start;
+
+                    for span in &overlapping {
+                        let span_start = span.start.max(line_start);
+                        let span_end = span.end.min(line_end);
+                        if pos < span_start {
+                            segments.push((pos, span_start, None));
+                        }
+                        segments.push((span_start, span_end, Some(span)));
+                        pos = span_end;
+                    }
+                    if pos < line_end {
+                        segments.push((pos, line_end, None));
+                    }
+
+                    // Render each segment
+                    let mut line_spans = Vec::new();
+                    for (seg_start, seg_end, opt_span) in &segments {
+                        let text = &composer.text()[*seg_start..*seg_end];
+                        match opt_span {
+                            Some(span) => {
+                                // Inline badge segment
+                                let badge_style = match span.kind {
+                                    InlineSpanKind::AtReference => {
+                                        if selection_overlaps(*seg_start, *seg_end, selection) {
+                                            Style::default()
+                                                .fg(palette.accent)
+                                                .bg(palette.panel_light)
+                                                .add_modifier(Modifier::BOLD)
+                                        } else {
+                                            Style::default()
+                                                .fg(palette.accent)
+                                                .add_modifier(Modifier::BOLD)
+                                        }
+                                    }
+                                    InlineSpanKind::Image => {
+                                        if selection_overlaps(*seg_start, *seg_end, selection) {
+                                            Style::default()
+                                                .bg(palette.accent)
+                                                .fg(palette.selection_fg)
+                                                .add_modifier(Modifier::BOLD)
+                                        } else {
+                                            Style::default()
+                                                .bg(palette.selection_bg)
+                                                .fg(palette.selection_fg)
+                                                .add_modifier(Modifier::BOLD)
+                                        }
+                                    }
+                                };
+                                line_spans.push(Span::styled(text.to_string(), badge_style));
+                            }
+                            None => {
+                                // Plain text segment — apply selection if active
+                                let plain_spans = render_plain_segments(
+                                    text,
+                                    *seg_start,
+                                    *seg_end,
+                                    selection,
+                                    palette,
+                                );
+                                line_spans.extend(plain_spans);
+                            }
+                        }
+                    }
+                    lines.push(Line::from(line_spans));
                 }
             }
 
@@ -1136,4 +1177,71 @@ fn shorten_by_width(s: &str, max_width: usize) -> String {
     }
     out.push(ellipsis);
     out
+}
+
+/// Check if a byte range `[start, end)` overlaps with an optional selection range.
+fn selection_overlaps(
+    start: usize,
+    end: usize,
+    selection: Option<(usize, usize)>,
+) -> bool {
+    selection
+        .map(|(sel_start, sel_end)| start < sel_end && end > sel_start)
+        .unwrap_or(false)
+}
+
+/// Render a plain composer line (no inline spans) with optional selection highlighting.
+fn render_composer_line_plain(
+    text: &str,
+    line_start: usize,
+    line_end: usize,
+    selection: Option<(usize, usize)>,
+    palette: ThemePalette,
+) -> Line<'static> {
+    let spans = render_plain_segments(text, line_start, line_end, selection, palette);
+    Line::from(spans)
+}
+
+/// Render plain text segments with optional selection highlighting.
+/// Splits text into before-selection, selection, and after-selection spans.
+fn render_plain_segments(
+    text: &str,
+    seg_start: usize,
+    seg_end: usize,
+    selection: Option<(usize, usize)>,
+    palette: ThemePalette,
+) -> Vec<Span<'static>> {
+    let mut result = Vec::new();
+
+    if let Some((sel_start, sel_end)) = selection {
+        let sel_in_seg_start = sel_start.max(seg_start);
+        let sel_in_seg_end = sel_end.min(seg_end);
+
+        if sel_in_seg_start < sel_in_seg_end {
+            // Before selection
+            if sel_in_seg_start > seg_start {
+                let before = text[..sel_in_seg_start - seg_start].to_string();
+                result.push(Span::styled(before, Style::default().fg(palette.text)));
+            }
+            // Selection
+            let selected = text[sel_in_seg_start - seg_start..sel_in_seg_end - seg_start].to_string();
+            result.push(Span::styled(
+                selected,
+                Style::default().fg(palette.text).bg(palette.accent),
+            ));
+            // After selection
+            if sel_in_seg_end < seg_end {
+                let after = text[sel_in_seg_end - seg_start..].to_string();
+                result.push(Span::styled(after, Style::default().fg(palette.text)));
+            }
+            return result;
+        }
+    }
+
+    // No selection overlap
+    result.push(Span::styled(
+        text.to_string(),
+        Style::default().fg(palette.text),
+    ));
+    result
 }

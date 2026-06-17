@@ -64,6 +64,14 @@ impl App {
         );
         self.composer
             .replace_range(start, self.composer.cursor(), &replacement);
+        // Register an atomic inline span for the accepted @ reference
+        let span_end = self.composer.cursor();
+        self.composer.register_span(
+            start,
+            span_end,
+            replacement,
+            InlineSpanKind::AtReference,
+        );
         self.at_mention.clear();
         self.refresh_at_mention_state();
         self.refresh_snippet_state();

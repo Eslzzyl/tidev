@@ -1,6 +1,39 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use fancy_regex::Regex;
+use std::sync::LazyLock;
 use std::ops::Range;
 use unicode_width::UnicodeWidthChar;
+
+/// Regex for detecting @ file/directory references in composer text.
+/// Look-behind ensures @ is not preceded by word chars or backticks.
+static AT_REF_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?<![\w`])@(\.?[^\s`.,]*(?:\.[^\s`.,]+)*)").unwrap()
+});
+
+/// Kind of an inline span in the composer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum InlineSpanKind {
+    /// @file/@dir reference accepted via autocomplete.
+    AtReference,
+    /// Image attachment placeholder (pasted from clipboard).
+    Image,
+}
+
+/// A byte range in the composer text that should be rendered as an atomic
+/// styled badge. The cursor skips over the entire span; backspace/delete
+/// removes it as a unit.
+#[derive(Clone, Debug)]
+pub(crate) struct InlineSpan {
+    /// Byte start index in `text` (inclusive).
+    pub start: usize,
+    /// Byte end index in `text` (exclusive).
+    pub end: usize,
+    /// Display text (identical to text content for @ refs, badge text for images).
+    #[allow(dead_code)]
+    pub display: String,
+    /// Kind of span.
+    pub kind: InlineSpanKind,
+}
 
 #[derive(Clone, Debug)]
 pub struct Composer {
@@ -15,6 +48,9 @@ pub struct Composer {
     /// Anchor position for text selection. When Some, there's an active selection
     /// from min(anchor, cursor) to max(anchor, cursor).
     selection_anchor: Option<usize>,
+    /// Atomic inline spans rendered as styled badges.
+    /// Kept sorted by `start`, non-overlapping.
+    pub(crate) spans: Vec<InlineSpan>,
 }
 
 impl Composer {
@@ -29,6 +65,7 @@ impl Composer {
             draft: String::new(),
             placeholder: placeholder.into(),
             selection_anchor: None,
+            spans: Vec::new(),
         }
     }
 
@@ -56,6 +93,7 @@ impl Composer {
         self.history_cursor = None;
         self.draft.clear();
         self.selection_anchor = None;
+        self.spans.clear();
     }
 
     pub fn set_text(&mut self, text: String) {
@@ -65,6 +103,8 @@ impl Composer {
         self.visual_line_hint = None;
         self.history_cursor = None;
         self.selection_anchor = None;
+        self.spans.clear();
+        self.detect_at_spans();
     }
 
     pub fn remember_submission(&mut self, submission: &str) {
@@ -122,9 +162,12 @@ impl Composer {
                     self.cursor = 0;
                     self.preferred_column = None;
                     self.selection_anchor = None;
+                    self.spans.clear();
                 }
                 'k' => {
+                    let old_len = self.text.len();
                     self.text.truncate(self.cursor);
+                    self.remove_spans_in_range(self.cursor, old_len);
                     self.preferred_column = None;
                     self.selection_anchor = None;
                 }
@@ -194,11 +237,13 @@ impl Composer {
             }
             KeyCode::Home => {
                 self.cursor = self.line_start(self.cursor);
+                self.cursor = self.snap_to_span_edge(self.cursor);
                 self.preferred_column = None;
                 self.selection_anchor = None;
             }
             KeyCode::End => {
                 self.cursor = self.line_end(self.cursor);
+                self.cursor = self.snap_to_span_edge(self.cursor);
                 self.preferred_column = None;
                 self.selection_anchor = None;
             }
@@ -275,7 +320,7 @@ impl Composer {
         let line_index = line.min(lines.len().saturating_sub(1) as u16) as usize;
         let line = lines[line_index];
         let column = column as usize;
-        self.cursor = cursor_from_visual_position(&self.text, line, column);
+        self.cursor = snap_to_span_edge_static(&self.spans, cursor_from_visual_position(&self.text, line, column));
         self.preferred_column = Some(column);
         self.visual_line_hint = Some(line_index);
     }
@@ -296,6 +341,113 @@ impl Composer {
 
     pub fn is_empty(&self) -> bool {
         self.text.is_empty()
+    }
+
+    // ========== Inline Span API ==========
+
+    /// Public accessor for spans (used by rendering code).
+    pub(crate) fn spans(&self) -> &[InlineSpan] {
+        &self.spans
+    }
+
+    /// Register a new inline span. Maintains sorted, non-overlapping invariant.
+    pub(crate) fn register_span(
+        &mut self,
+        start: usize,
+        end: usize,
+        display: String,
+        kind: InlineSpanKind,
+    ) {
+        let start = start.min(self.text.len());
+        let end = end.min(self.text.len()).max(start);
+        if start >= end {
+            return;
+        }
+        let span = InlineSpan {
+            start,
+            end,
+            display,
+            kind,
+        };
+        // Insert sorted by start
+        let pos = self.spans.partition_point(|s| s.start < span.start);
+        self.spans.insert(pos, span);
+    }
+
+    /// Find the span that contains `pos` (start <= pos <= end), if any.
+    #[allow(dead_code)]
+    pub(crate) fn span_at(&self, pos: usize) -> Option<&InlineSpan> {
+        self.spans
+            .iter()
+            .find(|s| pos >= s.start && pos <= s.end)
+    }
+
+    /// Find the span that ends exactly at `pos` (cursor is right after it).
+    pub(crate) fn span_before(&self, pos: usize) -> Option<&InlineSpan> {
+        self.spans.iter().find(|s| s.end == pos)
+    }
+
+    /// Find the span that starts exactly at `pos` (cursor is right before it).
+    pub(crate) fn span_after(&self, pos: usize) -> Option<&InlineSpan> {
+        self.spans.iter().find(|s| s.start == pos)
+    }
+
+    /// If `pos` is strictly inside a span (start < pos < end), return span.start;
+    /// otherwise return `pos` unchanged.
+    pub(crate) fn snap_to_span_edge(&self, pos: usize) -> usize {
+        if let Some(span) = self.spans.iter().find(|s| pos > s.start && pos < s.end) {
+            span.start
+        } else {
+            pos
+        }
+    }
+
+    /// Remove any spans that overlap with the byte range `[start, end)`.
+    fn remove_spans_in_range(&mut self, start: usize, end: usize) {
+        self.spans.retain(|s| s.end <= start || s.start >= end);
+    }
+
+    /// Adjust all spans after a text edit at `edit_start` that replaced
+    /// `old_len` bytes with `new_len` bytes.
+    fn adjust_after_edit(&mut self, edit_start: usize, old_len: usize, new_len: usize) {
+        let edit_end = edit_start + old_len;
+        let delta = new_len as isize - old_len as isize;
+
+        // Remove spans that overlap with the edited region
+        self.spans
+            .retain(|s| s.end <= edit_start || s.start >= edit_end);
+
+        // Shift spans that start at or after the edit end
+        for span in &mut self.spans {
+            if span.start >= edit_end {
+                span.start = (span.start as isize + delta) as usize;
+                span.end = (span.end as isize + delta) as usize;
+            }
+        }
+    }
+
+    /// Scan the composer text with the @ reference regex and register spans
+    /// for every match. Existing AtReference spans are cleared first.
+    pub(crate) fn detect_at_spans(&mut self) {
+        // Remove existing AtReference spans
+        self.spans.retain(|s| s.kind != InlineSpanKind::AtReference);
+
+        let text = self.text.clone();
+        let mut start = 0;
+        while let Some(caps) = AT_REF_RE.captures(&text[start..]).unwrap() {
+            if let Some(path_match) = caps.get(1) {
+                if path_match.as_str().is_empty() {
+                    break;
+                }
+                let abs_start = start + path_match.start() - 1; // include the '@'
+                let abs_end = start + path_match.end();
+                let display = text[abs_start..abs_end].to_string();
+                self.register_span(abs_start, abs_end, display, InlineSpanKind::AtReference);
+                start += path_match.end();
+            } else {
+                break;
+            }
+        }
     }
 
     // ========== Selection API ==========
@@ -359,6 +511,8 @@ impl Composer {
     /// Deletes the current selection if any, returns true if deletion occurred.
     fn delete_selection(&mut self) -> bool {
         if let Some((start, end)) = self.selection_range() {
+            self.remove_spans_in_range(start, end);
+            self.adjust_after_edit(start, end - start, 0);
             self.text.drain(start..end);
             self.cursor = start;
             self.selection_anchor = None;
@@ -387,7 +541,11 @@ impl Composer {
     fn insert_char(&mut self, ch: char) {
         // If there's a selection, replace it with the new character
         self.delete_selection();
-        self.text.insert(self.cursor, ch);
+        // Snap cursor out of any span before inserting
+        self.cursor = self.snap_to_span_edge(self.cursor);
+        let insert_pos = self.cursor;
+        self.text.insert(insert_pos, ch);
+        self.adjust_after_edit(insert_pos, 0, ch.len_utf8());
         self.cursor += ch.len_utf8();
         self.preferred_column = None;
         self.visual_line_hint = None;
@@ -397,7 +555,11 @@ impl Composer {
     pub fn insert_str(&mut self, value: &str) {
         // If there's a selection, replace it with the new text
         self.delete_selection();
-        self.text.insert_str(self.cursor, value);
+        // Snap cursor out of any span before inserting
+        self.cursor = self.snap_to_span_edge(self.cursor);
+        let insert_pos = self.cursor;
+        self.text.insert_str(insert_pos, value);
+        self.adjust_after_edit(insert_pos, 0, value.len());
         self.cursor += value.len();
         self.preferred_column = None;
         self.visual_line_hint = None;
@@ -407,6 +569,9 @@ impl Composer {
     pub fn replace_range(&mut self, start: usize, end: usize, replacement: &str) {
         let start = start.min(self.text.len());
         let end = end.min(self.text.len()).max(start);
+        let old_len = end - start;
+        self.remove_spans_in_range(start, end);
+        self.adjust_after_edit(start, old_len, replacement.len());
         self.text.replace_range(start..end, replacement);
         self.cursor = start + replacement.len();
         self.preferred_column = None;
@@ -424,8 +589,32 @@ impl Composer {
             return;
         }
 
+        // If cursor is strictly inside a span, snap to its start (don't delete)
+        if let Some(span) = self.spans.iter().find(|s| self.cursor > s.start && self.cursor < s.end)
+        {
+            self.cursor = span.start;
+            self.preferred_column = None;
+            self.visual_line_hint = None;
+            return;
+        }
+
+        // If cursor is right after a span, delete the entire span
+        if let Some(span) = self.span_before(self.cursor) {
+            let span_start = span.start;
+            let span_end = span.end;
+            self.text.drain(span_start..span_end);
+            self.cursor = span_start;
+            self.spans.retain(|s| s.start != span_start || s.end != span_end);
+            self.adjust_after_edit(span_start, span_end - span_start, 0);
+            self.preferred_column = None;
+            self.visual_line_hint = None;
+            self.history_cursor = None;
+            return;
+        }
+
         let previous = self.previous_char_boundary(self.cursor);
         self.text.drain(previous..self.cursor);
+        self.adjust_after_edit(previous, self.cursor - previous, 0);
         self.cursor = previous;
         self.preferred_column = None;
         self.visual_line_hint = None;
@@ -443,10 +632,24 @@ impl Composer {
             return;
         }
 
+        // If cursor is inside or right after a span, delete the entire span
+        if let Some(span) = self.spans.iter().find(|s| cursor >= s.start && cursor <= s.end) {
+            let span_start = span.start;
+            let span_end = span.end;
+            self.text.drain(span_start..span_end);
+            self.cursor = span_start;
+            self.spans.retain(|s| s.start != span_start || s.end != span_end);
+            self.adjust_after_edit(span_start, span_end - span_start, 0);
+            self.preferred_column = None;
+            self.visual_line_hint = None;
+            self.history_cursor = None;
+            return;
+        }
+
         let mut boundary = cursor;
         while boundary > 0 {
             let previous = self.previous_char_boundary(boundary);
-            // `previous` is always ≤ boundary; when text is non-empty and
+            // `previous` is always <= boundary; when text is non-empty and
             // boundary > 0 there is guaranteed to be at least one character
             // in `previous..boundary`, but we guard defensively anyway.
             if previous >= boundary {
@@ -481,7 +684,9 @@ impl Composer {
 
         // Guard against boundary exceeding text length (defensive)
         let boundary = boundary.min(self.text.len());
+        let old_len = cursor - boundary;
         self.text.drain(boundary..cursor);
+        self.adjust_after_edit(boundary, old_len, 0);
         self.cursor = boundary;
         self.preferred_column = None;
         self.visual_line_hint = None;
@@ -499,6 +704,9 @@ impl Composer {
         }
 
         let start = self.line_start(self.cursor);
+        let old_len = self.cursor - start;
+        self.remove_spans_in_range(start, self.cursor);
+        self.adjust_after_edit(start, old_len, 0);
         self.text.drain(start..self.cursor);
         self.cursor = start;
         self.preferred_column = None;
@@ -516,22 +724,58 @@ impl Composer {
             return;
         }
 
+        // If cursor is strictly inside a span, snap to its end (don't delete)
+        if let Some(span) = self.spans.iter().find(|s| self.cursor >= s.start && self.cursor < s.end)
+        {
+            self.cursor = span.end;
+            self.preferred_column = None;
+            self.visual_line_hint = None;
+            return;
+        }
+
+        // If cursor is right before a span, delete the entire span
+        if let Some(span) = self.span_after(self.cursor) {
+            let span_start = span.start;
+            let span_end = span.end;
+            self.text.drain(span_start..span_end);
+            self.cursor = span_start;
+            self.spans.retain(|s| s.start != span_start || s.end != span_end);
+            self.adjust_after_edit(span_start, span_end - span_start, 0);
+            self.preferred_column = None;
+            self.visual_line_hint = None;
+            self.history_cursor = None;
+            return;
+        }
+
         let next = self.next_char_boundary(self.cursor);
         self.text.drain(self.cursor..next);
+        self.adjust_after_edit(self.cursor, next - self.cursor, 0);
         self.preferred_column = None;
         self.visual_line_hint = None;
         self.history_cursor = None;
     }
 
     fn move_left(&mut self) {
-        self.cursor = self.previous_char_boundary(self.cursor);
+        let new_pos = self.previous_char_boundary(self.cursor);
+        // If we landed inside a span, jump to its start
+        self.cursor = if new_pos < self.cursor {
+            self.snap_to_span_edge(new_pos)
+        } else {
+            new_pos
+        };
         self.preferred_column = None;
         self.visual_line_hint = None;
         self.selection_anchor = None; // Clear selection on cursor movement
     }
 
     fn move_right(&mut self) {
-        self.cursor = self.next_char_boundary(self.cursor);
+        let new_pos = self.next_char_boundary(self.cursor);
+        // If we landed inside a span, jump to its end
+        self.cursor = if let Some(span) = self.spans.iter().find(|s| new_pos > s.start && new_pos < s.end) {
+            span.end
+        } else {
+            new_pos
+        };
         self.preferred_column = None;
         self.visual_line_hint = None;
         self.selection_anchor = None; // Clear selection on cursor movement
@@ -612,7 +856,10 @@ impl Composer {
             return;
         }
 
-        self.cursor = cursor_from_visual_position(&self.text, lines[target_line], desired_column);
+        self.cursor = snap_to_span_edge_static(
+            &self.spans,
+            cursor_from_visual_position(&self.text, lines[target_line], desired_column),
+        );
         self.preferred_column = Some(desired_column);
         self.visual_line_hint = Some(target_line);
         self.selection_anchor = None; // Clear selection on vertical movement
@@ -686,6 +933,16 @@ fn display_width(text: &str) -> usize {
     text.chars()
         .map(|ch| UnicodeWidthChar::width(ch).unwrap_or(0))
         .sum()
+}
+
+/// Standalone version of snap_to_span_edge that takes a span slice.
+/// If `pos` is strictly inside a span, returns `span.start`; otherwise `pos`.
+fn snap_to_span_edge_static(spans: &[InlineSpan], pos: usize) -> usize {
+    if let Some(span) = spans.iter().find(|s| pos > s.start && pos < s.end) {
+        span.start
+    } else {
+        pos
+    }
 }
 
 fn cursor_from_visual_position(text: &str, line: VisualLine, target_column: usize) -> usize {

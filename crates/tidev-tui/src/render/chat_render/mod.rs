@@ -1,7 +1,7 @@
 mod content;
 #[cfg(test)]
 mod tests;
-mod tool;
+pub(crate) mod tool;
 mod utils;
 
 pub(crate) use content::strip_system_reminder_tags;

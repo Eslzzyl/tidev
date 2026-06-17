@@ -904,7 +904,12 @@ impl App {
             data_url,
             file_size,
         });
-        self.composer.insert_str("[Image]");
+        let badge = format_image_badge("image/png", file_size);
+        let span_start = self.composer.cursor();
+        self.composer.insert_str(&badge);
+        let span_end = self.composer.cursor();
+        self.composer
+            .register_span(span_start, span_end, badge, InlineSpanKind::Image);
         self.last_notice = Some("Image pasted into draft".to_string());
         Ok(())
     }
@@ -1045,4 +1050,14 @@ impl TermiosGuard {
     fn save(_fd: i32) -> Self {
         Self
     }
+}
+
+/// Format an image badge string like `[100.0 KB PNG]` for display in the composer.
+pub(crate) fn format_image_badge(mime: &str, file_size: u64) -> String {
+    let type_label = mime
+        .strip_prefix("image/")
+        .unwrap_or(mime)
+        .to_uppercase();
+    let size_str = crate::render::chat_render::tool::format_file_size(file_size);
+    format!("[{} {}]", size_str, type_label)
 }
