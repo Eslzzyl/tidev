@@ -335,6 +335,14 @@ struct App {
     memory_store: Arc<MemoryStore>,
     /// Memory management panel
     memory_panel: Option<MemoryPanelState>,
+    /// Image protocol picker for terminal image display (Sixel/Kitty/iTerm2).
+    /// None if the terminal does not support any graphics protocol.
+    image_picker: Option<ratatui_image::picker::Picker>,
+    /// Active image viewer overlay, if any.
+    image_viewer: Option<crate::ui::image_viewer::ImageViewerState>,
+    /// When true, the next mouse Up event should NOT close the image viewer.
+    /// Set when the viewer is opened by a click, cleared on the Up of that click.
+    image_viewer_consume_next_up: bool,
     /// TUI terminal session for raw mode / alternate screen management.
     /// Used to suspend/resume the TUI when launching external editors.
     terminal_session: Option<TerminalSession>,

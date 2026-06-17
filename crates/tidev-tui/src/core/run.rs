@@ -339,6 +339,9 @@ impl App {
             thinking_level: active_model.thinking_level.clone(),
             memory_store,
             memory_panel: None,
+            image_picker: None,
+            image_viewer: None,
+            image_viewer_consume_next_up: false,
             terminal_session: None,
             force_full_redraw: false,
             processing_child_session: false,
@@ -390,6 +393,19 @@ impl App {
         let mut terminal = Terminal::new(backend).context("failed to create terminal")?;
         terminal.clear().context("failed to clear terminal")?;
         log::info!("startup: terminal created in {:?}", _t_run.elapsed());
+
+        // Initialize the image protocol picker for terminal image display.
+        // Must be called after entering alternate screen, before the event loop.
+        self.image_picker = match ratatui_image::picker::Picker::from_query_stdio() {
+            Ok(picker) => {
+                log::info!("image protocol detected: {:?}", picker.protocol_type());
+                Some(picker)
+            }
+            Err(e) => {
+                log::info!("image protocol not available: {}", e);
+                None
+            }
+        };
 
         let snapshot = self.snapshot.clone();
         let cleanup_cancel = self.cleanup_cancel.clone();

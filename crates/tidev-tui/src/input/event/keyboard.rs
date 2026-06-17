@@ -24,6 +24,13 @@ impl App {
             return Ok(());
         }
 
+        // Image viewer overlay: any key closes it
+        if self.image_viewer.is_some() {
+            self.image_viewer = None;
+            self.dirty = true;
+            return Ok(());
+        }
+
         // In subsession, arrow keys work directly for navigation
         if self.conversation.parent_session_id.is_some() {
             match key.code {
@@ -898,18 +905,19 @@ impl App {
             })
             .unwrap_or(0);
 
+        let badge = format_image_badge("image/png", file_size);
+        let data_url_for_span = data_url.clone();
+        let span_start = self.composer.cursor();
+        self.composer.insert_str(&badge);
+        let span_end = self.composer.cursor();
+        self.composer
+            .register_span(span_start, span_end, badge, InlineSpanKind::Image, Some(data_url_for_span));
         self.draft_attachments.push(MessageAttachment::Image {
             filename: format!("pasted-image-{}.png", Uuid::new_v4()),
             mime: "image/png".to_string(),
             data_url,
             file_size,
         });
-        let badge = format_image_badge("image/png", file_size);
-        let span_start = self.composer.cursor();
-        self.composer.insert_str(&badge);
-        let span_end = self.composer.cursor();
-        self.composer
-            .register_span(span_start, span_end, badge, InlineSpanKind::Image);
         self.last_notice = Some("Image pasted into draft".to_string());
         Ok(())
     }

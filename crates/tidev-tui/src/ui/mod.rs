@@ -4,6 +4,7 @@ pub mod agents_panel;
 pub mod balance_panel;
 pub mod connect;
 pub mod fork_confirm;
+pub mod image_viewer;
 pub mod mcp_panel;
 pub mod memory_panel;
 pub mod message_panel;

@@ -71,6 +71,7 @@ impl App {
             span_end,
             replacement,
             InlineSpanKind::AtReference,
+            None,
         );
         self.at_mention.clear();
         self.refresh_at_mention_state();

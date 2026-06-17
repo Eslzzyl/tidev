@@ -12,6 +12,20 @@ fn in_overlay(position: Position, overlay: Option<Rect>) -> bool {
 
 impl App {
     pub(crate) fn handle_mouse_event(&mut self, mouse: MouseEvent, runtime: &Runtime) {
+        // Image viewer overlay: close on any click (Up), block everything else.
+        if self.image_viewer.is_some() {
+            if matches!(mouse.kind, MouseEventKind::Up(_)) {
+                if self.image_viewer_consume_next_up {
+                    // This Up belongs to the click that opened the viewer — skip.
+                    self.image_viewer_consume_next_up = false;
+                } else {
+                    self.image_viewer = None;
+                    self.dirty = true;
+                }
+            }
+            return;
+        }
+
         // Route mouse events to active overlay panel first.
         // Panels are mutually exclusive — only one can be open at a time.
         if self.theme_panel.is_some() {
@@ -175,6 +189,47 @@ impl App {
 
                 // Clear scrollbar drag state
                 self.scrollbar_drag_state = None;
+
+                // Image badge click: open viewer if this was a click (not drag)
+                // on an Image span in the input area.
+                if !self.mouse_selection.is_dragging() {
+                    if let Some(picker) = &self.image_picker {
+                        if let Some(inner) = self.input_area.get()
+                            && inner.contains(position)
+                        {
+                            // Compute the raw text position (before span snapping)
+                            // to check if the click landed inside an Image span.
+                            let scroll = self.input_scroll_offset as u16;
+                            let local_line = position.y.saturating_sub(inner.y);
+                            let local_column = position.x.saturating_sub(inner.x);
+                            let target_line = scroll.saturating_add(local_line);
+                            let raw_pos = self.composer.raw_text_position_at_visual(
+                                inner.width,
+                                target_line,
+                                local_column,
+                            );
+                            if let Some(span) = self.composer.span_at(raw_pos)
+                                && span.kind == crate::input::composer::InlineSpanKind::Image
+                                && let Some(data_url) = &span.data_url
+                            {
+                                let data_url = data_url.clone();
+                                let filename = span.display.clone();
+                                if let Some(viewer) =
+                                    crate::ui::image_viewer::ImageViewerState::new(
+                                        picker, &data_url, &filename,
+                                    )
+                                {
+                                    self.image_viewer = Some(viewer);
+                                    self.image_viewer_consume_next_up = true;
+                                    self.dirty = true;
+                                    self.mouse_selection
+                                        .release(position, self.message_scroll_offset);
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
 
                 // Handle input area mouse up for selection
                 if self.handle_input_area_mouse_up(position) {

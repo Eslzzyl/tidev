@@ -156,6 +156,10 @@ impl App {
             self.render_undo_confirm_dialog(frame, area);
         }
         self.finish_mouse_selection(frame);
+        // Image viewer overlay — rendered last so it's on top of everything
+        if let (Some(viewer), Some(picker)) = (&mut self.image_viewer, &self.image_picker) {
+            viewer.render(frame, frame.area(), picker);
+        }
         self.render_toast(frame);
     }
 

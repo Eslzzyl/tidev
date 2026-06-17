@@ -33,6 +33,8 @@ pub(crate) struct InlineSpan {
     pub display: String,
     /// Kind of span.
     pub kind: InlineSpanKind,
+    /// Associated data URL for image spans (base64-encoded data URL).
+    pub data_url: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -304,6 +306,22 @@ impl Composer {
         self.move_vertical(width, 1);
     }
 
+    /// Compute the text position from a visual position WITHOUT snapping to
+    /// span edges. Used for click detection to determine if the raw click
+    /// landed inside a span.
+    pub(crate) fn raw_text_position_at_visual(&self, width: u16, line: u16, column: u16) -> usize {
+        let width = width as usize;
+        if width == 0 {
+            return 0;
+        }
+        let lines = visual_lines(&self.text, width);
+        if lines.is_empty() {
+            return 0;
+        }
+        let line_index = line.min(lines.len().saturating_sub(1) as u16) as usize;
+        cursor_from_visual_position(&self.text, lines[line_index], column as usize)
+    }
+
     pub fn set_cursor_at_visual_position(&mut self, width: u16, line: u16, column: u16) {
         let width = width as usize;
         if width == 0 {
@@ -357,6 +375,7 @@ impl Composer {
         end: usize,
         display: String,
         kind: InlineSpanKind,
+        data_url: Option<String>,
     ) {
         let start = start.min(self.text.len());
         let end = end.min(self.text.len()).max(start);
@@ -368,18 +387,19 @@ impl Composer {
             end,
             display,
             kind,
+            data_url,
         };
         // Insert sorted by start
         let pos = self.spans.partition_point(|s| s.start < span.start);
         self.spans.insert(pos, span);
     }
 
-    /// Find the span that contains `pos` (start <= pos <= end), if any.
-    #[allow(dead_code)]
+    /// Find the span that strictly contains `pos` (start < pos < end), if any.
+    /// Edges are excluded so clicking at the boundary doesn't trigger.
     pub(crate) fn span_at(&self, pos: usize) -> Option<&InlineSpan> {
         self.spans
             .iter()
-            .find(|s| pos >= s.start && pos <= s.end)
+            .find(|s| pos > s.start && pos < s.end)
     }
 
     /// Find the span that ends exactly at `pos` (cursor is right after it).
@@ -442,7 +462,7 @@ impl Composer {
                 let abs_start = start + path_match.start() - 1; // include the '@'
                 let abs_end = start + path_match.end();
                 let display = text[abs_start..abs_end].to_string();
-                self.register_span(abs_start, abs_end, display, InlineSpanKind::AtReference);
+                self.register_span(abs_start, abs_end, display, InlineSpanKind::AtReference, None);
                 start += path_match.end();
             } else {
                 break;
