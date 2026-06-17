@@ -50,8 +50,10 @@ pub(super) fn render_tool_call_with_result(
     let (edit_old_lines, edit_new_lines) =
         if matches!(canonical_name, "edit") && tool_result.is_none() {
             (
-                count_lines_in_partial_json(&tool_call.arguments, "old_text"),
-                count_lines_in_partial_json(&tool_call.arguments, "new_text"),
+                count_lines_in_partial_json(&tool_call.arguments, "old_text")
+                    .max(count_lines_in_partial_json(&tool_call.arguments, "old_string")),
+                count_lines_in_partial_json(&tool_call.arguments, "new_text")
+                    .max(count_lines_in_partial_json(&tool_call.arguments, "new_string")),
             )
         } else {
             (0, 0)
