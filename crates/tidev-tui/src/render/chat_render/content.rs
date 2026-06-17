@@ -298,16 +298,12 @@ pub(super) fn render_message_cards_inner(
             } else {
                 vec![(palette.panel_alt, {
                     let display_content = strip_system_reminder_tags(&message.content);
-                    let mut content_lines = render_text_body_lines(
+                    let content_lines = render_text_body_lines(
                         ctx,
                         &display_content,
                         body_width.saturating_sub(2),
                         Some(ctx.workspace_root),
                     );
-                    for attachment in &message.attachments {
-                        content_lines
-                            .push(line_with_style(&attachment.summary(), palette.accent_soft));
-                    }
                     let mut lines = Vec::new();
                     let mode_color = message.mode.map_or(palette.accent, |m| match m {
                         SessionMode::Build => palette.mode_build,
