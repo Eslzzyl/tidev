@@ -295,29 +295,34 @@ impl App {
             "~",
         );
 
-        let bottom_area = Rect::new(
+        // Always show the workspace path on the very last row.
+        let workspace_area = Rect::new(
             area.x + 1,
             area.bottom() - 1,
             area.width.saturating_sub(2),
             1,
         );
-        // Show last_notice on the welcome screen so the user can see clipboard
-        // errors, model-support messages, etc.  When there is no notice, show
-        // the workspace path as before.
-        if let Some(message) = self.last_notice.as_deref() {
-            frame.render_widget(
-                Paragraph::new(Line::from(Span::styled(
-                    message,
-                    Style::default().fg(palette.muted),
-                ))),
-                bottom_area,
-            );
-        } else {
-            let workspace_line = Line::from(Span::styled(
-                display_path,
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                &display_path,
                 Style::default().fg(palette.muted),
-            ));
-            frame.render_widget(Paragraph::new(workspace_line), bottom_area);
+            ))),
+            workspace_area,
+        );
+
+        // When there is a notice, show it on the row directly above the
+        // workspace path so the two always sit together at the bottom.
+        if let Some(message) = self.last_notice.as_deref() {
+            let notice_y = area.bottom().saturating_sub(2);
+            if notice_y < workspace_area.y {
+                frame.render_widget(
+                    Paragraph::new(Line::from(Span::styled(
+                        message,
+                        Style::default().fg(palette.muted),
+                    ))),
+                    Rect::new(area.x + 1, notice_y, area.width.saturating_sub(2), 1),
+                );
+            }
         }
 
         // Palettes should align with the composer's visual left edge (offset by 2 columns)
