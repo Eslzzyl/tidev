@@ -859,30 +859,71 @@ impl App {
     }
 
     pub(crate) fn handle_clipboard_paste(&mut self) -> Result<()> {
+        log::debug!("handle_clipboard_paste: entering");
         let mut clipboard = match arboard::Clipboard::new() {
             Ok(clipboard) => clipboard,
             Err(error) => {
+                log::debug!("handle_clipboard_paste: clipboard unavailable: {error}");
                 self.last_notice = Some(format!("Clipboard unavailable: {error}"));
                 return Ok(());
             }
         };
 
-        if let Ok(text) = clipboard.get_text()
-            && !text.is_empty()
-        {
-            return self.handle_text_paste(&text);
+        match clipboard.get_text() {
+            Ok(text) if !text.is_empty() => {
+                log::debug!(
+                    "handle_clipboard_paste: got text ({} bytes), pasting as text",
+                    text.len()
+                );
+                return self.handle_text_paste(&text);
+            }
+            Ok(text) => {
+                log::debug!(
+                    "handle_clipboard_paste: got empty text ({} bytes), trying image",
+                    text.len()
+                );
+            }
+            Err(e) => {
+                log::debug!("handle_clipboard_paste: get_text failed: {e}, trying image");
+            }
         }
 
         let image = match clipboard.get_image() {
-            Ok(image) => image,
-            Err(_) => {
-                self.last_notice =
-                    Some("Clipboard does not contain pasteable text or image".to_string());
-                return Ok(());
+            Ok(image) => {
+                log::debug!(
+                    "handle_clipboard_paste: got image {}x{}",
+                    image.width,
+                    image.height
+                );
+                image
+            }
+            Err(e) => {
+                log::debug!("handle_clipboard_paste: get_image failed: {e}");
+                // On WSL2, arboard cannot read image data from the Windows
+                // clipboard.  Try the PowerShell fallback.
+                match wsl_clipboard_image() {
+                    Some(img) => {
+                        log::debug!(
+                            "handle_clipboard_paste: WSL fallback got image {}x{}",
+                            img.width,
+                            img.height
+                        );
+                        img
+                    }
+                    None => {
+                        self.last_notice =
+                            Some("Clipboard does not contain pasteable text or image".to_string());
+                        return Ok(());
+                    }
+                }
             }
         };
 
         if !self.active_model.supports_images {
+            log::debug!(
+                "handle_clipboard_paste: model {} does not support images",
+                self.active_model.model_id
+            );
             self.last_notice = Some("This model does not support image attachments".to_string());
             return Ok(());
         }
@@ -890,6 +931,7 @@ impl App {
         let data_url = match png_data_url_from_clipboard_image(image) {
             Ok(value) => value,
             Err(error) => {
+                log::debug!("handle_clipboard_paste: image decode failed: {error}");
                 self.last_notice = Some(format!("Failed to decode clipboard image: {error}"));
                 return Ok(());
             }
@@ -897,11 +939,11 @@ impl App {
 
         let file_size = data_url
             .find("base64,")
-            .and_then(|i| {
+            .map(|i| {
                 let b64 = &data_url[i + 7..];
                 let decoded_len = (b64.len() as u64).saturating_mul(3) / 4;
                 let padding = b64.bytes().rev().take(2).filter(|&b| b == b'=').count() as u64;
-                Some(decoded_len.saturating_sub(padding))
+                decoded_len.saturating_sub(padding)
             })
             .unwrap_or(0);
 
@@ -918,6 +960,7 @@ impl App {
             data_url,
             file_size,
         });
+        log::debug!("handle_clipboard_paste: image pasted successfully ({file_size} bytes)");
         self.last_notice = Some("Image pasted into draft".to_string());
         Ok(())
     }
@@ -1068,4 +1111,110 @@ pub(crate) fn format_image_badge(mime: &str, file_size: u64) -> String {
         .to_uppercase();
     let size_str = crate::render::chat_render::tool::format_file_size(file_size);
     format!("[{} {}]", size_str, type_label)
+}
+
+// ---------------------------------------------------------------------------
+// WSL clipboard image fallback
+// ---------------------------------------------------------------------------
+
+/// On WSL2, `arboard::Clipboard::get_image()` often fails because the X11
+/// clipboard bridge (WSLg / RDP) does not expose image data in `image/png`
+/// format.  This function works around the limitation by asking the Windows
+/// host to save the clipboard image via PowerShell, then reading the
+/// resulting PNG file back into an `arboard::ImageData`.
+#[cfg(target_os = "linux")]
+pub(crate) fn wsl_clipboard_image() -> Option<arboard::ImageData<'static>> {
+    use super::super::mouse_selection::is_probably_wsl;
+    if !is_probably_wsl() {
+        return None;
+    }
+
+    log::debug!("wsl_clipboard_image: attempting PowerShell fallback");
+
+    // PowerShell script that saves the clipboard image to a temp PNG and
+    // prints the Windows path.  UTF-8 output is forced to avoid encoding
+    // mismatches between powershell.exe (UTF-16LE) and pwsh (UTF-8).
+    let script = r#"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; \
+$img = Get-Clipboard -Format Image; \
+if ($img -ne $null) { \
+  $p=[System.IO.Path]::GetTempFileName(); \
+  $p=[System.IO.Path]::ChangeExtension($p,'png'); \
+  $img.Save($p,[System.Drawing.Imaging.ImageFormat]::Png); \
+  Write-Output $p \
+} else { exit 1 }"#;
+
+    let win_path = try_powershell_command(script)?;
+    log::debug!("wsl_clipboard_image: PowerShell saved to {win_path}");
+
+    let wsl_path = windows_path_to_wsl(&win_path)?;
+    log::debug!("wsl_clipboard_image: mapped to {}", wsl_path.display());
+
+    let img = image::open(&wsl_path).ok()?;
+    let rgba = img.to_rgba8();
+    let (w, h) = rgba.dimensions();
+
+    log::debug!("wsl_clipboard_image: decoded {w}x{h} RGBA image");
+
+    Some(arboard::ImageData {
+        width: w as usize,
+        height: h as usize,
+        bytes: std::borrow::Cow::Owned(rgba.into_raw()),
+    })
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn wsl_clipboard_image() -> Option<arboard::ImageData<'static>> {
+    None
+}
+
+/// Try to execute a PowerShell script that saves the clipboard image and
+/// returns the Windows path to the temp file.  Tries `powershell.exe`,
+/// `pwsh`, and `powershell` in order.
+#[cfg(target_os = "linux")]
+fn try_powershell_command(script: &str) -> Option<String> {
+    for cmd in ["powershell.exe", "pwsh", "powershell"] {
+        match std::process::Command::new(cmd)
+            .args(["-NoProfile", "-Command", script])
+            .output()
+        {
+            Ok(output) if output.status.success() => {
+                let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if !path.is_empty() {
+                    log::debug!("wsl_clipboard_image: {cmd} succeeded");
+                    return Some(path);
+                }
+                log::debug!("wsl_clipboard_image: {cmd} returned empty path");
+            }
+            Ok(output) => {
+                log::debug!(
+                    "wsl_clipboard_image: {cmd} failed with status {}",
+                    output.status
+                );
+            }
+            Err(e) => {
+                log::debug!("wsl_clipboard_image: {cmd} not executable: {e}");
+            }
+        }
+    }
+    None
+}
+
+/// Convert a Windows path like `C:\Users\...\tmp.png` to a WSL path
+/// like `/mnt/c/Users/.../tmp.png`.
+#[cfg(target_os = "linux")]
+fn windows_path_to_wsl(input: &str) -> Option<std::path::PathBuf> {
+    let drive = input.chars().next()?.to_ascii_lowercase();
+    if !drive.is_ascii_lowercase() || input.get(1..2) != Some(":") {
+        return None;
+    }
+    let mut result = std::path::PathBuf::from(format!("/mnt/{drive}"));
+    for component in input
+        .get(2..)?
+        .trim_start_matches(['\\', '/'])
+        .split(['\\', '/'])
+        .filter(|c| !c.is_empty())
+    {
+        result.push(component);
+    }
+    Some(result)
 }

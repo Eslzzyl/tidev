@@ -244,7 +244,7 @@ impl App {
 
 /// Detect if we're running under WSL (Windows Subsystem for Linux).
 #[cfg(target_os = "linux")]
-fn is_probably_wsl() -> bool {
+pub(crate) fn is_probably_wsl() -> bool {
     // Primary: Check /proc/version for "microsoft" or "WSL" (most reliable for standard WSL).
     if let Ok(version) = std::fs::read_to_string("/proc/version") {
         let version_lower = version.to_lowercase();
@@ -261,7 +261,7 @@ fn is_probably_wsl() -> bool {
 
 #[cfg(not(target_os = "linux"))]
 #[allow(dead_code)]
-fn is_probably_wsl() -> bool {
+pub(crate) fn is_probably_wsl() -> bool {
     false
 }
 

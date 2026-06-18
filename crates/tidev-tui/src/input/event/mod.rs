@@ -18,6 +18,12 @@ impl App {
             Event::Paste(text) => {
                 if self.model_panel.is_some() {
                     self.handle_model_panel_paste(&text)?;
+                } else if text.is_empty() {
+                    // Empty bracketed paste — the terminal may have intercepted
+                    // Ctrl+V for a paste that contains only image data (no text).
+                    // Fall back to reading the clipboard directly via arboard,
+                    // which can detect and handle image content.
+                    self.handle_clipboard_paste()?;
                 } else {
                     self.handle_text_paste(&text)?;
                 }
