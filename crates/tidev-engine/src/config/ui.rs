@@ -12,10 +12,17 @@ pub struct UiConfig {
     /// Falls back to $VISUAL → $EDITOR → auto-detect among common editors.
     #[serde(default)]
     pub external_editor: Option<String>,
+    /// Number of spaces a tab character expands to in diff views (default: 4).
+    #[serde(default = "default_tab_width")]
+    pub tab_width: usize,
 }
 
 fn default_scroll_speed() -> f32 {
     3.0
+}
+
+fn default_tab_width() -> usize {
+    4
 }
 
 impl Default for UiConfig {
@@ -26,6 +33,7 @@ impl Default for UiConfig {
             max_input_lines: 6,
             scroll_speed: 3.0,
             external_editor: None,
+            tab_width: 4,
         }
     }
 }

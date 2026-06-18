@@ -55,6 +55,7 @@ pub(super) fn render_unified_diff_text(
     text: &str,
     width: usize,
     palette: ThemePalette,
+    tab_width: usize,
 ) -> Option<(Vec<Line<'static>>, Vec<SelectableRegionRange>)> {
     let sections = split_diff_sections(text);
     let mut out = Vec::new();
@@ -62,7 +63,8 @@ pub(super) fn render_unified_diff_text(
     let mut rendered_any = false;
 
     for section in sections {
-        let (section_lines, section_regions) = render_diff_section(&section, width, palette)?;
+        let (section_lines, section_regions) =
+            render_diff_section(&section, width, palette, tab_width)?;
         if !section_lines.is_empty() {
             if rendered_any {
                 out.push(Line::from(String::new()));
@@ -107,9 +109,10 @@ fn render_diff_section(
     section: &str,
     width: usize,
     palette: ThemePalette,
+    tab_width: usize,
 ) -> Option<(Vec<Line<'static>>, Vec<SelectableRegionRange>)> {
     let patch = Patch::from_str(section).ok()?;
-    let rows = collect_rows(&patch);
+    let rows = collect_rows(&patch, tab_width);
     if rows.is_empty() {
         return None;
     }
@@ -175,7 +178,7 @@ fn render_diff_section(
     })
 }
 
-fn collect_rows(patch: &Patch<'_, str>) -> Vec<DiffRow> {
+fn collect_rows(patch: &Patch<'_, str>, tab_width: usize) -> Vec<DiffRow> {
     let mut rows = Vec::new();
 
     for (index, hunk) in patch.hunks().iter().enumerate() {
@@ -193,8 +196,8 @@ fn collect_rows(patch: &Patch<'_, str>) -> Vec<DiffRow> {
                 DiffLine::Context(text) => {
                     rows.push(DiffRow {
                         kind: RowKind::Context,
-                        left: Some(DiffCell::new(old_line_number, text, DiffLineKind::Context)),
-                        right: Some(DiffCell::new(new_line_number, text, DiffLineKind::Context)),
+                        left: Some(DiffCell::new(old_line_number, text, DiffLineKind::Context, tab_width)),
+                        right: Some(DiffCell::new(new_line_number, text, DiffLineKind::Context, tab_width)),
                     });
                     old_line_number += 1;
                     new_line_number += 1;
@@ -231,11 +234,11 @@ fn collect_rows(patch: &Patch<'_, str>) -> Vec<DiffRow> {
                         let left = removed
                             .get(offset)
                             .cloned()
-                            .map(|(line_number, text)| DiffCell::delete(line_number, text));
+                            .map(|(line_number, text)| DiffCell::delete(line_number, text, tab_width));
                         let right = added
                             .get(offset)
                             .cloned()
-                            .map(|(line_number, text)| DiffCell::insert(line_number, text));
+                            .map(|(line_number, text)| DiffCell::insert(line_number, text, tab_width));
                         let kind = match (left.as_ref(), right.as_ref()) {
                             (Some(_), Some(_)) => RowKind::Modified,
                             (Some(_), None) => RowKind::Removed,
@@ -249,7 +252,7 @@ fn collect_rows(patch: &Patch<'_, str>) -> Vec<DiffRow> {
                     rows.push(DiffRow {
                         kind: RowKind::Added,
                         left: None,
-                        right: Some(DiffCell::insert(new_line_number, text.to_string())),
+                        right: Some(DiffCell::insert(new_line_number, text.to_string(), tab_width)),
                     });
                     new_line_number += 1;
                     cursor += 1;
@@ -684,20 +687,20 @@ fn line_number_width(max_line_number: usize) -> usize {
     }
 }
 
-/// Expand tab characters to spaces using 8-column tab stops.
+/// Expand tab characters to spaces using configurable tab stops.
 ///
 /// `unicode-width` measures `\t` as 0 columns, but terminals render it as
-/// 4-8 spaces. This mismatch causes cell padding to be wrong and the
+/// multiple spaces. This mismatch causes cell padding to be wrong and the
 /// `│` separator to shift. Expanding tabs at parse time prevents the issue.
-fn expand_tabs(text: &str) -> String {
+fn expand_tabs(text: &str, tab_width: usize) -> String {
     if !text.contains('\t') {
         return text.to_string();
     }
-    let mut result = String::with_capacity(text.len() + 8);
+    let mut result = String::with_capacity(text.len() + tab_width);
     let mut col = 0usize;
     for ch in text.chars() {
         if ch == '\t' {
-            let spaces = 8 - (col % 8);
+            let spaces = tab_width - (col % tab_width);
             result.extend(std::iter::repeat_n(' ', spaces));
             col += spaces;
         } else {
@@ -709,26 +712,26 @@ fn expand_tabs(text: &str) -> String {
 }
 
 impl DiffCell {
-    fn new(line_number: usize, text: &str, kind: DiffLineKind) -> Self {
+    fn new(line_number: usize, text: &str, kind: DiffLineKind, tab_width: usize) -> Self {
         Self {
             line_number,
-            text: expand_tabs(text),
+            text: expand_tabs(text, tab_width),
             kind,
         }
     }
 
-    fn delete(line_number: usize, text: String) -> Self {
+    fn delete(line_number: usize, text: String, tab_width: usize) -> Self {
         Self {
             line_number,
-            text: expand_tabs(&text),
+            text: expand_tabs(&text, tab_width),
             kind: DiffLineKind::Delete,
         }
     }
 
-    fn insert(line_number: usize, text: String) -> Self {
+    fn insert(line_number: usize, text: String, tab_width: usize) -> Self {
         Self {
             line_number,
-            text: expand_tabs(&text),
+            text: expand_tabs(&text, tab_width),
             kind: DiffLineKind::Insert,
         }
     }
@@ -778,7 +781,7 @@ index 1111111..2222222 100644
 "#;
 
         let (lines, _) =
-            render_unified_diff_text(diff, 120, palette()).expect("diff should render");
+            render_unified_diff_text(diff, 120, palette(), 4).expect("diff should render");
         let rendered = flatten_lines(&lines);
 
         assert!(!rendered.iter().any(|line| line.contains("diff --git")));
@@ -801,7 +804,7 @@ index 1111111..2222222 100644
 +fn main() {}
 "#;
 
-        let (lines, _) = render_unified_diff_text(diff, 60, palette()).expect("diff should render");
+        let (lines, _) = render_unified_diff_text(diff, 60, palette(), 4).expect("diff should render");
         let rendered = flatten_lines(&lines);
 
         assert!(
@@ -828,7 +831,7 @@ new file mode 100644
 "#;
 
         let (lines, _) =
-            render_unified_diff_text(diff, 120, palette()).expect("diff should render");
+            render_unified_diff_text(diff, 120, palette(), 4).expect("diff should render");
         let rendered = flatten_lines(&lines);
 
         assert!(!rendered.iter().any(|line| line.contains("│")));
@@ -846,7 +849,7 @@ new file mode 100644
 
     #[test]
     fn returns_none_for_plain_text() {
-        assert!(render_unified_diff_text("hello world", 80, palette()).is_none());
+        assert!(render_unified_diff_text("hello world", 80, palette(), 4).is_none());
     }
 
     #[test]
@@ -859,7 +862,7 @@ new file mode 100644
 "#;
 
         let (lines, _) =
-            render_unified_diff_text(diff, 120, palette()).expect("diff should render");
+            render_unified_diff_text(diff, 120, palette(), 4).expect("diff should render");
         let body_line = lines
             .iter()
             .find(|line| {
@@ -890,7 +893,7 @@ index 1111111..2222222 100644
  }
 "#;
         let (lines, _) =
-            render_unified_diff_text(diff, 120, palette()).expect("diff should render");
+            render_unified_diff_text(diff, 120, palette(), 4).expect("diff should render");
         let flat: Vec<String> = lines
             .iter()
             .map(|l| {
@@ -929,7 +932,7 @@ index 1111111..2222222 100644
 "#;
         let width = 120usize;
         let (lines, _) =
-            render_unified_diff_text(diff, width, palette()).expect("diff should render");
+            render_unified_diff_text(diff, width, palette(), 4).expect("diff should render");
         let flat: Vec<String> = lines
             .iter()
             .map(|l| {
@@ -959,8 +962,8 @@ index 1111111..2222222 100644
     #[test]
     fn expand_tabs_replaces_tabs_with_spaces() {
         let text = "col0\tcol1\tcol2";
-        let expanded = expand_tabs(text);
-        // Tab at col 0 -> 8 spaces, tab at col 12 -> 4 spaces
+        let expanded = expand_tabs(text, 4);
+        // Tab at col 0 -> 4 spaces (col0 is 4 cols), tab at col 8 -> 4 spaces
         assert_eq!(expanded, "col0    col1    col2");
         assert!(!expanded.contains('\t'));
     }
@@ -968,7 +971,7 @@ index 1111111..2222222 100644
     #[test]
     fn expand_tabs_short_circuits_when_no_tabs() {
         let text = "no tabs here";
-        let result = expand_tabs(text);
+        let result = expand_tabs(text, 4);
         // Should be a direct to_string() — same content
         assert_eq!(result, text);
     }

@@ -105,6 +105,7 @@ welcome_width = 90
 max_input_lines = 6
 scroll_speed = 3.0
 external_editor = "code --wait"
+tab_width = 4
 ```
 
 | Key | Default | Description |
@@ -114,6 +115,7 @@ external_editor = "code --wait"
 | `max_input_lines` | `6` | Maximum number of lines for the input area |
 | `scroll_speed` | `3.0` | Scroll speed multiplier for scrollable panes |
 | `external_editor` | none | Command to launch an external editor (e.g. `code --wait`). Falls back to `$VISUAL`, then `$EDITOR`, then auto-detection |
+| `tab_width` | `4` | Number of spaces a tab character expands to in diff views |
 
 ## [logging]
 

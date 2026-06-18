@@ -326,8 +326,12 @@ pub(super) fn render_assistant_body_lines(
     }
 
     if !message.content.is_empty() {
-        if let Some((diff_lines, _)) =
-            render_unified_diff_text(&message.content, body_width, ctx.palette)
+        if let Some((diff_lines, _)) = render_unified_diff_text(
+            &message.content,
+            body_width,
+            ctx.palette,
+            ctx.config.read().unwrap().ui.tab_width,
+        )
         {
             lines.extend(diff_lines);
         } else {

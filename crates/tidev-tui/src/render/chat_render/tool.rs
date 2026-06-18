@@ -966,6 +966,7 @@ pub(super) fn render_tool_result_detail_lines(
     ctx: &RenderContext<'_>,
 ) -> (Vec<Line<'static>>, Option<i32>, Vec<SelectableRegionRange>) {
     let palette = ctx.palette;
+    let tab_width = ctx.config.read().unwrap().ui.tab_width;
     let output = tool_output_from_message(message, ctx);
     let tool_name = message.tool_name.as_deref().unwrap_or(message.role.label());
     let canonical_name = canonical_tool_name(tool_name).unwrap_or(tool_name);
@@ -1015,7 +1016,7 @@ pub(super) fn render_tool_result_detail_lines(
             // Render diff for this file if available
             if let Some(diff) = &change.diff
                 && let Some((diff_lines, diff_regions)) =
-                    render_unified_diff_text(diff, body_width.saturating_sub(2), palette)
+                    render_unified_diff_text(diff, body_width.saturating_sub(2), palette, tab_width)
             {
                 let n_diff = diff_lines.len();
                 for mut r in diff_regions {
@@ -1040,7 +1041,7 @@ pub(super) fn render_tool_result_detail_lines(
         && matches!(canonical_name, "edit" | "write" | "apply_patch")
         && let Some(diff) = message.metadata.diff.as_ref()
         && let Some((diff_lines, regions)) =
-            render_unified_diff_text(diff, body_width.saturating_sub(2), palette)
+            render_unified_diff_text(diff, body_width.saturating_sub(2), palette, tab_width)
     {
         return (diff_lines, None, regions);
     }
@@ -1049,7 +1050,7 @@ pub(super) fn render_tool_result_detail_lines(
     if !is_error
         && matches!(canonical_name, "edit" | "write" | "apply_patch")
         && let Some((diff_lines, regions)) =
-            render_unified_diff_text(effective_output, body_width.saturating_sub(2), palette)
+            render_unified_diff_text(effective_output, body_width.saturating_sub(2), palette, tab_width)
     {
         return (diff_lines, None, regions);
     }

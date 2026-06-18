@@ -878,6 +878,11 @@ theme = "dark"
 default_provider = "openai"
 default_model = "gpt-4o-mini"
 
+# Optional UI settings.
+#[ui]
+# Number of spaces a tab character expands to in diff views (default: 4).
+#tab_width = 4
+
 # Optional custom instruction files or glob patterns to include in the system prompt.
 # Example: instructions = ["docs/style.md", "packages/*/AGENTS.md"]
 instructions = []
