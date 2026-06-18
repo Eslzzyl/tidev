@@ -295,39 +295,29 @@ impl App {
             "~",
         );
 
-        // Always show the workspace path at the very bottom.
-        let workspace_area = Rect::new(
+        let bottom_area = Rect::new(
             area.x + 1,
             area.bottom() - 1,
             area.width.saturating_sub(2),
             1,
         );
-        let workspace_line = Line::from(Span::styled(
-            &display_path,
-            Style::default().fg(palette.muted),
-        ));
-        frame.render_widget(Paragraph::new(workspace_line), workspace_area);
-
         // Show last_notice on the welcome screen so the user can see clipboard
-        // errors, model-support messages, etc.  Render it between the input
-        // block and the workspace-path row so neither is overwritten.
+        // errors, model-support messages, etc.  When there is no notice, show
+        // the workspace path as before.
         if let Some(message) = self.last_notice.as_deref() {
-            let notice_y = sections[2].bottom();
-            if notice_y < workspace_area.y {
-                let notice_area = Rect::new(
-                    area.x + 1,
-                    notice_y,
-                    area.width.saturating_sub(2),
-                    1,
-                );
-                frame.render_widget(
-                    Paragraph::new(Line::from(Span::styled(
-                        message,
-                        Style::default().fg(palette.muted),
-                    ))),
-                    notice_area,
-                );
-            }
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    message,
+                    Style::default().fg(palette.muted),
+                ))),
+                bottom_area,
+            );
+        } else {
+            let workspace_line = Line::from(Span::styled(
+                display_path,
+                Style::default().fg(palette.muted),
+            ));
+            frame.render_widget(Paragraph::new(workspace_line), bottom_area);
         }
 
         // Palettes should align with the composer's visual left edge (offset by 2 columns)
