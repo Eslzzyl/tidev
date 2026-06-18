@@ -531,6 +531,7 @@ fn merge_columns(
     right_width: usize,
 ) -> Vec<Line<'static>> {
     let height = left.len().max(right.len()).max(1);
+    let expected_width = left_width + 1 + right_width;
     let mut out = Vec::with_capacity(height);
 
     for index in 0..height {
@@ -546,7 +547,23 @@ fn merge_columns(
         let mut spans = left_line.spans;
         spans.push(separator.clone());
         spans.extend(right_line.spans);
-        out.push(Line::from(spans));
+
+        // Post-verify: ensure the merged line is exactly `expected_width`
+        // columns wide. Without this, any cell that overflows (e.g. due to
+        // ambiguous-width characters like │) shifts the separator for that
+        // line, producing a jagged appearance.
+        let mut line = Line::from(spans);
+        let actual = line_display_width(&line);
+        if actual < expected_width {
+            let mut sp = line.spans;
+            sp.push(Span::styled(
+                " ".repeat(expected_width - actual),
+                Style::default(),
+            ));
+            line = Line::from(sp);
+        }
+
+        out.push(line);
     }
 
     out
@@ -667,11 +684,35 @@ fn line_number_width(max_line_number: usize) -> usize {
     }
 }
 
+/// Expand tab characters to spaces using 8-column tab stops.
+///
+/// `unicode-width` measures `\t` as 0 columns, but terminals render it as
+/// 4-8 spaces. This mismatch causes cell padding to be wrong and the
+/// `│` separator to shift. Expanding tabs at parse time prevents the issue.
+fn expand_tabs(text: &str) -> String {
+    if !text.contains('\t') {
+        return text.to_string();
+    }
+    let mut result = String::with_capacity(text.len() + 8);
+    let mut col = 0usize;
+    for ch in text.chars() {
+        if ch == '\t' {
+            let spaces = 8 - (col % 8);
+            result.extend(std::iter::repeat_n(' ', spaces));
+            col += spaces;
+        } else {
+            result.push(ch);
+            col += 1;
+        }
+    }
+    result
+}
+
 impl DiffCell {
     fn new(line_number: usize, text: &str, kind: DiffLineKind) -> Self {
         Self {
             line_number,
-            text: text.to_string(),
+            text: expand_tabs(text),
             kind,
         }
     }
@@ -679,7 +720,7 @@ impl DiffCell {
     fn delete(line_number: usize, text: String) -> Self {
         Self {
             line_number,
-            text,
+            text: expand_tabs(&text),
             kind: DiffLineKind::Delete,
         }
     }
@@ -687,7 +728,7 @@ impl DiffCell {
     fn insert(line_number: usize, text: String) -> Self {
         Self {
             line_number,
-            text,
+            text: expand_tabs(&text),
             kind: DiffLineKind::Insert,
         }
     }
@@ -831,5 +872,104 @@ new file mode 100644
             .expect("expected highlighted body line");
 
         assert!(body_line.spans.len() > 1);
+    }
+
+    #[test]
+    fn wide_layout_separator_alignment() {
+        let diff = r#"diff --git a/foo.rs b/foo.rs
+index 1111111..2222222 100644
+--- a/foo.rs
++++ b/foo.rs
+@@ -1,4 +1,5 @@
+ fn main() {
+-    old();
+-    another();
++    new();
++    another();
++    extra();
+ }
+"#;
+        let (lines, _) =
+            render_unified_diff_text(diff, 120, palette()).expect("diff should render");
+        let flat: Vec<String> = lines
+            .iter()
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect()
+            })
+            .collect();
+
+        // All lines containing the separator must have it at the same column.
+        let positions: Vec<usize> = flat.iter().filter_map(|l| l.find('\u{2502}')).collect();
+        assert!(!positions.is_empty(), "expected at least one separator line");
+        let first = positions[0];
+        assert!(
+            positions.iter().all(|&p| p == first),
+            "separator column positions differ: {:?}",
+            positions
+        );
+    }
+
+    #[test]
+    fn wide_layout_all_lines_same_display_width() {
+        let diff = r#"diff --git a/foo.rs b/foo.rs
+index 1111111..2222222 100644
+--- a/foo.rs
++++ b/foo.rs
+@@ -1,4 +1,5 @@
+ fn main() {
+-    old();
+-    another();
++    new();
++    another();
++    extra();
+ }
+"#;
+        let width = 120usize;
+        let (lines, _) =
+            render_unified_diff_text(diff, width, palette()).expect("diff should render");
+        let flat: Vec<String> = lines
+            .iter()
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect()
+            })
+            .collect();
+
+        // Every non-empty line should have the same display width.
+        let widths: Vec<usize> = flat
+            .iter()
+            .filter(|l| !l.is_empty())
+            .map(|l| unicode_width::UnicodeWidthStr::width(l.as_str()))
+            .collect();
+        let expected = widths[0];
+        for (i, &w) in widths.iter().enumerate() {
+            assert_eq!(
+                w, expected,
+                "line {i} has width {w}, expected {expected}: {:?}",
+                flat.iter().enumerate().find(|(j, _)| *j == i).unwrap().1
+            );
+        }
+    }
+
+    #[test]
+    fn expand_tabs_replaces_tabs_with_spaces() {
+        let text = "col0\tcol1\tcol2";
+        let expanded = expand_tabs(text);
+        // Tab at col 0 -> 8 spaces, tab at col 12 -> 4 spaces
+        assert_eq!(expanded, "col0    col1    col2");
+        assert!(!expanded.contains('\t'));
+    }
+
+    #[test]
+    fn expand_tabs_short_circuits_when_no_tabs() {
+        let text = "no tabs here";
+        let result = expand_tabs(text);
+        // Should be a direct to_string() — same content
+        assert_eq!(result, text);
     }
 }
