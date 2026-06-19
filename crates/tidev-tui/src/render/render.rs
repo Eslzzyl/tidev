@@ -1099,6 +1099,7 @@ pub(crate) fn wrap_text_lines(text: &str, max_width: usize, max_lines: usize) ->
         .chars()
         .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
         .collect();
+    let normalized = expand_tabs(&normalized, 4);
     let trimmed = normalized.trim();
 
     if trimmed.is_empty() {
@@ -1265,5 +1266,29 @@ fn render_plain_segments(
         text.to_string(),
         Style::default().fg(palette.text),
     ));
+    result
+}
+
+/// Expand tab characters to spaces using configurable tab stops.
+///
+/// `unicode-width` measures `\t` as 0 columns, but terminals render it as
+/// multiple spaces. Expanding tabs at parse time prevents width mismatches
+/// in word wrapping, card padding, and table column alignment.
+pub(crate) fn expand_tabs(text: &str, tab_width: usize) -> String {
+    if !text.contains('\t') {
+        return text.to_string();
+    }
+    let mut result = String::with_capacity(text.len() + tab_width);
+    let mut col = 0usize;
+    for ch in text.chars() {
+        if ch == '\t' {
+            let spaces = tab_width - (col % tab_width);
+            result.extend(std::iter::repeat_n(' ', spaces));
+            col += spaces;
+        } else {
+            result.push(ch);
+            col += 1;
+        }
+    }
     result
 }

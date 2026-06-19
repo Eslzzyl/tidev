@@ -25,6 +25,7 @@ pub use wrap::{RtOptions as WrapOptions, adaptive_wrap_lines, word_wrap_line};
 
 pub use links::is_local_path_like_link;
 
+use crate::render::render::expand_tabs;
 use links::{render_local_link_target, should_render_link_destination};
 use styles::MarkdownStyles;
 use table::TableState;
@@ -145,6 +146,7 @@ where
     current_line_style: Style,
     current_line_in_code_block: bool,
     wrap_width: Option<usize>,
+    tab_width: usize,
     table_state: Option<TableState>,
     in_table_cell: bool,
 }
@@ -177,6 +179,7 @@ where
             current_line_style: Style::default(),
             current_line_in_code_block: false,
             wrap_width: None,
+            tab_width: 4,
             table_state: None,
             in_table_cell: false,
         }
@@ -429,7 +432,10 @@ where
         let mut parts = text.split('\n').peekable();
         while let Some(part) = parts.next() {
             if !part.is_empty() {
-                self.push_span(Span::styled(part.to_string(), style));
+                self.push_span(Span::styled(
+                    expand_tabs(part, self.tab_width),
+                    style,
+                ));
             }
             if parts.peek().is_some() {
                 self.push_span(Span::from(" "));
@@ -465,7 +471,7 @@ where
                 self.push_line(Line::default());
             }
             let span = Span::styled(
-                line.to_string(),
+                expand_tabs(line, self.tab_width),
                 self.inline_styles.last().copied().unwrap_or_default(),
             );
             self.push_span(span);
@@ -479,14 +485,16 @@ where
         }
         self.line_ends_with_local_link_target = false;
         if self.in_table_cell {
-            self.push_span(Span::from(code.into_string()).style(self.styles.code));
+            self.push_span(
+                Span::styled(expand_tabs(&code, self.tab_width), self.styles.code),
+            );
             return;
         }
         if self.pending_marker_line {
             self.push_line(Line::default());
             self.pending_marker_line = false;
         }
-        let span = Span::from(code.into_string()).style(self.styles.code);
+        let span = Span::styled(expand_tabs(&code, self.tab_width), self.styles.code);
         self.push_span(span);
     }
 
@@ -509,7 +517,7 @@ where
                 self.push_line(Line::default());
             }
             let style = self.inline_styles.last().copied().unwrap_or_default();
-            self.push_span(Span::styled(line.to_string(), style));
+            self.push_span(Span::styled(expand_tabs(line, self.tab_width), style));
         }
         self.needs_newline = !inline;
     }
@@ -624,7 +632,8 @@ where
         let code = std::mem::take(&mut self.code_block_buffer);
         if let Some(lang) = self.code_block_lang.take() {
             if !code.is_empty() {
-                let highlighted = highlight_code_to_lines(&code, &lang);
+                let expanded = expand_tabs(&code, self.tab_width);
+                let highlighted = highlight_code_to_lines(&expanded, &lang);
                 for line in highlighted {
                     self.push_line(Line::default());
                     for span in line.spans {
@@ -637,7 +646,10 @@ where
         } else if !code.is_empty() {
             for line in code.lines() {
                 self.push_line(Line::default());
-                self.push_span(Span::styled(line.to_string(), self.styles.code));
+                self.push_span(Span::styled(
+                    expand_tabs(line, self.tab_width),
+                    self.styles.code,
+                ));
             }
         } else {
             self.push_line(Line::default());

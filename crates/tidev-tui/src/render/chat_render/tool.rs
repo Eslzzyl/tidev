@@ -22,7 +22,7 @@ use super::utils::{
 };
 use super::{RenderContext, TOOL_OUTPUT_PREVIEW_LINES};
 use crate::diff_render::render_unified_diff_text;
-use crate::render::render::line_with_style;
+use crate::render::render::{expand_tabs, line_with_style};
 
 pub(super) fn render_tool_call_with_result(
     tool_call: &ToolCall,
@@ -1151,6 +1151,7 @@ pub(super) fn render_tool_result_detail_lines(
             Some(message.id),
             ctx.expanded_tool_results,
             palette,
+            tab_width,
         ),
         exit_code,
         vec![],
@@ -1261,6 +1262,7 @@ pub(super) fn render_websearch_result_lines(
             message_id,
             expanded_tool_results,
             palette,
+            4,
         );
     }
 
@@ -1329,6 +1331,7 @@ pub(super) fn render_webfetch_result_lines(
             message_id,
             expanded_tool_results,
             palette,
+            4,
         );
     }
 
@@ -1398,6 +1401,7 @@ pub(super) fn render_memory_result_lines(
             message_id,
             expanded_tool_results,
             palette,
+            4,
         );
     }
 
@@ -1530,6 +1534,7 @@ pub(super) fn render_memory_result_lines(
         message_id,
         expanded_tool_results,
         palette,
+        4,
     )
 }
 
@@ -1585,6 +1590,7 @@ fn render_memory_read_lines(
             message_id,
             expanded_tool_results,
             palette,
+            4,
         );
     }
 
@@ -1917,6 +1923,7 @@ pub(super) fn render_output_preview_lines(
     message_id: Option<Uuid>,
     expanded_tool_results: &HashSet<Uuid>,
     palette: ThemePalette,
+    tab_width: usize,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
 
@@ -1940,7 +1947,7 @@ pub(super) fn render_output_preview_lines(
     let wrap_width = body_width.saturating_sub(2);
 
     for line in output.lines().take(max_lines) {
-        let owned_line = Line::from(line.to_string());
+        let owned_line = Line::from(expand_tabs(line, tab_width));
         if is_expanded {
             let wrapped =
                 word_wrap_line(&owned_line, WrapOptions::new(wrap_width).break_words(true));

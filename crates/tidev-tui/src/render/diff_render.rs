@@ -1,5 +1,6 @@
 use crate::core::state::SelectableRegionRange;
 use crate::markdown::{WrapOptions, adaptive_wrap_lines, highlight_code_to_lines_for_path};
+use crate::render::render::expand_tabs;
 use crate::theme::{ThemeName, ThemePalette};
 use diffy::{Line as DiffLine, Patch};
 use ratatui::{
@@ -685,30 +686,6 @@ fn line_number_width(max_line_number: usize) -> usize {
     } else {
         max_line_number.to_string().len()
     }
-}
-
-/// Expand tab characters to spaces using configurable tab stops.
-///
-/// `unicode-width` measures `\t` as 0 columns, but terminals render it as
-/// multiple spaces. This mismatch causes cell padding to be wrong and the
-/// `│` separator to shift. Expanding tabs at parse time prevents the issue.
-fn expand_tabs(text: &str, tab_width: usize) -> String {
-    if !text.contains('\t') {
-        return text.to_string();
-    }
-    let mut result = String::with_capacity(text.len() + tab_width);
-    let mut col = 0usize;
-    for ch in text.chars() {
-        if ch == '\t' {
-            let spaces = tab_width - (col % tab_width);
-            result.extend(std::iter::repeat_n(' ', spaces));
-            col += spaces;
-        } else {
-            result.push(ch);
-            col += 1;
-        }
-    }
-    result
 }
 
 impl DiffCell {
