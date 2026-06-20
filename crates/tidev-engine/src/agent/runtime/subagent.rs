@@ -22,6 +22,15 @@ use crate::tooling::{ToolDefinition, canonical_tool_name};
 
 use super::{AgentRuntime, SubagentConfig};
 
+/// Helper: returns a future that resolves when the cancellation token fires.
+/// If the token is `None`, returns a future that never resolves.
+async fn cancel_token_cancelled(ct: &Option<CancellationToken>) {
+    match ct {
+        Some(token) => token.cancelled().await,
+        None => std::future::pending().await,
+    }
+}
+
 impl AgentRuntime {
     /// Run a sub-agent (`task` tool) in a dedicated child session.
     ///
@@ -388,6 +397,12 @@ impl AgentRuntime {
                             }
                             _ => {}
                         }
+                    }
+                    // Respond to cancellation immediately instead of waiting
+                    // for the LLM stream to finish or the idle timeout to fire.
+                    _ = cancel_token_cancelled(&cancel_token) => {
+                        log::info!("run_subagent: cancelled during LLM stream");
+                        anyhow::bail!("Subagent cancelled");
                     }
                     _ = &mut idle_timeout => {
                         return Err(anyhow::anyhow!(
