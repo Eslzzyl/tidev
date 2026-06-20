@@ -612,7 +612,6 @@ impl App {
         self.session_panel = None;
         self.mcp_panel = None;
         self.command_palette.clear();
-        self.composer.clear();
 
         if let Some(dialog) = self.question_dialog.as_ref() {
             self.composer.set_text(dialog.current_answer_text());

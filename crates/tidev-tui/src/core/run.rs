@@ -624,6 +624,7 @@ impl App {
             file_reads: self.file_read_tracker.extract_session_reads(session_id),
             loaded_instruction_sources: self.loaded_instruction_sources.clone(),
             instruction_content_cache: self.instruction_content_cache.clone(),
+            composer: self.composer.clone(),
         };
 
         self.cached_sessions.insert(session_id, cached);
@@ -824,6 +825,9 @@ impl App {
             self.file_read_tracker
                 .restore_session_reads(self.conversation.session_id, reads);
         }
+
+        // Restore the text input state for this session.
+        self.composer = cached.composer;
     }
 
     pub(crate) fn clear_message_render_cache(&self) {
@@ -1042,6 +1046,7 @@ impl App {
             file_reads: None,
             loaded_instruction_sources,
             instruction_content_cache,
+            composer: Composer::new(""),
         };
 
         // Load file reads from database into the tracker

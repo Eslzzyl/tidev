@@ -213,6 +213,8 @@ pub(crate) struct CachedSessionRuntime {
     /// Cached instruction file contents to avoid redundant I/O
     #[allow(dead_code)]
     pub(crate) instruction_content_cache: HashMap<String, String>,
+    /// Preserved text input state for this session.
+    pub(crate) composer: Composer,
 }
 #[derive(Clone, Debug)]
 pub(crate) struct UiStateSnapshot {
