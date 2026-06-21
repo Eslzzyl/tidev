@@ -763,6 +763,33 @@ fn preparing_text_for_tool(canonical_name: &str) -> &'static str {
     }
 }
 
+/// Wrap a tool title `Line` at `body_width`, indenting continuation lines
+/// by `subsequent_indent`. Returns owned `Vec<Line<'static>>`.
+fn wrap_tool_title(
+    title: Line<'static>,
+    body_width: usize,
+    subsequent_indent: &str,
+) -> Vec<Line<'static>> {
+    let indent = Line::from(subsequent_indent.to_string());
+    let wrapped = word_wrap_line(
+        &title,
+        WrapOptions::new(body_width)
+            .subsequent_indent(indent)
+            .break_words(true),
+    );
+    wrapped
+        .into_iter()
+        .map(|l| {
+            Line::from(
+                l.spans
+                    .into_iter()
+                    .map(|s| Span::styled(s.content.to_string(), s.style))
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .collect()
+}
+
 pub(super) fn render_tool_call_lines(
     tool_call: &ToolCall,
     body_width: usize,
@@ -820,7 +847,11 @@ pub(super) fn render_tool_call_lines(
                     ));
                 }
             }
-            lines.push(Line::from(title_spans));
+            lines.extend(wrap_tool_title(
+                Line::from(title_spans),
+                body_width,
+                "      ",
+            ));
 
             // Command line (below title)
             for line in command.lines() {
@@ -846,15 +877,19 @@ pub(super) fn render_tool_call_lines(
         "write" => {
             let path = get_field("file_path").unwrap_or("file");
             let rel_path = display_workspace_relative(workspace_root, Path::new(path));
-            lines.push(Line::from(vec![
-                Span::styled("Write ", Style::default().fg(palette.muted)),
-                Span::styled(
-                    rel_path,
-                    Style::default()
-                        .fg(palette.text)
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ]));
+            lines.extend(wrap_tool_title(
+                Line::from(vec![
+                    Span::styled("Write ", Style::default().fg(palette.muted)),
+                    Span::styled(
+                        rel_path,
+                        Style::default()
+                            .fg(palette.text)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ]),
+                body_width,
+                "      ",
+            ));
         }
         "websearch" => {
             let query = get_field("query").unwrap_or("");
@@ -880,7 +915,11 @@ pub(super) fn render_tool_call_lines(
                     Style::default().fg(palette.muted),
                 ));
             }
-            lines.push(Line::from(title_spans));
+            lines.extend(wrap_tool_title(
+                Line::from(title_spans),
+                body_width,
+                "               ",
+            ));
         }
         "webfetch" => {
             let url = get_field("url").unwrap_or("");
@@ -906,7 +945,11 @@ pub(super) fn render_tool_call_lines(
                     Style::default().fg(palette.muted),
                 ));
             }
-            lines.push(Line::from(title_spans));
+            lines.extend(wrap_tool_title(
+                Line::from(title_spans),
+                body_width,
+                "                    ",
+            ));
         }
         "apply_patch" => {
             // Attempt to parse file paths from the streaming patch_text argument.
@@ -934,26 +977,34 @@ pub(super) fn render_tool_call_lines(
             } else {
                 format!("Apply patch to {} files", file_paths.len())
             };
-            lines.push(Line::from(vec![Span::styled(
-                title,
-                Style::default()
-                    .fg(palette.text)
-                    .add_modifier(Modifier::BOLD),
-            )]));
+            lines.extend(wrap_tool_title(
+                Line::from(vec![Span::styled(
+                    title,
+                    Style::default()
+                        .fg(palette.text)
+                        .add_modifier(Modifier::BOLD),
+                )]),
+                body_width,
+                "               ",
+            ));
         }
         _ => {
             let summary = summarize_tool_call(
                 &tool_call.name,
                 &tool_call.arguments,
-                body_width,
+                usize::MAX,
                 workspace_root,
             );
-            lines.push(Line::from(vec![Span::styled(
-                summary,
-                Style::default()
-                    .fg(palette.text)
-                    .add_modifier(Modifier::BOLD),
-            )]));
+            lines.extend(wrap_tool_title(
+                Line::from(vec![Span::styled(
+                    summary,
+                    Style::default()
+                        .fg(palette.text)
+                        .add_modifier(Modifier::BOLD),
+                )]),
+                body_width,
+                "  ",
+            ));
         }
     }
 
