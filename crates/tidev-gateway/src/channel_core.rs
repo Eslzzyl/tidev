@@ -736,7 +736,7 @@ impl ChannelCore {
                 Ok(true)
             }
             "init" => {
-                let init_prompt = tidev_types::prompts::init_command();
+                let init_prompt = tidev_types::prompts::init_command_with_args(&command.args.join(" "));
                 let text = format!(
                     "📁 Project Analysis Prompt\n\nCopy and send this prompt to analyze your project:\n\n```\n{}\n```",
                     init_prompt

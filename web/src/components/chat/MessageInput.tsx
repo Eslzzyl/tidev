@@ -506,7 +506,9 @@ export function MessageInput({ onSlashCommand, skillInsert }: MessageInputProps)
 
   function handleSlashCommand(command: string) {
     const cmd = command.toLowerCase();
-    const name = cmd.startsWith("/") ? cmd.slice(1).split(" ")[0] : cmd;
+    const parts = cmd.startsWith("/") ? cmd.slice(1).split(" ") : [cmd];
+    const name = parts[0];
+    const args = parts.slice(1).join(" ");
 
     setInputValue("");
 
@@ -519,7 +521,7 @@ export function MessageInput({ onSlashCommand, skillInsert }: MessageInputProps)
     } else if (name === "compact") {
       executeCompact();
     } else if (name === "init") {
-      executeInit();
+      executeInit(args);
     } else if (name === "rename" || name === "title") {
       onSlashCommand?.("rename");
     } else if (name === "new" || name === "clear") {
@@ -600,12 +602,12 @@ export function MessageInput({ onSlashCommand, skillInsert }: MessageInputProps)
     }
   }
 
-  async function executeInit() {
+  async function executeInit(args: string = "") {
     try {
       const prompt = await queryClient.fetchQuery({
-        queryKey: queryKeys.initPrompt,
+        queryKey: [...queryKeys.initPrompt, args],
         queryFn: async () => {
-          const { prompt } = await api.getInitPrompt();
+          const { prompt } = await api.getInitPrompt(args);
           return prompt;
         },
       });

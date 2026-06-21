@@ -1,6 +1,6 @@
 use axum::{
     Json,
-    extract::{Path as AxumPath, State},
+    extract::{Path as AxumPath, Query, State},
     http::StatusCode,
 };
 use serde::{Deserialize, Serialize};
@@ -326,10 +326,18 @@ pub struct InitPromptResponse {
     pub prompt: String,
 }
 
+/// Optional query parameters for the init prompt endpoint
+#[derive(Deserialize, Default)]
+pub struct InitPromptParams {
+    pub args: Option<String>,
+}
+
 /// Get the init prompt for creating AGENTS.md
-pub async fn get_init_prompt() -> Json<InitPromptResponse> {
+pub async fn get_init_prompt(
+    Query(params): Query<InitPromptParams>,
+) -> Json<InitPromptResponse> {
     Json(InitPromptResponse {
-        prompt: tidev_types::prompts::init_command().to_string(),
+        prompt: tidev_types::prompts::init_command_with_args(&params.args.unwrap_or_default()),
     })
 }
 

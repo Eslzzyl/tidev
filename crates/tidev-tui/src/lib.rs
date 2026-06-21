@@ -64,7 +64,7 @@ pub use ui::theme_panel;
 use core::state::*;
 
 use tidev_types::Goal;
-use tidev_types::prompts::{SessionMode, init_command};
+use tidev_types::prompts::{SessionMode, init_command_with_args};
 
 use crate::ui::permission::{
     PendingToolExecution, PermissionDialogState, RunningSubagentExecution, RunningToolExecution,

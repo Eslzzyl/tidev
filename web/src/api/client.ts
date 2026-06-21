@@ -217,7 +217,10 @@ export const api = {
     }),
 
   // Init prompt
-  getInitPrompt: () => fetchJson<{ prompt: string }>(`${API_BASE}/init`),
+  getInitPrompt: (args?: string) =>
+    fetchJson<{ prompt: string }>(
+      args ? `${API_BASE}/init?args=${encodeURIComponent(args)}` : `${API_BASE}/init`,
+    ),
 
   // Config
   getDefaultModel: () => fetchJson<GetDefaultModelResponse>(`${API_BASE}/config/default-model`),

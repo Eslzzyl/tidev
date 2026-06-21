@@ -363,7 +363,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         name: "init",
         aliases: &[],
         description: "Analyze project and create AGENTS.md",
-        usage: "/init",
+        usage: "/init [focus or constraints]",
         action: CommandAction::Init,
     },
     CommandSpec {

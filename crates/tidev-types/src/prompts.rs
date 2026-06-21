@@ -344,3 +344,7 @@ Prefer short sections and bullets. If the repo is simple, keep the file simple. 
 
 If `AGENTS.md` already exists at `${path}`, improve it in place rather than rewriting blindly. Preserve verified useful guidance, delete fluff or stale claims, and reconcile it with the current codebase."#
 }
+
+pub fn init_command_with_args(args: &str) -> String {
+    init_command().replace("$ARGUMENTS", args.trim())
+}
