@@ -523,8 +523,6 @@ impl SnapshotService {
             git::drop_files(&self.gitdir, &self.worktree, &ignored_files)?;
         }
 
-        git::sync_exclude(&self.gitdir, &self.worktree, &[])?;
-
         let allowed: Vec<_> = all_files
             .iter()
             .filter(|f| !ignored.contains(*f))
