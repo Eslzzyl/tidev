@@ -25,6 +25,7 @@ pub use wrap::{RtOptions as WrapOptions, adaptive_wrap_lines, word_wrap_line};
 
 pub use links::is_local_path_like_link;
 
+use crate::ansi::strip_ansi;
 use crate::render::render::expand_tabs;
 use links::{render_local_link_target, should_render_link_destination};
 use styles::MarkdownStyles;
@@ -429,7 +430,8 @@ where
 
     fn table_text(&mut self, text: CowStr<'a>) {
         let style = self.inline_styles.last().copied().unwrap_or_default();
-        let mut parts = text.split('\n').peekable();
+        let stripped = strip_ansi(&text);
+        let mut parts = stripped.split('\n').peekable();
         while let Some(part) = parts.next() {
             if !part.is_empty() {
                 self.push_span(Span::styled(
@@ -458,11 +460,13 @@ where
         self.pending_marker_line = false;
 
         if self.in_code_block {
-            self.code_block_buffer.push_str(&text);
+            let stripped = strip_ansi(&text);
+            self.code_block_buffer.push_str(&stripped);
             return;
         }
 
-        for (index, line) in text.lines().enumerate() {
+        let stripped = strip_ansi(&text);
+        for (index, line) in stripped.lines().enumerate() {
             if self.needs_newline {
                 self.push_line(Line::default());
                 self.needs_newline = false;
@@ -484,9 +488,10 @@ where
             return;
         }
         self.line_ends_with_local_link_target = false;
+        let stripped = strip_ansi(&code);
         if self.in_table_cell {
             self.push_span(
-                Span::styled(expand_tabs(&code, self.tab_width), self.styles.code),
+                Span::styled(expand_tabs(&stripped, self.tab_width), self.styles.code),
             );
             return;
         }
@@ -494,7 +499,7 @@ where
             self.push_line(Line::default());
             self.pending_marker_line = false;
         }
-        let span = Span::styled(expand_tabs(&code, self.tab_width), self.styles.code);
+        let span = Span::styled(expand_tabs(&stripped, self.tab_width), self.styles.code);
         self.push_span(span);
     }
 
@@ -508,7 +513,8 @@ where
             return;
         }
         self.pending_marker_line = false;
-        for (index, line) in html.lines().enumerate() {
+        let stripped = strip_ansi(&html);
+        for (index, line) in stripped.lines().enumerate() {
             if self.needs_newline {
                 self.push_line(Line::default());
                 self.needs_newline = false;

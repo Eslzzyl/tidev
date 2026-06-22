@@ -26,6 +26,7 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+mod ansi;
 mod commands;
 mod core;
 mod input;

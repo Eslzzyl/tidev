@@ -15,6 +15,7 @@ tidev-storage = { path = "../tidev-storage" }
 tidev-llm = { path = "../tidev-llm" }
 tidev-types = { path = "../tidev-types" }
 tidev-session = { path = "../tidev-session" }
+ansi-to-tui = "8.0"
 anyhow = "1.0.102"
 arboard = "3.6.1"
 base64 = "0.22.1"

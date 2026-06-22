@@ -1,3 +1,4 @@
+use crate::ansi::ansi_to_styled_line;
 use crate::markdown::{WrapOptions, render_markdown_text_with_width_and_cwd, word_wrap_line};
 use crate::theme::ThemePalette;
 use tidev_engine::{
@@ -1997,33 +1998,20 @@ pub(super) fn render_output_preview_lines(
 
     let wrap_width = body_width.saturating_sub(2);
 
+    let default_style = Style::default().fg(fg);
+
     for line in output.lines().take(max_lines) {
-        let owned_line = Line::from(expand_tabs(line, tab_width));
-        if is_expanded {
-            let wrapped =
-                word_wrap_line(&owned_line, WrapOptions::new(wrap_width).break_words(true));
-            for wrapped_line in wrapped.iter() {
-                let mut spans = Vec::new();
-                spans.extend(
-                    wrapped_line.spans.iter().map(|span| {
-                        Span::styled(span.content.to_string(), Style::default().fg(fg))
-                    }),
-                );
-                lines.push(Line::from(spans));
-            }
-        } else {
-            // Preview (collapsed) mode: show each line with full wrapping
-            let wrapped =
-                word_wrap_line(&owned_line, WrapOptions::new(wrap_width).break_words(true));
-            for wrapped_line in wrapped.iter() {
-                let mut spans = Vec::new();
-                spans.extend(
-                    wrapped_line.spans.iter().map(|span| {
-                        Span::styled(span.content.to_string(), Style::default().fg(fg))
-                    }),
-                );
-                lines.push(Line::from(spans));
-            }
+        let expanded_text = expand_tabs(line, tab_width);
+        let owned_line = ansi_to_styled_line(&expanded_text, default_style);
+        let wrapped =
+            word_wrap_line(&owned_line, WrapOptions::new(wrap_width).break_words(true));
+        for wrapped_line in wrapped.iter() {
+            let spans: Vec<Span<'static>> = wrapped_line
+                .spans
+                .iter()
+                .map(|span| Span::styled(span.content.to_string(), span.style))
+                .collect();
+            lines.push(Line::from(spans));
         }
     }
 
