@@ -13,14 +13,13 @@ use rusqlite::{
 use std::{
     fs,
     path::{Path, PathBuf},
-    str::FromStr,
     sync::{Arc, Mutex},
     time::Duration,
 };
 use tidev_session::stats::{
     Granularity, ModelUsageEntry, StatsEntry, TimeRangeStats, UsageSummary,
 };
-use tidev_types::{Goal, GoalStatus, TodoItem};
+use tidev_types::TodoItem;
 use uuid::Uuid;
 
 use tidev_session::session::{Conversation, Message, MessageRole, ToolCall};
@@ -855,112 +854,6 @@ impl SessionStore {
                 })
             },
         )
-    }
-
-    // ── Goal CRUD ─────────────────────────────────────────────────────────
-
-    /// Retrieve the current goal for a session (None if not set).
-    pub fn get_goal(&self, session_id: Uuid) -> Result<Option<Goal>> {
-        self.read_query_opt(
-            "SELECT session_id, objective, status, tokens_used, time_used_seconds, created_at, updated_at \
-             FROM session_goals WHERE session_id = :session_id",
-            named_params! { ":session_id": session_id.to_string() },
-            |row| {
-                let status_str: String = row.get(2)?;
-                Ok(Goal {
-                    session_id: Uuid::parse_str(&row.get::<_, String>(0)?)
-                        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?,
-                    objective: row.get(1)?,
-                    status: GoalStatus::from_str(&status_str).unwrap_or(GoalStatus::Active),
-                    tokens_used: row.get(3)?,
-                    time_used_seconds: row.get(4)?,
-                    created_at: row.get(5)?,
-                    updated_at: row.get(6)?,
-                })
-            },
-        )
-    }
-
-    /// Set (create or overwrite) a goal for a session.
-    /// Resets usage counters to 0 on overwrite.
-    pub fn set_goal(&self, session_id: Uuid, objective: &str) -> Result<Goal> {
-        let now = Utc::now().to_rfc3339();
-        self.write_execute(
-            "INSERT OR REPLACE INTO session_goals \
-             (session_id, objective, status, tokens_used, time_used_seconds, created_at, updated_at) \
-             VALUES (:session_id, :objective, 'active', 0, 0, :now, :now)",
-            named_params! {
-                ":session_id": session_id.to_string(),
-                ":objective": objective,
-                ":now": now,
-            },
-        )?;
-        self.touch_session(session_id)?;
-        Ok(Goal {
-            session_id,
-            objective: objective.to_string(),
-            status: GoalStatus::Active,
-            tokens_used: 0,
-            time_used_seconds: 0,
-            created_at: now.clone(),
-            updated_at: now,
-        })
-    }
-
-    /// Update the status of a goal (e.g. Active → Paused, Paused → Active, Active → Complete).
-    /// Returns an error if no goal exists for this session.
-    pub fn update_goal_status(&self, session_id: Uuid, status: GoalStatus) -> Result<()> {
-        let now = Utc::now().to_rfc3339();
-        let affected = self.write_execute(
-            "UPDATE session_goals SET status = :status, updated_at = :now WHERE session_id = :session_id",
-            named_params! {
-                ":status": status.as_str(),
-                ":now": now,
-                ":session_id": session_id.to_string(),
-            },
-        )?;
-        if affected == 0 {
-            anyhow::bail!("no goal found for session {}", session_id);
-        }
-        self.touch_session(session_id)?;
-        Ok(())
-    }
-
-    /// Delete the goal for a session.
-    pub fn clear_goal(&self, session_id: Uuid) -> Result<()> {
-        self.write_execute(
-            "DELETE FROM session_goals WHERE session_id = :session_id",
-            named_params! { ":session_id": session_id.to_string() },
-        )?;
-        self.touch_session(session_id)?;
-        Ok(())
-    }
-
-    /// Accumulate token usage and elapsed time toward the session goal.
-    ///
-    /// Only takes effect when the session has an **Active** goal.
-    /// Silently no-ops if there is no goal or the goal is Paused/Complete.
-    pub fn account_goal_usage(
-        &self,
-        session_id: Uuid,
-        tokens: i64,
-        elapsed_secs: i64,
-    ) -> Result<()> {
-        let now = Utc::now().to_rfc3339();
-        self.write_execute(
-            "UPDATE session_goals \
-             SET tokens_used = tokens_used + :tokens, \
-                 time_used_seconds = time_used_seconds + :elapsed_secs, \
-                 updated_at = :now \
-             WHERE session_id = :session_id AND status = 'active'",
-            named_params! {
-                ":session_id": session_id.to_string(),
-                ":tokens": tokens,
-                ":elapsed_secs": elapsed_secs,
-                ":now": now,
-            },
-        )?;
-        Ok(())
     }
 
     pub fn load_latest_session(&self) -> Result<Option<SessionRecord>> {
@@ -2010,8 +1903,8 @@ impl SessionStore {
     /// The output database has the same schema but uses TEXT columns for
     /// `content`, `reasoning`, and `output_text` (i.e. no zstd compression).
     /// All other tables are copied verbatim. Only data belonging to the
-    /// given sessions is included (plus global tables such as `meta`,
-    /// `usage_stats`, and `memories`).
+    /// given sessions is included (plus global tables such as `meta` and
+    /// `usage_stats`).
     pub fn export_to_sqlite(
         &self,
         session_ids: &[Uuid],
@@ -2419,38 +2312,7 @@ impl SessionStore {
             }
         }
 
-        // 12. memories ── global table, copy all (decompress content for export)
-        {
-            let mut stmt = self.read_conn.prepare(
-                "SELECT id, workspace_root, memory_type, title, content, tags, source_session_id, created_at, updated_at, usage_count, active FROM memories",
-            )?;
-            let rows = stmt.query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    read_blob_maybe_text(row, 4)?,
-                    row.get::<_, String>(5)?,
-                    row.get::<_, Option<String>>(6)?,
-                    row.get::<_, String>(7)?,
-                    row.get::<_, String>(8)?,
-                    row.get::<_, i64>(9)?,
-                    row.get::<_, i64>(10)?,
-                ))
-            })?;
-            let mut insert = tx.prepare(
-                "INSERT OR REPLACE INTO memories (id, workspace_root, memory_type, title, content, tags, source_session_id, created_at, updated_at, usage_count, active) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-            )?;
-            for row in rows {
-                let (id, wr, mt, title, content, tags, src_sid, ca, ua, uc, active) = row?;
-                insert.execute(params![
-                    id, wr, mt, title, content, tags, src_sid, ca, ua, uc, active
-                ])?;
-            }
-        }
-
-        // 13. gateway_chat_sessions ── only for the exported sessions
+        // 12. gateway_chat_sessions ── only for the exported sessions
         {
             let mut stmt = self
                 .read_conn
@@ -2474,7 +2336,7 @@ impl SessionStore {
             }
         }
 
-        // 14. gateway_chat_models ── global table, copy all
+        // 13. gateway_chat_models ── global table, copy all
         {
             let mut stmt = self.read_conn.prepare(
                 "SELECT platform, chat_key, provider_id, model_id, updated_at FROM gateway_chat_models",
@@ -2494,33 +2356,6 @@ impl SessionStore {
             for row in rows {
                 let (platform, chat_key, p, m, u) = row?;
                 insert.execute(params![platform, chat_key, p, m, u])?;
-            }
-        }
-
-        // 15. session_goals ── per-session, filter by session_ids
-        {
-            let mut stmt = self
-                .read_conn
-                .prepare("SELECT session_id, objective, status, tokens_used, time_used_seconds, created_at, updated_at FROM session_goals WHERE session_id = ?1")?;
-            let mut insert = tx.prepare(
-                "INSERT OR REPLACE INTO session_goals (session_id, objective, status, tokens_used, time_used_seconds, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            )?;
-            for sid in &session_id_strs {
-                let rows = stmt.query_map(params![sid], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, i64>(3)?,
-                        row.get::<_, i64>(4)?,
-                        row.get::<_, String>(5)?,
-                        row.get::<_, String>(6)?,
-                    ))
-                })?;
-                for row in rows {
-                    let (sid, obj, status, tokens, secs, created, updated) = row?;
-                    insert.execute(params![sid, obj, status, tokens, secs, created, updated])?;
-                }
             }
         }
 
@@ -2644,9 +2479,6 @@ impl SessionStore {
             let mut insert_file_read = guard.prepare(
                 "INSERT OR REPLACE INTO file_reads (session_id, file_path, read_at, mtime, size) VALUES (?1, ?2, ?3, ?4, ?5)",
             )?;
-            let mut insert_goal = guard.prepare(
-                "INSERT OR REPLACE INTO session_goals (session_id, objective, status, tokens_used, time_used_seconds, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            )?;
 
             let mut import_gateway_session = guard.prepare(
                 "INSERT OR REPLACE INTO gateway_chat_sessions (platform, chat_key, session_id, updated_at) VALUES (?1, ?2, ?3, ?4)",
@@ -2674,9 +2506,6 @@ impl SessionStore {
             )?;
             let mut gw_session_stmt = import_conn.prepare(
                 "SELECT platform, chat_key, session_id, updated_at FROM gateway_chat_sessions WHERE session_id = ?1",
-            )?;
-            let mut goal_stmt = import_conn.prepare(
-                "SELECT session_id, objective, status, tokens_used, time_used_seconds, created_at, updated_at FROM session_goals WHERE session_id = ?1",
             )?;
 
             let mut imported_count = 0usize;
@@ -2945,26 +2774,6 @@ impl SessionStore {
                     import_gateway_session.execute(params![platform, chat_key, sid, updated])?;
                 }
 
-                // session_goals
-                if let Some(goal) = goal_stmt
-                    .query_row(params![&session.id], |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, String>(1)?,
-                            row.get::<_, String>(2)?,
-                            row.get::<_, i64>(3)?,
-                            row.get::<_, i64>(4)?,
-                            row.get::<_, String>(5)?,
-                            row.get::<_, String>(6)?,
-                        ))
-                    })
-                    .optional()?
-                {
-                    let (sid, obj, status, tokens, secs, created, updated) = goal;
-                    insert_goal
-                        .execute(params![sid, obj, status, tokens, secs, created, updated])?;
-                }
-
                 imported_count += 1;
             }
 
@@ -3042,21 +2851,6 @@ fn read_blob_maybe_text_bytes(row: &rusqlite::Row, idx: usize) -> rusqlite::Resu
         Err(_) => {
             let text: String = row.get(idx)?;
             Ok(text.into_bytes())
-        }
-    }
-}
-
-/// Helper: read a NOT NULL column that may be BLOB or TEXT, returning decompressed String.
-///
-/// Falls back to reading as TEXT (plain text) for backwards compatibility
-/// with databases created before zstd compression was enabled for the column.
-fn read_blob_maybe_text(row: &rusqlite::Row, idx: usize) -> rusqlite::Result<String> {
-    match row.get::<_, Vec<u8>>(idx) {
-        Ok(bytes) => Ok(decompress_text(&bytes)),
-        Err(_) => {
-            // Fallback for old databases where the column is TEXT
-            let text: String = row.get(idx)?;
-            Ok(text)
         }
     }
 }

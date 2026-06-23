@@ -239,135 +239,11 @@ impl AgentRuntime {
         Ok(true)
     }
 
-    /// Inject memory context into the first user message of a session
-    /// (only when no assistant message exists yet).
-    async fn inject_first_turn_memory(
-        &self,
-        session_id: uuid::Uuid,
-        last_user_msg: &mut tidev_session::session::Message,
-        has_assistant: bool,
-    ) -> Result<bool> {
-        if has_assistant || !self.config.memory.enabled || !self.config.memory.inject_context {
-            return Ok(false);
-        }
-
-        // Guard against duplicate injection in subsequent agent-loop iterations
-        // when the LLM makes multiple tool-call rounds (no assistant message is
-        // persisted until the final turn, so has_assistant stays false).
-        // All injection functions wrap content in <system-reminder>, so checking
-        // for its presence is a reliable guard against any prior injection.
-        if last_user_msg.content.contains("<system-reminder>") {
-            log::debug!(
-                "inject_first_turn_memory: content already contains <system-reminder>, \
-                 skipping (message {})",
-                last_user_msg.id,
-            );
-            return Ok(false);
-        }
-
-        let ws = self.workspace_root.display().to_string();
-        let memory_store = self.tools.memory_store();
-        let mut sections: Vec<String> = Vec::new();
-
-        macro_rules! timed_memory_op {
-            ($label:expr, $body:expr) => {{
-                let _start = std::time::Instant::now();
-                let _result = $body;
-                let _elapsed = _start.elapsed();
-                log::debug!("inject_first_turn_memory: {} took {:?}", $label, _elapsed);
-                if _elapsed > std::time::Duration::from_millis(500) {
-                    log::warn!(
-                        "inject_first_turn_memory: {} took {:?} (slow)",
-                        $label,
-                        _elapsed
-                    );
-                }
-                _result
-            }};
-        }
-
-        // ── Session summaries (other sessions) ──────────────────────────
-        if let Ok(summaries) = timed_memory_op!(
-            "load_other_session_summaries",
-            memory_store.load_other_session_summaries(&session_id, 5)
-        ) && !summaries.is_empty()
-        {
-            sections.push(Self::format_session_summaries(&summaries));
-        }
-
-        // ── Consolidated knowledge (cross-session facts) ────────────────
-        if let Ok(facts) = timed_memory_op!(
-            "load_consolidated_facts",
-            memory_store.load_consolidated_facts(&ws, 5)
-        ) && !facts.is_empty()
-        {
-            let mut block = "## Consolidated Project Knowledge\n".to_string();
-            for fact in &facts {
-                block.push_str(&format!(
-                    "- {} (confidence: {:.1})\n",
-                    fact.content, fact.strength
-                ));
-            }
-            sections.push(block);
-        }
-
-        // ── Consolidated procedures ─────────────────────────────────────
-        if let Ok(procs) = timed_memory_op!(
-            "load_consolidated_procedures",
-            memory_store.load_consolidated_procedures(&ws, 3)
-        ) && !procs.is_empty()
-        {
-            let mut block = "## Reusable Procedures\n".to_string();
-            for proc in &procs {
-                block.push_str(&format!("- **{}**: {}\n", proc.title, proc.content));
-            }
-            sections.push(block);
-        }
-
-        // ── Memory slots ────────────────────────────────────────────────
-        if let Ok(slot_content) =
-            timed_memory_op!("render_pinned_slots", memory_store.render_pinned_slots(&ws))
-            && !slot_content.is_empty()
-        {
-            sections.push(slot_content);
-        }
-
-        // ── Compose final injection ─────────────────────────────────────
-        if sections.is_empty() {
-            return Ok(false);
-        }
-
-        let injection = format!(
-            "<system-reminder>\n{}\n</system-reminder>",
-            sections.join("\n\n")
-        );
-        last_user_msg.content = format!("{}\n\n{}", injection, last_user_msg.content);
-
-        // Persist the updated message
-        {
-            let store = self.store.lock().await;
-            store.update_message_content(last_user_msg.id, &last_user_msg.content)?;
-        }
-
-        log::info!(
-            "injected {} memory section(s) into first user message of session {}",
-            sections.len(),
-            session_id
-        );
-
-        Ok(true)
+    /// Get all available tool definitions (built-in + MCP).
+    pub fn tool_definitions(&self) -> Vec<crate::tooling::ToolDefinition> {
+        self.tools.all_definitions()
     }
 
-    /// Inject mode reminder into the last user message.
-    ///
-    /// Injects `mode.reminder()` on the very first user message of a session,
-    /// and injects `plan_switch_reminder()` / `build_switch_reminder()` whenever
-    /// the session mode changes (detected by comparing the mode stored on the
-    /// previous user message with the current mode).
-    ///
-    /// Follows the same pattern as `inject_new_instructions` and
-    /// `inject_first_turn_memory`: the reminder is prepended to the user
-    /// message content and the updated content is persisted to the database.
     async fn inject_mode_reminder(
         &self,
         session_id: uuid::Uuid,
@@ -395,9 +271,9 @@ impl AgentRuntime {
         });
 
         let reminder: Option<String> = match (is_first_user, prev_mode) {
-            // ① Very first user message → inject mode reminder
+            // Very first user message -> inject mode reminder
             (true, _) => Some(current_mode.reminder().to_string()),
-            // ② Mode changed → inject switch reminder
+            // Mode changed -> inject switch reminder
             (false, Some(prev)) if prev != current_mode => Some(match current_mode {
                 tidev_types::prompts::SessionMode::Plan => {
                     tidev_types::prompts::plan_switch_reminder()
@@ -406,17 +282,11 @@ impl AgentRuntime {
                     tidev_types::prompts::build_switch_reminder()
                 }
             }),
-            // ③ Same mode as before → no injection needed
+            // Same mode as before -> no injection needed
             _ => None,
         };
 
         if let Some(text) = reminder {
-            // Guard: if the message already starts with the exact same
-            // reminder text, skip injection to avoid duplicate accumulation.
-            // The agent loop may iterate multiple times for tool-call turns,
-            // and `is_first_user` remains `true` as long as no new user
-            // messages are added, causing the same reminder to be prepended
-            // on every iteration.
             if last_user_msg.content.starts_with(&text) {
                 log::debug!(
                     "inject_mode_reminder: reminder already present in message {}, skipping",
@@ -438,35 +308,6 @@ impl AgentRuntime {
         } else {
             Ok(false)
         }
-    }
-
-    /// Format session summaries into a Markdown block.
-    fn format_session_summaries(summaries: &[crate::memory::SessionSummary]) -> String {
-        let mut parts = vec!["## Related Session Summaries".to_string()];
-        for s in summaries {
-            let title = s.title.as_deref().unwrap_or("(untitled)");
-            let narrative = s.narrative.as_deref().unwrap_or("");
-            let decisions_str = if s.key_decisions.is_empty() {
-                String::new()
-            } else {
-                format!("\n    Decisions: {}", s.key_decisions.join(", "))
-            };
-            let files_str = if s.files_modified.is_empty() {
-                String::new()
-            } else {
-                format!("\n    Files: {}", s.files_modified.join(", "))
-            };
-            parts.push(format!(
-                "- **{}**: {}{}{}",
-                title, narrative, decisions_str, files_str,
-            ));
-        }
-        parts.join("\n")
-    }
-
-    /// Get all available tool definitions (built-in + MCP).
-    pub fn tool_definitions(&self) -> Vec<crate::tooling::ToolDefinition> {
-        self.tools.all_definitions()
     }
 }
 

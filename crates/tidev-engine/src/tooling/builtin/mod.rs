@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::{Arc, atomic::AtomicBool};
 use tokio::sync::mpsc::UnboundedSender;
 
-use super::tools::{MemoryArgs, QuestionArgs, SkillArgs};
+use super::tools::{QuestionArgs, SkillArgs};
 use super::{SkillCatalog, ToolDefinition, ToolPermission, canonical_tool_name};
 use tidev_types::prompts::SessionMode;
 
@@ -24,7 +24,6 @@ pub struct ToolContext<'a> {
     pub session_id: uuid::Uuid,
     pub max_output_bytes: usize,
     pub rtk_enabled: bool,
-    pub memory_store: &'a Arc<crate::memory::MemoryStore>,
     pub mode: SessionMode,
     pub allow_outside: bool,
     pub sensitive_file_approved: bool,
@@ -37,8 +36,6 @@ pub struct ToolContext<'a> {
 pub mod apply_patch;
 pub mod exec;
 pub mod file;
-pub mod goal;
-pub mod memory;
 pub mod search;
 pub mod sensitive;
 pub mod sudo;
@@ -54,7 +51,6 @@ pub fn definitions(skill_description: String) -> Vec<ToolDefinition> {
     definitions.extend(exec::definitions());
     definitions.extend(task::definitions());
     definitions.extend(todo::definitions());
-    definitions.extend(goal::definitions());
     definitions.extend(web::definitions());
     definitions.push(ToolDefinition::new::<QuestionArgs>(
         "question",
@@ -64,11 +60,6 @@ pub fn definitions(skill_description: String) -> Vec<ToolDefinition> {
     definitions.push(ToolDefinition::new::<SkillArgs>(
         "skill",
         skill_description,
-        ToolPermission::Session,
-    ));
-    definitions.push(ToolDefinition::new::<MemoryArgs>(
-        "memory",
-        "Store, search, and manage workspace memories and slots. Operations: remember, search, list, read, forget, observations. Slots: slot_list, slot_get, slot_set, slot_append, slot_delete. Eviction: evict. Use to remember user preferences, project decisions, architecture decisions, and other important context.",
         ToolPermission::Session,
     ));
     definitions
@@ -140,29 +131,10 @@ pub fn execute_tool_call(
             )?;
             tidev_session::session::ToolExecutionResult::new(output)
         }
-        Some("get_goal") | Some("update_goal") => {
-            let output = goal::execute_tool_call(
-                ctx.workspace_root,
-                ctx.store,
-                ctx.session_id,
-                &call.name,
-                arguments,
-            )?;
-            tidev_session::session::ToolExecutionResult::new(output)
-        }
         Some("skill") => {
             let args = super::tools::parse_arguments::<SkillArgs>(&call.name, arguments)?;
             let output = ctx.skills.render_skill(&args.name)?;
             tidev_session::session::ToolExecutionResult::new(output)
-        }
-        Some("memory") => {
-            let result = crate::tooling::builtin::memory::execute_tool_call(
-                ctx.workspace_root,
-                ctx.memory_store,
-                call,
-                arguments,
-            )?;
-            tidev_session::session::ToolExecutionResult::new(result)
         }
         Some("websearch") | Some("webfetch") => {
             let output = web::execute_tool_call(
@@ -254,29 +226,10 @@ pub fn execute_tool_call_streaming(
             )?;
             tidev_session::session::ToolExecutionResult::new(output)
         }
-        Some("get_goal") | Some("update_goal") => {
-            let output = goal::execute_tool_call(
-                ctx.workspace_root,
-                ctx.store,
-                ctx.session_id,
-                &call.name,
-                arguments,
-            )?;
-            tidev_session::session::ToolExecutionResult::new(output)
-        }
         Some("skill") => {
             let args = super::tools::parse_arguments::<SkillArgs>(&call.name, arguments)?;
             let output = ctx.skills.render_skill(&args.name)?;
             tidev_session::session::ToolExecutionResult::new(output)
-        }
-        Some("memory") => {
-            let result = crate::tooling::builtin::memory::execute_tool_call(
-                ctx.workspace_root,
-                ctx.memory_store,
-                call,
-                arguments,
-            )?;
-            tidev_session::session::ToolExecutionResult::new(result)
         }
         Some("websearch") | Some("webfetch") => {
             let output = web::execute_tool_call(

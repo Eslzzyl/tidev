@@ -447,48 +447,31 @@ pub(super) fn render_message_cards_inner(
 
     match message.role {
         MessageRole::User | MessageRole::Shell => {
-            // Check for hidden system-injected goal continuation messages
-            if message.role == MessageRole::User
-                && message.content.trim_start().starts_with("<goal_context>")
-            {
-                vec![(palette.panel_alt, {
-                    let mut lines = Vec::new();
-                    let style = Style::default()
-                        .fg(palette.muted)
-                        .add_modifier(Modifier::DIM);
-                    lines.push(Line::from(vec![Span::styled(
-                        "┃ [Auto continue in goal mode]",
-                        style,
-                    )]));
-                    lines
-                })]
-            } else {
-                vec![(palette.panel_alt, {
-                    let display_content = strip_system_reminder_tags(&message.content);
-                    let mut content_lines = render_text_body_lines(
-                        ctx,
-                        &display_content,
-                        body_width.saturating_sub(2),
-                        Some(ctx.workspace_root),
-                    );
-                    // Apply inline badge styling for @ references and image placeholders
-                    apply_badge_styling(&mut content_lines, palette);
-                    let mut lines = Vec::new();
-                    let mode_color = message.mode.map_or(palette.accent, |m| match m {
-                        SessionMode::Build => palette.mode_build,
-                        SessionMode::Plan => palette.mode_plan,
-                    });
-                    let prefix_style = Style::default().fg(mode_color).add_modifier(Modifier::BOLD);
-                    lines.push(Line::from(vec![Span::styled("┃ ", prefix_style)]));
-                    for line in content_lines {
-                        let mut spans = vec![Span::styled("┃ ", prefix_style)];
-                        spans.extend(line.spans);
-                        lines.push(Line::from(spans));
-                    }
-                    lines.push(Line::from(vec![Span::styled("┃ ", prefix_style)]));
-                    lines
-                })]
-            }
+            vec![(palette.panel_alt, {
+                let display_content = strip_system_reminder_tags(&message.content);
+                let mut content_lines = render_text_body_lines(
+                    ctx,
+                    &display_content,
+                    body_width.saturating_sub(2),
+                    Some(ctx.workspace_root),
+                );
+                // Apply inline badge styling for @ references and image placeholders
+                apply_badge_styling(&mut content_lines, palette);
+                let mut lines = Vec::new();
+                let mode_color = message.mode.map_or(palette.accent, |m| match m {
+                    SessionMode::Build => palette.mode_build,
+                    SessionMode::Plan => palette.mode_plan,
+                });
+                let prefix_style = Style::default().fg(mode_color).add_modifier(Modifier::BOLD);
+                lines.push(Line::from(vec![Span::styled("┃ ", prefix_style)]));
+                for line in content_lines {
+                    let mut spans = vec![Span::styled("┃ ", prefix_style)];
+                    spans.extend(line.spans);
+                    lines.push(Line::from(spans));
+                }
+                lines.push(Line::from(vec![Span::styled("┃ ", prefix_style)]));
+                lines
+            })]
         }
         MessageRole::Assistant => {
             let mut cards = Vec::new();

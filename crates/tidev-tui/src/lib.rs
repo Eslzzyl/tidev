@@ -51,7 +51,6 @@ pub use render::diff_render;
 pub use ui::balance_panel;
 pub use ui::connect;
 pub use ui::mcp_panel;
-pub use ui::memory_panel;
 pub use ui::message_panel;
 pub use ui::model_panel;
 pub use ui::permission;
@@ -64,7 +63,6 @@ pub use ui::theme_panel;
 
 use core::state::*;
 
-use tidev_types::Goal;
 use tidev_types::prompts::{SessionMode, init_command_with_args};
 
 use crate::ui::permission::{
@@ -79,7 +77,6 @@ use tidev_engine::{
     context::ContextManager,
     instructions,
     mcp::McpManager,
-    memory::MemoryStore,
     notifications,
     provider_setup::ConnectDialog,
     shared::file_search::current_at_fragment,
@@ -99,7 +96,6 @@ use crate::{
     input::SnippetState,
     input::shell_completion::ShellCompletionState,
     mcp_panel::McpPanelState,
-    memory_panel::MemoryPanelState,
     message_panel::MessagePanelState,
     model_panel::ModelPanelState,
     mouse_selection::{ClipboardLease, MouseSelectionState},
@@ -132,8 +128,6 @@ struct App {
     /// Shared AgentRuntime for compose_static_system_prompt / build_request_messages.
     agent: AgentRuntime,
     file_read_tracker: Arc<FileReadTracker>,
-    /// Current goal for the active session, if any.
-    current_goal: Option<Goal>,
     commands: CommandRegistry,
     command_palette: CommandPaletteState,
     panel_launcher: panel_launcher::PanelLauncherState,
@@ -234,8 +228,6 @@ struct App {
     sidebar_scroll_offset: usize,
     sidebar_total_lines: usize,
     input_area: Cell<Option<Rect>>,
-    /// Overlay rect of the memory panel (for mouse hit-testing).
-    memory_panel_overlay: Cell<Option<Rect>>,
     /// Overlay rects for various panels (for mouse hit-testing).
     theme_panel_overlay: Cell<Option<Rect>>,
     model_panel_overlay: Cell<Option<Rect>>,
@@ -336,10 +328,6 @@ struct App {
     shell_kill_flag: Option<Arc<std::sync::atomic::AtomicBool>>,
     /// DeepSeek thinking level for the current model
     thinking_level: tidev_engine::config::reasoning::ThinkingLevelType,
-    /// Cross-session memory store
-    memory_store: Arc<MemoryStore>,
-    /// Memory management panel
-    memory_panel: Option<MemoryPanelState>,
     /// Image protocol picker for terminal image display (Sixel/Kitty/iTerm2).
     /// None if the terminal does not support any graphics protocol.
     image_picker: Option<ratatui_image::picker::Picker>,
@@ -639,7 +627,6 @@ impl App {
             mcp,
             config.permissions.clone(),
             file_read_tracker,
-            self.memory_store.clone(),
             config.rtk.enabled,
             worktree,
             config.websearch.clone(),
@@ -975,7 +962,6 @@ impl App {
             BackendEvent::ShellOutput { .. } => "ShellOutput",
             BackendEvent::TurnStarting { .. } => "TurnStarting",
             BackendEvent::SandboxElevationRequest { .. } => "SandboxElevationRequest",
-            BackendEvent::GoalStatusChanged { .. } => "GoalStatusChanged",
             BackendEvent::StreamEnd { .. } => "StreamEnd",
         };
         if event_type != "Delta"
@@ -1725,10 +1711,6 @@ impl App {
             BackendEvent::SandboxElevationRequest { .. } => {
                 // Handled in handle_backend_event before dispatch
             }
-            BackendEvent::GoalStatusChanged { goal, .. } => {
-                self.current_goal = goal;
-                self.dirty = true;
-            }
             BackendEvent::StreamEnd { .. } => {
                 // Reset streaming state when the agent loop exits (success or error).
                 // In the normal flow this is a no-op because finish_assistant_turn
@@ -1852,50 +1834,6 @@ impl App {
                 Some(thinking_level),
                 instruction_sources,
             ));
-    }
-
-    /// If we are on the welcome screen, create the session and switch to chat.
-    /// This is used by `/goal <objective>` so the user can set a goal before
-    /// sending any message.  Returns `true` if a session was just created.
-    fn ensure_goal_session(&mut self) -> Result<bool> {
-        if self.screen != Screen::Welcome {
-            return Ok(false);
-        }
-        let session_id = Uuid::new_v4();
-        self.conversation.session_id = session_id;
-        self.conversation.clear_context_state();
-        self.store.create_session(
-            session_id,
-            self.workspace_root.as_path(),
-            &self.active_model.provider_id,
-            &self.active_model.provider_display_name,
-            &self.active_model.model_id,
-            &self.active_model.display_name,
-            "Untitled session",
-        )?;
-        let static_prompt = self
-            .agent
-            .compose_static_system_prompt(&self.active_model.system_prompt);
-        self.active_model.system_prompt = static_prompt.clone();
-        if let Err(e) = self
-            .store
-            .update_session_system_prompt(session_id, &static_prompt)
-        {
-            log::warn!("failed to persist static system prompt: {}", e);
-        }
-        self.context_manager = ContextManager::new();
-        self.pending_tool_execution = None;
-        self.permission_dialog = None;
-        self.question_dialog = None;
-        self.fork_confirm_dialog = None;
-        self.running_tool_executions.clear();
-        self.workspace_boundary_approved.clear();
-        self.abort_confirmation_deadline = None;
-        self.active_request_id = self.active_request_id.wrapping_add(1);
-        self.screen = Screen::Chat;
-        self.command_palette.clear();
-        self.connect_dialog = None;
-        Ok(true)
     }
 
     fn submit_prompt_now(

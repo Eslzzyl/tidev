@@ -32,10 +32,6 @@ pub enum SettingKey {
     SaveResponseBody,
     ScrollSpeed,
     RtkEnabled,
-    MemoryEnabled,
-    MemoryAutoLearn,
-    MemoryInjectContext,
-    MemoryEnrichTools,
 }
 
 #[derive(Clone, Debug)]
@@ -58,7 +54,6 @@ impl SettingsPanelState {
             .position(|l| l == &config.logging.level.to_uppercase())
             .unwrap_or(1);
 
-        let memory_enabled = config.memory.enabled;
         let items = vec![
             SettingItem {
                 name: "Notifications".to_string(),
@@ -124,57 +119,6 @@ impl SettingsPanelState {
                 key: SettingKey::RtkEnabled,
                 disabled: false,
             },
-            // ── Memory ──────────────────────────────────────────────────
-            SettingItem {
-                name: "Memory".to_string(),
-                description: if memory_enabled {
-                    "Enable the entire memory system".to_string()
-                } else {
-                    "Memory system is disabled".to_string()
-                },
-                setting_type: SettingType::Toggle(memory_enabled),
-                key: SettingKey::MemoryEnabled,
-                disabled: false,
-            },
-            SettingItem {
-                name: "  Auto-Learn".to_string(),
-                description: if memory_enabled && config.memory.auto_learn {
-                    "Automatically learn from sessions and maintain memories".to_string()
-                } else if !memory_enabled {
-                    "Requires Memory to be enabled".to_string()
-                } else {
-                    "Automatic learning is disabled; manual only".to_string()
-                },
-                setting_type: SettingType::Toggle(memory_enabled && config.memory.auto_learn),
-                key: SettingKey::MemoryAutoLearn,
-                disabled: !memory_enabled,
-            },
-            SettingItem {
-                name: "  Inject Context".to_string(),
-                description: if !memory_enabled {
-                    "Requires Memory to be enabled".to_string()
-                } else if config.memory.inject_context {
-                    "Inject memory context into conversations (uses tokens)".to_string()
-                } else {
-                    "Do not inject memory context into conversations".to_string()
-                },
-                setting_type: SettingType::Toggle(memory_enabled && config.memory.inject_context),
-                key: SettingKey::MemoryInjectContext,
-                disabled: !memory_enabled,
-            },
-            SettingItem {
-                name: "  Enrich Tools".to_string(),
-                description: if !memory_enabled {
-                    "Requires Memory to be enabled".to_string()
-                } else if config.memory.enrich_tools {
-                    "Enrich file operations with relevant memories (uses tokens)".to_string()
-                } else {
-                    "Do not enrich file operations with memories".to_string()
-                },
-                setting_type: SettingType::Toggle(memory_enabled && config.memory.enrich_tools),
-                key: SettingKey::MemoryEnrichTools,
-                disabled: !memory_enabled,
-            },
         ];
 
         Self {
@@ -204,60 +148,6 @@ impl SettingsPanelState {
 
         // Skip disabled items
         if item.disabled {
-            return;
-        }
-
-        // Handle master-switch logic with indices to avoid borrow conflicts
-        let is_master_switch = item.key == SettingKey::MemoryEnabled;
-        let current_val = match &item.setting_type {
-            SettingType::Toggle(val) => *val,
-            _ => false,
-        };
-        let new_val = !current_val;
-
-        if is_master_switch {
-            if !new_val {
-                // Turning master off: clear sub-toggles
-                for i in 0..self.items.len() {
-                    match self.items[i].key {
-                        SettingKey::MemoryAutoLearn
-                        | SettingKey::MemoryInjectContext
-                        | SettingKey::MemoryEnrichTools => {
-                            self.items[i].setting_type = SettingType::Toggle(false);
-                            self.items[i].disabled = true;
-                            self.items[i].description = "Requires Memory to be enabled".to_string();
-                        }
-                        _ => {}
-                    }
-                }
-                self.items[selected].description = "Memory system is disabled".to_string();
-            } else {
-                // Turning master on: enable sub-toggles
-                for i in 0..self.items.len() {
-                    match self.items[i].key {
-                        SettingKey::MemoryAutoLearn => {
-                            self.items[i].disabled = false;
-                            self.items[i].description =
-                                "Automatically learn from sessions and maintain memories"
-                                    .to_string();
-                        }
-                        SettingKey::MemoryInjectContext => {
-                            self.items[i].disabled = false;
-                            self.items[i].description =
-                                "Do not inject memory context into conversations".to_string();
-                        }
-                        SettingKey::MemoryEnrichTools => {
-                            self.items[i].disabled = false;
-                            self.items[i].description =
-                                "Do not enrich file operations with memories".to_string();
-                        }
-                        _ => {}
-                    }
-                }
-                self.items[selected].description = "Enable the entire memory system".to_string();
-            }
-            // Toggle the master switch value
-            self.items[selected].setting_type = SettingType::Toggle(new_val);
             return;
         }
 
@@ -339,26 +229,6 @@ impl SettingsPanelState {
                     if let SettingType::Toggle(val) = item.setting_type {
                         // Only allow enabling RTK if it's installed
                         config.rtk.enabled = val && config.rtk.installed;
-                    }
-                }
-                SettingKey::MemoryEnabled => {
-                    if let SettingType::Toggle(val) = item.setting_type {
-                        config.memory.enabled = val;
-                    }
-                }
-                SettingKey::MemoryAutoLearn => {
-                    if let SettingType::Toggle(val) = item.setting_type {
-                        config.memory.auto_learn = val && config.memory.enabled;
-                    }
-                }
-                SettingKey::MemoryInjectContext => {
-                    if let SettingType::Toggle(val) = item.setting_type {
-                        config.memory.inject_context = val && config.memory.enabled;
-                    }
-                }
-                SettingKey::MemoryEnrichTools => {
-                    if let SettingType::Toggle(val) = item.setting_type {
-                        config.memory.enrich_tools = val && config.memory.enabled;
                     }
                 }
             }

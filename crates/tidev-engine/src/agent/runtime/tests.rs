@@ -68,7 +68,6 @@ fn agent_runtime() -> (AgentRuntime, tempfile::TempDir) {
             crate::mcp::McpManager::new(tmp.path().join("workspace"), Default::default()),
             tidev_types::types::PermissionConfig::default(),
             std::sync::Arc::new(crate::tooling::FileReadTracker::new()),
-            std::sync::Arc::new(crate::memory::MemoryStore::open(&db_path).unwrap()),
             false,
             None,
             crate::config::WebSearchConfig::default(),

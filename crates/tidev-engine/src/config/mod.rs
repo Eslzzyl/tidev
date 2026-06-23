@@ -36,73 +36,6 @@ pub use self::sandbox::SandboxConfig;
 /// Shared (thread-safe) reference to the app configuration.
 pub type SharedConfig = Arc<RwLock<AppConfig>>;
 
-/// Per-model overrides for memory operations.
-/// `None` = inherit from the session's active model.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct MemoryConfig {
-    /// Optional override for consolidation/reflection model.
-    #[serde(default)]
-    pub consolidation_model: Option<String>,
-    /// Per-role thinking level overrides, keyed by role name (e.g. "consolidation").
-    /// Format matches `ThinkingLevelType::to_string()` (e.g. "deepseek:High").
-    #[serde(default)]
-    pub thinking_levels: BTreeMap<String, String>,
-    /// Master switch for the memory system.
-    /// When false, background tasks do not run, auto-learning is skipped,
-    /// and memory is never injected or enriched automatically.
-    /// Manual operations (explicit `remember`/`search` tool calls) still work.
-    #[serde(default = "default_memory_enabled")]
-    pub enabled: bool,
-    /// Automatically learn from sessions and maintain memories.
-    /// Controls: background tasks (consolidation, reflection, eviction),
-    /// session summarization, and future real-time observation recording.
-    /// When disabled, memory is only written via explicit tool calls.
-    /// Ignored when `enabled` is false.
-    #[serde(default = "default_memory_auto_learn")]
-    pub auto_learn: bool,
-    /// Whether to inject comprehensive memory context into the conversation.
-    /// When true, memory context (observations, summaries, facts, procedures,
-    /// slots, graph, insights) is injected into the first user message only.
-    /// When false (default), memory is stored but never auto-injected.
-    /// Like agentmemory's AGENTMEMORY_INJECT_CONTEXT.
-    #[serde(default)]
-    pub inject_context: bool,
-    /// Whether to search and inject memory context relevant to the file
-    /// being operated on, before each file tool call (read/write/edit/grep/glob).
-    /// Like agentmemory's pre-tool-use enrich hook.
-    #[serde(default)]
-    pub enrich_tools: bool,
-    /// Token budget for the first-turn context injection.
-    #[serde(default = "default_context_token_budget")]
-    pub context_token_budget: usize,
-}
-
-fn default_memory_enabled() -> bool {
-    true
-}
-
-fn default_memory_auto_learn() -> bool {
-    true
-}
-
-fn default_context_token_budget() -> usize {
-    2000
-}
-
-impl Default for MemoryConfig {
-    fn default() -> Self {
-        Self {
-            consolidation_model: None,
-            thinking_levels: BTreeMap::new(),
-            enabled: true,
-            auto_learn: true,
-            inject_context: false,
-            enrich_tools: false,
-            context_token_budget: 2000,
-        }
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Web search configuration
 // ---------------------------------------------------------------------------
@@ -179,8 +112,6 @@ pub struct AppConfig {
     #[serde(default)]
     pub websearch: WebSearchConfig,
     #[serde(default)]
-    pub memory: MemoryConfig,
-    #[serde(default)]
     pub snapshot: SnapshotConfig,
     #[serde(default)]
     pub sync: SyncConfig,
@@ -214,7 +145,6 @@ impl Default for AppConfig {
             tmp: TmpConfig::default(),
             hooks: crate::hooks::HooksConfig::default(),
             websearch: WebSearchConfig::default(),
-            memory: MemoryConfig::default(),
             snapshot: SnapshotConfig::default(),
             sync: SyncConfig::default(),
             bundled_providers: bundled_provider_catalog().unwrap_or_default(),
@@ -350,9 +280,6 @@ pub struct CronJobDecl {
     /// Allowlist of tool names for agent jobs.
     #[serde(default)]
     pub allowed_tools: Option<Vec<String>>,
-    /// Whether to inject memory context for agent jobs.
-    #[serde(default = "default_true")]
-    pub uses_memory: bool,
     /// Session target: "isolated" (default) or "main".
     #[serde(default)]
     pub session_target: Option<String>,
@@ -376,7 +303,6 @@ impl Default for CronJobDecl {
             enabled: true,
             model: None,
             allowed_tools: None,
-            uses_memory: true,
             session_target: None,
             delivery: None,
         }
@@ -845,9 +771,6 @@ impl AppConfig {
         if has("shell") {
             self.shell = overlay.shell;
         }
-        if has("memory") {
-            self.memory = overlay.memory;
-        }
         if has("tmp") {
             self.tmp = overlay.tmp;
         }
@@ -964,18 +887,6 @@ enabled = false
 # allowlist can contain Telegram user IDs or chat IDs as strings.
 allowlist = []
 poll_timeout_secs = 30
-
-# Memory system configuration.
-# When enabled is false, the entire memory system is disabled
-# (no background tasks, no auto-injection, no auto-learning).
-# auto_learn controls background consolidation, reflection, eviction,
-# and session summarization.
-#[memory]
-#enabled = true
-#auto_learn = true
-#inject_context = false
-#enrich_tools = false
-#context_token_budget = 2000
 
 # Web search provider configuration.
 [websearch]
@@ -1189,69 +1100,6 @@ default_provider = "exa"
         self.agent_model_label(agent_type)
             .map(|s| s.to_string())
             .unwrap_or_else(|| "<inherit>".to_string())
-    }
-
-    /// Return the configured memory model label for a role, if any.
-    /// Roles: "consolidation".
-    pub fn memory_model_label(&self, role: &str) -> Option<&str> {
-        match role {
-            "consolidation" => self.memory.consolidation_model.as_deref(),
-            _ => None,
-        }
-    }
-
-    /// Return a human-readable label for a memory model role.
-    pub fn memory_model_display(&self, role: &str) -> String {
-        self.memory_model_label(role)
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| "<inherit>".to_string())
-    }
-
-    /// Set the memory model override for a role and persist to config.
-    pub fn set_memory_model(
-        &mut self,
-        paths: &ConfigPaths,
-        role: &str,
-        model_str: &str,
-    ) -> Result<()> {
-        if role == "consolidation" {
-            if model_str.is_empty() {
-                self.memory.consolidation_model = None;
-                self.memory.thinking_levels.remove(role);
-            } else {
-                self.memory.consolidation_model = Some(model_str.to_string());
-                // Clear thinking level when model changes
-                self.memory.thinking_levels.remove(role);
-            }
-        }
-        self.save(paths)
-    }
-
-    /// Set both the memory model override and thinking level for a role.
-    /// Pass empty `thinking_level` to clear the override.
-    pub fn set_memory_model_and_thinking(
-        &mut self,
-        paths: &ConfigPaths,
-        role: &str,
-        model_str: &str,
-        thinking_level: &str,
-    ) -> Result<()> {
-        if role == "consolidation" {
-            if model_str.is_empty() {
-                self.memory.consolidation_model = None;
-                self.memory.thinking_levels.remove(role);
-            } else {
-                self.memory.consolidation_model = Some(model_str.to_string());
-                if thinking_level.is_empty() {
-                    self.memory.thinking_levels.remove(role);
-                } else {
-                    self.memory
-                        .thinking_levels
-                        .insert(role.to_string(), thinking_level.to_string());
-                }
-            }
-        }
-        self.save(paths)
     }
 
     pub fn resolve_model_by_ids(

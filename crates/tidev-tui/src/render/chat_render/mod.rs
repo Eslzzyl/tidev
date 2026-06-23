@@ -8,7 +8,6 @@ pub(crate) use content::strip_system_reminder_tags;
 
 use content::IMAGE_BADGE_RE;
 
-use tidev_types::GoalStatus;
 use tidev_types::prompts::SessionMode;
 
 use crate::theme::ThemePalette;
@@ -866,31 +865,6 @@ impl App {
                     Style::default().fg(palette.muted),
                 )]));
             }
-        }
-
-        // Goal section
-        if let Some(ref goal) = self.current_goal {
-            lines.push(Line::from(""));
-            lines.push(Line::from(vec![Span::styled(
-                "Goal",
-                Style::default()
-                    .fg(palette.accent)
-                    .add_modifier(Modifier::BOLD),
-            )]));
-            let status_label = match goal.status {
-                GoalStatus::Active => "Active",
-                GoalStatus::Paused => "Paused",
-                GoalStatus::Complete => "Complete",
-            };
-            lines.push(Line::from(vec![Span::styled(
-                format!("[{}]", status_label),
-                Style::default().fg(palette.muted),
-            )]));
-            let objective_width = (area.width.saturating_sub(6).max(1)) as usize;
-            lines.push(Line::from(vec![Span::styled(
-                shorten(&goal.objective, objective_width),
-                Style::default().fg(palette.text),
-            )]));
         }
 
         // Token statistics (session cumulative)

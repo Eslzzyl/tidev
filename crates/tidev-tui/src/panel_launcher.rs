@@ -4,7 +4,6 @@ pub(crate) enum PanelAction {
     Agents,
     Balance,
     Mcp,
-    Memory,
     Message,
     Model,
     Sandbox,
@@ -39,10 +38,6 @@ pub(crate) static PANEL_ENTRIES: &[PanelEntry] = &[
     PanelEntry {
         description: "Configure application settings",
         action: PanelAction::Settings,
-    },
-    PanelEntry {
-        description: "Browse stored memories",
-        action: PanelAction::Memory,
     },
     PanelEntry {
         description: "Manage MCP servers",

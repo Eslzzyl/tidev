@@ -175,10 +175,6 @@ impl App {
             return self.handle_sync_panel_key(key, runtime);
         }
 
-        if self.memory_panel.is_some() {
-            return self.handle_memory_panel_key(key, runtime);
-        }
-
         if self.session_panel.is_some() {
             return self.handle_session_panel_key(key, runtime);
         }

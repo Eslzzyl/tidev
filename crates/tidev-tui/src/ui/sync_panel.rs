@@ -79,7 +79,6 @@ impl App {
         self.mcp_panel = None;
         self.agents_panel = None;
         self.settings_panel = None;
-        self.memory_panel = None;
         self.message_panel = None;
         self.skills_panel = None;
         self.sandbox_panel = None;

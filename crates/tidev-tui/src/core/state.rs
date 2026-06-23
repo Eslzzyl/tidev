@@ -224,7 +224,6 @@ pub(crate) struct UiStateSnapshot {
     pub(crate) model_panel: Option<ModelPanelState>,
     pub(crate) message_panel: Option<MessagePanelState>,
     pub(crate) session_panel: Option<SessionPanelState>,
-    pub(crate) memory_panel: Option<crate::memory_panel::MemoryPanelState>,
     pub(crate) rename_dialog: Option<RenameSessionDialogState>,
     pub(crate) mcp_panel: Option<McpPanelState>,
     pub(crate) agents_panel: Option<AgentsPanelState>,

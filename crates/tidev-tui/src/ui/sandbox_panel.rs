@@ -72,7 +72,6 @@ impl App {
         self.agents_panel = None;
         self.message_panel = None;
         self.rename_dialog = None;
-        self.memory_panel = None;
         *self.balance_panel.lock().unwrap() = None;
         self.stats_panel = None;
         self.skills_panel = None;

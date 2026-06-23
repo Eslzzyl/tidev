@@ -22,23 +22,6 @@ impl App {
         self.theme_panel = Some(ThemePanelState::new(self.theme.palette().name));
     }
 
-    pub(crate) fn open_memory_panel(&mut self) -> Result<()> {
-        self.command_palette.clear();
-        self.mcp_panel = None;
-        self.agents_panel = None;
-        self.theme_panel = None;
-        self.model_panel = None;
-        self.session_panel = None;
-        self.settings_panel = None;
-        let mut panel = MemoryPanelState::new();
-        panel.load(
-            &self.memory_store,
-            &self.workspace_root.display().to_string(),
-        )?;
-        self.memory_panel = Some(panel);
-        Ok(())
-    }
-
     pub(crate) fn open_settings_panel(&mut self) {
         self.mcp_panel = None;
         self.agents_panel = None;
@@ -58,7 +41,6 @@ impl App {
         self.mcp_panel = None;
         self.agents_panel = None;
         self.settings_panel = None;
-        self.memory_panel = None;
         self.message_panel = None;
         self.skills_panel = None;
         self.sandbox_panel = None;
@@ -120,11 +102,6 @@ impl App {
             PanelAction::Settings => {
                 self.open_settings_panel();
             }
-            PanelAction::Memory => {
-                if let Err(e) = self.open_memory_panel() {
-                    self.last_notice = Some(format!("{e}"));
-                }
-            }
             PanelAction::Mcp => {
                 self.open_mcp_panel(String::new());
             }
@@ -163,7 +140,7 @@ impl App {
         let mut panel = ModelPanelState::new();
         panel.query.set_text(initial_query);
 
-        // Build tabs: General first, then agent types, then Memory
+        // Build tabs: General first, then agent types
         let mut tabs = Vec::new();
         // General tab — main session model
         tabs.push(crate::model_panel::ModelPanelTab::new(
@@ -182,17 +159,6 @@ impl App {
                 ty,
                 agent_type.display_name(),
                 &label,
-            ));
-        }
-        // Memory tab — consolidation model
-        {
-            let display = self
-                .config
-                .read()
-                .unwrap()
-                .memory_model_display("consolidation");
-            tabs.push(crate::model_panel::ModelPanelTab::new(
-                "memory", "Memory", &display,
             ));
         }
         panel.tabs = tabs;
@@ -220,7 +186,6 @@ impl App {
         self.agents_panel = None;
         self.settings_panel = None;
         self.session_panel = None;
-        self.memory_panel = None;
 
         let provider = self
             .config
@@ -259,7 +224,6 @@ impl App {
         self.model_panel = None;
         self.session_panel = None;
         self.settings_panel = None;
-        self.memory_panel = None;
 
         // Build skill items from the catalog
         let skill_items: Vec<ui::skills_panel::SkillItem> = self

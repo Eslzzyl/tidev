@@ -14,55 +14,11 @@ use tokio_util::sync::CancellationToken;
 use tidev_session::session::{AssistantTurn, BackendEvent, Message, ToolCall, ToolExecutionResult};
 use tidev_types::prompts::SessionMode;
 
-use tidev_types::{Goal, GoalStatus};
-
 use crate::config::{ActiveModel, reasoning::ThinkingLevelType};
 use crate::context::ContextManager;
 use crate::tooling::{ToolDefinition, canonical_tool_name};
 
 use super::AgentRuntime;
-
-// ── Continuation prompt construction ────────────────────────────────────────
-
-/// Build the goal continuation prompt that is injected as a User message.
-/// The prompt is wrapped in `<goal_context>` markers so the UI can recognise
-/// and hide it.
-fn build_goal_prompt(goal: &Goal) -> String {
-    format!(
-        "<goal_context>\n\
-         Continue working toward the active thread goal.\n\n\
-         <objective>\n{objective}\n</objective>\n\n\
-         Continuation behavior:\n\
-         - This goal persists across turns. Ending this turn does not \
-         require finishing everything now.\n\
-         - Keep the full objective intact. If it cannot be finished now, \
-         make concrete progress.\n\
-         - Do not redefine success around a smaller or easier task than \
-         what is requested.\n\n\
-         Completion audit:\n\
-         Before deciding the goal is achieved, treat completion as unproven \
-         and verify against the actual current state:\n\
-         - Derive concrete requirements from the objective.\n\
-         - Preserve the original scope; do not redefine success around \
-         work that already exists.\n\
-         - For every requirement, identify authoritative evidence that \
-         would prove it, then inspect the relevant current-state sources.\n\
-         - If any requirement lacks proof, the goal is not complete — \
-         continue working.\n\n\
-         Task decomposition:\n\
-         If this objective is large, consider using the task tool to spawn\n\
-         sub-agents for independent sub-tasks — but only when sub-tasks are\n\
-         substantial enough to justify the overhead (each costs a full LLM\n\
-         turn with its own context window).\n\n\
-         Resource usage:\n\
-         - Tokens used: {tokens_used}\n\
-         - Time spent: {time_used_seconds} seconds\n\
-         </goal_context>",
-        objective = goal.objective,
-        tokens_used = goal.tokens_used,
-        time_used_seconds = goal.time_used_seconds,
-    )
-}
 
 // ── Single-turn streaming ──────────────────────────────────────────────────
 
@@ -323,25 +279,9 @@ impl AgentRuntime {
             }
 
             for (tool_call, handle) in handles {
-                let mut result = handle.await.unwrap_or_else(|join_err| {
+                let result = handle.await.unwrap_or_else(|join_err| {
                     ToolExecutionResult::new(format!("Tool task panicked/aborted: {join_err}"))
                 });
-
-                // Pre-tool enrich: search and inject memory relevant to the
-                // file being operated on (agentmemory's mem::enrich equivalent).
-                if crate::agent::runtime::is_file_operation(&tool_call.name)
-                    && self.config.memory.enabled
-                    && self.config.memory.enrich_tools
-                    && let Some(ctx) = self
-                        .hooks
-                        .on_pre_tool_use_enrich(&tool_call, Some(session_id))
-                        .await
-                {
-                    result.output.push_str(&format!(
-                        "\n\n<system-reminder>\n{}\n</system-reminder>",
-                        ctx
-                    ));
-                }
 
                 // PostToolFailure observation
                 if result.sandbox_denied
@@ -427,22 +367,6 @@ impl AgentRuntime {
             let mut result = handle.await.unwrap_or_else(|join_err| {
                 ToolExecutionResult::new(format!("Tool task panicked/aborted: {join_err}"))
             });
-
-            // Pre-tool enrich: search and inject memory relevant to the
-            // file being operated on (agentmemory's mem::enrich equivalent).
-            if crate::agent::runtime::is_file_operation(&tool_call.name)
-                && self.config.memory.enabled
-                && self.config.memory.enrich_tools
-                && let Some(ctx) = self
-                    .hooks
-                    .on_pre_tool_use_enrich(tool_call, Some(session_id))
-                    .await
-            {
-                result.output.push_str(&format!(
-                    "\n\n<system-reminder>\n{}\n</system-reminder>",
-                    ctx
-                ));
-            }
 
             // ─── Sandbox elevation  ────────────────────────────────────
             // If the tool was denied by the OS sandbox, ask the user
@@ -625,7 +549,7 @@ impl AgentRuntime {
             //    the runtime queue.
 
             // 3. Inject instructions into the last user message if needed
-            let has_assistant = db_messages
+            let _has_assistant = db_messages
                 .iter()
                 .any(|m| m.role == tidev_session::session::MessageRole::Assistant && !m.streaming);
             let last_user_idx = db_messages
@@ -638,8 +562,6 @@ impl AgentRuntime {
                 //  only calling async methods that do not re-borrow db_messages.
                 let last_user_msg = unsafe { &mut *last_user_ptr };
                 self.inject_new_instructions(session_id, last_user_msg)
-                    .await?;
-                self.inject_first_turn_memory(session_id, last_user_msg, has_assistant)
                     .await?;
                 self.inject_mode_reminder(session_id, last_user_msg, mode)
                     .await?;
@@ -696,46 +618,10 @@ impl AgentRuntime {
                 .await?;
             log::info!("agent_loop: turn completed in {:?}", _t_turn.elapsed());
 
-            // No tool calls — check if we should continue for an active goal
-            // or pick up queued messages
+            // No tool calls — check for queued messages or exit
             if turn.tool_calls.is_empty() {
                 log::info!("agent_loop: no tool calls, persisting assistant message");
                 self.persist_assistant_message(session_id, &turn).await?;
-
-                // Account goal usage for this turn
-                if let Some(total) = turn.total_tokens {
-                    let elapsed = turn
-                        .completed_at
-                        .zip(turn.created_at)
-                        .map(|(end, start)| (end - start).num_seconds().max(0))
-                        .unwrap_or(0);
-                    let store = self.store.lock().await;
-                    let _ = store.account_goal_usage(session_id, total as i64, elapsed);
-                    drop(store);
-                }
-
-                // If an Active goal exists, persist a continuation prompt and keep going
-                if self.continue_goal_if_active(session_id).await? {
-                    log::info!("agent_loop: goal active, injecting continuation and continuing");
-                    request_id = rand::random::<u64>();
-
-                    // Check cancellation before notifying the frontend,
-                    // to avoid stale TurnStarting events after abort.
-                    if let Some(ref ct) = cancel_token
-                        && ct.is_cancelled()
-                    {
-                        log::info!("run_agent_loop: cancelled before TurnStarting (goal)");
-                        return Ok(());
-                    }
-
-                    // Notify frontend about the new turn so it can create a
-                    // streaming message and update its active_request_id.
-                    let _ = event_tx.send(BackendEvent::TurnStarting {
-                        session_id,
-                        request_id,
-                    });
-                    continue;
-                }
 
                 // Before exiting, check for queued user messages.  This implements
                 // the "type-ahead" mechanism — frontends push messages through
@@ -1014,18 +900,6 @@ impl AgentRuntime {
                     .await?;
             }
 
-            // 7c. Account goal usage for this turn (if goal is Active)
-            if let Some(total) = turn.total_tokens {
-                let elapsed = turn
-                    .completed_at
-                    .zip(turn.created_at)
-                    .map(|(end, start)| (end - start).num_seconds().max(0))
-                    .unwrap_or(0);
-                let store = self.store.lock().await;
-                let _ = store.account_goal_usage(session_id, total as i64, elapsed);
-                drop(store);
-            }
-
             // 8. Continue loop with new request ID for next turn
             let _t_post_tools = std::time::Instant::now();
             request_id = rand::random::<u64>();
@@ -1048,31 +922,5 @@ impl AgentRuntime {
                 _t_post_tools.elapsed()
             );
         }
-    }
-
-    /// After an assistant turn completes, check if an Active goal exists.
-    /// If so, persist a continuation-prompt User message and return `true`
-    /// so the loop continues.  Returns `false` (no-op) when there is no
-    /// Active goal.
-    async fn continue_goal_if_active(&self, session_id: uuid::Uuid) -> anyhow::Result<bool> {
-        let goal = {
-            let store = self.store.lock().await;
-            store.get_goal(session_id)?
-        };
-        let Some(goal) = goal else {
-            return Ok(false);
-        };
-        if goal.status != GoalStatus::Active {
-            return Ok(false);
-        }
-
-        let prompt = build_goal_prompt(&goal);
-        let msg = tidev_session::session::Message::new(
-            tidev_session::session::MessageRole::User,
-            &prompt,
-        );
-        let store = self.store.lock().await;
-        store.append_message(session_id, &msg)?;
-        Ok(true)
     }
 }

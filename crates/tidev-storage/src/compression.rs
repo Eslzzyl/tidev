@@ -11,7 +11,6 @@
 //! | `messages` | `metadata` | BLOB | Compressed |
 //! | `messages` | `patch_files` | BLOB | Compressed |
 //! | `messages` | `file_diffs` | BLOB | Compressed |
-//! | `memories` | `content` | BLOB | Compressed |
 //! | `session_reverts` | `redo_snapshot` | BLOB | Compressed |
 //!
 //! With zstd level 3 we expect a 3–5× reduction, saving significant

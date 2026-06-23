@@ -138,6 +138,25 @@ CREATE TABLE IF NOT EXISTS session_goals (
 );
 "#,
     },
+    // ── v36: Remove memory/goal system tables ─────────────────────────
+    //
+    // The memory system and goal system have been completely removed from
+    // the codebase. Drop all of their tables for databases that had them
+    // created by prior migrations.
+    Migration {
+        version: 36,
+        description: "Remove memory/goal system tables",
+        sql: r#"
+DROP TABLE IF EXISTS memories;
+DROP TABLE IF EXISTS memories_fts;
+DROP TABLE IF EXISTS session_summaries;
+DROP TABLE IF EXISTS memory_slots;
+DROP TABLE IF EXISTS graph_nodes;
+DROP TABLE IF EXISTS graph_edges;
+DROP TABLE IF EXISTS retention_scores;
+DROP TABLE IF EXISTS session_goals;
+"#,
+    },
 ];
 
 // ---------------------------------------------------------------------------

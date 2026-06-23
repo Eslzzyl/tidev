@@ -1,17 +1,6 @@
 use crate::Composer;
 use tidev_engine::config::ModelSummary;
 
-/// Memory tab sub-entry identifiers.
-pub const MEMORY_ROLE_CONSOLIDATION: &str = "consolidation";
-pub const MEMORY_ROLES: [&str; 1] = [MEMORY_ROLE_CONSOLIDATION];
-
-/// Which column has focus within the Memory tab's two-column layout.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MemoryFocus {
-    Sidebar,
-    List,
-}
-
 #[derive(Clone, Debug)]
 pub struct ModelPanelTab {
     /// Agent type identifier, e.g. "general", "explorer", "librarian", etc.
@@ -49,10 +38,6 @@ pub struct ModelPanelState {
     pub tabs: Vec<ModelPanelTab>,
     /// Index into tabs for the currently active tab.
     pub selected_tab_index: usize,
-    /// Within the Memory tab, which sub-entry is selected.
-    pub memory_sub_selection: usize,
-    /// Within the Memory tab, which column has focus.
-    pub memory_focus: MemoryFocus,
 }
 
 impl Default for ModelPanelState {
@@ -67,47 +52,7 @@ impl ModelPanelState {
             query: Composer::new("Search connected models by provider or model name"),
             tabs: Vec::new(),
             selected_tab_index: 0,
-            memory_sub_selection: 0,
-            memory_focus: MemoryFocus::Sidebar,
         }
-    }
-
-    /// True if the active tab is the Memory tab.
-    pub fn is_memory_tab(&self) -> bool {
-        self.current_tab()
-            .is_some_and(|t| t.agent_type_str == "memory")
-    }
-
-    /// Get the active memory role string for the current sub-selection.
-    pub fn active_memory_role(&self) -> &'static str {
-        if self.is_memory_tab() {
-            MEMORY_ROLES[0]
-        } else {
-            MEMORY_ROLE_CONSOLIDATION
-        }
-    }
-
-    /// Move memory sub-selection (up/down within Memory tab sidebar).
-    pub fn move_memory_sub_selection(&mut self, delta: isize) {
-        if !self.is_memory_tab() {
-            return;
-        }
-        let len = MEMORY_ROLES.len() as isize;
-        self.memory_sub_selection =
-            ((self.memory_sub_selection as isize + delta).rem_euclid(len)) as usize;
-        // Reset search query when switching sub-entries
-        self.query.set_text(String::new());
-    }
-
-    /// Toggle focus between sidebar and model list in the Memory tab.
-    pub fn toggle_memory_focus(&mut self) {
-        if !self.is_memory_tab() {
-            return;
-        }
-        self.memory_focus = match self.memory_focus {
-            MemoryFocus::Sidebar => MemoryFocus::List,
-            MemoryFocus::List => MemoryFocus::Sidebar,
-        };
     }
 
     /// Resolve the active tab's selected_index given a filtered item list.

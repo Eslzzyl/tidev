@@ -51,9 +51,6 @@ impl App {
         );
         let _t3 = std::time::Instant::now();
         let store = db.create_session_store()?;
-        let memory_store = Arc::new(tidev_engine::memory::MemoryStore::open(
-            paths.default_database_path(),
-        )?);
         log::info!("startup: stores created in {:?}", _t3.elapsed());
         let _t4 = std::time::Instant::now();
         let llm = LlmClient::new(
@@ -79,7 +76,6 @@ impl App {
             mcp,
             config.permissions.clone(),
             file_read_tracker.clone(),
-            memory_store.clone(),
             config.rtk.enabled,
             worktree,
             config.websearch.clone(),
@@ -114,42 +110,7 @@ impl App {
                 tidev_engine::config::reasoning::ThinkingLevelType::from_string(&level_str);
         }
         tools.set_active_model(active_model.clone());
-        // Attach LLM to memory store with model overrides
-        let mut consolidation_override: Option<tidev_engine::config::ActiveModel> = config
-            .memory
-            .consolidation_model
-            .as_deref()
-            .and_then(|s| config.resolve_model(&auth, Some(s)).ok());
-        if let Some(ref mut model) = consolidation_override
-            && let Some(tl_str) = config.memory.thinking_levels.get("consolidation")
-        {
-            model.thinking_level =
-                tidev_engine::config::reasoning::ThinkingLevelType::from_string(tl_str);
-        }
-
-        // Provide a model resolver so summarization can reuse the last
-        // assistant message's model (for prompt-cache reuse).
         let shared_config: SharedConfig = Arc::new(RwLock::new(config.clone()));
-        {
-            let config = shared_config.clone();
-            let auth = auth.clone();
-            memory_store.set_model_resolver(std::sync::Arc::new(move |model_id: &str| {
-                config.read().unwrap().resolve_model(&auth, Some(model_id))
-            }));
-        }
-
-        // Provide a tool filter so background summarization produces the same
-        // tool list as normal conversation turns (preserving prefix cache).
-        {
-            let t = tools.clone();
-            memory_store.set_tool_filter(std::sync::Arc::new(move |model: &ActiveModel| {
-                t.definitions_for_model(model)
-            }));
-        }
-
-        let _t_mem = std::time::Instant::now();
-        memory_store.set_models(llm.clone(), active_model.clone(), consolidation_override);
-        log::info!("startup: memory set_models in {:?}", _t_mem.elapsed());
         // Set sandbox policy based on session mode and config
         let sandbox_policy = config.sandbox.to_policy();
         tools.set_sandbox_policy(Some(sandbox_policy));
@@ -172,8 +133,7 @@ impl App {
             hooks: tidev_engine::hooks::HookEngine::new(
                 config.hooks.clone(),
                 workspace_root.clone(),
-            )
-            .with_memory_store(memory_store.clone()),
+            ),
         };
         // Share current session ID for the background inactivity check.
         let current_session_id: Arc<RwLock<Uuid>> = Arc::new(RwLock::new(session_id));
@@ -212,7 +172,6 @@ impl App {
             tools,
             agent,
             file_read_tracker,
-            current_goal: None,
             commands,
             command_palette,
             panel_launcher: PanelLauncherState::default(),
@@ -284,7 +243,6 @@ impl App {
             sidebar_scroll_offset: 0,
             sidebar_total_lines: 0,
             input_area: Cell::new(None),
-            memory_panel_overlay: Cell::new(None),
             theme_panel_overlay: Cell::new(None),
             model_panel_overlay: Cell::new(None),
             session_panel_overlay: Cell::new(None),
@@ -338,8 +296,6 @@ impl App {
             shell_child_pid: None,
             shell_kill_flag: None,
             thinking_level: active_model.thinking_level.clone(),
-            memory_store,
-            memory_panel: None,
             image_picker: None,
             image_viewer: None,
             image_viewer_consume_next_up: false,
@@ -424,28 +380,10 @@ impl App {
             }
         });
 
-        // Start memory background tasks: eviction, consolidation, reflection.
-        log::info!("memory: starting background tasks");
-        tidev_engine::memory::start_background_tasks(
-            self.memory_store.clone(),
-            runtime.handle(),
-            &self.workspace_root.to_string_lossy(),
-            &self.config.read().unwrap().memory,
-        );
-        log::info!(
-            "startup: memory background tasks spawned in {:?}",
-            _t_run.elapsed()
-        );
-
         // Schedule periodic session inactivity check (every 60 seconds).
         let check_store = self.store.clone();
-        let check_mem_store = self.memory_store.clone();
-        let check_ws = self.workspace_root.to_string_lossy().to_string();
         let cancel_token = self.inactivity_check_cancel.clone();
         let sid_ref = self.current_session_id.clone();
-        let cfg = self.config.read().unwrap();
-        let memory_auto_learn = cfg.memory.enabled && cfg.memory.auto_learn;
-        drop(cfg);
         runtime.spawn(async move {
             const INACTIVITY_TIMEOUT_SECS: i64 = 300;
             let mut interval = tokio::time::interval(Duration::from_secs(60));
@@ -469,11 +407,6 @@ impl App {
                             if let Err(e) = check_store.set_session_status(id, "completed") {
                                 log::warn!("failed to mark session completed: {}", e);
                                 continue;
-                            }
-                            if memory_auto_learn
-                                && let Err(e) = check_mem_store.summarize_session(id, &check_ws).await
-                            {
-                                log::warn!("session summarisation failed: {}", e);
                             }
                         }
                     }
@@ -644,7 +577,6 @@ impl App {
             sandbox_panel: self.sandbox_panel.clone(),
             sync_panel: self.sync_panel.clone(),
             search_panel: self.search_panel.clone(),
-            memory_panel: self.memory_panel.clone(),
             message_panel: self.message_panel.clone(),
             at_mention: self.at_mention.clone(),
             snippet_state: self.snippet_state.clone(),
@@ -667,7 +599,6 @@ impl App {
         self.model_panel = snapshot.model_panel;
         self.message_panel = snapshot.message_panel;
         self.session_panel = snapshot.session_panel;
-        self.memory_panel = snapshot.memory_panel;
         self.rename_dialog = snapshot.rename_dialog;
         self.mcp_panel = snapshot.mcp_panel;
         self.agents_panel = snapshot.agents_panel;

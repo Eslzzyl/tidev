@@ -11,7 +11,6 @@ use super::tools::tool_definitions;
 use super::{FileReadTracker, ToolDefinition, canonical_tool_name};
 use crate::config::WebSearchConfig;
 use crate::mcp::McpManager;
-use crate::memory::MemoryStore;
 use crate::sandbox::SandboxPolicy;
 use crate::tooling::SkillCatalog;
 use tidev_session::session::BackendEvent;
@@ -29,7 +28,6 @@ pub struct ToolRegistry {
     mcp: McpManager,
     permission_config: PermissionConfig,
     file_read_tracker: Arc<FileReadTracker>,
-    memory_store: Arc<MemoryStore>,
     active_model: Option<crate::config::ActiveModel>,
     rtk_enabled: bool,
     sandbox_policy: Option<SandboxPolicy>,
@@ -46,7 +44,6 @@ impl ToolRegistry {
         mcp: McpManager,
         permission_config: PermissionConfig,
         file_read_tracker: Arc<FileReadTracker>,
-        memory_store: Arc<MemoryStore>,
         rtk_enabled: bool,
         worktree: Option<PathBuf>,
         web_search_config: WebSearchConfig,
@@ -69,7 +66,6 @@ impl ToolRegistry {
             mcp,
             permission_config,
             file_read_tracker,
-            memory_store,
             active_model: None,
             rtk_enabled,
             sandbox_policy: None,
@@ -83,8 +79,7 @@ impl ToolRegistry {
     }
 
     /// Returns tool definitions filtered for the given model, without mutating
-    /// internal state.  Used by background tasks (e.g. memory summarization)
-    /// that need the same tool list as normal requests for prefix-cache
+    /// internal state.  Used by background tasks that need the same tool list as normal requests for prefix-cache
     /// compatibility, without contending with the main thread's model setting.
     pub fn definitions_for_model(&self, model: &crate::config::ActiveModel) -> Vec<ToolDefinition> {
         let mut definitions = self.definitions.clone();
@@ -139,10 +134,6 @@ impl ToolRegistry {
 
     pub fn mcp_summaries(&self) -> Vec<crate::mcp::McpServerSummary> {
         self.mcp.summaries()
-    }
-
-    pub fn memory_store(&self) -> Arc<crate::memory::MemoryStore> {
-        self.memory_store.clone()
     }
 
     pub fn mcp_manager(&self) -> McpManager {
@@ -320,7 +311,6 @@ impl ToolRegistry {
                 session_id,
                 max_output_bytes: self.max_output_bytes,
                 rtk_enabled: self.rtk_enabled,
-                memory_store: &self.memory_store,
                 mode,
                 allow_outside,
                 sensitive_file_approved,
@@ -492,7 +482,6 @@ impl ToolRegistry {
                 session_id,
                 max_output_bytes: self.max_output_bytes,
                 rtk_enabled: self.rtk_enabled,
-                memory_store: &self.memory_store,
                 mode,
                 allow_outside,
                 sensitive_file_approved,

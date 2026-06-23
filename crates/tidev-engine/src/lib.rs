@@ -7,7 +7,6 @@ pub mod instructions;
 pub mod llm_bridge;
 pub mod logging;
 pub mod mcp;
-pub mod memory;
 pub mod notifications;
 pub mod process;
 pub mod provider_setup;

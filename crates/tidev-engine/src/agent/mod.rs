@@ -92,7 +92,6 @@ impl AgentType {
                 "bash",
                 "websearch",
                 "webfetch",
-                "memory",
             ]),
             // Librarian: research tools + bash for source-code study (no code modification).
             Self::Librarian => Some(&[
@@ -103,7 +102,6 @@ impl AgentType {
                 "websearch",
                 "webfetch",
                 "question",
-                "memory",
             ]),
             // Oracle: read-only analysis.
             Self::Oracle => Some(&[
@@ -113,7 +111,6 @@ impl AgentType {
                 "websearch",
                 "webfetch",
                 "question",
-                "memory",
             ]),
             // Designer: read + write for design work.
             Self::Designer => Some(&[
@@ -127,7 +124,6 @@ impl AgentType {
                 "webfetch",
                 "question",
                 "apply_patch",
-                "memory",
             ]),
             // Fixer: full tool access for implementation.
             Self::Fixer => None,

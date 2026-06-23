@@ -330,18 +330,6 @@ tool_args! {
 }
 
 tool_args! {
-    pub struct MemoryArgs {
-        operation: string("Operation: remember, search, list, read, forget, observations. Slots: slot_list, slot_get, slot_set, slot_append, slot_delete. Eviction: evict."),
-        memory_type: optional_string("Memory type: user, project, feedback, reference (optional, defaults to fact)"),
-        title: optional_string("Memory title (optional, defaults to first 80 chars of content)"),
-        content: optional_string("Memory content in markdown (required for remember)"),
-        tags: optional_string("Comma-separated tags or JSON array of tags (optional)"),
-        query: optional_string("Search query (required for search)"),
-        memory_id: optional_string("Memory UUID (required for read, forget)"),
-    }
-}
-
-tool_args! {
     pub struct QuestionOption {
         label: string("Display text for the option"),
         description: optional_string("Optional explanation of the option"),
@@ -380,28 +368,6 @@ tool_args! {
         timeout: optional_integer("Timeout in seconds (max 120)"),
         offset: optional_integer("1-indexed line number to start reading from"),
         limit: optional_integer("Maximum number of lines to return"),
-    }
-}
-
-tool_args! {
-    /// Mark the current goal as complete.
-    pub struct UpdateGoalArgs {
-        status: string("Only 'complete' is supported."),
-        reasoning: string("Brief explanation of verification evidence for each requirement."),
-    }
-}
-
-/// Empty args for the get_goal tool (no parameters needed).
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct GetGoalArgs {}
-
-impl ToolArgs for GetGoalArgs {
-    fn schema() -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {},
-            "additionalProperties": false,
-        })
     }
 }
 
@@ -481,7 +447,6 @@ pub(super) fn execute_tool_call(
     call: &ToolCall,
     max_output_bytes: usize,
     rtk_enabled: bool,
-    memory_store: &Arc<crate::memory::MemoryStore>,
     mode: tidev_types::prompts::SessionMode,
 ) -> Result<ToolExecutionResult> {
     // Pre-execution checks for file read tracking
@@ -516,7 +481,6 @@ pub(super) fn execute_tool_call(
             session_id,
             max_output_bytes,
             rtk_enabled,
-            memory_store,
             mode,
             allow_outside: false,
             sensitive_file_approved: false,
