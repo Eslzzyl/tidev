@@ -1,7 +1,6 @@
 use super::*;
 
 pub mod agents_panel;
-pub mod balance_panel;
 pub mod connect;
 pub mod fork_confirm;
 pub mod image_viewer;
@@ -17,7 +16,6 @@ pub mod sensitive;
 pub mod session_panel;
 pub mod settings_panel;
 pub mod skills_panel;
-pub mod stats_panel;
 pub mod sync_panel;
 pub mod theme_panel;
 pub mod undo_confirm;

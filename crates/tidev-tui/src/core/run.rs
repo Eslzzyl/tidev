@@ -60,7 +60,6 @@ impl App {
             config.logging.max_response_files,
         )?;
         log::info!("startup: LlmClient::new in {:?}", _t4.elapsed());
-        let http_client = Arc::new(llm.http().clone());
         let _t5 = std::time::Instant::now();
         let theme = ThemeManager::new(&config.theme);
         let mcp = McpManager::new(workspace_root.clone(), config.mcp.servers.clone());
@@ -162,7 +161,6 @@ impl App {
             auth,
             store,
             llm,
-            http_client,
             theme,
             mode,
             pending_mode: None,
@@ -251,8 +249,6 @@ impl App {
             settings_panel_overlay: Cell::new(None),
             agents_panel_overlay: Cell::new(None),
             mcp_panel_overlay: Cell::new(None),
-            balance_panel_overlay: Cell::new(None),
-            stats_panel_overlay: Cell::new(None),
             input_scroll_offset: 0,
             input_dragging: false,
             selection_clipboard_lease: None,
@@ -289,8 +285,6 @@ impl App {
             step_cached_file_lists: Vec::new(),
             step_cached_file_diffs: None,
             step_prev_hash: None,
-            stats_panel: None,
-            balance_panel: Arc::new(Mutex::new(None)),
             notifications,
             shell_mode: false,
             shell_child_pid: None,

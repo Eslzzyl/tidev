@@ -15,7 +15,7 @@ use std::{
     cell::{Cell, RefCell},
     env, io,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, RwLock},
+    sync::{Arc, RwLock},
     time::{Duration, Instant},
 };
 use tidev_engine::config::SharedConfig;
@@ -48,7 +48,6 @@ pub(crate) use panel_launcher::PanelAction;
 pub use render::chat_dialog;
 pub use render::chat_render;
 pub use render::diff_render;
-pub use ui::balance_panel;
 pub use ui::connect;
 pub use ui::mcp_panel;
 pub use ui::message_panel;
@@ -58,7 +57,6 @@ use ui::permission::SubagentStatus;
 pub use ui::question;
 pub use ui::session_panel;
 pub use ui::settings_panel;
-pub use ui::stats_panel;
 pub use ui::theme_panel;
 
 use core::state::*;
@@ -116,7 +114,6 @@ struct App {
     auth: AuthStore,
     store: SessionStore,
     llm: LlmClient,
-    http_client: Arc<reqwest::Client>,
     theme: ThemeManager,
     mode: SessionMode,
     /// Pending mode switch that will take effect on the next user message.
@@ -237,8 +234,6 @@ struct App {
     settings_panel_overlay: Cell<Option<Rect>>,
     agents_panel_overlay: Cell<Option<Rect>>,
     mcp_panel_overlay: Cell<Option<Rect>>,
-    balance_panel_overlay: Cell<Option<Rect>>,
-    stats_panel_overlay: Cell<Option<Rect>>,
     /// Scroll offset for the input box when content exceeds visible area.
     input_scroll_offset: usize,
     /// Whether we're currently dragging in the input area (for text selection).
@@ -315,8 +310,6 @@ struct App {
     step_cached_file_diffs: Option<Vec<FileDiff>>,
     /// The previous snapshot hash, used for computing per-step lightweight diffs.
     step_prev_hash: Option<String>,
-    stats_panel: Option<ui::stats_panel::StatsPanelState>,
-    balance_panel: Arc<Mutex<Option<ui::balance_panel::BalancePanelState>>>,
     notifications: notifications::NotificationManager,
     /// Whether the input is in shell command mode (triggered by `!` prefix).
     shell_mode: bool,

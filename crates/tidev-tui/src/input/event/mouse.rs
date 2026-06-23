@@ -76,27 +76,6 @@ impl App {
             return;
         }
 
-        // Stats panel
-        if self.stats_panel.as_ref().is_some_and(|p| p.active) {
-            if self.handle_stats_panel_mouse(mouse, runtime) {
-                return;
-            }
-            return;
-        }
-
-        // Balance panel
-        let balance_active = self
-            .balance_panel
-            .lock()
-            .map(|guard| guard.as_ref().is_some_and(|p| p.active))
-            .unwrap_or(false);
-        if balance_active {
-            if self.handle_balance_panel_mouse(mouse, runtime) {
-                return;
-            }
-            return;
-        }
-
         // Fall through to chat-area mouse handling
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
@@ -1077,48 +1056,6 @@ impl App {
                 self.session_panel = Some(panel);
                 true
             }
-        }
-    }
-
-    // ── Balance Panel ────────────────────────────────────────────────────────
-
-    fn handle_balance_panel_mouse(&mut self, mouse: MouseEvent, _runtime: &Runtime) -> bool {
-        let overlay = self.balance_panel_overlay.get();
-        let position = Position::new(mouse.column, mouse.row);
-        if !in_overlay(position, overlay) {
-            return false;
-        }
-
-        // Balance panel has no scrollable content currently; just consume events.
-        match mouse.kind {
-            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => true,
-            _ => true,
-        }
-    }
-
-    // ── Stats Panel ──────────────────────────────────────────────────────────
-
-    fn handle_stats_panel_mouse(&mut self, mouse: MouseEvent, _runtime: &Runtime) -> bool {
-        let overlay = self.stats_panel_overlay.get();
-        let position = Position::new(mouse.column, mouse.row);
-        if !in_overlay(position, overlay) {
-            return false;
-        }
-
-        match mouse.kind {
-            MouseEventKind::ScrollUp => {
-                if let Some(panel) = &mut self.stats_panel {
-                    panel.scroll_offset = panel.scroll_offset.saturating_sub(3);
-                }
-                true
-            }
-            MouseEventKind::ScrollDown => {
-                if let Some(panel) = &mut self.stats_panel {
-                    panel.scroll_offset = panel.scroll_offset.saturating_add(3);
-                }
-                true
-            }
-            _ => true,
         }
     }
 

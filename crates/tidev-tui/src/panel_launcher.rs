@@ -2,7 +2,6 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PanelAction {
     Agents,
-    Balance,
     Mcp,
     Message,
     Model,
@@ -10,7 +9,6 @@ pub(crate) enum PanelAction {
     Session,
     Settings,
     Skills,
-    Stats,
     Theme,
 }
 
@@ -54,14 +52,6 @@ pub(crate) static PANEL_ENTRIES: &[PanelEntry] = &[
     PanelEntry {
         description: "View and change sandbox policy for shell commands",
         action: PanelAction::Sandbox,
-    },
-    PanelEntry {
-        description: "Token usage statistics",
-        action: PanelAction::Stats,
-    },
-    PanelEntry {
-        description: "API provider balance",
-        action: PanelAction::Balance,
     },
     PanelEntry {
         description: "View message details in the current session",

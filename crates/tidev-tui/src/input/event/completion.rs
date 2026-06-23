@@ -189,14 +189,12 @@ impl App {
                 | CommandAction::Redo
                 | CommandAction::Session
                 | CommandAction::Clear
-                | CommandAction::Balance
                 | CommandAction::Connect
                 | CommandAction::Mcp
                 | CommandAction::Model
                 | CommandAction::Message
                 | CommandAction::Rename
                 | CommandAction::Settings
-                | CommandAction::Stats
                 | CommandAction::Init
                 | CommandAction::Agents
                 | CommandAction::Search
@@ -212,12 +210,6 @@ impl App {
         }
 
         match action {
-            CommandAction::Balance => {
-                if !args.is_empty() {
-                    self.last_notice = Some("Ignoring arguments to /balance".to_string());
-                }
-                self.open_balance_panel(runtime)?;
-            }
             CommandAction::Connect => {
                 if !args.is_empty() {
                     self.last_notice = Some("Ignoring arguments to /connect".to_string());
@@ -295,9 +287,6 @@ impl App {
             }
             CommandAction::Settings => {
                 self.open_settings_panel();
-            }
-            CommandAction::Stats => {
-                self.toggle_stats_panel();
             }
             CommandAction::Quit => {
                 self.should_quit = true;

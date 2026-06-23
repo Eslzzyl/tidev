@@ -124,19 +124,6 @@ impl App {
         if let Some(panel) = &self.sync_panel {
             self.render_sync_panel(frame, area, panel);
         }
-        if let Some(panel) = &self.stats_panel
-            && panel.active
-        {
-            self.render_stats_panel(frame, area);
-        }
-        let balance_active = self
-            .balance_panel
-            .lock()
-            .map(|guard| guard.as_ref().is_some_and(|p| p.active))
-            .unwrap_or(false);
-        if balance_active {
-            self.render_balance_panel(frame, area);
-        }
         if let Some(dialog) = &self.rename_dialog {
             self.render_rename_session_dialog(frame, area, dialog);
         }

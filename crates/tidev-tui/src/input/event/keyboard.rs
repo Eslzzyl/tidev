@@ -73,11 +73,6 @@ impl App {
             return Ok(());
         }
 
-        if matches!(key.code, KeyCode::Char('s')) && key.modifiers.contains(KeyModifiers::CONTROL) {
-            self.toggle_stats_panel();
-            return Ok(());
-        }
-
         // Allow message scrolling even when security dialogs are shown.
         // This must come before the dialog dispatch so PageUp/PageDown
         // reach the scroll handler instead of being consumed by dialogs.
@@ -177,19 +172,6 @@ impl App {
 
         if self.session_panel.is_some() {
             return self.handle_session_panel_key(key, runtime);
-        }
-
-        if self.stats_panel.as_ref().is_some_and(|p| p.active) {
-            return self.handle_stats_panel_key(key);
-        }
-
-        if self
-            .balance_panel
-            .lock()
-            .map(|guard| guard.as_ref().is_some_and(|p| p.active))
-            .unwrap_or(false)
-        {
-            return self.handle_balance_panel_key(key, runtime);
         }
 
         if self.handle_request_abort_key(key, runtime)? {
