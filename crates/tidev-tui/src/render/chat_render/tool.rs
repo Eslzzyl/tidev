@@ -115,9 +115,6 @@ pub(super) fn render_tool_call_with_result(
         (Vec::new(), None, vec![])
     };
 
-    // Get rtk_rewritten from tool result message
-    let rtk_rewritten = tool_result.map(|m| m.rtk_rewritten).unwrap_or(false);
-
     let mut lines = Vec::new();
     lines.push(Line::from(""));
 
@@ -147,7 +144,6 @@ pub(super) fn render_tool_call_with_result(
             body_width,
             palette,
             exit_code,
-            rtk_rewritten,
             ctx.workspace_root,
         );
         lines.extend(call_lines);
@@ -795,7 +791,6 @@ pub(super) fn render_tool_call_lines(
     body_width: usize,
     palette: ThemePalette,
     exit_code: Option<i32>,
-    rtk_rewritten: bool,
     workspace_root: &Path,
 ) -> Vec<Line<'static>> {
     let fields = summarize_tool_arguments(&tool_call.name, &tool_call.arguments);
@@ -827,14 +822,6 @@ pub(super) fn render_tool_call_lines(
                         .add_modifier(Modifier::BOLD),
                 ),
             ];
-
-            // Add [rtk] marker if command was rewritten
-            if rtk_rewritten {
-                title_spans.push(Span::styled(
-                    " [rtk]",
-                    Style::default().fg(palette.accent_soft),
-                ));
-            }
 
             // Add exit code status
             if let Some(code) = exit_code {

@@ -75,7 +75,6 @@ impl App {
             mcp,
             config.permissions.clone(),
             file_read_tracker.clone(),
-            config.rtk.enabled,
             worktree,
             config.websearch.clone(),
             Arc::new(auth.clone()),

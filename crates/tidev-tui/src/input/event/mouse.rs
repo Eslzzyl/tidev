@@ -596,7 +596,7 @@ impl App {
                 if local_y < panel.items.len() as u16 {
                     panel.selected_index = local_y as usize;
                     // Same as Enter/Space: toggle the selected setting
-                    panel.toggle_selected(self.config.read().unwrap().rtk.installed);
+                    panel.toggle_selected();
                 }
                 self.settings_panel = Some(panel);
                 true

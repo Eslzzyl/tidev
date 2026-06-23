@@ -101,11 +101,10 @@ pub fn kill_all_children() {
     // Windows support could be added later using TerminateProcess
 }
 
-/// Result of bash tool execution, including RTK metadata.
+/// Result of bash tool execution.
 #[derive(Debug)]
 pub struct BashExecutionResult {
     pub output: String,
-    pub rtk_rewritten: bool,
 }
 
 pub fn definitions() -> Vec<ToolDefinition> {
@@ -122,7 +121,6 @@ pub fn execute_tool_call(
     tool_name: &str,
     arguments: Value,
     max_output_bytes: usize,
-    rtk_enabled: bool,
     session_id: Uuid,
     event_tx: Option<UnboundedSender<BackendEvent>>,
 ) -> Result<BashExecutionResult> {
@@ -132,7 +130,6 @@ pub fn execute_tool_call(
         workspace_root,
         &args.command,
         max_output_bytes,
-        rtk_enabled,
         None,
         timeout,
         event_tx,
@@ -146,7 +143,6 @@ pub fn execute_tool_call_with_cancel(
     tool_name: &str,
     arguments: Value,
     max_output_bytes: usize,
-    rtk_enabled: bool,
     cancelled: Arc<std::sync::atomic::AtomicBool>,
     session_id: Uuid,
     event_tx: Option<UnboundedSender<BackendEvent>>,
@@ -157,7 +153,6 @@ pub fn execute_tool_call_with_cancel(
         workspace_root,
         &args.command,
         max_output_bytes,
-        rtk_enabled,
         Some(cancelled),
         timeout,
         event_tx,
@@ -170,19 +165,12 @@ fn run_shell_inner(
     workspace_root: &Path,
     command: &str,
     max_output_bytes: usize,
-    rtk_enabled: bool,
     cancelled: Option<Arc<AtomicBool>>,
     timeout_ms: u64,
     event_tx: Option<UnboundedSender<BackendEvent>>,
     session_id: Uuid,
 ) -> Result<BashExecutionResult> {
-    // Try to get RTK rewritten command if RTK is enabled
-    let (mut actual_command, rtk_rewritten) = if rtk_enabled {
-        let result = rewrite_command(command);
-        (result.command, result.rewritten)
-    } else {
-        (command.to_string(), false)
-    };
+    let mut actual_command = command.to_string();
 
     // ── Layer 1: Privilege escalation handling (sudo/doas/pkexec) ──────
     let mut sudo_guard: Option<super::sudo::AskpassGuard> = None;
@@ -322,7 +310,6 @@ fn run_shell_inner(
             truncate_in_place(&mut output_buf, max_output_bytes);
             return Ok(BashExecutionResult {
                 output: format!("[exit -1] (cancelled)\n{}", output_buf),
-                rtk_rewritten,
             });
         }
 
@@ -347,7 +334,6 @@ fn run_shell_inner(
                     timeout_ms / 1000,
                     output_buf
                 ),
-                rtk_rewritten,
             });
         }
 
@@ -424,54 +410,5 @@ fn run_shell_inner(
 
     Ok(BashExecutionResult {
         output: format!("[exit {status_code}]\n{}", combined),
-        rtk_rewritten,
     })
-}
-
-/// Result of RTK rewrite operation.
-struct RewriteResult {
-    command: String,
-    rewritten: bool,
-}
-
-/// Try to rewrite a command using RTK's rewrite feature.
-/// Returns the RTK rewritten command if available, otherwise the original command.
-///
-/// RTK rewrite exit codes:
-/// - Exit 0: Command rewritten and allowed
-/// - Exit 1: No RTK equivalent, use original command
-/// - Exit 2: Deny rule matched
-/// - Exit 3: Command rewritten but needs user confirmation (ask)
-///
-/// For exit 0 and 3, we use the rewritten command.
-fn rewrite_command(command: &str) -> RewriteResult {
-    let output = std::process::Command::new("rtk")
-        .arg("rewrite")
-        .arg(command)
-        .output()
-        .ok();
-
-    match output {
-        Some(output) => {
-            let exit_code = output.status.code().unwrap_or(1);
-            // Exit 0 (allow) or Exit 3 (ask) means command was rewritten
-            if exit_code == 0 || exit_code == 3 {
-                let rewritten = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                if !rewritten.is_empty() && rewritten != command {
-                    return RewriteResult {
-                        command: rewritten,
-                        rewritten: true,
-                    };
-                }
-            }
-            RewriteResult {
-                command: command.to_string(),
-                rewritten: false,
-            }
-        }
-        None => RewriteResult {
-            command: command.to_string(),
-            rewritten: false,
-        },
-    }
 }

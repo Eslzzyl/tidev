@@ -23,7 +23,6 @@ pub struct ToolContext<'a> {
     pub store: &'a SessionStore,
     pub session_id: uuid::Uuid,
     pub max_output_bytes: usize,
-    pub rtk_enabled: bool,
     pub mode: SessionMode,
     pub allow_outside: bool,
     pub sensitive_file_approved: bool,
@@ -99,12 +98,10 @@ pub fn execute_tool_call(
                 &call.name,
                 arguments,
                 ctx.max_output_bytes,
-                ctx.rtk_enabled,
                 ctx.session_id,
                 None,
             )?;
             tidev_session::session::ToolExecutionResult::new(result.output)
-                .with_rtk_rewritten(result.rtk_rewritten)
         }
         Some("task") => {
             let output = task::execute_tool_call(
@@ -190,13 +187,11 @@ pub fn execute_tool_call_streaming(
                 &call.name,
                 arguments,
                 ctx.max_output_bytes,
-                ctx.rtk_enabled,
                 cancelled.unwrap_or_else(|| Arc::new(AtomicBool::new(false))),
                 ctx.session_id,
                 ctx.event_tx.clone(),
             )?;
             tidev_session::session::ToolExecutionResult::new(result.output)
-                .with_rtk_rewritten(result.rtk_rewritten)
         }
         Some("task") => {
             let output = task::execute_tool_call(

@@ -204,7 +204,6 @@ pub fn execute_tool_call(
                 attachments: Vec::new(),
                 metadata,
                 instruction_sources: Vec::new(),
-                rtk_rewritten: false,
             })
         }
         Some(other) => bail!("unsupported file tool '{}'", other),
@@ -276,7 +275,6 @@ fn file_change_output(
         attachments: Vec::new(),
         metadata,
         instruction_sources: Vec::new(),
-        rtk_rewritten: false,
     }
 }
 

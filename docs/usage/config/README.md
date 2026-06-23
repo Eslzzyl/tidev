@@ -222,21 +222,6 @@ max_age_hours = 24
 | `auto_cleanup` | `false` | Automatically remove known tidev temp files on startup |
 | `max_age_hours` | `24` | Maximum age in hours for temp files to be kept. Files older than this are removed during cleanup |
 
-## [rtk]
-
-[RTK](https://github.com/rtk-ai/rtk) (Rust Token Killer) compresses command outputs to reduce token consumption.
-RTK must be installed on the system for this feature to work. If RTK is not
-detected, this setting is ignored and the feature stays disabled.
-
-```
-[rtk]
-enabled = true
-```
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `enabled` | `true` | Enable RTK compression for command outputs |
-
 ## [mcp]
 
 tidev supports the Model Context Protocol (MCP) for extending tool capabilities.

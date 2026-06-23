@@ -151,7 +151,6 @@ struct RawMessageRow {
     patch_files: Option<Vec<u8>>,
     file_diffs: Option<Vec<u8>>,
     mode: Option<String>,
-    rtk_rewritten: bool,
     thinking_level: Option<String>,
 }
 
@@ -181,8 +180,7 @@ impl RawMessageRow {
             patch_files: read_opt_blob_maybe_text(row, 20)?,
             file_diffs: read_opt_blob_maybe_text(row, 21)?,
             mode: row.get(22)?,
-            rtk_rewritten: row.get::<_, i64>(23)? != 0,
-            thinking_level: row.get(24)?,
+            thinking_level: row.get(23)?,
         })
     }
 
@@ -247,7 +245,6 @@ impl RawMessageRow {
         message.patch_files = self.patch_files.map(|b| decompress_text(&b));
         message.file_diffs = self.file_diffs.map(|b| decompress_text(&b));
         message.mode = mode;
-        message.rtk_rewritten = self.rtk_rewritten;
         message.thinking_level = thinking_level;
         Ok(message)
     }
@@ -599,7 +596,7 @@ impl SessionStore {
             Some(compress_text(&message.reasoning))
         };
         self.write_execute(
-            "INSERT INTO messages (id, session_id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, tokens_per_second, snapshot_hash, patch_files, file_diffs, mode, rtk_rewritten, thinking_level) VALUES (:id, :session_id, :role, :content, :attachments, :reasoning, :tool_calls, :tool_call_id, :tool_name, :metadata, :created_at, :completed_at, :streaming, :input_tokens, :output_tokens, :total_tokens, :cache_read_tokens, :cache_write_tokens, :model_id, :tokens_per_second, :snapshot_hash, :patch_files, :file_diffs, :mode, :rtk_rewritten, :thinking_level)",
+            "INSERT INTO messages (id, session_id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, tokens_per_second, snapshot_hash, patch_files, file_diffs, mode, thinking_level) VALUES (:id, :session_id, :role, :content, :attachments, :reasoning, :tool_calls, :tool_call_id, :tool_name, :metadata, :created_at, :completed_at, :streaming, :input_tokens, :output_tokens, :total_tokens, :cache_read_tokens, :cache_write_tokens, :model_id, :tokens_per_second, :snapshot_hash, :patch_files, :file_diffs, :mode, :thinking_level)",
             named_params! {
                 ":id": message.id.to_string(),
                 ":session_id": session_id.to_string(),
@@ -625,7 +622,6 @@ impl SessionStore {
                 ":patch_files": message.patch_files.as_deref().map(compress_text),
                 ":file_diffs": message.file_diffs.as_deref().map(compress_text),
                 ":mode": mode,
-                ":rtk_rewritten": if message.rtk_rewritten { 1_i64 } else { 0_i64 },
                 ":thinking_level": thinking_level,
             },
         )?;
@@ -651,7 +647,7 @@ impl SessionStore {
             guard.execute_batch("BEGIN TRANSACTION")?;
 
             let mut stmt = guard.prepare(
-                "INSERT INTO messages (id, session_id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, tokens_per_second, snapshot_hash, patch_files, file_diffs, mode, rtk_rewritten, thinking_level) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
+                "INSERT INTO messages (id, session_id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, tokens_per_second, snapshot_hash, patch_files, file_diffs, mode, thinking_level) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
             ).context("failed to prepare batch insert statement")?;
 
             for message in messages {
@@ -701,7 +697,6 @@ impl SessionStore {
                     message.patch_files.as_deref().map(compress_text),
                     message.file_diffs.as_deref().map(compress_text),
                     mode,
-                    if message.rtk_rewritten { 1_i64 } else { 0_i64 },
                     thinking_level,
                 ])
                 .context("failed to insert message in batch")?;
@@ -1182,7 +1177,7 @@ impl SessionStore {
     pub fn load_messages(&self, session_id: Uuid) -> Result<Vec<Message>> {
         // Phase 1: collect raw rows (no decompression, no JSON parsing)
         let raw_rows: Vec<RawMessageRow> = self.read_query(
-            "SELECT id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, tokens_per_second, snapshot_hash, patch_files, file_diffs, mode, rtk_rewritten, thinking_level FROM messages WHERE session_id = :session_id ORDER BY created_at ASC, rowid ASC",
+            "SELECT id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, tokens_per_second, snapshot_hash, patch_files, file_diffs, mode, thinking_level FROM messages WHERE session_id = :session_id ORDER BY created_at ASC, rowid ASC",
             named_params! { ":session_id": session_id.to_string() },
             RawMessageRow::from_row,
         )?;
@@ -2058,12 +2053,12 @@ impl SessionStore {
         // 6. messages
         {
             let mut insert = tx.prepare(
-                "INSERT OR REPLACE INTO messages (id, session_id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, tokens_per_second, snapshot_hash, patch_files, file_diffs, mode, rtk_rewritten, thinking_level) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
+                "INSERT OR REPLACE INTO messages (id, session_id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, tokens_per_second, snapshot_hash, patch_files, file_diffs, mode, thinking_level) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
             )?;
             if compress {
                 // Compressed export: read raw BLOB bytes directly
                 let mut msg_stmt = self.read_conn.prepare(
-                    "SELECT id, session_id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, tokens_per_second, snapshot_hash, patch_files, file_diffs, mode, rtk_rewritten, thinking_level FROM messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC"
+                    "SELECT id, session_id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, tokens_per_second, snapshot_hash, patch_files, file_diffs, mode, thinking_level FROM messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC"
                 )?;
                 for sid in &session_id_strs {
                     let rows = msg_stmt.query_map(params![sid], |row| {
@@ -2092,8 +2087,7 @@ impl SessionStore {
                             read_opt_blob_maybe_text(row, 21)?,  // patch_files (BLOB or TEXT)
                             read_opt_blob_maybe_text(row, 22)?,  // file_diffs (BLOB or TEXT)
                             row.get::<_, Option<String>>(23)?,   // mode
-                            row.get::<_, i64>(24)?,              // rtk_rewritten
-                            row.get::<_, Option<String>>(25)?,   // thinking_level
+                            row.get::<_, Option<String>>(24)?,   // thinking_level
                         ))
                     })?;
                     for row in rows {
@@ -2122,7 +2116,6 @@ impl SessionStore {
                             patch_files,
                             file_diffs,
                             mode,
-                            rtk_rewritten,
                             thinking_level,
                         ) = row?;
                         insert.execute(params![
@@ -2150,7 +2143,6 @@ impl SessionStore {
                             patch_files,
                             file_diffs,
                             mode,
-                            rtk_rewritten,
                             thinking_level,
                         ])?;
                     }
@@ -2200,7 +2192,6 @@ impl SessionStore {
                             msg.patch_files,
                             msg.file_diffs,
                             mode,
-                            if msg.rtk_rewritten { 1_i64 } else { 0_i64 },
                             thinking_level,
                         ])?;
                     }
@@ -2465,7 +2456,7 @@ impl SessionStore {
                 "INSERT OR REPLACE INTO session_instruction_sources (session_id, source) VALUES (?1, ?2)",
             )?;
             let mut insert_message = guard.prepare(
-                "INSERT OR REPLACE INTO messages (id, session_id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, tokens_per_second, snapshot_hash, patch_files, file_diffs, mode, rtk_rewritten, thinking_level) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
+                "INSERT OR REPLACE INTO messages (id, session_id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, tokens_per_second, snapshot_hash, patch_files, file_diffs, mode, thinking_level) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
             )?;
             let mut insert_revert = guard.prepare(
                 "INSERT OR REPLACE INTO session_reverts (session_id, message_id, redo_snapshot, created_at) VALUES (?1, ?2, ?3, ?4)",
@@ -2490,7 +2481,7 @@ impl SessionStore {
             let mut instr_stmt = import_conn
                 .prepare("SELECT source FROM session_instruction_sources WHERE session_id = ?1")?;
             let mut msg_stmt = import_conn.prepare(
-                "SELECT id, session_id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, tokens_per_second, snapshot_hash, patch_files, file_diffs, mode, rtk_rewritten, thinking_level FROM messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC",
+                "SELECT id, session_id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, tokens_per_second, snapshot_hash, patch_files, file_diffs, mode, thinking_level FROM messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC",
             )?;
             let mut revert_stmt = import_conn.prepare(
                 "SELECT session_id, message_id, redo_snapshot, created_at FROM session_reverts WHERE session_id = ?1",
@@ -2654,8 +2645,7 @@ impl SessionStore {
                             text.map(|s| compress_text(&s))
                         },
                         row.get::<_, Option<String>>(23)?, // mode
-                        row.get::<_, i64>(24)?,            // rtk_rewritten
-                        row.get::<_, Option<String>>(25)?, // thinking_level
+                        row.get::<_, Option<String>>(24)?, // thinking_level
                     ))
                 })?;
                 for row in msg_rows {
@@ -2684,7 +2674,6 @@ impl SessionStore {
                         patch_files,
                         file_diffs,
                         mode,
-                        rtk_rewritten,
                         thinking_level,
                     ) = row?;
                     insert_message.execute(params![
@@ -2712,7 +2701,6 @@ impl SessionStore {
                         patch_files,
                         file_diffs,
                         mode,
-                        rtk_rewritten,
                         thinking_level,
                     ])?;
                 }
@@ -2829,7 +2817,7 @@ impl SessionStore {
 /// as TEXT for backwards compatibility with older databases.
 pub fn load_session_messages(db: &Connection, session_id: Uuid) -> Result<Vec<Message>> {
     let mut stmt = db.prepare(
-        "SELECT id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, tokens_per_second, snapshot_hash, patch_files, file_diffs, mode, rtk_rewritten, thinking_level FROM messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC"
+        "SELECT id, role, content, attachments, reasoning, tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, tokens_per_second, snapshot_hash, patch_files, file_diffs, mode, thinking_level FROM messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC"
     )?;
 
     let rows = stmt.query_map(

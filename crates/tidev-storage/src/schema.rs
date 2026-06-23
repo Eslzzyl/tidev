@@ -1,4 +1,4 @@
-pub const SCHEMA_VERSION: i64 = 36;
+pub const SCHEMA_VERSION: i64 = 37;
 
 pub const SESSION_SELECT_COLUMNS: &str = "s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, s.status, s.ended_at, s.context_summary, s.context_retained_from, s.system_prompt, COALESCE(sw.workspace_root, '')";
 
@@ -71,7 +71,6 @@ CREATE TABLE IF NOT EXISTS messages (
     patch_files BLOB,
     file_diffs BLOB,
     mode TEXT,
-    rtk_rewritten INTEGER NOT NULL DEFAULT 0,
     thinking_level TEXT
 );
 
@@ -255,7 +254,6 @@ CREATE TABLE IF NOT EXISTS messages (
     patch_files TEXT,
     file_diffs TEXT,
     mode TEXT,
-    rtk_rewritten INTEGER NOT NULL DEFAULT 0,
     thinking_level TEXT
 );
 

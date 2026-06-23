@@ -387,7 +387,6 @@ pub fn execute_shell_tool_call(
     workspace_root: &Path,
     call: &ToolCall,
     max_output_bytes: usize,
-    rtk_enabled: bool,
     cancelled: Arc<AtomicBool>,
     session_id: Uuid,
     event_tx: Option<UnboundedSender<tidev_session::session::BackendEvent>>,
@@ -399,14 +398,12 @@ pub fn execute_shell_tool_call(
         &call.name,
         arguments,
         max_output_bytes,
-        rtk_enabled,
         cancelled,
         session_id,
         event_tx,
     )?;
     Ok(
-        tidev_session::session::ToolExecutionResult::new(result.output)
-            .with_rtk_rewritten(result.rtk_rewritten),
+        tidev_session::session::ToolExecutionResult::new(result.output),
     )
 }
 
@@ -442,7 +439,6 @@ pub(super) fn execute_tool_call(
     session_id: Uuid,
     call: &ToolCall,
     max_output_bytes: usize,
-    rtk_enabled: bool,
     mode: tidev_types::prompts::SessionMode,
 ) -> Result<ToolExecutionResult> {
     // Pre-execution checks for file read tracking
@@ -476,7 +472,6 @@ pub(super) fn execute_tool_call(
             store,
             session_id,
             max_output_bytes,
-            rtk_enabled,
             mode,
             allow_outside: false,
             sensitive_file_approved: false,

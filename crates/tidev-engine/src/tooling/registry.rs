@@ -28,7 +28,6 @@ pub struct ToolRegistry {
     permission_config: PermissionConfig,
     file_read_tracker: Arc<FileReadTracker>,
     active_model: Option<crate::config::ActiveModel>,
-    rtk_enabled: bool,
     web_search_config: WebSearchConfig,
     auth_store: Arc<AuthStore>,
 }
@@ -42,7 +41,6 @@ impl ToolRegistry {
         mcp: McpManager,
         permission_config: PermissionConfig,
         file_read_tracker: Arc<FileReadTracker>,
-        rtk_enabled: bool,
         worktree: Option<PathBuf>,
         web_search_config: WebSearchConfig,
         auth_store: Arc<AuthStore>,
@@ -65,7 +63,6 @@ impl ToolRegistry {
             permission_config,
             file_read_tracker,
             active_model: None,
-            rtk_enabled,
             web_search_config,
             auth_store,
         }
@@ -227,10 +224,6 @@ impl ToolRegistry {
         self.max_output_bytes
     }
 
-    pub fn rtk_enabled(&self) -> bool {
-        self.rtk_enabled
-    }
-
     pub fn can_execute(&self, tool_name: &str, mode: SessionMode) -> bool {
         self.definition_for(tool_name).is_some_and(|definition| {
             definition
@@ -297,7 +290,6 @@ impl ToolRegistry {
                 store,
                 session_id,
                 max_output_bytes: self.max_output_bytes,
-                rtk_enabled: self.rtk_enabled,
                 mode,
                 allow_outside,
                 sensitive_file_approved,
@@ -467,7 +459,6 @@ impl ToolRegistry {
                 store,
                 session_id,
                 max_output_bytes: self.max_output_bytes,
-                rtk_enabled: self.rtk_enabled,
                 mode,
                 allow_outside,
                 sensitive_file_approved,

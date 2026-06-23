@@ -562,7 +562,6 @@ fn call_tool_result_data(
         attachments,
         metadata: ToolMetadata::default(),
         instruction_sources: Vec::new(),
-        rtk_rewritten: false,
     }
 }
 

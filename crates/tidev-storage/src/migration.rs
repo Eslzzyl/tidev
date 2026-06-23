@@ -157,6 +157,17 @@ DROP TABLE IF EXISTS retention_scores;
 DROP TABLE IF EXISTS session_goals;
 "#,
     },
+    // ── v37: Remove rtk_rewritten column from messages ────────────────
+    //
+    // The RTK (Rust Token Killer) integration has been removed.
+    // Drop the `rtk_rewritten` column from the `messages` table.
+    Migration {
+        version: 37,
+        description: "Remove rtk_rewritten column from messages table",
+        sql: r#"
+ALTER TABLE messages DROP COLUMN rtk_rewritten;
+"#,
+    },
 ];
 
 // ---------------------------------------------------------------------------

@@ -95,8 +95,6 @@ pub struct AppConfig {
     #[serde(default)]
     pub gateway: GatewayConfig,
     #[serde(default)]
-    pub rtk: RtkConfig,
-    #[serde(default)]
     pub agent: AgentConfig,
     #[serde(default)]
     pub shell: ShellConfig,
@@ -133,7 +131,6 @@ impl Default for AppConfig {
             permissions: PermissionConfig::default(),
             notifications: NotificationConfig::default(),
             gateway: GatewayConfig::default(),
-            rtk: RtkConfig::default(),
             agent: AgentConfig::default(),
             shell: ShellConfig::default(),
             tmp: TmpConfig::default(),
@@ -361,27 +358,6 @@ impl Default for DeliveryConfigDecl {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct RtkConfig {
-    /// Enable RTK (Rust Token Killer) to compress command outputs and save tokens.
-    /// RTK must be installed on the system for this to work.
-    /// When RTK is not installed, this setting is ignored.
-    #[serde(default = "default_rtk_enabled")]
-    pub enabled: bool,
-    /// Whether RTK is installed on the system (runtime detection, not persisted).
-    #[serde(skip)]
-    pub installed: bool,
-}
-
-impl Default for RtkConfig {
-    fn default() -> Self {
-        Self {
-            enabled: default_rtk_enabled(),
-            installed: false,
-        }
-    }
-}
-
 /// Configuration for the multi-agent subsystem.
 ///
 /// Controls delegation depth, per-agent session limits, and default sub-agent model.
@@ -470,19 +446,6 @@ impl Default for AgentConfig {
             thinking_levels: BTreeMap::new(),
         }
     }
-}
-
-fn default_rtk_enabled() -> bool {
-    true
-}
-
-/// Check if RTK is installed on the system.
-pub fn check_rtk_installed() -> bool {
-    std::process::Command::new("rtk")
-        .arg("--version")
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -632,32 +595,20 @@ impl AppConfig {
     pub fn load_or_create(paths: &ConfigPaths) -> Result<Self> {
         paths.ensure_directories()?;
 
-        let rtk_installed = check_rtk_installed();
-
         if !paths.config_file.exists() {
             let example = Self::example_toml();
             std::fs::write(&paths.config_file, example)
                 .with_context(|| format!("failed to write {}", paths.config_file.display()))?;
-            let mut config: Self = toml::from_str(example).with_context(|| {
+            let config: Self = toml::from_str(example).with_context(|| {
                 format!("failed to parse generated {}", paths.config_file.display())
             })?;
-            config.rtk.installed = rtk_installed;
-            // If RTK is not installed, disable it by default
-            if !rtk_installed {
-                config.rtk.enabled = false;
-            }
             return config.attach_bundled_providers();
         }
 
         let contents = std::fs::read_to_string(&paths.config_file)
             .with_context(|| format!("failed to read {}", paths.config_file.display()))?;
-        let mut config: Self = toml::from_str(&contents)
+        let config: Self = toml::from_str(&contents)
             .with_context(|| format!("failed to parse {}", paths.config_file.display()))?;
-        config.rtk.installed = rtk_installed;
-        // If RTK is not installed, force disabled
-        if !rtk_installed {
-            config.rtk.enabled = false;
-        }
         config.attach_bundled_providers()
     }
 
@@ -753,9 +704,6 @@ impl AppConfig {
         if has("gateway") {
             self.gateway = overlay.gateway;
         }
-        if has("rtk") {
-            self.rtk = overlay.rtk;
-        }
         if has("agent") {
             self.agent = overlay.agent;
         }
@@ -823,13 +771,6 @@ skills = []
 #max_request_files = 100
 #save_response_body = false
 #max_response_files = 100
-
-# RTK (Rust Token Killer) configuration.
-# When enabled, command outputs are compressed to save tokens.
-# RTK must be installed on your system for this to work.
-# If RTK is not installed, this setting is ignored.
-#[rtk]
-#enabled = true
 
 # Optional permission settings by mode.
 # By default plan mode allows read/search/session/execute (shell, but only for read-only commands) and build mode allows all permissions.

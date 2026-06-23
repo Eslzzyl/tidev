@@ -156,7 +156,7 @@ impl App {
                     panel.move_down();
                 }
                 KeyCode::Enter | KeyCode::Char(' ') => {
-                    panel.toggle_selected(self.config.read().unwrap().rtk.installed);
+                    panel.toggle_selected();
                 }
                 KeyCode::Left => {
                     panel.decrease_selected();
