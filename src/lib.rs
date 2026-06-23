@@ -11,28 +11,9 @@ struct Cli {
 
 #[derive(clap::Subcommand, Debug)]
 enum Command {
-    /// Start gateway server (all enabled platforms: Telegram, QQ, etc.)
-    #[cfg(feature = "gateway")]
-    Gateway,
     /// Start TUI (default when no subcommand is given)
     #[cfg(feature = "tui")]
     Tui,
-    /// Start web server
-    #[cfg(feature = "web")]
-    Web {
-        /// Host to bind to
-        #[arg(short = 'H', long)]
-        host: Option<String>,
-        /// Port to listen on
-        #[arg(short, long)]
-        port: Option<u16>,
-        /// Serve frontend from filesystem (web/dist) instead of embedded assets
-        #[arg(long)]
-        dev_fs: bool,
-        /// Workspace root path (defaults to current directory)
-        #[arg(short, long)]
-        workspace: Option<std::path::PathBuf>,
-    },
     /// Export session(s) to a SQLite database
     Export {
         /// Session UUID(s) to export (repeat the flag for multiple sessions)
@@ -165,31 +146,10 @@ pub fn run() -> anyhow::Result<()> {
                 Ok(())
             }
         }
-        #[cfg(feature = "gateway")]
-        Some(Command::Gateway) => {
-            auto_cleanup_on_startup();
-            tidev_gateway::run()
-        }
         #[cfg(feature = "tui")]
         Some(Command::Tui) => {
             auto_cleanup_on_startup();
             tidev_tui::run()
-        }
-        #[cfg(feature = "web")]
-        Some(Command::Web {
-            host,
-            port,
-            dev_fs,
-            workspace,
-        }) => {
-            auto_cleanup_on_startup();
-            let rt = tokio::runtime::Runtime::new()?;
-            rt.block_on(tidev_web::run(tidev_web::WebOptions {
-                host,
-                port,
-                dev_fs,
-                workspace_root: workspace,
-            }))
         }
         Some(Command::Export {
             session,
@@ -466,12 +426,5 @@ mod tests {
     fn parses_default_command_as_app_mode() {
         let cli = Cli::parse_from(["tidev"]);
         assert!(cli.command.is_none());
-    }
-
-    #[cfg(feature = "gateway")]
-    #[test]
-    fn parses_gateway_command() {
-        let cli = Cli::parse_from(["tidev", "gateway"]);
-        assert!(matches!(cli.command, Some(Command::Gateway)));
     }
 }

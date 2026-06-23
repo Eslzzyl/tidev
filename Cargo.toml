@@ -7,11 +7,8 @@ members = [
     "crates/tidev-engine",
     "crates/tidev-storage",
     "crates/tidev-tui",
-    "crates/tidev-web",
-    "crates/tidev-gateway",
-    "crates/tidev-scheduler",
 ]
-default-members = [".", "crates/tidev-types", "crates/tidev-session", "crates/tidev-engine", "crates/tidev-tui", "crates/tidev-web", "crates/tidev-gateway", "crates/tidev-scheduler"]
+default-members = [".", "crates/tidev-types", "crates/tidev-session", "crates/tidev-engine", "crates/tidev-tui"]
 resolver = "2"
 
 [workspace.package]
@@ -57,14 +54,10 @@ tidev-types = { path = "crates/tidev-types" }
 tidev-engine = { path = "crates/tidev-engine" }
 tidev-storage = { path = "crates/tidev-storage" }
 tidev-tui = { path = "crates/tidev-tui", optional = true }
-tidev-web = { path = "crates/tidev-web", optional = true }
-tidev-gateway = { path = "crates/tidev-gateway", optional = true }
 
 [features]
-default = ["tui", "web", "gateway"]
+default = ["tui"]
 tui = ["tidev-tui"]
-web = ["tidev-web"]
-gateway = ["tidev-gateway"]
 
 [profile.dev]
 incremental = true

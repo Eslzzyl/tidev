@@ -566,16 +566,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "chrono-tz"
-version = "0.10.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6139a8597ed92cf816dfb33f5dd6cf0bb93a6adc938f11039f371bc5bcd26c3"
-dependencies = [
- "chrono",
- "phf 0.12.1",
-]
-
-[[package]]
 name = "clap"
 version = "4.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -746,18 +736,6 @@ name = "critical-section"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "790eea4361631c5e7d22598ecd5723ff611904e3344ce8720784c93e3d83d40b"
-
-[[package]]
-name = "cron"
-version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "089df96cf6a25253b4b6b6744d86f91150a3d4df546f31a95def47976b8cba97"
-dependencies = [
- "chrono",
- "once_cell",
- "phf 0.11.3",
- "winnow 0.7.15",
-]
 
 [[package]]
 name = "crossbeam-deque"
@@ -2678,15 +2656,6 @@ dependencies = [
 
 [[package]]
 name = "phf"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "913273894cec178f401a31ec4b656318d95473527be05c0752cc41cdc32be8b7"
-dependencies = [
- "phf_shared 0.12.1",
-]
-
-[[package]]
-name = "phf"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1562dc717473dbaa4c1f85a36410e03c047b2e7df7f45ee938fbef64ae7fadf"
@@ -2767,15 +2736,6 @@ name = "phf_shared"
 version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67eabc2ef2a60eb7faa00097bd1ffdb5bd28e62bf39990626a582201b7a754e5"
-dependencies = [
- "siphasher",
-]
-
-[[package]]
-name = "phf_shared"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06005508882fb681fd97892ecff4b7fd0fee13ef1aa569f8695dae7ab9099981"
 dependencies = [
  "siphasher",
 ]
@@ -4246,11 +4206,9 @@ dependencies = [
  "log",
  "rusqlite",
  "tidev-engine",
- "tidev-gateway",
  "tidev-storage",
  "tidev-tui",
  "tidev-types",
- "tidev-web",
  "tokio",
  "uuid",
 ]
@@ -4313,33 +4271,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tidev-gateway"
-version = "0.6.1"
-dependencies = [
- "anyhow",
- "async-trait",
- "base64",
- "futures-util",
- "log",
- "prost",
- "rand 0.10.1",
- "reqwest",
- "serde",
- "serde_json",
- "tidev-engine",
- "tidev-llm",
- "tidev-scheduler",
- "tidev-session",
- "tidev-storage",
- "tidev-types",
- "tokio",
- "tokio-tungstenite",
- "tokio-util",
- "urlencoding",
- "uuid",
-]
-
-[[package]]
 name = "tidev-llm"
 version = "0.6.1"
 dependencies = [
@@ -4353,28 +4284,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tidev-session",
- "tidev-types",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "tidev-scheduler"
-version = "0.6.1"
-dependencies = [
- "anyhow",
- "chrono",
- "chrono-tz",
- "cron",
- "futures-util",
- "log",
- "rusqlite",
- "serde",
- "serde_json",
- "tempfile",
- "tidev-engine",
- "tidev-session",
- "tidev-storage",
  "tidev-types",
  "tokio",
  "uuid",
@@ -4465,38 +4374,6 @@ dependencies = [
  "log",
  "serde",
  "serde_json",
- "uuid",
-]
-
-[[package]]
-name = "tidev-web"
-version = "0.6.1"
-dependencies = [
- "anyhow",
- "async-stream",
- "axum",
- "base64",
- "bytes",
- "chrono",
- "dirs",
- "futures-util",
- "log",
- "mime_guess",
- "portable-pty",
- "rand 0.10.1",
- "rusqlite",
- "serde",
- "serde_json",
- "tidev-engine",
- "tidev-llm",
- "tidev-session",
- "tidev-storage",
- "tidev-types",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "toml",
- "tower-http",
  "uuid",
 ]
 
@@ -4661,7 +4538,7 @@ dependencies = [
  "toml_datetime",
  "toml_parser",
  "toml_writer",
- "winnow 1.0.3",
+ "winnow",
 ]
 
 [[package]]
@@ -4679,7 +4556,7 @@ version = "1.1.2+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2abe9b86193656635d2411dc43050282ca48aa31c2451210f4202550afb7526"
 dependencies = [
- "winnow 1.0.3",
+ "winnow",
 ]
 
 [[package]]
@@ -5569,15 +5446,6 @@ name = "windows_x86_64_msvc"
 version = "0.53.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6bbff5f0aada427a1e5a6da5f1f98158182f26556f345ac9e04d36d0ebed650"
-
-[[package]]
-name = "winnow"
-version = "0.7.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df79d97927682d2fd8adb29682d1140b343be4ac0f08fd68b7765d9c059d3945"
-dependencies = [
- "memchr",
-]
 
 [[package]]
 name = "winnow"
