@@ -16,7 +16,6 @@ pub enum CommandAction {
     Message,
     Theme,
     Settings,
-    Sandbox,
     Quit,
     Init,
     Agents,
@@ -364,17 +363,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         action: CommandAction::Skills,
     },
     CommandSpec {
-        name: "sandbox",
-        aliases: &[],
-        description: "View and change sandbox policy for shell commands",
-        usage: "/sandbox",
-        action: CommandAction::Sandbox,
-    },
-    CommandSpec {
         name: "sync",
         aliases: &[],
         description: "Sync sessions with remote machines (see CLI: tidev sync)",
         usage: "/sync",
         action: CommandAction::Sync,
     },
-    ];
+];

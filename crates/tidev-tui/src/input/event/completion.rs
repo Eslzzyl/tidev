@@ -305,9 +305,6 @@ impl App {
             CommandAction::Sync => {
                 self.open_sync_panel();
             }
-            CommandAction::Sandbox => {
-                self.open_sandbox_panel();
-            }
             CommandAction::Memory => {
                 // TODO: implement memory panel
             }

@@ -11,7 +11,6 @@ use super::tools::tool_definitions;
 use super::{FileReadTracker, ToolDefinition, canonical_tool_name};
 use crate::config::WebSearchConfig;
 use crate::mcp::McpManager;
-use crate::sandbox::SandboxPolicy;
 use crate::tooling::SkillCatalog;
 use tidev_session::session::BackendEvent;
 use tidev_session::session::{ToolCall, ToolExecutionResult};
@@ -30,7 +29,6 @@ pub struct ToolRegistry {
     file_read_tracker: Arc<FileReadTracker>,
     active_model: Option<crate::config::ActiveModel>,
     rtk_enabled: bool,
-    sandbox_policy: Option<SandboxPolicy>,
     web_search_config: WebSearchConfig,
     auth_store: Arc<AuthStore>,
 }
@@ -68,7 +66,6 @@ impl ToolRegistry {
             file_read_tracker,
             active_model: None,
             rtk_enabled,
-            sandbox_policy: None,
             web_search_config,
             auth_store,
         }
@@ -97,16 +94,6 @@ impl ToolRegistry {
     /// tool calls will use the chosen provider.
     pub fn set_active_search_provider(&mut self, provider: &str) {
         self.web_search_config.default_provider = provider.to_string();
-    }
-
-    /// Set the sandbox policy for shell command execution.
-    pub fn set_sandbox_policy(&mut self, policy: Option<SandboxPolicy>) {
-        self.sandbox_policy = policy;
-    }
-
-    /// Get the current sandbox policy.
-    pub fn sandbox_policy(&self) -> Option<&SandboxPolicy> {
-        self.sandbox_policy.as_ref()
     }
 
     pub fn model_supports_images(&self) -> bool {
@@ -314,7 +301,6 @@ impl ToolRegistry {
                 mode,
                 allow_outside,
                 sensitive_file_approved,
-                sandbox_policy: self.sandbox_policy.clone(),
                 web_search_config: &self.web_search_config,
                 auth_store: self.auth_store.as_ref(),
                 event_tx: None,
@@ -485,7 +471,6 @@ impl ToolRegistry {
                 mode,
                 allow_outside,
                 sensitive_file_approved,
-                sandbox_policy: self.sandbox_policy.clone(),
                 web_search_config: &self.web_search_config,
                 auth_store: self.auth_store.as_ref(),
                 event_tx: Some(event_tx),

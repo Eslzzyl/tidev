@@ -5,7 +5,6 @@ pub(crate) enum PanelAction {
     Mcp,
     Message,
     Model,
-    Sandbox,
     Session,
     Settings,
     Skills,
@@ -48,10 +47,6 @@ pub(crate) static PANEL_ENTRIES: &[PanelEntry] = &[
     PanelEntry {
         description: "Browse and preview available skills",
         action: PanelAction::Skills,
-    },
-    PanelEntry {
-        description: "View and change sandbox policy for shell commands",
-        action: PanelAction::Sandbox,
     },
     PanelEntry {
         description: "View message details in the current session",

@@ -10,7 +10,6 @@ pub mod model_panel;
 pub mod permission;
 pub mod question;
 pub mod rename;
-pub mod sandbox_panel;
 pub mod search_panel;
 pub mod sensitive;
 pub mod session_panel;

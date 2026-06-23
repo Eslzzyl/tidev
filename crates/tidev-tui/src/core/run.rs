@@ -110,9 +110,6 @@ impl App {
         }
         tools.set_active_model(active_model.clone());
         let shared_config: SharedConfig = Arc::new(RwLock::new(config.clone()));
-        // Set sandbox policy based on session mode and config
-        let sandbox_policy = config.sandbox.to_policy();
-        tools.set_sandbox_policy(Some(sandbox_policy));
         // Build shared AgentRuntime from the same resources
         let agent = AgentRuntime {
             workspace_root: workspace_root.clone(),
@@ -185,7 +182,6 @@ impl App {
             mcp_panel: None,
             agents_panel: None,
             skills_panel: None,
-            sandbox_panel: None,
             sync_panel: None,
             search_panel: None,
             at_mention: AtMentionState::default(),
@@ -193,7 +189,6 @@ impl App {
             shell_completion: ShellCompletionState::default(),
             pending_tool_execution: None,
             permission_dialog: None,
-            sandbox_elevation: None,
             workspace_boundary_dialog: None,
             workspace_boundary_confirm_dialog: None,
             sensitive_file_dialog: None,
@@ -568,7 +563,6 @@ impl App {
             mcp_panel: self.mcp_panel.clone(),
             agents_panel: self.agents_panel.clone(),
             skills_panel: self.skills_panel.clone(),
-            sandbox_panel: self.sandbox_panel.clone(),
             sync_panel: self.sync_panel.clone(),
             search_panel: self.search_panel.clone(),
             message_panel: self.message_panel.clone(),
@@ -597,7 +591,6 @@ impl App {
         self.mcp_panel = snapshot.mcp_panel;
         self.agents_panel = snapshot.agents_panel;
         self.skills_panel = snapshot.skills_panel;
-        self.sandbox_panel = snapshot.sandbox_panel;
         self.sync_panel = snapshot.sync_panel;
         self.search_panel = snapshot.search_panel;
         self.at_mention = snapshot.at_mention;

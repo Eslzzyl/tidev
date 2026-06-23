@@ -27,7 +27,6 @@ pub struct ToolContext<'a> {
     pub mode: SessionMode,
     pub allow_outside: bool,
     pub sensitive_file_approved: bool,
-    pub sandbox_policy: Option<crate::sandbox::SandboxPolicy>,
     pub web_search_config: &'a WebSearchConfig,
     pub auth_store: &'a AuthStore,
     pub event_tx: Option<UnboundedSender<BackendEvent>>,
@@ -101,14 +100,11 @@ pub fn execute_tool_call(
                 arguments,
                 ctx.max_output_bytes,
                 ctx.rtk_enabled,
-                ctx.sandbox_policy.clone(),
                 ctx.session_id,
-                None, // event_tx — caller who needs streaming uses the dedicated streaming path
+                None,
             )?;
             tidev_session::session::ToolExecutionResult::new(result.output)
                 .with_rtk_rewritten(result.rtk_rewritten)
-                .with_sandbox(result.sandboxed, result.sandbox_type)
-                .with_sandbox_denied(result.sandbox_denied)
         }
         Some("task") => {
             let output = task::execute_tool_call(
@@ -196,14 +192,11 @@ pub fn execute_tool_call_streaming(
                 ctx.max_output_bytes,
                 ctx.rtk_enabled,
                 cancelled.unwrap_or_else(|| Arc::new(AtomicBool::new(false))),
-                ctx.sandbox_policy.clone(),
                 ctx.session_id,
-                ctx.event_tx.clone(), // pass the sender through for streaming
+                ctx.event_tx.clone(),
             )?;
             tidev_session::session::ToolExecutionResult::new(result.output)
                 .with_rtk_rewritten(result.rtk_rewritten)
-                .with_sandbox(result.sandboxed, result.sandbox_type)
-                .with_sandbox_denied(result.sandbox_denied)
         }
         Some("task") => {
             let output = task::execute_tool_call(

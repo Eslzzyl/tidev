@@ -99,9 +99,6 @@ impl App {
         if let Some(panel) = &self.skills_panel {
             self.render_skills_panel(frame, area, panel);
         }
-        if let Some(panel) = &self.sandbox_panel {
-            self.render_sandbox_panel(frame, area, panel);
-        }
         if let Some(panel) = &self.settings_panel {
             self.render_settings_panel(frame, area, panel);
         }
@@ -129,9 +126,6 @@ impl App {
         }
         if let Some(dialog) = &self.permission_dialog {
             self.render_permission_dialog(frame, area, dialog);
-        }
-        if self.sandbox_elevation.is_some() {
-            self.render_sandbox_elevation_dialog(frame, area);
         }
         if self.fork_confirm_dialog.is_some() {
             self.render_fork_confirm_dialog(frame, area);
@@ -272,7 +266,7 @@ impl App {
             true,
         );
 
-        // Model/sandbox info is now displayed inside the composer as metadata
+        // Model info is now displayed inside the composer as metadata
         let workspace_path = self.workspace_root.display().to_string();
         let display_path = workspace_path.replace(
             &dirs::home_dir().unwrap_or_default().display().to_string(),
@@ -589,24 +583,6 @@ impl App {
                     ));
                 }
 
-                // Sandbox status
-                let sandbox_label = self
-                    .tools
-                    .sandbox_policy()
-                    .map(|p| p.label())
-                    .unwrap_or_else(|| self.config.read().unwrap().sandbox.to_policy().label());
-                meta_spans.push(Span::styled(" · ", Style::default().fg(palette.muted)));
-                let sandbox_style =
-                    if sandbox_label.contains("off") || sandbox_label.contains("read") {
-                        Style::default().fg(palette.warning)
-                    } else {
-                        Style::default().fg(palette.success)
-                    };
-                meta_spans.push(Span::styled(
-                    format!("sandbox:{}", sandbox_label),
-                    sandbox_style,
-                ));
-
                 let meta_paragraph = Paragraph::new(Line::from(meta_spans))
                     .style(Style::default().bg(palette.panel));
                 // Render on the second row of metadata_area, aligned with text content
@@ -710,120 +686,6 @@ pub(super) fn spans_with_highlights(
 }
 
 impl App {
-    /// Render the sandbox policy selection panel.
-    pub(super) fn render_sandbox_panel(
-        &self,
-        frame: &mut Frame<'_>,
-        area: Rect,
-        panel: &crate::ui::sandbox_panel::SandboxPanelState,
-    ) {
-        use crate::ui::sandbox_panel::SandboxPanelState as S;
-        use ratatui::layout::Margin;
-        use ratatui::style::{Modifier, Style};
-        use ratatui::text::{Line, Span};
-        use ratatui::widgets::{Block, Clear, List};
-
-        let palette = self.palette();
-
-        let overlay = centered_rect(28, S::build_items().len() as u16 + 2, area);
-        frame.render_widget(Clear, overlay);
-
-        let block = Block::default().style(Style::default().bg(palette.panel));
-        frame.render_widget(block, overlay);
-
-        let inner = overlay.inner(Margin {
-            horizontal: 1,
-            vertical: 0,
-        });
-
-        let items = S::build_items();
-
-        // Build list items
-        let list_items: Vec<ratatui::widgets::ListItem> = items
-            .iter()
-            .map(|item| {
-                ratatui::widgets::ListItem::new(Line::from(vec![Span::styled(
-                    item.label,
-                    Style::default().add_modifier(Modifier::BOLD),
-                )]))
-            })
-            .collect();
-
-        let mut list_state = ratatui::widgets::ListState::default();
-        list_state.select(Some(
-            panel.selected_index.min(items.len().saturating_sub(1)),
-        ));
-
-        let list = List::new(list_items)
-            .highlight_style(
-                Style::default()
-                    .bg(palette.selection_bg)
-                    .fg(palette.selection_fg),
-            )
-            .highlight_symbol("");
-        frame.render_stateful_widget(list, inner, &mut list_state);
-    }
-
-    /// Render the sandbox elevation dialog.
-    pub(super) fn render_sandbox_elevation_dialog(&self, frame: &mut Frame<'_>, area: Rect) {
-        use ratatui::layout::{Constraint, Layout, Margin};
-        use ratatui::style::Style;
-        use ratatui::text::{Line, Span};
-        use ratatui::widgets::{Block, Clear, Paragraph};
-
-        let palette = self.palette();
-        let overlay = centered_rect(56, 8, area);
-        frame.render_widget(Clear, overlay);
-
-        let block = Block::default().style(Style::default().bg(palette.panel));
-        frame.render_widget(&block, overlay);
-
-        let inner = overlay.inner(Margin::new(1, 0));
-        let sections = Layout::vertical([
-            Constraint::Length(2),
-            Constraint::Length(1),
-            Constraint::Min(0),
-        ])
-        .split(inner);
-
-        // Main message
-        let msg = Line::from(Span::styled(
-            "This command was blocked by the OS sandbox.",
-            Style::default().fg(palette.text),
-        ));
-        let hint = Line::from(Span::styled(
-            "Retry with full filesystem access?",
-            Style::default().fg(palette.muted),
-        ));
-        frame.render_widget(
-            Paragraph::new(vec![msg, hint]).style(Style::default().bg(palette.panel)),
-            sections[0],
-        );
-
-        // Options
-        let options = Line::from(vec![
-            Span::styled(
-                "  [Y] Retry with full access  ",
-                Style::default().fg(palette.success),
-            ),
-            Span::styled("[N] Cancel  ", Style::default().fg(palette.error)),
-        ]);
-        frame.render_widget(
-            Paragraph::new(options).style(Style::default().bg(palette.panel)),
-            sections[1],
-        );
-
-        // Separator
-        let sep = Line::from(Span::styled(
-            "\u{2500}".repeat(inner.width.saturating_sub(2) as usize),
-            Style::default().fg(palette.muted),
-        ));
-        frame.render_widget(
-            Paragraph::new(sep).style(Style::default().bg(palette.panel)),
-            sections[2],
-        );
-    }
-
     pub(super) fn render_prompt_footer(&mut self, frame: &mut Frame<'_>, area: Rect) {
         let palette = self.palette();
         let status_text = self.footer_status_text();

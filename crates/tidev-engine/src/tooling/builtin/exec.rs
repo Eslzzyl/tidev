@@ -19,16 +19,11 @@ use std::{
 use tokio::sync::mpsc::UnboundedSender;
 
 use super::utils::truncate_in_place;
-#[cfg(unix)]
-use crate::sandbox::pre_exec_hardening;
-use crate::sandbox::{
-    CommandSpec, SandboxManager, SandboxPolicy, remove_dangerous_env_vars_parent,
-};
 use crate::tooling::tools::{BashArgs, decode_tool_args};
 use crate::tooling::{ToolDefinition, ToolPermission};
 use crate::encoding::decode_command_output;
 use crate::encoding::prepare_command_for_shell;
-use tidev_session::session::{BackendEvent, tool_output_preview};
+use tidev_session::session::BackendEvent;
 use uuid::Uuid;
 
 /// Registry of active child process PIDs spawned by the bash tool.
@@ -106,17 +101,11 @@ pub fn kill_all_children() {
     // Windows support could be added later using TerminateProcess
 }
 
-/// Result of bash tool execution, including sandbox and RTK metadata.
+/// Result of bash tool execution, including RTK metadata.
 #[derive(Debug)]
 pub struct BashExecutionResult {
     pub output: String,
     pub rtk_rewritten: bool,
-    /// Whether the command was executed inside a sandbox.
-    pub sandboxed: bool,
-    /// The type of sandbox used, if any.
-    pub sandbox_type: String,
-    /// Whether the command appeared to be denied by the sandbox.
-    pub sandbox_denied: bool,
 }
 
 pub fn definitions() -> Vec<ToolDefinition> {
@@ -134,7 +123,6 @@ pub fn execute_tool_call(
     arguments: Value,
     max_output_bytes: usize,
     rtk_enabled: bool,
-    sandbox_policy: Option<SandboxPolicy>,
     session_id: Uuid,
     event_tx: Option<UnboundedSender<BackendEvent>>,
 ) -> Result<BashExecutionResult> {
@@ -147,7 +135,6 @@ pub fn execute_tool_call(
         rtk_enabled,
         None,
         timeout,
-        sandbox_policy,
         event_tx,
         session_id,
     )
@@ -161,7 +148,6 @@ pub fn execute_tool_call_with_cancel(
     max_output_bytes: usize,
     rtk_enabled: bool,
     cancelled: Arc<std::sync::atomic::AtomicBool>,
-    sandbox_policy: Option<SandboxPolicy>,
     session_id: Uuid,
     event_tx: Option<UnboundedSender<BackendEvent>>,
 ) -> Result<BashExecutionResult> {
@@ -174,7 +160,6 @@ pub fn execute_tool_call_with_cancel(
         rtk_enabled,
         Some(cancelled),
         timeout,
-        sandbox_policy,
         event_tx,
         session_id,
     )
@@ -188,7 +173,6 @@ fn run_shell_inner(
     rtk_enabled: bool,
     cancelled: Option<Arc<AtomicBool>>,
     timeout_ms: u64,
-    sandbox_policy: Option<SandboxPolicy>,
     event_tx: Option<UnboundedSender<BackendEvent>>,
     session_id: Uuid,
 ) -> Result<BashExecutionResult> {
@@ -200,20 +184,9 @@ fn run_shell_inner(
         (command.to_string(), false)
     };
 
-    // Prepare sandbox if a policy is provided
-    let sandbox_policy = sandbox_policy.unwrap_or(SandboxPolicy::DangerFullAccess);
-    let use_sandbox = !cfg!(target_os = "windows")
-        && !matches!(sandbox_policy, SandboxPolicy::DangerFullAccess)
-        && !matches!(sandbox_policy, SandboxPolicy::ExternalSandbox);
-
     // ── Layer 1: Privilege escalation handling (sudo/doas/pkexec) ──────
-    // When sudo is detected in a non-sandboxed command, we:
-    // 1. Wrap the command so `sudo` becomes `sudo -A`, which uses
-    //    SUDO_ASKPASS instead of writing to /dev/tty directly.
-    // 2. Create a temporary askpass script that fails with a friendly
-    //    error message (no password prompt reaches the terminal).
     let mut sudo_guard: Option<super::sudo::AskpassGuard> = None;
-    let _sudo_active = if !use_sandbox && super::sudo::has_privilege_escalation(&actual_command) {
+    let _sudo_active = if super::sudo::has_privilege_escalation(&actual_command) {
         let guard = super::sudo::create_askpass_script()?;
         let wrapped = super::sudo::wrap_command(&actual_command, guard.path());
         log::info!("sudo: privilege escalation detected, wrapping command with SUDO_ASKPASS");
@@ -224,147 +197,73 @@ fn run_shell_inner(
         false
     };
 
-    let mut process = if use_sandbox {
-        let spec = CommandSpec::shell(
+    let mut process = if cfg!(target_os = "windows") {
+        let shell = crate::shell::get();
+
+        // Prepend shell-specific encoding setup so that Windows programs
+        // output UTF-8 instead of the system ANSI code page.
+        let shell_command = prepare_command_for_shell(
             &actual_command,
-            workspace_root.to_path_buf(),
-            Duration::from_millis(timeout_ms),
-        )
-        .with_policy(sandbox_policy.clone());
+            &shell.program,
+            &shell.arg,
+        );
 
-        let manager = SandboxManager::new();
-        let exec_env = manager.prepare(&spec);
-
-        let mut cmd = std::process::Command::new(exec_env.program());
-        cmd.args(exec_env.args())
-            .current_dir(&exec_env.cwd)
+        let mut cmd = std::process::Command::new(&shell.program);
+        // arg may contain spaces (e.g. "-NoProfile -Command")
+        let mut all_args: Vec<&str> = shell.arg.split_whitespace().collect();
+        all_args.push(&shell_command);
+        cmd.args(&all_args)
+            .current_dir(workspace_root)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
-        // Apply environment variables from the sandbox spec on top of
-        // inherited environment.  We do NOT call env_clear() here —
-        // remove_dangerous_env_vars_parent() handles stripping dangerous
-        // vars (LD_PRELOAD, DYLD_*, …) in the parent before spawn.
-        if !exec_env.env.is_empty() {
-            cmd.envs(&exec_env.env);
-        }
+        // Set environment variables to encourage UTF-8 output from child
+        // processes.  This helps Git Bash / MSYS2 / Python / etc.
+        cmd.env("LANG", "C.UTF-8");
+        cmd.env("LC_ALL", "C.UTF-8");
+        cmd.env("MSYS2_ENCODING", "UTF-8");
+        cmd.env("PYTHONIOENCODING", "utf-8:surrogateescape");
 
-        // Remove dangerous environment variables in the parent process
-        // (safe, before fork).  The child inherits the cleaned environment.
-        // MUST NOT be done in pre_exec — anything that allocates memory
-        // can deadlock after fork() in a multi-threaded process.
-        remove_dangerous_env_vars_parent();
-
-        // Determine if Landlock should be applied in the child process
-        // (Landlock requires in-process syscalls before exec).
-        #[cfg(target_os = "linux")]
-        let use_landlock = exec_env.sandbox_type == crate::sandbox::SandboxType::LinuxLandlock;
-
-        // Apply process hardening and Landlock (on Linux) in pre_exec
-        #[cfg(unix)]
-        if exec_env.is_sandboxed() {
-            unsafe {
-                cmd.pre_exec(move || {
-                    // For Landlock, apply filesystem restrictions before exec
-                    #[cfg(target_os = "linux")]
-                    if use_landlock {
-                        let cwd = std::path::Path::new(".");
-                        if let Err(e) =
-                            crate::sandbox::landlock::apply_landlock_policy(&sandbox_policy, cwd)
-                        {
-                            // If Landlock fails, abort the child process
-                            let _ = std::io::Write::write(
-                                &mut std::io::stderr(),
-                                format!("Landlock error: {e}\n").as_bytes(),
-                            );
-                            std::process::abort();
-                        }
-                    }
-
-                    // Detach from controlling terminal — create new session
-                    // and process group so the child cannot steal the TUI's
-                    // terminal or corrupt its settings.
-                    libc::setsid();
-
-                    // Apply general process hardening
-                    pre_exec_hardening()
-                });
-            }
+        // Inject SUDO_ASKPASS for privilege escalation handling
+        if let Some(ref guard) = sudo_guard {
+            cmd.env("SUDO_ASKPASS", guard.path());
         }
 
         cmd.spawn()
-            .with_context(|| format!("failed to run sandboxed command '{actual_command}'"))?
+            .with_context(|| format!("failed to run command '{actual_command}'"))?
     } else {
-        // No sandbox: direct execution (original behavior)
-        if cfg!(target_os = "windows") {
-            let shell = crate::shell::get();
+        let mut cmd = std::process::Command::new("sh");
+        cmd.arg("-lc")
+            .arg(&actual_command)
+            .current_dir(workspace_root)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
 
-            // Prepend shell-specific encoding setup so that Windows programs
-            // output UTF-8 instead of the system ANSI code page.
-            let shell_command = prepare_command_for_shell(
-                &actual_command,
-                &shell.program,
-                &shell.arg,
-            );
-
-            let mut cmd = std::process::Command::new(&shell.program);
-            // arg may contain spaces (e.g. "-NoProfile -Command")
-            let mut all_args: Vec<&str> = shell.arg.split_whitespace().collect();
-            all_args.push(&shell_command);
-            cmd.args(&all_args)
-                .current_dir(workspace_root)
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
-
-            // Set environment variables to encourage UTF-8 output from child
-            // processes.  This helps Git Bash / MSYS2 / Python / etc.
-            cmd.env("LANG", "C.UTF-8");
-            cmd.env("LC_ALL", "C.UTF-8");
-            cmd.env("MSYS2_ENCODING", "UTF-8");
-            cmd.env("PYTHONIOENCODING", "utf-8:surrogateescape");
-
-            // Inject SUDO_ASKPASS for privilege escalation handling
-            if let Some(ref guard) = sudo_guard {
-                cmd.env("SUDO_ASKPASS", guard.path());
-            }
-
-            cmd.spawn()
-                .with_context(|| format!("failed to run command '{actual_command}'"))?
-        } else {
-            let mut cmd = std::process::Command::new("sh");
-            cmd.arg("-lc")
-                .arg(&actual_command)
-                .current_dir(workspace_root)
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
-
-            // ── Layer 1: Inject SUDO_ASKPASS environment variable ──
-            // This tells sudo -A where to find the askpass helper.
-            if let Some(ref guard) = sudo_guard {
-                cmd.env("SUDO_ASKPASS", guard.path());
-            }
-
-            // ── Layer 2: Disconnect from controlling terminal ──
-            // Create a new session (setsid) so the child process has no
-            // controlling terminal. This means open("/dev/tty") will fail
-            // with ENXIO, preventing the child from stealing the TUI's
-            // terminal or corrupting its settings.
-            // This is done in pre_exec (after fork, before exec) so it
-            // only affects the child process.
-            #[cfg(unix)]
-            unsafe {
-                cmd.pre_exec(move || {
-                    libc::setsid();
-                    Ok(())
-                });
-            }
-
-            cmd.spawn()
-                .with_context(|| format!("failed to run command '{actual_command}'"))?
+        // ── Layer 1: Inject SUDO_ASKPASS environment variable ──
+        // This tells sudo -A where to find the askpass helper.
+        if let Some(ref guard) = sudo_guard {
+            cmd.env("SUDO_ASKPASS", guard.path());
         }
+
+        // ── Layer 2: Disconnect from controlling terminal ──
+        // Create a new session (setsid) so the child process has no
+        // controlling terminal. This means open("/dev/tty") will fail
+        // with ENXIO, preventing the child from stealing the TUI's
+        // terminal or corrupting its settings.
+        // This is done in pre_exec (after fork, before exec) so it
+        // only affects the child process.
+        #[cfg(unix)]
+        unsafe {
+            cmd.pre_exec(move || {
+                libc::setsid();
+                Ok(())
+            });
+        }
+
+        cmd.spawn()
+            .with_context(|| format!("failed to run command '{actual_command}'"))?
     };
 
     // Register child PID so it can be killed on program exit if needed.
@@ -376,10 +275,6 @@ fn run_shell_inner(
     let timeout = Duration::from_millis(timeout_ms);
 
     // ─── Stream stdout chunk-by-chunk via a reader thread ──────────────
-    // We spawn a reader thread so the main loop can still check for
-    // cancellation / timeout while output trickles in slowly.
-    // Raw bytes are accumulated and converted to string at the end to
-    // avoid corrupting multi-byte UTF-8 sequences across chunks.
     let (chunk_tx, chunk_rx) = mpsc::channel::<Vec<u8>>();
     let mut raw_bytes: Vec<u8> = Vec::new();
     let mut output_buf = String::new();
@@ -409,7 +304,6 @@ fn run_shell_inner(
             .is_some_and(|flag| flag.load(Ordering::SeqCst))
         {
             // Kill the entire process group (PID == PGID after setsid())
-            // Two-phase: SIGTERM for graceful shutdown, then SIGKILL
             kill_process_group(child_pid);
             let _ = process.wait();
             unregister_child(child_pid);
@@ -424,21 +318,19 @@ fn run_shell_inner(
                 });
             }
 
-            return Err(anyhow::anyhow!(
-                "shell command cancelled\n\nPartial output before termination:\n{}",
-                output_buf
-            ));
+            // Only show the output we got so far (truncated at max)
+            truncate_in_place(&mut output_buf, max_output_bytes);
+            return Ok(BashExecutionResult {
+                output: format!("[exit -1] (cancelled)\n{}", output_buf),
+                rtk_rewritten,
+            });
         }
 
-        // Check timeout
-        if start_time.elapsed() > timeout {
-            // Kill the entire process group (PID == PGID after setsid())
-            // Two-phase: SIGTERM for graceful shutdown, then SIGKILL
+        if start_time.elapsed() > timeout && timeout_ms > 0 {
             kill_process_group(child_pid);
             let _ = process.wait();
             unregister_child(child_pid);
 
-            // Send final ShellOutput event so UI consumers see the last state
             if let Some(ref tx) = event_tx {
                 let _ = tx.send(BackendEvent::ShellOutput {
                     session_id,
@@ -448,21 +340,21 @@ fn run_shell_inner(
                 });
             }
 
-            return Err(anyhow::anyhow!(
-                "bash tool terminated command after exceeding timeout {} ms. \
-                 If this command is expected to take longer and is not waiting for interactive input, \
-                 retry with a larger timeout value in milliseconds.\n\n\
-                 Partial output before termination:\n{}",
-                timeout_ms, output_buf
-            ));
+            truncate_in_place(&mut output_buf, max_output_bytes);
+            return Ok(BashExecutionResult {
+                output: format!(
+                    "[exit -1] (timed out after {}s)\n{}",
+                    timeout_ms / 1000,
+                    output_buf
+                ),
+                rtk_rewritten,
+            });
         }
 
         match chunk_rx.recv_timeout(Duration::from_millis(100)) {
             Ok(chunk) => {
                 raw_bytes.extend_from_slice(&chunk);
-
-                // Convert accumulated bytes to string for display.
-                // Using decode_command_output handles Windows code page
+                // Decode output from raw bytes, tolerating non-UTF-8
                 // encoding when UTF-8 decoding fails.
                 output_buf = decode_command_output(&raw_bytes);
 
@@ -477,15 +369,12 @@ fn run_shell_inner(
                     if raw_bytes.len() > max_output_bytes {
                         // Safety: ensure raw_bytes doesn't exceed max
                         raw_bytes.truncate(max_output_bytes);
+                        // Re-decode after truncation
                         output_buf = decode_command_output(&raw_bytes);
                     }
-                } else {
-                    truncate_in_place(&mut output_buf, max_output_bytes);
-                    // Sync raw_bytes to truncated string length
-                    raw_bytes.truncate(output_buf.len());
                 }
 
-                // Send progress event
+                // Send streaming event
                 if let Some(ref tx) = event_tx {
                     let _ = tx.send(BackendEvent::ShellOutput {
                         session_id,
@@ -533,45 +422,9 @@ fn run_shell_inner(
 
     let status_code = exit_code.unwrap_or_default();
 
-    // Determine sandbox type for result metadata
-    let sandbox_type = if use_sandbox {
-        crate::sandbox::get_platform_sandbox()
-            .map(|t| t.to_string())
-            .unwrap_or_else(|| "none".to_string())
-    } else {
-        "none".to_string()
-    };
-
-    // Detect sandbox denial from exit code and output content
-    let sandbox_denied = use_sandbox
-        && status_code != 0
-        && (combined.contains("Operation not permitted")
-            || combined.contains("denied")
-            || combined.contains("Sandbox")
-            || combined.contains("sandbox")
-            || combined.contains("not allowed")
-            || combined.contains("permission denied")
-            || combined.contains("EPERM")
-            // bwrap read-only filesystem denial
-            || combined.contains("Read-only file system"));
-
     Ok(BashExecutionResult {
-        output: if sandbox_denied {
-            format!(
-                "[exit {status_code}] (sandbox blocked this command)\n\n\
-                 The command was blocked by the {} sandbox.\n\
-                 Open the panel with /sandbox and switch to \"full access\" to retry.\n\n\
-                 {}",
-                sandbox_type,
-                tool_output_preview(Some("bash"), &combined)
-            )
-        } else {
-            format!("[exit {status_code}]\n{}", combined)
-        },
+        output: format!("[exit {status_code}]\n{}", combined),
         rtk_rewritten,
-        sandboxed: use_sandbox,
-        sandbox_type,
-        sandbox_denied,
     })
 }
 

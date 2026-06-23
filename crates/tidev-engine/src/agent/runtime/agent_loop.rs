@@ -284,8 +284,7 @@ impl AgentRuntime {
                 });
 
                 // PostToolFailure observation
-                if result.sandbox_denied
-                    || result.output.starts_with("Error:")
+                if result.output.starts_with("Error:")
                     || result.output.starts_with("Tool task panicked")
                     || result
                         .output
@@ -312,9 +311,6 @@ impl AgentRuntime {
                 let s = self.store.lock().await;
                 s.clone()
             };
-
-            // Save original sandbox policy before any elevation
-            let original_policy = self.tools.sandbox_policy().cloned();
 
             // Bash tool calls get streaming: output is sent chunk-by-chunk
             // via ShellOutput events while the command runs.
@@ -367,48 +363,6 @@ impl AgentRuntime {
             let mut result = handle.await.unwrap_or_else(|join_err| {
                 ToolExecutionResult::new(format!("Tool task panicked/aborted: {join_err}"))
             });
-
-            // ─── Sandbox elevation  ────────────────────────────────────
-            // If the tool was denied by the OS sandbox, ask the user
-            // whether to retry with full filesystem access.
-            if result.sandbox_denied && is_bash {
-                let (tx, rx) = oneshot::channel();
-                let tx_wrapper = std::sync::Arc::new(std::sync::Mutex::new(Some(tx)));
-                let _ = event_tx.send(BackendEvent::SandboxElevationRequest {
-                    session_id,
-                    request_id,
-                    tool_name: tool_call.name.clone(),
-                    tool_arguments: tool_call.arguments.clone(),
-                    response_tx: tx_wrapper,
-                });
-
-                if rx.await.unwrap_or(false) {
-                    self.tools
-                        .set_sandbox_policy(Some(crate::sandbox::SandboxPolicy::DangerFullAccess));
-                    let retry_store = {
-                        let s = self.store.lock().await;
-                        s.clone()
-                    };
-                    let retry = self.tools.execute_call_spawned(
-                        runtime.clone(),
-                        retry_store,
-                        session_id,
-                        tool_call.clone(),
-                        mode,
-                        allow_outside,
-                        sensitive_file_approved,
-                    );
-                    result = match retry.await {
-                        Ok(r) => r,
-                        Err(e) => ToolExecutionResult::new(format!("Tool panicked: {e}")),
-                    };
-                    if let Some(policy) = original_policy {
-                        self.tools.set_sandbox_policy(Some(policy));
-                    } else {
-                        self.tools.set_sandbox_policy(None);
-                    }
-                }
-            }
 
             // ─── PostToolUse Hooks ──────────────────────────────────────
             let hook_outcome = self

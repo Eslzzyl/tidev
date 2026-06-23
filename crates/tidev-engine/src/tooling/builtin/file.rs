@@ -205,9 +205,6 @@ pub fn execute_tool_call(
                 metadata,
                 instruction_sources: Vec::new(),
                 rtk_rewritten: false,
-                sandboxed: false,
-                sandbox_type: String::new(),
-                sandbox_denied: false,
             })
         }
         Some(other) => bail!("unsupported file tool '{}'", other),
@@ -280,9 +277,6 @@ fn file_change_output(
         metadata,
         instruction_sources: Vec::new(),
         rtk_rewritten: false,
-        sandboxed: false,
-        sandbox_type: String::new(),
-        sandbox_denied: false,
     }
 }
 

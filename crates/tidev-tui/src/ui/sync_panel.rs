@@ -81,7 +81,6 @@ impl App {
         self.settings_panel = None;
         self.message_panel = None;
         self.skills_panel = None;
-        self.sandbox_panel = None;
         self.command_palette.clear();
 
         // Reload config to pick up CLI-side changes

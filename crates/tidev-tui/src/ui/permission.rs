@@ -1,7 +1,6 @@
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent};
 
-use std::sync::{Arc, Mutex};
 use tokio::runtime::Runtime;
 
 use tidev_engine::agent::runtime::ApprovedTool;
@@ -77,24 +76,6 @@ impl PermissionDialogState {
             "Approve tool call {} of {} · {}",
             self.current_index, self.total, self.display_name
         )
-    }
-}
-
-/// Dialog state for sandbox elevation requests.
-///
-/// Shown when a sandboxed command is denied. User can choose to
-/// retry with full access or cancel (which lets the error through).
-#[derive(Clone, Debug)]
-pub(crate) struct SandboxElevationDialog {
-    /// The oneshot sender wrapped for clonability.
-    pub(crate) response_tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<bool>>>>,
-}
-
-impl SandboxElevationDialog {
-    pub(crate) fn new(response_tx: Option<tokio::sync::oneshot::Sender<bool>>) -> Self {
-        Self {
-            response_tx: Arc::new(Mutex::new(response_tx)),
-        }
     }
 }
 

@@ -2,40 +2,6 @@ use super::*;
 use crate::model_panel::{ModelPanelItem, thinking_options_for_model};
 
 impl App {
-    pub(crate) fn handle_sandbox_elevation_key(&mut self, key: KeyEvent) -> Result<()> {
-        if self.sandbox_elevation.is_some() {
-            match key.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
-                    // User approved: retry with full access
-                    if let Some(dialog) = self.sandbox_elevation.take() {
-                        if let Some(tx) = dialog.response_tx.lock().unwrap().take() {
-                            let _ = tx.send(true);
-                        }
-                        self.tools.set_sandbox_policy(Some(
-                            tidev_engine::sandbox::SandboxPolicy::DangerFullAccess,
-                        ));
-                        // Also sync to the agent's ToolRegistry (separate copy at init)
-                        self.agent.tools.set_sandbox_policy(Some(
-                            tidev_engine::sandbox::SandboxPolicy::DangerFullAccess,
-                        ));
-                        self.last_notice =
-                            Some("Sandbox policy elevated to full access for retry".to_string());
-                    }
-                }
-                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc | KeyCode::Char('q') => {
-                    // User cancelled: pass the denial through
-                    if let Some(dialog) = self.sandbox_elevation.take()
-                        && let Some(tx) = dialog.response_tx.lock().unwrap().take()
-                    {
-                        let _ = tx.send(false);
-                    }
-                }
-                _ => {}
-            }
-        }
-        Ok(())
-    }
-
     pub(crate) fn handle_theme_panel_key(&mut self, key: KeyEvent) -> Result<()> {
         if let Some(panel) = &mut self.theme_panel {
             match key.code {
@@ -702,30 +668,6 @@ impl App {
                 Ok(())
             }
         }
-    }
-
-    pub(crate) fn handle_sandbox_panel_key(&mut self, key: KeyEvent) -> Result<()> {        if self.sandbox_panel.is_some() {
-            match key.code {
-                KeyCode::Up | KeyCode::Char('k') => {
-                    if let Some(ref mut panel) = self.sandbox_panel {
-                        panel.move_selection(-1);
-                    }
-                }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    if let Some(ref mut panel) = self.sandbox_panel {
-                        panel.move_selection(1);
-                    }
-                }
-                KeyCode::Enter => {
-                    self.apply_sandbox_policy();
-                }
-                KeyCode::Esc | KeyCode::Char('q') => {
-                    self.sandbox_panel = None;
-                }
-                _ => {}
-            }
-        }
-        Ok(())
     }
 }
 

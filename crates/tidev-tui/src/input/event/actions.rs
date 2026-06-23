@@ -43,7 +43,6 @@ impl App {
         self.settings_panel = None;
         self.message_panel = None;
         self.skills_panel = None;
-        self.sandbox_panel = None;
         self.sync_panel = None;
         self.panel_launcher.open();
     }
@@ -110,9 +109,6 @@ impl App {
             }
             PanelAction::Skills => {
                 self.open_skills_panel();
-            }
-            PanelAction::Sandbox => {
-                self.open_sandbox_panel();
             }
             PanelAction::Message => {
                 if let Err(e) = self.open_message_panel(String::new()) {

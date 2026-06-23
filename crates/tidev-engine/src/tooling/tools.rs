@@ -388,7 +388,6 @@ pub fn execute_shell_tool_call(
     call: &ToolCall,
     max_output_bytes: usize,
     rtk_enabled: bool,
-    sandbox_policy: Option<crate::sandbox::SandboxPolicy>,
     cancelled: Arc<AtomicBool>,
     session_id: Uuid,
     event_tx: Option<UnboundedSender<tidev_session::session::BackendEvent>>,
@@ -402,15 +401,12 @@ pub fn execute_shell_tool_call(
         max_output_bytes,
         rtk_enabled,
         cancelled,
-        sandbox_policy,
         session_id,
         event_tx,
     )?;
     Ok(
         tidev_session::session::ToolExecutionResult::new(result.output)
-            .with_rtk_rewritten(result.rtk_rewritten)
-            .with_sandbox(result.sandboxed, result.sandbox_type)
-            .with_sandbox_denied(result.sandbox_denied),
+            .with_rtk_rewritten(result.rtk_rewritten),
     )
 }
 
@@ -484,7 +480,6 @@ pub(super) fn execute_tool_call(
             mode,
             allow_outside: false,
             sensitive_file_approved: false,
-            sandbox_policy: None,
             web_search_config: &crate::config::WebSearchConfig::default(),
             auth_store: &crate::config::AuthStore::default(),
             event_tx: None,

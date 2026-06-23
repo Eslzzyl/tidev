@@ -65,7 +65,6 @@ use tidev_types::prompts::{SessionMode, init_command_with_args};
 
 use crate::ui::permission::{
     PendingToolExecution, PermissionDialogState, RunningSubagentExecution, RunningToolExecution,
-    SandboxElevationDialog,
 };
 
 use crate::theme::ThemeManager;
@@ -138,7 +137,6 @@ struct App {
     mcp_panel: Option<McpPanelState>,
     agents_panel: Option<ui::agents_panel::AgentsPanelState>,
     skills_panel: Option<ui::skills_panel::SkillsPanelState>,
-    sandbox_panel: Option<ui::sandbox_panel::SandboxPanelState>,
     sync_panel: Option<ui::sync_panel::SyncPanelState>,
     search_panel: Option<ui::search_panel::SearchPanelState>,
     at_mention: AtMentionState,
@@ -146,7 +144,6 @@ struct App {
     shell_completion: ShellCompletionState,
     pending_tool_execution: Option<PendingToolExecution>,
     permission_dialog: Option<PermissionDialogState>,
-    sandbox_elevation: Option<SandboxElevationDialog>,
     workspace_boundary_dialog: Option<WorkspaceBoundaryDialogState>,
     /// Confirmation dialog for "allow/deny until exit" choices.
     /// Shown after user presses 'a' or 'd' to confirm they want to remember the permission.
@@ -625,12 +622,6 @@ impl App {
             config.websearch.clone(),
             Arc::new(self.auth.clone()),
         );
-        // Set sandbox policy based on current mode
-        let sandbox_policy = config.sandbox.to_policy();
-        self.tools.set_sandbox_policy(Some(sandbox_policy));
-        // Also sync to the agent's ToolRegistry (separate copy at init)
-        let agent_policy = config.sandbox.to_policy();
-        self.agent.tools.set_sandbox_policy(Some(agent_policy));
     }
 
     /// Find the git worktree root by looking for a .git directory,
@@ -885,13 +876,6 @@ impl App {
         // Sandbox elevation requests are handled here, outside the per-session
         // dispatch, because they carry a oneshot sender that must not be moved
         // into the event handler's match.
-        if let BackendEvent::SandboxElevationRequest { response_tx, .. } = event {
-            // Extract the sender from the Arc wrapper
-            let sender = response_tx.lock().unwrap().take();
-            self.sandbox_elevation = Some(SandboxElevationDialog::new(sender));
-            return Ok(());
-        }
-
         let session_id = event.session_id();
         let request_id = event.request_id();
         if session_id != self.conversation.session_id {
@@ -954,7 +938,6 @@ impl App {
             BackendEvent::SidebarSnapshotReady { .. } => "SidebarSnapshotReady",
             BackendEvent::ShellOutput { .. } => "ShellOutput",
             BackendEvent::TurnStarting { .. } => "TurnStarting",
-            BackendEvent::SandboxElevationRequest { .. } => "SandboxElevationRequest",
             BackendEvent::StreamEnd { .. } => "StreamEnd",
         };
         if event_type != "Delta"
@@ -1700,9 +1683,6 @@ impl App {
                 let mut assistant_message = Message::streaming(MessageRole::Assistant, "");
                 assistant_message.mode = Some(self.mode);
                 self.conversation.push(assistant_message);
-            }
-            BackendEvent::SandboxElevationRequest { .. } => {
-                // Handled in handle_backend_event before dispatch
             }
             BackendEvent::StreamEnd { .. } => {
                 // Reset streaming state when the agent loop exits (success or error).
