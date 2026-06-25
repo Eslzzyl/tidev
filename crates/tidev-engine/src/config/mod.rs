@@ -91,6 +91,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub permissions: PermissionConfig,
     #[serde(default)]
+    pub access_control: AccessControlConfig,
+    #[serde(default)]
     pub notifications: NotificationConfig,
     #[serde(default)]
     pub gateway: GatewayConfig,
@@ -129,6 +131,7 @@ impl Default for AppConfig {
             skills: Vec::new(),
             mcp: McpConfig::default(),
             permissions: PermissionConfig::default(),
+            access_control: AccessControlConfig::default(),
             notifications: NotificationConfig::default(),
             gateway: GatewayConfig::default(),
             agent: AgentConfig::default(),
@@ -538,6 +541,22 @@ impl Default for TelegramGatewayConfig {
     }
 }
 
+/// Configuration for access control dialogs.
+///
+/// When enabled, the corresponding confirmation dialog is skipped and the
+/// tool call is allowed automatically.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct AccessControlConfig {
+    /// Allow reading sensitive files (matched by `.tidev/sensitive.txt`)
+    /// without showing a confirmation dialog. (default: false)
+    #[serde(default)]
+    pub allow_sensitive_file_access: bool,
+    /// Allow tool access to paths outside the workspace root
+    /// without showing a confirmation dialog. (default: false)
+    #[serde(default)]
+    pub allow_outside_workspace_access: bool,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NotificationConfig {
     /// Enable notifications (default: true)
@@ -698,6 +717,9 @@ impl AppConfig {
         if has("permissions") {
             self.permissions = overlay.permissions;
         }
+        if has("access_control") {
+            self.access_control = overlay.access_control;
+        }
         if has("notifications") {
             self.notifications = overlay.notifications;
         }
@@ -775,6 +797,13 @@ skills = []
 # Optional permission settings by mode.
 # By default plan mode allows read/search/session/execute (shell, but only for read-only commands) and build mode allows all permissions.
 #permissions = { plan = { read = true, search = true, session = true, execute = true, write = false, edit = false }, build = { read = true, search = true, session = true, write = true, edit = true, execute = true } }
+
+# Optional access control settings.
+# When enabled, the model can read sensitive files or access files outside
+# the workspace without showing a confirmation dialog.
+#[access_control]
+#allow_sensitive_file_access = false
+#allow_outside_workspace_access = false
 
 # MCP servers can be declared here. Supported transports: stdio, streamable HTTP, and SSE.
 # [mcp.servers.my_server]

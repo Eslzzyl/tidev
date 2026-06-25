@@ -31,6 +31,8 @@ pub enum SettingKey {
     SaveRequestBody,
     SaveResponseBody,
     ScrollSpeed,
+    AllowSensitiveFileAccess,
+    AllowOutsideWorkspaceAccess,
 }
 
 #[derive(Clone, Debug)]
@@ -104,6 +106,23 @@ impl SettingsPanelState {
                     max: 10.0,
                 },
                 key: SettingKey::ScrollSpeed,
+                disabled: false,
+            },
+            SettingItem {
+                name: "Allow Sensitive File Access".to_string(),
+                description: "Allow reading sensitive files without confirmation".to_string(),
+                setting_type: SettingType::Toggle(config.access_control.allow_sensitive_file_access),
+                key: SettingKey::AllowSensitiveFileAccess,
+                disabled: false,
+            },
+            SettingItem {
+                name: "Allow Outside Workspace Access".to_string(),
+                description: "Allow accessing files outside workspace without confirmation"
+                    .to_string(),
+                setting_type: SettingType::Toggle(
+                    config.access_control.allow_outside_workspace_access,
+                ),
+                key: SettingKey::AllowOutsideWorkspaceAccess,
                 disabled: false,
             },
         ];
@@ -206,6 +225,16 @@ impl SettingsPanelState {
                 SettingKey::ScrollSpeed => {
                     if let SettingType::Number { value, .. } = item.setting_type {
                         config.ui.scroll_speed = value;
+                    }
+                }
+                SettingKey::AllowSensitiveFileAccess => {
+                    if let SettingType::Toggle(val) = item.setting_type {
+                        config.access_control.allow_sensitive_file_access = val;
+                    }
+                }
+                SettingKey::AllowOutsideWorkspaceAccess => {
+                    if let SettingType::Toggle(val) = item.setting_type {
+                        config.access_control.allow_outside_workspace_access = val;
                     }
                 }
             }

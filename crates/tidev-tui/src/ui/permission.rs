@@ -294,6 +294,18 @@ impl App {
                     continue;
                 }
 
+                // Check access control config for skip
+                if self.config.read().unwrap().access_control.allow_outside_workspace_access {
+                    self.workspace_boundary_approved
+                        .insert(tool_call.id.clone(), true);
+                    self.pending_tool_execution
+                        .as_mut()
+                        .unwrap()
+                        .add_ready(tool_call);
+                    self.advance_pending_tool_execution();
+                    continue;
+                }
+
                 // Check stored permissions in memory
                 if let Some(allowed) = self.is_workspace_boundary_allowed(&path_str) {
                     if !allowed {
@@ -362,7 +374,19 @@ impl App {
                     ) {
                         let path_str = resolved_path.display().to_string();
 
-                        // Check stored permissions in memory
+                // Check access control config for skip
+                if self.config.read().unwrap().access_control.allow_sensitive_file_access {
+                    self.sensitive_file_approved
+                        .insert(tool_call.id.clone(), true);
+                    self.pending_tool_execution
+                        .as_mut()
+                        .unwrap()
+                        .add_ready(tool_call);
+                    self.advance_pending_tool_execution();
+                    continue;
+                }
+
+                // Check stored permissions in memory
                         if let Some(allowed) = self.is_sensitive_file_allowed(&path_str) {
                             if !allowed {
                                 let output = format!(
