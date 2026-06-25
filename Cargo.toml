@@ -3,6 +3,7 @@ members = [
     ".",
     "crates/tidev-types",
     "crates/tidev-session",
+    "crates/tidev-storage",
 ]
 default-members = ["."]
 resolver = "2"

@@ -1,0 +1,129 @@
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex},
+    time::Duration,
+};
+
+use anyhow::{Context, Result};
+use rusqlite::Connection;
+
+use crate::migration;
+use crate::{SessionStore, schema::SCHEMA_SQL};
+
+/// Unified database manager.
+///
+/// Opens the SQLite file, runs the full schema, creates a **shared write
+/// connection**, and provides a factory method for [`SessionStore`].
+///
+/// # Shared write connection
+///
+/// The shared `Arc<Mutex<Connection>>` is provided to all stores created from
+/// this manager, guaranteeing that only one thread writes at a time — which is
+/// all SQLite allows anyway.  Each store still gets its own read connection so
+/// that reads never block writes.
+pub struct Database {
+    path: PathBuf,
+    /// Shared write connection used by created stores.
+    write_conn: Arc<Mutex<Connection>>,
+}
+
+impl Database {
+    /// Open (or create) the database and initialise the full schema.
+    ///
+    /// All `CREATE TABLE IF NOT EXISTS` statements are idempotent, so this
+    /// is safe to call on an existing database.
+    pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref().to_path_buf();
+
+        // Ensure parent directory exists
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).with_context(|| {
+                format!("failed to create database directory {}", parent.display())
+            })?;
+        }
+
+        // ── Shared write connection ──────────────────────────────────────
+        let write_conn = Connection::open(&path)
+            .with_context(|| format!("failed to open {}", path.display()))?;
+        write_conn
+            .pragma_update(None, "journal_mode", "WAL")
+            .context("failed to set journal_mode")?;
+        write_conn
+            .pragma_update(None, "foreign_keys", "ON")
+            .context("failed to enable foreign_keys")?;
+        write_conn
+            .pragma_update(None, "synchronous", "NORMAL")
+            .context("failed to set synchronous")?;
+        write_conn
+            .pragma_update(None, "mmap_size", "268435456")
+            .context("failed to set mmap_size")?;
+        write_conn
+            .pragma_update(None, "cache_size", "-64000")
+            .context("failed to set cache_size")?;
+        write_conn
+            .pragma_update(None, "temp_store", "MEMORY")
+            .context("failed to set temp_store")?;
+        write_conn.busy_timeout(Duration::from_secs(5))?;
+
+        // Register zstd_decode(blob) → text for CLI debugging
+        write_conn
+            .create_scalar_function(
+                "zstd_decode",
+                1,
+                rusqlite::functions::FunctionFlags::SQLITE_UTF8,
+                |ctx| {
+                    let blob = ctx.get::<Vec<u8>>(0)?;
+                    let text = crate::compression::decompress_text(&blob);
+                    Ok(text)
+                },
+            )
+            .context("failed to register zstd_decode function")?;
+
+        // Create / migrate all tables
+        write_conn
+            .execute_batch(SCHEMA_SQL)
+            .context("failed to initialise database schema")?;
+
+        // Run pending schema migrations.
+        migration::run_pending(&write_conn).context("failed to run database migrations")?;
+
+        let shared_conn = Arc::new(Mutex::new(write_conn));
+
+        Ok(Self {
+            path,
+            write_conn: shared_conn,
+        })
+    }
+
+    /// Create a [`SessionStore`] that shares the write connection.
+    pub fn create_session_store(&self) -> Result<SessionStore> {
+        SessionStore::open_with_shared_write(&self.path, Arc::clone(&self.write_conn))
+    }
+
+    /// Return the path to the database file.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Return a clone of the shared write connection.
+    pub fn write_conn(&self) -> Arc<Mutex<Connection>> {
+        Arc::clone(&self.write_conn)
+    }
+
+    /// Open a new read-only connection to the database.
+    ///
+    /// This is safe to call concurrently with the shared write connection
+    /// because SQLite in WAL mode supports multiple concurrent readers.
+    pub fn open_read_connection(&self) -> Result<Connection> {
+        let conn =
+            Connection::open_with_flags(&self.path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .with_context(|| {
+                    format!(
+                        "failed to open read-only connection to {}",
+                        self.path.display()
+                    )
+                })?;
+        Ok(conn)
+    }
+}
