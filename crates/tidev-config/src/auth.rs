@@ -323,3 +323,24 @@ impl ModelSummary {
         format!("{}/{}", self.provider_id, self.model_id)
     }
 }
+
+// ── Bridge conversion: ActiveModel → LlmProviderConfig ──────────
+
+impl From<ActiveModel> for tidev_llm::LlmProviderConfig {
+    fn from(m: ActiveModel) -> Self {
+        tidev_llm::LlmProviderConfig {
+            provider_id: m.provider_id,
+            api_type: m.api_type,
+            api_key: m.api_key,
+            base_url: m.base_url,
+            model_id: m.model_id,
+            request_model_id: Some(m.request_model_id).filter(|s| !s.is_empty()),
+            system_prompt: Some(m.system_prompt).filter(|s| !s.is_empty()),
+            thinking_level: m.thinking_level,
+            extra_body: m.extra_body,
+            max_output_tokens: m.max_output_tokens,
+            temperature: m.temperature,
+            supports_images: m.supports_images,
+        }
+    }
+}

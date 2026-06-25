@@ -1,0 +1,25 @@
+[package]
+name = "tidev-context"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "tidev context manager — system prompt composition"
+
+[lib]
+name = "tidev_context"
+
+[dependencies]
+anyhow = "1.0.102"
+chrono = { version = "0.4.45", features = ["serde"] }
+log = "0.4.32"
+serde = { version = "1.0.228", features = ["derive", "rc"] }
+serde_json = "1.0.150"
+tokio = { version = "=1.52.3", features = ["sync", "macros"] }
+uuid = { version = "1.23.3", features = ["v4", "serde"] }
+tidev-types = { path = "../tidev-types" }
+tidev-session = { path = "../tidev-session" }
+tidev-config = { path = "../tidev-config" }
+tidev-llm = { path = "../tidev-llm" }
+tidev-tools = { path = "../tidev-tools" }
+tidev-instructions = { path = "../tidev-instructions" }

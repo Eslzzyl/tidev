@@ -2453,8 +2453,28 @@ dependencies = [
  "log",
  "serde",
  "serde_json",
+ "tidev-llm",
  "tidev-types",
  "toml",
+ "uuid",
+]
+
+[[package]]
+name = "tidev-context"
+version = "0.7.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "log",
+ "serde",
+ "serde_json",
+ "tidev-config",
+ "tidev-instructions",
+ "tidev-llm",
+ "tidev-session",
+ "tidev-tools",
+ "tidev-types",
+ "tokio",
  "uuid",
 ]
 
