@@ -331,13 +331,6 @@ impl App {
                     self.close_model_panel();
                 }
             }
-            KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                let items = self.model_panel_items(&panel);
-                if let Some(summary) = panel.selected_model(&items).cloned() {
-                    self.close_model_panel();
-                    self.begin_provider_edit_for_model(summary.provider_id, summary.model_id)?;
-                }
-            }
             KeyCode::Tab if key.modifiers.is_empty() => {
                 let mut next_panel = panel;
                 next_panel.next_tab();

@@ -18,10 +18,8 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Clear, List, ListItem, ListState, Paragraph, Wrap},
 };
-use tidev_engine::{
-    config::ProviderSource,
-    provider_setup::{ConnectDialog, EditProviderStep, NewProviderStep},
-};
+use tidev_engine::config::ProviderSource;
+use crate::ui::connect::ConnectDialog;
 
 impl App {
     pub(crate) fn render_connect_dialog(&self, frame: &mut Frame<'_>, area: Rect) {
@@ -32,21 +30,7 @@ impl App {
         let palette = self.palette();
         let (overlay_width, overlay_height) = match dialog {
             ConnectDialog::ProviderPicker { .. } => (area.width.min(92), area.height.min(28)),
-            ConnectDialog::EditProvider {
-                step, model_step, ..
-            } => {
-                if model_step.is_some() {
-                    (area.width.min(90), area.height.min(26))
-                } else {
-                    match step {
-                        EditProviderStep::ModelList | EditProviderStep::ConfirmDeleteModel => {
-                            (area.width.min(96), area.height.min(34))
-                        }
-                        _ => (area.width.min(84), area.height.min(24)),
-                    }
-                }
-            }
-            _ => (area.width.min(80), area.height.min(24)),
+            ConnectDialog::ApiKey { .. } => (area.width.min(80), area.height.min(24)),
         };
         let overlay = centered_rect(overlay_width, overlay_height, area);
         frame.render_widget(Clear, overlay);
@@ -63,8 +47,6 @@ impl App {
         let dialog_title = match dialog {
             ConnectDialog::ProviderPicker { .. } => " Connect to provider ",
             ConnectDialog::ApiKey { .. } => " API Key ",
-            ConnectDialog::NewProvider { .. } => " New Provider ",
-            ConnectDialog::EditProvider { .. } => " Edit Provider ",
         };
 
         frame.render_widget(
@@ -158,27 +140,6 @@ impl App {
                                 ),
                             ]))
                         }
-                        ProviderPickerItem::AddNew { query } => {
-                            let label = if query.is_empty() {
-                                "Add new provider".to_string()
-                            } else {
-                                format!("Add new provider: {query}")
-                            };
-
-                            ListItem::new(Line::from(vec![
-                                Span::styled(
-                                    label,
-                                    Style::default()
-                                        .fg(palette.accent)
-                                        .add_modifier(Modifier::BOLD),
-                                ),
-                                Span::raw("  "),
-                                Span::styled(
-                                    "Create a new OpenAI-compatible provider",
-                                    Style::default().fg(palette.warning),
-                                ),
-                            ]))
-                        }
                     })
                     .collect::<Vec<_>>();
 
@@ -198,7 +159,7 @@ impl App {
 
                 frame.render_widget(
                     Paragraph::new(
-                        "Enter to connect · Ctrl+E to edit · Ctrl+P to prune orphans · Esc to cancel",
+                        "Enter to connect · Ctrl+P to prune orphans · Esc to cancel",
                     )
                     .alignment(Alignment::Center)
                     .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
@@ -257,331 +218,6 @@ impl App {
                         .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                     lines[3],
                 );
-            }
-            ConnectDialog::NewProvider { step, draft: _ } => {
-                let lines = Layout::vertical([
-                    Constraint::Length(2),
-                    Constraint::Length(2),
-                    Constraint::Length(4),
-                    Constraint::Length(2),
-                    Constraint::Length(1),
-                ])
-                .split(body);
-
-                frame.render_widget(
-                    Paragraph::new(format!("Create provider · {}", step.title()))
-                        .alignment(Alignment::Center)
-                        .style(
-                            Style::default()
-                                .bg(palette.panel_alt)
-                                .fg(palette.text)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                    lines[0],
-                );
-
-                frame.render_widget(
-                    Paragraph::new(step.help())
-                        .alignment(Alignment::Center)
-                        .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
-                    lines[1],
-                );
-
-                self.render_input_block(
-                    frame,
-                    lines[2],
-                    step.label(),
-                    self.composer.placeholder(),
-                    step.is_secret(),
-                );
-
-                let prompt_line = if matches!(step, NewProviderStep::AddAnotherModel) {
-                    "y to add another model · Enter to save provider".to_string()
-                } else {
-                    format!(
-                        "Next: {}",
-                        step.next()
-                            .map(|next| next.label())
-                            .unwrap_or("Save provider")
-                    )
-                };
-                frame.render_widget(
-                    Paragraph::new(prompt_line)
-                        .alignment(Alignment::Center)
-                        .style(
-                            Style::default()
-                                .bg(palette.panel_alt)
-                                .fg(palette.accent_soft),
-                        ),
-                    lines[3],
-                );
-
-                let footer = if matches!(step, NewProviderStep::AddAnotherModel) {
-                    "Enter to save provider · y to add another model · Esc to cancel"
-                } else {
-                    "Enter to continue · Esc to cancel"
-                };
-                frame.render_widget(
-                    Paragraph::new(footer)
-                        .alignment(Alignment::Center)
-                        .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
-                    lines[4],
-                );
-            }
-            ConnectDialog::EditProvider {
-                provider_id,
-                step,
-                model_step,
-                draft,
-            } => {
-                if let Some(model_step) = model_step {
-                    let lines = Layout::vertical([
-                        Constraint::Length(2),
-                        Constraint::Length(2),
-                        Constraint::Length(4),
-                        Constraint::Length(2),
-                        Constraint::Length(1),
-                    ])
-                    .split(body);
-
-                    let provider_label = self
-                        .config
-                        .read()
-                        .unwrap()
-                        .provider_display_name(provider_id)
-                        .unwrap_or(provider_id)
-                        .to_string();
-
-                    frame.render_widget(
-                        Paragraph::new(format!(
-                            "Edit model for {provider_label} · {}",
-                            model_step.title()
-                        ))
-                        .alignment(Alignment::Center)
-                        .style(
-                            Style::default()
-                                .bg(palette.panel_alt)
-                                .fg(palette.text)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                        lines[0],
-                    );
-
-                    frame.render_widget(
-                        Paragraph::new(model_step.help())
-                            .alignment(Alignment::Center)
-                            .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
-                        lines[1],
-                    );
-
-                    self.render_input_block(
-                        frame,
-                        lines[2],
-                        model_step.label(),
-                        model_step.placeholder(),
-                        model_step.is_secret(),
-                    );
-
-                    frame.render_widget(
-                        Paragraph::new("Enter to continue · Esc to cancel")
-                            .alignment(Alignment::Center)
-                            .style(
-                                Style::default()
-                                    .bg(palette.panel_alt)
-                                    .fg(palette.accent_soft),
-                            ),
-                        lines[3],
-                    );
-
-                    frame.render_widget(
-                        Paragraph::new("Model ids stay fixed while editing existing models")
-                            .alignment(Alignment::Center)
-                            .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
-                        lines[4],
-                    );
-                } else if *step == EditProviderStep::ModelList {
-                    let lines = Layout::vertical([
-                        Constraint::Length(2),
-                        Constraint::Min(8),
-                        Constraint::Length(1),
-                    ])
-                    .split(body);
-
-                    frame.render_widget(
-                        Paragraph::new(format!("Manage models for {}", provider_id))
-                            .alignment(Alignment::Center)
-                            .style(
-                                Style::default()
-                                    .bg(palette.panel_alt)
-                                    .fg(palette.text)
-                                    .add_modifier(Modifier::BOLD),
-                            ),
-                        lines[0],
-                    );
-
-                    let items = draft
-                        .models
-                        .iter()
-                        .enumerate()
-                        .map(|(index, (model_id, model))| {
-                            let is_selected = index == draft.selected_model_index;
-                            let status_style = if is_selected {
-                                Style::default().fg(palette.selection_fg)
-                            } else {
-                                Style::default().fg(palette.muted)
-                            };
-
-                            ListItem::new(Line::from(vec![
-                                Span::styled(
-                                    model.display_name.to_string(),
-                                    Style::default()
-                                        .fg(palette.text)
-                                        .add_modifier(Modifier::BOLD),
-                                ),
-                                Span::raw("  "),
-                                Span::styled(
-                                    format!("({model_id})"),
-                                    Style::default().fg(palette.muted),
-                                ),
-                                Span::raw("  "),
-                                Span::styled(format!("ctx {}", model.context_window), status_style),
-                                Span::raw("  "),
-                                Span::styled(
-                                    format!("max {}", model.max_output_tokens),
-                                    status_style,
-                                ),
-                            ]))
-                        })
-                        .collect::<Vec<_>>();
-
-                    let mut state = ListState::default();
-                    state.select(Some(
-                        draft
-                            .selected_model_index
-                            .min(items.len().saturating_sub(1)),
-                    ));
-
-                    let list = List::new(items)
-                        .style(Style::default().bg(palette.panel_alt).fg(palette.text))
-                        .highlight_style(
-                            Style::default()
-                                .bg(palette.selection_bg)
-                                .fg(palette.selection_fg)
-                                .add_modifier(Modifier::BOLD),
-                        );
-
-                    frame.render_stateful_widget(list, lines[1], &mut state);
-
-                    frame.render_widget(
-                        Paragraph::new("Enter edit · N new · D delete · S save · Esc cancel")
-                            .alignment(Alignment::Center)
-                            .style(
-                                Style::default()
-                                    .bg(palette.panel_alt)
-                                    .fg(palette.accent_soft),
-                            ),
-                        lines[2],
-                    );
-                } else if *step == EditProviderStep::ConfirmDeleteModel {
-                    let lines = Layout::vertical([
-                        Constraint::Length(2),
-                        Constraint::Length(2),
-                        Constraint::Length(4),
-                        Constraint::Length(1),
-                    ])
-                    .split(body);
-
-                    let pending = draft
-                        .pending_delete_model_id
-                        .as_deref()
-                        .unwrap_or("unknown model");
-
-                    frame.render_widget(
-                        Paragraph::new(format!("Delete model {pending}?"))
-                            .alignment(Alignment::Center)
-                            .style(
-                                Style::default()
-                                    .bg(palette.panel_alt)
-                                    .fg(palette.error)
-                                    .add_modifier(Modifier::BOLD),
-                            ),
-                        lines[0],
-                    );
-
-                    frame.render_widget(
-                        Paragraph::new("This only removes the model from config.toml. Historical sessions keep their stored snapshot.")
-                            .alignment(Alignment::Center)
-                            .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
-                        lines[1],
-                    );
-
-                    self.render_input_block(frame, lines[2], "Confirm", "y or n", false);
-
-                    frame.render_widget(
-                        Paragraph::new("Y to delete · N / Esc to keep")
-                            .alignment(Alignment::Center)
-                            .style(
-                                Style::default()
-                                    .bg(palette.panel_alt)
-                                    .fg(palette.accent_soft),
-                            ),
-                        lines[3],
-                    );
-                } else {
-                    let lines = Layout::vertical([
-                        Constraint::Length(2),
-                        Constraint::Length(2),
-                        Constraint::Length(4),
-                        Constraint::Length(2),
-                        Constraint::Length(1),
-                    ])
-                    .split(body);
-
-                    frame.render_widget(
-                        Paragraph::new(format!("Edit provider · {}", provider_id))
-                            .alignment(Alignment::Center)
-                            .style(
-                                Style::default()
-                                    .bg(palette.panel_alt)
-                                    .fg(palette.text)
-                                    .add_modifier(Modifier::BOLD),
-                            ),
-                        lines[0],
-                    );
-
-                    frame.render_widget(
-                        Paragraph::new(step.help())
-                            .alignment(Alignment::Center)
-                            .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
-                        lines[1],
-                    );
-
-                    self.render_input_block(
-                        frame,
-                        lines[2],
-                        step.label(),
-                        step.placeholder(),
-                        step.is_secret(),
-                    );
-
-                    frame.render_widget(
-                        Paragraph::new("Enter to continue · Esc to cancel")
-                            .alignment(Alignment::Center)
-                            .style(
-                                Style::default()
-                                    .bg(palette.panel_alt)
-                                    .fg(palette.accent_soft),
-                            ),
-                        lines[3],
-                    );
-
-                    frame.render_widget(
-                        Paragraph::new("After the fields, manage models from the list")
-                            .alignment(Alignment::Center)
-                            .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
-                        lines[4],
-                    );
-                }
             }
         }
     }

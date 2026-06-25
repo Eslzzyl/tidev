@@ -9,7 +9,6 @@ pub mod logging;
 pub mod mcp;
 pub mod notifications;
 pub mod process;
-pub mod provider_setup;
 pub mod shared;
 pub mod shell;
 pub mod snapshot;

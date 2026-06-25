@@ -28,9 +28,11 @@ use crate::ui::workspace_boundary::WorkspaceBoundaryConfirmDialogState;
 use crate::ui::workspace_boundary::WorkspaceBoundaryDialogState;
 use tidev_engine::{
     config::ActiveModel, config::reasoning::ThinkingLevelType, context::ContextManager,
-    provider_setup::ConnectDialog, tooling::TodoItem,
+    tooling::TodoItem,
 };
 use tidev_session::session::{Conversation, MessageAttachment};
+
+use crate::ui::connect::ConnectDialog;
 
 use crate::{commands::CommandPaletteState, input::Composer, panel_launcher::PanelLauncherState};
 

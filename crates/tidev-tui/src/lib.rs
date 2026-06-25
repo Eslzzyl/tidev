@@ -63,6 +63,7 @@ use core::state::*;
 
 use tidev_types::prompts::{SessionMode, init_command_with_args};
 
+use crate::ui::connect::ConnectDialog;
 use crate::ui::permission::{
     PendingToolExecution, PermissionDialogState, RunningSubagentExecution, RunningToolExecution,
 };
@@ -75,7 +76,6 @@ use tidev_engine::{
     instructions,
     mcp::McpManager,
     notifications,
-    provider_setup::ConnectDialog,
     shared::file_search::current_at_fragment,
     snapshot::{FileDiff, SnapshotService},
     tooling::{FileReadTracker, TodoItem, ToolRegistry},
