@@ -1,5 +1,7 @@
 # tidev
 
+> tidev is my personal project, I will adjust its functions according to my actual needs. Over the past two months I've added a lot of features that I don't use, making tidev bloated and difficult to use. I've aggressively removed several large features from tidev and plan to do a complete rewrite of tidev. The [`last-full`](https://github.com/Eslzzyl/tidev/tree/last-full) tag marks the last commit that contains a complete feature.
+
 AI coding agent built in Rust. tidev reimplements the interaction model of [OpenCode](https://github.com/anomalyco/opencode) with a focus on performance and memory efficiency. It also introduced richer extended features.
 
 > Disclaimer: This project is early in development. The database structure and UI may iterate quickly and produce incompatible changes. Some features may be unavailable yet or contain bugs. Run at your own risk.
@@ -42,15 +44,15 @@ AI coding agent built in Rust. tidev reimplements the interaction model of [Open
 
 ## Performance
 
-| Page | OpenCode Memory | tidev Memory |
-|------|----------------|--------------|
-| Welcome page | ~470 MB | ~17 MB |
-| simple session | ~580 MB | ~32 MB |
-| complex session | >1GB | ~200 MB |
+| Page            | OpenCode Memory | tidev Memory |
+| --------------- | --------------- | ------------ |
+| Welcome page    | ~470 MB         | ~17 MB       |
+| simple session  | ~580 MB         | ~32 MB       |
+| complex session | >1GB            | ~200 MB      |
 
-| Metric | OpenCode | tidev |
-|--------|----------|-------|
-| Binary size | 121 MB | 26 MB |
+| Metric      | OpenCode | tidev |
+| ----------- | -------- | ----- |
+| Binary size | 121 MB   | 26 MB |
 
 ---
 
@@ -59,6 +61,7 @@ AI coding agent built in Rust. tidev reimplements the interaction model of [Open
 A gateway mode is under active development that runs tidev as a persistent server with bot integrations (like OpenClaw). Currently supported platforms include Telegram, QQ, Lark, and Discord. Both platforms can run simultaneously via a shared channel orchestrator.
 
 Run with:
+
 ```
 tidev gateway
 ```
@@ -72,6 +75,7 @@ tidev gateway
 tidev also supports WebUI. Currently, WebUI is an experimental feature and may not be stable.
 
 Run with:
+
 ```
 tidev web
 ```
