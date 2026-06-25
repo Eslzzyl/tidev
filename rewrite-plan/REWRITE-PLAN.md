@@ -1,8 +1,8 @@
 # Tidev Workspace Rewrite Plan
 
 This document describes the target workspace structure for the crate decomposition
-rewrite. It is the result of a comprehensive analysis of the current 7-crate workspace
-(66,761 lines of Rust) and proposes a 15-crate structure that eliminates the "God
+rewrite. It is the result of a comprehensive analysis of the current 6-crate workspace
+(66,328 lines of Rust) and proposes a 15-crate structure that eliminates the "God
 Crate" problem, removes internal circular dependencies, and enforces strict
 dependency layering.
 
@@ -62,6 +62,103 @@ Two circular dependency paths exist at the module level within `tidev-engine`:
 
 `tidev-llm::types::ToolDefinition` (4 fields) and `tidev_engine::tooling::ToolDefinition`
 (6+ fields) are structurally similar types bridged by `llm_bridge.rs` conversions.
+
+### 1.6 Undocumented Internal Cycles
+
+Two additional module-level dependency issues exist that were not caught in the
+initial analysis:
+
+- **`agent ↔ tooling`**: `agent/runtime/mod.rs` imports `ToolRegistry`, while
+  `tooling/builtin/task.rs` imports `AgentType`. This creates a module-level cycle
+  between the agent runtime and the tooling system.
+- **`snapshot → tooling` (inverted dependency)**: `snapshot/mod.rs` calls
+  `canonicalize_display()` from `tooling::builtin::utils`. The utility function
+  is used by four subsystems (snapshot, instructions, agent runtime, tooling itself)
+  but lives in a `tooling::builtin` submodule — the wrong place and visibility level.
+
+### 1.7 `task` Tool: Stub Implementation with Fragile String Dispatch
+
+The `task` tool (`tooling/builtin/task.rs`, 62 lines) **does not actually execute
+subagents**. It only validates arguments and returns a magic string:
+
+```rust
+Ok(format!(
+    "Started {agent_type} subagent task '{description}'",
+    agent_type = agent_type.display_name()
+))
+```
+
+The agent loop (`agent_loop.rs`) must parse this magic string to decide whether to
+actually dispatch `run_subagent()`. This is:
+
+- **Fragile**: Changing the output string silently breaks subagent dispatch
+- **Misleading API**: `execute_tool_call("task", ...)` appears to execute the task
+  but returns a placeholder
+- **Hidden coupling**: The agent loop must understand the task tool's internal contract
+- **Anti-pattern**: String parsing as control flow mechanism
+
+**Fix**: Treat task delegation as a first-class agent loop action (e.g., via
+`BackendEvent::SubtaskRequested`), not as a tool that returns a magic string.
+
+### 1.8 Performance Concerns
+
+| Issue | Location | Severity |
+|-------|----------|----------|
+| `ToolDefinition` deep clone on every tool lookup and execution (clones `serde_json::Value` + 4 `String`s) | `registry.rs:250`, `mcp.rs` | **High** |
+| Two linear scans per tool lookup (builtin definitions, then MCP tools) | `registry.rs:250-268` | Medium |
+| Global `Arc<Mutex<()>>` serializing ALL snapshot operations across sessions | `snapshot/mod.rs` | Medium |
+| `truncate()` allocates new `String` even when input is already under limit | `context.rs:413` | Low |
+| `filepath.exists()` stat call on every post-tool-use hook execution | `hooks/engine.rs:121` | Low |
+| `BackendEvent::session_id()` 18-arm match extracting session_id on every event | `session.rs:831` | Low |
+
+### 1.9 Visibility and Encapsulation Issues
+
+The entire `tidev-engine` module tree is `pub`, exposing many internal details:
+
+| Module | Problem |
+|--------|---------|
+| `pub mod shared` | Named "shared" implying internal use, but publicly exposed to all consumers |
+| `tooling::builtin::*` | Entire builtin implementation tree is `pub`; should be `pub(crate)` with limited re-exports |
+| `config::reasoning` | `ThinkingLevelType` parsing methods used directly by TUI (deep structural coupling) |
+| `tooling::builtin::utils` | 534-line mixed utility bag; used by 4 different subsystems; should be promoted to `crate::util::path` |
+
+### 1.10 TUI-Specific Problems
+
+Beyond the leaky abstractions documented in 1.3:
+
+- **`use super::*` proliferation**: 22+ files use `use super::*`, importing the entire
+  `lib.rs` namespace into every module
+- **Inline test code**: 12+ `mod tests` blocks embedded in production files instead
+  of dedicated `tests.rs` files (engine has 20 inline test modules)
+- **Monolithic event handler**: `process_backend_events()` is a 500+ line match statement
+  handling 18+ event variants with complex session-aware conditional logic
+- **Triple subagent event dispatch**: `SubagentStatus` / `SubagentToolResult` /
+  `SubagentCompleted` three aggregated events + `running_subagent_executions` cache
+  in TUI — all eliminated by per-session event channels
+- **Direct `AgentRuntime` access**: TUI directly calls `self.agent.run_agent_loop()`,
+  `self.agent.run_subagent()`, etc.
+
+### 1.11 Code Size Distribution Imbalance
+
+```
+tidev-types:       959  lines (1.4%)
+tidev-session:   2,062  lines (3.1%)
+tidev-llm:       5,758  lines (8.7%)
+tidev-storage:   4,438  lines (6.7%)
+tidev-engine:   19,564  lines (29.5%)   ← God Crate
+tidev-tui:      33,547  lines (50.6%)   ← God Module
+─────────────────────────────────
+Total:          66,328  lines
+```
+
+**Two crates account for 80% of all code.** The TUI alone has more lines than all
+other crates combined (33,547 vs 32,781).
+
+### 1.12 Feature Flag Simplicity (Post-cleanup)
+
+Prior to rewrite, the sole feature flag `tui` (now removed) controlled only the TUI
+dependency. Web and gateway crates were previously implemented and fully removed.
+The workspace has no optional features remaining.
 
 ---
 
@@ -665,8 +762,18 @@ dependencies.
 10. Redesign `ToolRegistry` to remove MCP coupling
 11. Introduce `ToolSchema` in `tidev-types`, update `tidev-llm` to use it
 12. Delete `llm_bridge.rs` (conversions no longer needed)
+13. **Redesign `task` tool**: Convert from stub returning magic string to
+    first-class agent loop action via `BackendEvent::SubtaskRequested`. The tool
+    definition remains for LLM-facing schema, but execution produces a structured
+    event consumed by `SessionManager` rather than a parsed string.
+14. **Performance: Optimize `ToolRegistry` lookup**: Switch from linear scan to
+    `HashMap<String, ToolDefinition>` for O(1) tool lookup. Avoid cloning
+    `ToolDefinition` on every execution by using `Arc<ToolSchema>` sharing.
+15. **Extract `canonicalize_display`** from `tooling::builtin::utils` into a
+    shared utility location (e.g., `tidev-types` or new `tidev-util`)
 
-**Verification:** All tool tests pass, `execute_tool_call` dispatch works.
+**Verification:** All tool tests pass, `execute_tool_call` dispatch works,
+`task` tool produces `SubtaskRequested` event instead of magic string.
 
 ### Phase 3 — Agent System (Medium Risk)
 
@@ -678,12 +785,21 @@ dependencies.
 
 ### Phase 4 — TUI Refactoring (High Risk)
 
-16. Restructure `tidev-tui` App monolith
+16. Restructure `tidev-tui` App monolith into `app/`, `core/`, `render/`, etc.
 17. Separate business logic from rendering
 18. Replace all leaky abstractions with public API calls
-19. Eliminate `use super::*` pattern
+19. Eliminate `use super::*` pattern — each file imports only what it needs
+20. **Separate inline tests**: Move `mod tests` blocks from production files into
+    dedicated `tests.rs` files
+21. **Simplify event handling**: `process_backend_events()` decomposition into
+    focused handler methods; per-session event channels eliminate session_id
+    checking in every handler
+22. **Remove subagent aggregation events**: Delete `SubagentStatus`,
+    `SubagentToolResult`, `SubagentCompleted` variants — frontend subscribes to
+    child session channels directly
 
-**Verification:** Full TUI manual testing, all TUI tests pass.
+**Verification:** Full TUI manual testing, all TUI tests pass, event handling is
+session-agnostic (no `is_active_request()` checks).
 
 ### Phase 5 — Cleanup
 

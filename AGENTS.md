@@ -12,9 +12,6 @@ cargo test           # >200 test functions, 8 async; uses tempfile crate
 | Command                         | Description                                                   |
 | ------------------------------- | ------------------------------------------------------------- |
 | `tidev` (no subcommand)         | Terminal TUI (default)                                        |
-| `tidev gateway`                 | Start gateway server (Telegram + QQ bots)                     |
-| `tidev web`                     | Start web UI server                                           |
-| `tidev web --dev-fs`            | Serve web frontend from `web/dist` instead of embedded assets |
 | `tidev db migrate`              | Apply pending schema migrations                               |
 | `tidev db status`               | Show current vs. latest schema version                        |
 | `tidev export --session <UUID>` | Export session(s) to plain SQLite (no zstd)                   |
@@ -28,6 +25,10 @@ cargo test           # >200 test functions, 8 async; uses tempfile crate
 
 This project is a Cargo workspace with 9 crates:
 
+## Workspace Structure (multi-crate)
+
+This project is a Cargo workspace with 6 crates:
+
 | Crate             | Path                   | Description                                                                                                                                                                                                                                             |
 | ----------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **tidev** (root)  | `.`                    | Thin CLI dispatch (`src/main.rs` → `src/lib.rs`). Uses clap to delegate to subcrates.                                                                                                                                                                   |
@@ -36,17 +37,13 @@ This project is a Cargo workspace with 9 crates:
 | **tidev-storage** | `crates/tidev-storage` | SQLite persistence: `SessionStore` with separate read/write connections, schema (`schema.rs`), migrations (`migration.rs`), zstd compression. Depends on `tidev-types`, `tidev-session`.                                                                |
 | **tidev-llm**     | `crates/tidev-llm`     | LLM provider abstraction: Anthropic, OpenAI chat, OpenAI Responses API, Google Gemini. Depends on `tidev-types`, `tidev-session`.                                                                                                                       |
 | **tidev-engine**  | `crates/tidev-engine`  | **Core engine** — the largest crate. Contains agent runtime, tool registry, config loading, MCP, sandbox, memory/graph, snapshot, sync, instructions, logging, provider setup. Depends on `tidev-types`, `tidev-session`, `tidev-storage`, `tidev-llm`. |
-| **tidev-tui**     | `crates/tidev-tui`     | Terminal UI (ratatui + crossterm). Optional feature (`tui`). Depends on `tidev-engine`.                                                                                                                                                                 |
-| **tidev-web**     | `crates/tidev-web`     | Web server (axum HTTP+WS). Optional feature (`web`). Frontend in `web/`. Depends on `tidev-engine`.                                                                                                                                                     |
-| **tidev-gateway** | `crates/tidev-gateway` | Gateway bots (Telegram, QQ, Discord, Lark) via shared channel orchestrator. Optional feature (`gateway`). Depends on `tidev-engine`.                                                                                                                    |
+| **tidev-tui**     | `crates/tidev-tui`     | Terminal UI (ratatui + crossterm). Depends on `tidev-engine`.                                                                                                                                                                                           |
 
 ## Entry Points
 
 - `src/main.rs` → `pub fn run()` in `src/lib.rs` (CLI dispatch via clap)
 - Root crate delegates to subcrates based on subcommand:
   - Default mode: `tidev-tui` (`crates/tidev-tui/`)
-  - Gateway mode: `tidev-gateway` (`crates/tidev-gateway/`)
-  - Web mode: `tidev-web` (`crates/tidev-web/`)
   - Export/Import: handled directly in root crate's `lib.rs`
 
 ## Architecture (key modules in each crate)
@@ -110,23 +107,6 @@ This project is a Cargo workspace with 9 crates:
 - `theme/` — styling
 - `commands.rs`, `panel_launcher.rs`
 
-### tidev-web (`crates/tidev-web/src/`)
-
-- `server.rs` — axum server startup
-- `routes/` — HTTP route handlers
-- `event_bus.rs` — WebSocket events
-- `state.rs` — application state
-- `auth.rs`, `error.rs`, `terminal.rs`, `assets.rs`
-
-### tidev-gateway (`crates/tidev-gateway/src/`)
-
-- `orchestrator.rs` — central channel orchestrator
-- `telegram/` — Telegram bot integration
-- `qq/` — QQ bot integration
-- `discord/` — Discord bot integration
-- `lark/` — Lark bot integration
-- `channel_core.rs`, `channel.rs`, `commands.rs`, `shared.rs`, `shell.rs`
-
 ## Storage Locations
 
 - Config: `~/.config/tidev/config.toml`
@@ -152,10 +132,7 @@ Tables: `meta`, `sessions`, `session_workspaces`, `session_instruction_sources`,
 
 ## Build System
 
-- Root `build.rs` builds web frontend (`pnpm build` in `web/`) and embeds assets via `include_bytes!`
-- If `pnpm` is not available, the web frontend is skipped and `tidev web` shows a placeholder page (TUI works fine)
 - Release profile optimizes for binary size: `opt-level = "s"`, `lto = true`, `codegen-units = 1`, `strip = true`
-- `tidev-tui`, `tidev-web`, and `tidev-gateway` are optional features; toggle with `--no-default-features`
 - Use `cargo build -p tidev-tui` to build a specific crate in isolation
 
 ## Provider Presets
@@ -171,29 +148,14 @@ Tables: `meta`, `sessions`, `session_workspaces`, `session_instruction_sources`,
 | `zeroclaw/`                         | [zeroclaw-labs/zeroclaw](https://github.com/zeroclaw-labs/zeroclaw)              |
 | `opencode-dynamic-context-pruning/` | [Opencode-DCP](https://github.com/Opencode-DCP/opencode-dynamic-context-pruning) |
 
-## Web Frontend
-
-See `web/AGENTS.md`. Uses **pnpm** (not npm/yarn). Build commands:
-
-```bash
-cd web && pnpm install && pnpm build
-```
-
-Dev server: `pnpm dev` (Vite, serves from filesystem). TypeScript 6.0 + React 19 + Tailwind CSS 4.
-
-## npm Package
-
-`npm/tidev/` publishes the binary via GitHub release artifacts (`npm install -g tidev`). Installation downloads the correct platform binary in `scripts/install.js`.
-
 ## Release
 
 Triggered by pushing a `v*` tag. CI workflow (`.github/workflows/release.yml`):
 
 - Builds for 5 platforms (Linux x64/ARM64, macOS x64/ARM64, Windows x64)
 - Requires `libdbus-1-dev` on Linux
-- Builds web frontend, then `cargo build --release --locked`
+- Runs `cargo build --release --locked`
 - Creates GitHub Release with checksum manifest
-- Publishes to npm (`npm/tidev/`)
 
 ## Important Conventions
 
