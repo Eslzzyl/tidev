@@ -12,6 +12,7 @@ members = [
     "crates/tidev-sync",
     "crates/tidev-search",
     "crates/tidev-mcp",
+    "crates/tidev-tools",
 ]
 default-members = ["."]
 resolver = "2"

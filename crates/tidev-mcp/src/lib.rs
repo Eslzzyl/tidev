@@ -11,10 +11,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tokio::process::Command;
 
-mod types;
+pub mod types;
+
+pub use types::ToolDefinition;
 
 use tidev_config::mcp::McpServerConfig;
-use types::ToolDefinition;
 use tidev_types::types::{PermissionConfig, ToolPermission};
 use tidev_types::prompts::SessionMode;
 use tidev_session::session::{MessageAttachment, ToolCall, ToolExecutionResult, ToolMetadata};
