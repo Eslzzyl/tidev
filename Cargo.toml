@@ -1,6 +1,7 @@
 [workspace]
 members = [
     ".",
+    "crates/tidev-types",
 ]
 default-members = ["."]
 resolver = "2"
