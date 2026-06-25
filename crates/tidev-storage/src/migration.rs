@@ -65,110 +65,14 @@ pub struct Migration {
 ///
 /// ```ignore
 /// pub const MIGRATIONS: &[Migration] = &[
-///     // Migration { version: 33, description: "Add collapsed column to messages",
+///     // Migration { version: 38, description: "Add collapsed column to messages",
 ///     //              sql: "ALTER TABLE messages ADD COLUMN collapsed INTEGER NOT NULL DEFAULT 0;" },
 /// ];
 /// ```
 ///
 /// Then bump [`SCHEMA_VERSION`](super::schema::SCHEMA_VERSION) and update
 /// [`SCHEMA_SQL`](super::schema::SCHEMA_SQL).
-pub const MIGRATIONS: &[Migration] = &[
-    // ── v33: Remove priority from todos ─────────────────────────────────
-    //
-    // The `priority` column was removed from the `todos` table.  SQLite's
-    // ALTER TABLE DROP COLUMN does not support NOT NULL columns, so we
-    // recreate the table via the create-copy-drop-rename pattern.
-    Migration {
-        version: 33,
-        description: "Remove priority column from todos table",
-        sql: r#"
-DROP TABLE IF EXISTS todos_new;
-CREATE TABLE IF NOT EXISTS todos_new (
-    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    position INTEGER NOT NULL,
-    content TEXT NOT NULL,
-    status TEXT NOT NULL,
-    PRIMARY KEY(session_id, position)
-);
-INSERT INTO todos_new (session_id, position, content, status)
-    SELECT session_id, position, content, status FROM todos;
-DROP TABLE IF EXISTS todos;
-ALTER TABLE todos_new RENAME TO todos;
-CREATE INDEX IF NOT EXISTS idx_todos_session_position
-    ON todos(session_id, position);
-"#,
-    },
-    // ── v34: Add tool_outputs table ─────────────────────────────────────
-    //
-    // Stores the full (zstd-compressed) output of tool calls so the TUI
-    // can display the complete output when the user expands a tool result
-    // card.  The output is compressed with zstd level 3 before writing.
-    Migration {
-        version: 34,
-        description: "Add tool_outputs table for full tool output storage",
-        sql: r#"
-CREATE TABLE IF NOT EXISTS tool_outputs (
-    message_id TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    tool_name TEXT NOT NULL,
-    output BLOB NOT NULL,
-    created_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_tool_outputs_session_created
-    ON tool_outputs(session_id, created_at);
-"#,
-    },
-    // ── v35: Add session_goals table ─────────────────────────────────────
-    //
-    // Stores a single persistent goal per session for the `/goal` command.
-    // The table is created IF NOT EXISTS so fresh installations already
-    // have it via SCHEMA_SQL.
-    Migration {
-        version: 35,
-        description: "Add session_goals table for /goal command",
-        sql: r#"
-CREATE TABLE IF NOT EXISTS session_goals (
-    session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
-    objective TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'active',
-    tokens_used INTEGER NOT NULL DEFAULT 0,
-    time_used_seconds INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-"#,
-    },
-    // ── v36: Remove memory/goal system tables ─────────────────────────
-    //
-    // The memory system and goal system have been completely removed from
-    // the codebase. Drop all of their tables for databases that had them
-    // created by prior migrations.
-    Migration {
-        version: 36,
-        description: "Remove memory/goal system tables",
-        sql: r#"
-DROP TABLE IF EXISTS memories;
-DROP TABLE IF EXISTS memories_fts;
-DROP TABLE IF EXISTS session_summaries;
-DROP TABLE IF EXISTS memory_slots;
-DROP TABLE IF EXISTS graph_nodes;
-DROP TABLE IF EXISTS graph_edges;
-DROP TABLE IF EXISTS retention_scores;
-DROP TABLE IF EXISTS session_goals;
-"#,
-    },
-    // ── v37: Remove rtk_rewritten column from messages ────────────────
-    //
-    // The RTK (Rust Token Killer) integration has been removed.
-    // Drop the `rtk_rewritten` column from the `messages` table.
-    Migration {
-        version: 37,
-        description: "Remove rtk_rewritten column from messages table",
-        sql: r#"
-ALTER TABLE messages DROP COLUMN rtk_rewritten;
-"#,
-    },
-];
+pub const MIGRATIONS: &[Migration] = &[];
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -379,8 +283,7 @@ mod tests {
         let s = status(&conn).unwrap();
         assert_eq!(s.current_version, 0);
         assert_eq!(s.latest_version, SCHEMA_VERSION);
-        // After adding migration v33, a fresh DB sees it as pending.
-        assert!(s.pending_count > 0);
+        assert_eq!(s.pending_count, 0);
     }
 
     #[test]
@@ -424,118 +327,5 @@ mod tests {
         // At latest version: no-op.
         let result = run_pending(&conn).unwrap();
         assert_eq!(result, SCHEMA_VERSION);
-    }
-
-    /// Create a database with the pre-v33 schema (including `priority` column).
-    fn db_with_old_todos() -> Connection {
-        let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-             INSERT INTO meta(key, value) VALUES ('schema_version', '32');
-
-             CREATE TABLE IF NOT EXISTS sessions (
-                 id TEXT PRIMARY KEY,
-                 parent_session_id TEXT,
-                 provider_id TEXT NOT NULL,
-                 provider_display_name TEXT NOT NULL,
-                 model_id TEXT NOT NULL,
-                 model_display_name TEXT NOT NULL,
-                 title TEXT NOT NULL,
-                 created_at TEXT NOT NULL,
-                 updated_at TEXT NOT NULL,
-                 status TEXT NOT NULL DEFAULT 'active',
-                 ended_at TEXT,
-                 context_summary TEXT NOT NULL DEFAULT '',
-                 context_retained_from INTEGER NOT NULL DEFAULT 0,
-                 system_prompt TEXT NOT NULL DEFAULT ''
-             );
-
-             CREATE TABLE IF NOT EXISTS todos (
-                 session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-                 position INTEGER NOT NULL,
-                 content TEXT NOT NULL,
-                 status TEXT NOT NULL,
-                 priority TEXT NOT NULL,
-                 PRIMARY KEY(session_id, position)
-             );
-
-             INSERT INTO sessions (id, provider_id, provider_display_name, model_id,
-                 model_display_name, title, created_at, updated_at)
-                 VALUES ('test-session', 'test', 'Test', 'test-model', 'Test Model',
-                         'Test', '2024-01-01', '2024-01-01');
-
-             INSERT INTO todos (session_id, position, content, status, priority)
-                 VALUES ('test-session', 1, 'Test todo', 'pending', 'high');",
-        )
-        .unwrap();
-        conn
-    }
-
-    #[test]
-    fn migration_v33_drops_priority_column() {
-        let conn = db_with_old_todos();
-
-        // Verify old schema has priority column
-        let has_priority: bool = conn
-            .query_row(
-                "SELECT COUNT(*) FROM pragma_table_info('todos') WHERE name='priority'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert!(
-            has_priority,
-            "pre-migration: todos should have priority column"
-        );
-
-        // Run migration
-        let result = run_pending(&conn).unwrap();
-        assert_eq!(result, SCHEMA_VERSION);
-
-        // Verify priority column is gone
-        let has_priority: bool = conn
-            .query_row(
-                "SELECT COUNT(*) FROM pragma_table_info('todos') WHERE name='priority'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert!(
-            !has_priority,
-            "post-migration: todos should NOT have priority column"
-        );
-
-        // Verify data survived
-        let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM todos", [], |row| row.get(0))
-            .unwrap();
-        assert_eq!(count, 1, "todo data should survive migration");
-
-        let content: String = conn
-            .query_row("SELECT content FROM todos WHERE position = 1", [], |row| {
-                row.get(0)
-            })
-            .unwrap();
-        assert_eq!(content, "Test todo");
-    }
-
-    #[test]
-    fn migration_v33_is_idempotent_across_runs() {
-        let conn = db_with_old_todos();
-
-        // First run
-        run_pending(&conn).unwrap();
-        let v1 = current_version(&conn).unwrap().unwrap();
-        assert_eq!(v1, SCHEMA_VERSION);
-
-        // Second run (should be no-op)
-        let v2 = run_pending(&conn).unwrap();
-        assert_eq!(v2, SCHEMA_VERSION);
-
-        // Data still intact
-        let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM todos", [], |row| row.get(0))
-            .unwrap();
-        assert_eq!(count, 1);
     }
 }
