@@ -1546,10 +1546,6 @@ impl App {
         .len();
         // Status line
         count += 1;
-        // Streaming content preview (if any)
-        if !execution.streaming_content.trim().is_empty() {
-            count += 1;
-        }
         // Bottom padding
         count += 1;
         count
@@ -1629,19 +1625,6 @@ impl App {
             Span::styled("  ".to_string(), Style::default()),
             Span::styled(status_line, Style::default().fg(palette.accent_soft)),
         ]));
-
-        // Streaming content preview (if any)
-        let content = execution.streaming_content.trim().to_string();
-        if !content.is_empty() {
-            let preview = shorten_single_line(&content, body_width.saturating_sub(4));
-            lines.push(Line::from(vec![
-                Span::styled("  ".to_string(), Style::default()),
-                Span::styled(
-                    preview,
-                    Style::default().fg(palette.text).add_modifier(Modifier::DIM),
-                ),
-            ]));
-        }
 
         // Bottom padding
         lines.push(Line::from(""));
