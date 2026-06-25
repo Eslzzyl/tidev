@@ -6,6 +6,11 @@ members = [
     "crates/tidev-storage",
     "crates/tidev-llm",
     "crates/tidev-config",
+    "crates/tidev-hooks",
+    "crates/tidev-instructions",
+    "crates/tidev-snapshot",
+    "crates/tidev-sync",
+    "crates/tidev-search",
 ]
 default-members = ["."]
 resolver = "2"
