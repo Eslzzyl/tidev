@@ -11,6 +11,7 @@ members = [
     "crates/tidev-snapshot",
     "crates/tidev-sync",
     "crates/tidev-search",
+    "crates/tidev-mcp",
 ]
 default-members = ["."]
 resolver = "2"
