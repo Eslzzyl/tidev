@@ -14,6 +14,7 @@ members = [
     "crates/tidev-mcp",
     "crates/tidev-tools",
     "crates/tidev-context",
+    "crates/tidev-agent",
 ]
 default-members = ["."]
 resolver = "2"

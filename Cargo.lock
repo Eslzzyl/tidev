@@ -2445,6 +2445,33 @@ name = "tidev"
 version = "0.7.0"
 
 [[package]]
+name = "tidev-agent"
+version = "0.7.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "log",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tidev-config",
+ "tidev-context",
+ "tidev-hooks",
+ "tidev-instructions",
+ "tidev-llm",
+ "tidev-mcp",
+ "tidev-search",
+ "tidev-session",
+ "tidev-snapshot",
+ "tidev-storage",
+ "tidev-tools",
+ "tidev-types",
+ "tokio",
+ "tokio-util",
+ "uuid",
+]
+
+[[package]]
 name = "tidev-config"
 version = "0.7.0"
 dependencies = [
