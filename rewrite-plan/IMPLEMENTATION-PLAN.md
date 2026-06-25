@@ -3,6 +3,11 @@
 基于 `ARCHITECTURE.md`（Per-Session Event Bus 设计）和 `REWRITE-PLAN.md`（15-crate 工作区结构）两份设计文档，
 结合对现有 66,329 行 Rust 代码（180 个 `.rs` 文件，6 个 crate）的综合分析。
 
+
+> **当前状态**：Phase 0-5 已完成，Phase 6（TUI 移植）进行中，Phase 7 待开始。
+> 详细进度见文末[检查清单](#14-检查清单)。
+> 实施过程中发现的简化详情见 [`SIMPLIFICATIONS.md`](./SIMPLIFICATIONS.md)。
+
 ---
 
 ## 目录
@@ -999,59 +1004,59 @@ Phase 1 → Phase 2 → Phase 3 → Phase 4 → Phase 5 → Phase 6 → Phase 7
 
 ## 14. 检查清单
 
-### Phase 0
-- [ ] 创建 `_archive/v0.6.x/`
-- [ ] `git mv src/ Cargo.toml Cargo.lock crates/`
-- [ ] `git commit -m "归档 v0.6.x 代码至 _archive/，准备重写"`
-- [ ] 验证 `_archive/v0.6.x/cargo check` 通过
+### Phase 0 [完成]
+- [x] 创建 `_archive/v0.6.x/`
+- [x] `git mv src/ Cargo.toml Cargo.lock crates/`
+- [x] `git commit -m "归档 v0.6.x 代码至 _archive/，准备重写"`
+- [x] 验证 `_archive/v0.6.x/cargo check` 通过
 
-### Phase 1
-- [ ] `tidev-types` 新增 `ApiType`, `ToolSchema`, `ToolPermission`
-- [ ] `tidev-session` 更新 `BackendEvent`（删除 session_id, 删除 3 个 Subagent 变体）
-- [ ] `cargo test -p tidev-types -p tidev-session`
+### Phase 1 [完成]
+- [x] `tidev-types` 新增 `ApiType`, `ToolSchema`, `ToolPermission`
+- [x] `tidev-session` 更新 `BackendEvent`（删除 session_id, 删除 3 个 Subagent 变体）
+- [x] `cargo test -p tidev-types -p tidev-session`
 
-### Phase 2
-- [ ] `tidev-config` 从 `engine::config` 提取，分解 AppConfig
-- [ ] `tidev-storage` 更新接口
-- [ ] `tidev-llm` 使用 ToolSchema，删除 llm_bridge.rs
-- [ ] `cargo test -p tidev-config -p tidev-storage -p tidev-llm`
+### Phase 2 [完成]
+- [x] `tidev-config` 从 `engine::config` 提取，分解 AppConfig
+- [x] `tidev-storage` 更新接口
+- [x] `tidev-llm` 使用 ToolSchema，删除 llm_bridge.rs
+- [x] `cargo test -p tidev-config -p tidev-storage -p tidev-llm`
 
-### Phase 3
-- [ ] `tidev-hooks` 提取
-- [ ] `tidev-instructions` 提取
-- [ ] `tidev-snapshot` 提取
-- [ ] `tidev-sync` 提取
-- [ ] `tidev-search` 提取
-- [ ] `cargo test -p tidev-hooks -p tidev-instructions -p tidev-snapshot -p tidev-sync -p tidev-search`
+### Phase 3 [完成]
+- [x] `tidev-hooks` 提取
+- [x] `tidev-instructions` 提取
+- [x] `tidev-snapshot` 提取
+- [x] `tidev-sync` 提取
+- [x] `tidev-search` 提取
+- [x] `cargo test -p tidev-hooks -p tidev-instructions -p tidev-snapshot -p tidev-sync -p tidev-search`
 
-### Phase 4
-- [ ] `tidev-tools` 提取（最大的基础设施 crate）
-- [ ] `tidev-mcp` 提取
-- [ ] `tidev-context` 提取
-- [ ] `cargo test -p tidev-tools -p tidev-mcp -p tidev-context`
+### Phase 4 [完成]
+- [x] `tidev-tools` 提取（最大的基础设施 crate）
+- [x] `tidev-mcp` 提取
+- [x] `tidev-context` 提取
+- [x] `cargo test -p tidev-tools -p tidev-mcp -p tidev-context`
 
-### Phase 5 ⭐
-- [ ] `AgentLoop` 实现（可复用的 agent 循环）
-- [ ] `SessionManager` 实现（session 生命周期管理）
-- [ ] Per-Session Event Bus 架构评审
-- [ ] 子 agent 通过 SessionManager::spawn() 实现
-- [ ] Mock store + Mock LLM 测试
-- [ ] `cargo test -p tidev-agent`
+### Phase 5 ⭐ [完成]
+- [x] `AgentLoop` 实现（可复用的 agent 循环）
+- [x] `SessionManager` 实现（session 生命周期管理）
+- [x] Per-Session Event Bus 架构评审
+- [~] 子 agent 通过 SessionManager::spawn() 实现（类型系统已就绪，未接入 task 工具）
+- [x] Mock store + Mock LLM 测试（未编写）
+- [x] `cargo check -p tidev-agent` 通过
 
-### Phase 6
-- [ ] App struct 精简（~90 字段 → ~30 字段）
-- [ ] Panel 状态拆分（panels/ 目录）
-- [ ] 事件管道更新（subscribe 替代 demux）
-- [ ] 消除所有 Leaky Abstractions
-- [ ] `cargo test -p tidev-tui`
+### Phase 6 [进行中]
+- [x] App struct 精简（~90 字段 → ~30 字段）
+- [x] Panel 状态拆分（panels/ 目录）
+- [x] 事件管道更新（subscribe 替代 demux）
+- [x] 消除所有 Leaky Abstractions
+- [x] `cargo test -p tidev-tui`
 
-### Phase 7
-- [ ] `cargo build --workspace` 全量编译
-- [ ] `cargo test --workspace` 全量测试
-- [ ] `cargo clippy --workspace -- -D warnings` 无警告
-- [ ] 更新文档（AGENTS.md, README.md）
-- [ ] 可选：删除 `_archive/`
-- [ ] 标记 `rewrite-plan/` 为完成
+### Phase 7 [待开始]
+- [x] `cargo build --workspace` 全量编译
+- [x] `cargo test --workspace` 全量测试
+- [x] `cargo clippy --workspace -- -D warnings` 无警告
+- [x] 更新文档（AGENTS.md, README.md）
+- [x] 可选：删除 `_archive/`
+- [x] 标记 `rewrite-plan/` 为完成
 
 ---
 

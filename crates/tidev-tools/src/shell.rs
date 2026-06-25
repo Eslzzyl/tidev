@@ -15,7 +15,6 @@ pub fn get() -> ResolvedShell {
 
 /// Detect the default system shell.
 pub fn detect_default_shell() -> ResolvedShell {
-    // Try common shells in order of preference
     for shell in &["/bin/bash", "/bin/zsh", "/bin/sh"] {
         if Path::new(shell).exists() {
             return ResolvedShell {
@@ -24,9 +23,13 @@ pub fn detect_default_shell() -> ResolvedShell {
             };
         }
     }
-    // Fallback
     ResolvedShell {
         program: "/bin/sh".to_string(),
         arg: "-c".to_string(),
     }
+}
+
+/// Initialize shell configuration (stub for now).
+pub fn init(_config_shell: Option<String>, _paths: Option<&std::path::Path>) {
+    // Shell auto-detection happens at first use
 }
