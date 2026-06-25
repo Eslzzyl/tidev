@@ -9,36 +9,36 @@ cargo test           # >200 test functions, 8 async; uses tempfile crate
 
 ## Key CLI Commands
 
-| Command | Description |
-|---------|-------------|
-| `tidev` (no subcommand) | Terminal TUI (default) |
-| `tidev gateway` | Start gateway server (Telegram + QQ bots) |
-| `tidev web` | Start web UI server |
-| `tidev web --dev-fs` | Serve web frontend from `web/dist` instead of embedded assets |
-| `tidev db migrate` | Apply pending schema migrations |
-| `tidev db status` | Show current vs. latest schema version |
-| `tidev export --session <UUID>` | Export session(s) to plain SQLite (no zstd) |
-| `tidev export --all` | Export all sessions |
-| `tidev import <path>` | Import sessions from an exported SQLite database |
-| `tidev tmp list` | List tidev temp files in /tmp |
-| `tidev tmp clean` | Clean old temp files (`--dry-run` to preview) |
-| `tidev sync` | Sync sessions with remote machines via SSH |
+| Command                         | Description                                                   |
+| ------------------------------- | ------------------------------------------------------------- |
+| `tidev` (no subcommand)         | Terminal TUI (default)                                        |
+| `tidev gateway`                 | Start gateway server (Telegram + QQ bots)                     |
+| `tidev web`                     | Start web UI server                                           |
+| `tidev web --dev-fs`            | Serve web frontend from `web/dist` instead of embedded assets |
+| `tidev db migrate`              | Apply pending schema migrations                               |
+| `tidev db status`               | Show current vs. latest schema version                        |
+| `tidev export --session <UUID>` | Export session(s) to plain SQLite (no zstd)                   |
+| `tidev export --all`            | Export all sessions                                           |
+| `tidev import <path>`           | Import sessions from an exported SQLite database              |
+| `tidev tmp list`                | List tidev temp files in /tmp                                 |
+| `tidev tmp clean`               | Clean old temp files (`--dry-run` to preview)                 |
+| `tidev sync`                    | Sync sessions with remote machines via SSH                    |
 
 ## Workspace Structure (multi-crate)
 
 This project is a Cargo workspace with 9 crates:
 
-| Crate | Path | Description |
-|-------|------|-------------|
-| **tidev** (root) | `.` | Thin CLI dispatch (`src/main.rs` → `src/lib.rs`). Uses clap to delegate to subcrates. |
-| **tidev-types** | `crates/tidev-types` | Shared types & enums: types, prompts, reasoning levels, theme. Leaf crate, no internal deps. |
-| **tidev-session** | `crates/tidev-session` | Core data model: session, conversation, message, tool call types, stats, balance, system info. Depends on `tidev-types`. |
-| **tidev-storage** | `crates/tidev-storage` | SQLite persistence: `SessionStore` with separate read/write connections, schema (`schema.rs`), migrations (`migration.rs`), zstd compression. Depends on `tidev-types`, `tidev-session`. |
-| **tidev-llm** | `crates/tidev-llm` | LLM provider abstraction: Anthropic, OpenAI chat, OpenAI Responses API, Google Gemini. Depends on `tidev-types`, `tidev-session`. |
-| **tidev-engine** | `crates/tidev-engine` | **Core engine** — the largest crate. Contains agent runtime, tool registry, config loading, MCP, sandbox, memory/graph, snapshot, sync, instructions, logging, provider setup. Depends on `tidev-types`, `tidev-session`, `tidev-storage`, `tidev-llm`. |
-| **tidev-tui** | `crates/tidev-tui` | Terminal UI (ratatui + crossterm). Optional feature (`tui`). Depends on `tidev-engine`. |
-| **tidev-web** | `crates/tidev-web` | Web server (axum HTTP+WS). Optional feature (`web`). Frontend in `web/`. Depends on `tidev-engine`. |
-| **tidev-gateway** | `crates/tidev-gateway` | Gateway bots (Telegram, QQ, Discord, Lark) via shared channel orchestrator. Optional feature (`gateway`). Depends on `tidev-engine`. |
+| Crate             | Path                   | Description                                                                                                                                                                                                                                             |
+| ----------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **tidev** (root)  | `.`                    | Thin CLI dispatch (`src/main.rs` → `src/lib.rs`). Uses clap to delegate to subcrates.                                                                                                                                                                   |
+| **tidev-types**   | `crates/tidev-types`   | Shared types & enums: types, prompts, reasoning levels, theme. Leaf crate, no internal deps.                                                                                                                                                            |
+| **tidev-session** | `crates/tidev-session` | Core data model: session, conversation, message, tool call types, stats, balance, system info. Depends on `tidev-types`.                                                                                                                                |
+| **tidev-storage** | `crates/tidev-storage` | SQLite persistence: `SessionStore` with separate read/write connections, schema (`schema.rs`), migrations (`migration.rs`), zstd compression. Depends on `tidev-types`, `tidev-session`.                                                                |
+| **tidev-llm**     | `crates/tidev-llm`     | LLM provider abstraction: Anthropic, OpenAI chat, OpenAI Responses API, Google Gemini. Depends on `tidev-types`, `tidev-session`.                                                                                                                       |
+| **tidev-engine**  | `crates/tidev-engine`  | **Core engine** — the largest crate. Contains agent runtime, tool registry, config loading, MCP, sandbox, memory/graph, snapshot, sync, instructions, logging, provider setup. Depends on `tidev-types`, `tidev-session`, `tidev-storage`, `tidev-llm`. |
+| **tidev-tui**     | `crates/tidev-tui`     | Terminal UI (ratatui + crossterm). Optional feature (`tui`). Depends on `tidev-engine`.                                                                                                                                                                 |
+| **tidev-web**     | `crates/tidev-web`     | Web server (axum HTTP+WS). Optional feature (`web`). Frontend in `web/`. Depends on `tidev-engine`.                                                                                                                                                     |
+| **tidev-gateway** | `crates/tidev-gateway` | Gateway bots (Telegram, QQ, Discord, Lark) via shared channel orchestrator. Optional feature (`gateway`). Depends on `tidev-engine`.                                                                                                                    |
 
 ## Entry Points
 
@@ -52,6 +52,7 @@ This project is a Cargo workspace with 9 crates:
 ## Architecture (key modules in each crate)
 
 ### tidev-engine (`crates/tidev-engine/src/`)
+
 - `agent/` — agent loop (`runtime.rs`) and 6 agent types (General, Explorer, Librarian, Oracle, Designer, Fixer)
 - `tooling/` — tool definitions, `ToolRegistry`, `ToolArgs` trait, `SkillCatalog`, `FileReadTracker`
 - `config/` — config loading, auth storage, provider config, MCP config, sandbox config, reasoning/thinking levels
@@ -67,12 +68,14 @@ This project is a Cargo workspace with 9 crates:
 - `notifications.rs` — desktop notification support
 
 ### tidev-types (`crates/tidev-types/src/`)
+
 - `types.rs` — core types
 - `prompts.rs` — session modes: `Plan` (read-only) and `Build` (full tools); system prompts
 - `reasoning.rs` — reasoning/thinking levels
 - `theme.rs` — color theme definitions
 
 ### tidev-session (`crates/tidev-session/src/`)
+
 - `session.rs` — `Conversation`, `Message`, `MessageRole`, `ToolCall`, etc.
 - `balance/` — token/fee accounting
 - `stats/` — usage statistics, granularity
@@ -80,12 +83,14 @@ This project is a Cargo workspace with 9 crates:
 - `utils.rs` — utilities
 
 ### tidev-storage (`crates/tidev-storage/src/`)
+
 - `database.rs` — `SessionStore` implementation (read/write connections)
 - `schema.rs` — `SCHEMA_SQL`, `EXPORT_SCHEMA_SQL`, `SCHEMA_VERSION`
 - `migration.rs` — `MIGRATIONS` list
 - `compression.rs` — zstd compress/decompress helpers
 
 ### tidev-llm (`crates/tidev-llm/src/`)
+
 - `anthropic.rs` — Anthropic API provider
 - `openai.rs` — OpenAI chat completions provider
 - `responses.rs` — OpenAI Responses API provider
@@ -96,6 +101,7 @@ This project is a Cargo workspace with 9 crates:
 - `attachments.rs`, `debug.rs`, `error.rs`, `types.rs`
 
 ### tidev-tui (`crates/tidev-tui/src/`)
+
 - `core/run.rs` — TUI entry point
 - `input/` — keyboard/mouse input handling
 - `render/` — ratatui rendering
@@ -105,6 +111,7 @@ This project is a Cargo workspace with 9 crates:
 - `commands.rs`, `panel_launcher.rs`
 
 ### tidev-web (`crates/tidev-web/src/`)
+
 - `server.rs` — axum server startup
 - `routes/` — HTTP route handlers
 - `event_bus.rs` — WebSocket events
@@ -112,6 +119,7 @@ This project is a Cargo workspace with 9 crates:
 - `auth.rs`, `error.rs`, `terminal.rs`, `assets.rs`
 
 ### tidev-gateway (`crates/tidev-gateway/src/`)
+
 - `orchestrator.rs` — central channel orchestrator
 - `telegram/` — Telegram bot integration
 - `qq/` — QQ bot integration
@@ -156,11 +164,11 @@ Tables: `meta`, `sessions`, `session_workspaces`, `session_instruction_sources`,
 
 ## Submodules
 
-| Path | Upstream |
-|------|----------|
-| `opencode/` | [anomalyco/opencode](https://github.com/anomalyco/opencode) |
-| `codex/` | [openai/codex](https://github.com/openai/codex) |
-| `zeroclaw/` | [zeroclaw-labs/zeroclaw](https://github.com/zeroclaw-labs/zeroclaw) |
+| Path                                | Upstream                                                                         |
+| ----------------------------------- | -------------------------------------------------------------------------------- |
+| `opencode/`                         | [anomalyco/opencode](https://github.com/anomalyco/opencode)                      |
+| `codex/`                            | [openai/codex](https://github.com/openai/codex)                                  |
+| `zeroclaw/`                         | [zeroclaw-labs/zeroclaw](https://github.com/zeroclaw-labs/zeroclaw)              |
 | `opencode-dynamic-context-pruning/` | [Opencode-DCP](https://github.com/Opencode-DCP/opencode-dynamic-context-pruning) |
 
 ## Web Frontend
@@ -180,6 +188,7 @@ Dev server: `pnpm dev` (Vite, serves from filesystem). TypeScript 6.0 + React 19
 ## Release
 
 Triggered by pushing a `v*` tag. CI workflow (`.github/workflows/release.yml`):
+
 - Builds for 5 platforms (Linux x64/ARM64, macOS x64/ARM64, Windows x64)
 - Requires `libdbus-1-dev` on Linux
 - Builds web frontend, then `cargo build --release --locked`
@@ -192,5 +201,5 @@ Triggered by pushing a `v*` tag. CI workflow (`.github/workflows/release.yml`):
 - Database columns with large content (messages, tool events) are zstd-compressed at the application layer
 - Emoji is STRICTLY FORBIDDEN at ANY code in this project
 - NEVER automatically simplify the implementation of a plan. If you believe simplification is necessary, stop and solicit feedback from users.
-- ALWAYS use English commit message.
+- ALWAYS use Simplified Chinese commit message.
 - When building/testing a single crate, use `-p <crate-name>` (e.g., `cargo test -p tidev-storage`)
