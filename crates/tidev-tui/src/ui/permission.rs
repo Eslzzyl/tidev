@@ -134,6 +134,10 @@ pub(crate) struct RunningSubagentExecution {
     pub subagent_type: String,
     pub status: SubagentStatus,
     pub current_tool_call: Option<ToolCall>,
+    /// Accumulated streaming content (from SubagentStatus.content_delta).
+    pub streaming_content: String,
+    /// Accumulated reasoning content (from SubagentStatus.reasoning_delta).
+    pub streaming_reasoning: String,
 }
 
 impl RunningSubagentExecution {
@@ -155,6 +159,8 @@ impl RunningSubagentExecution {
             subagent_type,
             status: SubagentStatus::Thinking,
             current_tool_call: None,
+            streaming_content: String::new(),
+            streaming_reasoning: String::new(),
         }
     }
 }

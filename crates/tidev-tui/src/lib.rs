@@ -1221,8 +1221,8 @@ impl App {
                 status_text,
                 current_tool_call,
                 assistant_message,
-                content_delta: _,
-                reasoning_delta: _,
+                content_delta,
+                reasoning_delta,
             } => {
                 if !self.is_active_request(request_id) {
                     return Ok(());
@@ -1242,6 +1242,13 @@ impl App {
                 {
                     execution.status = SubagentStatus::from_status_text(&status_text);
                     execution.current_tool_call = current_tool_call;
+                    // Accumulate streaming content for the inline card
+                    if let Some(delta) = content_delta {
+                        execution.streaming_content.push_str(&delta);
+                    }
+                    if let Some(delta) = reasoning_delta {
+                        execution.streaming_reasoning.push_str(&delta);
+                    }
                 }
 
                 if self.conversation.session_id == child_session_id {
