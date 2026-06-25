@@ -12,7 +12,6 @@ struct Cli {
 #[derive(clap::Subcommand, Debug)]
 enum Command {
     /// Start TUI (default when no subcommand is given)
-    #[cfg(feature = "tui")]
     Tui,
     /// Export session(s) to a SQLite database
     Export {
@@ -134,19 +133,8 @@ pub fn run() -> anyhow::Result<()> {
         None => {
             // Auto-cleanup on startup
             auto_cleanup_on_startup();
-            #[cfg(feature = "tui")]
-            return tidev_tui::run();
-            #[cfg(not(feature = "tui"))]
-            {
-                // No default frontend enabled, show help
-                use clap::CommandFactory;
-                let mut cmd = Cli::command();
-                cmd.print_help()?;
-                println!();
-                Ok(())
-            }
+            tidev_tui::run()
         }
-        #[cfg(feature = "tui")]
         Some(Command::Tui) => {
             auto_cleanup_on_startup();
             tidev_tui::run()

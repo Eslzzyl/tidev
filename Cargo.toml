@@ -8,7 +8,7 @@ members = [
     "crates/tidev-storage",
     "crates/tidev-tui",
 ]
-default-members = [".", "crates/tidev-types", "crates/tidev-session", "crates/tidev-engine", "crates/tidev-tui"]
+default-members = ["."]
 resolver = "2"
 
 [workspace.package]
@@ -53,11 +53,7 @@ uuid = { version = "1.23.3", features = ["v4", "serde"] }
 tidev-types = { path = "crates/tidev-types" }
 tidev-engine = { path = "crates/tidev-engine" }
 tidev-storage = { path = "crates/tidev-storage" }
-tidev-tui = { path = "crates/tidev-tui", optional = true }
-
-[features]
-default = ["tui"]
-tui = ["tidev-tui"]
+tidev-tui = { path = "crates/tidev-tui" }
 
 [profile.dev]
 incremental = true
