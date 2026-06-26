@@ -1839,6 +1839,7 @@ impl App {
                     hooks,
                     session_manager,
                 )
+                .await
             {
                 log::error!("spawn_agent_loop: agent loop failed: {}", e);
             }

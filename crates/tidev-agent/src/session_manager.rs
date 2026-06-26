@@ -129,12 +129,11 @@ impl SessionManager {
     /// Run the agent loop with a permission approval channel.
     ///
     /// Convenience method that builds an AgentLoop from the provided config
-    /// and additional runtime resources, then runs it synchronously via
-    /// `tokio::runtime::Handle::block_on`.
+    /// and additional runtime resources, then runs it asynchronously.
     #[allow(clippy::too_many_arguments)]
-    pub fn run_agent_loop_with_permission_channel(
+    pub async fn run_agent_loop_with_permission_channel<'a>(
         &self,
-        config: AgentLoopConfig,
+        config: AgentLoopConfig<'a>,
         request_id: u64,
         permission_tx: UnboundedSender<PendingToolApproval>,
         tool_registry: tidev_tools::ToolRegistry,
@@ -153,48 +152,45 @@ impl SessionManager {
         let cancel_token = config.cancel_token.unwrap_or_default();
         let control_tx = self.control_tx.clone();
 
-        let runtime_handle = tokio::runtime::Handle::current();
-        runtime_handle.block_on(async move {
-            let conversation = {
-                let store_guard = store.lock().await;
-                let msgs = store_guard.load_messages(config.session_id).unwrap_or_default();
-                let mut conv = tidev_session::session::Conversation::new(
-                    config.session_id,
-                    "".to_string(),
-                    &config.model.provider_id,
-                    &config.model.provider_display_name,
-                    &config.model.model_id,
-                    &config.model.display_name,
-                    "Session",
-                );
-                conv.messages = msgs;
-                conv
-            };
+        let conversation = {
+            let store_guard = store.lock().await;
+            let msgs = store_guard.load_messages(config.session_id).unwrap_or_default();
+            let mut conv = tidev_session::session::Conversation::new(
+                config.session_id,
+                "".to_string(),
+                &config.model.provider_id,
+                &config.model.provider_display_name,
+                &config.model.model_id,
+                &config.model.display_name,
+                "Session",
+            );
+            conv.messages = msgs;
+            conv
+        };
 
-            let agent_loop = AgentLoop {
-                session_id: config.session_id,
-                model: config.model,
-                conversation,
-                context: config.context_manager.clone(),
-                tools,
-                tool_registry,
-                store,
-                llm,
-                event_tx,
-                cancel_token,
-                mode: config.mode,
-                agent_type: tidev_types::agent::AgentType::General,
-                workspace_root: config.workspace_root,
-                system_prompt: config.system_prompt,
-                permission_tx: Some(permission_tx),
-                hooks,
-                session_manager,
-                can_delegate: true,
-                control_tx,
-            };
+        let agent_loop = AgentLoop {
+            session_id: config.session_id,
+            model: config.model,
+            conversation,
+            context: config.context_manager.clone(),
+            tools,
+            tool_registry,
+            store,
+            llm,
+            event_tx,
+            cancel_token,
+            mode: config.mode,
+            agent_type: tidev_types::agent::AgentType::General,
+            workspace_root: config.workspace_root,
+            system_prompt: config.system_prompt,
+            permission_tx: Some(permission_tx),
+            hooks,
+            session_manager,
+            can_delegate: true,
+            control_tx,
+        };
 
-            agent_loop.run(request_id).await
-        })
+        agent_loop.run(request_id).await
     }
 
     /// Process pending control events for tracking purposes.
