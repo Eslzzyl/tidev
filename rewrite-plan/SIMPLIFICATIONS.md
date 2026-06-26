@@ -366,7 +366,7 @@ BackendEvent::ShellOutput { content, finished, exit_code, session_id, .. } => { 
 
 | 错误 | 缺失类型 | 原始位置 | 需要移至 |
 |------|---------|---------|---------|
-| `cannot find 'NotificationManager' in 'tidev_hooks'` | `NotificationManager` | `engine/notifications.rs` | `tidev-hooks` |
+| `cannot find 'NotificationManager' in 'tidev_hooks'` | `NotificationManager` | `engine/notifications.rs` | ✅ 已移植到 `tidev-notification` |
 | `cannot find struct 'QueuedUserMessage'` | `QueuedUserMessage` | `engine/agent/runtime/types.rs` | `tidev-agent` |
 | `cannot find struct 'AgentLoopConfig'` | `AgentLoopConfig` | `engine/agent/runtime/types.rs` | `tidev-agent` |
 | `cannot find 'StepPatch' in 'tidev_snapshot'` | `StepPatch` | `engine/shared/undo.rs` | `tidev-snapshot` |
@@ -433,7 +433,7 @@ let app = App { session_manager, config, workspace_root, ... };
 | `sandbox/`              | ~800   | bwrap/landlock/seatbelt 沙箱 | 非核心，Linux only                            |
 | `provider_setup/`       | ~500   | API key 初始化流程           | 非核心                                        |
 | `process.rs`            | ~46    | 进程管理（restart_self）     | 可在需要时移植                                |
-| `notifications.rs`      | ~329   | 桌面通知（OSC 9 / BEL）      | TUI 依赖但未移植 → 见 9.5                    |
+| `notifications.rs`      | ~329   | 桌面通知（OSC 9 / BEL）      | ✅ 已移植到 `tidev-notification` |
 | `shell.rs`（完整版）    | ~240   | 跨平台 shell 检测            | 见 6.2                                        |
 | `encoding.rs`（完整版） | ~246   | 编码检测                     | 见 6.1                                        |
 | `shared/undo.rs`        | ~200   | 撤销/重做补丁（StepPatch）   | 见 5.1                                        |
@@ -449,7 +449,7 @@ let app = App { session_manager, config, workspace_root, ... };
 |------|------|--------|------|------|
 | 1 | **移植 `StepPatch` + `collect_patches_after_message` 到 `tidev-snapshot`** — 从 `_archive/v0.6.x/crates/tidev-engine/src/shared/undo.rs` 移植 | 3 个 | 无 | ✅ 完成 |
 | 2 | **修复 `SyncConfig` — 用 `tidev-sync::SyncConfig & RemoteMachine` 完整类型替换 `tidev-config` 中的 JSON Value 占位** | 8 个 | 无 | ✅ 完成 |
-| 3 | **移植 `NotificationManager` 到 `tidev-hooks`** — 从 `_archive/v0.6.x/crates/tidev-engine/src/notifications.rs` 移植 | 3 个 | 无 | |
+| 3 | **移植 `NotificationManager` 到 `tidev-notification`** — 从 `_archive/v0.6.x/crates/tidev-engine/src/notifications.rs` 移植到新 crate | 3 个 | 无 | ✅ 完成 |
 | 4 | **统一 `ApprovedTool` / `PendingToolApproval`** — 添加缺失字段：`rejection`、`child_session_id`、`allow_outside`、`sensitive_file_approved`、`tool_calls`、`response_tx`、`mode` | 12 个 | 无 | |
 | 5 | **移植缺失类型** — `QueuedUserMessage` → `tidev-agent`，`AgentLoopConfig` → `tidev-agent`；更新模块导入路径 | 6 个 | 步骤 1 | |
 | 6 | **删除 BackendEvent 模式匹配中的 `session_id`** — 从 `Delta`、`ReasoningDelta`、`ShellOutput` 等变体中移除 `session_id` | 5 个 | 无 | |
