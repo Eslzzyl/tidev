@@ -298,9 +298,11 @@
 
 ---
 
-## 9. Phase 6: tidev-tui（73 个编译错误）
+## 9. Phase 6: tidev-tui（73 个编译错误 → ✅ 已全部修复）
 
-TUI 移植**未完成**。`cargo check -p tidev-tui` 报告 73 个编译错误。以下是按类别分类的详细分析：
+> **状态**：2026-06-26 所有 73 个编译错误已清除。`cargo check -p tidev-tui` 通过，整个工作区 `cargo check --workspace` 通过。
+
+TUI 移植过程中共出现 73 个编译错误，以下按类别分类记录。
 
 ### 9.1 SessionManager 内部字段直接访问（~15 个错误）
 
@@ -447,18 +449,18 @@ let app = App { session_manager, config, workspace_root, ... };
 
 | 步骤 | 操作 | 修复约 | 依赖 | 状态 |
 |------|------|--------|------|------|
-| 1 | **移植 `StepPatch` + `collect_patches_after_message` 到 `tidev-snapshot`** — 从 `_archive/v0.6.x/crates/tidev-engine/src/shared/undo.rs` 移植 | 3 个 | 无 | ✅ 完成 |
-| 2 | **修复 `SyncConfig` — 用 `tidev-sync::SyncConfig & RemoteMachine` 完整类型替换 `tidev-config` 中的 JSON Value 占位** | 8 个 | 无 | ✅ 完成 |
-| 3 | **移植 `NotificationManager` 到 `tidev-notification`** — 从 `_archive/v0.6.x/crates/tidev-engine/src/notifications.rs` 移植到新 crate | 3 个 | 无 | ✅ 完成 |
-| 4 | **统一 `ApprovedTool` / `PendingToolApproval`** — 添加缺失字段：`rejection`、`child_session_id`、`allow_outside`、`sensitive_file_approved`、`tool_calls`、`response_tx`、`mode` | 12 个 | 无 | |
-| 5 | **移植缺失类型** — `QueuedUserMessage` → `tidev-agent`，`AgentLoopConfig` → `tidev-agent`；更新模块导入路径 | 6 个 | 步骤 1 | |
-| 6 | **删除 BackendEvent 模式匹配中的 `session_id`** — 从 `Delta`、`ReasoningDelta`、`ShellOutput` 等变体中移除 `session_id` | 5 个 | 无 | |
-| 7 | **为 `AgentType` 添加 `variants()` 方法** — 返回 `&'static [AgentType]` 以支持枚举 | 3 个 | 无 | |
-| 8 | **修复 `shell::init` 参数类型** — 更新签名为接受 `Option<&ConfigPaths>` 或修复调用处 | 2 个 | 无 | |
-| 9 | **重写 TUI 初始化代码** — `core/run.rs` 中 `App::new()` 从 AgentRuntime 构造改为 SessionManager::spawn() | 15 个 | 步骤 2,3,4 | |
-| 10 | **添加 SessionManager 缺失的访问器方法** — `workspace_root()`、`config()`、`tools()` 等，或重构 TUI 直接从其他源获取 | 16 个 | 步骤 9 | |
+| 1 | **移植 `StepPatch` + `collect_patches_after_message` 到 `tidev-snapshot`** | 3 个 | 无 | ✅ 完成 |
+| 2 | **修复 `SyncConfig` / `HooksConfig` — 用完整类型替换 JSON Value 占位** | 8 个 | 无 | ✅ 完成 |
+| 3 | **移植 `NotificationManager` 到 `tidev-notification`** | 3 个 | 无 | ✅ 完成 |
+| 4 | **统一 `ApprovedTool` / `PendingToolApproval` — 添加缺失字段** | 12 个 | 无 | ✅ 完成 |
+| 5 | **移植缺失类型** — `QueuedUserMessage`, `AgentLoopConfig`, `SubagentConfig`, `AgentType` 方法 | 9 个 | 步骤 1 | ✅ 完成 |
+| 6 | **删除 BackendEvent 模式匹配/构造中的 `session_id`** | 7 个 | 无 | ✅ 完成 |
+| 7 | **为 `AgentType` 添加缺失方法** — `description`, `is_read_only`, `default_tool_restrictions`, `default_temperature`, `all` | 4 个 | 无 | ✅ 完成 |
+| 8 | **修复 `shell::init` 参数类型** — 修改调用处使用 `None` | 2 个 | 无 | ✅ 完成 |
+| 9 | **修复 TUI 导入路径** — `tooling::` → `tidev_tools::`, `tidev_tools::config` → `tidev_config` | 5 个 | 无 | ✅ 完成 |
+| 10 | **补全 SessionManager 公开字段和方法** — 添加 TUI 期望的 12 个字段 + 3 个方法 | 24 个 | 步骤 5,9 | ✅ 完成 |
 
-> **总计**：以上 10 步完成后，预计可清除 73 个编译错误中的约 70 个。剩余 ~3 个为导入路径等零散问题。
+> **总计**：所有 10 步完成后，编译错误从 **73 降至 0**。整个工作区 `cargo check --workspace` 通过。
 
 ### 编译后需恢复的核心功能
 
@@ -483,16 +485,18 @@ let app = App { session_manager, config, workspace_root, ... };
 | --------------------------------- | ---------- | -------------------------------------------------------- |
 | Phase 0（归档）                   | 无简化     | 纯文件移动                                               |
 | Phase 1（types + session）        | 计划内     | BackendEvent 变更是架构需求                              |
-| Phase 2（config + storage + llm） | **中**     | HooksConfig/SyncConfig 占位，logging 简化                |
-| Phase 3（5 个基础设施 crate）     | **低**     | hooks 中 canonical_tool_name 副本，StepPatch 未移植      |
-| Phase 4（tools + mcp + context）  | **中**     | encoding/shell 简化，AgentType 副本，task/MCP 占位       |
-| Phase 5（agent）                  | **高**     | 全新代码，工具执行/审批/子agent/hooks/压缩/重试均为 stub |
-| Phase 6（tui）                    | **73 个编译错误** | SessionManager API 不匹配 + 6 个未移植类型 + 字段签名变更 |
+| Phase 2（config + storage + llm） | **中** | HooksConfig/SyncConfig 已完整化，logging 简化（待恢复）    |
+| Phase 3（5 个基础设施 crate）     | **低** | StepPatch 已移植，canonical_tool_name 副本仍存在            |
+| Phase 4（tools + mcp + context）  | **中** | encoding/shell 待完整化，task/MCP 仍为 stub                |
+| Phase 5（agent）                  | **高** | 工具执行/审批/子agent/hooks/压缩/重试均为 stub，类型已就绪 |
+| Phase 6（tui）                    | **✅ 已修复** | 73 个编译错误已全部清除                                    |
 | Phase 7（清理）                   | 未开始     | —                                                        |
 
 最需要优先恢复的功能：
 
-1. **Phase 6 编译错误** — 按 10 步路线图修复 73 个错误
-2. **Phase 5 AgentLoop** — 工具执行、审批流程、子 agent
-3. **Phase 2 tidev-config** — HooksConfig/SyncConfig 完整化
-4. **Phase 4 tidev-tools** — encoding/shell 完整化
+1. **AgentLoop 工具执行** — 连接 `ToolRegistry` 实现真正的工具路由
+2. **工具审批流程** — 实现 `PendingToolApproval` → 用户确认 → `ApprovedTool` 异步通道
+3. **Subagent 调度** — 在 task.rs 中调用 `SessionManager::spawn()`
+4. **Hook 执行** — 在 AgentLoop 循环中调用 `HookEngine`
+5. **上下文压缩** — 在 AgentLoop 中调用 `ContextManager::compact_if_needed()`
+6. **跨平台 shell/encoding** — 移植 Windows shell 检测和编码转换
