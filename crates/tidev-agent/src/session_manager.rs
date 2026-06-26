@@ -175,7 +175,7 @@ impl SessionManager {
                 session_id: config.session_id,
                 model: config.model,
                 conversation,
-                context: tidev_context::ContextManager::new(),
+                context: config.context_manager.clone(),
                 tools,
                 tool_registry,
                 store,

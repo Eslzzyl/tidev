@@ -129,18 +129,11 @@ impl AgentLoop {
                 )
                 .await?;
 
-            // 4. Persist the assistant turn
-            let assistant_msg = {
-                let mut msg = Message::new(MessageRole::Assistant, &turn.content);
-                if !turn.tool_calls.is_empty() {
-                    msg.tool_calls = turn.tool_calls.clone();
-                }
-                if !turn.reasoning.is_empty() {
-                    msg.reasoning = turn.reasoning.clone();
-                }
-                msg
-            };
-            self.conversation.push(assistant_msg);
+            // 4. Persist the assistant turn to DB (with full token metadata)
+            let persisted_msg = crate::persistence::persist_assistant_message(
+                &self.store, self.session_id, &turn,
+            ).await?;
+            self.conversation.push(persisted_msg);
 
             // 5. Send Finished event
             let _ = self.event_tx.send(BackendEvent::Finished {
@@ -156,44 +149,97 @@ impl AgentLoop {
                     .partition(|tc| tc.name == "task" || tc.name == "todo");
 
                 // Handle internal tools
+                let mut task_handles: Vec<(
+                    ToolCall,
+                    tokio::task::JoinHandle<ToolExecutionResult>,
+                )> = Vec::new();
+
+                // === Serial subagents (write-capable) first ===
+                for tc in &internal {
+                    if tc.name == "task" && self.can_delegate {
+                        let is_read_only = serde_json::from_str::<TaskArgs>(&tc.arguments)
+                            .ok()
+                            .and_then(|args| tidev_types::agent::AgentType::parse(&args.subagent_type))
+                            .is_some_and(|t| t.is_read_only());
+                        if !is_read_only {
+                            // Write-capable subagent: run serially
+                            let result = self.run_subagent(tc).await;
+                            crate::persistence::persist_tool_result(
+                                &self.store, self.session_id, request_id,
+                                tc, &result, &self.event_tx,
+                            ).await?;
+                            self.conversation.push(Message::tool_result(
+                                &tc.id, &tc.name, result,
+                            ));
+                        }
+                    }
+                }
+
+                // === Parallel subagents (read-only) second ===
+                for tc in &internal {
+                    if tc.name == "task" && self.can_delegate
+                        && let Ok(args) = serde_json::from_str::<TaskArgs>(&tc.arguments)
+                            && let Some(agent_type) = tidev_types::agent::AgentType::parse(&args.subagent_type)
+                                && agent_type.is_read_only() {
+                                    let description = args.description.trim().to_string();
+                                    let prompt = args.prompt.trim().to_string();
+                                    let child = self.build_child_agent(agent_type, &description, &prompt).await?;
+                                    let child_session_id = child.session_id;
+                                    let child_store = self.store.clone();
+                                    let handle = tokio::spawn(async move {
+                                        child.into_run_fut(1).await.ok();
+                                        // Read the last assistant message from child session
+                                        let store = child_store.lock().await;
+                                        let msgs = store.load_messages(child_session_id).unwrap_or_default();
+                                        drop(store);
+                                        let content = msgs.iter()
+                                            .rev()
+                                            .find(|m| m.role == MessageRole::Assistant && !m.streaming)
+                                            .map(|m| m.content.clone())
+                                            .unwrap_or_default();
+                                        ToolExecutionResult::new(content)
+                                    });
+                                    task_handles.push(((*tc).clone(), handle));
+                                }
+                }
+
+                // Collect parallel results in original tool_use order
+                for (tc, handle) in task_handles {
+                    let result = handle.await.unwrap_or_else(|e| {
+                        ToolExecutionResult::new(format!("Subagent task panicked: {e}"))
+                    });
+                    crate::persistence::persist_tool_result(
+                        &self.store, self.session_id, request_id,
+                        &tc, &result, &self.event_tx,
+                    ).await?;
+                    self.conversation.push(Message::tool_result(
+                        &tc.id, &tc.name, result,
+                    ));
+                }
+
+                // Handle todo tool
                 for tc in &internal {
                     if tc.name == "todo" {
                         let result = self.execute_external_tool(tc, request_id, false).await?;
-                        let r = ToolExecResult {
-                            tool_call_id: tc.id.clone(),
-                            tool_name: tc.name.clone(),
-                            result: result.result,
-                        };
                         self.conversation.push(Message::tool_result(
-                            &r.tool_call_id, &r.tool_name, r.result.clone(),
+                            &result.tool_call_id, &result.tool_name, result.result,
                         ));
                     }
-                    if tc.name == "task" {
-                        if self.can_delegate {
-                            // Full subagent execution
-                            let result = self.run_subagent(tc).await;
-                            let _ = self.event_tx.send(BackendEvent::ToolCompleted {
-                                request_id,
-                                tool_call: (*tc).clone(),
-                                result: result.clone(),
-                            });
-                            self.conversation.push(Message::tool_result(
-                                &tc.id, &tc.name, result.clone(),
-                            ));
-                        } else {
-                            // Child sessions: task tool is not available
-                            let result = ToolExecutionResult::new(
-                                "Subagent delegation is not available in this context.".to_string(),
-                            );
-                            let _ = self.event_tx.send(BackendEvent::ToolCompleted {
-                                request_id,
-                                tool_call: (*tc).clone(),
-                                result: result.clone(),
-                            });
-                            self.conversation.push(Message::tool_result(
-                                &tc.id, &tc.name, result.clone(),
-                            ));
-                        }
+                }
+
+                // Handle non-delegable task (child sessions: task tool is not available)
+                for tc in &internal {
+                    if tc.name == "task" && !self.can_delegate {
+                        let result = ToolExecutionResult::new(
+                            "Subagent delegation is not available in this context.".to_string(),
+                        );
+                        crate::persistence::persist_tool_result(
+                            &self.store, self.session_id, request_id,
+                            tc, &result, &self.event_tx,
+                        ).await?;
+                        self.conversation.push(Message::tool_result(
+                            &tc.id, &tc.name, result,
+                        ));
                     }
                 }
 
@@ -257,24 +303,61 @@ impl AgentLoop {
                 args.subagent_type
             ))?;
 
-        let description = args.description.trim();
-        let prompt = args.prompt.trim();
+        let description = args.description.trim().to_string();
+        let prompt = args.prompt.trim().to_string();
         anyhow::ensure!(!description.is_empty(), "task description cannot be empty");
         anyhow::ensure!(!prompt.is_empty(), "task prompt cannot be empty");
 
+        // 2. Build child agent (session + AgentLoop)
+        let child = self.build_child_agent(agent_type, &description, &prompt).await?;
+        let child_session_id = child.session_id;
+
+        // 3. Run child agent inline
+        if let Err(e) = child.into_run_fut(1).await {
+            log::warn!("run_subagent: child session failed: {e}");
+        }
+
+        // 4. Notify SessionManager that child completed
+        let _ = self.control_tx.send(ControlEvent::SubtaskCompleted {
+            child_session_id,
+            success: true,
+        });
+
+        // 5. Get last assistant message from child session
+        let last_content = {
+            let store = self.store.lock().await;
+            let msgs = store.load_messages(child_session_id).unwrap_or_default();
+            msgs.iter()
+                .rev()
+                .find(|m| m.role == MessageRole::Assistant && !m.streaming)
+                .map(|m| m.content.clone())
+                .unwrap_or_default()
+        };
+
         log::info!(
-            "run_subagent: starting {} subagent for '{}' (parent={})",
+            "run_subagent: {} subagent '{}' completed (child={})",
             agent_type.display_name(),
             description,
-            self.session_id
+            child_session_id
         );
 
-        // 2. Create child session
+        Ok(last_content)
+    }
+
+    /// Build a child AgentLoop for a subagent task without running it.
+    ///
+    /// Creates the child session in the store, prepares the bootstrap message,
+    /// filters tools, and returns the ready-to-run AgentLoop.
+    /// The caller is responsible for calling `into_run_fut` and reading the result.
+    async fn build_child_agent(
+        &self,
+        agent_type: tidev_types::agent::AgentType,
+        description: &str,
+        prompt: &str,
+    ) -> Result<AgentLoop> {
         let child_session_id = Uuid::new_v4();
         let (child_event_tx, _child_event_rx) = tokio::sync::mpsc::unbounded_channel();
         let child_cancel_token = self.cancel_token.child_token();
-
-        // Determine child model — use parent model or agent-specific override
         let child_model = self.model.clone();
 
         // Create session in store
@@ -291,17 +374,15 @@ impl AgentLoop {
             )?;
         }
 
-        // 3. Compose child system prompt
+        // Compose and store child system prompt
         let agent_def = AgentDefinition::new(agent_type);
         let child_prompt = compose_static_system_prompt(&agent_def.system_prompt, &self.workspace_root);
-
-        // Store system prompt
         {
             let store = self.store.lock().await;
             store.update_session_system_prompt(child_session_id, &child_prompt)?;
         }
 
-        // 4. Create bootstrap message with the task prompt
+        // Create and persist bootstrap message with the task prompt
         let bootstrap_msg = Message::new(MessageRole::User, prompt);
         {
             let store = self.store.lock().await;
@@ -314,10 +395,10 @@ impl AgentLoop {
             store.load_messages(child_session_id).unwrap_or_default()
         };
 
-        // 5. Filter tools for child agent type
+        // Filter tools for child agent type
         let (child_tools, _) = self.restrict_tools_for_agent(agent_type);
 
-        // 6. Create and run child AgentLoop
+        // Build child conversation
         let mut child_conv = Conversation::new(
             child_session_id,
             self.workspace_root.display().to_string(),
@@ -369,37 +450,7 @@ impl AgentLoop {
             sources: vec![format!("Subagent {} started: {}", agent_type.display_name(), description)],
         });
 
-        // Run child agent inline. The child has can_delegate=false so it
-        // will not attempt to spawn sub-agents (avoiding async recursion).
-        // Run child agent via into_run_fut to break the async recursion detection.
-        if let Err(e) = child.into_run_fut(1).await {
-            log::warn!("run_subagent: child session failed: {e}");
-        }
-
-        // Notify SessionManager that child completed
-        let _ = self.control_tx.send(ControlEvent::SubtaskCompleted {
-            child_session_id,
-            success: true,
-        });
-        // 7. Get last assistant message from child session
-        let last_content = {
-            let store = self.store.lock().await;
-            let msgs = store.load_messages(child_session_id).unwrap_or_default();
-            msgs.iter()
-                .rev()
-                .find(|m| m.role == MessageRole::Assistant && !m.streaming)
-                .map(|m| m.content.clone())
-                .unwrap_or_default()
-        };
-
-        log::info!(
-            "run_subagent: {} subagent '{}' completed (child={})",
-            agent_type.display_name(),
-            description,
-            child_session_id
-        );
-
-        Ok(last_content)
+        Ok(child)
     }
 
     /// Filter tool definitions for a specific agent type based on its
@@ -652,11 +703,11 @@ impl AgentLoop {
 
         drop(store);
 
-        let _ = self.event_tx.send(BackendEvent::ToolCompleted {
-            request_id,
-            tool_call: tool_call.clone(),
-            result: result.clone(),
-        });
+        // Persist tool result to DB and emit ToolCompleted event
+        crate::persistence::persist_tool_result(
+            &self.store, self.session_id, request_id,
+            tool_call, &result, &self.event_tx,
+        ).await?;
 
         Ok(ToolExecResult {
             tool_call_id: tool_call.id.clone(),
