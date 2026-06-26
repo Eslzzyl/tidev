@@ -743,8 +743,8 @@ impl App {
     fn process_backend_events(&mut self, runtime: &Runtime) -> Result<()> {
         // Coalesce consecutive Delta and ReasoningDelta events to reduce
         // per-frame cache invalidation overhead during LLM streaming.
-        let mut coalesced_delta: Option<(Uuid, u64, String)> = None;
-        let mut coalesced_reasoning: Option<(Uuid, u64, String)> = None;
+        let mut coalesced_delta: Option<(u64, String)> = None;
+        let mut coalesced_reasoning: Option<(u64, String)> = None;
         let mut event_count = 0;
         const MAX_EVENTS_PER_BATCH: usize = 200;
 
@@ -779,10 +779,10 @@ impl App {
                     content,
                 } => {
                     // Coalesce consecutive Delta events for the same request
-                    if let Some((_, _, ref mut acc)) = coalesced_delta {
+                    if let Some((_, ref mut acc)) = coalesced_delta {
                         acc.push_str(&content);
                     } else {
-                        coalesced_delta = Some((session_id, request_id, content));
+                        coalesced_delta = Some((request_id, content));
                     }
                 }
                 BackendEvent::ReasoningDelta {
@@ -790,10 +790,10 @@ impl App {
                     content,
                 } => {
                     // Coalesce consecutive ReasoningDelta events
-                    if let Some((_, _, ref mut acc)) = coalesced_reasoning {
+                    if let Some((_, ref mut acc)) = coalesced_reasoning {
                         acc.push_str(&content);
                     } else {
-                        coalesced_reasoning = Some((session_id, request_id, content));
+                        coalesced_reasoning = Some((request_id, content));
                     }
                 }
                 _other => {
@@ -838,24 +838,22 @@ impl App {
     /// as single merged events through `handle_backend_event`.
     fn flush_coalesced_events(
         &mut self,
-        delta: &mut Option<(Uuid, u64, String)>,
-        reasoning: &mut Option<(Uuid, u64, String)>,
+        delta: &mut Option<(u64, String)>,
+        reasoning: &mut Option<(u64, String)>,
         runtime: &Runtime,
     ) -> Result<()> {
-        if let Some((sid, rid, content)) = delta.take() {
+        if let Some((rid, content)) = delta.take() {
             self.handle_backend_event(
                 BackendEvent::Delta {
-                    session_id: sid,
                     request_id: rid,
                     content,
                 },
                 runtime,
             )?;
         }
-        if let Some((sid, rid, content)) = reasoning.take() {
+        if let Some((rid, content)) = reasoning.take() {
             self.handle_backend_event(
                 BackendEvent::ReasoningDelta {
-                    session_id: sid,
                     request_id: rid,
                     content,
                 },
@@ -867,28 +865,13 @@ impl App {
 
     fn handle_backend_event(&mut self, event: BackendEvent, runtime: &Runtime) -> Result<()> {
         self.dirty = true;
-        // Sandbox elevation requests are handled here, outside the per-session
-        // dispatch, because they carry a oneshot sender that must not be moved
-        // into the event handler's match.
-        let session_id = event.session_id();
         let request_id = event.request_id();
-        if session_id != self.conversation.session_id {
-            let saved = self.processing_child_session;
-            self.processing_child_session = true;
-            let result = self.with_temporary_session_context(session_id, |app| {
-                if let Some(request_id) = request_id {
-                    app.prime_active_request(request_id);
-                }
-                app.handle_backend_event_for_active(event, runtime)
-            });
-            self.processing_child_session = saved;
-            return result;
-        }
-
+        // In the per-session event bus architecture, all events arriving on
+        // this session's channel belong to this session. No session_id routing
+        // is needed. Child session events are dispatched via separate channels.
         if let Some(request_id) = request_id {
             self.prime_active_request(request_id);
         }
-
         self.handle_backend_event_for_active(event, runtime)
     }
 
@@ -1266,7 +1249,7 @@ impl App {
                 error,
             } => {
                 self.apply_context_compaction(
-                    session_id,
+                    self.conversation.session_id,
                     compacted,
                     manual,
                     summary,
@@ -1407,15 +1390,8 @@ impl App {
                     self.active_request_id
                 );
 
-                // Only handle TurnStarting for the current conversation
-                // session.  Child sessions (from parallel subagents) send
-                // their own TurnStarting, which must not overwrite the
-                // parent's active_request_id — otherwise subsequent parent
-                // events (ToolCompleted, SubagentCompleted, etc.) would
-                // fail the is_active_request check and be silently ignored.
-                if session_id != self.conversation.session_id {
-                    return Ok(());
-                }
+                // In the per-session event bus, all events arriving on this
+                // channel belong to this session. No session_id check needed.
 
                 // Ignore stale TurnStarting from a cancelled/aborted agent
                 // loop.  If no cancel token exists, no agent loop is
@@ -1601,7 +1577,7 @@ impl App {
         let thinking_level = self.thinking_level.clone();
 
         // Queue via runtime for processing
-        let msg = tidev_tools::QueuedUserMessage {
+        let msg = tidev_agent::QueuedUserMessage {
             content: prompt.clone(),
             attachments: attachments.clone(),
             mode: Some(mode),

@@ -29,10 +29,8 @@ use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::{Duration, Instant};
-use tidev_tools::{
-    config::{AuthStore, SharedConfig},
-    tooling::canonical_tool_name,
-};
+use tidev_tools::canonical_tool_name;
+use tidev_config::{AuthStore, SharedConfig};
 use tidev_session::session::{Conversation, Message, MessageRole, ToolCall};
 use tidev_session::utils::{TokenUsage, format_token_count};
 use unicode_width::UnicodeWidthStr;

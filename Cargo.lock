@@ -3803,7 +3803,9 @@ dependencies = [
  "log",
  "serde",
  "serde_json",
+ "tidev-hooks",
  "tidev-llm",
+ "tidev-sync",
  "tidev-types",
  "toml",
  "uuid",
@@ -3889,6 +3891,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "tidev-notification"
+version = "0.7.0"
+dependencies = [
+ "crossterm",
+ "log",
+ "tidev-config",
+]
+
+[[package]]
 name = "tidev-search"
 version = "0.7.0"
 dependencies = [
@@ -3929,6 +3940,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tidev-config",
+ "tidev-session",
  "tidev-types",
  "tokio",
  "uuid",
@@ -4041,6 +4053,7 @@ dependencies = [
  "tidev-instructions",
  "tidev-llm",
  "tidev-mcp",
+ "tidev-notification",
  "tidev-search",
  "tidev-session",
  "tidev-snapshot",

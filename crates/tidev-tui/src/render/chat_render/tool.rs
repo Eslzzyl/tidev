@@ -2,8 +2,8 @@ use crate::ansi::ansi_to_styled_line;
 use crate::markdown::{WrapOptions, render_markdown_text_with_width_and_cwd, word_wrap_line};
 use crate::theme::ThemePalette;
 use tidev_tools::{
-    tooling::builtin::utils::display_workspace_relative,
-    tooling::{TodoItem, canonical_tool_name},
+    builtin::utils::display_workspace_relative,
+    canonical_tool_name, TodoItem,
 };
 use tidev_session::session::{Message, MessageAttachment, ToolCall};
 

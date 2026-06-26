@@ -69,7 +69,9 @@ pub enum AgentType {
 
 impl AgentType {
     pub fn parse(s: &str) -> Option<Self> {
-        match s.to_lowercase().as_str() {
+        let s = s.trim().to_ascii_lowercase();
+        let s = s.strip_prefix('@').unwrap_or(&s);
+        match s {
             "general" => Some(Self::General),
             "explorer" => Some(Self::Explorer),
             "librarian" => Some(Self::Librarian),
@@ -91,6 +93,63 @@ impl AgentType {
         }
     }
 
+    /// Short description shown to the LLM and in UI panels.
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::General => "General-purpose assistant with multi-agent delegation",
+            Self::Explorer => {
+                "Fast codebase search specialist: grep, glob, and read to discover code patterns"
+            }
+            Self::Librarian => {
+                "Documentation and library research: fetches official docs, API references, examples"
+            }
+            Self::Oracle => {
+                "Strategic technical advisor: architecture decisions, code review, complex debugging"
+            }
+            Self::Designer => "UI/UX design specialist: frontend design, styling, user experience",
+            Self::Fixer => {
+                "Implementation specialist: executes code changes efficiently with full context"
+            }
+        }
+    }
+
+    /// Whether this agent type is read-only (no write/edit/execute tools).
+    pub fn is_read_only(self) -> bool {
+        matches!(self, Self::Explorer | Self::Librarian | Self::Oracle)
+    }
+
+    /// The default set of tool names allowed for this agent type.
+    /// `None` means all tools are allowed (subject to session mode permissions).
+    pub fn default_tool_restrictions(self) -> Option<&'static [&'static str]> {
+        match self {
+            Self::General => None,
+            Self::Explorer => Some(&[
+                "read", "glob", "grep", "bash", "websearch", "webfetch",
+            ]),
+            Self::Librarian => Some(&[
+                "read", "glob", "grep", "bash", "websearch", "webfetch", "question",
+            ]),
+            Self::Oracle => Some(&[
+                "read", "glob", "grep", "websearch", "webfetch", "question",
+            ]),
+            Self::Designer => Some(&[
+                "read", "glob", "grep", "write", "edit", "bash",
+                "websearch", "webfetch", "question", "apply_patch",
+            ]),
+            Self::Fixer => None,
+        }
+    }
+
+    /// Default temperature for this agent type.
+    pub fn default_temperature(self) -> f32 {
+        match self {
+            Self::Explorer | Self::Librarian | Self::Oracle => 0.1,
+            Self::Fixer => 0.2,
+            Self::Designer => 0.7,
+            Self::General => 0.3,
+        }
+    }
+
     /// Return all variants of AgentType for iteration.
     pub fn variants() -> &'static [Self] {
         &[
@@ -101,6 +160,11 @@ impl AgentType {
             Self::Designer,
             Self::Fixer,
         ]
+    }
+
+    /// Alias for `variants()` — used by TUI.
+    pub fn all() -> &'static [Self] {
+        Self::variants()
     }
 }
 

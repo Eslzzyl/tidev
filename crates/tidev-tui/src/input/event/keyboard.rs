@@ -422,7 +422,6 @@ impl App {
                 tidev_tools::builtin::kill_process_group(pid);
                 // Send a cancellation event so the streaming message is closed
                 let _ = self.backend_tx.send(BackendEvent::ShellOutput {
-                    session_id: self.conversation.session_id,
                     content: "Command cancelled".to_string(),
                     finished: true,
                     exit_code: None,
@@ -636,7 +635,6 @@ impl App {
             Err(error) => {
                 self.last_notice = Some(format!("Failed to execute command: {error}"));
                 let _ = self.backend_tx.send(BackendEvent::ShellOutput {
-                    session_id: self.conversation.session_id,
                     content: format!("Failed to execute command: {error}"),
                     finished: true,
                     exit_code: None,

@@ -7,7 +7,7 @@ use ratatui::{
 };
 use std::path::Path;
 use tidev_tools::{
-    tooling::builtin::utils::display_workspace_relative, tooling::canonical_tool_name,
+    builtin::utils::display_workspace_relative, canonical_tool_name,
 };
 
 pub(super) fn render_reasoning_markdown_lines(
