@@ -73,6 +73,7 @@ tidev-instructions = { path = "../tidev-instructions" }
 tidev-hooks = { path = "../tidev-hooks" }
 tidev-sync = { path = "../tidev-sync" }
 tidev-notification = { path = "../tidev-notification" }
+tidev-logging = { path = "../tidev-logging" }
 
 [dev-dependencies]
 tempfile = "3.27"

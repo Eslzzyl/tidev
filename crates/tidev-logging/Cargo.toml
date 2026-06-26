@@ -1,0 +1,15 @@
+[package]
+name = "tidev-logging"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "tidev logging subsystem with file rotation"
+
+[lib]
+name = "tidev_logging"
+
+[dependencies]
+chrono = "0.4"
+log = "0.4.32"
+tidev-config = { path = "../tidev-config" }

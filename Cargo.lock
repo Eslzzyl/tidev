@@ -3794,9 +3794,7 @@ name = "tidev-config"
 version = "0.7.0"
 dependencies = [
  "anyhow",
- "chrono",
  "dirs",
- "log",
  "serde",
  "serde_json",
  "tidev-hooks",
@@ -3870,6 +3868,15 @@ dependencies = [
  "tidev-types",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "tidev-logging"
+version = "0.7.0"
+dependencies = [
+ "chrono",
+ "log",
+ "tidev-config",
 ]
 
 [[package]]
@@ -4050,6 +4057,7 @@ dependencies = [
  "tidev-hooks",
  "tidev-instructions",
  "tidev-llm",
+ "tidev-logging",
  "tidev-mcp",
  "tidev-notification",
  "tidev-search",

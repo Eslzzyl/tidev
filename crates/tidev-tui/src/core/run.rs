@@ -37,7 +37,7 @@ impl App {
         let config = AppConfig::load_with_project_overlay(&paths, &workspace_root)?;
         // Initialize shell detection (Windows: auto-detect bash, Unix: sh).
         tidev_tools::shell::init(config.shell.windows_shell.clone(), Some(&paths));
-        let _ = tidev_config::logging::init(&paths.data_dir, config.logging.clone());
+        let _ = tidev_logging::init(&paths.data_dir, config.logging.clone());
         log::info!("App initializing, workspace={}", workspace_root.display());
         log::info!("startup: config loaded in {:?}", _t0.elapsed());
         let _t1 = std::time::Instant::now();
