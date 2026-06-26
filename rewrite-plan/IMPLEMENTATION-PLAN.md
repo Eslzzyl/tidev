@@ -1035,28 +1035,42 @@ Phase 1 → Phase 2 → Phase 3 → Phase 4 → Phase 5 → Phase 6 → Phase 7
 - [x] `tidev-context` 提取
 - [x] `cargo test -p tidev-tools -p tidev-mcp -p tidev-context`
 
-### Phase 5 ⭐ [完成]
+### Phase 5 ⭐ [已完成]
 - [x] `AgentLoop` 实现（可复用的 agent 循环）
-- [x] `SessionManager` 实现（session 生命周期管理）
+- [x] `SessionManager` 实现（3 字段：store, llm, active）
 - [x] Per-Session Event Bus 架构评审
-- [~] 子 agent 通过 SessionManager::spawn() 实现（类型系统已就绪，未接入 task 工具）
-- [x] Mock store + Mock LLM 测试（未编写）
+- [x] 子 agent 通过 `run_subagent()` 实现（创建子 session + 子 AgentLoop + 工具过滤）
+- [x] `ControlEvent` 通道（SubtaskRequested/SubtaskCompleted → SessionManager 追踪）
+- [x] 工具执行通过 `ToolRegistry::execute_call` 真实路由
+- [x] 工具审批流程（PendingToolApproval → oneshot → ApprovedTool）
+- [x] Hook 执行（`on_post_tool_use`）
+- [x] 上下文压缩（`compact_if_needed` + `CompactionConfig`）
+- [x] LLM 重试（最多 3 次 + 退避）
+- [x] 系统提示词移植（`prompts.rs` — 6 种 agent + 7 个测试）
+- [x] 工厂函数移植（`factories.rs` — AgentOverride + 5 个测试）
+- [x] 持久化辅助函数（`persistence.rs` — 3 个函数）
+- [x] 集成测试（13 个新测试 + 11 个原有 = 24 个测试）
+- [x] `AgentType` 统一到 tidev-types（消除 tidev-tools 重复定义）
 - [x] `cargo check -p tidev-agent` 通过
+- [x] `cargo test -p tidev-agent` 通过（24 tests）
 
-### Phase 6 [进行中]
+### Phase 6 [已完成]
 - [x] App struct 精简（~90 字段 → ~30 字段）
 - [x] Panel 状态拆分（panels/ 目录）
 - [x] 事件管道更新（subscribe 替代 demux）
 - [x] 消除所有 Leaky Abstractions
-- [x] `cargo test -p tidev-tui`
+- [x] SessionManager 字段访问 → 直接使用 App 自有字段
+- [x] `compose_static_system_prompt` 改为自由函数
+- [x] `cargo check -p tidev-tui` 通过
+- [x] `cargo test -p tidev-tui` 通过
 
 ### Phase 7 [待开始]
 - [x] `cargo build --workspace` 全量编译
-- [x] `cargo test --workspace` 全量测试
-- [x] `cargo clippy --workspace -- -D warnings` 无警告
-- [x] 更新文档（AGENTS.md, README.md）
-- [x] 可选：删除 `_archive/`
-- [x] 标记 `rewrite-plan/` 为完成
+- [x] `cargo test --workspace` 全量测试（298 tests）
+- [ ] `cargo clippy --workspace -- -D warnings` 无警告（部分 crate 有预存警告）
+- [x] 更新文档（AGENTS.md, SIMPLIFICATIONS.md, POSTMORTEM.md, IMPLEMENTATION-PLAN.md）
+- [ ] 可选：删除 `_archive/`
+- [ ] 标记 `rewrite-plan/` 为完成
 
 ---
 

@@ -214,87 +214,112 @@
 
 这是**最大的简化区域**，因为 tidev-agent 是全新编写的代码（非提取）。
 
-### 8.1 AgentLoop 工具执行为占位
+**以下各项已全部修复**，详见 [`POSTMORTEM.md`](./POSTMORTEM.md#5-迁移到正确架构的步骤) 的迁移记录。
+
+### 8.1 AgentLoop 工具执行为占位 ✅ 已修复
 
 | 项目     | 说明                                                                                   |
 | -------- | -------------------------------------------------------------------------------------- |
 | **原始** | `AgentRuntime::execute_tool_calls` → 通过 `ToolRegistry` 路由到 20+ 内置工具 + MCP     |
-| **当前** | `AgentLoop::execute_tool_calls` 返回占位字符串 `"Executed tool 'X' (standalone mode)"` |
-| **原因** | 需要集成 `ToolRegistry`，但架构尚未确定如何连接                                        |
-| **影响** | AgentLoop 无法真正执行任何工具                                                         |
-| **恢复** | 实现 `execute_tool_calls` → `ToolRegistry::execute` 路由                               |
+| **当前** | `AgentLoop::run()` 中的 `execute_external_tools()` → 通过 `ToolRegistry::execute_call` 路由 |
+| **状态** | ✅ **已完成** — 通过 `execute_external_tool()` 调用 `ToolRegistry::execute_call`，支持 20+ 内置工具 + MCP |
+| **恢复** | 已在重写中直接实现                                                                     |
 
-### 8.2 工具审批流程未实现 + 类型字段不匹配
+### 8.2 工具审批流程未实现 + 类型字段不匹配 ✅ 已修复
 
 | 项目     | 说明                                                                                                                                                                                    |
 | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **原始** | `PendingToolApproval { tool_calls: Vec<ToolCall>, mode: SessionMode, response_tx: oneshot::Sender<Vec<ApprovedTool>> }` — 异步审批通道，TUI 通过 `response_tx` 返回用户决定               |
-| **当前** | `tidev-agent::types::PendingToolApproval { session_id, request_id, tool_call, tool_definition }` — 结构完全不同；`ApprovedTool { tool_call, tool_definition }` — 缺失审批相关字段         |
-| **影响** | TUI 编译错误：`PendingToolApproval` 无 `tool_calls`/`response_tx`/`mode` 字段；`ApprovedTool` 无 `rejection`/`child_session_id`/`allow_outside`/`sensitive_file_approved` 字段（约 12 个错误） |
-| **恢复** | 统一类型定义：将 `PendingToolApproval` 恢复为包含 `tool_calls: Vec<ToolCall>` + `mode` + `response_tx` 的完整审批结构；在 `ApprovedTool` 中添加所有缺失字段                              |
+| **当前** | `tidev-agent::types::PendingToolApproval { tool_calls, mode, response_tx }` — 完整审批结构；`ApprovedTool { tool_call, rejection, child_session_id, allow_outside, sensitive_file_approved }` — 全部字段已恢复 |
+| **状态** | ✅ **已完成** — TUI 中约 12 个相关编译错误已清除 |
+| **恢复** | 已在重写中于 `types.rs` 中直接实现完整类型 |
 
-### 8.3 SessionManager API 不匹配
+### 8.3 SessionManager API 不匹配 ✅ 已修复
 
 | 项目     | 说明                                                                                                                                                                                                                                   |
 | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **原始** | TUI 期望 SessionManager 有 ~12 个可直接访问的字段和方法：`workspace_root`、`config_dir`、`config_paths`、`config`、`auth`、`llm_client`、`tools`、`instructions`、`instruction_content_cache`、`queued_messages`、`hooks`、`auto_approve_permissions`、`store` |
-| **当前** | `crates/tidev-agent/src/session_manager.rs` 的 `SessionManager` 只有 3 个字段（`store`、`llm`、`active`）和 5 个方法（`spawn`、`cancel`、`list_active`、`is_active`、`active_count`）                                                          |
-| **影响** | TUI 中约 25 个编译错误：struct `SessionManager` has no field named `workspace_root` / `config_dir` / `tools` 等；no method named `queue_user_message` / `compose_static_system_prompt` / `run_agent_loop_with_permission_channel`      |
-| **恢复** | 两种方案：(A) 在 SessionManager 中添加缺失的访问器方法；(B) 重写 TUI 中直接访问 SessionManager 内部字段的代码，改为通过 `tidev-config`、`tidev-agent` 公共 API 获取。推荐方案 B                                                     |
+| **原始** | TUI 期望 SessionManager 有 ~12 个可直接访问的字段和方法 |
+| **当前** | `SessionManager` 只有 4 个字段（`store`、`llm`、`active`、`control_tx`/`control_rx`）和 `run_agent_loop_with_permission_channel` 等公共方法 |
+| **状态** | ✅ **已完成** — TUI 中约 25 个编译错误已清除，前端字段直接存放在 `App` struct 中，`compose_static_system_prompt` 改为自由函数 |
+| **恢复** | 已在重写中直接实现 |
 
-### 8.4 子 agent 调度未实现
+### 8.4 子 agent 调度未实现 ✅ 已修复
 
 | 项目     | 说明                                                                 |
 | -------- | -------------------------------------------------------------------- |
 | **原始** | `SubagentConfig` → `run_subagent_inner` → 递归创建子 session         |
-| **当前** | `SessionManager::spawn` 支持 `parent_session_id`，但 task 工具未接入 |
-| **影响** | task 工具返回占位字符串，不会真正创建子 agent                        |
-| **恢复** | 在 `task.rs` 中调用 `SessionManager::spawn`                          |
+| **当前** | `AgentLoop::run_subagent()` → 创建子 session + 子 AgentLoop → `into_run_fut()` 内联执行 |
+| **状态** | ✅ **已完成** — task 工具现在真正创建子 agent，按 agent 类型过滤工具，通过 `ControlEvent` 通知 SessionManager |
+| **恢复** | 已在重写中直接实现 |
 
-### 8.5 Hook 执行未实现
+### 8.5 Hook 执行未实现 ✅ 已修复
 
 | 项目     | 说明                                                                  |
 | -------- | --------------------------------------------------------------------- |
 | **原始** | `AgentRuntime` 在工具执行后调用 `HookEngine::run_post_tool_use_hooks` |
-| **当前** | AgentLoop 中无钩子调用                                                |
-| **影响** | post-tool-use 钩子不会触发                                            |
-| **恢复** | 在 `execute_tool_calls` 后添加 `HookEngine` 调用                      |
+| **当前** | AgentLoop 在工具执行后调用 `self.hooks.on_post_tool_use()` |
+| **状态** | ✅ **已完成** — post-tool-use 钩子在每次外部工具执行后触发 |
+| **恢复** | 已在重写中直接实现 |
 
-### 8.6 上下文压缩未实现
+### 8.6 上下文压缩未实现 ✅ 已修复
 
 | 项目     | 说明                                                                          |
 | -------- | ----------------------------------------------------------------------------- |
 | **原始** | `ContextManager::compact_if_needed`, `compact`, `schedule_context_compaction` |
-| **当前** | AgentLoop 中无压缩逻辑                                                        |
-| **影响** | 长对话不会自动压缩上下文                                                      |
-| **恢复** | 在 AgentLoop 循环中添加压缩检查                                               |
+| **当前** | AgentLoop 循环中检查 `needs_compaction()` → 调用 `compact_if_needed()` |
+| **状态** | ✅ **已完成** — 长对话自动压缩上下文，使用正确的 `CompactionConfig` API |
+| **恢复** | 已在重写中直接实现 |
 
-### 8.7 重试逻辑未实现
+### 8.7 重试逻辑未实现 ✅ 已修复
 
 | 项目     | 说明                                                                                       |
 | -------- | ------------------------------------------------------------------------------------------ |
-| **原始** | `stream_chat_with_retry` 在 tidev-llm 层实现（最多 MAX_RETRIES 次）                        |
-| **当前** | tidev-llm 的带重试版本在提取后被保留，但 tidev-agent 的 AgentLoop 不处理 Failed 事件的重试 |
-| **影响** | LLM 请求失败后直接抛出错误                                                                 |
-| **恢复** | 在 `run_single_turn` 中添加重试循环                                                        |
+| **原始** | `stream_chat_with_retry` 在 tidev-llm 层实现 |
+| **当前** | `run_single_turn_with_retry` 在 AgentLoop 中实现，最多重试 3 次，指数退避 |
+| **状态** | ✅ **已完成** — LLM 请求失败后自动重试，发送 `BackendEvent::Retrying` 通知前端 |
+| **恢复** | 已在重写中直接实现 |
 
-### 8.8 权限检查未实现
+### 8.8 权限检查未实现 ⚠️ 部分保留
 
 | 项目     | 说明                                                                     |
 | -------- | ------------------------------------------------------------------------ |
 | **原始** | `PermissionConfig`, `ToolPermission::is_allowed_in` 控制 Plan/Build 模式 |
-| **当前** | AgentLoop 不检查工具权限                                                 |
-| **影响** | Plan 模式下也可以执行写操作工具                                          |
-| **恢复** | 在 `execute_tool_calls` 中添加权限检查                                   |
+| **当前** | AgentLoop 通过 `permission_tx` 通道将工具审批转发给前端处理              |
+| **状态** | ✅ **已实现** — TUI 通过 `PendingToolApproval`/`ApprovedTool` 通道控制权限，`ToolPermission` 检查由 `ToolRegistry` 完成 |
+| **恢复** | 已在重写中直接实现 |
 
-### 8.9 单元测试缺失
+### 8.9 单元测试缺失 ✅ 已修复
 
 | 项目     | 说明                                              |
 | -------- | ------------------------------------------------- |
 | **原始** | `agent/runtime/tests.rs` — 完整的 agent loop 测试 |
-| **当前** | tidev-agent 中 0 个测试                           |
-| **原因** | 全新编写，尚未添加测试                            |
-| **恢复** | 编写 MockSessionStore + MockLlmClient 测试        |
+| **当前** | tidev-agent 中 24 个测试（11 个 prompts/factories 测试 + 13 个集成测试） |
+| **状态** | ✅ **已完成** — 包含 persistence 辅助函数测试、AgentType 测试、compose_static_system_prompt 测试、SharedAgentState 测试 |
+| **恢复** | 已在重写中直接实现 |
+
+### 8.10 ControlEvent 通道 ✅ 已实现
+
+| 项目     | 说明                                                                 |
+| -------- | -------------------------------------------------------------------- |
+| **新增** | `ControlEvent` 枚举 + `control_tx`/`control_rx` 通道 + `process_control_events()` |
+| **当前** | 父 AgentLoop 在创建/完成子 session 时发送 `SubtaskRequested`/`SubtaskCompleted` 事件，SessionManager 记录追踪 |
+| **状态** | ✅ **已完成** |
+
+### 8.11 系统提示词 + 工厂函数 ✅ 已实现
+
+| 项目     | 说明                                                                 |
+| -------- | -------------------------------------------------------------------- |
+| **移植** | `prompts.rs` — 全部 6 种 agent 系统提示词 + 7 个测试 |
+| **移植** | `factories.rs` — `AgentOverride`, `create_agent()`, `create_all_agents()`, `create_sub_agents()` + 5 个测试 |
+| **状态** | ✅ **已完成** — 从 `_archive/v0.6.x/` 移植 |
+
+### 8.12 AgentType 统一 ✅ 已实现
+
+| 项目     | 说明                                                                 |
+| -------- | -------------------------------------------------------------------- |
+| **迁移** | `AgentType` 从 `tidev-tools` + `tidev-agent` 的重复定义 → 统一到 `tidev-types::agent` |
+| **当前** | `tidev-tools::agent` 改为 `pub use tidev_types::agent::AgentType` |
+| **状态** | ✅ **已完成** — 消除重复定义，`AgentType` 含 `all/display_name/description/parse/is_read_only/default_tool_restrictions/default_temperature` + 6 个测试 |
 
 ---
 
@@ -488,17 +513,23 @@ let app = App { session_manager, config, workspace_root, ... };
 | Phase 2（config + storage + llm） | ✅ 已完成 | HooksConfig/SyncConfig 已完整化，logging 简化（待恢复）    |
 | Phase 3（5 个基础设施 crate）     | ✅ 已完成 | StepPatch 已移植，canonical_tool_name 副本仍存在            |
 | Phase 4（tools + mcp + context）  | ✅ 已完成 | encoding/shell 已从旧代码完整移植，80 测试通过               |
-| Phase 5（agent）                  | **部分完成** | 工具执行/审批/MCP/Hook/压缩/重试已恢复，子 agent spawn 待接 |
+| Phase 5（agent）                  | **全部完成** | 工具执行/审批/MCP/Hook/压缩/重试/子 agent/ControlEvent/持久化/测试/提示词/工厂函数 |
 | Phase 6（tui）                    | ✅ 已修复 | 73 个编译错误已全部清除                                    |
-| Phase 7（清理）                   | 未开始     | —                                                        |
+| Phase 7（清理）                   | 待开始   | —                                                        |
 
-最需要优先恢复的功能：
+所有 Phase 5 的 tidev-agent 功能已完整实现：
 
-1. ✅ **AgentLoop 工具执行** — 通过 ToolRegistry 真实执行（已完成）
-2. ✅ **工具审批流程** — PendingToolApproval → ApprovedTool 通道（已完成）
-3. 🔲 **Subagent 调度** — task 工具实际调用 SessionManager::spawn()（需解决 Send 问题）
-4. ✅ **Hook 执行** — 在 AgentLoop 中调用 HookEngine（已完成）
-5. ✅ **上下文压缩** — 在 AgentLoop 中自动检测并压缩（已完成）
-6. ✅ **LLM 重试** — 最多重试 3 次（已完成）
-7. ✅ **跨平台 shell/encoding** — 移植 Windows 检测和编码转换（已完成）
-8. 🔲 **with_temporary_session_context** — TUI 子会话事件路由（待实现）
+1. ✅ **AgentLoop 工具执行** — 通过 ToolRegistry 真实执行
+2. ✅ **工具审批流程** — PendingToolApproval → ApprovedTool 通道
+3. ✅ **Subagent 调度** — task 工具创建子 session + 子 AgentLoop + ControlEvent 通知
+4. ✅ **Hook 执行** — 在 AgentLoop 中调用 HookEngine
+5. ✅ **上下文压缩** — 在 AgentLoop 中自动检测并压缩
+6. ✅ **LLM 重试** — 最多重试 3 次
+7. ✅ **跨平台 shell/encoding** — 移植 Windows 检测和编码转换
+8. ✅ **ControlEvent 通道** — SubtaskRequested/SubtaskCompleted 事件
+9. ✅ **persistence.rs** — 消息持久化辅助函数
+10. ✅ **prompts.rs** — 全部 6 种 agent 系统提示词
+11. ✅ **factories.rs** — agent 工厂函数
+12. ✅ **AgentType 统一** — 移到 tidev-types
+13. ✅ **集成测试** — 24 个测试（11 prompts/factories + 13 新测试）
+14. 🔲 **with_temporary_session_context** — TUI 子会话事件路由（待 TUI 重构时处理）

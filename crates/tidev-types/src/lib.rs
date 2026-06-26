@@ -1,3 +1,4 @@
+pub mod agent;
 pub mod prompts;
 pub mod reasoning;
 pub mod theme;

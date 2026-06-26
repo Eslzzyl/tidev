@@ -1,4 +1,11 @@
+//! Shared types for the tidev-agent runtime.
+//!
+//! These types define the configuration structs, permission models,
+//! and session handles that frontends use to interact with the agent runtime.
+
 use std::sync::{Arc, Mutex};
+use std::collections::VecDeque;
+use std::path::PathBuf;
 
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::oneshot;
@@ -6,12 +13,12 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use tidev_session::session::{BackendEvent, MessageAttachment, ToolCall, ToolExecutionResult};
-use tidev_storage::SessionStore;
+use tidev_types::agent::AgentType;
 use tidev_types::prompts::SessionMode;
 
 /// A user message received while the agent loop was already processing a turn.
 ///
-/// After the current turn completes, `run_agent_loop` picks up the next
+/// After the current turn completes, the agent loop picks up the next
 /// queued message, persists it to the database, and continues the loop.
 /// This is the shared mechanism for "type-ahead" across all frontends.
 #[derive(Clone, Debug)]
@@ -22,155 +29,32 @@ pub struct QueuedUserMessage {
     pub thinking_level: Option<tidev_config::reasoning::ThinkingLevelType>,
 }
 
-/// Configuration for spawning a new agent session.
-#[derive(Clone)]
-pub struct SessionConfig {
-    /// Parent session ID, if this is a sub-agent.
-    pub parent_session_id: Option<Uuid>,
-    /// The model configuration for this session.
-    pub model: tidev_config::ActiveModel,
-    /// Shared session store for persistence.
-    pub store: Arc<tokio::sync::Mutex<SessionStore>>,
-    /// Optional workspace root.
-    pub workspace_root: Option<std::path::PathBuf>,
-}
-
-/// A handle to a running session, obtained from [`SessionManager::spawn`].
-pub struct SessionHandle {
-    /// The session ID.
-    pub session_id: Uuid,
-    /// Receive end of the session's event channel.
-    pub event_rx: UnboundedReceiver<BackendEvent>,
-    /// Cancellation token for this session.
-    pub cancel_token: CancellationToken,
-}
-
-/// Information about an active session.
+/// A fully configured agent definition with resolved system prompt and tool settings.
 #[derive(Clone, Debug)]
-pub struct SessionInfo {
-    pub session_id: Uuid,
-    pub parent_session_id: Option<Uuid>,
+pub struct AgentDefinition {
+    /// The agent type.
     pub agent_type: AgentType,
-    pub started_at: chrono::DateTime<chrono::Utc>,
-}
-
-/// Agent type classification.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AgentType {
-    General,
-    Explorer,
-    Librarian,
-    Oracle,
-    Designer,
-    Fixer,
-}
-
-impl AgentType {
-    pub fn parse(s: &str) -> Option<Self> {
-        let s = s.trim().to_ascii_lowercase();
-        let s = s.strip_prefix('@').unwrap_or(&s);
-        match s {
-            "general" => Some(Self::General),
-            "explorer" => Some(Self::Explorer),
-            "librarian" => Some(Self::Librarian),
-            "oracle" => Some(Self::Oracle),
-            "designer" => Some(Self::Designer),
-            "fixer" => Some(Self::Fixer),
-            _ => None,
-        }
-    }
-
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            Self::General => "general",
-            Self::Explorer => "explorer",
-            Self::Librarian => "librarian",
-            Self::Oracle => "oracle",
-            Self::Designer => "designer",
-            Self::Fixer => "fixer",
-        }
-    }
-
-    /// Short description shown to the LLM and in UI panels.
-    pub fn description(self) -> &'static str {
-        match self {
-            Self::General => "General-purpose assistant with multi-agent delegation",
-            Self::Explorer => {
-                "Fast codebase search specialist: grep, glob, and read to discover code patterns"
-            }
-            Self::Librarian => {
-                "Documentation and library research: fetches official docs, API references, examples"
-            }
-            Self::Oracle => {
-                "Strategic technical advisor: architecture decisions, code review, complex debugging"
-            }
-            Self::Designer => "UI/UX design specialist: frontend design, styling, user experience",
-            Self::Fixer => {
-                "Implementation specialist: executes code changes efficiently with full context"
-            }
-        }
-    }
-
-    /// Whether this agent type is read-only (no write/edit/execute tools).
-    pub fn is_read_only(self) -> bool {
-        matches!(self, Self::Explorer | Self::Librarian | Self::Oracle)
-    }
-
-    /// The default set of tool names allowed for this agent type.
-    /// `None` means all tools are allowed (subject to session mode permissions).
-    pub fn default_tool_restrictions(self) -> Option<&'static [&'static str]> {
-        match self {
-            Self::General => None,
-            Self::Explorer => Some(&[
-                "read", "glob", "grep", "bash", "websearch", "webfetch",
-            ]),
-            Self::Librarian => Some(&[
-                "read", "glob", "grep", "bash", "websearch", "webfetch", "question",
-            ]),
-            Self::Oracle => Some(&[
-                "read", "glob", "grep", "websearch", "webfetch", "question",
-            ]),
-            Self::Designer => Some(&[
-                "read", "glob", "grep", "write", "edit", "bash",
-                "websearch", "webfetch", "question", "apply_patch",
-            ]),
-            Self::Fixer => None,
-        }
-    }
-
-    /// Default temperature for this agent type.
-    pub fn default_temperature(self) -> f32 {
-        match self {
-            Self::Explorer | Self::Librarian | Self::Oracle => 0.1,
-            Self::Fixer => 0.2,
-            Self::Designer => 0.7,
-            Self::General => 0.3,
-        }
-    }
-
-    /// Return all variants of AgentType for iteration.
-    pub fn variants() -> &'static [Self] {
-        &[
-            Self::General,
-            Self::Explorer,
-            Self::Librarian,
-            Self::Oracle,
-            Self::Designer,
-            Self::Fixer,
-        ]
-    }
-
-    /// Alias for `variants()` — used by TUI.
-    pub fn all() -> &'static [Self] {
-        Self::variants()
-    }
+    /// Human-readable display name (e.g. "explorer").
+    pub display_name: String,
+    /// Short description for tool definitions and UI.
+    pub description: String,
+    /// The system prompt sent to the LLM.
+    pub system_prompt: String,
+    /// Optional tool name restrictions. `None` = all tools allowed.
+    pub allowed_tools: Option<Vec<String>>,
+    /// Optional model override for this agent. `None` = inherit from parent session.
+    pub model_override: Option<tidev_config::ActiveModel>,
+    /// Temperature override. `None` = use default for agent type.
+    pub temperature: Option<f32>,
+    /// Whether this agent is read-only.
+    pub read_only: bool,
 }
 
 /// A tool call with an optional rejection reason.
 ///
 /// Sent by frontends through the permission channel to tell
-/// `run_agent_loop` which tools are approved and which are rejected.
-#[derive(Debug)]
+/// the agent loop which tools are approved and which are rejected.
+#[derive(Clone, Debug)]
 pub struct ApprovedTool {
     pub tool_call: ToolCall,
     /// If `Some`, the tool is rejected; this [`ToolExecutionResult`] will
@@ -190,7 +74,7 @@ pub struct ApprovedTool {
     pub sensitive_file_approved: bool,
 }
 
-/// Request sent by `run_agent_loop` to the frontend for tool permission approval.
+/// Request sent by the agent loop to the frontend for tool permission approval.
 ///
 /// The frontend sends back a `Vec<ApprovedTool>` through `response_tx`.
 pub struct PendingToolApproval {
@@ -219,6 +103,10 @@ pub struct AgentLoopConfig<'a> {
     pub thinking_level: tidev_config::reasoning::ThinkingLevelType,
     pub event_tx: tokio::sync::mpsc::UnboundedSender<BackendEvent>,
     pub cancel_token: Option<CancellationToken>,
+    /// Workspace root for this session.
+    pub workspace_root: std::path::PathBuf,
+    /// The composed static system prompt (frozen for session lifetime).
+    pub system_prompt: String,
 }
 
 /// Configuration for running a sub-agent via the `task` tool.
@@ -230,4 +118,134 @@ pub struct SubagentConfig {
     pub cancel_token: Option<CancellationToken>,
     pub parent_model: tidev_config::ActiveModel,
     pub child_session_id: Option<Uuid>,
+}
+
+/// Configuration for spawning a new agent session.
+#[derive(Clone)]
+pub struct SessionConfig {
+    /// Parent session ID, if this is a sub-agent.
+    pub parent_session_id: Option<Uuid>,
+    /// The model configuration for this session.
+    pub model: tidev_config::ActiveModel,
+    /// Shared session store for persistence.
+    pub store: Arc<tokio::sync::Mutex<tidev_storage::SessionStore>>,
+    /// Optional workspace root.
+    pub workspace_root: Option<PathBuf>,
+}
+
+/// A handle to a running session, obtained from [`SessionManager::spawn`].
+pub struct SessionHandle {
+    /// The session ID.
+    pub session_id: Uuid,
+    /// Receive end of the session's event channel.
+    pub event_rx: UnboundedReceiver<BackendEvent>,
+    /// Cancellation token for this session.
+    pub cancel_token: CancellationToken,
+}
+
+/// Information about an active session.
+#[derive(Clone, Debug)]
+pub struct SessionInfo {
+    pub session_id: Uuid,
+    pub parent_session_id: Option<Uuid>,
+    pub agent_type: AgentType,
+    pub started_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// Per-session control event for parent-child communication.
+///
+/// Unlike [`BackendEvent`], `ControlEvent` is never sent to the frontend.
+/// It carries `oneshot::Sender` channels that do not serialise, and is
+/// used exclusively for in-process communication between an AgentLoop and
+/// its SessionManager.
+///
+/// In the current execution model (blocking/inline), the parent AgentLoop
+/// directly creates and runs child sessions. ControlEvents are used for
+/// tracking/side-effects in SessionManager, not for delegation dispatch.
+pub enum ControlEvent {
+    /// The parent agent loop has spawned a child session.
+    /// Sent after the child is created, for SessionManager tracking.
+    SubtaskRequested {
+        parent_session_id: Uuid,
+        child_session_id: Uuid,
+        agent_type: tidev_types::agent::AgentType,
+        /// Description of the task being delegated.
+        description: String,
+        /// Oneshot for SessionManager to acknowledge (if needed).
+        ack_tx: oneshot::Sender<()>,
+    },
+    /// A child session has completed.
+    SubtaskCompleted {
+        child_session_id: Uuid,
+        /// Whether the child completed successfully.
+        success: bool,
+    },
+}
+
+/// Shared mutable state for the agent runtime.
+///
+/// Holds the queued messages and other runtime-global state
+/// that must be accessible from both the frontend and agent loops.
+pub struct SharedAgentState {
+    /// Queue of user messages received while the agent loop is running.
+    /// After each turn completes, the loop processes the next message
+    /// automatically. Frontends push through [`queue_user_message`].
+    pub queued_messages: Mutex<VecDeque<QueuedUserMessage>>,
+}
+
+impl Default for SharedAgentState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SharedAgentState {
+    pub fn new() -> Self {
+        Self {
+            queued_messages: Mutex::new(VecDeque::new()),
+        }
+    }
+
+    /// Enqueue a user message for processing after the current turn ends.
+    pub fn queue_user_message(&self, msg: QueuedUserMessage) {
+        if let Ok(mut queue) = self.queued_messages.lock() {
+            queue.push_back(msg);
+        }
+    }
+
+    /// Pop the next queued message, if any.
+    pub fn pop_queued_message(&self) -> Option<QueuedUserMessage> {
+        self.queued_messages.lock().ok()?.pop_front()
+    }
+}
+
+/// Compose the static system prompt — called exactly once per session lifetime.
+///
+/// Content: base prompt + environment info.
+/// Result is persisted to the session DB record and never changes.
+pub fn compose_static_system_prompt(base_prompt: &str, workspace_root: &std::path::Path) -> String {
+    let base_prompt = base_prompt.trim();
+    let system_info = tidev_session::system_info::SystemInfo::detect();
+    let working_dir = std::env::current_dir()
+        .map(|p| p.display().to_string())
+        .unwrap_or_default();
+    let is_git = tidev_session::system_info::is_git_repo(workspace_root);
+
+    let mut prompt = String::new();
+    if !base_prompt.is_empty() {
+        prompt.push_str(base_prompt);
+    }
+    prompt.push_str("\n\nHere is some useful information about the environment:\n<env>\n  ");
+    prompt.push_str(&format!("Working directory: {}\n  ", working_dir));
+    prompt.push_str(&format!(
+        "Workspace root folder: {}\n  ",
+        workspace_root.display()
+    ));
+    prompt.push_str(&format!(
+        "Is directory a git repo: {}\n  ",
+        if is_git { "yes" } else { "no" }
+    ));
+    prompt.push_str(&system_info.format_env());
+    prompt.push_str("\n</env>");
+    prompt
 }

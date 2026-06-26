@@ -1,4 +1,4 @@
-use tidev_agent::AgentType;
+use tidev_types::agent::AgentType;
 
 #[derive(Clone, Debug)]
 #[allow(dead_code)]

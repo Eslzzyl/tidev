@@ -109,30 +109,14 @@ impl App {
         }
         tools.set_active_model(active_model.clone());
         let shared_config: SharedConfig = Arc::new(RwLock::new(config.clone()));
-        // Build shared tidev_agent::SessionManager from the same resources
-        let agent = tidev_agent::SessionManager {
-            workspace_root: workspace_root.clone(),
-            config_dir: paths.config_dir.clone(),
-            config_paths: paths.clone(),
-            config: config.clone(),
-            auth: auth.clone(),
-            store: Arc::new(tokio::sync::Mutex::new(store.clone())),
-            llm_client: llm.clone(),
-            tools: tools.clone(),
-            instructions: config.instructions.clone(),
-            instruction_content_cache: std::collections::HashMap::new(),
-            queued_messages: std::sync::Arc::new(std::sync::Mutex::new(
-                std::collections::VecDeque::new(),
-            )),
-            auto_approve_permissions: true, // TUI handles permissions via channel
-            hooks: Arc::new(std::sync::Mutex::new(
-                tidev_hooks::HookEngine::new(
-                    config.hooks.clone(),
-                    workspace_root.clone(),
-                ),
-            )),
-            active: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-        };
+        // Build shared tidev_agent::SessionManager from the same resources.
+        // SessionManager now holds only shared runtime state (store + LLM).
+        // Frontend-specific fields (workspace_root, config, tools, hooks, etc.)
+        // live directly on the App struct.
+        let agent = tidev_agent::SessionManager::new(
+            Arc::new(tokio::sync::Mutex::new(store.clone())),
+            llm.clone(),
+        );
         // Share current session ID for the background inactivity check.
         let current_session_id: Arc<RwLock<Uuid>> = Arc::new(RwLock::new(session_id));
         let inactivity_check_cancel = CancellationToken::new();
@@ -681,7 +665,7 @@ impl App {
         // (all_definitions → use_apply_patch) uses the correct model
         // for the restored session.
         self.tools.set_active_model(self.active_model.clone());
-        self.agent.tools.set_active_model(self.active_model.clone());
+        self.tools.set_active_model(self.active_model.clone());
         self.thinking_level = thinking_level;
         self.context_manager = cached.context_manager;
         self.pending_tool_execution = cached.pending_tool_execution;
@@ -881,9 +865,10 @@ impl App {
         if !stored_system_prompt.is_empty() {
             active_model.system_prompt = stored_system_prompt;
         } else {
-            let composed = self
-                .agent
-                .compose_static_system_prompt(&active_model.system_prompt);
+            let composed = tidev_agent::compose_static_system_prompt(
+                &active_model.system_prompt,
+                &self.workspace_root,
+            );
             if let Err(e) = self
                 .store
                 .update_session_system_prompt(session_id, &composed)

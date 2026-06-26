@@ -73,7 +73,7 @@ use tidev_config::{ActiveModel, AppConfig, AuthStore, ConfigPaths};
 use tidev_context::ContextManager;
 use tidev_instructions;
 use tidev_mcp::McpManager;
-use tidev_agent::{SessionManager, PendingToolApproval};
+use tidev_agent::PendingToolApproval;
 use tidev_search::current_at_fragment;
 use tidev_snapshot::{FileDiff, SnapshotService};
 use tidev_tools::{FileReadTracker, TodoItem, ToolRegistry};
@@ -1576,15 +1576,8 @@ impl App {
         let mode = self.pending_mode.unwrap_or(self.mode);
         let thinking_level = self.thinking_level.clone();
 
-        // Queue via runtime for processing
-        let msg = tidev_agent::QueuedUserMessage {
-            content: prompt.clone(),
-            attachments: attachments.clone(),
-            mode: Some(mode),
-            thinking_level: Some(thinking_level.clone()),
-        };
-        self.agent.queue_user_message(msg);
-
+        // Queue via runtime for processing — message will be persisted to store
+        // when spawn_agent_loop runs
         // Add to display queue for UI rendering
         // instruction_sources will be shown when the queued message is processed
         // (in TurnStarting handler) so the notification appears below the user message.
@@ -1646,9 +1639,10 @@ impl App {
 
                 // Compose the immutable static system prompt and persist it.
                 let _t_prompt = std::time::Instant::now();
-                let static_prompt = self
-                    .agent
-                    .compose_static_system_prompt(&self.active_model.system_prompt);
+                let static_prompt = tidev_agent::compose_static_system_prompt(
+                    &self.active_model.system_prompt,
+                    &self.workspace_root,
+                );
                 log::info!(
                     "agent: compose_static_system_prompt took {:?}",
                     _t_prompt.elapsed()
@@ -1735,16 +1729,16 @@ impl App {
         // the streaming assistant message is created by spawn_agent_loop.
         // This is done here (not in the agent loop) to avoid corrupting the
         // conversation message order (the streaming message must remain last).
+        let instructions = self.config.read().unwrap().instructions.clone();
         let (_, sources, new_cache) = tidev_instructions::system_prompt_and_sources_with_cache(
             &self.workspace_root,
             &self.paths.config_dir,
-            &self.agent.instructions,
+            &instructions,
             &self.instruction_content_cache,
         )
         .unwrap_or_default();
         self.update_loaded_instruction_sources(&sources)?;
-        self.instruction_content_cache = new_cache.clone();
-        self.agent.instruction_content_cache = new_cache;
+        self.instruction_content_cache = new_cache;
 
         log::info!(
             "submit_prompt_now: after instruction load, sources={:?}",
@@ -1798,7 +1792,13 @@ impl App {
         self.pending_permission_response = None;
 
         // Clone resources for the spawned task
-        let mut agent = self.agent.clone();
+        let agent = self.agent.clone();
+        let tools = self.tools.clone();
+        let hooks_config = self.config.read().unwrap().hooks.clone();
+        let hooks = tidev_hooks::HookEngine::new(hooks_config, self.workspace_root.clone());
+        let session_manager = self.agent.clone();
+        let workspace_root = self.workspace_root.clone();
+        let system_prompt = self.active_model.system_prompt.clone();
         let tx = self.backend_tx.clone();
         let session_id = self.conversation.session_id;
         let model = self.active_model.clone();
@@ -1819,7 +1819,7 @@ impl App {
                 ContextManager::from_state(context_summary, context_retained_from);
 
             // Clone tx for post-loop cleanup — the original will be moved
-            // into AgentLoopConfig below.
+            // into run_agent_loop_with_permission_channel below.
             let cleanup_tx = tx.clone();
 
             if let Err(e) = agent
@@ -1832,9 +1832,14 @@ impl App {
                         thinking_level,
                         event_tx: tx,
                         cancel_token: Some(cancel_token),
+                        workspace_root,
+                        system_prompt,
                     },
                     request_id,
                     permission_tx,
+                    tools,
+                    hooks,
+                    session_manager,
                 )
             {
                 log::error!("spawn_agent_loop: agent loop failed: {}", e);

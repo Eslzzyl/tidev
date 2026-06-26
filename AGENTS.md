@@ -23,21 +23,27 @@ cargo test           # >200 test functions, 8 async; uses tempfile crate
 
 ## Workspace Structure (multi-crate)
 
-This project is a Cargo workspace with 9 crates:
-
-## Workspace Structure (multi-crate)
-
-This project is a Cargo workspace with 6 crates:
+This project is a Cargo workspace with 18 crates:
 
 | Crate             | Path                   | Description                                                                                                                                                                                                                                             |
 | ----------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **tidev** (root)  | `.`                    | Thin CLI dispatch (`src/main.rs` → `src/lib.rs`). Uses clap to delegate to subcrates.                                                                                                                                                                   |
-| **tidev-types**   | `crates/tidev-types`   | Shared types & enums: types, prompts, reasoning levels, theme. Leaf crate, no internal deps.                                                                                                                                                            |
-| **tidev-session** | `crates/tidev-session` | Core data model: session, conversation, message, tool call types, stats, balance, system info. Depends on `tidev-types`.                                                                                                                                |
+| **tidev-types**   | `crates/tidev-types`   | Shared types & enums: `AgentType`, prompts, reasoning levels, theme, `ToolSchema`. Leaf crate, no internal deps.                                                                                                                                        |
+| **tidev-session** | `crates/tidev-session` | Core data model: session, conversation, message, tool call types, `BackendEvent`, stats, balance, system info. Depends on `tidev-types`.                                                                                                                |
 | **tidev-storage** | `crates/tidev-storage` | SQLite persistence: `SessionStore` with separate read/write connections, schema (`schema.rs`), migrations (`migration.rs`), zstd compression. Depends on `tidev-types`, `tidev-session`.                                                                |
+| **tidev-config**  | `crates/tidev-config`  | Config loading, auth storage, provider config, MCP config, reasoning/thinking levels.                                                                                                                                                                   |
 | **tidev-llm**     | `crates/tidev-llm`     | LLM provider abstraction: Anthropic, OpenAI chat, OpenAI Responses API, Google Gemini. Depends on `tidev-types`, `tidev-session`.                                                                                                                       |
-| **tidev-engine**  | `crates/tidev-engine`  | **Core engine** — the largest crate. Contains agent runtime, tool registry, config loading, MCP, sandbox, memory/graph, snapshot, sync, instructions, logging, provider setup. Depends on `tidev-types`, `tidev-session`, `tidev-storage`, `tidev-llm`. |
-| **tidev-tui**     | `crates/tidev-tui`     | Terminal UI (ratatui + crossterm). Depends on `tidev-engine`.                                                                                                                                                                                           |
+| **tidev-hooks**   | `crates/tidev-hooks`   | PostToolUse hook engine with configurable command matchers.                                                                                                                                                                                              |
+| **tidev-instructions** | `crates/tidev-instructions` | Instruction file resolution (AGENTS.md, CLAUDE.md, etc.) with upward directory walk.                                                                                                                                |
+| **tidev-snapshot** | `crates/tidev-snapshot` | Git snapshot/revert for workspace file tracking.                                                                                                                                                                                                        |
+| **tidev-sync**    | `crates/tidev-sync`    | Session sync over SSH.                                                                                                                                                                                                                                  |
+| **tidev-search**  | `crates/tidev-search`  | File search utilities (grep, glob wrappers).                                                                                                                                                                                                            |
+| **tidev-mcp**     | `crates/tidev-mcp`     | Model Context Protocol (experimental); child process and streamable HTTP transports.                                                                                                                                                                     |
+| **tidev-tools**   | `crates/tidev-tools`   | Tool definitions, `ToolRegistry`, `ToolArgs` trait, `SkillCatalog`, `FileReadTracker`, 20+ builtin tools.                                                                                                                                               |
+| **tidev-context** | `crates/tidev-context` | Context management: `ContextManager`, `CompactionConfig`, compaction/summarization logic.                                                                                                                                                                |
+| **tidev-agent**   | `crates/tidev-agent`   | **Agent runtime** — `AgentLoop` (core LLM ↔ tool execution loop with Per-Session Event Bus), `SessionManager` (session lifecycle), `ControlEvent`, prompts, factories, persistence.                                                                     |
+| **tidev-notification** | `crates/tidev-notification` | Desktop notification support.                                                                                                                                                                                                                           |
+| **tidev-tui**     | `crates/tidev-tui`     | Terminal UI (ratatui + crossterm). Depends on `tidev-agent`, `tidev-tools`, `tidev-config`, etc.                                                                                                                                                        |
 
 ## Entry Points
 
@@ -48,16 +54,36 @@ This project is a Cargo workspace with 6 crates:
 
 ## Architecture (key modules in each crate)
 
-### tidev-engine (`crates/tidev-engine/src/`)
+### tidev-agent (`crates/tidev-agent/src/`)
 
-- `agent/` — agent loop (`runtime.rs`) and 6 agent types (General, Explorer, Librarian, Oracle, Designer, Fixer)
-- `tooling/` — tool definitions, `ToolRegistry`, `ToolArgs` trait, `SkillCatalog`, `FileReadTracker`
-- `config/` — config loading, auth storage, provider config, MCP config, sandbox config, reasoning/thinking levels
-- `memory/` — memory/graph/retention system (graph nodes/edges, consolidation, eviction, lessons)
-- `sandbox/` — sandbox execution (bwrap, landlock, seatbelt, process hardening)
-- `snapshot/` — git snapshot/revert for workspace file tracking
-- `mcp.rs` — Model Context Protocol (experimental); child process and streamable HTTP transports
-- `instructions.rs` — instruction file resolution (AGENTS.md, CLAUDE.md, etc.) with upward directory walk
+- `agent_loop.rs` — `AgentLoop`: core LLM ↔ tool execution loop with retry, hooks, context compaction, subagent delegation
+- `session_manager.rs` — `SessionManager`: 3-field struct (store, llm, active) + control channel for parent-child coordination
+- `types.rs` — `ApprovedTool`, `PendingToolApproval`, `QueuedUserMessage`, `AgentDefinition`, `ControlEvent`, `SessionHandle`, `SharedAgentState`, `compose_static_system_prompt()`
+- `prompts.rs` — System prompts for all 6 built-in agent types (General, Explorer, Librarian, Oracle, Designer, Fixer)
+- `factories.rs` — `AgentOverride`, `create_agent()`, `create_all_agents()`, `create_sub_agents()`
+- `persistence.rs` — Message persistence helpers (`persist_message`, `persist_tool_result`, `persist_assistant_message`)
+
+### tidev-tools (`crates/tidev-tools/src/`)
+
+- `registry.rs` — `ToolRegistry`: tool definition storage, model-aware filtering, `execute_call` routing
+- `builtin/` — 20+ built-in tool implementations (read, write, edit, grep, glob, bash, websearch, etc.)
+- `agent.rs` — Re-exports `AgentType` from `tidev-types` (was duplicate, now unified)
+- `SkillCatalog` — Reusable skill management
+
+### tidev-config (`crates/tidev-config/src/`)
+
+- `lib.rs` — `AppConfig`, `ActiveModel`, `ConfigPaths`, `SharedConfig`
+- `auth.rs` — `AuthStore`, `From<ActiveModel> for LlmProviderConfig`
+- `reasoning.rs` — `ThinkingLevelType`
+
+### tidev-tui (`crates/tidev-tui/src/`)
+
+- `core/run.rs` — TUI entry point, App construction, SessionManager initialization
+- `input/` — keyboard/mouse input handling
+- `render/` — ratatui rendering
+- `ui/` — UI components (panels, dialogs)
+- `markdown/` — markdown rendering
+- `theme/` — styling
 - `llm_bridge.rs` — bridge between engine and `tidev-llm` crate
 - `provider_setup/` — API key / provider initialization flow
 - `sync/` — session sync over SSH

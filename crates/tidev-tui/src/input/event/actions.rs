@@ -1,7 +1,7 @@
 use super::*;
 use crate::render::chat_render::strip_system_reminder_tags;
 use crate::theme::ThemeName;
-use tidev_agent::AgentType;
+use tidev_types::agent::AgentType;
 
 impl App {
     pub(crate) fn apply_theme_command(&mut self, args: &[String]) -> Result<()> {
@@ -498,7 +498,7 @@ impl App {
         self.tools.set_active_model(model.clone());
         // Sync the agent's ToolRegistry so per-turn tool filtering
         // (all_definitions → use_apply_patch) uses the correct model.
-        self.agent.tools.set_active_model(model.clone());
+        self.tools.set_active_model(model.clone());
         self.conversation.set_model(
             model.provider_id.clone(),
             model.provider_display_name.clone(),
@@ -586,9 +586,10 @@ impl App {
             .set_placeholder("Ask tidev about your code, task, or question...");
         // ── Compose the static system prompt and persist it ──────────────
         // This prompt is frozen for the entire session lifetime. Never change it.
-        let static_prompt = self
-            .agent
-            .compose_static_system_prompt(&self.active_model.system_prompt);
+        let static_prompt = tidev_agent::compose_static_system_prompt(
+            &self.active_model.system_prompt,
+            &self.workspace_root,
+        );
         self.active_model.system_prompt = static_prompt.clone();
         if let Err(e) = self
             .store
