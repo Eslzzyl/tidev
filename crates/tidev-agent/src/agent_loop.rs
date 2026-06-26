@@ -266,10 +266,17 @@ impl AgentLoop {
                 self.compact_context().await;
             }
 
-            // 8. Generate new request ID and continue loop
+            // 8. If no tool calls, this was a final response — exit the loop.
+            //    The agent loop will only continue when there are tool calls
+            //    to execute and feed back to the LLM.
+            if turn.tool_calls.is_empty() {
+                break;
+            }
+
+            // 9. Generate new request ID and continue loop
             request_id = request_id.wrapping_add(1);
 
-            // 9. Notify frontend about the new turn
+            // 10. Notify frontend about the new turn
             let _ = self.event_tx.send(BackendEvent::TurnStarting {
                 request_id,
             });
@@ -560,6 +567,30 @@ impl AgentLoop {
                 BackendEvent::ReasoningDelta { content, .. } => {
                     turn.reasoning.push_str(&content);
                 }
+                BackendEvent::UsageStats {
+                    input_tokens,
+                    output_tokens,
+                    total_tokens,
+                    cache_read_tokens,
+                    cache_write_tokens,
+                    model_id,
+                    duration_ms,
+                    ..
+                } => {
+                    turn.input_tokens = Some(input_tokens);
+                    turn.output_tokens = Some(output_tokens);
+                    turn.total_tokens = Some(total_tokens);
+                    turn.cache_read_tokens = Some(cache_read_tokens);
+                    turn.cache_write_tokens = Some(cache_write_tokens);
+                    turn.model_id = Some(model_id.clone());
+                    turn.tokens_per_second = duration_ms.and_then(|ms| {
+                        if ms > 0 {
+                            Some(output_tokens as f32 / (ms as f32 / 1000.0))
+                        } else {
+                            None
+                        }
+                    });
+                }
                 BackendEvent::Finished { turn: finished_turn, .. } => {
                     if !finished_turn.content.is_empty() {
                         turn.content = finished_turn.content;
@@ -570,13 +601,15 @@ impl AgentLoop {
                     if !finished_turn.reasoning.is_empty() {
                         turn.reasoning = finished_turn.reasoning;
                     }
-                    turn.input_tokens = finished_turn.input_tokens;
-                    turn.output_tokens = finished_turn.output_tokens;
-                    turn.total_tokens = finished_turn.total_tokens;
-                    turn.cache_read_tokens = finished_turn.cache_read_tokens;
-                    turn.cache_write_tokens = finished_turn.cache_write_tokens;
-                    turn.model_id = finished_turn.model_id;
-                    turn.tokens_per_second = finished_turn.tokens_per_second;
+                    // Preserve token data accumulated from UsageStats event.
+                    // finished_turn always has None for these (from Default::default()).
+                    turn.input_tokens = finished_turn.input_tokens.or(turn.input_tokens);
+                    turn.output_tokens = finished_turn.output_tokens.or(turn.output_tokens);
+                    turn.total_tokens = finished_turn.total_tokens.or(turn.total_tokens);
+                    turn.cache_read_tokens = finished_turn.cache_read_tokens.or(turn.cache_read_tokens);
+                    turn.cache_write_tokens = finished_turn.cache_write_tokens.or(turn.cache_write_tokens);
+                    turn.model_id = finished_turn.model_id.or(turn.model_id.clone());
+                    turn.tokens_per_second = finished_turn.tokens_per_second.or(turn.tokens_per_second);
                     break;
                 }
                 BackendEvent::Failed { error, .. } => {

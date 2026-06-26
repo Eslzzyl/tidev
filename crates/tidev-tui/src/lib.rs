@@ -1517,6 +1517,7 @@ impl App {
                 message.cache_read_tokens = Some(usage.cache_read_tokens);
                 message.cache_write_tokens = Some(usage.cache_write_tokens);
                 message.model_id = Some(usage.model_id.clone());
+                message.tokens_per_second = usage.tokens_per_second;
                 message.completed_at = Some(chrono::Utc::now());
             }
         }
