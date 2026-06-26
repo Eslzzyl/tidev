@@ -15,6 +15,7 @@ members = [
     "crates/tidev-tools",
     "crates/tidev-context",
     "crates/tidev-agent",
+    "crates/tidev-notification",
     "crates/tidev-tui",
 ]
 default-members = ["."]

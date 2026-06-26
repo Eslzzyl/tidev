@@ -304,7 +304,7 @@ struct App {
     step_cached_file_diffs: Option<Vec<FileDiff>>,
     /// The previous snapshot hash, used for computing per-step lightweight diffs.
     step_prev_hash: Option<String>,
-    notifications: tidev_hooks::NotificationManager,
+    notifications: tidev_notification::NotificationManager,
     /// Whether the input is in shell command mode (triggered by `!` prefix).
     shell_mode: bool,
     /// PID of the child process running a `!` shell command, if any.

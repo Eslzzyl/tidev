@@ -143,7 +143,7 @@ impl App {
             Arc::new(config.snapshot.clone()),
         )?;
         let cleanup_cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let notifications = tidev_hooks::NotificationManager::new(config.notifications.clone());
+        let notifications = tidev_notification::NotificationManager::new(config.notifications.clone());
 
         // Background cleanup of old tool outputs (runs every hour).
         store.start_output_cleanup(7, std::time::Duration::from_secs(3600));
