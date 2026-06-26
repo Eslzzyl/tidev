@@ -25,21 +25,10 @@ pub use mcp::{McpConfig, McpServerConfig};
 pub use paths::ConfigPaths;
 pub use provider::{ModelConfig, ProviderConfig, ProviderSource};
 pub use tidev_types::ApiType;
-// ── Inline config types (to be moved to their own crates in Phase 3) ──
+// ── Re-exported config types from their own crates ──
 
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
-pub struct HooksConfig {
-    #[serde(default)]
-    pub disable_all_hooks: bool,
-    #[serde(default)]
-    pub post_tool_use: Vec<serde_json::Value>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
-pub struct SyncConfig {
-    #[serde(default)]
-    pub remotes: Vec<serde_json::Value>,
-}
+pub use tidev_hooks::config::HooksConfig;
+pub use tidev_sync::SyncConfig;
 
 pub use tmp::TmpConfig;
 pub use snapshot::SnapshotConfig;
