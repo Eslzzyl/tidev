@@ -3,5 +3,4 @@
 
 pub mod session;
 pub mod stats;
-pub mod system_info;
 pub mod utils;

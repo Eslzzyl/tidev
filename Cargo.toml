@@ -18,6 +18,7 @@ members = [
     "crates/tidev-notification",
     "crates/tidev-logging",
     "crates/tidev-tui",
+    "crates/tidev-system-info",
 ]
 default-members = ["."]
 resolver = "2"

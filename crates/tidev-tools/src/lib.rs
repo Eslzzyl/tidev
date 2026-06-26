@@ -1,4 +1,3 @@
-pub mod agent;
 pub mod builtin;
 pub(crate) mod bundled_skills;
 pub mod encoding;

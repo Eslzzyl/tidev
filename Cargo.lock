@@ -3896,6 +3896,7 @@ dependencies = [
  "tidev-session",
  "tidev-snapshot",
  "tidev-storage",
+ "tidev-system-info",
  "tidev-tools",
  "tidev-types",
  "tokio",
@@ -4034,10 +4035,8 @@ dependencies = [
 name = "tidev-session"
 version = "0.7.0"
 dependencies = [
- "anyhow",
  "chrono",
  "log",
- "rusqlite",
  "serde",
  "serde_json",
  "tidev-types",
@@ -4093,6 +4092,13 @@ dependencies = [
  "tidev-storage",
  "tidev-types",
  "uuid",
+]
+
+[[package]]
+name = "tidev-system-info"
+version = "0.7.0"
+dependencies = [
+ "chrono",
 ]
 
 [[package]]

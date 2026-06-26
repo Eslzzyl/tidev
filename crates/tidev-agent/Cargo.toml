@@ -36,6 +36,7 @@ tidev-instructions = { path = "../tidev-instructions" }
 tidev-snapshot = { path = "../tidev-snapshot" }
 tidev-search = { path = "../tidev-search" }
 tidev-mcp = { path = "../tidev-mcp" }
+tidev-system-info = { path = "../tidev-system-info" }
 
 [dev-dependencies]
 tempfile = "3.27"

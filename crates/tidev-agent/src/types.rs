@@ -225,11 +225,11 @@ impl SharedAgentState {
 /// Result is persisted to the session DB record and never changes.
 pub fn compose_static_system_prompt(base_prompt: &str, workspace_root: &std::path::Path) -> String {
     let base_prompt = base_prompt.trim();
-    let system_info = tidev_session::system_info::SystemInfo::detect();
+    let system_info = tidev_system_info::SystemInfo::detect();
     let working_dir = std::env::current_dir()
         .map(|p| p.display().to_string())
         .unwrap_or_default();
-    let is_git = tidev_session::system_info::is_git_repo(workspace_root);
+    let is_git = tidev_system_info::is_git_repo(workspace_root);
 
     let mut prompt = String::new();
     if !base_prompt.is_empty() {

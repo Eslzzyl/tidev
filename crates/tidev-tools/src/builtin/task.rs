@@ -3,7 +3,7 @@ use serde_json::Value;
 use std::path::Path;
 use uuid::Uuid;
 
-use crate::agent::AgentType;
+use tidev_types::agent::AgentType;
 use crate::tools::{TaskArgs, decode_tool_args};
 use crate::{ToolDefinition, ToolPermission};
 use tidev_storage::SessionStore;
