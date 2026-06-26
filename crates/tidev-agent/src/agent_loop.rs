@@ -7,15 +7,15 @@
 //! Permission approval, hooks, and tool execution are injected via fields
 //! at construction time — no tight coupling to frontends.
 //!
-//! Subagent spawning is handled by creating a child AgentLoop with its own
-//! session and running it synchronously within the parent's execution flow.
+//! Subagent spawning is delegated to [`SessionManager::run_subagent`], which
+//! handles model resolution, tool filtering, child session creation, and
+//! frontend notification via [`FrontendEvent`].
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
 use tokio::sync::mpsc::UnboundedSender;
-use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -28,8 +28,7 @@ use tidev_types::prompts::SessionMode;
 use tidev_storage::SessionStore;
 
 use crate::session_manager::SessionManager;
-use crate::types::{ApprovedTool, ControlEvent, PendingToolApproval, compose_static_system_prompt};
-use crate::AgentDefinition;
+use crate::types::{ApprovedTool, PendingToolApproval};
 
 /// The per-session agent loop.
 ///
@@ -37,14 +36,14 @@ use crate::AgentDefinition;
 /// - Owns its own event channel (`event_tx`)
 /// - Receives permission approvals through `permission_tx`
 /// - Runs hooks after tool execution via `hooks`
-/// - Delegates subagent spawning through `session_manager`
+/// - Delegates subagent spawning to [`SessionManager::run_subagent`]
 pub struct AgentLoop {
     pub session_id: Uuid,
     pub model: tidev_config::ActiveModel,
     pub conversation: Conversation,
     pub context: tidev_context::ContextManager,
+    /// Pre-filtered tool definitions for this session's model.
     pub tools: Vec<tidev_tools::ToolDefinition>,
-    pub tool_registry: tidev_tools::ToolRegistry,
     pub store: Arc<tokio::sync::Mutex<SessionStore>>,
     pub llm: tidev_llm::LlmClient,
     pub event_tx: UnboundedSender<BackendEvent>,
@@ -59,14 +58,13 @@ pub struct AgentLoop {
     pub permission_tx: Option<UnboundedSender<PendingToolApproval>>,
     /// Hook engine for PostToolUse hooks.
     pub hooks: tidev_hooks::HookEngine,
-    /// SessionManager for spawning subagent sessions.
+    /// Tool registry for executing tool calls.
+    pub tool_registry: tidev_tools::ToolRegistry,
+    /// SessionManager for subagent creation and lifecycle management.
     pub session_manager: SessionManager,
     /// Whether this loop can delegate to sub-agents.
     /// Child sessions set this to `false` to avoid async recursion.
     pub can_delegate: bool,
-    /// Control event channel for parent-child coordination.
-    /// Used to notify SessionManager about subagent lifecycle events.
-    pub control_tx: tokio::sync::mpsc::UnboundedSender<ControlEvent>,
 }
 
 impl AgentLoop {
@@ -79,13 +77,7 @@ impl AgentLoop {
     }
 
     /// Core agent loop implementation as a boxed future.
-    ///
-    /// Returns a `Pin<Box<dyn Future>>` instead of being `async` so that
-    /// child sessions can call this method without creating async recursion
-    /// in the call graph (`run_subagent_inner` → `into_run_fut` → `run_subagent_inner`
-    /// is not a cycle because the compiler sees `into_run_fut` as a non-async
-    /// function that returns a future).
-    fn into_run_fut(
+    pub(crate) fn into_run_fut(
         mut self,
         mut request_id: u64,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>> {
@@ -157,13 +149,19 @@ impl AgentLoop {
                 // === Serial subagents (write-capable) first ===
                 for tc in &internal {
                     if tc.name == "task" && self.can_delegate {
-                        let is_read_only = serde_json::from_str::<TaskArgs>(&tc.arguments)
+                        let is_read_only = serde_json::from_str::<tidev_tools::TaskArgs>(&tc.arguments)
                             .ok()
                             .and_then(|args| tidev_types::agent::AgentType::parse(&args.subagent_type))
                             .is_some_and(|t| t.is_read_only());
                         if !is_read_only {
-                            // Write-capable subagent: run serially
-                            let result = self.run_subagent(tc).await;
+                            // Write-capable subagent: run serially via SessionManager
+                            let result = self.session_manager.run_subagent(
+                                self.session_id,
+                                &self.model,
+                                &self.workspace_root,
+                                &self.system_prompt,
+                                tc,
+                            ).await;
                             crate::persistence::persist_tool_result(
                                 &self.store, self.session_id, request_id,
                                 tc, &result, &self.event_tx,
@@ -178,26 +176,23 @@ impl AgentLoop {
                 // === Parallel subagents (read-only) second ===
                 for tc in &internal {
                     if tc.name == "task" && self.can_delegate
-                        && let Ok(args) = serde_json::from_str::<TaskArgs>(&tc.arguments)
+                        && let Ok(args) = serde_json::from_str::<tidev_tools::TaskArgs>(&tc.arguments)
                             && let Some(agent_type) = tidev_types::agent::AgentType::parse(&args.subagent_type)
                                 && agent_type.is_read_only() {
-                                    let description = args.description.trim().to_string();
-                                    let prompt = args.prompt.trim().to_string();
-                                    let child = self.build_child_agent(agent_type, &description, &prompt).await?;
-                                    let child_session_id = child.session_id;
-                                    let child_store = self.store.clone();
+                                    let session_manager = self.session_manager.clone();
+                                    let parent_session_id = self.session_id;
+                                    let parent_model = self.model.clone();
+                                    let workspace_root = self.workspace_root.clone();
+                                    let system_prompt = self.system_prompt.clone();
+                                    let tc_clone = (*tc).clone();
                                     let handle = tokio::spawn(async move {
-                                        child.into_run_fut(1).await.ok();
-                                        // Read the last assistant message from child session
-                                        let store = child_store.lock().await;
-                                        let msgs = store.load_messages(child_session_id).unwrap_or_default();
-                                        drop(store);
-                                        let content = msgs.iter()
-                                            .rev()
-                                            .find(|m| m.role == MessageRole::Assistant && !m.streaming)
-                                            .map(|m| m.content.clone())
-                                            .unwrap_or_default();
-                                        ToolExecutionResult::new(content)
+                                        session_manager.run_subagent(
+                                            parent_session_id,
+                                            &parent_model,
+                                            &workspace_root,
+                                            &system_prompt,
+                                            &tc_clone,
+                                        ).await
                                     });
                                     task_handles.push(((*tc).clone(), handle));
                                 }
@@ -267,8 +262,6 @@ impl AgentLoop {
             }
 
             // 8. If no tool calls, this was a final response — exit the loop.
-            //    The agent loop will only continue when there are tool calls
-            //    to execute and feed back to the LLM.
             if turn.tool_calls.is_empty() {
                 break;
             }
@@ -284,201 +277,6 @@ impl AgentLoop {
 
         Ok(())
         }) // end of Box::pin(async move { })
-    }
-
-    /// Run the agent loop for a sub-agent session.
-    ///
-    /// Similar to `run()` but does not own `self` — instead creates and
-    /// runs a new AgentLoop for the child, then returns the result.
-    /// Used by the `task` tool to delegate to specialist sub-agents.
-    pub async fn run_subagent(&self, tool_call: &ToolCall) -> ToolExecutionResult {
-        let result = self.run_subagent_inner(tool_call).await;
-        match result {
-            Ok(output) => ToolExecutionResult::new(output),
-            Err(e) => ToolExecutionResult::new(format!("Subagent failed: {e}")),
-        }
-    }
-
-    async fn run_subagent_inner(&self, tool_call: &ToolCall) -> Result<String> {
-        // 1. Parse task arguments
-        let args: TaskArgs = serde_json::from_str(&tool_call.arguments)
-            .map_err(|e| anyhow::anyhow!("failed to parse task arguments: {e}"))?;
-
-        let agent_type = tidev_types::agent::AgentType::parse(&args.subagent_type)
-            .ok_or_else(|| anyhow::anyhow!(
-                "unknown subagent type '{}': expected one of explorer, librarian, oracle, designer, fixer",
-                args.subagent_type
-            ))?;
-
-        let description = args.description.trim().to_string();
-        let prompt = args.prompt.trim().to_string();
-        anyhow::ensure!(!description.is_empty(), "task description cannot be empty");
-        anyhow::ensure!(!prompt.is_empty(), "task prompt cannot be empty");
-
-        // 2. Build child agent (session + AgentLoop)
-        let child = self.build_child_agent(agent_type, &description, &prompt).await?;
-        let child_session_id = child.session_id;
-
-        // 3. Run child agent inline
-        if let Err(e) = child.into_run_fut(1).await {
-            log::warn!("run_subagent: child session failed: {e}");
-        }
-
-        // 4. Notify SessionManager that child completed
-        let _ = self.control_tx.send(ControlEvent::SubtaskCompleted {
-            child_session_id,
-            success: true,
-        });
-
-        // 5. Get last assistant message from child session
-        let last_content = {
-            let store = self.store.lock().await;
-            let msgs = store.load_messages(child_session_id).unwrap_or_default();
-            msgs.iter()
-                .rev()
-                .find(|m| m.role == MessageRole::Assistant && !m.streaming)
-                .map(|m| m.content.clone())
-                .unwrap_or_default()
-        };
-
-        log::info!(
-            "run_subagent: {} subagent '{}' completed (child={})",
-            agent_type.display_name(),
-            description,
-            child_session_id
-        );
-
-        Ok(last_content)
-    }
-
-    /// Build a child AgentLoop for a subagent task without running it.
-    ///
-    /// Creates the child session in the store, prepares the bootstrap message,
-    /// filters tools, and returns the ready-to-run AgentLoop.
-    /// The caller is responsible for calling `into_run_fut` and reading the result.
-    async fn build_child_agent(
-        &self,
-        agent_type: tidev_types::agent::AgentType,
-        description: &str,
-        prompt: &str,
-    ) -> Result<AgentLoop> {
-        let child_session_id = Uuid::new_v4();
-        let (child_event_tx, _child_event_rx) = tokio::sync::mpsc::unbounded_channel();
-        let child_cancel_token = self.cancel_token.child_token();
-        let child_model = self.model.clone();
-
-        // Create session in store
-        {
-            let store = self.store.lock().await;
-            store.create_session(
-                child_session_id,
-                &self.workspace_root,
-                &child_model.provider_id,
-                &child_model.provider_display_name,
-                &child_model.model_id,
-                &child_model.display_name,
-                agent_type.display_name(),
-            )?;
-        }
-
-        // Compose and store child system prompt
-        let agent_def = AgentDefinition::new(agent_type);
-        let child_prompt = compose_static_system_prompt(&agent_def.system_prompt, &self.workspace_root);
-        {
-            let store = self.store.lock().await;
-            store.update_session_system_prompt(child_session_id, &child_prompt)?;
-        }
-
-        // Create and persist bootstrap message with the task prompt
-        let bootstrap_msg = Message::new(MessageRole::User, prompt);
-        {
-            let store = self.store.lock().await;
-            store.append_message(child_session_id, &bootstrap_msg)?;
-        }
-
-        // Load bootstrap messages for child conversation
-        let child_messages = {
-            let store = self.store.lock().await;
-            store.load_messages(child_session_id).unwrap_or_default()
-        };
-
-        // Filter tools for child agent type
-        let (child_tools, _) = self.restrict_tools_for_agent(agent_type);
-
-        // Build child conversation
-        let mut child_conv = Conversation::new(
-            child_session_id,
-            self.workspace_root.display().to_string(),
-            &child_model.provider_id,
-            &child_model.provider_display_name,
-            &child_model.model_id,
-            &child_model.display_name,
-            description,
-        );
-        child_conv.messages = child_messages;
-
-        let child = AgentLoop {
-            session_id: child_session_id,
-            model: child_model,
-            conversation: child_conv,
-            context: tidev_context::ContextManager::new(),
-            tools: child_tools,
-            tool_registry: self.tool_registry.clone(),
-            store: self.store.clone(),
-            llm: self.llm.clone(),
-            event_tx: child_event_tx,
-            cancel_token: child_cancel_token,
-            mode: self.mode,
-            agent_type,
-            workspace_root: self.workspace_root.clone(),
-            system_prompt: child_prompt,
-            permission_tx: None, // auto-approve for sub-agents
-            hooks: tidev_hooks::HookEngine::new(
-                Default::default(),
-                self.workspace_root.clone(),
-            ),
-            session_manager: self.session_manager.clone(),
-            can_delegate: false,
-            control_tx: self.control_tx.clone(),
-        };
-
-        // Notify SessionManager about the child session via ControlEvent
-        let (ack_tx, _ack_rx) = tokio::sync::oneshot::channel();
-        let _ = self.control_tx.send(ControlEvent::SubtaskRequested {
-            parent_session_id: self.session_id,
-            child_session_id,
-            agent_type,
-            description: description.to_string(),
-            ack_tx,
-        });
-
-        // Notify parent TUI about child session
-        let _ = self.event_tx.send(BackendEvent::InstructionsLoaded {
-            sources: vec![format!("Subagent {} started: {}", agent_type.display_name(), description)],
-        });
-
-        Ok(child)
-    }
-
-    /// Filter tool definitions for a specific agent type based on its
-    /// default_tool_restrictions.
-    fn restrict_tools_for_agent(
-        &self,
-        agent_type: tidev_types::agent::AgentType,
-    ) -> (Vec<tidev_tools::ToolDefinition>, bool) {
-        let is_read_only = agent_type.is_read_only();
-        match agent_type.default_tool_restrictions() {
-            Some(allowed) => {
-                let filtered: Vec<tidev_tools::ToolDefinition> = self
-                    .tools
-                    .iter()
-                    .filter(|t| allowed.contains(&t.name.as_str()))
-                    .cloned()
-                    .collect();
-                (filtered, is_read_only)
-            }
-            None => (self.tools.clone(), is_read_only),
-        }
     }
 
     /// Run a single LLM turn with retry logic.
@@ -554,18 +352,37 @@ impl AgentLoop {
         let mut turn = AssistantTurn::default();
 
         while let Some(event) = rx.recv().await {
-            // Forward event to frontend
-            let _ = self.event_tx.send(event.clone());
-
             match event {
                 BackendEvent::Delta { content, .. } => {
                     turn.content.push_str(&content);
-                }
-                BackendEvent::ToolCallUpdated { tool_call, .. } => {
-                    turn.upsert_tool_call(tool_call);
+                    let _ = self.event_tx.send(BackendEvent::Delta {
+                        request_id,
+                        content,
+                    });
                 }
                 BackendEvent::ReasoningDelta { content, .. } => {
                     turn.reasoning.push_str(&content);
+                    let _ = self.event_tx.send(BackendEvent::ReasoningDelta {
+                        request_id,
+                        content,
+                    });
+                }
+                BackendEvent::ToolCallUpdated { tool_call: tc_update, .. } => {
+                    // Update or add the tool call
+                    if let Some(existing) = turn
+                        .tool_calls
+                        .iter_mut()
+                        .find(|tc| tc.id == tc_update.id)
+                    {
+                        existing.name = tc_update.name.clone();
+                        existing.arguments = tc_update.arguments.clone();
+                    } else {
+                        turn.tool_calls.push(tc_update.clone());
+                    }
+                    let _ = self.event_tx.send(BackendEvent::ToolCallUpdated {
+                        request_id,
+                        tool_call: tc_update,
+                    });
                 }
                 BackendEvent::UsageStats {
                     input_tokens,
@@ -583,164 +400,166 @@ impl AgentLoop {
                     turn.cache_read_tokens = Some(cache_read_tokens);
                     turn.cache_write_tokens = Some(cache_write_tokens);
                     turn.model_id = Some(model_id.clone());
-                    turn.tokens_per_second = duration_ms.and_then(|ms| {
-                        if ms > 0 {
-                            Some(output_tokens as f32 / (ms as f32 / 1000.0))
-                        } else {
-                            None
-                        }
+                    let _ = self.event_tx.send(BackendEvent::UsageStats {
+                        request_id,
+                        input_tokens,
+                        output_tokens,
+                        total_tokens,
+                        cache_read_tokens,
+                        cache_write_tokens,
+                        model_id,
+                        duration_ms,
                     });
                 }
                 BackendEvent::Finished { turn: finished_turn, .. } => {
-                    if !finished_turn.content.is_empty() {
-                        turn.content = finished_turn.content;
+                    // Extract finish_reason from the turn if available
+                    if let Some(reason) = finished_turn.finish_reason {
+                        turn.finish_reason = Some(reason);
                     }
-                    if !finished_turn.tool_calls.is_empty() {
-                        turn.tool_calls = finished_turn.tool_calls;
-                    }
-                    if !finished_turn.reasoning.is_empty() {
-                        turn.reasoning = finished_turn.reasoning;
-                    }
-                    // Preserve token data accumulated from UsageStats event.
-                    // finished_turn always has None for these (from Default::default()).
-                    turn.input_tokens = finished_turn.input_tokens.or(turn.input_tokens);
-                    turn.output_tokens = finished_turn.output_tokens.or(turn.output_tokens);
-                    turn.total_tokens = finished_turn.total_tokens.or(turn.total_tokens);
-                    turn.cache_read_tokens = finished_turn.cache_read_tokens.or(turn.cache_read_tokens);
-                    turn.cache_write_tokens = finished_turn.cache_write_tokens.or(turn.cache_write_tokens);
-                    turn.model_id = finished_turn.model_id.or(turn.model_id.clone());
-                    turn.tokens_per_second = finished_turn.tokens_per_second.or(turn.tokens_per_second);
                     break;
                 }
                 BackendEvent::Failed { error, .. } => {
-                    anyhow::bail!("LLM turn error: {}", error);
+                    anyhow::bail!("LLM streaming error: {error}");
                 }
-                _ => {}
+                _ => {
+                    // Forward any other events (Retrying, StreamEnd, etc.)
+                    let _ = self.event_tx.send(event);
+                }
             }
         }
 
         Ok(turn)
     }
 
-    /// Execute external tool calls through the ToolRegistry.
+    /// Execute a batch of external tool calls.
     async fn execute_external_tools(
         &self,
         tool_calls: &[&ToolCall],
         request_id: u64,
     ) -> Result<Vec<ToolExecResult>> {
-        let mut results = Vec::new();
+        // If there is a permission channel, request approval first
+        if let Some(ref permission_tx) = self.permission_tx {
+            let (response_tx, response_rx) = tokio::sync::oneshot::channel();
 
-        // Check if any tools need permission approval
-        let needs_approval = self.needs_tool_approval(tool_calls);
-        let approved_tools = if needs_approval {
-            self.request_tool_approval(tool_calls).await?
+            permission_tx
+                .send(PendingToolApproval {
+                    tool_calls: tool_calls.iter().map(|tc| (*tc).clone()).collect(),
+                    mode: self.mode,
+                    response_tx,
+                })
+                .map_err(|_| anyhow::anyhow!("permission channel closed"))?;
+
+            let approved = response_rx
+                .await
+                .map_err(|_| anyhow::anyhow!("permission response cancelled"))?;
+
+            let mut results = Vec::new();
+
+            for approved_tool in &approved {
+                if let Some(rejection) = &approved_tool.rejection {
+                    results.push(ToolExecResult {
+                        tool_call_id: approved_tool.tool_call.id.clone(),
+                        tool_name: approved_tool.tool_call.name.clone(),
+                        result: rejection.clone(),
+                    });
+                    continue;
+                }
+
+                match self
+                    .execute_external_tool(&approved_tool.tool_call, request_id, approved_tool.allow_outside)
+                    .await
+                {
+                    Ok(mut result) => {
+                        result.tool_call_id = approved_tool.tool_call.id.clone();
+                        results.push(result);
+                    }
+                    Err(e) => {
+                        let error_result = ToolExecResult {
+                            tool_call_id: approved_tool.tool_call.id.clone(),
+                            tool_name: approved_tool.tool_call.name.clone(),
+                            result: ToolExecutionResult::new(format!("Error: {}", e)),
+                        };
+                        results.push(error_result);
+                    }
+                }
+            }
+
+            Ok(results)
         } else {
-            tool_calls
+            let mut results = Vec::new();
+            for tc in tool_calls {
+                match self.execute_external_tool(tc, request_id, false).await {
+                    Ok(mut result) => {
+                        result.tool_call_id = tc.id.clone();
+                        results.push(result);
+                    }
+                    Err(e) => {
+                        results.push(ToolExecResult {
+                            tool_call_id: tc.id.clone(),
+                            tool_name: tc.name.clone(),
+                            result: ToolExecutionResult::new(format!("Error: {e}")),
+                        });
+                    }
+                }
+            }
+            Ok(results)
+        }
+    }
+
+    /// Request approval for tool calls from the permission channel.
+    async fn request_tool_approval(
+        &self,
+        tool_calls: &[ToolCall],
+    ) -> Result<Vec<ApprovedTool>> {
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+
+        if let Some(ref permission_tx) = self.permission_tx {
+            permission_tx
+                .send(PendingToolApproval {
+                    tool_calls: tool_calls.to_vec(),
+                    mode: self.mode,
+                    response_tx,
+                })
+                .map_err(|_| anyhow::anyhow!("permission channel closed"))?;
+
+            let approved = response_rx
+                .await
+                .map_err(|_| anyhow::anyhow!("permission response cancelled"))?;
+            Ok(approved)
+        } else {
+            // No permission channel — auto-approve all tools
+            Ok(tool_calls
                 .iter()
                 .map(|tc| ApprovedTool {
-                    tool_call: (*tc).clone(),
+                    tool_call: tc.clone(),
                     rejection: None,
                     child_session_id: None,
                     allow_outside: false,
                     sensitive_file_approved: false,
                 })
-                .collect()
-        };
-
-        // Execute approved tools
-        for approved in &approved_tools {
-            if let Some(ref rejection) = approved.rejection {
-                results.push(ToolExecResult {
-                    tool_call_id: approved.tool_call.id.clone(),
-                    tool_name: approved.tool_call.name.clone(),
-                    result: rejection.clone(),
-                });
-                continue;
-            }
-
-            match self
-                .execute_external_tool(&approved.tool_call, request_id, approved.allow_outside)
-                .await
-            {
-                Ok(mut result) => {
-                    result.tool_call_id = approved.tool_call.id.clone();
-                    results.push(result);
-                }
-                Err(e) => {
-                    let error_result = ToolExecResult {
-                        tool_call_id: approved.tool_call.id.clone(),
-                        tool_name: approved.tool_call.name.clone(),
-                        result: ToolExecutionResult::new(format!("Error: {}", e)),
-                    };
-                    results.push(error_result);
-                }
-            }
+                .collect())
         }
-
-        Ok(results)
     }
 
-    /// Check if any tools need user permission approval.
-    fn needs_tool_approval(&self, tool_calls: &[&ToolCall]) -> bool {
-        self.permission_tx.is_some() && !tool_calls.is_empty()
-    }
-
-    /// Request tool approval from the frontend via the permission channel.
-    async fn request_tool_approval(
-        &self,
-        tool_calls: &[&ToolCall],
-    ) -> Result<Vec<ApprovedTool>> {
-        let permission_tx = self
-            .permission_tx
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("no permission channel available"))?;
-
-        let (response_tx, response_rx) = oneshot::channel();
-
-        let pending = PendingToolApproval {
-            tool_calls: tool_calls.iter().map(|tc| (*tc).clone()).collect(),
-            mode: self.mode,
-            response_tx,
-        };
-
-        let _ = permission_tx.send(pending);
-
-        let approved = response_rx
-            .await
-            .map_err(|_| anyhow::anyhow!("permission channel closed"))?;
-
-        Ok(approved)
-    }
-
-    /// Execute a single external tool via the ToolRegistry.
+    /// Execute a single external tool call.
     async fn execute_external_tool(
         &self,
         tool_call: &ToolCall,
-        request_id: u64,
+        _request_id: u64,
         allow_outside: bool,
     ) -> Result<ToolExecResult> {
-        let runtime_handle = tokio::runtime::Handle::current();
         let store = self.store.lock().await;
 
-        let result = self
-            .tool_registry
-            .execute_call(
-                &runtime_handle,
-                &store,
-                self.session_id,
-                tool_call,
-                self.mode,
-                allow_outside,
-                false,
-            )?;
-
+        let result = self.tool_registry.execute_call(
+            &tokio::runtime::Handle::current(),
+            &store,
+            self.session_id,
+            tool_call,
+            self.mode,
+            allow_outside,
+            false,
+        )?;
         drop(store);
-
-        // Persist tool result to DB and emit ToolCompleted event
-        crate::persistence::persist_tool_result(
-            &self.store, self.session_id, request_id,
-            tool_call, &result, &self.event_tx,
-        ).await?;
 
         Ok(ToolExecResult {
             tool_call_id: tool_call.id.clone(),
@@ -749,50 +568,40 @@ impl AgentLoop {
         })
     }
 
-    /// Compact the context when it grows too large.
+    /// Compact conversation context.
     async fn compact_context(&mut self) {
-        let config = tidev_context::CompactionConfig {
-            llm: &self.llm,
-            model: &self.model,
-            conversation: &self.conversation,
-            manual: false,
-            stream_ctx: None,
-            tools: &self.tools,
-            mode: self.mode,
-        };
+        log::info!("agent_loop[{}]: context compaction triggered", self.session_id);
 
-        match self.context.compact_if_needed(config).await {
-            Ok(_) => {
-                log::info!(
-                    "agent_loop[{}]: context compaction succeeded",
-                    self.session_id
-                );
-            }
-            Err(e) => {
-                log::warn!(
-                    "agent_loop[{}]: context compaction failed: {}",
-                    self.session_id,
-                    e
-                );
-            }
+        let event_tx = self.event_tx.clone();
+        let context = &mut self.context;
+
+        if let Err(e) = context
+            .compact(tidev_context::CompactionConfig {
+                llm: &self.llm,
+                model: &self.model,
+                conversation: &self.conversation,
+                manual: false,
+                stream_ctx: None,
+                tools: &self.tools,
+                mode: self.mode,
+            })
+            .await
+        {
+            log::warn!(
+                "agent_loop[{}]: context compaction failed: {}",
+                self.session_id,
+                e
+            );
         }
 
-        let _ = self.event_tx.send(BackendEvent::ContextCompacted {
-            compacted: self.context.summary.is_some(),
+        let _ = event_tx.send(BackendEvent::ContextCompacted {
+            compacted: context.summary.is_some(),
             manual: false,
-            summary: self.context.summary.clone(),
-            retained_from: self.context.retained_from,
+            summary: context.summary.clone(),
+            retained_from: context.retained_from,
             error: None,
         });
     }
-}
-
-/// Arguments for the `task` tool.
-#[derive(serde::Deserialize)]
-struct TaskArgs {
-    description: String,
-    prompt: String,
-    subagent_type: String,
 }
 
 /// Result of executing a single tool call.

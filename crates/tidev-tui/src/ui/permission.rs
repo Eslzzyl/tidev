@@ -734,3 +734,21 @@ impl App {
         ))
     }
 }
+
+/// A subagent overlay rendered inline in the parent conversation.
+///
+/// Each overlay subscribes directly to the child session's BackendEvent channel,
+/// eliminating the need for aggregate subagent events (SubagentStatus, etc.).
+#[derive(Debug)]
+pub(crate) struct SubagentOverlay {
+    pub child_session_id: uuid::Uuid,
+    pub parent_session_id: uuid::Uuid,
+    pub agent_type: tidev_types::agent::AgentType,
+    pub description: String,
+    /// Direct event stream from the child AgentLoop.
+    pub event_rx: tokio::sync::mpsc::UnboundedReceiver<tidev_session::session::BackendEvent>,
+    /// The accumulated assistant message content for this subagent.
+    pub assistant_content: String,
+    /// Whether this subagent has completed.
+    pub finished: bool,
+}

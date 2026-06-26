@@ -109,17 +109,6 @@ pub struct AgentLoopConfig<'a> {
     pub system_prompt: String,
 }
 
-/// Configuration for running a sub-agent via the `task` tool.
-pub struct SubagentConfig {
-    pub parent_session_id: Uuid,
-    pub parent_request_id: u64,
-    pub tool_call: ToolCall,
-    pub event_tx: tokio::sync::mpsc::UnboundedSender<BackendEvent>,
-    pub cancel_token: Option<CancellationToken>,
-    pub parent_model: tidev_config::ActiveModel,
-    pub child_session_id: Option<Uuid>,
-}
-
 /// Configuration for spawning a new agent session.
 #[derive(Clone)]
 pub struct SessionConfig {
@@ -152,33 +141,32 @@ pub struct SessionInfo {
     pub started_at: chrono::DateTime<chrono::Utc>,
 }
 
-/// Per-session control event for parent-child communication.
+/// Events from SessionManager to the frontend.
 ///
-/// Unlike [`BackendEvent`], `ControlEvent` is never sent to the frontend.
-/// It carries `oneshot::Sender` channels that do not serialise, and is
-/// used exclusively for in-process communication between an AgentLoop and
-/// its SessionManager.
+/// Unlike [`BackendEvent`] (which streams per-session LLM/tool events to the
+/// active conversation view), `FrontendEvent` carries lifecycle notifications
+/// that the frontend uses to manage session subscription and overlay rendering.
 ///
-/// In the current execution model (blocking/inline), the parent AgentLoop
-/// directly creates and runs child sessions. ControlEvents are used for
-/// tracking/side-effects in SessionManager, not for delegation dispatch.
-pub enum ControlEvent {
-    /// The parent agent loop has spawned a child session.
-    /// Sent after the child is created, for SessionManager tracking.
-    SubtaskRequested {
+/// Each subagent session gets its own [`BackendEvent`] channel. The frontend
+/// receives the receiver end via `SubagentSpawned` and reads directly from it,
+/// eliminating the need for aggregate subagent events.
+#[derive(Debug)]
+pub enum FrontendEvent {
+    /// A child subagent session has started.
+    /// The frontend should subscribe to `event_rx` for inline rendering
+    /// (e.g. a subagent card overlay in the parent conversation).
+    SubagentSpawned {
+        child_session_id: Uuid,
         parent_session_id: Uuid,
-        child_session_id: Uuid,
-        agent_type: tidev_types::agent::AgentType,
-        /// Description of the task being delegated.
+        agent_type: AgentType,
         description: String,
-        /// Oneshot for SessionManager to acknowledge (if needed).
-        ack_tx: oneshot::Sender<()>,
+        /// Receiver for the child session's own BackendEvent stream.
+        event_rx: UnboundedReceiver<BackendEvent>,
     },
-    /// A child session has completed.
-    SubtaskCompleted {
+    /// A child subagent session has completed.
+    SubagentFinished {
         child_session_id: Uuid,
-        /// Whether the child completed successfully.
-        success: bool,
+        parent_session_id: Uuid,
     },
 }
 

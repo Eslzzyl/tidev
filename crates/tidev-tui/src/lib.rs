@@ -65,13 +65,14 @@ use tidev_types::prompts::{SessionMode, init_command_with_args};
 use crate::ui::connect::ConnectDialog;
 use crate::ui::permission::{
     PendingToolExecution, PermissionDialogState, RunningSubagentExecution, RunningToolExecution,
+    SubagentOverlay,
 };
 
 use crate::theme::ThemeManager;
 use tidev_config::{ActiveModel, AppConfig, AuthStore, ConfigPaths};
 use tidev_context::ContextManager;
 use tidev_mcp::McpManager;
-use tidev_agent::PendingToolApproval;
+use tidev_agent::{FrontendEvent, PendingToolApproval};
 use tidev_search::current_at_fragment;
 use tidev_snapshot::{FileDiff, SnapshotService};
 use tidev_tools::{FileReadTracker, TodoItem, ToolRegistry};
@@ -168,6 +169,10 @@ struct App {
     pending_assistant_turns: std::collections::HashSet<Uuid>,
     cached_sessions: std::collections::HashMap<Uuid, CachedSessionRuntime>,
     compacting_sessions: std::collections::HashSet<Uuid>,
+    /// Receiver for FrontendEvents from SessionManager (subagent lifecycle).
+    frontend_rx: tokio::sync::mpsc::UnboundedReceiver<tidev_agent::FrontendEvent>,
+    /// Active subagent overlays — each has its own BackendEvent channel.
+    subagent_overlays: std::collections::HashMap<Uuid, SubagentOverlay>,
     leader_key_pending: bool,
     composer: Composer,
     /// Saved composer text before question dialog opened, restored on dialog close.
@@ -1838,7 +1843,6 @@ impl App {
                     permission_tx,
                     tools,
                     hooks,
-                    session_manager,
                 )
                 .await
             {

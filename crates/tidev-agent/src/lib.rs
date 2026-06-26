@@ -29,7 +29,7 @@ pub mod prompts;
 pub use agent_loop::{AgentLoop, ToolExecResult};
 pub use session_manager::SessionManager;
 pub use types::{
-    AgentDefinition, AgentLoopConfig, ApprovedTool, ControlEvent, PendingToolApproval,
+    AgentDefinition, AgentLoopConfig, ApprovedTool, FrontendEvent, PendingToolApproval,
     QueuedUserMessage, SessionConfig, SessionHandle, SessionInfo, SharedAgentState,
-    SubagentConfig, compose_static_system_prompt,
+    compose_static_system_prompt,
 };

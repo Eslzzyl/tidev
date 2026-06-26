@@ -109,13 +109,17 @@ impl App {
         }
         tools.set_active_model(active_model.clone());
         let shared_config: SharedConfig = Arc::new(RwLock::new(config.clone()));
-        // Build shared tidev_agent::SessionManager from the same resources.
-        // SessionManager now holds only shared runtime state (store + LLM).
-        // Frontend-specific fields (workspace_root, config, tools, hooks, etc.)
-        // live directly on the App struct.
+        // Build shared tidev_agent::SessionManager with config/auth/tools for
+        // subagent model resolution and tool filtering.
+        let session_config = Arc::new(tokio::sync::RwLock::new(config.clone()));
+        let (frontend_tx, frontend_rx) = tokio::sync::mpsc::unbounded_channel();
         let agent = tidev_agent::SessionManager::new(
             Arc::new(tokio::sync::Mutex::new(store.clone())),
             llm.clone(),
+            session_config,
+            Arc::new(auth.clone()),
+            tools.clone(),
+            frontend_tx,
         );
         // Share current session ID for the background inactivity check.
         let current_session_id: Arc<RwLock<Uuid>> = Arc::new(RwLock::new(session_id));
@@ -191,6 +195,8 @@ impl App {
             pending_assistant_turns: std::collections::HashSet::new(),
             cached_sessions: std::collections::HashMap::new(),
             compacting_sessions: std::collections::HashSet::new(),
+            frontend_rx,
+            subagent_overlays: std::collections::HashMap::new(),
             leader_key_pending: false,
             composer,
             saved_composer_text: None,
