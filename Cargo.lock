@@ -3988,6 +3988,7 @@ dependencies = [
  "diffy",
  "dirs",
  "dunce",
+ "encoding_rs",
  "fast_html2md",
  "futures-util",
  "globset",
