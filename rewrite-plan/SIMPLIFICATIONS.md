@@ -43,25 +43,22 @@
 
 ## 2. Phase 2: tidev-config
 
-### 2.1 HooksConfig 内联占位
+### 2.1 HooksConfig 内联占位 — ✅ 已修复
 
 | 项目     | 说明                                                                                           |
 | -------- | ---------------------------------------------------------------------------------------------- |
-| **原始** | `PostToolUseHookConfig` 有完整字段和方法（matcher, command, extensions, timeout 等）           |
-| **当前** | `HooksConfig` 只有两个字段：`disable_all_hooks: bool`, `post_tool_use: Vec<serde_json::Value>` |
-| **原因** | 避免依赖 `tidev-hooks` crate（Phase 3 之前不存在），使用 JSON Value 占位                       |
-| **影响** | 钩子系统配置不完整，无法在 config.toml 中精细定义钩子                                          |
-| **恢复** | Phase 3 后从 `tidev-hooks` 重新导入完整 `HooksConfig`                                          |
+| **原始** | `PostToolUseHookConfig` 有完整字段和方法（matcher, command, extensions, timeout 等），位于 `tidev-engine/src/hooks/config.rs` |
+| **当前** | `tidev-config` 已改为从 `tidev-hooks` 重新导入完整 `HooksConfig`                                |
+| **状态** | ✅ **已完成** — 2026-06-26 替换为 `pub use tidev_hooks::config::HooksConfig`                    |
 
-### 2.2 SyncConfig 内联占位
+### 2.2 SyncConfig 内联占位 — ✅ 已修复
 
 | 项目     | 说明                                                                                             |
 | -------- | ------------------------------------------------------------------------------------------------ |
 | **原始** | `tidev-engine/src/sync/mod.rs` — `SyncConfig { remotes: Vec<RemoteMachine> }` 完整类型，含 `RemoteMachine { name, host, tidev_path, last_sync_at }` |
-| **当前** | `crates/tidev-config/src/lib.rs` 中的 `SyncConfig` 只有 `remotes: Vec<serde_json::Value>`        |
-| **原因** | 与 HooksConfig 相同，Phase 2 创建时 `tidev-sync` crate 还不存在，使用 JSON Value 占位             |
-| **影响** | TUI 中 `config.sync.remotes[0].name` / `.host` / `.last_sync_at` 等字段访问在 `&Value` 上不存在，产生约 8 个编译错误 |
-| **恢复** | 将 `tidev-config` 的 `SyncConfig` 替换为从 `tidev-sync` 导入的完整版本                           |
+| **当前** | `tidev-config` 已改为从 `tidev-sync` 重新导入完整 `SyncConfig`                                    |
+| **影响** | TUI 中 `config.sync.remotes[0].name` / `.host` / `.last_sync_at` 等字段现在编译通过                |
+| **状态** | ✅ **已完成** — 2026-06-26 替换为 `pub use tidev_sync::SyncConfig`                                |
 
 ### 2.3 logging::init() 简化
 
@@ -87,14 +84,13 @@
 | **影响** | 两个 crate 中重复定义，可能不同步                                               |
 | **恢复** | 统一放到 `tidev-types` 或一个共享位置                                           |
 
-### 3.2 HooksConfig 未使用完整类型
+### 3.2 HooksConfig 未使用完整类型 — ✅ 已修复
 
 | 项目     | 说明                                                                                                         |
 | -------- | ------------------------------------------------------------------------------------------------------------ |
 | **原始** | `PostToolUseHookConfig` — 完整的钩子定义（matcher, command, extensions, cwd, timeout, status_message, name） |
-| **当前** | `tidev-config` 中使用 `Vec<serde_json::Value>` 占位                                                          |
-| **原因** | tidev-config 在 Phase 2 创建，tidev-hooks 在 Phase 3 创建                                                    |
-| **影响** | 见 2.1                                                                                                       |
+| **当前** | `tidev-config` 已改为从 `tidev-hooks` 重新导入完整 `HooksConfig`                                                          |
+| **状态** | ✅ **已完成** — 随 2.1 一起修复                                                                                           |
 
 ---
 
@@ -452,7 +448,7 @@ let app = App { session_manager, config, workspace_root, ... };
 | 步骤 | 操作 | 修复约 | 依赖 | 状态 |
 |------|------|--------|------|------|
 | 1 | **移植 `StepPatch` + `collect_patches_after_message` 到 `tidev-snapshot`** — 从 `_archive/v0.6.x/crates/tidev-engine/src/shared/undo.rs` 移植 | 3 个 | 无 | ✅ 完成 |
-| 2 | **修复 `SyncConfig` — 用 `tidev-sync::SyncConfig & RemoteMachine` 完整类型替换 `tidev-config` 中的 JSON Value 占位** | 8 个 | 无 | |
+| 2 | **修复 `SyncConfig` — 用 `tidev-sync::SyncConfig & RemoteMachine` 完整类型替换 `tidev-config` 中的 JSON Value 占位** | 8 个 | 无 | ✅ 完成 |
 | 3 | **移植 `NotificationManager` 到 `tidev-hooks`** — 从 `_archive/v0.6.x/crates/tidev-engine/src/notifications.rs` 移植 | 3 个 | 无 | |
 | 4 | **统一 `ApprovedTool` / `PendingToolApproval`** — 添加缺失字段：`rejection`、`child_session_id`、`allow_outside`、`sensitive_file_approved`、`tool_calls`、`response_tx`、`mode` | 12 个 | 无 | |
 | 5 | **移植缺失类型** — `QueuedUserMessage` → `tidev-agent`，`AgentLoopConfig` → `tidev-agent`；更新模块导入路径 | 6 个 | 步骤 1 | |
