@@ -407,6 +407,8 @@ impl App {
 
         loop {
             self.process_backend_events(runtime)?;
+            self.process_frontend_events();
+            self.poll_subagent_channels();
             self.update_mouse_selection_auto_scroll();
 
             // Throttle rendering during streaming to preserve responsiveness for input events

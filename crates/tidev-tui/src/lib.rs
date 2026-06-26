@@ -72,7 +72,7 @@ use crate::theme::ThemeManager;
 use tidev_config::{ActiveModel, AppConfig, AuthStore, ConfigPaths};
 use tidev_context::ContextManager;
 use tidev_mcp::McpManager;
-use tidev_agent::{FrontendEvent, PendingToolApproval};
+use tidev_agent::PendingToolApproval;
 use tidev_search::current_at_fragment;
 use tidev_snapshot::{FileDiff, SnapshotService};
 use tidev_tools::{FileReadTracker, TodoItem, ToolRegistry};
@@ -277,9 +277,9 @@ struct App {
     subagent_result_message_map: std::collections::HashMap<Uuid, Uuid>,
     /// Inline running subagent card screen bounds: (execution_index, screen_rect)
     /// Recalculated every frame in render_messages()
-    inline_subagent_card_bounds: Vec<(usize, Rect)>,
-    /// Hovered inline subagent card index for mouse hover highlight
-    hovered_inline_subagent: Option<usize>,
+    inline_subagent_card_bounds: Vec<(Uuid, Rect)>,
+    /// Hovered inline subagent card (identified by child session ID)
+    hovered_inline_subagent: Option<Uuid>,
     /// Permission channel receiver — receives [`PendingToolApproval`] from
     /// the spawned `run_agent_loop` task when tool calls need approval.
     pending_permission_rx: Option<
@@ -864,6 +864,92 @@ impl App {
             )?;
         }
         Ok(())
+    }
+
+    /// Process FrontendEvents from SessionManager (subagent lifecycle).
+    fn process_frontend_events(&mut self) {
+        use tidev_agent::FrontendEvent;
+        while let Ok(event) = self.frontend_rx.try_recv() {
+            match event {
+                FrontendEvent::SubagentSpawned {
+                    child_session_id,
+                    parent_session_id,
+                    agent_type,
+                    description,
+                    tool_call_id,
+                    tool_call_name,
+                    event_rx,
+                } => {
+                    log::info!(
+                        "process_frontend_events: SubagentSpawned {} (type={}, parent={})",
+                        child_session_id,
+                        agent_type.display_name(),
+                        parent_session_id,
+                    );
+                    if parent_session_id == self.conversation.session_id {
+                        self.subagent_overlays.insert(child_session_id, SubagentOverlay {
+                            child_session_id,
+                            parent_session_id,
+                            agent_type,
+                            description,
+                            tool_call_id,
+                            tool_call_name,
+                            event_rx,
+                            assistant_content: String::new(),
+                            finished: false,
+                        });
+                    }
+                }
+                FrontendEvent::SubagentFinished {
+                    child_session_id,
+                    ..
+                } => {
+                    log::info!(
+                        "process_frontend_events: SubagentFinished {}",
+                        child_session_id,
+                    );
+                    if let Some(overlay) = self.subagent_overlays.get_mut(&child_session_id) {
+                        overlay.finished = true;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Poll subagent event channels and update overlay state.
+    fn poll_subagent_channels(&mut self) {
+        let finished_ids: Vec<Uuid> = self.subagent_overlays.iter()
+            .filter(|(_, o)| o.finished)
+            .map(|(id, _)| *id)
+            .collect();
+
+        for overlay in self.subagent_overlays.values_mut() {
+            if overlay.finished {
+                continue;
+            }
+            while let Ok(event) = overlay.event_rx.try_recv() {
+                match event {
+                    BackendEvent::Delta { content, .. } => {
+                        overlay.assistant_content.push_str(&content);
+                    }
+                    BackendEvent::Finished { turn, .. } => {
+                        overlay.assistant_content = turn.content;
+                        if overlay.assistant_content.is_empty() {
+                            overlay.assistant_content = turn.tool_calls
+                                .iter()
+                                .map(|tc| format!("[{}: {}]", tc.name, tc.arguments))
+                                .collect::<Vec<_>>()
+                                .join("\n");
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        // Clean up finished overlays
+        for id in finished_ids {
+            self.subagent_overlays.remove(&id);
+        }
     }
 
     fn handle_backend_event(&mut self, event: BackendEvent, runtime: &Runtime) -> Result<()> {
@@ -1800,7 +1886,6 @@ impl App {
         let tools = self.tools.clone();
         let hooks_config = self.config.read().unwrap().hooks.clone();
         let hooks = tidev_hooks::HookEngine::new(hooks_config, self.workspace_root.clone());
-        let session_manager = self.agent.clone();
         let workspace_root = self.workspace_root.clone();
         let system_prompt = self.active_model.system_prompt.clone();
         let tx = self.backend_tx.clone();

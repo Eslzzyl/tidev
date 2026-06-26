@@ -321,6 +321,8 @@ impl SessionManager {
             parent_session_id,
             agent_type,
             description: description.clone(),
+            tool_call_id: tool_call.id.clone(),
+            tool_call_name: tool_call.name.clone(),
             event_rx: child_event_rx,
         });
 

@@ -36,7 +36,7 @@ use tidev_session::utils::{TokenUsage, format_token_count};
 use unicode_width::UnicodeWidthStr;
 use uuid::Uuid;
 
-use super::super::permission::RunningSubagentExecution;
+use super::super::permission::SubagentOverlay;
 use crate::render::render::{
     decorate_card_lines, line_with_prefix, line_with_style, shorten, shorten_single_line,
     wrap_text_lines,
@@ -59,7 +59,7 @@ struct ToolResultCardRange {
 
 #[derive(Clone, Debug)]
 struct InlineRunningCardRange {
-    execution_index: usize,
+    child_session_id: Uuid,
     start_line: usize,
     end_line: usize,
 }
@@ -709,7 +709,7 @@ impl App {
                     height: visible_end.saturating_sub(visible_start),
                 };
                 self.inline_subagent_card_bounds
-                    .push((card_range.execution_index, card_rect));
+                    .push((card_range.child_session_id, card_rect));
             }
         }
 
@@ -1525,7 +1525,7 @@ impl App {
     /// for blocks containing running subagent task tool calls — the generic tool
     /// call card (2 lines) is replaced at render time by the taller running card.
     fn count_running_subagent_card_lines(
-        execution: &RunningSubagentExecution,
+        overlay: &SubagentOverlay,
         body_width: usize,
     ) -> usize {
         let mut count = 0;
@@ -1534,8 +1534,8 @@ impl App {
         // Header line (word-wrapped)
         let header_text = format!(
             "@{} subagent: {}",
-            execution.subagent_type,
-            execution.task_description.trim()
+            overlay.agent_type.display_name(),
+            overlay.description.trim()
         );
         count += word_wrap_line(
             &Line::from(header_text),
@@ -1551,14 +1551,14 @@ impl App {
 
     fn render_running_subagent_lines(
         &self,
-        execution: &RunningSubagentExecution,
+        overlay: &SubagentOverlay,
         body_width: usize,
     ) -> Vec<Line<'static>> {
         let palette = self.palette();
 
         // Title line: [@type] subagent: [description]
-        let description = execution.task_description.trim();
-        let subagent_type = execution.subagent_type.clone();
+        let description = overlay.description.trim();
+        let subagent_type = overlay.agent_type.display_name().to_string();
 
         let mut lines = Vec::new();
 
@@ -1593,7 +1593,7 @@ impl App {
         );
 
         // Status line
-        let status_text = execution.status.display();
+        let status_text = "Thinking";
         let status_line = status_text.to_string();
 
         lines.push(Line::from(vec![
@@ -1770,13 +1770,13 @@ impl App {
                         && msg.role == MessageRole::Assistant {
                             for tool_call in &msg.tool_calls {
                                 if tool_call.name == "task"
-                                    && let Some(execution) = self
-                                        .running_subagent_executions
-                                        .iter()
-                                        .find(|e| e.tool_call.id == tool_call.id)
+                                    && let Some(overlay) = self
+                                        .subagent_overlays
+                                        .values()
+                                        .find(|o| o.tool_call_id == tool_call.id)
                                     {
                                         let running_height = Self::count_running_subagent_card_lines(
-                                            execution,
+                                            overlay,
                                             body_width,
                                         );
                                         // Generic tool call card: 1 empty + 1 summary = 2 lines
@@ -1865,14 +1865,14 @@ impl App {
                         && msg.role == MessageRole::Assistant {
                             for tool_call in &msg.tool_calls {
                                 if tool_call.name == "task"
-                                    && let Some(execution) = self
-                                        .running_subagent_executions
-                                        .iter()
-                                        .find(|e| e.tool_call.id == tool_call.id)
+                                    && let Some(overlay) = self
+                                        .subagent_overlays
+                                        .values()
+                                        .find(|o| o.tool_call_id == tool_call.id)
                                     {
                                         let running_height =
                                             Self::count_running_subagent_card_lines(
-                                                execution,
+                                                overlay,
                                                 body_width,
                                             );
                                         adjusted_line_count =
@@ -2217,24 +2217,25 @@ impl App {
                         // This eliminates the dual-card problem (tool call card + running overlay).
                         if tool_result.is_none()
                             && tool_call.name == "task"
-                            && let Some(exec_index) = self
-                                .running_subagent_executions
-                                .iter()
-                                .position(|e| e.tool_call.id == tool_call.id)
+                            && let Some(overlay) = self
+                                .subagent_overlays
+                                .values()
+                                .find(|o| o.tool_call_id == tool_call.id)
                         {
-                            let execution = &self.running_subagent_executions[exec_index];
                             let running_lines =
-                                self.render_running_subagent_lines(execution, body_width);
+                                self.render_running_subagent_lines(overlay, body_width);
                             let start_line = current_line_offset + lines.len();
                             let mut card_bg = palette.panel;
-                            if self.hovered_inline_subagent == Some(exec_index) {
+                            let child_session_id = overlay.child_session_id;
+                            let is_hovered = self.hovered_inline_subagent == Some(child_session_id);
+                            if is_hovered {
                                 card_bg = palette.hover_bg(card_bg);
                             }
                             let decorated = decorate_card_lines(running_lines, width, card_bg, 2);
                             lines.extend(decorated);
                             let end_line = current_line_offset + lines.len();
                             inline_running_card_ranges.push(InlineRunningCardRange {
-                                execution_index: exec_index,
+                                child_session_id,
                                 start_line,
                                 end_line,
                             });

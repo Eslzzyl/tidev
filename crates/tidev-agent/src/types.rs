@@ -160,6 +160,10 @@ pub enum FrontendEvent {
         parent_session_id: Uuid,
         agent_type: AgentType,
         description: String,
+        /// The parent's tool_call_id that spawned this subagent.
+        tool_call_id: String,
+        /// The parent's tool_call name (always "task").
+        tool_call_name: String,
         /// Receiver for the child session's own BackendEvent stream.
         event_rx: UnboundedReceiver<BackendEvent>,
     },

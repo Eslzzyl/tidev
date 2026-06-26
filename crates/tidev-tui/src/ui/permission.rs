@@ -101,6 +101,7 @@ pub(crate) enum SubagentStatus {
 }
 
 impl SubagentStatus {
+    #[allow(dead_code)]
     pub(crate) fn display(&self) -> &'static str {
         match self {
             Self::Thinking => "Thinking",
@@ -109,6 +110,7 @@ impl SubagentStatus {
 }
 
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub(crate) struct RunningSubagentExecution {
     pub request_id: u64,
     pub parent_session_id: uuid::Uuid,
@@ -740,11 +742,16 @@ impl App {
 /// Each overlay subscribes directly to the child session's BackendEvent channel,
 /// eliminating the need for aggregate subagent events (SubagentStatus, etc.).
 #[derive(Debug)]
+#[allow(dead_code)]
 pub(crate) struct SubagentOverlay {
     pub child_session_id: uuid::Uuid,
     pub parent_session_id: uuid::Uuid,
     pub agent_type: tidev_types::agent::AgentType,
     pub description: String,
+    /// The tool_call ID from the parent conversation that spawned this subagent.
+    pub tool_call_id: String,
+    /// The tool_call name (always "task").
+    pub tool_call_name: String,
     /// Direct event stream from the child AgentLoop.
     pub event_rx: tokio::sync::mpsc::UnboundedReceiver<tidev_session::session::BackendEvent>,
     /// The accumulated assistant message content for this subagent.

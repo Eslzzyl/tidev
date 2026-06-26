@@ -133,7 +133,7 @@ impl App {
                     .inline_subagent_card_bounds
                     .iter()
                     .find(|(_, rect)| rect.contains(position))
-                    .map(|(idx, _)| *idx);
+                    .map(|(id, _)| *id);
                 if self.hovered_inline_subagent != hit_inline {
                     self.hovered_inline_subagent = hit_inline;
                 }
@@ -244,22 +244,20 @@ impl App {
 
                 if !self.mouse_selection.is_dragging() {
                     // Click on an inline running subagent card → enter subsession directly.
-                    // If the execution was already removed (e.g. ToolCompleted fired but render
-                    // hasn't caught up), fall through to tool_result_card_bounds below.
                     let hit_running = self
                         .inline_subagent_card_bounds
                         .iter()
                         .find(|(_, rect)| rect.contains(position))
-                        .map(|(idx, _)| *idx);
+                        .map(|(id, _)| *id);
 
-                    if let Some(exec_index) = hit_running
-                        && let Some(execution) = self.running_subagent_executions.get(exec_index)
+                    if let Some(child_session_id) = hit_running
+                        && self.subagent_overlays.contains_key(&child_session_id)
                     {
-                        self.switch_session(execution.child_session_id, runtime)
+                        self.switch_session(child_session_id, runtime)
                             .ok();
                         return;
                     }
-                    // Execution already gone (completed) — fall through to the
+                    // Subagent already completed — fall through to the
                     // completed tool result card check below.
 
                     // Click on a tool result card

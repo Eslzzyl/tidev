@@ -507,6 +507,7 @@ impl AgentLoop {
     }
 
     /// Request approval for tool calls from the permission channel.
+    #[allow(dead_code)]
     async fn request_tool_approval(
         &self,
         tool_calls: &[ToolCall],
