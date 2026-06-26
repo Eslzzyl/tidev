@@ -125,10 +125,12 @@ impl App {
                 std::collections::VecDeque::new(),
             )),
             auto_approve_permissions: true, // TUI handles permissions via channel
-            hooks: tidev_hooks::HookEngine::new(
-                config.hooks.clone(),
-                workspace_root.clone(),
-            ),
+            hooks: Arc::new(std::sync::Mutex::new(
+                tidev_hooks::HookEngine::new(
+                    config.hooks.clone(),
+                    workspace_root.clone(),
+                ),
+            )),
             active: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         };
         // Share current session ID for the background inactivity check.

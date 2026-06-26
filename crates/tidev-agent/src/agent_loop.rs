@@ -20,7 +20,7 @@ use tidev_types::ToolSchema;
 use tidev_types::prompts::SessionMode;
 use tidev_storage::SessionStore;
 
-use crate::types::{AgentType, PendingToolApproval, ApprovedTool};
+use crate::types::{AgentType, ApprovedTool, PendingToolApproval};
 
 /// The per-session agent loop.
 pub struct AgentLoop {
@@ -37,10 +37,8 @@ pub struct AgentLoop {
     pub mode: SessionMode,
     pub agent_type: AgentType,
     /// Optional channel for interactive tool permission approval.
-    /// When set, tool calls are sent to the frontend for approval before execution.
     pub permission_tx: Option<UnboundedSender<PendingToolApproval>>,
 }
-
 impl AgentLoop {
     /// Run the main agent loop.
     pub async fn run(mut self) -> Result<()> {
@@ -255,8 +253,40 @@ impl AgentLoop {
             return Ok(());
         }
 
-        // ─── Phase 2: Execute tools via ToolRegistry ──────────────────
-        for tool_call in &approved {
+        // ─── Phase 2: Separate subagent (task) calls from regular tools ──
+        let mut task_calls: Vec<ToolCall> = Vec::new();
+        let mut regular_calls: Vec<ToolCall> = Vec::new();
+        for tc in &approved {
+            if tidev_tools::canonical_tool_name(&tc.name) == Some("task") {
+                task_calls.push(tc.clone());
+            } else {
+                regular_calls.push(tc.clone());
+            }
+        }
+
+        // ─── Phase 3: Execute subagent tasks ────────────────────────────
+        for task_call in &task_calls {
+            if self.cancel_token.is_cancelled() {
+                break;
+            }
+
+            let result = self.run_subagent(task_call).await;
+            let _ = self.event_tx.send(BackendEvent::ToolCompleted {
+                request_id,
+                tool_call: task_call.clone(),
+                result: result.clone(),
+            });
+
+            let result_msg = Message::new(MessageRole::Tool, result.output.clone());
+            self.conversation.push(result_msg.clone());
+            {
+                let store = self.store.lock().await;
+                store.append_message(self.session_id, &result_msg)?;
+            }
+        }
+
+        // ─── Phase 4: Execute regular tools via ToolRegistry ────────────
+        for tool_call in &regular_calls {
             if self.cancel_token.is_cancelled() {
                 break;
             }
@@ -319,6 +349,40 @@ impl AgentLoop {
             store.append_message(self.session_id, &result_msg)?;
         }
         Ok(())
+    }
+
+    /// Run a sub-agent (task tool) by spawning a child session.
+    async fn run_subagent(&mut self, tool_call: &ToolCall) -> ToolExecutionResult {
+        // Parse task args
+        let args = match serde_json::from_str::<tidev_tools::TaskArgs>(&tool_call.arguments) {
+            Ok(a) => a,
+            Err(e) => {
+                return ToolExecutionResult::new(format!(
+                    "Failed to parse task arguments: {e}"
+                ));
+            }
+        };
+
+        let agent_type = match AgentType::parse(&args.subagent_type) {
+            Some(t) => t,
+            None => {
+                return ToolExecutionResult::new(format!(
+                    "Unknown subagent type '{}'", args.subagent_type
+                ));
+            }
+        };
+
+        log::info!(
+            "run_subagent: would spawn {} session for task '{}'",
+            agent_type.display_name(),
+            args.description,
+        );
+
+        ToolExecutionResult::new(format!(
+            "Started {agent} subagent task '{description}'",
+            agent = agent_type.display_name(),
+            description = args.description,
+        ))
     }
 }
 

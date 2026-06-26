@@ -37,7 +37,7 @@ pub struct SessionManager {
     pub instruction_content_cache: HashMap<String, String>,
     pub queued_messages: Arc<Mutex<VecDeque<QueuedUserMessage>>>,
     pub auto_approve_permissions: bool,
-    pub hooks: tidev_hooks::HookEngine,
+    pub hooks: Arc<std::sync::Mutex<tidev_hooks::HookEngine>>,
 }
 
 pub struct ActiveSession {
@@ -111,6 +111,7 @@ impl SessionManager {
         let store = self.store.clone();
         let llm = self.llm_client.clone();
         let event_tx = config.event_tx.clone();
+        let session_manager = self.clone();
 
         // Build main conversation from store
         let runtime_handle = tokio::runtime::Handle::current();
