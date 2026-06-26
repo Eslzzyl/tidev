@@ -106,15 +106,14 @@
 
 ## 5. Phase 3: tidev-snapshot
 
-### 5.1 缺失 shared/undo.rs 中的类型
+### 5.1 缺失 shared/undo.rs 中的类型 — ✅ 已修复
 
 | 项目     | 说明                                                                                                         |
 | -------- | ------------------------------------------------------------------------------------------------------------ |
 | **缺失** | `StepPatch`, `extract_patches_from_message`, `collect_patches_from_message`, `collect_patches_after_message` |
 | **原始** | `engine/shared/undo.rs` — 约 200 行的撤销/重做补丁管理                                                       |
-| **原因** | 这些类型被 TUI 和 web 前端共享，属于 undo 系统的核心部分                                                     |
-| **影响** | TUI 中引用 `tidev_snapshot::StepPatch` 和 `collect_patches_after_message` 的地方编译失败                     |
 | **恢复** | 将 `shared/undo.rs` 的内容移植到 `tidev-snapshot`                                                            |
+| **状态** | ✅ **已完成** — 2026-06-26 移植到 `crates/tidev-snapshot/src/lib.rs`，`cargo test -p tidev-snapshot` 通过  |
 
 ---
 
@@ -450,18 +449,18 @@ let app = App { session_manager, config, workspace_root, ... };
 
 以下是按依赖关系排列的、清除 73 个 TUI 编译错误的逐步计划：
 
-| 步骤 | 操作 | 修复约 | 依赖 |
-|------|------|--------|------|
-| 1 | **移植 `StepPatch` + `collect_patches_after_message` 到 `tidev-snapshot`** — 从 `_archive/v0.6.x/crates/tidev-engine/src/shared/undo.rs` 移植 | 3 个 | 无 |
-| 2 | **修复 `SyncConfig` — 用 `tidev-sync::SyncConfig & RemoteMachine` 完整类型替换 `tidev-config` 中的 JSON Value 占位** | 8 个 | 无 |
-| 3 | **移植 `NotificationManager` 到 `tidev-hooks`** — 从 `_archive/v0.6.x/crates/tidev-engine/src/notifications.rs` 移植 | 3 个 | 无 |
-| 4 | **统一 `ApprovedTool` / `PendingToolApproval`** — 添加缺失字段：`rejection`、`child_session_id`、`allow_outside`、`sensitive_file_approved`、`tool_calls`、`response_tx`、`mode` | 12 个 | 无 |
-| 5 | **移植缺失类型** — `QueuedUserMessage` → `tidev-agent`，`AgentLoopConfig` → `tidev-agent`；更新模块导入路径 | 6 个 | 步骤 1 |
-| 6 | **删除 BackendEvent 模式匹配中的 `session_id`** — 从 `Delta`、`ReasoningDelta`、`ShellOutput` 等变体中移除 `session_id` | 5 个 | 无 |
-| 7 | **为 `AgentType` 添加 `variants()` 方法** — 返回 `&'static [AgentType]` 以支持枚举 | 3 个 | 无 |
-| 8 | **修复 `shell::init` 参数类型** — 更新签名为接受 `Option<&ConfigPaths>` 或修复调用处 | 2 个 | 无 |
-| 9 | **重写 TUI 初始化代码** — `core/run.rs` 中 `App::new()` 从 AgentRuntime 构造改为 SessionManager::spawn() | 15 个 | 步骤 2,3,4 |
-| 10 | **添加 SessionManager 缺失的访问器方法** — `workspace_root()`、`config()`、`tools()` 等，或重构 TUI 直接从其他源获取 | 16 个 | 步骤 9 |
+| 步骤 | 操作 | 修复约 | 依赖 | 状态 |
+|------|------|--------|------|------|
+| 1 | **移植 `StepPatch` + `collect_patches_after_message` 到 `tidev-snapshot`** — 从 `_archive/v0.6.x/crates/tidev-engine/src/shared/undo.rs` 移植 | 3 个 | 无 | ✅ 完成 |
+| 2 | **修复 `SyncConfig` — 用 `tidev-sync::SyncConfig & RemoteMachine` 完整类型替换 `tidev-config` 中的 JSON Value 占位** | 8 个 | 无 | |
+| 3 | **移植 `NotificationManager` 到 `tidev-hooks`** — 从 `_archive/v0.6.x/crates/tidev-engine/src/notifications.rs` 移植 | 3 个 | 无 | |
+| 4 | **统一 `ApprovedTool` / `PendingToolApproval`** — 添加缺失字段：`rejection`、`child_session_id`、`allow_outside`、`sensitive_file_approved`、`tool_calls`、`response_tx`、`mode` | 12 个 | 无 | |
+| 5 | **移植缺失类型** — `QueuedUserMessage` → `tidev-agent`，`AgentLoopConfig` → `tidev-agent`；更新模块导入路径 | 6 个 | 步骤 1 | |
+| 6 | **删除 BackendEvent 模式匹配中的 `session_id`** — 从 `Delta`、`ReasoningDelta`、`ShellOutput` 等变体中移除 `session_id` | 5 个 | 无 | |
+| 7 | **为 `AgentType` 添加 `variants()` 方法** — 返回 `&'static [AgentType]` 以支持枚举 | 3 个 | 无 | |
+| 8 | **修复 `shell::init` 参数类型** — 更新签名为接受 `Option<&ConfigPaths>` 或修复调用处 | 2 个 | 无 | |
+| 9 | **重写 TUI 初始化代码** — `core/run.rs` 中 `App::new()` 从 AgentRuntime 构造改为 SessionManager::spawn() | 15 个 | 步骤 2,3,4 | |
+| 10 | **添加 SessionManager 缺失的访问器方法** — `workspace_root()`、`config()`、`tools()` 等，或重构 TUI 直接从其他源获取 | 16 个 | 步骤 9 | |
 
 > **总计**：以上 10 步完成后，预计可清除 73 个编译错误中的约 70 个。剩余 ~3 个为导入路径等零散问题。
 
