@@ -71,10 +71,36 @@ impl AgentLoop {
                 })
                 .collect();
 
-            // Run a single LLM turn
-            let turn = self
-                .run_single_turn(request_id, &messages, &llm_tools)
-                .await?;
+            // Run a single LLM turn with retry
+            let max_retries = 3u32;
+            let turn = {
+                let mut retries = 0u32;
+                loop {
+                    match self
+                        .run_single_turn(request_id, &messages, &llm_tools)
+                        .await
+                    {
+                        Ok(t) => break t,
+                        Err(e) => {
+                            retries += 1;
+                            if retries > max_retries {
+                                return Err(e);
+                            }
+                            log::warn!(
+                                "agent_loop[{}]: LLM turn failed (retry {retries}/{max_retries}), retrying: {e}",
+                                self.session_id
+                            );
+                            let _ = self.event_tx.send(BackendEvent::Retrying {
+                                request_id,
+                                attempt: retries,
+                                max_attempts: max_retries,
+                                reason: e.to_string(),
+                                retry_after_secs: None,
+                            });
+                        }
+                    }
+                }
+            };
 
             // Persist the assistant turn
             let assistant_msg = assistant_turn_to_message(&turn);
@@ -95,6 +121,9 @@ impl AgentLoop {
             // Execute tool calls — this is the core execution path
             self.execute_tool_calls(request_id, &turn.tool_calls)
                 .await?;
+
+            // Check context compaction after tools execute
+            self.check_context_compaction(request_id).await;
 
             request_id += 1;
         }
@@ -395,6 +424,50 @@ impl AgentLoop {
             agent = agent_type.display_name(),
             description = args.description,
         ))
+    }
+
+    /// Check if context compaction is needed and perform it.
+    async fn check_context_compaction(&mut self, _request_id: u64) {
+        let conversation_msgs = &self.conversation.messages;
+        let total_est: usize = conversation_msgs
+            .iter()
+            .map(|m| m.content.len() / 4 + 1)
+            .sum();
+        if total_est > self.context.prune_threshold_tokens {
+            log::info!(
+                "agent_loop[{}]: estimated tokens {total_est} > threshold {}, compacting",
+                self.session_id,
+                self.context.prune_threshold_tokens
+            );
+            // Extract borrows before mutable borrow of context
+            let llm = &self.llm;
+            let model = &self.model;
+            let conversation = &self.conversation;
+            let tools: &[tidev_tools::ToolDefinition] = &self.tools;
+            let mode = self.mode;
+            let compact_config = tidev_context::CompactionConfig {
+                llm,
+                model,
+                conversation,
+                manual: false,
+                stream_ctx: None,
+                tools,
+                mode,
+            };
+            if let Err(e) = self.context.compact_if_needed(compact_config).await {
+                log::warn!(
+                    "agent_loop[{}]: context compaction failed: {e}",
+                    self.session_id
+                );
+            }
+            let _ = self.event_tx.send(BackendEvent::ContextCompacted {
+                compacted: self.context.summary.is_some(),
+                manual: false,
+                summary: self.context.summary.clone(),
+                retained_from: self.context.retained_from,
+                error: None,
+            });
+        }
     }
 }
 
