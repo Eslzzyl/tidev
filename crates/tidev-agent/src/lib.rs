@@ -12,5 +12,6 @@ pub mod types;
 pub use agent_loop::AgentLoop;
 pub use session_manager::SessionManager;
 pub use types::{
-    AgentType, ApprovedTool, PendingToolApproval, SessionConfig, SessionHandle, SessionInfo,
+    AgentLoopConfig, AgentType, ApprovedTool, PendingToolApproval, QueuedUserMessage,
+    SessionConfig, SessionHandle, SessionInfo, SubagentConfig,
 };
