@@ -15,8 +15,9 @@
 6. [Phase 4: tidev-tools](#6-phase-4-tidev-tools)
 7. [Phase 4: tidev-mcp](#7-phase-4-tidev-mcp)
 8. [Phase 5: tidev-agent](#8-phase-5-tidev-agent)
-9. [Phase 6: tidev-tui（未完成）](#9-phase-6-tidev-tui未完成)
+9. [Phase 6: tidev-tui（73 个编译错误）](#9-phase-6-tidev-tui73-个编译错误)
 10. [未移植的 tidev-engine 模块](#10-未移植的-tidev-engine-模块)
+11. [恢复路线图](#11-恢复路线图)
 
 ---
 
@@ -51,6 +52,16 @@
 | **原因** | 避免依赖 `tidev-hooks` crate（Phase 3 之前不存在），使用 JSON Value 占位                       |
 | **影响** | 钩子系统配置不完整，无法在 config.toml 中精细定义钩子                                          |
 | **恢复** | Phase 3 后从 `tidev-hooks` 重新导入完整 `HooksConfig`                                          |
+
+### 2.2 SyncConfig 内联占位
+
+| 项目     | 说明                                                                                             |
+| -------- | ------------------------------------------------------------------------------------------------ |
+| **原始** | `tidev-engine/src/sync/mod.rs` — `SyncConfig { remotes: Vec<RemoteMachine> }` 完整类型，含 `RemoteMachine { name, host, tidev_path, last_sync_at }` |
+| **当前** | `crates/tidev-config/src/lib.rs` 中的 `SyncConfig` 只有 `remotes: Vec<serde_json::Value>`        |
+| **原因** | 与 HooksConfig 相同，Phase 2 创建时 `tidev-sync` crate 还不存在，使用 JSON Value 占位             |
+| **影响** | TUI 中 `config.sync.remotes[0].name` / `.host` / `.last_sync_at` 等字段访问在 `&Value` 上不存在，产生约 8 个编译错误 |
+| **恢复** | 将 `tidev-config` 的 `SyncConfig` 替换为从 `tidev-sync` 导入的完整版本                           |
 
 ### 2.3 logging::init() 简化
 
@@ -159,6 +170,25 @@
 | **影响** | AgentLoop 中的工具执行不会产生实际效果                                                    |
 | **恢复** | 将 `execute_tool_calls` 连接到 `ToolRegistry`                                             |
 
+### 6.6 task.rs 占位执行
+
+| 项目     | 说明                                                                                                    |
+| -------- | ------------------------------------------------------------------------------------------------------- |
+| **原始** | `engine/tooling/builtin/task.rs` — `execute_tool_call` 调用 `AgentRuntime::run_subagent()` 创建子 session，运行完整的子 agent 循环 |
+| **当前** | `tidev-tools/src/builtin/task.rs` — `execute_tool_call()` 返回占位字符串 `"Started {agent_type} subagent task '{description}'"`，不实际创建子 agent，参数校验完整但无副作用 |
+| **原因** | task 工具需要调用 `SessionManager::spawn()`，但架构连接未完成（互为依赖）                                |
+| **影响** | task 工具不会真正执行子 agent，LLM 得到虚假的成功响应                                                   |
+| **恢复** | 在 task 工具中调用 `SessionManager::spawn()`，传递正确的 AgentType、会话 ID 和工具列表                  |
+
+### 6.7 MCP 工具执行为 stub
+
+| 项目     | 说明                                                                                                    |
+| -------- | ------------------------------------------------------------------------------------------------------- |
+| **原始** | `engine/mcp.rs` — `McpManager::execute_call` 通过 MCP 协议调用远程工具                                    |
+| **当前** | `tidev-mcp/src/lib.rs` — `try_execute_mcp` 直接 `bail!("not implemented")`                              |
+| **影响** | MCP 工具在 AgentLoop 中不可用                                                                            |
+| **恢复** | 连接到 `tidev_mcp::McpManager::execute_call`（McpManager 中的 `list_tools` 和 `call_tool` 已实现，113 行，但未暴露给 AgentLoop） |
+
 ---
 
 ## 7. Phase 4: tidev-mcp
@@ -199,22 +229,23 @@
 | **影响** | AgentLoop 无法真正执行任何工具                                                         |
 | **恢复** | 实现 `execute_tool_calls` → `ToolRegistry::execute` 路由                               |
 
-### 8.2 MCP 工具执行为 stub
+### 8.2 工具审批流程未实现 + 类型字段不匹配
 
-| 项目     | 说明                                              |
-| -------- | ------------------------------------------------- |
-| **当前** | `try_execute_mcp` 直接 `bail!("not implemented")` |
-| **影响** | MCP 工具在 AgentLoop 中不可用                     |
-| **恢复** | 连接到 `tidev_mcp::McpManager::execute_call`      |
+| 项目     | 说明                                                                                                                                                                                    |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **原始** | `PendingToolApproval { tool_calls: Vec<ToolCall>, mode: SessionMode, response_tx: oneshot::Sender<Vec<ApprovedTool>> }` — 异步审批通道，TUI 通过 `response_tx` 返回用户决定               |
+| **当前** | `tidev-agent::types::PendingToolApproval { session_id, request_id, tool_call, tool_definition }` — 结构完全不同；`ApprovedTool { tool_call, tool_definition }` — 缺失审批相关字段         |
+| **影响** | TUI 编译错误：`PendingToolApproval` 无 `tool_calls`/`response_tx`/`mode` 字段；`ApprovedTool` 无 `rejection`/`child_session_id`/`allow_outside`/`sensitive_file_approved` 字段（约 12 个错误） |
+| **恢复** | 统一类型定义：将 `PendingToolApproval` 恢复为包含 `tool_calls: Vec<ToolCall>` + `mode` + `response_tx` 的完整审批结构；在 `ApprovedTool` 中添加所有缺失字段                              |
 
-### 8.3 工具审批流程未实现
+### 8.3 SessionManager API 不匹配
 
-| 项目     | 说明                                                                  |
-| -------- | --------------------------------------------------------------------- |
-| **原始** | `PendingToolApproval` → 用户确认 → `ApprovedTool` 的异步审批通道      |
-| **当前** | 类型已定义（`PendingToolApproval`, `ApprovedTool`）但未接入 AgentLoop |
-| **影响** | 所有工具调用自动执行，无用户确认                                      |
-| **恢复** | 在 `execute_tool_calls` 中实现审批通道                                |
+| 项目     | 说明                                                                                                                                                                                                                                   |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **原始** | TUI 期望 SessionManager 有 ~12 个可直接访问的字段和方法：`workspace_root`、`config_dir`、`config_paths`、`config`、`auth`、`llm_client`、`tools`、`instructions`、`instruction_content_cache`、`queued_messages`、`hooks`、`auto_approve_permissions`、`store` |
+| **当前** | `crates/tidev-agent/src/session_manager.rs` 的 `SessionManager` 只有 3 个字段（`store`、`llm`、`active`）和 5 个方法（`spawn`、`cancel`、`list_active`、`is_active`、`active_count`）                                                          |
+| **影响** | TUI 中约 25 个编译错误：struct `SessionManager` has no field named `workspace_root` / `config_dir` / `tools` 等；no method named `queue_user_message` / `compose_static_system_prompt` / `run_agent_loop_with_permission_channel`      |
+| **恢复** | 两种方案：(A) 在 SessionManager 中添加缺失的访问器方法；(B) 重写 TUI 中直接访问 SessionManager 内部字段的代码，改为通过 `tidev-config`、`tidev-agent` 公共 API 获取。推荐方案 B                                                     |
 
 ### 8.4 子 agent 调度未实现
 
@@ -272,60 +303,127 @@
 
 ---
 
-## 9. Phase 6: tidev-tui（未完成）
+## 9. Phase 6: tidev-tui（73 个编译错误）
 
-TUI 移植**未完成**，当前编译状态：74 个错误。以下是已识别但未修复的问题：
+TUI 移植**未完成**。`cargo check -p tidev-tui` 报告 73 个编译错误。以下是按类别分类的详细分析：
 
-### 9.1 未消除的 tidev-engine 依赖
+### 9.1 SessionManager 内部字段直接访问（~15 个错误）
 
-| 类型                                                    | 数量 |
-| ------------------------------------------------------- | ---- |
-| 缺失的类型导入（`StepPatch`, `NotificationManager` 等） | ~10  |
-| BackendEvent session_id 字段残留                        | ~12  |
-| AgentRuntime → SessionManager 字段不匹配                | ~10  |
-| SessionManager 缺失的方法调用                           | ~5   |
-| ApprovedTool / PendingToolApproval 字段变更             | ~8   |
-| 其他类型不匹配                                          | ~30  |
+TUI 代码大量直接访问 `SessionManager` 的内部字段，但新版 `SessionManager` 只有 `store`、`llm`、`active` 三个字段：
 
-### 9.2 关键的未移植依赖
+| 错误模式 | 原因 | 影响范围 |
+|---------|------|---------|
+| `no field 'tools' on SessionManager` | TUI 读取 `session_manager.tools` | `core/run.rs`, `commands.rs` |
+| `no field 'llm_client' on SessionManager` | TUI 读取 `session_manager.llm_client` | `core/run.rs` |
+| `no field 'workspace_root' on SessionManager` | TUI 读取 `session_manager.workspace_root` | `core/run.rs`, `input/event/mod.rs` |
+| `no field 'config' on SessionManager` | TUI 读取 `session_manager.config` | `core/run.rs` |
+| `no field 'auth' on SessionManager` | TUI 读取 `session_manager.auth` | `core/run.rs` |
+| `no field 'hooks' on SessionManager` | TUI 读取 `session_manager.hooks` | `core/run.rs` |
+| `no field 'config_dir' / 'config_paths' on SessionManager` | TUI 读取配置路径 | `core/run.rs` |
+| `no field 'instructions' / 'instruction_content_cache' on SessionManager` | TUI 读取指令缓存 | `core/run.rs` |
+| `no field 'queued_messages' on SessionManager` | TUI 读取消息队列 | `core/run.rs` |
+| `no field 'auto_approve_permissions' on SessionManager` | TUI 读取自动审批配置 | `core/run.rs` |
+| `no field 'store' on SessionManager` (类型不匹配) | TUI 以特定方式访问 store | `core/run.rs` |
 
-| 类型                            | 原始位置                        | 需要移至                     |
-| ------------------------------- | ------------------------------- | ---------------------------- |
-| `StepPatch`                     | `engine/shared/undo.rs`         | `tidev-snapshot`             |
-| `collect_patches_after_message` | `engine/shared/undo.rs`         | `tidev-snapshot`             |
-| `NotificationManager`           | `engine/notifications.rs`       | `tidev-hooks`                |
-| `QueuedUserMessage`             | `engine/agent/runtime/types.rs` | `tidev-agent`                |
-| `AgentLoopConfig`               | `engine/agent/runtime/types.rs` | `tidev-agent`                |
-| `NotificationConfig`            | `engine/config/mod.rs`          | `tidev-config`（部分已存在） |
+**恢复**：TUI 初始化代码需要从 `AgentRuntime` 手动构造改为使用 `SessionManager::spawn()` API。将 App 持有的配置字段改为在构造时直接注入，而非从 SessionManager 读取。
 
-### 9.3 初始化代码需重写
+### 9.2 SessionManager 缺失的方法调用（~8 个错误）
 
-`core/run.rs` 中的 `App::new()` / `App::new_with_paths()` 创建 `AgentRuntime` 并手动设置其所有字段。需要重写为：
+TUI 调用的方法在新版 SessionManager 中不存在：
+
+| 错误 | 原始代码 | 恢复 |
+|------|---------|------|
+| `no method 'queue_user_message'` | `session_manager.queue_user_message(...)` | 在 SessionManager 中添加消息队列支持 |
+| `no method 'compose_static_system_prompt'` | `session_manager.compose_static_system_prompt(...)` | 在 SessionManager 中添加系统提示组合方法 |
+| `no method 'run_agent_loop_with_permission_channel'` | `session_manager.run_agent_loop_with_permission_channel(...)` | 实现审批通道并暴露方法 |
+| `no method 'session_id'` on BackendEvent | `event.session_id()` | BackendEvent 已删除 `session_id`，改为从事件通道上下文获取 |
+
+**恢复**：在 `SessionManager` 中添加缺失的方法；或重构 TUI 逻辑不再依赖这些方法。
+
+### 9.3 BackendEvent 模式匹配残留（~5 个错误）
+
+TUI 处理事件时仍使用旧版带 `session_id` 字段的模式匹配：
 
 ```rust
-// 旧方式
-let agent = AgentRuntime {
-    workspace_root: ...,
-    config_dir: ...,
-    config_paths: ...,
-    config: ...,
-    auth: ...,
-    store: ...,
-    llm_client: ...,
-    tools: ...,
-    // ... 更多字段
-};
+// TUI 中的旧代码：
+BackendEvent::Delta { content, session_id, .. } => { ... }
+BackendEvent::ReasoningDelta { content, session_id, .. } => { ... }
+BackendEvent::ShellOutput { content, finished, exit_code, session_id, .. } => { ... }
+```
 
-// 新方式
-let store = Arc::new(Mutex::new(store));
-let llm = LlmClient::new(...);
+新版 BackendEvent 所有变体已删除 `session_id`，只需移除模式中的 `session_id` 字段即可。
+
+### 9.4 ApprovedTool / PendingToolApproval 字段不匹配（~12 个错误）
+
+| 错误 | 原因 | 受影响的代码位置 |
+|------|------|----------------|
+| `no field 'rejection' on ApprovedTool` | TUI 检查 `approved_tool.rejection` | `ui/permission.rs` |
+| `no field 'child_session_id' on ApprovedTool` | TUI 读取 `approved_tool.child_session_id` | `ui/permission.rs` |
+| `no field 'allow_outside' on ApprovedTool` | TUI 设置 `approved_tool.allow_outside` | `ui/permission.rs` |
+| `no field 'sensitive_file_approved' on ApprovedTool` | TUI 设置 `approved_tool.sensitive_file_approved` | `ui/permission.rs` |
+| `no field 'tool_calls' on PendingToolApproval` | TUI 读取 `pending.tool_calls` | `ui/permission.rs` |
+| `no field 'mode' on PendingToolApproval` | TUI 读取 `pending.mode` | `ui/permission.rs` |
+| `no field 'response_tx' on PendingToolApproval` | TUI 写入 `pending.response_tx` | `ui/permission.rs` |
+
+**恢复**：统一 `tidev-agent::types` 中的 `ApprovedTool` 和 `PendingToolApproval` 定义，匹配 TUI 期望的完整字段集。
+
+### 9.5 未移植的类型导入（~8 个错误）
+
+| 错误 | 缺失类型 | 原始位置 | 需要移至 |
+|------|---------|---------|---------|
+| `cannot find 'NotificationManager' in 'tidev_hooks'` | `NotificationManager` | `engine/notifications.rs` | `tidev-hooks` |
+| `cannot find struct 'QueuedUserMessage'` | `QueuedUserMessage` | `engine/agent/runtime/types.rs` | `tidev-agent` |
+| `cannot find struct 'AgentLoopConfig'` | `AgentLoopConfig` | `engine/agent/runtime/types.rs` | `tidev-agent` |
+| `cannot find 'StepPatch' in 'tidev_snapshot'` | `StepPatch` | `engine/shared/undo.rs` | `tidev-snapshot` |
+| `cannot find function 'collect_patches_after_message'` | `collect_patches_after_message` | `engine/shared/undo.rs` | `tidev-snapshot` |
+| `cannot find 'tooling' in 'tidev_tools'` | 模块路径 `tidev_tools::tooling` | 旧模块结构 | 更新导入路径 |
+
+### 9.6 tidev-config 内联 JSON Value 占位（~8 个错误）
+
+| 错误 | 受影响的代码 | 原因 |
+|------|------------|------|
+| `no field 'name' on type '&Value'` | `ui/sync_panel.rs` | TUI 访问 `sync_config.remotes[0].name` |
+| `no field 'host' on type '&Value'` | `ui/sync_panel.rs` | TUI 访问 `sync_config.remotes[0].host` |
+| `no field 'last_sync_at' on type '&Value'` | `ui/sync_panel.rs` | TUI 访问 `sync_config.remotes[0].last_sync_at` |
+
+**恢复**：见 2.2 — 用 `tidev-sync::SyncConfig & RemoteMachine` 完整类型替换 JSON Value。
+
+### 9.7 AgentType 非迭代器（~3 个错误）
+
+| 错误 | 受影响的代码 | 原因 |
+|------|------------|------|
+| `tidev_agent::AgentType is not an iterator` | `ui/agents_panel.rs` | TUI 枚举所有 agent 类型以渲染面板 |
+| `tidev_agent::AgentType is not an iterator` | input/event | TUI 枚举类型做快捷键映射 |
+
+**恢复**：为 `AgentType` 添加 `variants()` 关联函数返回 `&'static [AgentType]`。
+
+### 9.8 shell::init 参数类型不匹配（~2 个错误）
+
+| 错误 | 受影响的代码 | 原因 |
+|------|------------|------|
+| `expected &Path, found &ConfigPaths` | `core/run.rs:39` | `tidev_tools::shell::init()` 签名期望 `Option<&Path>` 但 TUI 传入 `Option<&ConfigPaths>` |
+
+**恢复**：更新 `shell::init` 签名为接受 `Option<&ConfigPaths>`，或修复调用处转换。
+
+### 9.9 其他类型不匹配（~12 个错误）
+
+包括：`SessionManager` 构造参数类型不匹配、`ToolRegistry` 方法签名变化、导入路径变更等零散类型错误，分布在整个 TUI crate 中。
+
+**恢复**：随上述主要类别修复后逐一解决。
+
+### 9.10 初始化流程需重写
+
+`core/run.rs` 中的 `App::new()` / `App::new_with_paths()` 需要从旧式构造迁移：
+
+```rust
+// 旧方式 — 设置 AgentRuntime 的所有字段
+let agent = AgentRuntime { workspace_root, config_dir, config_paths, config, auth,
+    store, llm_client, tools, instructions, ... };
+
+// 新方式 — 使用 SessionManager API
 let session_manager = SessionManager::new(store, llm);
-let handle = session_manager.spawn(SessionConfig {
-    model: active_model,
-    tools: tool_definitions,
-    store: store.clone(),
-    // ...
-}).await;
+let handle = session_manager.spawn(SessionConfig { model, tools, ... }).await;
+let app = App { session_manager, config, workspace_root, ... };
 ```
 
 ---
@@ -339,12 +437,48 @@ let handle = session_manager.spawn(SessionConfig {
 | `memory/`               | ~1,500 | 记忆/图谱/保留系统           | 非核心，架构不稳定                            |
 | `sandbox/`              | ~800   | bwrap/landlock/seatbelt 沙箱 | 非核心，Linux only                            |
 | `provider_setup/`       | ~500   | API key 初始化流程           | 非核心                                        |
-| `process.rs`            | ~100   | 进程管理（kill children）    | 可在需要时移植                                |
-| `notifications.rs`      | ~200   | 桌面通知                     | 可在需要时移植                                |
-| `shell.rs`（完整版）    | ~150   | 跨平台 shell 检测            | 见 6.2                                        |
-| `encoding.rs`（完整版） | ~100   | 编码检测                     | 见 6.1                                        |
-| `shared/undo.rs`        | ~200   | 撤销/重做补丁                | 见 5.1                                        |
-| `shared/file_search.rs` | ~400   | 文件搜索                     | 已提取为 `tidev-search`，但部分辅助函数未移植 |
+| `process.rs`            | ~46    | 进程管理（restart_self）     | 可在需要时移植                                |
+| `notifications.rs`      | ~329   | 桌面通知（OSC 9 / BEL）      | TUI 依赖但未移植 → 见 9.5                    |
+| `shell.rs`（完整版）    | ~240   | 跨平台 shell 检测            | 见 6.2                                        |
+| `encoding.rs`（完整版） | ~246   | 编码检测                     | 见 6.1                                        |
+| `shared/undo.rs`        | ~200   | 撤销/重做补丁（StepPatch）   | 见 5.1                                        |
+| `tmp.rs`（扫描/清理）    | ~175   | 扫描/清理 /tmp 中临时文件    | 仅 TmpConfig 已提取，实际逻辑未移植           |
+
+## 11. 恢复路线图
+
+### 修复编译错误的推荐顺序（10 步）
+
+以下是按依赖关系排列的、清除 73 个 TUI 编译错误的逐步计划：
+
+| 步骤 | 操作 | 修复约 | 依赖 |
+|------|------|--------|------|
+| 1 | **移植 `StepPatch` + `collect_patches_after_message` 到 `tidev-snapshot`** — 从 `_archive/v0.6.x/crates/tidev-engine/src/shared/undo.rs` 移植 | 3 个 | 无 |
+| 2 | **修复 `SyncConfig` — 用 `tidev-sync::SyncConfig & RemoteMachine` 完整类型替换 `tidev-config` 中的 JSON Value 占位** | 8 个 | 无 |
+| 3 | **移植 `NotificationManager` 到 `tidev-hooks`** — 从 `_archive/v0.6.x/crates/tidev-engine/src/notifications.rs` 移植 | 3 个 | 无 |
+| 4 | **统一 `ApprovedTool` / `PendingToolApproval`** — 添加缺失字段：`rejection`、`child_session_id`、`allow_outside`、`sensitive_file_approved`、`tool_calls`、`response_tx`、`mode` | 12 个 | 无 |
+| 5 | **移植缺失类型** — `QueuedUserMessage` → `tidev-agent`，`AgentLoopConfig` → `tidev-agent`；更新模块导入路径 | 6 个 | 步骤 1 |
+| 6 | **删除 BackendEvent 模式匹配中的 `session_id`** — 从 `Delta`、`ReasoningDelta`、`ShellOutput` 等变体中移除 `session_id` | 5 个 | 无 |
+| 7 | **为 `AgentType` 添加 `variants()` 方法** — 返回 `&'static [AgentType]` 以支持枚举 | 3 个 | 无 |
+| 8 | **修复 `shell::init` 参数类型** — 更新签名为接受 `Option<&ConfigPaths>` 或修复调用处 | 2 个 | 无 |
+| 9 | **重写 TUI 初始化代码** — `core/run.rs` 中 `App::new()` 从 AgentRuntime 构造改为 SessionManager::spawn() | 15 个 | 步骤 2,3,4 |
+| 10 | **添加 SessionManager 缺失的访问器方法** — `workspace_root()`、`config()`、`tools()` 等，或重构 TUI 直接从其他源获取 | 16 个 | 步骤 9 |
+
+> **总计**：以上 10 步完成后，预计可清除 73 个编译错误中的约 70 个。剩余 ~3 个为导入路径等零散问题。
+
+### 编译后需恢复的核心功能
+
+清除编译错误后，按此顺序恢复 AgentLoop 的核心功能：
+
+| 优先级 | 功能 | 影响 | 工作量估计 |
+|--------|------|------|-----------|
+| P0 | **AgentLoop 工具执行** — 连接 `ToolRegistry` 实现真正的工具路由 | AgentLoop 产生实际效果 | 中 |
+| P1 | **工具审批流程** — 实现 `PendingToolApproval` → 用户确认 → `ApprovedTool` 异步通道 | 用户控制工具执行 | 中 |
+| P2 | **Subagent 调度** — 在 task.rs 中调用 `SessionManager::spawn()` | 子 agent 真正工作 | 小 |
+| P3 | **Hook 执行** — 在 AgentLoop 循环中调用 `HookEngine` | post-tool-use 钩子触发 | 小 |
+| P4 | **上下文压缩** — 在 AgentLoop 中调用 `ContextManager::compact_if_needed()` | 长对话自动压缩 | 小 |
+| P5 | **LLM 重试** — 在 `run_single_turn` 中处理 `Failed` 事件 | 容错性 | 小 |
+| P6 | **权限/模式检查** — 在 `execute_tool_calls` 中添加 Plan/Build 模式判断 | 安全限制 | 小 |
+| P7 | **跨平台 shell/encoding** — 移植 Windows shell 检测和编码转换 | Windows 兼容性 | 中 |
 
 ---
 
@@ -355,14 +489,15 @@ let handle = session_manager.spawn(SessionConfig {
 | Phase 0（归档）                   | 无简化     | 纯文件移动                                               |
 | Phase 1（types + session）        | 计划内     | BackendEvent 变更是架构需求                              |
 | Phase 2（config + storage + llm） | **中**     | HooksConfig/SyncConfig 占位，logging 简化                |
-| Phase 3（5 个基础设施 crate）     | **低**     | hooks 中 canonical_tool_name 副本                        |
-| Phase 4（tools + mcp + context）  | **中**     | encoding/shell 简化，AgentType 副本                      |
+| Phase 3（5 个基础设施 crate）     | **低**     | hooks 中 canonical_tool_name 副本，StepPatch 未移植      |
+| Phase 4（tools + mcp + context）  | **中**     | encoding/shell 简化，AgentType 副本，task/MCP 占位       |
 | Phase 5（agent）                  | **高**     | 全新代码，工具执行/审批/子agent/hooks/压缩/重试均为 stub |
-| Phase 6（tui）                    | **未完成** | 74 个编译错误待修复                                      |
+| Phase 6（tui）                    | **73 个编译错误** | SessionManager API 不匹配 + 6 个未移植类型 + 字段签名变更 |
 | Phase 7（清理）                   | 未开始     | —                                                        |
 
 最需要优先恢复的功能：
 
-1. **Phase 5 AgentLoop** — 工具执行、审批流程
-2. **Phase 2 tidev-config** — HooksConfig/SyncConfig 完整化
-3. **Phase 4 tidev-tools** — encoding/shell 完整化
+1. **Phase 6 编译错误** — 按 10 步路线图修复 73 个错误
+2. **Phase 5 AgentLoop** — 工具执行、审批流程、子 agent
+3. **Phase 2 tidev-config** — HooksConfig/SyncConfig 完整化
+4. **Phase 4 tidev-tools** — encoding/shell 完整化
