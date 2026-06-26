@@ -519,11 +519,11 @@ impl App {
                 ));
 
                 // Register tool_call_id → child_session_id mapping for navigation.
-                if approval.tool_call.name == "task" {
-                    if let Some(child_session_id) = approval.child_session_id {
-                        self.subagent_task_map
-                            .insert(approval.tool_call.id.clone(), child_session_id);
-                    }
+                if approval.tool_call.name == "task"
+                    && let Some(child_session_id) = approval.child_session_id
+                {
+                    self.subagent_task_map
+                        .insert(approval.tool_call.id.clone(), child_session_id);
                 }
             }
         }

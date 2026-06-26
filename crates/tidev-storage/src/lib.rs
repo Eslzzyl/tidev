@@ -1837,7 +1837,6 @@ impl SessionStore {
                     total_cache_write_tokens: row.get::<_, Option<i64>>(3)?.unwrap_or(0),
                     total_tokens: row.get::<_, Option<i64>>(4)?.unwrap_or(0),
                     total_requests: row.get::<_, Option<i64>>(5)?.unwrap_or(0),
-                    ..Default::default()
                 })
             },
         )

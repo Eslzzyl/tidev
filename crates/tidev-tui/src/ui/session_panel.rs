@@ -582,7 +582,7 @@ impl App {
     pub(crate) fn switch_session(
         &mut self,
         session_id: Uuid,
-        runtime: &tokio::runtime::Runtime,
+        _runtime: &tokio::runtime::Runtime,
     ) -> Result<()> {
         if self.conversation.session_id == session_id {
             self.last_notice = Some("Already on that session".to_string());
