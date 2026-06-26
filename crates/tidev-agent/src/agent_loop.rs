@@ -38,7 +38,10 @@ pub struct AgentLoop {
     pub agent_type: AgentType,
     /// Optional channel for interactive tool permission approval.
     pub permission_tx: Option<UnboundedSender<PendingToolApproval>>,
+    /// Hook engine for PostToolUse hooks.
+    pub hooks: tidev_hooks::HookEngine,
 }
+
 impl AgentLoop {
     /// Run the main agent loop.
     pub async fn run(mut self) -> Result<()> {
@@ -309,6 +312,15 @@ impl AgentLoop {
                 Ok(result) => result,
                 Err(e) => ToolExecutionResult::new(format!("Error: {e}")),
             };
+
+            // Run PostToolUse hooks
+            let hook_outcome = self
+                .hooks
+                .on_post_tool_use(tool_call, &result, Some(self.session_id))
+                .await;
+            if let Some(hook_output) = hook_outcome.format_for_result() {
+                log::info!("hooks: post-tool-use result: {}", hook_output);
+            }
 
             // Emit completion event
             let _ = self.event_tx.send(BackendEvent::ToolCompleted {

@@ -149,6 +149,7 @@ impl SessionManager {
                 mode: config.mode,
                 agent_type: AgentType::General,
                 permission_tx: Some(permission_tx),
+                hooks: self.hooks.lock().unwrap().clone(),
             };
 
             loop_.run().await
@@ -205,6 +206,7 @@ impl SessionManager {
             mode: tidev_types::prompts::SessionMode::Build,
             agent_type: AgentType::General,
             permission_tx: None,
+            hooks: self.hooks.lock().unwrap().clone(),
         };
 
         // Register as active
