@@ -485,18 +485,20 @@ let app = App { session_manager, config, workspace_root, ... };
 | --------------------------------- | ---------- | -------------------------------------------------------- |
 | Phase 0（归档）                   | 无简化     | 纯文件移动                                               |
 | Phase 1（types + session）        | 计划内     | BackendEvent 变更是架构需求                              |
-| Phase 2（config + storage + llm） | **中** | HooksConfig/SyncConfig 已完整化，logging 简化（待恢复）    |
-| Phase 3（5 个基础设施 crate）     | **低** | StepPatch 已移植，canonical_tool_name 副本仍存在            |
-| Phase 4（tools + mcp + context）  | **中** | encoding/shell 待完整化，task/MCP 仍为 stub                |
-| Phase 5（agent）                  | **高** | 工具执行/审批/子agent/hooks/压缩/重试均为 stub，类型已就绪 |
-| Phase 6（tui）                    | **✅ 已修复** | 73 个编译错误已全部清除                                    |
+| Phase 2（config + storage + llm） | ✅ 已完成 | HooksConfig/SyncConfig 已完整化，logging 简化（待恢复）    |
+| Phase 3（5 个基础设施 crate）     | ✅ 已完成 | StepPatch 已移植，canonical_tool_name 副本仍存在            |
+| Phase 4（tools + mcp + context）  | ✅ 已完成 | encoding/shell 已从旧代码完整移植，80 测试通过               |
+| Phase 5（agent）                  | **部分完成** | 工具执行/审批/MCP/Hook/压缩/重试已恢复，子 agent spawn 待接 |
+| Phase 6（tui）                    | ✅ 已修复 | 73 个编译错误已全部清除                                    |
 | Phase 7（清理）                   | 未开始     | —                                                        |
 
 最需要优先恢复的功能：
 
-1. **AgentLoop 工具执行** — 连接 `ToolRegistry` 实现真正的工具路由
-2. **工具审批流程** — 实现 `PendingToolApproval` → 用户确认 → `ApprovedTool` 异步通道
-3. **Subagent 调度** — 在 task.rs 中调用 `SessionManager::spawn()`
-4. **Hook 执行** — 在 AgentLoop 循环中调用 `HookEngine`
-5. **上下文压缩** — 在 AgentLoop 中调用 `ContextManager::compact_if_needed()`
-6. **跨平台 shell/encoding** — 移植 Windows shell 检测和编码转换
+1. ✅ **AgentLoop 工具执行** — 通过 ToolRegistry 真实执行（已完成）
+2. ✅ **工具审批流程** — PendingToolApproval → ApprovedTool 通道（已完成）
+3. 🔲 **Subagent 调度** — task 工具实际调用 SessionManager::spawn()（需解决 Send 问题）
+4. ✅ **Hook 执行** — 在 AgentLoop 中调用 HookEngine（已完成）
+5. ✅ **上下文压缩** — 在 AgentLoop 中自动检测并压缩（已完成）
+6. ✅ **LLM 重试** — 最多重试 3 次（已完成）
+7. ✅ **跨平台 shell/encoding** — 移植 Windows 检测和编码转换（已完成）
+8. 🔲 **with_temporary_session_context** — TUI 子会话事件路由（待实现）
