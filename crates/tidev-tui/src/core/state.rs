@@ -7,7 +7,7 @@ use uuid::Uuid;
 use tidev_tools::FileReadStamp;
 
 use super::permission::{
-    PendingToolExecution, PermissionDialogState, RunningSubagentExecution, RunningToolExecution,
+    PendingToolExecution, PermissionDialogState, RunningToolExecution,
 };
 use super::question::QuestionDialogState;
 use tidev_types::prompts::SessionMode;
@@ -183,7 +183,6 @@ pub(crate) struct CachedSessionRuntime {
     pub(crate) sensitive_file_permissions: std::collections::HashMap<String, bool>,
     pub(crate) question_dialog: Option<QuestionDialogState>,
     pub(crate) running_tool_executions: Vec<RunningToolExecution>,
-    pub(crate) running_subagent_executions: Vec<RunningSubagentExecution>,
     pub(crate) pending_request: bool,
     pub(crate) pending_prompt_queue: std::collections::VecDeque<QueuedPrompt>,
     pub(crate) active_request_id: u64,

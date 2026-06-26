@@ -28,10 +28,6 @@ impl App {
         request_id == self.active_request_id
     }
 
-    pub(crate) fn cancel_running_subagents(&mut self) {
-        self.running_subagent_executions.clear();
-    }
-
     pub(crate) fn abort_current_request(&mut self) {
         self.active_request_id = self.active_request_id.wrapping_add(1);
         self.abort_confirmation_deadline = None;
@@ -61,44 +57,6 @@ impl App {
         self.permission_dialog = None;
         self.question_dialog = None;
         self.fork_confirm_dialog = None;
-
-        // Handle subagent cancellations: record "User cancelled" tool results
-        // so the parent agent's tool call has a matching tool message.
-        // This prevents orphaned tool calls that some providers (e.g. OpenAI) reject.
-        if !self.running_subagent_executions.is_empty() {
-            let parent_session_id = self.running_subagent_executions[0].parent_session_id;
-            let current_session_id = self.conversation.session_id;
-            let is_in_subsession = current_session_id != parent_session_id;
-            let cancel_output = "User cancelled the request".to_string();
-
-            for execution in self.running_subagent_executions.drain(..) {
-                let result = ToolExecutionResult::new(cancel_output.clone());
-                let msg = Message::tool_result(
-                    execution.tool_call.id.clone(),
-                    execution.tool_call.name.clone(),
-                    result,
-                );
-
-                // Store in DB for parent session
-                let _ = self.store.append_message(parent_session_id, &msg);
-
-                if is_in_subsession {
-                    // Also push to cached parent conversation so it's in-memory when restored
-                    if let Some(cached) = self.cached_sessions.get_mut(&parent_session_id) {
-                        cached.conversation.messages.push(msg.clone());
-                    }
-                } else {
-                    // We're on the parent session: push to in-memory conversation
-                    self.conversation.messages.push(msg.clone());
-                }
-            }
-
-            if is_in_subsession {
-                self.pending_assistant_turns.insert(parent_session_id);
-            }
-        }
-
-        self.cancel_running_subagents();
 
         // Clean up per-batch boundary approvals
         self.workspace_boundary_approved.clear();

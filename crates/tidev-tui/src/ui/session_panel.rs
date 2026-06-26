@@ -621,16 +621,6 @@ impl App {
                 .set_placeholder("Ask tidev about your code, task, or question...");
         }
 
-        if self.pending_assistant_turns.remove(&session_id) {
-            log::info!(
-                "switch_session: session {} has pending assistant turn, starting now",
-                session_id
-            );
-            if !self.pending_request {
-                self.spawn_agent_loop(runtime)?;
-            }
-        }
-
         Ok(())
     }
 }

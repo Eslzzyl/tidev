@@ -191,8 +191,6 @@ impl App {
             fork_confirm_dialog: None,
             undo_confirm_dialog: None,
             running_tool_executions: Vec::new(),
-            running_subagent_executions: Vec::new(),
-            pending_assistant_turns: std::collections::HashSet::new(),
             cached_sessions: std::collections::HashMap::new(),
             compacting_sessions: std::collections::HashSet::new(),
             frontend_rx,
@@ -282,7 +280,6 @@ impl App {
             image_viewer_consume_next_up: false,
             terminal_session: None,
             force_full_redraw: false,
-            processing_child_session: false,
         };
 
         // Start background file indexing so the @-mention panel is ready
@@ -525,7 +522,6 @@ impl App {
             sensitive_file_permissions: self.sensitive_file_permissions.clone(),
             question_dialog: self.question_dialog.clone(),
             running_tool_executions: self.running_tool_executions.clone(),
-            running_subagent_executions: self.running_subagent_executions.clone(),
             pending_request: self.pending_request,
             pending_prompt_queue: self.pending_prompt_queue.clone(),
             active_request_id: self.active_request_id,
@@ -584,7 +580,6 @@ impl App {
         self.sensitive_file_permissions = cached.sensitive_file_permissions;
         self.question_dialog = cached.question_dialog;
         self.running_tool_executions = cached.running_tool_executions;
-        self.running_subagent_executions = cached.running_subagent_executions;
         self.mode = cached.mode;
         self.pending_request = cached.pending_request;
         self.pending_prompt_queue = cached.pending_prompt_queue;
@@ -718,7 +713,6 @@ impl App {
         self.question_dialog = None;
         self.fork_confirm_dialog = None;
         self.running_tool_executions.clear();
-        self.running_subagent_executions.clear();
         self.pending_request = false;
         self.pending_mode = None;
         self.pending_prompt_queue.clear();
@@ -842,7 +836,6 @@ impl App {
             sensitive_file_permissions: std::collections::HashMap::new(),
             question_dialog: None,
             running_tool_executions: Vec::new(),
-            running_subagent_executions: Vec::new(),
             pending_request: false,
             pending_prompt_queue: std::collections::VecDeque::new(),
             active_request_id: 0,

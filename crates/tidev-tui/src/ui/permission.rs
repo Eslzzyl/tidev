@@ -94,54 +94,6 @@ impl RunningToolExecution {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
-pub(crate) enum SubagentStatus {
-    #[default]
-    Thinking,
-}
-
-impl SubagentStatus {
-    #[allow(dead_code)]
-    pub(crate) fn display(&self) -> &'static str {
-        match self {
-            Self::Thinking => "Thinking",
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-#[allow(dead_code)]
-pub(crate) struct RunningSubagentExecution {
-    pub request_id: u64,
-    pub parent_session_id: uuid::Uuid,
-    pub tool_call: ToolCall,
-    pub child_session_id: uuid::Uuid,
-    pub task_description: String,
-    pub subagent_type: String,
-    pub status: SubagentStatus,
-}
-
-impl RunningSubagentExecution {
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new(
-        request_id: u64,
-        parent_session_id: uuid::Uuid,
-        tool_call: ToolCall,
-        child_session_id: uuid::Uuid,
-        task_description: String,
-        subagent_type: String,
-    ) -> Self {
-        Self {
-            request_id,
-            parent_session_id,
-            tool_call,
-            child_session_id,
-            task_description,
-            subagent_type,
-            status: SubagentStatus::Thinking,
-        }
-    }
-}
 
 impl App {
     pub(crate) fn begin_tool_execution(
@@ -475,18 +427,14 @@ impl App {
             .as_ref()
             .is_some_and(PendingToolExecution::is_finished)
         {
-            log::info!(
-                "process_pending_tool_execution: finished, running_subagent_executions={}",
-                self.running_subagent_executions.len()
-            );
+            log::info!("process_pending_tool_execution: finished");
             self.pending_tool_execution = None;
             // All tools rejected — send empty approval to continue the loop
             return self.send_permission_approval(ready_calls, rejected, runtime);
         } else {
             log::info!(
-                "process_pending_tool_execution: loop ended but not finished, pending_tool_execution={}, running_subagent_executions={}",
-                self.pending_tool_execution.is_some(),
-                self.running_subagent_executions.len()
+                "process_pending_tool_execution: loop ended but not finished, pending_tool_execution={}",
+                self.pending_tool_execution.is_some()
             );
         }
 
@@ -563,8 +511,6 @@ impl App {
         );
 
         // Record approved tool calls as running for UI display.
-        // For "task" tools, also create RunningSubagentExecution entries
-        // so the TUI can show subagent cards with status updates.
         for approval in &approvals {
             if approval.rejection.is_none() {
                 self.running_tool_executions.push(RunningToolExecution::new(
@@ -572,33 +518,12 @@ impl App {
                     approval.tool_call.clone(),
                 ));
 
-                // If this is a task/subagent tool, also track it as a
-                // RunningSubagentExecution so the runtime's SubagentStatus
-                // events can update the subagent card in the UI.
-                if approval.tool_call.name == "task"
-                    && let Ok(args) = serde_json::from_str::<tidev_tools::TaskArgs>(
-                        &approval.tool_call.arguments,
-                    )
-                {
-                    let child_session_id =
-                        approval.child_session_id.unwrap_or_else(uuid::Uuid::new_v4);
-                    let subagent_type_str = args.subagent_type.clone();
-                    let description = args.description.trim().to_string();
-
-                    // Register the mapping from tool_call_id to child_session_id
-                    // so the TUI can navigate into the subsession on click.
-                    self.subagent_task_map
-                        .insert(approval.tool_call.id.clone(), child_session_id);
-
-                    self.running_subagent_executions
-                        .push(RunningSubagentExecution::new(
-                            self.active_request_id,
-                            self.conversation.session_id,
-                            approval.tool_call.clone(),
-                            child_session_id,
-                            description,
-                            subagent_type_str,
-                        ));
+                // Register tool_call_id → child_session_id mapping for navigation.
+                if approval.tool_call.name == "task" {
+                    if let Some(child_session_id) = approval.child_session_id {
+                        self.subagent_task_map
+                            .insert(approval.tool_call.id.clone(), child_session_id);
+                    }
                 }
             }
         }

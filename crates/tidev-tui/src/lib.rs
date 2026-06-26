@@ -64,7 +64,7 @@ use tidev_types::prompts::{SessionMode, init_command_with_args};
 
 use crate::ui::connect::ConnectDialog;
 use crate::ui::permission::{
-    PendingToolExecution, PermissionDialogState, RunningSubagentExecution, RunningToolExecution,
+    PendingToolExecution, PermissionDialogState, RunningToolExecution,
     SubagentOverlay,
 };
 
@@ -165,9 +165,8 @@ struct App {
     fork_confirm_dialog: Option<ui::fork_confirm::ForkConfirmDialogState>,
     undo_confirm_dialog: Option<ui::undo_confirm::UndoConfirmDialogState>,
     running_tool_executions: Vec<RunningToolExecution>,
-    running_subagent_executions: Vec<RunningSubagentExecution>,
-    pending_assistant_turns: std::collections::HashSet<Uuid>,
-    cached_sessions: std::collections::HashMap<Uuid, CachedSessionRuntime>,
+    /// Cached session UI state for session switching (scroll, dialogs, etc.).
+    cached_sessions: std::collections::HashMap<Uuid, crate::core::state::CachedSessionRuntime>,
     compacting_sessions: std::collections::HashSet<Uuid>,
     /// Receiver for FrontendEvents from SessionManager (subagent lifecycle).
     frontend_rx: tokio::sync::mpsc::UnboundedReceiver<tidev_agent::FrontendEvent>,
@@ -333,9 +332,6 @@ struct App {
     /// on the next event loop iteration (ratatui's frame buffer is stale after
     /// leaving and re-entering the alternate screen).
     force_full_redraw: bool,
-    /// True when temporarily processing events for a child session (subagent).
-    /// Used to suppress desktop notifications from subagent events.
-    processing_child_session: bool,
 }
 pub fn run() -> Result<()> {
     let runtime = Runtime::new().context("failed to create runtime")?;
@@ -1007,9 +1003,7 @@ impl App {
             && event_type != "ReasoningDelta"
             && event_type != "ToolCallUpdated"
             && event_type != "UsageStats"
-            && event_type != "SubagentStatus"
             && event_type != "InstructionsLoaded"
-            && event_type != "SubagentToolResult"
         {
             log::debug!("handle_backend_event: {}", event_type);
         }
@@ -1110,21 +1104,6 @@ impl App {
                 error,
             } => {
                 if !self.is_active_request(request_id) {
-                    // This may be a Failed event from a subagent child session
-                    // (the child session has its own request_id).  Try to match
-                    // it against running_subagent_executions and clean up.
-                    if self
-                        .running_subagent_executions
-                        .iter()
-                        .any(|e| e.request_id == request_id)
-                    {
-                        log::info!(
-                            "Failed event for subagent child session request_id={}, cleaning up",
-                            request_id
-                        );
-                        self.running_subagent_executions
-                            .retain(|e| e.request_id != request_id);
-                    }
                     return Ok(());
                 }
 
@@ -1136,7 +1115,6 @@ impl App {
                 self.fork_confirm_dialog = None;
                 self.running_tool_executions.clear();
                 self.workspace_boundary_approved.clear();
-                self.cancel_running_subagents();
                 self.abort_confirmation_deadline = None;
                 self.retrying_hint = None;
                 // Clean up cancel token and permission channel so the agent
@@ -1145,10 +1123,8 @@ impl App {
                 self.pending_permission_response = None;
                 self.pending_permission_rx = None;
 
-                if !self.processing_child_session {
-                    self.notifications
-                        .notify(&format!("Request failed: {}", error));
-                }
+                self.notifications
+                    .notify(&format!("Request failed: {}", error));
 
                 if let Some(message) = self.conversation.messages.last_mut()
                     && message.streaming
@@ -1251,23 +1227,10 @@ impl App {
                     // snapshot so patch_files are attributed to the correct user
                     // message rather than left dangling for the next Finished event.
                     if self.running_tool_executions.is_empty()
-                        && self.running_subagent_executions.is_empty()
                         && let Err(error) =
                             self.finalize_snapshot_for_last_user_message_sync(runtime)
                     {
                         log::warn!("ToolCompleted: failed to finalize snapshot: {}", error);
-                    }
-
-                    // Also clean up running_subagent_executions for task tools.
-                    // Match by tool_call.id instead of request_id so that
-                    // parallel subagents (which share the same request_id) are
-                    // each removed individually rather than all at once.
-                    if tool_call.name == "task"
-                        && let Some(pos) = self.running_subagent_executions.iter().position(|e| {
-                            e.request_id == request_id && e.tool_call.id == tool_call.id
-                        })
-                    {
-                        self.running_subagent_executions.remove(pos);
                     }
                 }
             }
@@ -1503,16 +1466,10 @@ impl App {
                     return Ok(());
                 }
 
-                // When on a child session (subsession), never create a
-                // streaming assistant message here — SubagentStatus will
-                // push the finalized message instead.
-                //
-                // This must be checked AFTER the request_cancel_token gate
-                // above because the parent's cancel token is not part of
-                // CachedSessionRuntime and survives session swaps: when the
-                // user is directly on a child session whose parent loop is
-                // still running, request_cancel_token is non-None but we
-                // still must not create a streaming message.
+                // When on a child session (subsession), create the streaming
+                // message through the child session's own event channel.
+                // The parent's cancel token may still be active (parent loop
+                // running) so this check must come after the token gate above.
                 if self.conversation.parent_session_id.is_some() {
                     log::info!(
                         "TurnStarting: child session, skipping streaming message"
@@ -1639,9 +1596,7 @@ impl App {
                 log::warn!("failed to finalize snapshot: {}", error);
             }
 
-            if !self.processing_child_session {
-                self.notifications.notify("Response complete");
-            }
+            self.notifications.notify("Response complete");
         } else {
             // Tool calls are present — keep `pending_request` true.
             // Permission approval will happen via the channel, and
