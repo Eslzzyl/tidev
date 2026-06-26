@@ -36,7 +36,7 @@ impl App {
         );
         let config = AppConfig::load_with_project_overlay(&paths, &workspace_root)?;
         // Initialize shell detection (Windows: auto-detect bash, Unix: sh).
-        tidev_tools::shell::init(config.shell.windows_shell.clone(), Some(&paths));
+        tidev_tools::shell::init(config.shell.windows_shell.clone(), None);
         let _ = tidev_config::logging::init(&paths.data_dir, config.logging.clone());
         log::info!("App initializing, workspace={}", workspace_root.display());
         log::info!("startup: config loaded in {:?}", _t0.elapsed());
@@ -129,6 +129,7 @@ impl App {
                 config.hooks.clone(),
                 workspace_root.clone(),
             ),
+            active: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         };
         // Share current session ID for the background inactivity check.
         let current_session_id: Arc<RwLock<Uuid>> = Arc::new(RwLock::new(session_id));

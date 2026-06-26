@@ -1,6 +1,7 @@
 //! SessionManager — manages session lifecycle with Per-Session Event Bus.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use chrono::Utc;
@@ -12,17 +13,31 @@ use tidev_session::session::BackendEvent;
 use tidev_storage::SessionStore;
 
 use crate::agent_loop::AgentLoop;
-use crate::types::{AgentType, SessionConfig, SessionHandle, SessionInfo};
+use crate::types::{AgentType, AgentLoopConfig, QueuedUserMessage, SessionConfig, SessionHandle, SessionInfo};
 
 /// Manages all active sessions, each with its own event bus.
 #[derive(Clone)]
 pub struct SessionManager {
-    store: Arc<Mutex<SessionStore>>,
-    llm: tidev_llm::LlmClient,
-    active: Arc<AsyncMutex<HashMap<Uuid, ActiveSession>>>,
+    // Core runtime fields (used by SessionManager internally)
+    pub store: Arc<tokio::sync::Mutex<SessionStore>>,
+    pub llm_client: tidev_llm::LlmClient,
+    pub active: Arc<AsyncMutex<HashMap<Uuid, ActiveSession>>>,
+
+    // TUI-facing fields (held for frontend access, not used internally by SessionManager)
+    pub workspace_root: PathBuf,
+    pub config_dir: PathBuf,
+    pub config_paths: tidev_config::ConfigPaths,
+    pub config: tidev_config::AppConfig,
+    pub auth: tidev_config::AuthStore,
+    pub tools: tidev_tools::ToolRegistry,
+    pub instructions: Vec<String>,
+    pub instruction_content_cache: HashMap<String, String>,
+    pub queued_messages: Arc<Mutex<VecDeque<QueuedUserMessage>>>,
+    pub auto_approve_permissions: bool,
+    pub hooks: tidev_hooks::HookEngine,
 }
 
-struct ActiveSession {
+pub struct ActiveSession {
     agent_type: AgentType,
     parent_session_id: Option<Uuid>,
     cancel_token: CancellationToken,
@@ -31,16 +46,31 @@ struct ActiveSession {
 }
 
 impl SessionManager {
-    pub fn new(store: Arc<Mutex<SessionStore>>, llm: tidev_llm::LlmClient) -> Self {
-        Self {
-            store,
-            llm,
-            active: Arc::new(AsyncMutex::new(HashMap::new())),
+    /// Queue a user message for the next agent loop turn.
+    pub fn queue_user_message(&self, msg: QueuedUserMessage) {
+        if let Ok(mut queue) = self.queued_messages.lock() {
+            queue.push_back(msg);
         }
     }
 
-    pub async fn spawn(&self, config: SessionConfig) -> SessionHandle {
-        let session_id = Uuid::new_v4();
+    /// Compose a static system prompt from the given prompt string.
+    pub fn compose_static_system_prompt(&self, system_prompt: &str) -> String {
+        system_prompt.to_string()
+    }
+
+    /// Run the agent loop with a permission approval channel.
+    /// Stub for now — will be connected in Phase 5.
+    pub fn run_agent_loop_with_permission_channel(
+        &mut self,
+        _config: crate::types::AgentLoopConfig,
+        _request_id: u64,
+        _permission_tx: tokio::sync::mpsc::UnboundedSender<crate::types::PendingToolApproval>,
+    ) -> anyhow::Result<()> {
+        log::warn!("run_agent_loop_with_permission_channel: not yet implemented");
+        Ok(())
+    }
+
+    pub async fn spawn(&self, config: SessionConfig) -> SessionHandle {        let session_id = Uuid::new_v4();
         let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
         let parent_token = CancellationToken::new();
         let child_token = parent_token.child_token();
@@ -51,7 +81,7 @@ impl SessionManager {
             .as_deref()
             .unwrap_or_else(|| std::path::Path::new("/"));
         {
-            let store = self.store.lock().unwrap();
+            let store = self.store.lock().await;
             let _ = store.create_session(
                 session_id,
                 workspace_root,
@@ -81,7 +111,7 @@ impl SessionManager {
             context: tidev_context::ContextManager::new(),
             tools: config.tools,
             store: self.store.clone(),
-            llm: self.llm.clone(),
+            llm: self.llm_client.clone(),
             event_tx: event_tx.clone(),
             cancel_token: child_token,
             mode: tidev_types::prompts::SessionMode::Build,

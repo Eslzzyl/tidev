@@ -1836,7 +1836,6 @@ impl App {
                     request_id,
                     permission_tx,
                 )
-                .await
             {
                 log::error!("spawn_agent_loop: agent loop failed: {}", e);
             }

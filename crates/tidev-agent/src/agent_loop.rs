@@ -4,14 +4,13 @@
 //! Events carry NO `session_id` — the receiver already knows which session
 //! the events belong to (Per-Session Event Bus).
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use anyhow::Result;
 use chrono::Utc;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
-
 use tidev_session::session::{
     AssistantTurn, BackendEvent, Conversation, Message, MessageRole, ToolCall,
     ToolExecutionResult,
@@ -29,7 +28,7 @@ pub struct AgentLoop {
     pub conversation: Conversation,
     pub context: tidev_context::ContextManager,
     pub tools: Vec<tidev_tools::ToolDefinition>,
-    pub store: Arc<Mutex<SessionStore>>,
+    pub store: Arc<tokio::sync::Mutex<SessionStore>>,
     pub llm: tidev_llm::LlmClient,
     pub event_tx: UnboundedSender<BackendEvent>,
     pub cancel_token: CancellationToken,
@@ -74,10 +73,9 @@ impl AgentLoop {
             // Persist the assistant turn
             let assistant_msg = assistant_turn_to_message(&turn);
             self.conversation.push(assistant_msg.clone());
-            self.store
-                .lock()
-                .unwrap()
-                .append_message(self.session_id, &assistant_msg)?;
+            {
+            let store = self.store.lock().await;
+            store.append_message(self.session_id, &assistant_msg)?;            }
 
             // If no tool calls, we're done
             if turn.tool_calls.is_empty() {
@@ -199,10 +197,8 @@ impl AgentLoop {
             // Persist tool result
             let result_msg = Message::new(MessageRole::Tool, result.output.clone());
             self.conversation.push(result_msg.clone());
-            self.store
-                .lock()
-                .unwrap()
-                .append_message(self.session_id, &result_msg)?;
+            let store = self.store.lock().await;
+            store.append_message(self.session_id, &result_msg)?;
         }
 
         Ok(())

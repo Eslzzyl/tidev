@@ -32,7 +32,7 @@ pub struct SessionConfig {
     /// Tool definitions available to this session.
     pub tools: Vec<tidev_tools::ToolDefinition>,
     /// Shared session store for persistence.
-    pub store: Arc<Mutex<SessionStore>>,
+    pub store: Arc<tokio::sync::Mutex<SessionStore>>,
     /// Optional workspace root.
     pub workspace_root: Option<std::path::PathBuf>,
 }
