@@ -496,9 +496,6 @@ impl App {
                 tidev_config::reasoning::ThinkingLevelType::from_string(&level_str);
         }
         self.tools.set_active_model(model.clone());
-        // Sync the agent's ToolRegistry so per-turn tool filtering
-        // (all_definitions → use_apply_patch) uses the correct model.
-        self.tools.set_active_model(model.clone());
         self.conversation.set_model(
             model.provider_id.clone(),
             model.provider_display_name.clone(),
