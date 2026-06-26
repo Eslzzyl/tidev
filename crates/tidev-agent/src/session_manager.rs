@@ -13,7 +13,10 @@ use tidev_session::session::BackendEvent;
 use tidev_storage::SessionStore;
 
 use crate::agent_loop::AgentLoop;
-use crate::types::{AgentType, AgentLoopConfig, QueuedUserMessage, SessionConfig, SessionHandle, SessionInfo};
+use crate::types::{
+    AgentType, AgentLoopConfig, PendingToolApproval, QueuedUserMessage,
+    SessionConfig, SessionHandle, SessionInfo,
+};
 
 /// Manages all active sessions, each with its own event bus.
 #[derive(Clone)]
@@ -53,24 +56,106 @@ impl SessionManager {
         }
     }
 
-    /// Compose a static system prompt from the given prompt string.
-    pub fn compose_static_system_prompt(&self, system_prompt: &str) -> String {
-        system_prompt.to_string()
+    /// Compose the static system prompt — called exactly once per session lifetime.
+    ///
+    /// Content: base prompt + environment info.
+    /// Result is persisted to the session DB record and never changes.
+    pub fn compose_static_system_prompt(&self, base_prompt: &str) -> String {
+        let base_prompt = base_prompt.trim();
+        let system_info = tidev_session::system_info::SystemInfo::detect();
+        let working_dir = std::env::current_dir()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
+        let is_git = tidev_session::system_info::is_git_repo(&self.workspace_root);
+
+        let mut prompt = String::new();
+        if !base_prompt.is_empty() {
+            prompt.push_str(base_prompt);
+        }
+        prompt.push_str("\n\nHere is some useful information about the environment:\n<env>\n  ");
+        prompt.push_str(&format!("Working directory: {}\n  ", working_dir));
+        prompt.push_str(&format!(
+            "Workspace root folder: {}\n  ",
+            self.workspace_root.display()
+        ));
+        prompt.push_str(&format!(
+            "Is directory a git repo: {}\n  ",
+            if is_git { "yes" } else { "no" }
+        ));
+        prompt.push_str(&system_info.format_env());
+        prompt.push_str("\n</env>");
+        prompt
     }
 
     /// Run the agent loop with a permission approval channel.
-    /// Stub for now — will be connected in Phase 5.
+    ///
+    /// Creates an AgentLoop from the config and runs it inline.
+    /// Tool execution goes through ToolRegistry for real tool calls.
+    /// Permission approvals flow through the provided channel.
     pub fn run_agent_loop_with_permission_channel(
         &mut self,
-        _config: crate::types::AgentLoopConfig,
-        _request_id: u64,
-        _permission_tx: tokio::sync::mpsc::UnboundedSender<crate::types::PendingToolApproval>,
+        config: AgentLoopConfig,
+        request_id: u64,
+        permission_tx: tokio::sync::mpsc::UnboundedSender<PendingToolApproval>,
     ) -> anyhow::Result<()> {
-        log::warn!("run_agent_loop_with_permission_channel: not yet implemented");
-        Ok(())
+        // This runs synchronously (blocking) to match the TUI's call pattern.
+        // The actual AgentLoop implementation is in tokio::runtime::Handle.
+        log::info!(
+            "run_agent_loop_with_permission_channel: starting for session {}",
+            config.session_id
+        );
+
+        // Build tools list from registry
+        let tools = self.tools.definitions_for_model(&config.model);
+        let tool_registry = self.tools.clone();
+        let store = self.store.clone();
+        let llm = self.llm_client.clone();
+        let event_tx = config.event_tx.clone();
+
+        // Build main conversation from store
+        let runtime_handle = tokio::runtime::Handle::current();
+
+        // We need to run the AgentLoop as a blocking task since this method is synchronous
+        runtime_handle.block_on(async move {
+            // Load conversation from store
+            let conversation = {
+                let store = store.lock().await;
+                let msgs = store.load_messages(config.session_id).unwrap_or_default();
+                let mut conv = tidev_session::session::Conversation::new(
+                    config.session_id,
+                    "".to_string(),
+                    &config.model.provider_id,
+                    &config.model.provider_display_name,
+                    &config.model.model_id,
+                    &config.model.display_name,
+                    "Session",
+                );
+                conv.messages = msgs;
+                conv
+            };
+
+            let loop_ = AgentLoop {
+                session_id: config.session_id,
+                model: config.model,
+                conversation,
+                context: tidev_context::ContextManager::new(),
+                tools,
+                tool_registry,
+                store,
+                llm,
+                event_tx,
+                cancel_token: config.cancel_token.unwrap_or_else(CancellationToken::new),
+                mode: config.mode,
+                agent_type: AgentType::General,
+                permission_tx: Some(permission_tx),
+            };
+
+            loop_.run().await
+        })
     }
 
-    pub async fn spawn(&self, config: SessionConfig) -> SessionHandle {        let session_id = Uuid::new_v4();
+    pub async fn spawn(&self, config: SessionConfig) -> SessionHandle {
+        let session_id = Uuid::new_v4();
         let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
         let parent_token = CancellationToken::new();
         let child_token = parent_token.child_token();
@@ -104,18 +189,21 @@ impl SessionManager {
             "New session",
         );
 
+        let tools_list = self.tools.definitions_for_model(&config.model);
         let loop_ = AgentLoop {
             session_id,
             model: config.model,
             conversation,
             context: tidev_context::ContextManager::new(),
-            tools: config.tools,
+            tools: tools_list,
+            tool_registry: self.tools.clone(),
             store: self.store.clone(),
             llm: self.llm_client.clone(),
             event_tx: event_tx.clone(),
             cancel_token: child_token,
             mode: tidev_types::prompts::SessionMode::Build,
             agent_type: AgentType::General,
+            permission_tx: None,
         };
 
         // Register as active

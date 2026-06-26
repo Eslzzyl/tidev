@@ -9,6 +9,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use chrono::Utc;
 use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 use tidev_session::session::{
@@ -19,7 +20,7 @@ use tidev_types::ToolSchema;
 use tidev_types::prompts::SessionMode;
 use tidev_storage::SessionStore;
 
-use crate::types::AgentType;
+use crate::types::{AgentType, PendingToolApproval, ApprovedTool};
 
 /// The per-session agent loop.
 pub struct AgentLoop {
@@ -28,12 +29,16 @@ pub struct AgentLoop {
     pub conversation: Conversation,
     pub context: tidev_context::ContextManager,
     pub tools: Vec<tidev_tools::ToolDefinition>,
+    pub tool_registry: tidev_tools::ToolRegistry,
     pub store: Arc<tokio::sync::Mutex<SessionStore>>,
     pub llm: tidev_llm::LlmClient,
     pub event_tx: UnboundedSender<BackendEvent>,
     pub cancel_token: CancellationToken,
     pub mode: SessionMode,
     pub agent_type: AgentType,
+    /// Optional channel for interactive tool permission approval.
+    /// When set, tool calls are sent to the frontend for approval before execution.
+    pub permission_tx: Option<UnboundedSender<PendingToolApproval>>,
 }
 
 impl AgentLoop {
@@ -72,10 +77,12 @@ impl AgentLoop {
 
             // Persist the assistant turn
             let assistant_msg = assistant_turn_to_message(&turn);
+            let msg_id = assistant_msg.id;
             self.conversation.push(assistant_msg.clone());
             {
-            let store = self.store.lock().await;
-            store.append_message(self.session_id, &assistant_msg)?;            }
+                let store = self.store.lock().await;
+                store.append_message(self.session_id, &assistant_msg)?;
+            }
 
             // If no tool calls, we're done
             if turn.tool_calls.is_empty() {
@@ -84,7 +91,7 @@ impl AgentLoop {
                 break;
             }
 
-            // Execute tool calls
+            // Execute tool calls — this is the core execution path
             self.execute_tool_calls(request_id, &turn.tool_calls)
                 .await?;
 
@@ -173,21 +180,107 @@ impl AgentLoop {
     }
 
     /// Execute tool calls from an LLM turn.
+    ///
+    /// Filters tools by mode, checks permissions, then executes through ToolRegistry.
+    /// If a permission_tx channel is available, tool calls are sent to the frontend
+    /// for interactive approval before execution.
     async fn execute_tool_calls(
         &mut self,
         request_id: u64,
         tool_calls: &[ToolCall],
     ) -> Result<()> {
-        for tool_call in tool_calls {
+        let runtime = tokio::runtime::Handle::current();
+
+        // ─── Phase 0: Mode-based filtering ────────────────────────────
+        let mut filtered: Vec<ToolCall> = Vec::with_capacity(tool_calls.len());
+        for call in tool_calls {
+            if !self.tool_registry.can_execute(&call.name, self.mode) {
+                log::info!(
+                    "execute_tool_calls: rejecting '{}' — not allowed in {:?} mode",
+                    call.name,
+                    self.mode
+                );
+                let result = ToolExecutionResult::new(format!(
+                    "Tool '{}' is disabled in {:?} mode. \
+                     If you need to modify files, you must explain your intent to the user \
+                     and ask them to switch to Build mode.",
+                    call.name, self.mode
+                ));
+                self.persist_tool_result(request_id, call, &result).await?;
+                continue;
+            }
+            filtered.push(call.clone());
+        }
+
+        if filtered.is_empty() {
+            return Ok(());
+        }
+
+        // ─── Phase 1: Permission approval (if channel is available) ──
+        let approved: Vec<ToolCall> = if let Some(ref tx) = self.permission_tx {
+            let (response_tx, response_rx) = oneshot::channel();
+            let pending = PendingToolApproval {
+                tool_calls: filtered.clone(),
+                mode: self.mode,
+                response_tx,
+            };
+            let _ = tx.send(pending);
+
+            match response_rx.await {
+                Ok(approved_tools) => {
+                    // Collect approved tool calls, execute them
+                    // Rejected tools have rejection set
+                    let mut to_execute = Vec::new();
+                    for at in approved_tools {
+                        if let Some(rejection) = at.rejection {
+                            // Tool was rejected — persist the rejection result
+                            self.persist_tool_result(request_id, &at.tool_call, &rejection).await?;
+                        } else {
+                            to_execute.push(at.tool_call);
+                        }
+                    }
+                    to_execute
+                }
+                Err(_) => {
+                    log::warn!("execute_tool_calls: permission channel closed, skipping all tools");
+                    return Ok(());
+                }
+            }
+        } else {
+            // No permission channel — execute all tools directly
+            filtered
+        };
+
+        if approved.is_empty() {
+            return Ok(());
+        }
+
+        // ─── Phase 2: Execute tools via ToolRegistry ──────────────────
+        for tool_call in &approved {
             if self.cancel_token.is_cancelled() {
                 break;
             }
 
-            let result = ToolExecutionResult::new(format!(
-                "Executed tool '{}' (standalone mode)",
-                tool_call.name
-            ));
+            // Get a store snapshot for tool execution
+            let store_snapshot = {
+                let store = self.store.lock().await;
+                store.clone()
+            };
 
+            let result = match self.tool_registry.execute_call(
+                &runtime,
+                &store_snapshot,
+                self.session_id,
+                tool_call,
+                self.mode,
+                false, // allow_outside — TUI will set this via approval
+                false, // sensitive_file_approved — TUI will set this via approval
+            ) {
+                Ok(result) => result,
+                Err(e) => ToolExecutionResult::new(format!("Error: {e}")),
+            };
+
+            // Emit completion event
             let _ = self.event_tx.send(BackendEvent::ToolCompleted {
                 request_id,
                 tool_call: tool_call.clone(),
@@ -197,10 +290,34 @@ impl AgentLoop {
             // Persist tool result
             let result_msg = Message::new(MessageRole::Tool, result.output.clone());
             self.conversation.push(result_msg.clone());
+            {
+                let store = self.store.lock().await;
+                store.append_message(self.session_id, &result_msg)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Persist a tool result (for mode-rejected or user-rejected tools).
+    async fn persist_tool_result(
+        &mut self,
+        request_id: u64,
+        tool_call: &ToolCall,
+        result: &ToolExecutionResult,
+    ) -> Result<()> {
+        let _ = self.event_tx.send(BackendEvent::ToolCompleted {
+            request_id,
+            tool_call: tool_call.clone(),
+            result: result.clone(),
+        });
+
+        let result_msg = Message::new(MessageRole::Tool, result.output.clone());
+        self.conversation.push(result_msg.clone());
+        {
             let store = self.store.lock().await;
             store.append_message(self.session_id, &result_msg)?;
         }
-
         Ok(())
     }
 }

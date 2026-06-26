@@ -29,8 +29,6 @@ pub struct SessionConfig {
     pub parent_session_id: Option<Uuid>,
     /// The model configuration for this session.
     pub model: tidev_config::ActiveModel,
-    /// Tool definitions available to this session.
-    pub tools: Vec<tidev_tools::ToolDefinition>,
     /// Shared session store for persistence.
     pub store: Arc<tokio::sync::Mutex<SessionStore>>,
     /// Optional workspace root.
