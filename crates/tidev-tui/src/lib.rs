@@ -53,7 +53,6 @@ pub use ui::mcp_panel;
 pub use ui::message_panel;
 pub use ui::model_panel;
 pub use ui::permission;
-use ui::permission::SubagentStatus;
 pub use ui::question;
 pub use ui::session_panel;
 pub use ui::settings_panel;
@@ -71,7 +70,6 @@ use crate::ui::permission::{
 use crate::theme::ThemeManager;
 use tidev_config::{ActiveModel, AppConfig, AuthStore, ConfigPaths};
 use tidev_context::ContextManager;
-use tidev_instructions;
 use tidev_mcp::McpManager;
 use tidev_agent::PendingToolApproval;
 use tidev_search::current_at_fragment;

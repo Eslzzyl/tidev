@@ -164,8 +164,8 @@ impl App {
 
                 // Image badge click: open viewer if this was a click (not drag)
                 // on an Image span in the input area.
-                if !self.mouse_selection.is_dragging() {
-                    if let Some(picker) = &self.image_picker {
+                if !self.mouse_selection.is_dragging()
+                    && let Some(picker) = &self.image_picker {
                         // Check composer image badges first
                         if let Some(inner) = self.input_area.get()
                             && inner.contains(position)
@@ -236,7 +236,6 @@ impl App {
                             }
                         }
                     }
-                }
 
                 // Handle input area mouse up for selection
                 if self.handle_input_area_mouse_up(position) {

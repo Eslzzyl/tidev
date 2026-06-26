@@ -150,7 +150,7 @@ impl SessionManager {
         let store = self.store.clone();
         let llm = self.llm_client.clone();
         let event_tx = config.event_tx.clone();
-        let cancel_token = config.cancel_token.unwrap_or_else(CancellationToken::new);
+        let cancel_token = config.cancel_token.unwrap_or_default();
         let control_tx = self.control_tx.clone();
 
         let runtime_handle = tokio::runtime::Handle::current();

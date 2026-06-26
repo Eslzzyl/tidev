@@ -167,7 +167,7 @@ impl App {
     ) {
         let snapshot = self.snapshot.clone();
         let tx = self.backend_tx.clone();
-        let session_id = self.conversation.session_id;
+        let _session_id = self.conversation.session_id;
         let request_id = self.active_request_id;
 
         runtime.spawn(async move {

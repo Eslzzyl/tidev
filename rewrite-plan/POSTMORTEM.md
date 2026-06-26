@@ -472,9 +472,9 @@ pub enum ControlEvent {
 | `persistence.rs` — 消息持久化辅助函数 | ✅ 已移植 |
 | `tests.rs` — 集成测试（mock store） | ✅ 13 个新测试 |
 | `AgentType` 统一到 tidev-types | ✅ + 6 个测试 |
-| `process.rs` → root crate | 🔲 待移出 |
-| `tmp.rs` 逻辑 → root crate | 🔲 待移出 |
-| `logging.rs` 文件轮转 → tidev-config | 🔲 待移出 |
+| `process.rs` → root crate | ✅ 已移出 (src/process.rs) |
+| `tmp.rs` 逻辑 → root crate | ✅ 已移出 (src/tmp.rs) |
+| `logging.rs` 文件轮转 → tidev-config | ✅ 已恢复文件日志轮转 |
 
 ### 验证标准（已全部通过）
 

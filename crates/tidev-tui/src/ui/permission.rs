@@ -98,28 +98,12 @@ impl RunningToolExecution {
 pub(crate) enum SubagentStatus {
     #[default]
     Thinking,
-    Working,
-    Tool,
-    WritingOutput,
 }
 
 impl SubagentStatus {
     pub(crate) fn display(&self) -> &'static str {
         match self {
             Self::Thinking => "Thinking",
-            Self::Working => "Working",
-            Self::Tool => "Tool",
-            Self::WritingOutput => "Writing output",
-        }
-    }
-
-    pub(crate) fn from_status_text(text: &str) -> Self {
-        match text {
-            "Thinking" => Self::Thinking,
-            "Working" => Self::Working,
-            "Tool" => Self::Tool,
-            "Writing output" => Self::WritingOutput,
-            _ => Self::Thinking,
         }
     }
 }
@@ -133,7 +117,6 @@ pub(crate) struct RunningSubagentExecution {
     pub task_description: String,
     pub subagent_type: String,
     pub status: SubagentStatus,
-    pub current_tool_call: Option<ToolCall>,
 }
 
 impl RunningSubagentExecution {
@@ -154,7 +137,6 @@ impl RunningSubagentExecution {
             task_description,
             subagent_type,
             status: SubagentStatus::Thinking,
-            current_tool_call: None,
         }
     }
 }

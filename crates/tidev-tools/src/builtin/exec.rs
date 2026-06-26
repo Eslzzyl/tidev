@@ -168,7 +168,7 @@ fn run_shell_inner(
     cancelled: Option<Arc<AtomicBool>>,
     timeout_ms: u64,
     event_tx: Option<UnboundedSender<BackendEvent>>,
-    session_id: Uuid,
+    _session_id: Uuid,
 ) -> Result<BashExecutionResult> {
     let mut actual_command = command.to_string();
 

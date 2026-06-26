@@ -36,7 +36,7 @@ use tidev_session::utils::{TokenUsage, format_token_count};
 use unicode_width::UnicodeWidthStr;
 use uuid::Uuid;
 
-use super::super::permission::{RunningSubagentExecution, SubagentStatus};
+use super::super::permission::RunningSubagentExecution;
 use crate::render::render::{
     decorate_card_lines, line_with_prefix, line_with_style, shorten, shorten_single_line,
     wrap_text_lines,
@@ -1594,30 +1594,7 @@ impl App {
 
         // Status line
         let status_text = execution.status.display();
-        let status_line = match &execution.status {
-            SubagentStatus::Tool => {
-                if let Some(tool_call) = &execution.current_tool_call {
-                    let tool_summary =
-                        if tool::tool_call_arguments_are_complete(&tool_call.arguments) {
-                            utils::summarize_tool_call(
-                                &tool_call.name,
-                                &tool_call.arguments,
-                                body_width.saturating_sub(10),
-                                self.workspace_root.as_path(),
-                            )
-                        } else {
-                            let canonical_display = canonical_tool_name(&tool_call.name)
-                                .map(|s| s.to_string())
-                                .unwrap_or_else(|| tool_call.name.clone());
-                            format!("{} ...", canonical_display)
-                        };
-                    format!("{}: {}", status_text, tool_summary)
-                } else {
-                    status_text.to_string()
-                }
-            }
-            _ => status_text.to_string(),
-        };
+        let status_line = status_text.to_string();
 
         lines.push(Line::from(vec![
             Span::styled("  ".to_string(), Style::default()),
@@ -1789,11 +1766,11 @@ impl App {
                     // subagent card (4+ lines). Correct the layout index to match.
                     let start_idx = blocks_info[comp_idx].start_idx;
                     let mut line_count = comp.line_count;
-                    if let Some(msg) = messages.get(start_idx) {
-                        if msg.role == MessageRole::Assistant {
+                    if let Some(msg) = messages.get(start_idx)
+                        && msg.role == MessageRole::Assistant {
                             for tool_call in &msg.tool_calls {
-                                if tool_call.name == "task" {
-                                    if let Some(execution) = self
+                                if tool_call.name == "task"
+                                    && let Some(execution) = self
                                         .running_subagent_executions
                                         .iter()
                                         .find(|e| e.tool_call.id == tool_call.id)
@@ -1805,10 +1782,8 @@ impl App {
                                         // Generic tool call card: 1 empty + 1 summary = 2 lines
                                         line_count = line_count.saturating_sub(2) + running_height;
                                     }
-                                }
                             }
                         }
-                    }
 
                     let block = super::MessageBlock {
                         message_id: comp.message_id,
@@ -1886,11 +1861,11 @@ impl App {
                     // Apply the same running-subagent line-count adjustment as in
                     // the full rebuild path above.
                     let mut adjusted_line_count = comp.line_count;
-                    if let Some(msg) = messages.get(block.message_start_idx) {
-                        if msg.role == MessageRole::Assistant {
+                    if let Some(msg) = messages.get(block.message_start_idx)
+                        && msg.role == MessageRole::Assistant {
                             for tool_call in &msg.tool_calls {
-                                if tool_call.name == "task" {
-                                    if let Some(execution) = self
+                                if tool_call.name == "task"
+                                    && let Some(execution) = self
                                         .running_subagent_executions
                                         .iter()
                                         .find(|e| e.tool_call.id == tool_call.id)
@@ -1903,10 +1878,8 @@ impl App {
                                         adjusted_line_count =
                                             adjusted_line_count.saturating_sub(2) + running_height;
                                     }
-                                }
                             }
                         }
-                    }
 
                     let old_line_count = index.blocks[i].line_count;
                     let line_count_diff =

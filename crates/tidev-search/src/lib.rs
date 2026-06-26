@@ -1,5 +1,4 @@
 use ignore::WalkBuilder;
-use log;
 use notify::{
     Config as NotifyConfig, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher,
     event::ModifyKind,

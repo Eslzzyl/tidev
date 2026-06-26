@@ -257,6 +257,7 @@ pub(crate) async fn stream_openai(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn complete_openai(
     http: &Client,
     model: LlmProviderConfig,

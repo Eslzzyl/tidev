@@ -526,6 +526,7 @@ pub(crate) async fn stream_responses(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn complete_responses(
     http: &Client,
     model: LlmProviderConfig,

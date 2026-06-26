@@ -6,24 +6,12 @@ use uuid::Uuid;
 
 use tidev_tools::FileReadStamp;
 
-use super::at_mention::AtMentionState;
-use super::input::SnippetState;
-use super::mcp_panel::McpPanelState;
-use super::message_panel::MessagePanelState;
-use super::model_panel::ModelPanelState;
-use super::mouse_selection::MouseSelectionState;
 use super::permission::{
     PendingToolExecution, PermissionDialogState, RunningSubagentExecution, RunningToolExecution,
 };
 use super::question::QuestionDialogState;
-use super::session_panel::SessionPanelState;
-use super::theme_panel::ThemePanelState;
-use crate::ui::agents_panel::AgentsPanelState;
-use crate::ui::rename::RenameSessionDialogState;
-use crate::ui::search_panel::SearchPanelState;
 use tidev_types::prompts::SessionMode;
 
-use crate::ui::skills_panel::SkillsPanelState;
 use crate::ui::workspace_boundary::WorkspaceBoundaryConfirmDialogState;
 use crate::ui::workspace_boundary::WorkspaceBoundaryDialogState;
 use tidev_config::{ActiveModel};
@@ -32,9 +20,7 @@ use tidev_context::ContextManager;
 use tidev_tools::TodoItem;
 use tidev_session::session::{Conversation, MessageAttachment};
 
-use crate::ui::connect::ConnectDialog;
-
-use crate::{commands::CommandPaletteState, input::Composer, panel_launcher::PanelLauncherState};
+use crate::input::Composer;
 
 pub(crate) const MESSAGE_RENDER_CACHE_MAX_ENTRIES: usize = 1200;
 
@@ -217,32 +203,4 @@ pub(crate) struct CachedSessionRuntime {
     pub(crate) instruction_content_cache: HashMap<String, String>,
     /// Preserved text input state for this session.
     pub(crate) composer: Composer,
-}
-#[derive(Clone, Debug)]
-pub(crate) struct UiStateSnapshot {
-    pub(crate) screen: Screen,
-    pub(crate) connect_dialog: Option<ConnectDialog>,
-    pub(crate) theme_panel: Option<ThemePanelState>,
-    pub(crate) model_panel: Option<ModelPanelState>,
-    pub(crate) message_panel: Option<MessagePanelState>,
-    pub(crate) session_panel: Option<SessionPanelState>,
-    pub(crate) rename_dialog: Option<RenameSessionDialogState>,
-    pub(crate) mcp_panel: Option<McpPanelState>,
-    pub(crate) agents_panel: Option<AgentsPanelState>,
-    pub(crate) skills_panel: Option<SkillsPanelState>,
-    pub(crate) sync_panel: Option<crate::ui::sync_panel::SyncPanelState>,
-    pub(crate) search_panel: Option<SearchPanelState>,
-    pub(crate) at_mention: AtMentionState,
-    pub(crate) snippet_state: SnippetState,
-    pub(crate) command_palette: CommandPaletteState,
-    pub(crate) panel_launcher: PanelLauncherState,
-    pub(crate) leader_key_pending: bool,
-    pub(crate) composer: Composer,
-    pub(crate) draft_attachments: Vec<MessageAttachment>,
-    /// Attachments restored from an undone user message.
-    /// Consumed by build_prompt_attachments on the next prompt submission.
-    pub(crate) restored_attachments: Vec<MessageAttachment>,
-    pub(crate) last_notice: Option<String>,
-    pub(crate) toast: Option<(String, Instant)>,
-    pub(crate) mouse_selection: MouseSelectionState,
 }

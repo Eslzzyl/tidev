@@ -460,7 +460,7 @@ impl McpManager {
 fn parse_tool(server_name: &str, tool: McpTool) -> Result<ToolDefinition> {
     let annotations = tool.annotations.unwrap_or_default();
     let remote_tool_name = tool.name.to_string();
-    let permission = match remote_tool_name.as_str() {
+    let _permission = match remote_tool_name.as_str() {
         "websearch" => ToolPermission::Search,
         "webfetch" => ToolPermission::Read,
         _ if annotations.read_only_hint.unwrap_or(false) => ToolPermission::Read,

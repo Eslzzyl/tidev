@@ -82,11 +82,10 @@ fn supports_osc9() -> bool {
         return true;
     }
     // iTerm2 sets this to a version string
-    if let Ok(val) = env::var("ITERM_PROFILE") {
-        if !val.is_empty() {
+    if let Ok(val) = env::var("ITERM_PROFILE")
+        && !val.is_empty() {
             return true;
         }
-    }
     // Apple Terminal does not support OSC 9
     true
 }
@@ -98,6 +97,12 @@ fn supports_osc9() -> bool {
 /// OSC 9 notification protocol (iTerm2, WezTerm, ghostty, Warp).
 #[derive(Debug)]
 pub struct Osc9Backend;
+
+impl Default for Osc9Backend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Osc9Backend {
     pub fn new() -> Self {
@@ -130,6 +135,12 @@ impl Osc9Backend {
 /// BEL (terminal bell) notification backend.
 #[derive(Debug)]
 pub struct BelBackend;
+
+impl Default for BelBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl BelBackend {
     pub fn new() -> Self {

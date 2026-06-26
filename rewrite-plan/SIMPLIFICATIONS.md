@@ -515,7 +515,7 @@ let app = App { session_manager, config, workspace_root, ... };
 | Phase 4（tools + mcp + context）  | ✅ 已完成 | encoding/shell 已从旧代码完整移植，80 测试通过               |
 | Phase 5（agent）                  | **全部完成** | 工具执行/审批/MCP/Hook/压缩/重试/子 agent/ControlEvent/持久化/测试/提示词/工厂函数 |
 | Phase 6（tui）                    | ✅ 已修复 | 73 个编译错误已全部清除                                    |
-| Phase 7（清理）                   | 待开始   | —                                                        |
+| Phase（清理）                   | ✅ 已完成 | `cargo clippy --workspace -- -D warnings` 无警告, process.rs/tmp.rs 移入 root crate, logging 文件轮转恢复 |
 
 所有 Phase 5 的 tidev-agent 功能已完整实现：
 

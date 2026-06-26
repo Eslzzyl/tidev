@@ -98,8 +98,8 @@ fn resolve(config_shell: Option<String>, _paths: Option<&tidev_config::ConfigPat
     }
 
     // Also try `where bash` to find bash on PATH
-    if let Ok(output) = std::process::Command::new("where").arg("bash").output() {
-        if output.status.success() {
+    if let Ok(output) = std::process::Command::new("where").arg("bash").output()
+        && output.status.success() {
             let path = String::from_utf8_lossy(&output.stdout);
             let first_line = path.lines().next().unwrap_or("").trim().to_string();
             if !first_line.is_empty() && PathBuf::from(&first_line).exists() {
@@ -111,7 +111,6 @@ fn resolve(config_shell: Option<String>, _paths: Option<&tidev_config::ConfigPat
                 };
             }
         }
-    }
 
     // Fallback: PowerShell
     log::info!("shell: no bash found, falling back to PowerShell");
@@ -133,15 +132,6 @@ fn shell_arg_for(shell_path: &str) -> String {
     } else {
         "-lc".into()
     }
-}
-
-/// Persist the auto-detected shell path to `config.toml` so that
-/// subsequent startups use it directly without re-detection.
-#[cfg(windows)]
-fn persist_to_config(paths: &tidev_config::ConfigPaths, shell_path: &str) {
-    // Config persistence requires loading AppConfig from paths
-    // For now, just log the detected path
-    log::info!("shell: would persist auto-detected shell to config: {shell_path}");
 }
 
 /// Check whether a resolved shell is bash-like (POSIX-compatible).

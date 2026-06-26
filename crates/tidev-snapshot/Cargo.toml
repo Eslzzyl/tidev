@@ -13,6 +13,7 @@ name = "tidev_snapshot"
 anyhow = "1.0.102"
 blake3 = "1.8.5"
 diffy = "0.5.0"
+dunce = "1"
 log = "0.4.32"
 rayon = "1.12.0"
 serde = { version = "1.0.228", features = ["derive", "rc"] }

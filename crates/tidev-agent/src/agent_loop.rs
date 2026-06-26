@@ -287,7 +287,7 @@ impl AgentLoop {
                 &child_model.provider_display_name,
                 &child_model.model_id,
                 &child_model.display_name,
-                &agent_type.display_name(),
+                agent_type.display_name(),
             )?;
         }
 
@@ -320,7 +320,7 @@ impl AgentLoop {
         // 6. Create and run child AgentLoop
         let mut child_conv = Conversation::new(
             child_session_id,
-            &self.workspace_root.display().to_string(),
+            self.workspace_root.display().to_string(),
             &child_model.provider_id,
             &child_model.provider_display_name,
             &child_model.model_id,

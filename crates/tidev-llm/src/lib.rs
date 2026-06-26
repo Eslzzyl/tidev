@@ -26,7 +26,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 
 use tidev_session::session::{BackendEvent, Message};
-use tidev_types::{ApiType, ToolSchema};
+use tidev_types::ToolSchema;
 
 use error::{MAX_RETRIES, backoff_delay, backoff_sleep, classify_anyhow_error};
 

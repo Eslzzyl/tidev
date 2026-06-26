@@ -286,7 +286,7 @@ pub async fn filter_large_files(
     // Honour the caller's "disable parallelism" intent. We never go
     // above the number of files (no point spawning idle workers).
     let workers = concurrency.max(1).min(files.len());
-    let chunk_size = (files.len() + workers - 1) / workers;
+    let chunk_size = files.len().div_ceil(workers);
 
     let mut set: JoinSet<Vec<String>> = JoinSet::new();
     for chunk in files.chunks(chunk_size) {

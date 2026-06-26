@@ -45,6 +45,9 @@ categories = ["development-tools", "command-line-utilities"]
 include = ["/src", "/README.md", "/LICENSE"]
 
 [dependencies]
+log = "0.4"
+uuid = { version = "1", features = ["v4"] }
+tidev-config = { path = "crates/tidev-config" }
 
 [profile.dev]
 incremental = true

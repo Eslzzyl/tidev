@@ -4,7 +4,7 @@
 结合对现有 66,329 行 Rust 代码（180 个 `.rs` 文件，6 个 crate）的综合分析。
 
 
-> **当前状态**：Phase 0-5 已完成，Phase 6（TUI 移植）进行中，Phase 7 待开始。
+> **当前状态**：Phase 0-7 全部完成。
 > 详细进度见文末[检查清单](#14-检查清单)。
 > 实施过程中发现的简化详情见 [`SIMPLIFICATIONS.md`](./SIMPLIFICATIONS.md)。
 
@@ -1064,13 +1064,13 @@ Phase 1 → Phase 2 → Phase 3 → Phase 4 → Phase 5 → Phase 6 → Phase 7
 - [x] `cargo check -p tidev-tui` 通过
 - [x] `cargo test -p tidev-tui` 通过
 
-### Phase 7 [待开始]
+### Phase 7 [已完成]
 - [x] `cargo build --workspace` 全量编译
 - [x] `cargo test --workspace` 全量测试（298 tests）
-- [ ] `cargo clippy --workspace -- -D warnings` 无警告（部分 crate 有预存警告）
+- [x] `cargo clippy --workspace -- -D warnings` 无警告
 - [x] 更新文档（AGENTS.md, SIMPLIFICATIONS.md, POSTMORTEM.md, IMPLEMENTATION-PLAN.md）
 - [ ] 可选：删除 `_archive/`
-- [ ] 标记 `rewrite-plan/` 为完成
+- [x] 标记 `rewrite-plan/` 为完成
 
 ---
 

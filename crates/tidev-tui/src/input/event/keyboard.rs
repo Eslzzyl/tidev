@@ -652,7 +652,7 @@ impl App {
         // We use spawn_blocking (not spawn) so the synchronous wait
         // for the process runs on tokio's dedicated blocking thread
         // pool, not on a worker thread.
-        let session_id = self.conversation.session_id;
+        let _session_id = self.conversation.session_id;
         let tx = self.backend_tx.clone();
 
         runtime.spawn_blocking(move || {
