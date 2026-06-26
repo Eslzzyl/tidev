@@ -23,10 +23,12 @@ tokio = { version = "=1.52.3", features = [
     "rt",
     "macros",
     "rt-multi-thread",
+    "process",
 ] }
+uuid = { version = "1.23.3", features = ["v4"] }
 tidev-types = { path = "../tidev-types" }
 tidev-config = { path = "../tidev-config" }
+tidev-session = { path = "../tidev-session" }
 
 [dev-dependencies]
 tempfile = "3.27"
-uuid = { version = "1.23.3", features = ["v4"] }

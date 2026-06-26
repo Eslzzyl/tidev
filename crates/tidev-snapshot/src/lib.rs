@@ -34,6 +34,90 @@ pub struct Patch {
     pub files: Vec<String>,
 }
 
+/// A single step-level patch stored within a round.
+///
+/// Multiple step patches are serialised as a JSON array in
+/// `message.patch_files`.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct StepPatch {
+    pub hash: String,
+    pub files: Vec<String>,
+    pub step: usize,
+}
+
+/// Decode the patches stored inside a single message's `patch_files` field.
+///
+/// Supports both the current nested format
+/// (`[{"hash":...,"files":[...],"step":N}]`) and the legacy flat format
+/// (`["file1","file2"]`).
+pub fn extract_patches_from_message(message: &tidev_session::session::Message) -> Vec<Patch> {
+    let Some(patch_files_str) = &message.patch_files else {
+        return Vec::new();
+    };
+
+    // Try nested format first.
+    if let Ok(step_patches) = serde_json::from_str::<Vec<StepPatch>>(patch_files_str) {
+        return step_patches
+            .into_iter()
+            .map(|sp| Patch {
+                hash: sp.hash,
+                files: sp.files,
+            })
+            .collect();
+    }
+
+    // Fallback: old flat format `["file1","file2",...]`
+    if let Ok(files) = serde_json::from_str::<Vec<String>>(patch_files_str) {
+        return vec![Patch {
+            hash: String::new(),
+            files,
+        }];
+    }
+
+    Vec::new()
+}
+
+/// Accumulate patches from one message into an existing vec.
+pub fn collect_patches_from_message(
+    mut patches: Vec<Patch>,
+    message: &tidev_session::session::Message,
+) -> Vec<Patch> {
+    let msg_patches = extract_patches_from_message(message);
+    patches.extend(msg_patches);
+    patches
+}
+
+/// Gather all patches that need to be reverted to restore the state at (or
+/// before) a given message.
+///
+/// # Errors
+///
+/// Returns an error if the target `message_id` is not found in `messages`.
+pub fn collect_patches_after_message(
+    messages: &[tidev_session::session::Message],
+    message_id: uuid::Uuid,
+) -> Result<Vec<Patch>> {
+    let mut patches: Vec<Patch> = Vec::new();
+    let mut found = false;
+
+    // Messages are in chronological order. Walk forward until we find the
+    // target message, then continue collecting patches from subsequent
+    // messages.
+    for message in messages {
+        if !found && message.id == message_id {
+            found = true;
+        }
+        if found {
+            patches = collect_patches_from_message(patches, message);
+        }
+    }
+
+    if !found {
+        anyhow::bail!("message {message_id} not found");
+    }
+    Ok(patches)
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct FileDiff {
     pub file: String,
