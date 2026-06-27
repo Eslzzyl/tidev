@@ -155,7 +155,7 @@ impl App {
             );
             let result = ToolExecutionResult::new(output);
             // Add to in-memory conversation for TUI rendering
-            self.record_tool_result(dialog.pending.tool_call.clone(), result.clone())?;
+            self.record_tool_result(dialog.pending.tool_call.clone(), result.clone(), runtime)?;
             // Add to pending_rejected_tools so runtime persists it to DB via
             // send_permission_approval → ApprovedTool.rejection → persist_tool_result.
             // Without this, the orphaned tool call causes "no matching tool result" error.

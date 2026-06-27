@@ -97,7 +97,10 @@ impl App {
                     result,
                 );
 
-                let _ = self.store.append_message(session_id, &msg);
+                let _ = {
+                    let handle = tokio::runtime::Handle::current();
+                    handle.block_on(self.agent.append_message(session_id, &msg))
+                };
                 self.conversation.messages.push(msg);
             }
         }

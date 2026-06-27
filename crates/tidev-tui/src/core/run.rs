@@ -37,7 +37,7 @@ impl App {
         let config = AppConfig::load_with_project_overlay(&paths, &workspace_root)?;
         // Initialize shell detection (Windows: auto-detect bash, Unix: sh).
         tidev_tools::shell::init(config.shell.windows_shell.clone(), Some(&paths));
-        let _ = tidev_logging::init(&paths.data_dir, config.logging.clone());
+        let _ = crate::logging::init(&paths.data_dir, config.logging.clone());
         log::info!("App initializing, workspace={}", workspace_root.display());
         log::info!("startup: config loaded in {:?}", _t0.elapsed());
         let _t1 = std::time::Instant::now();
@@ -85,6 +85,7 @@ impl App {
         let command_palette = CommandPaletteState::default();
         let composer = Composer::new("Ask tidev about your code, task, or question...");
         let (backend_tx, backend_rx) = unbounded_channel();
+        let (display_tx, display_rx) = unbounded_channel();
         let mode = SessionMode::Build;
 
         let fallback_model = Self::resolve_fallback_model(&config, &auth)?;
@@ -120,6 +121,7 @@ impl App {
             Arc::new(auth.clone()),
             tools.clone(),
             frontend_tx,
+            display_tx,
         );
         // Share current session ID for the background inactivity check.
         let current_session_id: Arc<RwLock<Uuid>> = Arc::new(RwLock::new(session_id));
@@ -134,7 +136,7 @@ impl App {
             Arc::new(config.snapshot.clone()),
         )?;
         let cleanup_cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let notifications = tidev_notification::NotificationManager::new(config.notifications.clone());
+        let notifications = crate::notification::NotificationManager::new(config.notifications.clone());
 
         // Background cleanup of old tool outputs (runs every hour).
         store.start_output_cleanup(7, std::time::Duration::from_secs(3600));
@@ -153,7 +155,6 @@ impl App {
             pending_mode: None,
             active_model: active_model.clone(),
             conversation,
-            context_manager: ContextManager::new(),
             tools,
             agent,
             file_read_tracker,
@@ -192,7 +193,6 @@ impl App {
             undo_confirm_dialog: None,
             running_tool_executions: Vec::new(),
             cached_sessions: std::collections::HashMap::new(),
-            compacting_sessions: std::collections::HashSet::new(),
             frontend_rx,
             subagent_overlays: std::collections::HashMap::new(),
             leader_key_pending: false,
@@ -242,6 +242,7 @@ impl App {
             dirty: true,
             backend_tx,
             backend_rx,
+            display_rx,
             spinner_start: Instant::now(),
             last_spinner_frame: 0,
             context_usage: None,
@@ -404,6 +405,7 @@ impl App {
 
         loop {
             self.process_backend_events(runtime)?;
+            self.process_display_events(runtime)?;
             self.process_frontend_events();
             self.poll_subagent_channels();
             self.update_mouse_selection_auto_scroll();
@@ -511,7 +513,6 @@ impl App {
             conversation: self.conversation.clone(),
             active_model: self.active_model.clone(),
             mode: self.mode,
-            context_manager: self.context_manager.clone(),
             pending_tool_execution: self.pending_tool_execution.clone(),
             permission_dialog: self.permission_dialog.clone(),
             workspace_boundary_dialog: self.workspace_boundary_dialog.clone(),
@@ -569,7 +570,6 @@ impl App {
         // for the restored session.
         self.tools.set_active_model(self.active_model.clone());
         self.thinking_level = thinking_level;
-        self.context_manager = cached.context_manager;
         self.pending_tool_execution = cached.pending_tool_execution;
         self.permission_dialog = cached.permission_dialog;
         self.workspace_boundary_dialog = cached.workspace_boundary_dialog;
@@ -707,7 +707,6 @@ impl App {
     }
 
     pub(crate) fn reset_active_runtime(&mut self) {
-        self.context_manager = ContextManager::new();
         self.pending_tool_execution = None;
         self.permission_dialog = None;
         self.question_dialog = None;
@@ -778,17 +777,11 @@ impl App {
             active_model.system_prompt = composed;
         }
 
-        let context_manager = ContextManager::from_state(
-            conversation.context_summary.clone(),
-            conversation.context_retained_from,
-        );
+        let loaded_instruction_sources =
+            self.store.load_instruction_sources(session_id)?;
 
-        let mut loaded_instruction_sources = self.store.load_instruction_sources(session_id)?;
-
-        // Normalise legacy DB entries (may contain relative paths saved by
-        // earlier versions) to canonical absolute form so the in-memory list
-        // is consistent regardless of what the DB holds.
-        for source in loaded_instruction_sources.iter_mut() {
+        let mut instruction_content_cache = std::collections::HashMap::new();
+        for source in &loaded_instruction_sources {
             if source.starts_with("http://") || source.starts_with("https://") {
                 continue;
             }
@@ -797,37 +790,16 @@ impl App {
             } else {
                 self.workspace_root.join(source.as_str())
             };
-            let canonical = tidev_tools::builtin::utils::canonicalize_display(&path);
-            *source = canonical.display().to_string();
-        }
-
-        // Pre-populate cache from loaded instruction sources so the next
-        // user message doesn't re-read all files and avoid redundant
-        // "Loaded instructions from ..." messages across restarts.
-        let mut instruction_content_cache = std::collections::HashMap::new();
-        for source in &loaded_instruction_sources {
-            if source.starts_with("http://") || source.starts_with("https://") {
-                continue;
-            }
-            // source is now guaranteed to be canonical absolute.
-            if let Ok(content) = std::fs::read_to_string(source) {
+            if let Ok(content) = std::fs::read_to_string(&path) {
                 instruction_content_cache.insert(source.clone(), content);
             }
         }
-        log::info!(
-            "load_session_runtime_from_store: session={} loaded_instruction_sources={:?} cache_keys={:?}",
-            session_id,
-            loaded_instruction_sources,
-            instruction_content_cache.keys().collect::<Vec<_>>(),
-        );
 
         let mut runtime = CachedSessionRuntime {
             conversation,
             active_model,
             mode: SessionMode::Build,
-            context_manager,
-            pending_tool_execution: None,
-            permission_dialog: None,
+            pending_tool_execution: None,            permission_dialog: None,
             workspace_boundary_dialog: None,
             workspace_boundary_confirm_dialog: None,
             sensitive_file_dialog: None,
@@ -921,212 +893,7 @@ impl App {
         Ok(Some(runtime))
     }
 
-    pub(crate) fn schedule_context_compaction_for_session(
-        &mut self,
-        session_id: Uuid,
-        runtime: &Runtime,
-        stream_request_id: Option<u64>,
-    ) {
-        if self.compacting_sessions.contains(&session_id) {
-            return;
-        }
-
-        let is_active = self.conversation.session_id == session_id;
-        let Some((mut conversation, mut context_manager, mut model)) = (if is_active {
-            Some((
-                self.conversation.clone(),
-                self.context_manager.clone(),
-                self.active_model.clone(),
-            ))
-        } else {
-            self.cached_sessions.get(&session_id).map(|cached| {
-                (
-                    cached.conversation.clone(),
-                    cached.context_manager.clone(),
-                    cached.active_model.clone(),
-                )
-            })
-        }) else {
-            return;
-        };
-
-        // Reload messages from DB so they reflect any DC persistence
-        // done by the agent loop (which updates DB but not the in-memory
-        // conversation copy used above).
-        if let Ok(db_messages) = self.store.load_messages(session_id) {
-            conversation.messages = db_messages;
-        }
-
-        // Use the session's immutable static system prompt from DB.
-        // For the active session, model.system_prompt is already correct
-        // (loaded in restore_or_load_session), but cached sessions need
-        // the stored prompt too. Re-composing would re-capture SystemInfo
-        // (date, etc.) and break prefix caching.
-        if let Ok(stored) = self.store.load_session_system_prompt(session_id)
-            && !stored.is_empty()
-        {
-            model.system_prompt = stored;
-        }
-        let mode = if is_active {
-            self.mode
-        } else {
-            tidev_types::prompts::SessionMode::Build
-        };
-
-        self.compacting_sessions.insert(session_id);
-        let llm = self.llm.clone();
-        let tx = self.backend_tx.clone();
-        let manual = stream_request_id.is_some();
-        // Sync the tool registry's active model so the tool list is
-        // byte-for-byte identical to normal requests (preserving prefix cache).
-        self.tools.set_active_model(model.clone());
-        let tools = self.tools.all_definitions();
-
-        runtime.spawn(async move {
-            let result = if let Some(request_id) = stream_request_id {
-                context_manager
-                    .compact(tidev_context::CompactionConfig {
-                        llm: &llm,
-                        model: &model,
-                        conversation: &conversation,
-                        manual: true,
-                        stream_ctx: Some((request_id, tx.clone())),
-                        tools: &tools,
-                        mode,
-                    })
-                    .await
-            } else {
-                context_manager
-                    .compact_if_needed(tidev_context::CompactionConfig {
-                        llm: &llm,
-                        model: &model,
-                        conversation: &conversation,
-                        manual: false,
-                        stream_ctx: None,
-                        tools: &tools,
-                        mode,
-                    })
-                    .await
-            };
-
-            let (compacted, summary, retained_from, error) = match result {
-                Ok(compacted) => (
-                    compacted,
-                    context_manager.summary,
-                    context_manager.retained_from,
-                    None,
-                ),
-                Err(error) => (false, None, 0, Some(error.to_string())),
-            };
-
-            let _ = tx.send(BackendEvent::ContextCompacted {
-                compacted,
-                manual,
-                summary,
-                retained_from,
-                error,
-            });
-        });
-    }
-
-    pub(crate) fn apply_context_compaction(
-        &mut self,
-        session_id: Uuid,
-        compacted: bool,
-        manual: bool,
-        summary: Option<String>,
-        retained_from: usize,
-        error: Option<String>,
-    ) {
-        self.compacting_sessions.remove(&session_id);
-
-        if self.conversation.session_id == session_id {
-            if compacted {
-                // Capture prior context state for undo before overwriting.
-                let prior_summary = self.context_manager.summary.clone();
-                let prior_retained_from = self.context_manager.retained_from;
-
-                self.context_manager.summary = summary.clone();
-                self.context_manager.retained_from = retained_from;
-                self.conversation
-                    .set_context_state(summary.clone(), retained_from);
-                if let Err(error) = self.store.update_session_context_state(
-                    session_id,
-                    summary.as_deref(),
-                    retained_from,
-                ) {
-                    log::warn!("failed to persist compacted context state: {}", error);
-                }
-                if let Some(summary) = summary.as_ref() {
-                    let mut updated_existing = false;
-                    if manual
-                        && let Some(last_msg) = self.conversation.messages.last_mut()
-                        && last_msg.streaming
-                        && last_msg.role == tidev_session::session::MessageRole::System
-                    {
-                        // Don't replace message content — Delta events during
-                        // streaming have already accumulated the full summary
-                        // text (via BackendEvent::Delta → push_str).  The
-                        // `summary` parameter here is truncated to
-                        // `maximum_summary_chars` and would cut off the full
-                        // output that the user already saw streaming in.
-                        last_msg.streaming = false;
-                        last_msg.metadata.prior_summary = prior_summary.clone();
-                        last_msg.metadata.prior_retained_from = Some(prior_retained_from);
-                        last_msg.completed_at = Some(Utc::now());
-                        updated_existing = true;
-
-                        if let Err(error) = self
-                            .store
-                            .append_message(self.conversation.session_id, last_msg)
-                        {
-                            log::warn!("failed to persist compaction message: {}", error);
-                        }
-                    }
-                    if !updated_existing {
-                        let mut compaction_message =
-                            tidev_session::session::Message::compaction(summary.clone());
-                        compaction_message.metadata.prior_summary = prior_summary;
-                        compaction_message.metadata.prior_retained_from = Some(prior_retained_from);
-                        compaction_message.completed_at = Some(Utc::now());
-                        self.conversation.push(compaction_message.clone());
-                        if let Err(error) = self
-                            .store
-                            .append_message(self.conversation.session_id, &compaction_message)
-                        {
-                            log::warn!("failed to persist compaction message: {}", error);
-                        }
-                    }
-                    self.scroll_messages_to_bottom();
-                    self.clear_message_render_cache();
-                }
-                self.last_notice = Some("Context compacted".to_string());
-            } else if let Some(error) = error {
-                self.last_notice = Some(error);
-            }
-            return;
-        }
-
-        if let Some(cached) = self.cached_sessions.get_mut(&session_id)
-            && compacted
-        {
-            cached.context_manager.summary = summary.clone();
-            cached.context_manager.retained_from = retained_from;
-            cached
-                .conversation
-                .set_context_state(summary.clone(), retained_from);
-            if let Err(error) = self.store.update_session_context_state(
-                session_id,
-                summary.as_deref(),
-                retained_from,
-            ) {
-                log::warn!("failed to persist compacted context state: {}", error);
-            }
-        }
-    }
-
-    pub(crate) fn background_running_count(&self) -> usize {
-        self.cached_sessions
+    pub(crate) fn background_running_count(&self) -> usize {        self.cached_sessions
             .values()
             .filter(|cached| cached.pending_request)
             .count()

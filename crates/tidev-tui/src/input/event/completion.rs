@@ -254,18 +254,13 @@ impl App {
             }
             CommandAction::Compact => {
                 self.active_request_id = self.active_request_id.wrapping_add(1);
-                let request_id = self.active_request_id;
+                let _request_id = self.active_request_id;
                 let msg = tidev_session::session::Message::streaming(
                     tidev_session::session::MessageRole::System,
                     format!("{}\n\n", tidev_session::session::COMPACTION_MESSAGE_LABEL),
                 );
                 self.conversation.push(msg);
-
-                self.schedule_context_compaction_for_session(
-                    self.conversation.session_id,
-                    runtime,
-                    Some(request_id),
-                );
+                self.last_notice = Some("Compaction requested — will run at next idle checkpoint".to_string());
             }
             CommandAction::Message => {
                 self.open_message_panel(args.join(" "))?;

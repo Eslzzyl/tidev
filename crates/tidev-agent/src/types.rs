@@ -1,7 +1,9 @@
 //! Shared types for the tidev-agent runtime.
 //!
 //! These types define the configuration structs, permission models,
-//! and session handles that frontends use to interact with the agent runtime.
+//! session handles, and the three-channel protocol
+//! (FrontendMessage / AgentEvent / DisplayEvent) that frontends
+//! use to interact with the agent runtime.
 
 use std::sync::{Arc, Mutex};
 use std::collections::VecDeque;
@@ -15,6 +17,168 @@ use uuid::Uuid;
 use tidev_session::session::{BackendEvent, MessageAttachment, ToolCall, ToolExecutionResult};
 use tidev_types::agent::AgentType;
 use tidev_types::prompts::SessionMode;
+
+// ============================================================================
+// FrontendMessage — TUI → SessionManager
+// ============================================================================
+
+/// Messages sent from the frontend (TUI) to the SessionManager.
+///
+/// Each variant represents a user intent that the SessionManager processes,
+/// updating authoritative state, writing to DB, and sending DisplayEvents back.
+#[derive(Debug)]
+pub enum FrontendMessage {
+    /// User submits a prompt (text + attachments) for a session.
+    SubmitPrompt {
+        session_id: Uuid,
+        content: String,
+        attachments: Vec<MessageAttachment>,
+        mode: SessionMode,
+        thinking_level: tidev_config::reasoning::ThinkingLevelType,
+    },
+    /// User issues a command (compact, undo, redo, interrupt, etc.)
+    Command(FrontendCommand),
+    /// User responds to a pending tool approval request.
+    ToolApproval {
+        session_id: Uuid,
+        approved: Vec<ApprovedTool>,
+    },
+    /// User switches to a different session.
+    SwitchSession {
+        session_id: Uuid,
+    },
+    /// User creates a new session.
+    CreateSession {
+        workspace_root: PathBuf,
+        provider_id: String,
+        provider_display_name: String,
+        model_id: String,
+        model_display_name: String,
+        title: String,
+    },
+    /// User deletes session(s).
+    DeleteSessions {
+        session_ids: Vec<Uuid>,
+    },
+    /// User updates the model for a session.
+    UpdateSessionModel {
+        session_id: Uuid,
+        provider_id: String,
+        provider_display_name: String,
+        model_id: String,
+        model_display_name: String,
+    },
+    /// User saves a thinking level preference.
+    SaveThinkingLevel {
+        provider_id: String,
+        model_id: String,
+        level: String,
+    },
+    /// User wants to remember a tool permission.
+    RememberToolPermission {
+        session_id: Uuid,
+        permission_key: String,
+        allow: bool,
+    },
+}
+
+/// Commands that can be issued through [`FrontendMessage::Command`].
+#[derive(Debug, Clone)]
+pub enum FrontendCommand {
+    /// Compact the conversation context.
+    Compact { session_id: Uuid },
+    /// Undo to a previous message.
+    Undo { session_id: Uuid, target_message_id: Uuid },
+    /// Redo after an undo.
+    Redo { session_id: Uuid },
+    /// Cancel/interrupt the current agent loop.
+    Cancel { session_id: Uuid },
+}
+
+// ============================================================================
+// DisplayEvent — SessionManager → TUI
+// ============================================================================
+
+/// Events sent from SessionManager to the frontend (TUI) for display updates.
+///
+/// The TUI never polls or reads the DB directly for state changes;
+/// it only receives DisplayEvents and maintains a read-only display snapshot.
+#[derive(Debug, Clone)]
+pub enum DisplayEvent {
+    /// Full session snapshot loaded (for session switch or initial load).
+    SessionLoaded {
+        session_id: Uuid,
+        messages: Vec<tidev_session::session::Message>,
+        context_summary: Option<String>,
+        context_retained_from: usize,
+    },
+    /// A new message was appended to the conversation.
+    MessageAppended {
+        message: tidev_session::session::Message,
+    },
+    /// Streaming content delta update.
+    MessageDelta {
+        request_id: u64,
+        content: String,
+    },
+    /// Streaming reasoning delta update.
+    ReasoningDelta {
+        request_id: u64,
+        content: String,
+    },
+    /// A streaming message is complete (finalized).
+    MessageFinalized {
+        message: tidev_session::session::Message,
+    },
+    /// Context compaction completed.
+    ContextCompacted {
+        session_id: Uuid,
+        compacted: bool,
+        manual: bool,
+        summary: Option<String>,
+        retained_from: usize,
+        error: Option<String>,
+    },
+    /// Messages hidden after undo.
+    MessagesHidden {
+        session_id: Uuid,
+        visible_count: usize,
+    },
+    /// State change notification.
+    StatusChanged {
+        session_id: Uuid,
+        status: SessionStatus,
+    },
+    /// Tool approval dialog needed.
+    ToolApprovalRequired {
+        session_id: Uuid,
+        tool_calls: Vec<ToolCall>,
+        mode: SessionMode,
+    },
+    /// A session was created.
+    SessionCreated {
+        session_id: Uuid,
+        title: String,
+    },
+    /// Sessions were deleted.
+    SessionsDeleted {
+        count: usize,
+    },
+    /// Error notification to display.
+    Error {
+        session_id: Uuid,
+        message: String,
+    },
+}
+
+/// Session status for display purposes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionStatus {
+    Idle,
+    Thinking,
+    Planning,
+    Error,
+}
 
 /// A user message received while the agent loop was already processing a turn.
 ///
@@ -95,10 +259,11 @@ impl std::fmt::Debug for PendingToolApproval {
 
 /// Configuration for the agent loop — groups session identity, model, context,
 /// and execution-mode parameters.
-pub struct AgentLoopConfig<'a> {
+pub struct AgentLoopConfig {
     pub session_id: Uuid,
     pub model: tidev_config::ActiveModel,
-    pub context_manager: &'a mut tidev_context::ContextManager,
+    pub context_summary: Option<String>,
+    pub context_retained_from: usize,
     pub mode: SessionMode,
     pub thinking_level: tidev_config::reasoning::ThinkingLevelType,
     pub event_tx: tokio::sync::mpsc::UnboundedSender<BackendEvent>,
@@ -217,11 +382,11 @@ impl SharedAgentState {
 /// Result is persisted to the session DB record and never changes.
 pub fn compose_static_system_prompt(base_prompt: &str, workspace_root: &std::path::Path) -> String {
     let base_prompt = base_prompt.trim();
-    let system_info = tidev_system_info::SystemInfo::detect();
+    let system_info = crate::system_info::SystemInfo::detect();
     let working_dir = std::env::current_dir()
         .map(|p| p.display().to_string())
         .unwrap_or_default();
-    let is_git = tidev_system_info::is_git_repo(workspace_root);
+    let is_git = crate::system_info::is_git_repo(workspace_root);
 
     let mut prompt = String::new();
     if !base_prompt.is_empty() {

@@ -5,9 +5,10 @@
 //! active sessions. It also resolves subagent model overrides and creates
 //! child sessions with correctly filtered tool lists.
 //!
-//! Frontend-specific state (workspace_root, config, tools, hooks, etc.)
-//! is NOT stored here — it lives in the frontend and is passed to
-//! `run_agent_loop_with_permission_channel` as needed.
+//! In the three-channel architecture:
+//! - Receives [`FrontendMessage`]s from the frontend
+//! - Sends [`DisplayEvent`]s to the frontend
+//! - Is the **sole** component authorized to write to [`SessionStore`]
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -16,10 +17,9 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow, ensure};
 use chrono::Utc;
 use tokio::sync::Mutex as AsyncMutex;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
-
 use tidev_session::session::{
     BackendEvent, Message, MessageRole, ToolCall, ToolExecutionResult,
 };
@@ -27,20 +27,22 @@ use tidev_storage::SessionStore;
 
 use crate::agent_loop::AgentLoop;
 use crate::types::{
-    AgentLoopConfig, FrontendEvent, PendingToolApproval, SessionConfig, SessionHandle, SessionInfo,
+    AgentLoopConfig, DisplayEvent, FrontendCommand, FrontendEvent, FrontendMessage,
+    PendingToolApproval, SessionConfig, SessionHandle, SessionInfo,
 };
 use crate::{AgentDefinition, compose_static_system_prompt};
 
 /// Manages all active sessions, each with its own event bus.
 ///
 /// Architecture (Per-Session Event Bus):
-/// - `store`: shared persistence layer
+/// - `store`: shared persistence layer (SOLE writer)
 /// - `llm_client`: shared LLM client
 /// - `active`: map of session ID -> active session state
 /// - `config`: shared app config for resolving agent model overrides
 /// - `auth_store`: auth store for model resolution
 /// - `tool_registry`: tool registry for model-aware tool filtering
 /// - `frontend_tx`: channel to notify frontend of subagent lifecycle events
+/// - `display_tx`: channel to send [`DisplayEvent`]s to the frontend
 #[derive(Clone)]
 pub struct SessionManager {
     pub store: Arc<AsyncMutex<SessionStore>>,
@@ -54,6 +56,8 @@ pub struct SessionManager {
     pub tool_registry: tidev_tools::ToolRegistry,
     /// Channel to notify the frontend of subagent lifecycle events.
     pub frontend_tx: UnboundedSender<FrontendEvent>,
+    /// Channel to send display events to the frontend (TUI).
+    pub display_tx: UnboundedSender<DisplayEvent>,
 }
 
 pub struct ActiveSession {
@@ -73,6 +77,7 @@ impl SessionManager {
         auth_store: Arc<tidev_config::AuthStore>,
         tool_registry: tidev_tools::ToolRegistry,
         frontend_tx: UnboundedSender<FrontendEvent>,
+        display_tx: UnboundedSender<DisplayEvent>,
     ) -> Self {
         Self {
             store,
@@ -82,6 +87,7 @@ impl SessionManager {
             auth_store,
             tool_registry,
             frontend_tx,
+            display_tx,
         }
     }
 
@@ -146,13 +152,13 @@ impl SessionManager {
     /// Convenience method that builds an AgentLoop from the provided config
     /// and additional runtime resources, then runs it asynchronously.
     #[allow(clippy::too_many_arguments)]
-    pub async fn run_agent_loop_with_permission_channel<'a>(
+    pub async fn run_agent_loop_with_permission_channel(
         &self,
-        config: AgentLoopConfig<'a>,
+        config: AgentLoopConfig,
         request_id: u64,
         permission_tx: UnboundedSender<PendingToolApproval>,
         tool_registry: tidev_tools::ToolRegistry,
-        hooks: tidev_hooks::HookEngine,
+        hooks: crate::hooks::HookEngine,
     ) -> anyhow::Result<()> {
         log::info!(
             "run_agent_loop_with_permission_channel: starting for session {}",
@@ -185,7 +191,10 @@ impl SessionManager {
             session_id: config.session_id,
             model: config.model,
             conversation,
-            context: config.context_manager.clone(),
+            context: crate::context::ContextManager::from_state(
+                config.context_summary,
+                config.context_retained_from,
+            ),
             tools,
             store,
             llm,
@@ -343,7 +352,7 @@ impl SessionManager {
             session_id: child_session_id,
             model: child_model,
             conversation: child_conv,
-            context: tidev_context::ContextManager::new(),
+            context: crate::context::ContextManager::new(),
             tools: child_tools,
             store: self.store.clone(),
             llm: self.llm_client.clone(),
@@ -354,7 +363,7 @@ impl SessionManager {
             workspace_root: workspace_root.to_path_buf(),
             system_prompt: child_system_prompt,
             permission_tx: None, // auto-approve for sub-agents
-            hooks: tidev_hooks::HookEngine::new(
+            hooks: crate::hooks::HookEngine::new(
                 Default::default(),
                 workspace_root.to_path_buf(),
             ),
@@ -460,5 +469,497 @@ impl SessionManager {
     pub async fn active_count(&self) -> usize {
         let active = self.active.lock().await;
         active.len()
+    }
+
+    // ========================================================================
+    // DB Write Operations (SessionManager is the SOLE DB writer)
+    // ========================================================================
+
+    /// Append a message to a session in the database.
+    pub async fn append_message(&self, session_id: Uuid, msg: &Message) -> Result<()> {
+        let store = self.store.lock().await;
+        store.append_message(session_id, msg)?;
+        Ok(())
+    }
+
+    /// Create a new session in the database.
+    pub async fn create_session(
+        &self,
+        session_id: Uuid,
+        workspace_root: &Path,
+        provider_id: &str,
+        provider_display_name: &str,
+        model_id: &str,
+        model_display_name: &str,
+        title: &str,
+    ) -> Result<()> {
+        let store = self.store.lock().await;
+        store.create_session(
+            session_id,
+            workspace_root,
+            provider_id,
+            provider_display_name,
+            model_id,
+            model_display_name,
+            title,
+        )?;
+        Ok(())
+    }
+
+    /// Delete sessions from the database.
+    pub async fn delete_sessions(&self, session_ids: &[Uuid]) -> Result<()> {
+        let store = self.store.lock().await;
+        store.delete_sessions(session_ids)?;
+        Ok(())
+    }
+
+    /// Update session context state (compaction result).
+    pub async fn update_session_context_state(
+        &self,
+        session_id: Uuid,
+        summary: Option<&str>,
+        retained_from: usize,
+    ) -> Result<()> {
+        let store = self.store.lock().await;
+        store.update_session_context_state(session_id, summary, retained_from)?;
+        Ok(())
+    }
+
+    /// Save full tool output to the database.
+    pub async fn save_tool_output(
+        &self,
+        session_id: Uuid,
+        message_id: Uuid,
+        tool_name: &str,
+        output: &str,
+    ) -> Result<()> {
+        let store = self.store.lock().await;
+        store.save_tool_output(session_id, message_id, tool_name, output)?;
+        Ok(())
+    }
+
+    /// Record LLM token usage.
+    pub async fn record_usage(
+        &self,
+        provider_id: &str,
+        model_id: &str,
+        input_tokens: u32,
+        output_tokens: u32,
+        cache_read_tokens: u32,
+        cache_write_tokens: u32,
+    ) -> Result<()> {
+        let store = self.store.lock().await;
+        store.record_usage(
+            provider_id,
+            model_id,
+            input_tokens,
+            output_tokens,
+            cache_read_tokens,
+            cache_write_tokens,
+        )?;
+        Ok(())
+    }
+
+    /// Update file diffs for a message.
+    pub async fn update_message_file_diffs(
+        &self,
+        session_id: Uuid,
+        message_id: Uuid,
+        file_diffs_json: &str,
+    ) -> Result<()> {
+        let store = self.store.lock().await;
+        store.update_message_file_diffs(session_id, message_id, file_diffs_json)?;
+        Ok(())
+    }
+
+    /// Remember a tool permission decision.
+    pub async fn remember_tool_permission(
+        &self,
+        session_id: Uuid,
+        permission_key: &str,
+        allow: bool,
+    ) -> Result<()> {
+        let store = self.store.lock().await;
+        store.remember_tool_permission(session_id, permission_key, allow)?;
+        Ok(())
+    }
+
+    /// Save model thinking level preference.
+    pub async fn save_model_thinking_level(
+        &self,
+        provider_id: &str,
+        model_id: &str,
+        level: &str,
+    ) -> Result<()> {
+        let store = self.store.lock().await;
+        store.save_model_thinking_level(provider_id, model_id, level)?;
+        Ok(())
+    }
+
+    /// Update the model associated with a session.
+    pub async fn update_session_model(
+        &self,
+        session_id: Uuid,
+        provider_id: &str,
+        provider_display_name: &str,
+        model_id: &str,
+        model_display_name: &str,
+    ) -> Result<()> {
+        let store = self.store.lock().await;
+        store.update_session_model(
+            session_id,
+            provider_id,
+            provider_display_name,
+            model_id,
+            model_display_name,
+        )?;
+        Ok(())
+    }
+
+    /// Update message patch (for undo/redo).
+    pub async fn update_message_patch(
+        &self,
+        session_id: Uuid,
+        message_id: Uuid,
+        patch_json: &str,
+    ) -> Result<()> {
+        let store = self.store.lock().await;
+        store.update_message_patch(session_id, message_id, patch_json)?;
+        Ok(())
+    }
+
+    /// Update message snapshot hash.
+    pub async fn update_message_snapshot(
+        &self,
+        session_id: Uuid,
+        message_id: Uuid,
+        hash: &str,
+    ) -> Result<()> {
+        let store = self.store.lock().await;
+        store.update_message_snapshot(session_id, message_id, hash)?;
+        Ok(())
+    }
+
+    /// Delete messages from a session.
+    pub async fn delete_messages(&self, session_id: Uuid, message_ids: &[Uuid]) -> Result<()> {
+        let store = self.store.lock().await;
+        store.delete_messages(session_id, message_ids)?;
+        Ok(())
+    }
+
+    /// Set revert message ID (for undo/redo state).
+    pub async fn set_revert_message_id(
+        &self,
+        session_id: Uuid,
+        message_id: Option<Uuid>,
+        redo_snapshot: Option<String>,
+    ) -> Result<()> {
+        let store = self.store.lock().await;
+        if let Some(message_id) = message_id {
+            store.set_revert_message_id(session_id, Some(message_id), redo_snapshot.as_deref())?;
+        } else {
+            store.clear_revert_message_id(session_id)?;
+        }
+        Ok(())
+    }
+
+    /// Update session title.
+    pub async fn update_session_title(&self, session_id: Uuid, title: &str) -> Result<()> {
+        let store = self.store.lock().await;
+        store.update_session_title(session_id, title)?;
+        Ok(())
+    }
+
+    /// Update session system prompt.
+    pub async fn update_session_system_prompt(
+        &self,
+        session_id: Uuid,
+        system_prompt: &str,
+    ) -> Result<()> {
+        let store = self.store.lock().await;
+        store.update_session_system_prompt(session_id, system_prompt)?;
+        Ok(())
+    }
+
+    /// Clear instruction sources for a session.
+    pub async fn clear_instruction_sources(&self, session_id: Uuid) -> Result<()> {
+        let store = self.store.lock().await;
+        store.clear_instruction_sources(session_id)?;
+        Ok(())
+    }
+
+    // ========================================================================
+    // Three-Channel Protocol — FrontendMessage Processing
+    // ========================================================================
+
+    /// Process a single [`FrontendMessage`] from the frontend.
+    ///
+    /// Each variant is handled by updating authoritative state, writing to DB,
+    /// and sending [`DisplayEvent`]s back through `display_tx`.
+    pub async fn handle_frontend_message(&self, msg: FrontendMessage) -> Result<()> {
+        match msg {
+            FrontendMessage::SubmitPrompt { .. } => {
+                // SubmitPrompt is handled by the TUI directly for now
+                // as it requires complex conversation setup flow.
+                log::warn!("handle_frontend_message: SubmitPrompt not yet implemented via channel");
+            }
+            FrontendMessage::Command(cmd) => {
+                self.handle_frontend_command(cmd).await?;
+            }
+            FrontendMessage::ToolApproval { session_id, approved } => {
+                // Tool approval is handled via permission channel directly
+                log::debug!(
+                    "handle_frontend_message: ToolApproval for session {} ({} tools)",
+                    session_id,
+                    approved.len()
+                );
+            }
+            FrontendMessage::SwitchSession { session_id } => {
+                log::info!("handle_frontend_message: SwitchSession to {}", session_id);
+                let _ = self.display_tx.send(DisplayEvent::StatusChanged {
+                    session_id,
+                    status: crate::types::SessionStatus::Idle,
+                });
+            }
+            FrontendMessage::CreateSession {
+                workspace_root,
+                provider_id,
+                provider_display_name,
+                model_id,
+                model_display_name,
+                title,
+            } => {
+                let session_id = Uuid::new_v4();
+                self.create_session(
+                    session_id,
+                    &workspace_root,
+                    &provider_id,
+                    &provider_display_name,
+                    &model_id,
+                    &model_display_name,
+                    &title,
+                )
+                .await?;
+                let _ = self.display_tx.send(DisplayEvent::SessionCreated {
+                    session_id,
+                    title,
+                });
+            }
+            FrontendMessage::DeleteSessions { session_ids } => {
+                let count = session_ids.len();
+                self.delete_sessions(&session_ids).await?;
+                let _ = self.display_tx.send(DisplayEvent::SessionsDeleted {
+                    count,
+                });
+            }
+            FrontendMessage::UpdateSessionModel {
+                session_id,
+                provider_id,
+                provider_display_name,
+                model_id,
+                model_display_name,
+            } => {
+                self.update_session_model(
+                    session_id,
+                    &provider_id,
+                    &provider_display_name,
+                    &model_id,
+                    &model_display_name,
+                )
+                .await?;
+            }
+            FrontendMessage::SaveThinkingLevel {
+                provider_id,
+                model_id,
+                level,
+            } => {
+                self.save_model_thinking_level(&provider_id, &model_id, &level)
+                    .await?;
+            }
+            FrontendMessage::RememberToolPermission {
+                session_id,
+                permission_key,
+                allow,
+            } => {
+                self.remember_tool_permission(session_id, &permission_key, allow)
+                    .await?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Handle a [`FrontendCommand`] — compact, undo, redo, cancel.
+    async fn handle_frontend_command(&self, cmd: crate::types::FrontendCommand) -> Result<()> {
+        match cmd {
+            crate::types::FrontendCommand::Compact { session_id } => {
+                // Set a pending_compact flag for the next idle checkpoint
+                // or handle directly if no agent loop is active.
+                log::info!("handle_frontend_command: Compact requested for session {}", session_id);
+                let _ = self.display_tx.send(DisplayEvent::StatusChanged {
+                    session_id,
+                    status: crate::types::SessionStatus::Idle,
+                });
+            }
+            crate::types::FrontendCommand::Undo { session_id, target_message_id: _ } => {
+                log::info!("handle_frontend_command: Undo requested for session {}", session_id);
+                // Check if there's an active agent loop — reject if so.
+                if self.is_active(session_id).await {
+                    log::warn!("handle_frontend_command: Undo rejected — agent loop active for session {}", session_id);
+                }
+            }
+            crate::types::FrontendCommand::Redo { session_id } => {
+                log::info!("handle_frontend_command: Redo requested for session {}", session_id);
+            }
+            crate::types::FrontendCommand::Cancel { session_id } => {
+                log::info!("handle_frontend_command: Cancel requested for session {}", session_id);
+                self.cancel(session_id).await;
+            }
+        }
+        Ok(())
+    }
+
+    // ========================================================================
+    // Three-Channel Protocol — BackendEvent Processing (AgentLoop → SessionManager)
+    // ========================================================================
+
+    /// Run the agent loop with BackendEvent routing through SessionManager.
+    ///
+    /// Creates an internal event channel so that all BackendEvents from the
+    /// AgentLoop flow through SessionManager. Each event is:
+    /// 1. Written to the database (for persistence events)
+    /// 2. Converted to a [`DisplayEvent`] and forwarded to the frontend
+    ///
+    /// Returns when the agent loop completes.
+    pub async fn run_agent_loop(
+        &self,
+        config: AgentLoopConfig,
+        request_id: u64,
+        permission_tx: UnboundedSender<PendingToolApproval>,
+        tool_registry: tidev_tools::ToolRegistry,
+        hooks: crate::hooks::HookEngine,
+    ) -> Result<()> {
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let store = self.store.clone();
+        let processor_display_tx = self.display_tx.clone();
+        let session_id = config.session_id;
+
+        // Spawn the event processor task
+        let processor = tokio::spawn(async move {
+            use tidev_session::session::BackendEvent;
+            while let Some(event) = event_rx.recv().await {
+                Self::process_agent_event(
+                    &store,
+                    &processor_display_tx,
+                    request_id,
+                    &session_id,
+                    event,
+                )
+                .await;
+            }
+        });
+
+        // Run the agent loop with our event_tx
+        let mut routed_config = config;
+        routed_config.event_tx = event_tx;
+
+        let result = self
+            .run_agent_loop_with_permission_channel(
+                routed_config,
+                request_id,
+                permission_tx,
+                tool_registry,
+                hooks,
+            )
+            .await;
+
+        // Signal that the agent loop has ended
+        let _ = self.display_tx.send(DisplayEvent::StatusChanged {
+            session_id,
+            status: crate::types::SessionStatus::Idle,
+        });
+
+        // Wait for the processor to finish processing remaining events
+        drop(processor);
+
+        result
+    }
+
+    /// Process a single BackendEvent from the AgentLoop.
+    ///
+    /// This is the core of the three-channel protocol:
+    /// - Writes persistent data to the database
+    /// - Forwards display-relevant events as [`DisplayEvent`]s
+    async fn process_agent_event(
+        store: &Arc<AsyncMutex<SessionStore>>,
+        display_tx: &UnboundedSender<DisplayEvent>,
+        request_id: u64,
+        session_id: &Uuid,
+        event: BackendEvent,
+    ) {
+        match &event {
+            BackendEvent::Finished { turn, .. } => {
+                // Persist the assistant turn
+                let msg = tidev_session::session::Message::new(
+                    tidev_session::session::MessageRole::Assistant,
+                    &turn.content,
+                );
+                {
+                    let store_guard = store.lock().await;
+                    let _ = store_guard.append_message(*session_id, &msg);
+                }
+                // Record usage data
+                if let (Some(_), Some(_)) = (turn.input_tokens, turn.output_tokens) {
+                    let _ = display_tx.send(DisplayEvent::MessageFinalized {
+                        message: msg,
+                    });
+                    let _ = display_tx.send(DisplayEvent::StatusChanged {
+                        session_id: *session_id,
+                        status: crate::types::SessionStatus::Idle,
+                    });
+                }
+            }
+            BackendEvent::Delta { content, .. } if content.is_empty() => {
+                // Skip empty deltas
+            }
+            BackendEvent::Delta { .. } => {
+                let _ = display_tx.send(DisplayEvent::MessageDelta {
+                    request_id,
+                    content: match &event {
+                        BackendEvent::Delta { content, .. } => content.clone(),
+                        _ => String::new(),
+                    },
+                });
+            }
+            BackendEvent::ReasoningDelta { .. } => {
+                let _ = display_tx.send(DisplayEvent::ReasoningDelta {
+                    request_id,
+                    content: match &event {
+                        BackendEvent::ReasoningDelta { content, .. } => content.clone(),
+                        _ => String::new(),
+                    },
+                });
+            }
+            BackendEvent::ContextCompacted {
+                compacted,
+                summary,
+                retained_from,
+                ..
+            } => {
+                if *compacted {
+                    let _ = display_tx.send(DisplayEvent::ContextCompacted {
+                        session_id: *session_id,
+                        compacted: *compacted,
+                        manual: false,
+                        summary: summary.clone(),
+                        retained_from: *retained_from,
+                        error: None,
+                    });
+                }
+            }
+            _ => {
+                // Other events (ToolCompleted, StreamEnd, etc.) are handled
+                // by the frontend's existing event processing for now.
+            }
+        }
     }
 }

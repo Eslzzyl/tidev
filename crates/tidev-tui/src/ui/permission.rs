@@ -446,7 +446,7 @@ impl App {
         &mut self,
         mut ready_calls: Vec<ToolCall>,
         mut rejected: Vec<(ToolCall, ToolExecutionResult)>,
-        _runtime: &Runtime,
+        runtime: &Runtime,
     ) -> Result<()> {
         log::info!(
             "send_permission_approval: ready_calls={}, rejected={}",
@@ -469,7 +469,7 @@ impl App {
         // added to running_tool_executions, so ToolCompleted is silently
         // dropped — without this early record the rejection would never appear.
         for (tc, result) in &rejected {
-            self.record_tool_result(tc.clone(), result.clone())?;
+            self.record_tool_result(tc.clone(), result.clone(), runtime)?;
         }
 
         // Build approved list: None = execute, Some(error) = reject
@@ -545,11 +545,11 @@ impl App {
         };
 
         if remember {
-            self.store.remember_tool_permission(
+            runtime.block_on(self.agent.remember_tool_permission(
                 self.conversation.session_id,
                 &dialog.permission_key,
                 allow,
-            )?;
+            ))?;
         }
 
         if allow {
@@ -569,7 +569,7 @@ impl App {
             self.pending_rejected_tools
                 .push((dialog.tool_call, ToolExecutionResult::new(output)));
         } else {
-            self.record_tool_result(dialog.tool_call, ToolExecutionResult::new(output))?;
+            self.record_tool_result(dialog.tool_call, ToolExecutionResult::new(output), runtime)?;
         }
         self.advance_pending_tool_execution();
         self.process_pending_tool_execution(runtime)
@@ -579,6 +579,7 @@ impl App {
         &mut self,
         tool_call: ToolCall,
         mut result: ToolExecutionResult,
+        runtime: &Runtime,
     ) -> Result<()> {
         let is_task = tool_call.name == "task";
         let tool_call_id = tool_call.id.clone();
@@ -607,12 +608,12 @@ impl App {
         // The task tool stores the full output inside the subagent session
         // rather than here, so we skip it.
         if tool_call.name != "task"
-            && let Err(e) = self.store.save_tool_output(
+            && let Err(e) = runtime.block_on(self.agent.save_tool_output(
                 self.conversation.session_id,
                 message.id,
                 &tool_call.name,
                 &result.output,
-            )
+            ))
         {
             log::warn!("Failed to save full tool output: {e}");
         }

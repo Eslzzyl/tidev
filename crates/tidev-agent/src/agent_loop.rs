@@ -41,7 +41,7 @@ pub struct AgentLoop {
     pub session_id: Uuid,
     pub model: tidev_config::ActiveModel,
     pub conversation: Conversation,
-    pub context: tidev_context::ContextManager,
+    pub context: crate::context::ContextManager,
     /// Pre-filtered tool definitions for this session's model.
     pub tools: Vec<tidev_tools::ToolDefinition>,
     pub store: Arc<tokio::sync::Mutex<SessionStore>>,
@@ -57,7 +57,7 @@ pub struct AgentLoop {
     /// Optional channel for interactive tool permission approval.
     pub permission_tx: Option<UnboundedSender<PendingToolApproval>>,
     /// Hook engine for PostToolUse hooks.
-    pub hooks: tidev_hooks::HookEngine,
+    pub hooks: crate::hooks::HookEngine,
     /// Tool registry for executing tool calls.
     pub tool_registry: tidev_tools::ToolRegistry,
     /// SessionManager for subagent creation and lifecycle management.
@@ -577,7 +577,7 @@ impl AgentLoop {
         let context = &mut self.context;
 
         if let Err(e) = context
-            .compact(tidev_context::CompactionConfig {
+            .compact(crate::context::CompactionConfig {
                 llm: &self.llm,
                 model: &self.model,
                 conversation: &self.conversation,

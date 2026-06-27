@@ -18,5 +18,4 @@ toml = "1.1.2"
 uuid = { version = "1.23.3", features = ["v4", "serde"] }
 tidev-types = { path = "../tidev-types" }
 tidev-llm = { path = "../tidev-llm" }
-tidev-hooks = { path = "../tidev-hooks" }
 tidev-sync = { path = "../tidev-sync" }

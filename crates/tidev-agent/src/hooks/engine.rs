@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use crate::config::{HooksConfig, PostToolUseHookConfig};
-use crate::matcher::matches_tool;
-use crate::runner::run_hook_command;
+use crate::hooks::config::{HooksConfig, PostToolUseHookConfig};
+use crate::hooks::matcher::matches_tool;
+use crate::hooks::runner::run_hook_command;
 use tidev_session::session::{ToolCall, ToolExecutionResult};
 
 /// Outcome of running hooks for a single tool call.
@@ -180,7 +180,7 @@ impl HookEngine {
     ) -> bool {
         // 1. Check matcher pattern against tool name (use canonical name)
         let canonical =
-            crate::canonical::canonical_tool_name(&tool_call.name).unwrap_or(&tool_call.name);
+            crate::hooks::canonical::canonical_tool_name(&tool_call.name).unwrap_or(&tool_call.name);
         if !matches_tool(&hook.matcher, canonical) {
             return false;
         }

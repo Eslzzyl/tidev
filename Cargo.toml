@@ -6,19 +6,14 @@ members = [
     "crates/tidev-storage",
     "crates/tidev-llm",
     "crates/tidev-config",
-    "crates/tidev-hooks",
     "crates/tidev-instructions",
     "crates/tidev-snapshot",
     "crates/tidev-sync",
     "crates/tidev-search",
     "crates/tidev-mcp",
     "crates/tidev-tools",
-    "crates/tidev-context",
     "crates/tidev-agent",
-    "crates/tidev-notification",
-    "crates/tidev-logging",
     "crates/tidev-tui",
-    "crates/tidev-system-info",
 ]
 default-members = ["."]
 resolver = "2"
@@ -55,7 +50,6 @@ tidev-tui = { path = "crates/tidev-tui" }
 tidev-config = { path = "crates/tidev-config" }
 tidev-storage = { path = "crates/tidev-storage" }
 tidev-sync = { path = "crates/tidev-sync" }
-tidev-logging = { path = "crates/tidev-logging" }
 
 [profile.dev]
 incremental = true

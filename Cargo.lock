@@ -3858,7 +3858,6 @@ dependencies = [
  "clap",
  "log",
  "tidev-config",
- "tidev-logging",
  "tidev-storage",
  "tidev-sync",
  "tidev-tui",
@@ -3876,8 +3875,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tidev-config",
- "tidev-context",
- "tidev-hooks",
  "tidev-instructions",
  "tidev-llm",
  "tidev-mcp",
@@ -3885,7 +3882,6 @@ dependencies = [
  "tidev-session",
  "tidev-snapshot",
  "tidev-storage",
- "tidev-system-info",
  "tidev-tools",
  "tidev-types",
  "tokio",
@@ -3901,42 +3897,10 @@ dependencies = [
  "dirs",
  "serde",
  "serde_json",
- "tidev-hooks",
  "tidev-llm",
  "tidev-sync",
  "tidev-types",
  "toml",
- "uuid",
-]
-
-[[package]]
-name = "tidev-context"
-version = "0.7.0"
-dependencies = [
- "anyhow",
- "chrono",
- "log",
- "serde",
- "serde_json",
- "tidev-config",
- "tidev-instructions",
- "tidev-llm",
- "tidev-session",
- "tidev-tools",
- "tidev-types",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "tidev-hooks"
-version = "0.7.0"
-dependencies = [
- "anyhow",
- "serde",
- "tidev-session",
- "tidev-types",
- "tokio",
  "uuid",
 ]
 
@@ -3975,15 +3939,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tidev-logging"
-version = "0.7.0"
-dependencies = [
- "chrono",
- "log",
- "tidev-config",
-]
-
-[[package]]
 name = "tidev-mcp"
 version = "0.7.0"
 dependencies = [
@@ -3995,15 +3950,6 @@ dependencies = [
  "tidev-session",
  "tidev-types",
  "tokio",
-]
-
-[[package]]
-name = "tidev-notification"
-version = "0.7.0"
-dependencies = [
- "crossterm",
- "log",
- "tidev-config",
 ]
 
 [[package]]
@@ -4084,13 +4030,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tidev-system-info"
-version = "0.7.0"
-dependencies = [
- "chrono",
-]
-
-[[package]]
 name = "tidev-tools"
 version = "0.7.0"
 dependencies = [
@@ -4162,13 +4101,9 @@ dependencies = [
  "textwrap",
  "tidev-agent",
  "tidev-config",
- "tidev-context",
- "tidev-hooks",
  "tidev-instructions",
  "tidev-llm",
- "tidev-logging",
  "tidev-mcp",
- "tidev-notification",
  "tidev-search",
  "tidev-session",
  "tidev-snapshot",

@@ -65,17 +65,13 @@ tidev-types = { path = "../tidev-types" }
 tidev-session = { path = "../tidev-session" }
 tidev-storage = { path = "../tidev-storage" }
 tidev-config = { path = "../tidev-config" }
-tidev-context = { path = "../tidev-context" }
 tidev-llm = { path = "../tidev-llm" }
 tidev-tools = { path = "../tidev-tools" }
 tidev-snapshot = { path = "../tidev-snapshot" }
 tidev-mcp = { path = "../tidev-mcp" }
 tidev-search = { path = "../tidev-search" }
 tidev-instructions = { path = "../tidev-instructions" }
-tidev-hooks = { path = "../tidev-hooks" }
 tidev-sync = { path = "../tidev-sync" }
-tidev-notification = { path = "../tidev-notification" }
-tidev-logging = { path = "../tidev-logging" }
 
 [dev-dependencies]
 tempfile = "3.27"

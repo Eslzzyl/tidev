@@ -522,6 +522,7 @@ impl App {
                 self.record_tool_result(
                     dialog.tool_call,
                     ToolExecutionResult::new("Tool 'question' was dismissed by user"),
+                    runtime,
                 )?;
                 self.advance_pending_tool_execution();
             }
@@ -687,7 +688,7 @@ impl App {
             // Also add the tool result to the in-memory conversation so it
             // renders in the TUI tool cards.  Persistence is handled by
             // tidev_agent::SessionManager::persist_tool_result.
-            self.record_tool_result(dialog.tool_call.clone(), result.clone())?;
+            self.record_tool_result(dialog.tool_call.clone(), result.clone(), runtime)?;
             self.pending_rejected_tools.push((dialog.tool_call, result));
         }
 

@@ -1,4 +1,5 @@
 mod auth;
+pub mod hooks;
 pub mod logging;
 pub mod mcp;
 mod paths;
@@ -27,7 +28,7 @@ pub use provider::{ModelConfig, ProviderConfig, ProviderSource};
 pub use tidev_types::ApiType;
 // ── Re-exported config types from their own crates ──
 
-pub use tidev_hooks::config::HooksConfig;
+pub use crate::hooks::HooksConfig;
 pub use tidev_sync::SyncConfig;
 
 pub use tmp::TmpConfig;

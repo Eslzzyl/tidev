@@ -30,7 +30,9 @@ mod ansi;
 mod commands;
 mod core;
 mod input;
+mod logging;
 mod markdown;
+mod notification;
 mod panel_launcher;
 mod render;
 pub mod theme;
@@ -70,9 +72,8 @@ use crate::ui::permission::{
 
 use crate::theme::ThemeManager;
 use tidev_config::{ActiveModel, AppConfig, AuthStore, ConfigPaths};
-use tidev_context::ContextManager;
-use tidev_mcp::McpManager;
 use tidev_agent::PendingToolApproval;
+use tidev_mcp::McpManager;
 use tidev_search::current_at_fragment;
 use tidev_snapshot::{FileDiff, SnapshotService};
 use tidev_tools::{FileReadTracker, TodoItem, ToolRegistry};
@@ -115,7 +116,6 @@ struct App {
     pending_mode: Option<SessionMode>,
     active_model: ActiveModel,
     conversation: Conversation,
-    context_manager: ContextManager,
     tools: ToolRegistry,
     /// Shared tidev_agent::SessionManager for compose_static_system_prompt / build_request_messages.
     agent: tidev_agent::SessionManager,
@@ -167,7 +167,6 @@ struct App {
     running_tool_executions: Vec<RunningToolExecution>,
     /// Cached session UI state for session switching (scroll, dialogs, etc.).
     cached_sessions: std::collections::HashMap<Uuid, crate::core::state::CachedSessionRuntime>,
-    compacting_sessions: std::collections::HashSet<Uuid>,
     /// Receiver for FrontendEvents from SessionManager (subagent lifecycle).
     frontend_rx: tokio::sync::mpsc::UnboundedReceiver<tidev_agent::FrontendEvent>,
     /// Active subagent overlays — each has its own BackendEvent channel.
@@ -243,6 +242,7 @@ struct App {
     dirty: bool,
     backend_tx: UnboundedSender<BackendEvent>,
     backend_rx: UnboundedReceiver<BackendEvent>,
+    display_rx: UnboundedReceiver<tidev_agent::DisplayEvent>,
     spinner_start: Instant,
     /// Last rendered spinner frame index (increments every 100ms).
     /// Used for lazy rendering: only redraw when the spinner visually changes.
@@ -306,7 +306,7 @@ struct App {
     step_cached_file_diffs: Option<Vec<FileDiff>>,
     /// The previous snapshot hash, used for computing per-step lightweight diffs.
     step_prev_hash: Option<String>,
-    notifications: tidev_notification::NotificationManager,
+    notifications: crate::notification::NotificationManager,
     /// Whether the input is in shell command mode (triggered by `!` prefix).
     shell_mode: bool,
     /// PID of the child process running a `!` shell command, if any.
@@ -736,6 +736,115 @@ impl App {
         self.store
             .append_message(self.conversation.session_id, &message)?;
         self.screen = Screen::Chat;
+        Ok(())
+    }
+
+    /// Process pending [`DisplayEvent`]s from SessionManager.
+    ///
+    /// These events carry authoritative state changes that the TUI
+    /// renders as a read-only display snapshot.
+    fn process_display_events(&mut self, _runtime: &Runtime) -> Result<()> {
+        use tidev_agent::DisplayEvent;
+        while let Ok(event) = self.display_rx.try_recv() {
+            match event {
+                DisplayEvent::SessionLoaded {
+                    messages,
+                    context_summary,
+                    context_retained_from,
+                    ..
+                } => {
+                    self.conversation.messages = messages;
+                    self.conversation.set_context_state(context_summary, context_retained_from);
+                    self.dirty = true;
+                }
+                DisplayEvent::MessageAppended { message } => {
+                    self.conversation.push(message);
+                    self.dirty = true;
+                }
+                DisplayEvent::MessageDelta { content, .. } => {
+                    // Append streaming content to the last assistant message
+                    if let Some(last) = self.conversation.messages.last_mut() {
+                        if last.role == tidev_session::session::MessageRole::Assistant {
+                            last.content.push_str(&content);
+                            last.streaming = true;
+                        }
+                    }
+                    self.dirty = true;
+                }
+                DisplayEvent::ReasoningDelta { content, .. } => {
+                    // Append streaming reasoning to the last assistant message
+                    if let Some(last) = self.conversation.messages.last_mut() {
+                        if last.role == tidev_session::session::MessageRole::Assistant {
+                            last.reasoning.push_str(&content);
+                        }
+                    }
+                    self.dirty = true;
+                }
+                DisplayEvent::MessageFinalized { message } => {
+                    // Update the last assistant message with finalized data
+                    if let Some(last) = self.conversation.messages.last_mut() {
+                        if last.role == tidev_session::session::MessageRole::Assistant && last.streaming {
+                            last.streaming = false;
+                            last.content = message.content;
+                            last.input_tokens = message.input_tokens;
+                            last.output_tokens = message.output_tokens;
+                            last.total_tokens = message.total_tokens;
+                            last.completed_at = Some(chrono::Utc::now());
+                        }
+                    }
+                    self.dirty = true;
+                }
+                DisplayEvent::ContextCompacted {
+                    session_id,
+                    summary,
+                    retained_from,
+                    ..
+                } => {
+                    if self.conversation.session_id == session_id {
+                        self.conversation.set_context_state(summary.clone(), retained_from);
+                        if let Some(summary) = summary {
+                            let mut msg = tidev_session::session::Message::new(
+                                tidev_session::session::MessageRole::System,
+                                summary,
+                            );
+                            self.conversation.push(msg);
+                            self.clear_message_render_cache();
+                            self.scroll_messages_to_bottom();
+                        }
+                    }
+                    self.dirty = true;
+                }
+                DisplayEvent::MessagesHidden {
+                    visible_count, ..
+                } => {
+                    // Re-render with the updated visible range
+                    self.dirty = true;
+                }
+                DisplayEvent::StatusChanged { status, .. } => {
+                    log::info!("DisplayEvent::StatusChanged: {:?}", status);
+                    self.dirty = true;
+                }
+                DisplayEvent::ToolApprovalRequired {
+                    tool_calls,
+                    mode,
+                    ..
+                } => {
+                    log::info!("DisplayEvent::ToolApprovalRequired: {} tool(s)", tool_calls.len());
+                    // Tool approval is handled through the existing permission channel
+                    self.dirty = true;
+                }
+                DisplayEvent::SessionCreated { .. } => {
+                    self.dirty = true;
+                }
+                DisplayEvent::SessionsDeleted { .. } => {
+                    self.dirty = true;
+                }
+                DisplayEvent::Error { message, .. } => {
+                    log::warn!("DisplayEvent::Error: {}", message);
+                    self.last_notice = Some(message);
+                }
+            }
+        }
         Ok(())
     }
 
@@ -1177,12 +1286,12 @@ impl App {
                             let message_id = self.conversation.messages[tool_idx].id;
 
                             // Save the full output before truncation
-                            if let Err(e) = self.store.save_tool_output(
+                            if let Err(e) = runtime.block_on(self.agent.save_tool_output(
                                 self.conversation.session_id,
                                 message_id,
                                 "bash",
                                 &result.output,
-                            ) {
+                            )) {
                                 log::warn!("Failed to save full bash output: {e}");
                             }
 
@@ -1214,10 +1323,10 @@ impl App {
                             }
                         } else {
                             // Fallback: no streaming message existed
-                            self.record_tool_result(tool_call.clone(), result)?;
+                            self.record_tool_result(tool_call.clone(), result, runtime)?;
                         }
                     } else {
-                        self.record_tool_result(running.tool_call, result)?;
+                        self.record_tool_result(running.tool_call, result, runtime)?;
                     }
 
                     // Capture step snapshot for per-step undo tracking and sidebar updates
@@ -1279,14 +1388,14 @@ impl App {
                     message.tokens_per_second = tokens_per_second;
                 }
 
-                let _ = self.store.record_usage(
+                let _ = runtime.block_on(self.agent.record_usage(
                     &self.active_model.provider_id,
                     &model_id,
                     input_tokens,
                     output_tokens,
                     cache_read_tokens,
                     cache_write_tokens,
-                );
+                ));
             }
             BackendEvent::InstructionsLoaded {
                 sources,
@@ -1295,19 +1404,25 @@ impl App {
             }
             BackendEvent::ContextCompacted {
                 compacted,
-                manual,
+                manual: _,
                 summary,
                 retained_from,
-                error,
+                error: _,
             } => {
-                self.apply_context_compaction(
-                    self.conversation.session_id,
-                    compacted,
-                    manual,
-                    summary,
-                    retained_from,
-                    error,
-                );
+                if compacted {
+                    self.conversation
+                        .set_context_state(summary.clone(), retained_from);
+                    if let Some(summary) = summary.as_ref() {
+                        let mut msg = Message::new(MessageRole::System, summary.clone());
+                        msg.metadata.prior_summary = self.conversation.context_summary.clone();
+                        msg.metadata.prior_retained_from =
+                            Some(self.conversation.context_retained_from);
+                        self.conversation.push(msg);
+                        self.clear_message_render_cache();
+                        self.scroll_messages_to_bottom();
+                    }
+                    self.last_notice = Some("Context compacted".to_string());
+                }
             }
             BackendEvent::SidebarSnapshotReady {
                 request_id: _,
@@ -1327,11 +1442,11 @@ impl App {
                 {
                     msg.file_diffs = Some(file_diffs_json.clone());
                     // Also persist to database
-                    if let Err(e) = self.store.update_message_file_diffs(
+                    if let Err(e) = runtime.block_on(self.agent.update_message_file_diffs(
                         self.conversation.session_id,
                         message_id,
                         &file_diffs_json,
-                    ) {
+                    )) {
                         log::warn!("SidebarSnapshotReady: failed to persist file_diffs: {}", e);
                     }
                     // Invalidate render cache so sidebar re-renders
@@ -1671,7 +1786,7 @@ impl App {
                 self.conversation.session_id = session_id;
                 self.conversation.clear_context_state();
                 let _t_create = std::time::Instant::now();
-                self.store.create_session(
+                runtime.block_on(self.agent.create_session(
                     session_id,
                     self.workspace_root.as_path(),
                     &self.active_model.provider_id,
@@ -1679,7 +1794,7 @@ impl App {
                     &self.active_model.model_id,
                     &self.active_model.display_name,
                     "Untitled session",
-                )?;
+                ))?;
                 log::info!("agent: create_session took {:?}", _t_create.elapsed());
 
                 // Compose the immutable static system prompt and persist it.
@@ -1701,7 +1816,6 @@ impl App {
                 }
             }
             log::info!("agent: session init took {:?}", _t_session.elapsed());
-            self.context_manager = ContextManager::new();
             self.pending_tool_execution = None;
             self.permission_dialog = None;
             self.question_dialog = None;
@@ -1718,8 +1832,7 @@ impl App {
         self.connect_dialog = None;
 
         if self.conversation.is_reverted() {
-            self.discard_reverted_branch()?;
-            self.context_manager = ContextManager::new();
+            self.discard_reverted_branch(runtime)?;
             self.conversation.clear_context_state();
         }
 
@@ -1734,8 +1847,7 @@ impl App {
         user_message.mode = Some(self.mode);
         user_message.thinking_level = Some(self.thinking_level.clone());
         self.conversation.push(user_message.clone());
-        self.store
-            .append_message(self.conversation.session_id, &user_message)?;
+        runtime.block_on(self.agent.append_message(self.conversation.session_id, &user_message))?;
 
         // Persist and display nearby instruction sources from @ references
         // below the user message, so the notification appears after the user's
@@ -1757,13 +1869,13 @@ impl App {
 
         if self.conversation.messages.len() == 1 || self.conversation.title == "Untitled session" {
             self.conversation.update_title_from_prompt(&prompt);
-            self.store
-                .update_session_title(self.conversation.session_id, &self.conversation.title)?;
+            runtime.block_on(self.agent.update_session_title(
+                self.conversation.session_id,
+                &self.conversation.title,
+            ))?;
         }
 
         self.scroll_messages_to_bottom();
-
-        self.schedule_context_compaction_for_session(self.conversation.session_id, runtime, None);
 
         log::info!(
             "submit_prompt_now: before instruction load, instruction_content_cache keys={:?}",
@@ -1840,7 +1952,7 @@ impl App {
         let agent = self.agent.clone();
         let tools = self.tools.clone();
         let hooks_config = self.config.read().unwrap().hooks.clone();
-        let hooks = tidev_hooks::HookEngine::new(hooks_config, self.workspace_root.clone());
+        let hooks = tidev_agent::hooks::HookEngine::new(hooks_config, self.workspace_root.clone());
         let workspace_root = self.workspace_root.clone();
         let system_prompt = self.active_model.system_prompt.clone();
         let tx = self.backend_tx.clone();
@@ -1859,9 +1971,6 @@ impl App {
             .unwrap_or_else(|| self.thinking_level.clone());
 
         runtime.spawn(async move {
-            let mut context_manager =
-                ContextManager::from_state(context_summary, context_retained_from);
-
             // Clone tx for post-loop cleanup — the original will be moved
             // into run_agent_loop_with_permission_channel below.
             let cleanup_tx = tx.clone();
@@ -1871,7 +1980,8 @@ impl App {
                     tidev_agent::AgentLoopConfig {
                         session_id,
                         model,
-                        context_manager: &mut context_manager,
+                        context_summary,
+                        context_retained_from,
                         mode,
                         thinking_level,
                         event_tx: tx,

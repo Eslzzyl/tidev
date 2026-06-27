@@ -20,6 +20,7 @@ tokio = { version = "=1.52.3", features = [
     "macros",
     "rt",
     "time",
+    "process",
 ] }
 tokio-util = "0.7.18"
 uuid = { version = "1.23.3", features = ["v4", "serde"] }
@@ -30,13 +31,10 @@ tidev-storage = { path = "../tidev-storage" }
 tidev-config = { path = "../tidev-config" }
 tidev-llm = { path = "../tidev-llm" }
 tidev-tools = { path = "../tidev-tools" }
-tidev-context = { path = "../tidev-context" }
-tidev-hooks = { path = "../tidev-hooks" }
 tidev-instructions = { path = "../tidev-instructions" }
 tidev-snapshot = { path = "../tidev-snapshot" }
 tidev-search = { path = "../tidev-search" }
 tidev-mcp = { path = "../tidev-mcp" }
-tidev-system-info = { path = "../tidev-system-info" }
 
 [dev-dependencies]
 tempfile = "3.27"

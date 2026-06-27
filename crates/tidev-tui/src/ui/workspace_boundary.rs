@@ -206,6 +206,7 @@ impl App {
                             ToolExecutionResult::new(format!(
                                 "Tool failed: failed to decode question arguments: {error}"
                             )),
+                            runtime,
                         )?;
                         self.advance_pending_tool_execution();
                         return self.process_pending_tool_execution(runtime);
@@ -218,6 +219,7 @@ impl App {
                         ToolExecutionResult::new(
                             "Tool failed: question tool requires at least one question",
                         ),
+                        runtime,
                     )?;
                     self.advance_pending_tool_execution();
                     return self.process_pending_tool_execution(runtime);
@@ -245,7 +247,7 @@ impl App {
             );
             let result = ToolExecutionResult::new(output);
             // Add to in-memory conversation for TUI rendering
-            self.record_tool_result(dialog.pending.tool_call.clone(), result.clone())?;
+            self.record_tool_result(dialog.pending.tool_call.clone(), result.clone(), runtime)?;
             // Add to pending_rejected_tools so runtime persists it to DB via
             // send_permission_approval → ApprovedTool.rejection → persist_tool_result.
             // Without this, the orphaned tool call causes "no matching tool result" error.

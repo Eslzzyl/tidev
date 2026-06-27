@@ -5,7 +5,6 @@ use uuid::Uuid;
 
 use crate::render::chat_render::strip_system_reminder_tags;
 use tidev_snapshot::FileDiff;
-use tidev_context::ContextManager;
 use tidev_snapshot::{StepPatch, Patch};
 
 use super::{App, BackendEvent, Screen};
@@ -116,11 +115,11 @@ impl App {
                 "finalize_snapshot: saving patch_files, steps={}",
                 step_patches.len()
             );
-            self.store.update_message_patch(
+            runtime.block_on(self.agent.update_message_patch(
                 self.conversation.session_id,
                 last_user_message_id,
                 &patch_files_json,
-            )?;
+            ))?;
 
             if let Some(msg) = self
                 .conversation
@@ -337,23 +336,21 @@ impl App {
         let restored = self.restore_context_from_undo_compaction(message_id);
 
         if !restored {
-            self.context_manager = ContextManager::new();
             self.conversation.clear_context_state();
         }
 
         // Persist context state to the database so it survives a session reload.
         if restored {
-            if let Err(e) = self.store.update_session_context_state(
+            if let Err(e) = runtime.block_on(self.agent.update_session_context_state(
                 self.conversation.session_id,
                 self.conversation.context_summary.as_deref(),
                 self.conversation.context_retained_from,
-            ) {
+            )) {
                 log::warn!("revert_to_message: failed to persist context state: {e}");
             }
         } else {
             if let Err(e) =
-                self.store
-                    .update_session_context_state(self.conversation.session_id, None, 0)
+                runtime.block_on(self.agent.update_session_context_state(self.conversation.session_id, None, 0))
             {
                 log::warn!("revert_to_message: failed to clear context state: {e}");
             }
@@ -366,6 +363,7 @@ impl App {
             } else {
                 Some(&redo_snapshot)
             },
+            runtime,
         )?;
         self.composer
             .set_text(strip_system_reminder_tags(&message_content));
@@ -385,7 +383,7 @@ impl App {
             .load_redo_snapshot(self.conversation.session_id)?
         else {
             log::info!("unrevert: no redo_snapshot found");
-            self.clear_revert_state()?;
+            self.clear_revert_state(runtime)?;
             return Ok(());
         };
 
@@ -395,13 +393,11 @@ impl App {
             self.last_notice = Some(format!("Redo failed: {error}"));
         }
 
-        self.clear_revert_state()?;
-        self.context_manager = ContextManager::new();
+        self.clear_revert_state(runtime)?;
         self.conversation.clear_context_state();
-        if let Err(e) =
-            self.store
-                .update_session_context_state(self.conversation.session_id, None, 0)
-        {
+        if let Err(e) = runtime.block_on(self.agent.update_session_context_state(
+            self.conversation.session_id, None, 0,
+        )) {
             log::warn!("unrevert: failed to clear context state: {e}");
         }
         self.composer.clear();
@@ -440,7 +436,7 @@ impl App {
                                 })
                                 .collect();
                             self.step_cached_file_lists.push(files);
-                            self.merge_step_diffs(diffs);
+                            self.merge_step_diffs(diffs, runtime);
                         }
                         Err(e) => {
                             log::warn!("capture_step_snapshot: diff_lightweight failed: {}", e);
@@ -465,7 +461,7 @@ impl App {
 
     /// Merge lightweight per-step diffs into the running cumulative sidebar data.
     /// Updates step_cached_file_diffs and writes to the current user message's file_diffs.
-    fn merge_step_diffs(&mut self, step_diffs: Vec<FileDiff>) {
+    fn merge_step_diffs(&mut self, step_diffs: Vec<FileDiff>, runtime: &Runtime) {
         use std::collections::HashMap;
 
         let mut cumulative: HashMap<String, FileDiff> = HashMap::new();
@@ -528,11 +524,11 @@ impl App {
                 );
                 msg.file_diffs = Some(json.clone());
                 // Persist immediately so changed files survive app restart
-                if let Err(e) = self.store.update_message_file_diffs(
+                if let Err(e) = runtime.block_on(self.agent.update_message_file_diffs(
                     self.conversation.session_id,
                     msg_id,
                     &json,
-                ) {
+                )) {
                     log::warn!("merge_step_diffs: failed to persist file_diffs: {}", e);
                 }
                 self.invalidate_active_message_render_cache_for(msg_id);
@@ -543,7 +539,7 @@ impl App {
     pub(crate) fn capture_prompt_snapshot(
         &mut self,
         message_id: Uuid,
-        _runtime: &Runtime,
+        runtime: &Runtime,
     ) -> Result<()> {
         log::info!("capture_prompt_snapshot: message_id={}", message_id);
 
@@ -577,11 +573,11 @@ impl App {
         match self.snapshot.track() {
             Ok(Some(hash)) => {
                 log::info!("capture_prompt_snapshot: captured hash={}", hash);
-                self.store.update_message_snapshot(
+                runtime.block_on(self.agent.update_message_snapshot(
                     self.conversation.session_id,
                     message_id,
                     &hash,
-                )?;
+                ))?;
 
                 if let Some(msg) = self
                     .conversation
@@ -610,7 +606,7 @@ impl App {
         Ok(())
     }
 
-    pub(crate) fn discard_reverted_branch(&mut self) -> Result<()> {
+    pub(crate) fn discard_reverted_branch(&mut self, runtime: &Runtime) -> Result<()> {
         if !self.conversation.is_reverted() {
             return Ok(());
         }
@@ -618,22 +614,19 @@ impl App {
         let visible_count = self.conversation.visible_message_count();
         let hidden_messages = self.conversation.messages[visible_count..].to_vec();
 
-        self.store.delete_messages(
+        runtime.block_on(self.agent.delete_messages(
             self.conversation.session_id,
             &hidden_messages
                 .iter()
                 .map(|message| message.id)
                 .collect::<Vec<_>>(),
-        )?;
+        ))?;
 
         // Clear instruction-source tracking so the next user message gets
         // a fresh injection.  The deleted messages (which may have been the
         // ones that received the instruction injection) are gone, so the
         // tracking table would otherwise prevent re-injection.
-        match self
-            .store
-            .clear_instruction_sources(self.conversation.session_id)
-        {
+        match runtime.block_on(self.agent.clear_instruction_sources(self.conversation.session_id)) {
             Ok(_) => {}
             Err(e) => {
                 log::warn!("discard_reverted_branch: failed to clear instruction sources: {e}");
@@ -641,13 +634,11 @@ impl App {
         }
 
         let _ = self.conversation.take_hidden_messages();
-        self.clear_revert_state()?;
-        self.context_manager = ContextManager::new();
+        self.clear_revert_state(runtime)?;
         self.conversation.clear_context_state();
-        if let Err(e) =
-            self.store
-                .update_session_context_state(self.conversation.session_id, None, 0)
-        {
+        if let Err(e) = runtime.block_on(self.agent.update_session_context_state(
+            self.conversation.session_id, None, 0,
+        )) {
             log::warn!("discard_reverted_branch: failed to clear context state: {e}");
         }
         Ok(())
@@ -667,23 +658,19 @@ impl App {
         &mut self,
         message_id: Option<Uuid>,
         redo_snapshot: Option<&str>,
+        runtime: &Runtime,
     ) -> Result<()> {
         self.conversation.revert_message_id = message_id;
-        if let Some(message_id) = message_id {
-            self.store.set_revert_message_id(
-                self.conversation.session_id,
-                Some(message_id),
-                redo_snapshot,
-            )?;
-        } else {
-            self.store
-                .clear_revert_message_id(self.conversation.session_id)?;
-        }
+        runtime.block_on(self.agent.set_revert_message_id(
+            self.conversation.session_id,
+            message_id,
+            redo_snapshot.map(|s| s.to_string()),
+        ))?;
         Ok(())
     }
 
-    pub(crate) fn clear_revert_state(&mut self) -> Result<()> {
-        self.set_revert_message_id(None, None)
+    pub(crate) fn clear_revert_state(&mut self, runtime: &Runtime) -> Result<()> {
+        self.set_revert_message_id(None, None, runtime)
     }
 
     /// If undoing past any compaction messages, restore the context state
@@ -702,8 +689,6 @@ impl App {
                 prior_retained_from,
                 prior_summary.is_some(),
             );
-            self.context_manager.summary = prior_summary.clone();
-            self.context_manager.retained_from = prior_retained_from;
             self.conversation
                 .set_context_state(prior_summary, prior_retained_from);
             true

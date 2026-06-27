@@ -4,6 +4,7 @@ use std::process::Command;
 
 /// Operating system type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum OsType {
     Windows,
     Macos,

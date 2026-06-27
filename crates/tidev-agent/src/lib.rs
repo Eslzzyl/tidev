@@ -17,8 +17,11 @@
 //! [`AgentLoop`] at construction time.
 
 mod agent_loop;
+pub(crate) mod context;
+pub mod hooks;
 pub mod persistence;
 mod session_manager;
+mod system_info;
 pub mod types;
 #[cfg(test)]
 mod tests;
@@ -29,7 +32,7 @@ pub mod prompts;
 pub use agent_loop::{AgentLoop, ToolExecResult};
 pub use session_manager::SessionManager;
 pub use types::{
-    AgentDefinition, AgentLoopConfig, ApprovedTool, FrontendEvent, PendingToolApproval,
-    QueuedUserMessage, SessionConfig, SessionHandle, SessionInfo, SharedAgentState,
-    compose_static_system_prompt,
+    AgentDefinition, AgentLoopConfig, ApprovedTool, DisplayEvent, FrontendCommand,
+    FrontendEvent, FrontendMessage, PendingToolApproval, QueuedUserMessage, SessionConfig,
+    SessionHandle, SessionInfo, SessionStatus, SharedAgentState, compose_static_system_prompt,
 };

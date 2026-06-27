@@ -16,7 +16,6 @@ use crate::ui::workspace_boundary::WorkspaceBoundaryConfirmDialogState;
 use crate::ui::workspace_boundary::WorkspaceBoundaryDialogState;
 use tidev_config::{ActiveModel};
 use tidev_config::reasoning::ThinkingLevelType;
-use tidev_context::ContextManager;
 use tidev_tools::TodoItem;
 use tidev_session::session::{Conversation, MessageAttachment};
 
@@ -171,7 +170,6 @@ pub(crate) struct CachedSessionRuntime {
     pub(crate) conversation: Conversation,
     pub(crate) active_model: ActiveModel,
     pub(crate) mode: SessionMode,
-    pub(crate) context_manager: ContextManager,
     pub(crate) pending_tool_execution: Option<PendingToolExecution>,
     pub(crate) permission_dialog: Option<PermissionDialogState>,
     pub(crate) workspace_boundary_dialog: Option<WorkspaceBoundaryDialogState>,

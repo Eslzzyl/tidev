@@ -1,3 +1,10 @@
+//! Hook configuration types.
+//!
+//! These config types reside in tidev-config because both tidev-config
+//! and tidev-agent need them. Putting them here avoids a circular dependency
+//! (tidev-agent depends on tidev-config, and tidev-config cannot depend on
+//! tidev-agent).
+
 use serde::{Deserialize, Serialize};
 
 /// Top-level hook system configuration.
