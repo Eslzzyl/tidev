@@ -3896,7 +3896,6 @@ dependencies = [
  "dirs",
  "serde",
  "serde_json",
- "tidev-llm",
  "tidev-types",
  "toml",
  "uuid",

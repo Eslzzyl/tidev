@@ -327,9 +327,9 @@ impl ModelSummary {
 
 // ── Bridge conversion: ActiveModel → LlmProviderConfig ──────────
 
-impl From<ActiveModel> for tidev_llm::LlmProviderConfig {
+impl From<ActiveModel> for tidev_types::LlmProviderConfig {
     fn from(m: ActiveModel) -> Self {
-        tidev_llm::LlmProviderConfig {
+        tidev_types::LlmProviderConfig {
             provider_id: m.provider_id,
             api_type: m.api_type,
             api_key: m.api_key,
@@ -345,3 +345,5 @@ impl From<ActiveModel> for tidev_llm::LlmProviderConfig {
         }
     }
 }
+
+

@@ -4,4 +4,4 @@ pub mod reasoning;
 pub mod theme;
 pub mod types;
 
-pub use types::{ApiType, PermissionConfig, PermissionSettings, TodoItem, ToolPermission, ToolSchema};
+pub use types::{ApiType, LlmProviderConfig, PermissionConfig, PermissionSettings, TodoItem, ToolPermission, ToolSchema};

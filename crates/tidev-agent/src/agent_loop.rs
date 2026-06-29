@@ -344,7 +344,7 @@ impl AgentLoop {
         let llm_tools = tools.to_vec();
 
         tokio::spawn(async move {
-            let llm_config = tidev_llm::LlmProviderConfig::from(model_for_task);
+            let llm_config = tidev_types::LlmProviderConfig::from(model_for_task);
             llm.stream_chat(sid, request_id, llm_config, msgs, llm_tools, tx, tl)
                 .await;
         });

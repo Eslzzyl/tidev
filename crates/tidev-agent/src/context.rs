@@ -319,7 +319,7 @@ impl ContextManager {
 
             tokio::spawn(async move {
                 let thinking_level = model_clone.thinking_level.clone();
-                let llm_config = tidev_llm::LlmProviderConfig::from(model_clone);
+                let llm_config = tidev_types::LlmProviderConfig::from(model_clone);
                 let llm_tools: Vec<tidev_types::ToolSchema> = tools_vec
                     .iter()
                     .map(|t: &tidev_tools::ToolDefinition| tidev_types::ToolSchema {
@@ -366,7 +366,7 @@ impl ContextManager {
             }
             text
         } else {
-            let llm_config = tidev_llm::LlmProviderConfig::from(config.model.clone());
+            let llm_config = tidev_types::LlmProviderConfig::from(config.model.clone());
             let llm_tools: Vec<tidev_types::ToolSchema> = config
                 .tools
                 .iter()
