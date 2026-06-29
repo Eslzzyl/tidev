@@ -20,7 +20,6 @@ pub enum CommandAction {
     Init,
     Agents,
     Skills,
-    Sync,
 }
 
 #[derive(Clone, Debug)]
@@ -361,12 +360,5 @@ pub static COMMANDS: &[CommandSpec] = &[
         description: "Browse and preview available skills",
         usage: "/skills",
         action: CommandAction::Skills,
-    },
-    CommandSpec {
-        name: "sync",
-        aliases: &[],
-        description: "Sync sessions with remote machines (see CLI: tidev sync)",
-        usage: "/sync",
-        action: CommandAction::Sync,
     },
 ];

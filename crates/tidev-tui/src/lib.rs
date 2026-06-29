@@ -133,7 +133,6 @@ struct App {
     mcp_panel: Option<McpPanelState>,
     agents_panel: Option<ui::agents_panel::AgentsPanelState>,
     skills_panel: Option<ui::skills_panel::SkillsPanelState>,
-    sync_panel: Option<ui::sync_panel::SyncPanelState>,
     search_panel: Option<ui::search_panel::SearchPanelState>,
     at_mention: AtMentionState,
     snippet_state: SnippetState,

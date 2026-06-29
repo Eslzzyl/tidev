@@ -118,9 +118,6 @@ impl App {
             self.render_session_panel(frame, area, panel);
             self.render_session_panel_dialog(frame, area, panel);
         }
-        if let Some(panel) = &self.sync_panel {
-            self.render_sync_panel(frame, area, panel);
-        }
         if let Some(dialog) = &self.rename_dialog {
             self.render_rename_session_dialog(frame, area, dialog);
         }

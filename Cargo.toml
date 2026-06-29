@@ -8,7 +8,6 @@ members = [
     "crates/tidev-config",
     "crates/tidev-instructions",
     "crates/tidev-snapshot",
-    "crates/tidev-sync",
     "crates/tidev-search",
     "crates/tidev-mcp",
     "crates/tidev-tools",
@@ -49,7 +48,6 @@ uuid = { version = "1", features = ["v4"] }
 tidev-tui = { path = "crates/tidev-tui" }
 tidev-config = { path = "crates/tidev-config" }
 tidev-storage = { path = "crates/tidev-storage" }
-tidev-sync = { path = "crates/tidev-sync" }
 
 [profile.dev]
 incremental = true

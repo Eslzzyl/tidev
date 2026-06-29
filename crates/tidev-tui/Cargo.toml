@@ -71,7 +71,6 @@ tidev-snapshot = { path = "../tidev-snapshot" }
 tidev-mcp = { path = "../tidev-mcp" }
 tidev-search = { path = "../tidev-search" }
 tidev-instructions = { path = "../tidev-instructions" }
-tidev-sync = { path = "../tidev-sync" }
 
 [dev-dependencies]
 tempfile = "3.27"

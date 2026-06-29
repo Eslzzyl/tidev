@@ -173,7 +173,6 @@ impl App {
             mcp_panel: None,
             agents_panel: None,
             skills_panel: None,
-            sync_panel: None,
             search_panel: None,
             at_mention: AtMentionState::default(),
             snippet_state: SnippetState::default(),

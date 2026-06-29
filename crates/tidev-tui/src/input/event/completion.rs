@@ -198,8 +198,7 @@ impl App {
                 | CommandAction::Init
                 | CommandAction::Agents
                 | CommandAction::Search
-                | CommandAction::Skills
-                | CommandAction::Sync => {}
+                | CommandAction::Skills => {}
                 _ => {
                     self.last_notice = Some(
                         "A response is still streaming. Wait for it to finish before changing sessions.".to_string(),
@@ -296,9 +295,6 @@ impl App {
             }
             CommandAction::Skills => {
                 self.open_skills_panel();
-            }
-            CommandAction::Sync => {
-                self.open_sync_panel();
             }
             CommandAction::Memory => {
                 // TODO: implement memory panel

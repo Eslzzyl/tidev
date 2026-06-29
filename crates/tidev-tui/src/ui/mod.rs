@@ -15,7 +15,6 @@ pub mod sensitive;
 pub mod session_panel;
 pub mod settings_panel;
 pub mod skills_panel;
-pub mod sync_panel;
 pub mod theme_panel;
 pub mod undo_confirm;
 pub mod workspace_boundary;

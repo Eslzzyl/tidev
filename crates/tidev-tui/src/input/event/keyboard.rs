@@ -158,10 +158,6 @@ impl App {
             return self.handle_message_panel_key(key);
         }
 
-        if self.sync_panel.is_some() {
-            return self.handle_sync_panel_key(key, runtime);
-        }
-
         if self.session_panel.is_some() {
             return self.handle_session_panel_key(key, runtime);
         }

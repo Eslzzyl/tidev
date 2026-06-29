@@ -29,7 +29,6 @@ impl App {
         self.model_panel = None;
         self.session_panel = None;
         self.settings_panel = Some(SettingsPanelState::new(&self.config));
-        self.sync_panel = None;
     }
 
     pub(crate) fn open_panel_launcher(&mut self) {
@@ -43,7 +42,6 @@ impl App {
         self.settings_panel = None;
         self.message_panel = None;
         self.skills_panel = None;
-        self.sync_panel = None;
         self.panel_launcher.open();
     }
 

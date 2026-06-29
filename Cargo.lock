@@ -3859,7 +3859,6 @@ dependencies = [
  "log",
  "tidev-config",
  "tidev-storage",
- "tidev-sync",
  "tidev-tui",
  "uuid",
 ]
@@ -3898,7 +3897,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tidev-llm",
- "tidev-sync",
  "tidev-types",
  "toml",
  "uuid",
@@ -4017,19 +4015,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tidev-sync"
-version = "0.7.0"
-dependencies = [
- "anyhow",
- "serde",
- "serde_json",
- "tidev-session",
- "tidev-storage",
- "tidev-types",
- "uuid",
-]
-
-[[package]]
 name = "tidev-tools"
 version = "0.7.0"
 dependencies = [
@@ -4108,7 +4093,6 @@ dependencies = [
  "tidev-session",
  "tidev-snapshot",
  "tidev-storage",
- "tidev-sync",
  "tidev-tools",
  "tidev-types",
  "tokio",
