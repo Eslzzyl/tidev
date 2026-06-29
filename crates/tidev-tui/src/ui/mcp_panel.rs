@@ -3,7 +3,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::collections::BTreeMap;
 
 use tidev_config::McpServerConfig;
-use tidev_mcp::McpServerSummary;
+use tidev_agent::McpServerSummary;
 
 use super::App;
 
@@ -194,8 +194,8 @@ impl App {
                 if let Some(selected) = panel.selected_item(&items) {
                     let name = selected.summary.name.clone();
                     let result = match selected.summary.status {
-                        tidev_mcp::McpConnectionStatus::Connected
-                        | tidev_mcp::McpConnectionStatus::Connecting => {
+                        tidev_agent::McpConnectionStatus::Connected
+                        | tidev_agent::McpConnectionStatus::Connecting => {
                             runtime.block_on(self.tools.disconnect_mcp_server(&name))
                         }
                         _ => runtime.block_on(self.tools.toggle_mcp_server(&name)),

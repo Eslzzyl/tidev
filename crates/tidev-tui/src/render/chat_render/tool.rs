@@ -1094,19 +1094,29 @@ pub(super) fn render_tool_result_detail_lines(
     }
 
     if canonical_name == "todowrite" && !is_error {
-        #[derive(serde::Deserialize)]
         struct RawTodo {
             content: String,
             status: Option<String>,
         }
 
-        let raw_todos = if let Ok(todos) = serde_json::from_str::<Vec<RawTodo>>(effective_output) {
-            Some(todos)
-        } else if let Ok(value) = serde_json::from_str::<serde_json::Value>(effective_output) {
-            value
-                .get("newTodos")
-                .or_else(|| value.get("todos"))
-                .and_then(|v| serde_json::from_value::<Vec<RawTodo>>(v.clone()).ok())
+        fn parse_raw_todo(v: &serde_json::Value) -> Option<RawTodo> {
+            Some(RawTodo {
+                content: v.get("content")?.as_str()?.to_string(),
+                status: v.get("status").and_then(|s| s.as_str()).map(String::from),
+            })
+        }
+
+        fn parse_raw_todos(v: &serde_json::Value) -> Option<Vec<RawTodo>> {
+            v.as_array()?.iter().map(parse_raw_todo).collect()
+        }
+
+        let raw_todos = if let Ok(value) = serde_json::from_str::<serde_json::Value>(effective_output) {
+            parse_raw_todos(&value).or_else(|| {
+                value
+                    .get("newTodos")
+                    .or_else(|| value.get("todos"))
+                    .and_then(parse_raw_todos)
+            })
         } else {
             None
         };

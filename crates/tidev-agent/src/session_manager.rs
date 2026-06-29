@@ -17,17 +17,18 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow, ensure};
 use chrono::Utc;
 use tokio::sync::Mutex as AsyncMutex;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{UnboundedSender};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 use tidev_session::session::{
     BackendEvent, Message, MessageRole, ToolCall, ToolExecutionResult,
 };
 use tidev_storage::SessionStore;
+use tidev_config::LogConfig;
 
 use crate::agent_loop::AgentLoop;
 use crate::types::{
-    AgentLoopConfig, DisplayEvent, FrontendCommand, FrontendEvent, FrontendMessage,
+    AgentLoopConfig, DisplayEvent, FrontendEvent, FrontendMessage,
     PendingToolApproval, SessionConfig, SessionHandle, SessionInfo,
 };
 use crate::{AgentDefinition, compose_static_system_prompt};
@@ -70,16 +71,26 @@ pub struct ActiveSession {
 
 impl SessionManager {
     /// Create a new SessionManager with shared resources.
+    /// Opens the database, creates the session store, and initializes
+    /// the LLM client internally.
     pub fn new(
-        store: Arc<AsyncMutex<SessionStore>>,
-        llm_client: tidev_llm::LlmClient,
+        db_path: &Path,
         config: Arc<tokio::sync::RwLock<tidev_config::AppConfig>>,
         auth_store: Arc<tidev_config::AuthStore>,
         tool_registry: tidev_tools::ToolRegistry,
         frontend_tx: UnboundedSender<FrontendEvent>,
         display_tx: UnboundedSender<DisplayEvent>,
-    ) -> Self {
-        Self {
+        log_config: &LogConfig,
+    ) -> Result<Self> {
+        let db = tidev_storage::database::Database::open(db_path)?;
+        let store = Arc::new(AsyncMutex::new(db.create_session_store()?));
+        let llm_client = tidev_llm::LlmClient::new(
+            log_config.save_request_body,
+            log_config.max_request_files,
+            log_config.save_response_body,
+            log_config.max_response_files,
+        )?;
+        Ok(Self {
             store,
             llm_client,
             active: Arc::new(AsyncMutex::new(HashMap::new())),
@@ -88,7 +99,13 @@ impl SessionManager {
             tool_registry,
             frontend_tx,
             display_tx,
-        }
+        })
+    }
+
+    /// Get a clone of the session store for synchronous frontend use.
+    /// Each clone opens a new read connection but shares the write connection.
+    pub fn clone_store(&self) -> SessionStore {
+        self.store.blocking_lock().clone()
     }
 
     /// Spawn a new session and return a handle to receive its events.
@@ -845,7 +862,6 @@ impl SessionManager {
 
         // Spawn the event processor task
         let processor = tokio::spawn(async move {
-            use tidev_session::session::BackendEvent;
             while let Some(event) = event_rx.recv().await {
                 Self::process_agent_event(
                     &store,

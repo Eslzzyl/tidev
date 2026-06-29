@@ -31,6 +31,11 @@ pub mod prompts;
 
 pub use agent_loop::{AgentLoop, ToolExecResult};
 pub use session_manager::SessionManager;
+pub use tidev_instructions::{
+    resolve_nearby_instructions, system_prompt_and_sources_with_cache,
+};
+pub use tidev_mcp::{McpConnectionStatus, McpManager, McpServerSummary};
+pub use tidev_storage::{SessionRecord, SessionStore};
 pub use types::{
     AgentDefinition, AgentLoopConfig, ApprovedTool, DisplayEvent, FrontendCommand,
     FrontendEvent, FrontendMessage, PendingToolApproval, QueuedUserMessage, SessionConfig,

@@ -73,17 +73,16 @@ use crate::ui::permission::{
 use crate::theme::ThemeManager;
 use tidev_config::{ActiveModel, AppConfig, AuthStore, ConfigPaths};
 use tidev_agent::PendingToolApproval;
-use tidev_mcp::McpManager;
+use tidev_agent::McpManager;
 use tidev_search::current_at_fragment;
 use tidev_snapshot::{FileDiff, SnapshotService};
 use tidev_tools::{FileReadTracker, TodoItem, ToolRegistry};
-use tidev_llm::LlmClient;
 use tidev_session::session::{
     AssistantTurn, BackendEvent, COMPACTION_MESSAGE_LABEL, Conversation, Message,
     MessageAttachment, MessageRole, ToolCall, ToolExecutionResult,
 };
 use tidev_session::utils::TokenUsage;
-use tidev_storage::SessionStore;
+use tidev_agent::SessionStore;
 
 use crate::{
     at_mention::{AtMentionKind, AtMentionState},
@@ -109,7 +108,6 @@ struct App {
     config: SharedConfig,
     auth: AuthStore,
     store: SessionStore,
-    llm: LlmClient,
     theme: ThemeManager,
     mode: SessionMode,
     /// Pending mode switch that will take effect on the next user message.
@@ -453,7 +451,7 @@ impl App {
             Ok((mut tool_output, truncated)) => {
                 // Load nearby instruction files (like the read tool does)
                 let mut instruction_sources = Vec::new();
-                if let Ok(nearby) = tidev_instructions::resolve_nearby_instructions(
+                if let Ok(nearby) = tidev_agent::resolve_nearby_instructions(
                     &self.workspace_root,
                     &self.paths.config_dir,
                     &absolute,
@@ -1886,7 +1884,7 @@ impl App {
         // This is done here (not in the agent loop) to avoid corrupting the
         // conversation message order (the streaming message must remain last).
         let instructions = self.config.read().unwrap().instructions.clone();
-        let (_, sources, new_cache) = tidev_instructions::system_prompt_and_sources_with_cache(
+        let (_, sources, new_cache) = tidev_agent::system_prompt_and_sources_with_cache(
             &self.workspace_root,
             &self.paths.config_dir,
             &instructions,

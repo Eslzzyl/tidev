@@ -1,16 +1,7 @@
 use super::*;
 use crate::panel_launcher::PanelLauncherState;
 use chrono::Utc;
-use ratatui::{Terminal, backend::CrosstermBackend};
-use std::{
-    io,
-    path::Path,
-    sync::{Arc, RwLock},
-    time::Duration,
-};
-use tidev_config::SharedConfig;
-use tidev_storage::database::Database;
-use tokio::runtime::Runtime;
+use ratatui::{Terminal, backend::CrosstermBackend};use tokio::runtime::Runtime;
 
 /// Find the git worktree root by looking for a .git directory,
 /// starting from the given path and walking up to the ancestors.
@@ -44,30 +35,13 @@ impl App {
         let auth = AuthStore::load_or_create(&paths)?;
         log::info!("startup: auth loaded in {:?}", _t1.elapsed());
         let _t2 = std::time::Instant::now();
-        let db = Database::open(paths.default_database_path())?;
-        log::info!(
-            "startup: Database::open (schema init) in {:?}",
-            _t2.elapsed()
-        );
-        let _t3 = std::time::Instant::now();
-        let store = db.create_session_store()?;
-        log::info!("startup: stores created in {:?}", _t3.elapsed());
-        let _t4 = std::time::Instant::now();
-        let llm = LlmClient::new(
-            config.logging.save_request_body,
-            config.logging.max_request_files,
-            config.logging.save_response_body,
-            config.logging.max_response_files,
-        )?;
-        log::info!("startup: LlmClient::new in {:?}", _t4.elapsed());
-        let _t5 = std::time::Instant::now();
         let theme = ThemeManager::new(&config.theme);
         let mcp = McpManager::new(workspace_root.clone(), config.mcp.servers.clone());
         let file_read_tracker = Arc::new(FileReadTracker::new());
         // Find git worktree root to limit skill discovery scope
         let worktree = find_git_worktree(&workspace_root);
-        log::info!("startup: theme/mcp created in {:?}", _t5.elapsed());
-        let _t6 = std::time::Instant::now();
+        log::info!("startup: theme/mcp created in {:?}", _t2.elapsed());
+        let _t3 = std::time::Instant::now();
         let mut tools = ToolRegistry::new(
             workspace_root.clone(),
             paths.config_dir.clone(),
@@ -79,7 +53,7 @@ impl App {
             config.websearch.clone(),
             Arc::new(auth.clone()),
         );
-        log::info!("startup: ToolRegistry created in {:?}", _t6.elapsed());
+        log::info!("startup: ToolRegistry created in {:?}", _t3.elapsed());
         #[allow(unused_variables)]
         let commands = CommandRegistry::new();
         let command_palette = CommandPaletteState::default();
@@ -101,6 +75,22 @@ impl App {
         );
 
         let mut active_model = fallback_model;
+        let shared_config: SharedConfig = Arc::new(RwLock::new(config.clone()));
+        // Build shared tidev_agent::SessionManager with config/auth/tools for
+        // subagent model resolution and tool filtering.
+        let session_config = Arc::new(tokio::sync::RwLock::new(config.clone()));
+        let (frontend_tx, frontend_rx) = tokio::sync::mpsc::unbounded_channel();
+        let agent = tidev_agent::SessionManager::new(
+            paths.default_database_path(),
+            session_config,
+            Arc::new(auth.clone()),
+            tools.clone(),
+            frontend_tx,
+            display_tx,
+            &config.logging,
+        )?;
+        let store = agent.clone_store();
+
         // Load saved thinking level preference for the default model across restarts
         if let Ok(Some(level_str)) =
             store.load_model_thinking_level(&active_model.provider_id, &active_model.model_id)
@@ -109,20 +99,9 @@ impl App {
                 tidev_config::reasoning::ThinkingLevelType::from_string(&level_str);
         }
         tools.set_active_model(active_model.clone());
-        let shared_config: SharedConfig = Arc::new(RwLock::new(config.clone()));
-        // Build shared tidev_agent::SessionManager with config/auth/tools for
-        // subagent model resolution and tool filtering.
-        let session_config = Arc::new(tokio::sync::RwLock::new(config.clone()));
-        let (frontend_tx, frontend_rx) = tokio::sync::mpsc::unbounded_channel();
-        let agent = tidev_agent::SessionManager::new(
-            Arc::new(tokio::sync::Mutex::new(store.clone())),
-            llm.clone(),
-            session_config,
-            Arc::new(auth.clone()),
-            tools.clone(),
-            frontend_tx,
-            display_tx,
-        );
+
+        // Background cleanup of old tool outputs (runs every hour).
+        store.start_output_cleanup(7, std::time::Duration::from_secs(3600));
         // Share current session ID for the background inactivity check.
         let current_session_id: Arc<RwLock<Uuid>> = Arc::new(RwLock::new(session_id));
         let inactivity_check_cancel = CancellationToken::new();
@@ -138,9 +117,6 @@ impl App {
         let cleanup_cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let notifications = crate::notification::NotificationManager::new(config.notifications.clone());
 
-        // Background cleanup of old tool outputs (runs every hour).
-        store.start_output_cleanup(7, std::time::Duration::from_secs(3600));
-
         let app = Self {
             should_quit: false,
             screen: Screen::Welcome,
@@ -149,7 +125,6 @@ impl App {
             config: shared_config,
             auth,
             store,
-            llm,
             theme,
             mode,
             pending_mode: None,
