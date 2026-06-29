@@ -6,9 +6,8 @@ use ratatui::{
     text::{Line, Span},
 };
 use std::path::Path;
-use tidev_tools::{
-    builtin::utils::display_workspace_relative, canonical_tool_name,
-};
+use tidev_tools::canonical_tool_name;
+use tidev_utils::path::display_workspace_relative;
 
 pub(super) fn render_reasoning_markdown_lines(
     reasoning: &str,

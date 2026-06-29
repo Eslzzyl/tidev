@@ -2,14 +2,12 @@ use anyhow::{Context, Result};
 use serde_json::Value;
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
-use std::sync::LazyLock;
 use std::{
-    collections::HashSet,
     io::Read,
     path::Path,
     process::Stdio,
     sync::{
-        Arc, Mutex,
+        Arc,
         atomic::{AtomicBool, Ordering},
         mpsc,
     },
@@ -18,7 +16,7 @@ use std::{
 };
 use tokio::sync::mpsc::UnboundedSender;
 
-use super::utils::truncate_in_place;
+use tidev_utils::process::truncate_in_place;
 use crate::tools::{BashArgs, decode_tool_args};
 use crate::{ToolDefinition, ToolPermission};
 use crate::encoding::decode_command_output;
@@ -26,80 +24,10 @@ use crate::encoding::prepare_command_for_shell;
 use tidev_session::session::BackendEvent;
 use uuid::Uuid;
 
-/// Registry of active child process PIDs spawned by the bash tool.
-/// Used during program exit to prevent orphaned processes.
-static ACTIVE_CHILDREN: LazyLock<Mutex<HashSet<u32>>> =
-    LazyLock::new(|| Mutex::new(HashSet::new()));
-
-/// Register a child PID so it can be killed on program exit.
-pub fn register_child(pid: u32) {
-    ACTIVE_CHILDREN.lock().unwrap().insert(pid);
-}
-
-/// Unregister a child PID that has exited normally.
-pub fn unregister_child(pid: u32) {
-    ACTIVE_CHILDREN.lock().unwrap().remove(&pid);
-}
-
-/// Kill all tracked child processes. Two-phase: SIGTERM → brief wait → SIGKILL.
-#[cfg(unix)]
-pub fn kill_all_children() {
-    let pids: Vec<u32> = ACTIVE_CHILDREN.lock().unwrap().iter().copied().collect();
-    if pids.is_empty() {
-        return;
-    }
-
-    // Phase 1: SIGTERM — graceful shutdown
-    for &pid in &pids {
-        let _ = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
-    }
-
-    // Give them a moment to exit cleanly
-    std::thread::sleep(std::time::Duration::from_millis(200));
-
-    // Phase 2: SIGKILL — force kill survivors
-    for &pid in &pids {
-        let _ = unsafe { libc::kill(pid as i32, libc::SIGKILL) };
-    }
-}
-
-/// Kill a process group by its leader PID.
-///
-/// Uses two-phase termination (SIGTERM → brief wait → SIGKILL) to give
-/// the process and its descendants a chance to clean up (e.g. restore
-/// terminal settings) before being forcefully killed.
-///
-/// After `setsid()` in pre_exec, the child's PID equals its PGID
-/// (process group ID), so `kill(-pid, ...)` sends the signal to the
-/// entire process group — including any grandchildren (git, editor, pager).
-#[cfg(unix)]
-pub fn kill_process_group(pid: u32) {
-    unsafe {
-        let _ = libc::kill(-(pid as i32), libc::SIGTERM);
-    }
-    // Give them a moment to exit cleanly (restore terminal, etc.)
-    std::thread::sleep(std::time::Duration::from_millis(200));
-    unsafe {
-        let _ = libc::kill(-(pid as i32), libc::SIGKILL);
-    }
-}
-
-/// Kill a process group by its leader PID (no-op on non-Unix).
-#[cfg(not(unix))]
-pub fn kill_process_group(pid: u32) {
-    // Fallback: just kill the individual process on non-Unix platforms.
-    // This won't kill grandchildren, but it's the best we can do without
-    // process group support.
-    let _ = std::process::Command::new("taskkill")
-        .args(["/F", "/T", "/PID", &pid.to_string()])
-        .output();
-}
-
-/// Kill all tracked child processes (no-op on non-Unix).
-#[cfg(not(unix))]
-pub fn kill_all_children() {
-    // Windows support could be added later using TerminateProcess
-}
+/// Re-export process management functions from tidev-utils for backward
+/// compatibility. External callers (e.g. tidev-tui) use these via
+/// `tidev_tools::builtin::kill_process_group`.
+pub use tidev_utils::process::{kill_all_children, kill_process_group, register_child, unregister_child};
 
 /// Result of bash tool execution.
 #[derive(Debug)]

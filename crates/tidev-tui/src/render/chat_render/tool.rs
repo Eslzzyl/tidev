@@ -1,10 +1,8 @@
 use crate::ansi::ansi_to_styled_line;
 use crate::markdown::{WrapOptions, render_markdown_text_with_width_and_cwd, word_wrap_line};
 use crate::theme::ThemePalette;
-use tidev_tools::{
-    builtin::utils::display_workspace_relative,
-    canonical_tool_name, TodoItem,
-};
+use tidev_tools::{canonical_tool_name, TodoItem};
+use tidev_utils::path::display_workspace_relative;
 use tidev_session::session::{Message, MessageAttachment, ToolCall};
 
 use crate::core::state::SelectableRegionRange;

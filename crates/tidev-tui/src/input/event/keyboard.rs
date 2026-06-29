@@ -415,7 +415,7 @@ impl App {
                     flag.store(true, Ordering::SeqCst);
                 }
                 // Kill the process group (PID == PGID after process_group(0))
-                tidev_tools::builtin::kill_process_group(pid);
+                tidev_utils::process::kill_process_group(pid);
                 // Send a cancellation event so the streaming message is closed
                 let _ = self.backend_tx.send(BackendEvent::ShellOutput {
                     content: "Command cancelled".to_string(),
@@ -464,7 +464,7 @@ impl App {
                 if let Some(flag) = self.shell_kill_flag.take() {
                     flag.store(true, Ordering::SeqCst);
                 }
-                tidev_tools::builtin::kill_process_group(pid);
+                tidev_utils::process::kill_process_group(pid);
             }
         }
 
@@ -707,7 +707,7 @@ impl App {
             loop {
                 // Check if user pressed Esc to cancel
                 if kill_flag.load(Ordering::SeqCst) {
-                    tidev_tools::builtin::kill_process_group(child_pid);
+                    tidev_utils::process::kill_process_group(child_pid);
                     let _ = child.wait();
                     let _ = tx.send(BackendEvent::ShellOutput {
                         content: "Command cancelled".to_string(),
@@ -804,7 +804,7 @@ impl App {
                 flag.store(true, Ordering::SeqCst);
             }
             // Kill the process group (PID == PGID after process_group(0))
-            tidev_tools::builtin::kill_process_group(pid);
+            tidev_utils::process::kill_process_group(pid);
         }
         self.shell_kill_flag = None;
     }

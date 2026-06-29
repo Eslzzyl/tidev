@@ -7,11 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-/// Canonicalize a path for comparison, resolving symlinks.
-/// Falls back to the original path if canonicalization fails.
-fn canonicalize_display(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
-}
+use tidev_utils::path::canonicalize_display;
 
 const INSTRUCTION_FILES: &[&str] = &[
     "AGENTS.md",

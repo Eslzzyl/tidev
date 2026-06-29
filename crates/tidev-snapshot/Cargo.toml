@@ -13,7 +13,6 @@ name = "tidev_snapshot"
 anyhow = "1.0.102"
 blake3 = "1.8.5"
 diffy = "0.5.0"
-dunce = "1"
 log = "0.4.32"
 rayon = "1.12.0"
 serde = { version = "1.0.228", features = ["derive", "rc"] }
@@ -30,6 +29,7 @@ uuid = { version = "1.23.3", features = ["v4"] }
 tidev-types = { path = "../tidev-types" }
 tidev-config = { path = "../tidev-config" }
 tidev-session = { path = "../tidev-session" }
+tidev-utils = { path = "../tidev-utils" }
 
 [dev-dependencies]
 tempfile = "3.27"

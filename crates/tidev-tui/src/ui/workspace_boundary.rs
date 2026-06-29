@@ -125,7 +125,7 @@ pub(crate) fn extract_boundary_violation_path(
         _ => return None,
     };
 
-    if !tidev_tools::builtin::utils::is_path_outside_workspace(workspace_root, &path_buf)
+    if !tidev_utils::path::is_path_outside_workspace(workspace_root, &path_buf)
     {
         return None;
     }
@@ -134,10 +134,10 @@ pub(crate) fn extract_boundary_violation_path(
     // Use canonicalize_for_comparison which handles both existing paths
     // (resolving symlinks) and non-existent paths (via parent-walk fallback).
     let resolved =
-        tidev_tools::builtin::utils::resolve_path_unchecked(workspace_root, &path_buf)
+        tidev_utils::path::resolve_path_unchecked(workspace_root, &path_buf)
             .unwrap_or_else(|_| path_buf.clone());
 
-    Some(tidev_tools::builtin::utils::canonicalize_for_comparison(&resolved))
+    Some(tidev_utils::path::canonicalize_for_comparison(&resolved))
 }
 
 impl App {

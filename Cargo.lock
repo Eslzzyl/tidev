@@ -3894,6 +3894,7 @@ version = "0.7.0"
 dependencies = [
  "anyhow",
  "dirs",
+ "log",
  "serde",
  "serde_json",
  "tidev-types",
@@ -3913,6 +3914,7 @@ dependencies = [
  "reqwest",
  "serde",
  "tidev-types",
+ "tidev-utils",
  "uuid",
 ]
 
@@ -3982,7 +3984,6 @@ dependencies = [
  "anyhow",
  "blake3",
  "diffy",
- "dunce",
  "log",
  "rayon",
  "serde",
@@ -3991,6 +3992,7 @@ dependencies = [
  "tidev-config",
  "tidev-session",
  "tidev-types",
+ "tidev-utils",
  "tokio",
  "uuid",
 ]
@@ -4049,6 +4051,7 @@ dependencies = [
  "tidev-snapshot",
  "tidev-storage",
  "tidev-types",
+ "tidev-utils",
  "tokio",
  "url",
  "urlencoding",
@@ -4089,6 +4092,7 @@ dependencies = [
  "tidev-snapshot",
  "tidev-tools",
  "tidev-types",
+ "tidev-utils",
  "tokio",
  "tokio-util",
  "two-face",
@@ -4107,6 +4111,18 @@ dependencies = [
  "serde",
  "serde_json",
  "uuid",
+]
+
+[[package]]
+name = "tidev-utils"
+version = "0.7.0"
+dependencies = [
+ "anyhow",
+ "dirs",
+ "dunce",
+ "libc",
+ "log",
+ "tempfile",
 ]
 
 [[package]]

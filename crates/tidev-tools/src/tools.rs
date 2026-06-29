@@ -407,24 +407,8 @@ pub fn execute_shell_tool_call(
     )
 }
 
-#[allow(dead_code)]
-fn truncate_in_place(value: &mut String, max_bytes: usize) {
-    if value.len() <= max_bytes {
-        return;
-    }
-
-    let mut end = max_bytes;
-    while end > 0 && !value.is_char_boundary(end) {
-        end -= 1;
-    }
-
-    value.truncate(end);
-    value.push_str("\n[truncated]");
-}
-
-#[allow(dead_code)]
 fn truncate_to_limit(mut value: String, max_bytes: usize) -> String {
-    truncate_in_place(&mut value, max_bytes);
+    tidev_utils::process::truncate_in_place(&mut value, max_bytes);
     value
 }
 

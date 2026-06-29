@@ -11,13 +11,7 @@ use tokio::sync::Mutex;
 
 use tidev_config::{ConfigPaths, SnapshotConfig};
 
-/// Canonicalize a path for display purposes, resolving symlinks.
-/// Falls back to the original path if canonicalization fails.
-/// Uses `dunce` on Windows to strip the `\\?\` prefix so that
-/// path comparisons (e.g. `strip_prefix`) work correctly.
-fn canonicalize_display(path: &Path) -> PathBuf {
-    dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
-}
+use tidev_utils::path::canonicalize_display;
 
 const BATCH_SIZE: usize = 100;
 

@@ -638,7 +638,7 @@ impl App {
         } else {
             self.workspace_root.join(source)
         };
-        tidev_tools::builtin::utils::canonicalize_display(&path)
+        tidev_utils::path::canonicalize_display(&path)
             .display()
             .to_string()
     }

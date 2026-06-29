@@ -293,7 +293,7 @@ impl App {
 
                 if let Some(ref path_str) = file_path
                     && let Ok(resolved_path) =
-                        tidev_tools::builtin::utils::resolve_workspace_path(
+                        tidev_utils::path::resolve_workspace_path(
                             &self.workspace_root,
                             std::path::Path::new(path_str),
                             false,

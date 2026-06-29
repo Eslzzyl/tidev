@@ -5,6 +5,7 @@ pub mod mcp;
 mod paths;
 mod provider;
 pub mod reasoning;
+pub mod shell;
 mod snapshot;
 mod tmp;
 mod ui;

@@ -22,12 +22,12 @@ impl App {
 
     pub(crate) fn new_with_paths(paths: ConfigPaths) -> Result<Self> {
         let _t0 = std::time::Instant::now();
-        let workspace_root = tidev_tools::builtin::utils::canonicalize_display(
+        let workspace_root = tidev_utils::path::canonicalize_display(
             &env::current_dir().context("failed to determine workspace root")?,
         );
         let config = AppConfig::load_with_project_overlay(&paths, &workspace_root)?;
         // Initialize shell detection (Windows: auto-detect bash, Unix: sh).
-        tidev_tools::shell::init(config.shell.windows_shell.clone(), Some(&paths));
+        tidev_config::shell::init(config.shell.windows_shell.clone(), Some(&paths));
         let _ = crate::logging::init(&paths.data_dir, config.logging.clone());
         log::info!("App initializing, workspace={}", workspace_root.display());
         log::info!("startup: config loaded in {:?}", _t0.elapsed());
@@ -472,7 +472,7 @@ impl App {
 
         // Force-kill any remaining child processes (e.g. bash subprocesses
         // whose tokio task was dropped before it could clean up).
-        tidev_tools::builtin::kill_all_children();
+        tidev_utils::process::kill_all_children();
 
         self.pending_permission_rx = None;
         self.pending_permission_response = None;
@@ -586,7 +586,7 @@ impl App {
             } else {
                 self.workspace_root.join(source)
             };
-            let canonical_path = tidev_tools::builtin::utils::canonicalize_display(&path);
+            let canonical_path = tidev_utils::path::canonicalize_display(&path);
 
             if let Ok(content) = std::fs::read_to_string(&canonical_path) {
                 self.instruction_content_cache

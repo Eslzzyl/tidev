@@ -64,6 +64,7 @@ tidev-types = { path = "../tidev-types" }
 tidev-session = { path = "../tidev-session" }
 tidev-config = { path = "../tidev-config" }
 tidev-tools = { path = "../tidev-tools" }
+tidev-utils = { path = "../tidev-utils" }
 tidev-snapshot = { path = "../tidev-snapshot" }
 tidev-search = { path = "../tidev-search" }
 
