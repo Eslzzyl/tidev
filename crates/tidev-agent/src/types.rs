@@ -5,6 +5,7 @@
 //! (FrontendMessage / AgentEvent / DisplayEvent) that frontends
 //! use to interact with the agent runtime.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -137,6 +138,9 @@ pub enum DisplayEvent {
         manual: bool,
         summary: Option<String>,
         retained_from: usize,
+        /// Context state BEFORE this compaction (for undo/redo boundary).
+        prior_summary: Option<String>,
+        prior_retained_from: usize,
         error: Option<String>,
     },
     /// Messages hidden after undo.
@@ -268,6 +272,8 @@ pub struct AgentLoopConfig {
     pub thinking_level: tidev_config::reasoning::ThinkingLevelType,
     pub event_tx: tokio::sync::mpsc::UnboundedSender<BackendEvent>,
     pub cancel_token: Option<CancellationToken>,
+    /// Shared mutable state for frontend ↔ agent loop communication.
+    pub shared_state: std::sync::Arc<SharedAgentState>,
     /// Workspace root for this session.
     pub workspace_root: std::path::PathBuf,
     /// The composed static system prompt (frozen for session lifetime).
@@ -348,6 +354,9 @@ pub struct SharedAgentState {
     /// After each turn completes, the loop processes the next message
     /// automatically. Frontends push through [`queue_user_message`].
     pub queued_messages: Mutex<VecDeque<QueuedUserMessage>>,
+    /// Signal from the frontend to force context compaction on the next
+    /// idle checkpoint inside the agent loop.
+    pub compact_pending: AtomicBool,
 }
 
 impl Default for SharedAgentState {
@@ -360,6 +369,7 @@ impl SharedAgentState {
     pub fn new() -> Self {
         Self {
             queued_messages: Mutex::new(VecDeque::new()),
+            compact_pending: AtomicBool::new(false),
         }
     }
 
@@ -373,6 +383,16 @@ impl SharedAgentState {
     /// Pop the next queued message, if any.
     pub fn pop_queued_message(&self) -> Option<QueuedUserMessage> {
         self.queued_messages.lock().ok()?.pop_front()
+    }
+
+    /// Request context compaction on the next idle checkpoint.
+    pub fn request_compact(&self) {
+        self.compact_pending.store(true, Ordering::Relaxed);
+    }
+
+    /// Drain and return whether a compact was requested.
+    pub fn take_compact_request(&self) -> bool {
+        self.compact_pending.swap(false, Ordering::Relaxed)
     }
 }
 

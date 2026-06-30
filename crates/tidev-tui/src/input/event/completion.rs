@@ -252,14 +252,10 @@ impl App {
                 self.open_session_panel(args.join(" "))?;
             }
             CommandAction::Compact => {
-                self.active_request_id = self.active_request_id.wrapping_add(1);
-                let _request_id = self.active_request_id;
-                let msg = tidev_session::session::Message::streaming(
-                    tidev_session::session::MessageRole::System,
-                    format!("{}\n\n", tidev_session::session::COMPACTION_MESSAGE_LABEL),
-                );
-                self.conversation.push(msg);
-                self.last_notice = Some("Compaction requested — will run at next idle checkpoint".to_string());
+                let session_id = self.conversation.session_id;
+                self.last_notice = Some("Compacting...".to_string());
+                // Delegate to SessionManager which handles both active and idle cases.
+                runtime.block_on(self.agent.compact(session_id));
             }
             CommandAction::Message => {
                 self.open_message_panel(args.join(" "))?;

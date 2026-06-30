@@ -28,7 +28,7 @@ use tidev_types::prompts::SessionMode;
 use tidev_storage::SessionStore;
 
 use crate::session_manager::SessionManager;
-use crate::types::{ApprovedTool, PendingToolApproval};
+use crate::types::{ApprovedTool, PendingToolApproval, SharedAgentState};
 
 /// The per-session agent loop.
 ///
@@ -62,6 +62,8 @@ pub struct AgentLoop {
     pub tool_registry: tidev_tools::ToolRegistry,
     /// SessionManager for subagent creation and lifecycle management.
     pub session_manager: SessionManager,
+    /// Shared mutable state for frontend ↔ agent loop communication.
+    pub shared_state: Arc<SharedAgentState>,
     /// Whether this loop can delegate to sub-agents.
     /// Child sessions set this to `false` to avoid async recursion.
     pub can_delegate: bool,
@@ -256,9 +258,18 @@ impl AgentLoop {
                 }
             }
 
-            // 7. Check for context compaction
+            // 7. Drain queued compact requests (from /compact while loop was running)
+            if self.shared_state.take_compact_request() {
+                log::info!(
+                    "agent_loop[{}]: processing queued compact request",
+                    self.session_id
+                );
+                self.compact_context(true).await;
+            }
+
+            // 7b. Auto-compaction check
             if self.context.needs_compaction(&self.conversation, &self.model) {
-                self.compact_context().await;
+                self.compact_context(false).await;
             }
 
             // 8. If no tool calls, this was a final response — exit the loop.
@@ -570,18 +581,30 @@ impl AgentLoop {
     }
 
     /// Compact conversation context.
-    async fn compact_context(&mut self) {
-        log::info!("agent_loop[{}]: context compaction triggered", self.session_id);
+    ///
+    /// Saves the prior context state, runs the LLM summarisation, persists
+    /// the new context state and compaction message to the database, and
+    /// emits a [`BackendEvent::ContextCompacted`] carrying both old and new
+    /// state so the frontend can update correctly.
+    async fn compact_context(&mut self, manual: bool) {
+        log::info!(
+            "agent_loop[{}]: context compaction triggered (manual={})",
+            self.session_id,
+            manual
+        );
 
-        let event_tx = self.event_tx.clone();
-        let context = &mut self.context;
+        // 1. Capture prior state before compaction.
+        let prior_summary = self.context.summary.clone();
+        let prior_retained_from = self.context.retained_from;
 
-        if let Err(e) = context
+        // 2. Run the LLM summarisation.
+        if let Err(e) = self
+            .context
             .compact(crate::context::CompactionConfig {
                 llm: &self.llm,
                 model: &self.model,
                 conversation: &self.conversation,
-                manual: false,
+                manual,
                 stream_ctx: None,
                 tools: &self.tools,
                 mode: self.mode,
@@ -593,13 +616,64 @@ impl AgentLoop {
                 self.session_id,
                 e
             );
+            let _ = self.event_tx.send(BackendEvent::ContextCompacted {
+                compacted: false,
+                manual,
+                summary: None,
+                retained_from: prior_retained_from,
+                prior_summary,
+                prior_retained_from,
+                error: Some(e.to_string()),
+            });
+            return;
         }
 
-        let _ = event_tx.send(BackendEvent::ContextCompacted {
-            compacted: context.summary.is_some(),
-            manual: false,
-            summary: context.summary.clone(),
-            retained_from: context.retained_from,
+        // 3. Persist context state to the database.
+        if let Err(e) = self
+            .store
+            .lock()
+            .await
+            .update_session_context_state(
+                self.session_id,
+                self.context.summary.as_deref(),
+                self.context.retained_from,
+            )
+        {
+            log::warn!(
+                "agent_loop[{}]: failed to persist context state: {}",
+                self.session_id,
+                e
+            );
+        }
+
+        // 4. Create and persist compaction message (with prior-state metadata).
+        if let Some(ref summary) = self.context.summary {
+            let mut compaction_msg = Message::compaction(summary.clone());
+            compaction_msg.metadata.prior_summary = prior_summary.clone();
+            compaction_msg.metadata.prior_retained_from = Some(prior_retained_from);
+            compaction_msg.completed_at = Some(chrono::Utc::now());
+            if let Err(e) = self
+                .store
+                .lock()
+                .await
+                .append_message(self.session_id, &compaction_msg)
+            {
+                log::warn!(
+                    "agent_loop[{}]: failed to persist compaction message: {}",
+                    self.session_id,
+                    e
+                );
+            }
+        }
+
+        // 5. Emit event with both prior and new state.
+        let _ = self.event_tx.send(BackendEvent::ContextCompacted {
+            compacted: self.context.summary.is_some(),
+            manual,
+            summary: self.context.summary.clone(),
+            retained_from: self.context.retained_from,
+            prior_summary,
+            prior_retained_from,
             error: None,
         });
     }

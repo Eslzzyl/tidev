@@ -786,6 +786,9 @@ pub enum BackendEvent {
         manual: bool,
         summary: Option<String>,
         retained_from: usize,
+        /// Context state BEFORE this compaction (for undo/redo boundary).
+        prior_summary: Option<String>,
+        prior_retained_from: usize,
         error: Option<String>,
     },
     /// Async sidebar snapshot computation completed.

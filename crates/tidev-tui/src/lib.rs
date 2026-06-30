@@ -795,15 +795,16 @@ impl App {
                     session_id,
                     summary,
                     retained_from,
+                    prior_summary,
+                    prior_retained_from,
                     ..
                 } => {
                     if self.conversation.session_id == session_id {
                         self.conversation.set_context_state(summary.clone(), retained_from);
                         if let Some(summary) = summary {
-                            let mut msg = tidev_session::session::Message::new(
-                                tidev_session::session::MessageRole::System,
-                                summary,
-                            );
+                            let mut msg = tidev_session::session::Message::compaction(summary);
+                            msg.metadata.prior_summary = prior_summary;
+                            msg.metadata.prior_retained_from = Some(prior_retained_from);
                             self.conversation.push(msg);
                             self.clear_message_render_cache();
                             self.scroll_messages_to_bottom();
@@ -1404,16 +1405,18 @@ impl App {
                 manual: _,
                 summary,
                 retained_from,
+                prior_summary,
+                prior_retained_from,
                 error: _,
             } => {
                 if compacted {
                     self.conversation
                         .set_context_state(summary.clone(), retained_from);
                     if let Some(summary) = summary.as_ref() {
-                        let mut msg = Message::new(MessageRole::System, summary.clone());
-                        msg.metadata.prior_summary = self.conversation.context_summary.clone();
+                        let mut msg = Message::compaction(summary.clone());
+                        msg.metadata.prior_summary = prior_summary;
                         msg.metadata.prior_retained_from =
-                            Some(self.conversation.context_retained_from);
+                            Some(prior_retained_from);
                         self.conversation.push(msg);
                         self.clear_message_render_cache();
                         self.scroll_messages_to_bottom();
@@ -1983,6 +1986,7 @@ impl App {
                         thinking_level,
                         event_tx: tx,
                         cancel_token: Some(cancel_token),
+                        shared_state: agent.shared_state.clone(),
                         workspace_root,
                         system_prompt,
                     },

@@ -30,6 +30,7 @@ use crate::agent_loop::AgentLoop;
 use crate::types::{
     AgentLoopConfig, DisplayEvent, FrontendEvent, FrontendMessage,
     PendingToolApproval, SessionConfig, SessionHandle, SessionInfo,
+    SharedAgentState,
 };
 use crate::{AgentDefinition, compose_static_system_prompt};
 
@@ -59,6 +60,8 @@ pub struct SessionManager {
     pub frontend_tx: UnboundedSender<FrontendEvent>,
     /// Channel to send display events to the frontend (TUI).
     pub display_tx: UnboundedSender<DisplayEvent>,
+    /// Shared mutable state for frontend <-> agent loop communication.
+    pub shared_state: Arc<SharedAgentState>,
 }
 
 pub struct ActiveSession {
@@ -99,6 +102,7 @@ impl SessionManager {
             tool_registry,
             frontend_tx,
             display_tx,
+            shared_state: Arc::new(SharedAgentState::new()),
         })
     }
 
@@ -225,6 +229,7 @@ impl SessionManager {
             hooks,
             tool_registry,
             session_manager: self.clone(),
+            shared_state: config.shared_state,
             can_delegate: true,
         };
 
@@ -385,6 +390,7 @@ impl SessionManager {
                 workspace_root.to_path_buf(),
             ),
             session_manager: self.clone(),
+            shared_state: std::sync::Arc::new(crate::types::SharedAgentState::new()),
             tool_registry: self.tool_registry.clone(),
             can_delegate: false,
         };
@@ -540,6 +546,18 @@ impl SessionManager {
         let store = self.store.lock().await;
         store.update_session_context_state(session_id, summary, retained_from)?;
         Ok(())
+    }
+
+    /// Request context compaction for a session.
+    ///
+    /// If the agent loop is running, queues a request via `SharedAgentState`.
+    /// If idle, runs compaction directly.
+    pub async fn compact(&self, session_id: Uuid) {
+        if self.is_active(session_id).await {
+            self.shared_state.request_compact();
+        } else {
+            self.compact_session_idle(session_id).await;
+        }
     }
 
     /// Save full tool output to the database.
@@ -809,13 +827,14 @@ impl SessionManager {
     async fn handle_frontend_command(&self, cmd: crate::types::FrontendCommand) -> Result<()> {
         match cmd {
             crate::types::FrontendCommand::Compact { session_id } => {
-                // Set a pending_compact flag for the next idle checkpoint
-                // or handle directly if no agent loop is active.
                 log::info!("handle_frontend_command: Compact requested for session {}", session_id);
-                let _ = self.display_tx.send(DisplayEvent::StatusChanged {
-                    session_id,
-                    status: crate::types::SessionStatus::Idle,
-                });
+                if self.is_active(session_id).await {
+                    // Agent loop is running -- queue a compact request.
+                    self.shared_state.request_compact();
+                } else {
+                    // Agent loop is idle -- run compaction directly.
+                    self.compact_session_idle(session_id).await;
+                }
             }
             crate::types::FrontendCommand::Undo { session_id, target_message_id: _ } => {
                 log::info!("handle_frontend_command: Undo requested for session {}", session_id);
@@ -833,6 +852,125 @@ impl SessionManager {
             }
         }
         Ok(())
+    }
+
+    /// Run compaction for a session when the agent loop is idle.
+    ///
+    /// Creates a temporary [`ContextManager`](crate::context::ContextManager) from
+    /// stored state, runs the LLM summarisation, persists the result, and
+    /// notifies the TUI via [`DisplayEvent::ContextCompacted`].
+    async fn compact_session_idle(&self, session_id: Uuid) {
+        // 1. Load session record and messages from the database.
+        let (session_record, messages) = {
+            let store = self.store.lock().await;
+            let record = match store.load_session_record(session_id) {
+                Ok(Some(r)) => r,
+                Ok(None) => {
+                    log::warn!("compact_session_idle: session {} not found", session_id);
+                    return;
+                }
+                Err(e) => {
+                    log::warn!("compact_session_idle: failed to load session {}: {}", session_id, e);
+                    return;
+                }
+            };
+            let msgs = store.load_messages(session_id).unwrap_or_default();
+            (record, msgs)
+        };
+
+        // 2. Build Conversation and resolve model (with API key from auth store).
+        let mut conv = tidev_session::session::Conversation::new(
+            session_id,
+            "".to_string(),
+            &session_record.provider_id,
+            &session_record.provider_display_name,
+            &session_record.model_id,
+            &session_record.model_display_name,
+            &session_record.title,
+        );
+        conv.messages = messages;
+
+        let model = {
+            let config_guard = self.config.read().await;
+            match config_guard.resolve_model_by_ids(
+                &self.auth_store,
+                &session_record.provider_id,
+                &session_record.model_id,
+            ) {
+                Ok(m) => m,
+                Err(e) => {
+                    log::warn!("compact_session_idle: model resolve failed: {}", e);
+                    return;
+                }
+            }
+        };
+        let tools = self.tool_registry.definitions_for_model(&model);
+
+        // 3. Create ContextManager and capture prior state.
+        let mut ctx = crate::context::ContextManager::from_state(
+            session_record.context_summary.clone(),
+            session_record.context_retained_from,
+        );
+        let prior_summary = ctx.summary.clone();
+        let prior_retained_from = ctx.retained_from;
+
+        // 4. Run compaction.
+        if let Err(e) = ctx
+            .compact(crate::context::CompactionConfig {
+                llm: &self.llm_client,
+                model: &model,
+                conversation: &conv,
+                manual: true,
+                stream_ctx: None,
+                tools: &tools,
+                mode: tidev_types::prompts::SessionMode::Build,
+            })
+            .await
+        {
+            log::warn!("compact_session_idle: compaction failed for {}: {}", session_id, e);
+            return;
+        }
+
+        // 5. Persist context state.
+        {
+            let store = self.store.lock().await;
+            if let Err(e) = store.update_session_context_state(
+                session_id,
+                ctx.summary.as_deref(),
+                ctx.retained_from,
+            ) {
+                log::warn!("compact_session_idle: persist context state failed: {}", e);
+            }
+
+            // 6. Create and persist compaction message.
+            if let Some(ref summary) = ctx.summary {
+                let mut compaction_msg = tidev_session::session::Message::compaction(summary.clone());
+                compaction_msg.metadata.prior_summary = prior_summary.clone();
+                compaction_msg.metadata.prior_retained_from = Some(prior_retained_from);
+                compaction_msg.completed_at = Some(Utc::now());
+                if let Err(e) = store.append_message(session_id, &compaction_msg) {
+                    log::warn!("compact_session_idle: persist compaction msg failed: {}", e);
+                }
+            }
+        }
+
+        // 7. Notify TUI.
+        let _ = self.display_tx.send(DisplayEvent::ContextCompacted {
+            session_id,
+            compacted: ctx.summary.is_some(),
+            manual: true,
+            summary: ctx.summary,
+            retained_from: ctx.retained_from,
+            prior_summary,
+            prior_retained_from,
+            error: None,
+        });
+
+        // Consume any stale compact request that may have been set between the
+        // is_active() check and the idle compaction completing.  Without this,
+        // the next agent loop would redundantly re-compact the already-summarised
+        // context ("summary of a summary"), degrading information quality.
+        self.shared_state.take_compact_request();
     }
 
     // ========================================================================
@@ -957,21 +1095,25 @@ impl SessionManager {
             }
             BackendEvent::ContextCompacted {
                 compacted,
+                manual,
                 summary,
                 retained_from,
+                prior_summary,
+                prior_retained_from,
                 ..
-            } => {
-                if *compacted {
-                    let _ = display_tx.send(DisplayEvent::ContextCompacted {
-                        session_id: *session_id,
-                        compacted: *compacted,
-                        manual: false,
-                        summary: summary.clone(),
-                        retained_from: *retained_from,
-                        error: None,
-                    });
-                }
+            } if *compacted => {
+                let _ = display_tx.send(DisplayEvent::ContextCompacted {
+                    session_id: *session_id,
+                    compacted: *compacted,
+                    manual: *manual,
+                    summary: summary.clone(),
+                    retained_from: *retained_from,
+                    prior_summary: prior_summary.clone(),
+                    prior_retained_from: *prior_retained_from,
+                    error: None,
+                });
             }
+            BackendEvent::ContextCompacted { .. } => {}
             _ => {
                 // Other events (ToolCompleted, StreamEnd, etc.) are handled
                 // by the frontend's existing event processing for now.
