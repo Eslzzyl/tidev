@@ -4,7 +4,19 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "Tool definitions and execution for tidev"
+description = "Built-in tool implementations for tidev"
 
 [dependencies]
+anyhow = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["process", "io-std", "time", "sync"] }
+uuid = { version = "1", features = ["v4"] }
 tidev-types = { path = "../tidev-types" }
+glob = "0.3"
+grep = "0.4"
+ignore = "0.4"
+diffy = "0.5"
+base64 = "0.22"
+mime_guess = "2"
