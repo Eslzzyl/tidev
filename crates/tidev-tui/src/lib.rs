@@ -760,27 +760,25 @@ impl App {
                 }
                 DisplayEvent::MessageDelta { content, .. } => {
                     // Append streaming content to the last assistant message
-                    if let Some(last) = self.conversation.messages.last_mut() {
-                        if last.role == tidev_session::session::MessageRole::Assistant {
+                    if let Some(last) = self.conversation.messages.last_mut()
+                        && last.role == tidev_session::session::MessageRole::Assistant {
                             last.content.push_str(&content);
                             last.streaming = true;
                         }
-                    }
                     self.dirty = true;
                 }
                 DisplayEvent::ReasoningDelta { content, .. } => {
                     // Append streaming reasoning to the last assistant message
-                    if let Some(last) = self.conversation.messages.last_mut() {
-                        if last.role == tidev_session::session::MessageRole::Assistant {
+                    if let Some(last) = self.conversation.messages.last_mut()
+                        && last.role == tidev_session::session::MessageRole::Assistant {
                             last.reasoning.push_str(&content);
                         }
-                    }
                     self.dirty = true;
                 }
                 DisplayEvent::MessageFinalized { message } => {
                     // Update the last assistant message with finalized data
-                    if let Some(last) = self.conversation.messages.last_mut() {
-                        if last.role == tidev_session::session::MessageRole::Assistant && last.streaming {
+                    if let Some(last) = self.conversation.messages.last_mut()
+                        && last.role == tidev_session::session::MessageRole::Assistant && last.streaming {
                             last.streaming = false;
                             last.content = message.content;
                             last.input_tokens = message.input_tokens;
@@ -788,7 +786,6 @@ impl App {
                             last.total_tokens = message.total_tokens;
                             last.completed_at = Some(chrono::Utc::now());
                         }
-                    }
                     self.dirty = true;
                 }
                 DisplayEvent::ContextCompacted {
@@ -813,7 +810,7 @@ impl App {
                     self.dirty = true;
                 }
                 DisplayEvent::MessagesHidden {
-                    visible_count, ..
+                    visible_count: _, ..
                 } => {
                     // Re-render with the updated visible range
                     self.dirty = true;
@@ -824,7 +821,7 @@ impl App {
                 }
                 DisplayEvent::ToolApprovalRequired {
                     tool_calls,
-                    mode,
+                    mode: _,
                     ..
                 } => {
                     log::info!("DisplayEvent::ToolApprovalRequired: {} tool(s)", tool_calls.len());

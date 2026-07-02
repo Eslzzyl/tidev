@@ -65,11 +65,6 @@ impl DesktopNotificationBackend {
     }
 }
 
-/// Detect the best available notification backend.
-pub fn detect_backend(method: &str) -> DesktopNotificationBackend {
-    DesktopNotificationBackend::for_method(method)
-}
-
 /// Check if the terminal supports OSC 9 protocol.
 fn supports_osc9() -> bool {
     if env::var_os("WT_SESSION").is_some() {
@@ -163,11 +158,6 @@ impl NotificationManager {
         self.focused.store(focused, Ordering::Relaxed);
     }
 
-    /// Returns shared reference to the focused flag for crossterm event handling.
-    pub fn focused_flag(&self) -> Arc<AtomicBool> {
-        self.focused.clone()
-    }
-
     /// Check whether a notification should be emitted based on the current condition.
     pub fn should_emit(&self) -> bool {
         match self.condition {
@@ -181,11 +171,10 @@ impl NotificationManager {
         if !self.should_emit() {
             return;
         }
-        if let Some(backend) = &mut self.backend {
-            if let Err(e) = backend.notify(message) {
+        if let Some(backend) = &mut self.backend
+            && let Err(e) = backend.notify(message) {
                 log::warn!("notification error: {e}");
             }
-        }
     }
 }
 
@@ -249,10 +238,10 @@ mod tests {
 
     #[test]
     fn test_backend_selection() {
-        let backend = detect_backend("bel");
+        let backend = DesktopNotificationBackend::for_method("bel");
         assert!(matches!(backend, DesktopNotificationBackend::Bel(_)));
 
-        let backend = detect_backend("osc9");
+        let backend = DesktopNotificationBackend::for_method("osc9");
         assert!(matches!(backend, DesktopNotificationBackend::Osc9(_)));
     }
 
