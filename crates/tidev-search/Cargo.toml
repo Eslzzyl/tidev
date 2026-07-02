@@ -4,6 +4,11 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "Search functionality for tidev"
+description = "File search indexing for tidev @-mention completion"
 
 [dependencies]
+ignore = "0.4"
+notify = "8"
+rayon = "1"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
