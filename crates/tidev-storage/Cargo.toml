@@ -8,4 +8,3 @@ description = "Storage layer for tidev"
 
 [dependencies]
 tidev-types = { path = "../tidev-types" }
-tidev-session = { path = "../tidev-session" }

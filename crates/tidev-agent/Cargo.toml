@@ -8,6 +8,5 @@ description = "Agent runtime for tidev"
 
 [dependencies]
 tidev-types = { path = "../tidev-types" }
-tidev-session = { path = "../tidev-session" }
 tidev-storage = { path = "../tidev-storage" }
 tidev-llm = { path = "../tidev-llm" }
