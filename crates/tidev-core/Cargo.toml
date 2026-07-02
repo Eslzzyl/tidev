@@ -1,0 +1,18 @@
+[package]
+name = "tidev-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Core orchestration layer for tidev"
+
+[dependencies]
+tidev-agent = { path = "../tidev-agent" }
+tidev-tools = { path = "../tidev-tools" }
+tidev-config = { path = "../tidev-config" }
+tidev-storage = { path = "../tidev-storage" }
+tidev-llm = { path = "../tidev-llm" }
+tidev-mcp = { path = "../tidev-mcp" }
+tidev-snapshot = { path = "../tidev-snapshot" }
+tidev-instructions = { path = "../tidev-instructions" }
+tidev-search = { path = "../tidev-search" }

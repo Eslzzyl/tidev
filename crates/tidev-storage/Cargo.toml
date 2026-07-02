@@ -1,0 +1,11 @@
+[package]
+name = "tidev-storage"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Storage layer for tidev"
+
+[dependencies]
+tidev-types = { path = "../tidev-types" }
+tidev-session = { path = "../tidev-session" }

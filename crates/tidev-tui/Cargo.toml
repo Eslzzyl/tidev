@@ -1,0 +1,14 @@
+[package]
+name = "tidev-tui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "TUI frontend for tidev"
+
+[dependencies]
+tidev-core = { path = "../tidev-core" }
+tidev-types = { path = "../tidev-types" }
+tidev-session = { path = "../tidev-session" }
+tidev-config = { path = "../tidev-config" }
+tidev-utils = { path = "../tidev-utils" }

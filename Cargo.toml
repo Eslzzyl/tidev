@@ -13,6 +13,7 @@ members = [
     "crates/tidev-utils",
     "crates/tidev-tools",
     "crates/tidev-agent",
+    "crates/tidev-core",
     "crates/tidev-tui",
 ]
 default-members = ["."]
@@ -43,12 +44,7 @@ include = ["/src", "/README.md", "/LICENSE"]
 
 [dependencies]
 anyhow = "1"
-clap = { version = "4", features = ["derive"] }
-log = "0.4"
-uuid = { version = "1", features = ["v4"] }
 tidev-tui = { path = "crates/tidev-tui" }
-tidev-config = { path = "crates/tidev-config" }
-tidev-storage = { path = "crates/tidev-storage" }
 
 [profile.dev]
 incremental = true

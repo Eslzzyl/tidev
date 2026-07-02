@@ -1,0 +1,10 @@
+[package]
+name = "tidev-llm"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "LLM integration for tidev"
+
+[dependencies]
+tidev-types = { path = "../tidev-types" }

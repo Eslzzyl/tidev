@@ -1,0 +1,9 @@
+[package]
+name = "tidev-instructions"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Agent instructions for tidev"
+
+[dependencies]

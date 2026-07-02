@@ -1,0 +1,10 @@
+[package]
+name = "tidev-tools"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Tool definitions and execution for tidev"
+
+[dependencies]
+tidev-types = { path = "../tidev-types" }
