@@ -1839,7 +1839,36 @@ impl App {
             return Ok(());
         }
 
-        let mut user_message = Message::new(MessageRole::User, prompt.clone());
+        // Load instruction files. Prepend new ones as <system-reminder> content
+        // at the beginning of the user message, rather than creating a separate
+        // message. Injection happens once per source — tracked in
+        // session_instruction_sources.
+        let session_id = self.conversation.session_id;
+        let instructions = self.config.read().unwrap().instructions.clone();
+        let (instr_content, instr_sources, new_instr_cache) =
+            tidev_agent::system_prompt_and_sources_with_cache(
+                &self.workspace_root,
+                &self.paths.config_dir,
+                &instructions,
+                &self.instruction_content_cache,
+            )
+            .unwrap_or_default();
+        let already_injected = self.store.load_instruction_sources(session_id)?;
+        let new_sources: Vec<&String> = instr_sources
+            .iter()
+            .filter(|s| !already_injected.contains(*s))
+            .collect();
+
+        let effective_prompt = if !instr_content.is_empty() && !new_sources.is_empty() {
+            format!(
+                "<system-reminder>\n{}\n</system-reminder>\n\n{}",
+                instr_content, prompt,
+            )
+        } else {
+            prompt.clone()
+        };
+
+        let mut user_message = Message::new(MessageRole::User, effective_prompt);
         user_message.attachments = attachments;
         user_message.mode = Some(self.mode);
         user_message.thinking_level = Some(self.thinking_level.clone());
@@ -1875,52 +1904,23 @@ impl App {
         self.scroll_messages_to_bottom();
 
         log::info!(
-            "submit_prompt_now: before instruction load, instruction_content_cache keys={:?}",
+            "submit_prompt_now: instruction_content_cache keys={:?}",
             self.instruction_content_cache.keys().collect::<Vec<_>>(),
         );
 
-        // Load instruction files. Inject new ones as <system-reminder> User messages
-        // at the start of the conversation (before the just-submitted user message).
-        // Injection happens once per source — tracked in session_instruction_sources.
-        let instructions = self.config.read().unwrap().instructions.clone();
-        let (content, sources, new_cache) = tidev_agent::system_prompt_and_sources_with_cache(
-            &self.workspace_root,
-            &self.paths.config_dir,
-            &instructions,
-            &self.instruction_content_cache,
-        )
-        .unwrap_or_default();
-        let session_id = self.conversation.session_id;
-        let already_injected = self.store.load_instruction_sources(session_id)?;
-        let new_sources: Vec<&String> = sources
-            .iter()
-            .filter(|s| !already_injected.contains(*s))
-            .collect();
-        if !content.is_empty() && !new_sources.is_empty() {
-            let msg = tidev_session::session::Message::new(
-                tidev_session::session::MessageRole::User,
-                format!(
-                    "<system-reminder>\n{}\n</system-reminder>",
-                    content
-                ),
-            );
-            let pos = self.conversation.messages.len() - 1;
-            self.conversation.messages.insert(pos, msg.clone());
-            runtime.block_on(
-                self.agent
-                    .append_message(session_id, &msg),
-            )?;
+        // Track injected instruction sources so they are not injected again
+        if !instr_content.is_empty() && !new_sources.is_empty() {
             for source in &new_sources {
                 self.store
                     .append_instruction_source(session_id, source)?;
             }
         }
-        self.update_loaded_instruction_sources(&sources)?;
-        self.instruction_content_cache = new_cache;
+        self.update_loaded_instruction_sources(&instr_sources)?;
+        self.instruction_content_cache = new_instr_cache;
 
         log::info!(
-            "submit_prompt_now: after instruction load, sources={:?}",
-            sources,
+            "submit_prompt_now: sources after injection={:?}",
+            instr_sources,
         );
 
         log::info!("agent: submit_prompt_now took {:?}", _t_submit.elapsed());
