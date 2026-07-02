@@ -766,4 +766,32 @@ mod tests {
         // manager2.retained_from would become conversation.visible_messages().len()
         // This is verified by compact() setting self.retained_from = messages.len()
     }
+
+    #[test]
+    fn build_request_messages_includes_system_reminder_user_message() {
+        // Verifies that a <system-reminder> user message (used for instruction injection)
+        // appears in the request messages in the correct position.
+        let messages = vec![
+            Message::new(
+                MessageRole::User,
+                "<system-reminder>\nInstructions from: AGENTS.md\nfoo\n</system-reminder>",
+            ),
+            Message::new(MessageRole::User, "what is this project?"),
+        ];
+        let conversation = test_conversation(messages);
+        let manager = ContextManager::new();
+        let request_messages =
+            manager.build_request_messages(&conversation, SessionMode::Build);
+
+        assert_eq!(request_messages.len(), 2);
+        assert!(
+            request_messages[0].content.contains("<system-reminder>"),
+            "first message should contain <system-reminder>"
+        );
+        assert!(
+            request_messages[0].content.contains("AGENTS.md"),
+            "first message should reference the instruction source"
+        );
+        assert_eq!(request_messages[1].content, "what is this project?");
+    }
 }

@@ -1882,18 +1882,42 @@ impl App {
             self.instruction_content_cache.keys().collect::<Vec<_>>(),
         );
 
-        // Load instruction files so "Loaded instructions from ..." appears before
-        // the streaming assistant message is created by spawn_agent_loop.
-        // This is done here (not in the agent loop) to avoid corrupting the
-        // conversation message order (the streaming message must remain last).
+        // Load instruction files. Inject new ones as <system-reminder> User messages
+        // at the start of the conversation (before the just-submitted user message).
+        // Injection happens once per source — tracked in session_instruction_sources.
         let instructions = self.config.read().unwrap().instructions.clone();
-        let (_, sources, new_cache) = tidev_agent::system_prompt_and_sources_with_cache(
+        let (content, sources, new_cache) = tidev_agent::system_prompt_and_sources_with_cache(
             &self.workspace_root,
             &self.paths.config_dir,
             &instructions,
             &self.instruction_content_cache,
         )
         .unwrap_or_default();
+        let session_id = self.conversation.session_id;
+        let already_injected = self.store.load_instruction_sources(session_id)?;
+        let new_sources: Vec<&String> = sources
+            .iter()
+            .filter(|s| !already_injected.contains(*s))
+            .collect();
+        if !content.is_empty() && !new_sources.is_empty() {
+            let msg = tidev_session::session::Message::new(
+                tidev_session::session::MessageRole::User,
+                format!(
+                    "<system-reminder>\n{}\n</system-reminder>",
+                    content
+                ),
+            );
+            let pos = self.conversation.messages.len() - 1;
+            self.conversation.messages.insert(pos, msg.clone());
+            runtime.block_on(
+                self.agent
+                    .append_message(session_id, &msg),
+            )?;
+            for source in &new_sources {
+                self.store
+                    .append_instruction_source(session_id, source)?;
+            }
+        }
         self.update_loaded_instruction_sources(&sources)?;
         self.instruction_content_cache = new_cache;
 
