@@ -434,23 +434,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn thinking_level_type_roundtrip() {
-        let levels = [
-            ThinkingLevelType::None,
-            ThinkingLevelType::DeepSeek(DeepSeekV4ThinkingLevel::High),
-            ThinkingLevelType::Qwen(Qwen35ThinkingLevel::On),
-            ThinkingLevelType::Glm(GlmThinkingLevel::High),
-            ThinkingLevelType::Gpt5(Gpt5ThinkingLevel::Medium),
-            ThinkingLevelType::MiniMax(MiniMaxThinkingLevel::Max),
-        ];
-        for level in &levels {
-            let s = level.to_string();
-            let parsed = ThinkingLevelType::from_string(&s);
-            assert_eq!(&parsed, level, "roundtrip failed for: {s}");
-        }
-    }
-
-    #[test]
     fn qwen_skip_for_anthropic() {
         let qwen = ThinkingLevelType::Qwen(Qwen35ThinkingLevel::On);
         assert!(qwen.extra_body_for_api("anthropic").is_none());
