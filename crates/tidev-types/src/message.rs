@@ -210,6 +210,24 @@ impl MessageRole {
             Self::Shell => "shell",
         }
     }
+
+    /// Database storage value.
+    pub fn db_value(&self) -> &'static str {
+        self.label()
+    }
+
+    /// Parse from a database storage value.
+    pub fn from_db_value(value: &str) -> Self {
+        match value {
+            "system" => Self::System,
+            "user" => Self::User,
+            "assistant" => Self::Assistant,
+            "tool" => Self::Tool,
+            "error" => Self::Error,
+            "shell" => Self::Shell,
+            _ => Self::User,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
