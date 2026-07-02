@@ -1,1 +1,16 @@
-//! tidev-agent: Agent 运行时
+//! tidev-agent: agent types, prompts, and execution loop.
+//!
+//! This crate defines the thin agent layer — the types, prompts, and loop
+//! skeleton that are independent of any concrete runtime implementation.
+//! tidev-core provides the real [`AgentContext`] and drives the loop.
+
+pub mod agent_type;
+pub mod context;
+pub mod loop_;
+pub mod prompts;
+
+pub use agent_type::{
+    AgentDefinition, AgentOverride, AgentType, create_agent, create_all_agents, create_sub_agents,
+};
+pub use context::{AgentContext, AgentLoopConfig, ApprovedTool, PendingToolApproval};
+pub use loop_::run_agent_loop;
