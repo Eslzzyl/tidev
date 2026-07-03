@@ -101,6 +101,38 @@ unsafe extern "system" {
     fn GetACP() -> u32;
 }
 
+/// Prepare a shell command for execution with proper encoding handling.
+///
+/// On Windows, this prefixes PowerShell commands with UTF-8 output encoding
+/// and cmd.exe commands with `chcp 65001` to ensure UTF-8 output.
+/// On non-Windows, returns the command unchanged.
+#[cfg(windows)]
+pub fn prepare_command_for_shell(command: &str, shell_program: &str, _shell_arg: &str) -> String {
+    let shell_lower = shell_program.to_lowercase();
+
+    // PowerShell: set output encoding to UTF-8
+    if shell_lower.contains("powershell") || shell_lower.contains("pwsh") {
+        return format!(
+            "$OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new(); {}",
+            command
+        );
+    }
+
+    // cmd.exe: set code page to UTF-8
+    if shell_lower.contains("cmd") {
+        return format!("@chcp 65001 >nul 2>nul && {}", command);
+    }
+
+    // Bash / Git Bash / MSYS2 / Cygwin: encoding is handled via
+    // environment variables (set in exec.rs).  No prefix needed.
+    command.to_string()
+}
+
+#[cfg(not(windows))]
+pub fn prepare_command_for_shell(command: &str, _shell_program: &str, _shell_arg: &str) -> String {
+    command.to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -125,6 +157,35 @@ mod tests {
         let result = decode_command_output(&partial);
         // Should not panic; will contain replacement chars or partial decode
         assert!(!result.is_empty());
+    }
+
+    #[test]
+    fn test_prepare_command_for_shell_non_windows() {
+        let cmd = "echo hello";
+        let result = prepare_command_for_shell(cmd, "bash", "-lc");
+        assert_eq!(result, "echo hello");
+
+        let result2 = prepare_command_for_shell(cmd, "sh", "-lc");
+        assert_eq!(result2, "echo hello");
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn test_prepare_command_for_powershell() {
+        let cmd = "Get-ChildItem";
+        let result = prepare_command_for_shell(cmd, "powershell.exe", "-NoProfile -Command");
+        assert!(result.starts_with("$OutputEncoding"));
+        assert!(result.ends_with(cmd));
+        assert!(result.contains("UTF8Encoding"));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn test_prepare_command_for_cmd() {
+        let cmd = "dir";
+        let result = prepare_command_for_shell(cmd, "cmd.exe", "/C");
+        assert!(result.starts_with("@chcp 65001"));
+        assert!(result.ends_with(cmd));
     }
 
     #[test]

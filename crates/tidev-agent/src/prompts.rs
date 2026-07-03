@@ -3,7 +3,7 @@
 //! Each agent type has a specialised system prompt that defines its role,
 //! tool usage guidelines, and behavioural constraints.
 
-use crate::agent_type::AgentType;
+use tidev_types::agent_type::AgentType;
 
 /// Return the system prompt for a given agent type.
 pub fn system_prompt(agent_type: AgentType) -> String {

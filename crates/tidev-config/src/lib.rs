@@ -15,7 +15,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::auth::{ActiveModel, AuthStore, ModelSummary};
+use crate::auth::{ActiveModel, ModelSummary};
+pub use crate::auth::AuthStore;
 use crate::paths::ConfigPaths;
 use crate::provider::{ProviderConfig, ProviderSource};
 use tidev_types::tools::PermissionConfig;

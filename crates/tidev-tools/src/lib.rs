@@ -1,1 +1,27 @@
-//! tidev-tools: 工具定义与执行
+//! tidev-tools: built-in tool implementations for the tidev agent.
+//!
+//! This crate provides:
+//!
+//! - All builtin tool implementations (file read/write/edit, bash, glob/grep,
+//!   web search/fetch, todo, task delegation, apply_patch, question, skill)
+//! - [`execute_tool_call`] dispatch routing tool names to implementations
+//! - [`ToolContext`] carrying shared configuration into every tool invocation
+//! - [`SkillCatalog`] for discovering and serving skill files
+//! - [`TodoPersistence`] trait — a 2-method abstraction that lets tidev-core
+//!   bridge todo storage without tidev-tools depending on tidev-storage
+//! - [`shell`] module — shell detection for command execution
+
+pub mod builtin;
+pub mod shell;
+pub mod skills;
+pub mod todo_persistence;
+
+mod bundled_skills;
+
+// Re-export key public types.
+pub use builtin::ToolContext;
+pub use builtin::execute_tool_call;
+pub use builtin::execute_tool_call_streaming;
+pub use builtin::definitions as tool_definitions;
+pub use skills::{SkillCatalog, SkillInfo};
+pub use todo_persistence::TodoPersistence;

@@ -8,15 +8,40 @@ description = "Built-in tool implementations for tidev"
 
 [dependencies]
 anyhow = "1.0"
+async-trait = "0.1"
+base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
+diffy = "0.5"
+dirs = "6"
+glob = "0.3"
+globset = "0.4"
+grep = "0.4"
+html2md = { package = "fast_html2md", version = "0.0.62", default-features = false, features = [
+    "rewriter",
+    "ignore_cookies",
+] }
+ignore = "0.4"
+log = "0.4"
+mime_guess = "2"
+pulldown-cmark = "0.13"
+rayon = "1"
+regex = "1"
+reqwest = { version = "0.12", features = ["blocking", "json"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+strsim = "0.11"
+tempfile = "3"
 tokio = { version = "1", features = ["process", "io-std", "time", "sync"] }
+url = "2"
 uuid = { version = "1", features = ["v4"] }
+
 tidev-types = { path = "../tidev-types" }
-glob = "0.3"
-grep = "0.4"
-ignore = "0.4"
-diffy = "0.5"
-base64 = "0.22"
-mime_guess = "2"
+tidev-utils = { path = "../tidev-utils" }
+tidev-config = { path = "../tidev-config" }
+tidev-instructions = { path = "../tidev-instructions" }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
