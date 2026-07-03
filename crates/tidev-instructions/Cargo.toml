@@ -4,6 +4,17 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "Agent instructions for tidev"
+description = "Agent instruction file lookup and loading for tidev"
 
 [dependencies]
+anyhow = "1"
+log = "0.4"
+dirs = "6"
+globset = "0.4"
+ignore = "0.4"
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls"] }
+uuid = { version = "1", features = ["v4"] }
+tidev-utils = { path = "../tidev-utils" }
+
+[dev-dependencies]
+tempfile = "3"
