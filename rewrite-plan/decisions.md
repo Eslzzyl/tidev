@@ -9,3 +9,4 @@
 | [D-003](decisions/D-003-tools-self-contained.md) | tidev-tools 自包含原则 | ⏸️ 暂缓 |
 | [D-004](decisions/D-004-search-migration.md) | tidev-search 独立迁移 | ✅ 已完成 |
 | [D-005](decisions/D-005-agent-thin-layer.md) | tidev-agent 薄层设计 | 🔄 待实现 |
+| [D-006](decisions/D-006-skip-mcp.md) | tidev-mcp 不纳入重写 | ✅ 已定案 |

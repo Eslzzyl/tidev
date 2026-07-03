@@ -1943,7 +1943,6 @@ dependencies = [
  "tidev-config",
  "tidev-instructions",
  "tidev-llm",
- "tidev-mcp",
  "tidev-search",
  "tidev-snapshot",
  "tidev-storage",
@@ -1981,13 +1980,6 @@ dependencies = [
  "tidev-types",
  "tokio",
  "uuid",
-]
-
-[[package]]
-name = "tidev-mcp"
-version = "0.7.0"
-dependencies = [
- "tidev-types",
 ]
 
 [[package]]

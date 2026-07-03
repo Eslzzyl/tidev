@@ -8,7 +8,6 @@ members = [
     "crates/tidev-instructions",
     "crates/tidev-snapshot",
     "crates/tidev-search",
-    "crates/tidev-mcp",
     "crates/tidev-utils",
     "crates/tidev-tools",
     "crates/tidev-agent",
