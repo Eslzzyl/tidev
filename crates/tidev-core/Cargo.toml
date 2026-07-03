@@ -14,4 +14,3 @@ tidev-storage = { path = "../tidev-storage" }
 tidev-llm = { path = "../tidev-llm" }
 tidev-snapshot = { path = "../tidev-snapshot" }
 tidev-instructions = { path = "../tidev-instructions" }
-tidev-search = { path = "../tidev-search" }

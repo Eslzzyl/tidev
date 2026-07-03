@@ -6,6 +6,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
+use tokio_util::sync::CancellationToken;
 
 use tidev_types::message::{
     AssistantTurn, BackendEvent, Message, ToolCall, ToolExecutionResult,
@@ -30,6 +31,8 @@ pub struct AgentLoopConfig {
     pub thinking_level: ThinkingLevelType,
     /// Channel for sending real-time events to the frontend.
     pub event_tx: UnboundedSender<BackendEvent>,
+    /// Cancellation token for cooperative termination.
+    pub cancel: CancellationToken,
 }
 
 // ---------------------------------------------------------------------------

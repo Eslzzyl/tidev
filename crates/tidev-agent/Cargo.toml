@@ -11,6 +11,7 @@ tidev-types = { path = "../tidev-types" }
 serde = { version = "1", features = ["derive"] }
 async-trait = "0.1"
 tokio = { version = "1", features = ["sync"] }
+tokio-util = "0.7"
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
