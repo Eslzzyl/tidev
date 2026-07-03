@@ -177,26 +177,10 @@ supports_images = false
 display_name = "LongCat"
 base_url = "https://api.longcat.chat/openai/v1"
 
-[providers.longcat.models.longcat-flash-chat]
-request_model_id = "LongCat-Flash-Chat"
-display_name = "LongCat-Flash-Chat"
-context_window = 256000
-max_output_tokens = 32768
-supports_streaming = true
-supports_images = false
-
-[providers.longcat.models.longcat-flash-thinking]
-request_model_id = "LongCat-Flash-Thinking"
-display_name = "LongCat-Flash-Thinking"
-context_window = 256000
-max_output_tokens = 32768
-supports_streaming = true
-supports_images = false
-
-[providers.longcat.models.longcat-flash-lite]
-request_model_id = "LongCat-Flash-Lite"
-display_name = "LongCat-Flash-Lite"
-context_window = 256000
+[providers.longcat.models.longcat-2]
+request_model_id = "LongCat-2.0"
+display_name = "LongCat-2.0"
+context_window = 1048576
 max_output_tokens = 32768
 supports_streaming = true
 supports_images = false
