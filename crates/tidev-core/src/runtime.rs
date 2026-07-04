@@ -195,6 +195,32 @@ impl Runtime {
         &self.config_dir
     }
 
+    /// Get the active model ID string (for display).
+    pub fn active_model_id(&self) -> String {
+        self.active_model.model_id.clone()
+    }
+
+    /// Get the active provider ID string.
+    pub fn active_provider_id(&self) -> String {
+        self.active_model.provider_id.clone()
+    }
+
+    /// Create a new session with current workspace and active model settings.
+    pub fn create_default_session(&self, title: &str) -> Result<Uuid> {
+        let session_id = Uuid::new_v4();
+        let model = &self.active_model;
+        self.session_manager.create_session(
+            session_id,
+            &self.workspace_root.to_string_lossy(),
+            &model.provider_id,
+            &model.provider_display_name,
+            &model.model_id,
+            &model.display_name,
+            title,
+        )?;
+        Ok(session_id)
+    }
+
     // -----------------------------------------------------------------------
     // Operations
     // -----------------------------------------------------------------------

@@ -18,3 +18,8 @@ pub use runtime::Runtime;
 // Re-export approval types from tidev-agent so tidev-tui can access them
 // without depending on tidev-agent directly.
 pub use tidev_agent::{ApprovedTool, PendingToolApproval};
+
+// Re-export storage/snapshot types so tidev-tui can use them
+// without depending on tidev-storage / tidev-snapshot directly.
+pub use tidev_storage::SessionRecord;
+pub use tidev_snapshot::FileDiff;

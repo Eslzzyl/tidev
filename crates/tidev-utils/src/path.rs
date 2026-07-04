@@ -195,6 +195,27 @@ pub fn display_workspace_relative(workspace_root: &Path, path: &Path) -> String 
     }
 }
 
+/// Extract the file path from a codex-format patch string.
+/// Returns the first file path found, or None if parsing fails.
+/// Looks for `*** Add File:`, `*** Update File:`, `*** Delete File:` markers.
+pub fn extract_file_path_from_patch(patch: &str) -> Option<String> {
+    const ADD_MARKER: &str = "*** Add File: ";
+    const UPDATE_MARKER: &str = "*** Update File: ";
+    const DELETE_MARKER: &str = "*** Delete File: ";
+
+    for line in patch.lines() {
+        let trimmed = line.trim();
+        if let Some(path) = trimmed
+            .strip_prefix(ADD_MARKER)
+            .or_else(|| trimmed.strip_prefix(UPDATE_MARKER))
+            .or_else(|| trimmed.strip_prefix(DELETE_MARKER))
+        {
+            return Some(path.to_string());
+        }
+    }
+    None
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
