@@ -79,7 +79,7 @@ impl Database {
 
         Ok(SessionStore {
             write_conn: Arc::clone(&self.write_conn),
-            read_conn,
+            read_conn: Mutex::new(read_conn),
             path: self.path.clone(),
         })
     }

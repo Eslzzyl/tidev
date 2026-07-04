@@ -8,15 +8,12 @@ use std::{
     io::Read,
     path::Path,
     process::Stdio,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
-        mpsc,
-    },
+    sync::{mpsc, Mutex},
     thread,
     time::Duration,
 };
 use tokio::sync::mpsc::UnboundedSender;
+use tokio_util::sync::CancellationToken;
 
 use super::utils::truncate_in_place;
 use crate::builtin::utils::decode_tool_args;
@@ -143,7 +140,7 @@ pub fn execute_tool_call_with_cancel(
     tool_name: &str,
     arguments: Value,
     max_output_bytes: usize,
-    cancelled: Arc<std::sync::atomic::AtomicBool>,
+    cancel: &CancellationToken,
     session_id: Uuid,
     event_tx: Option<UnboundedSender<BackendEvent>>,
 ) -> Result<BashExecutionResult> {
@@ -153,7 +150,7 @@ pub fn execute_tool_call_with_cancel(
         workspace_root,
         &args.command,
         max_output_bytes,
-        Some(cancelled),
+        Some(cancel),
         timeout,
         event_tx,
         session_id,
@@ -165,7 +162,7 @@ fn run_shell_inner(
     workspace_root: &Path,
     command: &str,
     max_output_bytes: usize,
-    cancelled: Option<Arc<AtomicBool>>,
+    cancel: Option<&CancellationToken>,
     timeout_ms: u64,
     event_tx: Option<UnboundedSender<BackendEvent>>,
     session_id: Uuid,
@@ -287,10 +284,7 @@ fn run_shell_inner(
 
     // Main loop: check cancel/timeout, read chunks from the reader thread
     loop {
-        if cancelled
-            .as_ref()
-            .is_some_and(|flag| flag.load(Ordering::SeqCst))
-        {
+        if cancel.is_some_and(|c| c.is_cancelled()) {
             // Kill the entire process group (PID == PGID after setsid())
             kill_process_group(child_pid);
             let _ = process.wait();

@@ -12,7 +12,7 @@
 
 ### 3. 缺少接口抽象
 
-crate 之间通过具体 struct 直接耦合。AgentLoop 直接持有 `ToolRegistry` 而非 `Box<dyn ToolExecutor>`，SessionManager 直接持有 `SessionStore` 而非 `Box<dyn SessionRepository>`。
+crate 之间通过具体 struct 直接耦合。AgentLoop 直接持有 `ToolRegistry` 而非通过 `AgentContext` trait 间接调用，SessionManager 直接持有 `SessionStore` 而非 `Box<dyn SessionRepository>`。
 
 ### 4. 子代理重复实现
 
@@ -38,19 +38,18 @@ TUI、agent loop、ContextManager 各持有一份消息列表，同步困难，�
 tidev-tui
   依赖: tidev-core, tidev-types, tidev-config(UI配置), tidev-utils
 
-tidev-core
+   tidev-core
   依赖: tidev-agent, tidev-tools, tidev-config,
         tidev-storage, tidev-llm, tidev-snapshot,
-        tidev-instructions, tidev-search
+        tidev-instructions
 
   Runtime             运行时上下文，持有全部资源
   RuntimeBuilder      将 TUI 散落的初始化逻辑收拢至此
   SessionManager      会话生命周期
   AgentContext impl   实现 tidev-agent 定义的 trait
   ContextManager      上下文压缩（build_request_messages + compact）
-  ToolRegistry        工具注册与执行（impl ToolExecutor）
+  ToolRegistry        工具注册与执行
   消息缓存            追加写的 Vec<Message>，唯一权威副本
-
 tidev-tools
   依赖: tidev-types, tidev-utils, tidev-instructions, tidev-config
         + 外部 crate（glob, grep, ignore, diffy, reqwest 等）
@@ -131,29 +130,34 @@ mode 切换不修改 system prompt。两种 mode 的定义在 session 开始时�
 
 模型切换会重新组装 system prompt（tool descriptions 随模型变化），用户接受前缀缓存失效的成本。
 
-### 4. ToolExecutor trait
+### 4. ToolRegistry 与工具执行
 
-```rust
-#[async_trait]
-pub trait ToolExecutor: Send + Sync {
-    async fn execute(
-        &self,
-        tool_call: &ToolCall,
-        ctx: &ExecutionContext,
-    ) -> Result<ToolExecutionResult>;
-}
+tidev-core 的 `ToolRegistry` 直接包装 `tidev_tools::execute_tool_call`，不引入额外的 `ToolExecutor` trait。
 
-pub struct ExecutionContext<'a> {
-    pub session_id: Uuid,
-    pub mode: SessionMode,
-    pub allow_outside: bool,
-    pub sensitive_file_approved: bool,
-}
+执行前做：权限检查、文件读取追踪检查、路径边界检查。
+执行后做：文件读取记录。
+
+`AgentContext::execute_tools()` 内部调用 `ToolRegistry`，agent loop 不直接接触工具执行层。
+
+#### 持久化职责边界
+
+`AgentContext::execute_tools()` **只负责执行和发事件**，不负责持久化工具结果。工具结果的持久化由 `run_agent_loop` 统一通过 `save_messages()` 处理。
+
+```
+run_agent_loop:
+  1. stream_turn()
+  2. save_messages(assistant_msg)           ← 助手消息持久化
+  3. execute_tools()                         ← 只执行，内部不调 save_messages
+  4. save_messages(tool_results)             ← 工具结果统一持久化 ← 唯一入口
+  5. goto 1
 ```
 
-ToolRegistry 在 tidev-core 实现 ToolExecutor。执行前做：权限检查、文件读取追踪检查、路径边界检查。执行后做：文件读取记录。
+理由：
+- 单一权威：所有消息持久化统一经过 `save_messages()`，避免 `MessageBuffer` + DB 双重写入走不同路径
+- 铁律保障：`build_request_messages()` 的输出必须是确定性的，分散持久化容易引入重复或乱序
+- 职责内聚：`execute_tools()` 的存在理由是"协调工具执行"（并行/串行调度、子代理派生），持久化是横切关注点，不应内嵌在执行逻辑中
 
-AgentLoop 通过 `&dyn ToolExecutor` 调用工具，不持有具体 ToolRegistry。
+Exception：流式工具（bash）在执行过程中产生的 `ShellOutput` 事件不通过 `save_messages()`，直接通过 `event_tx` 发送实时给 TUI。
 
 ### 5. tidev-tools 执行接口
 
@@ -191,7 +195,7 @@ perm_rx → TUI（接收审批请求，弹对话框）
 oneshot → TUI 回复 Vec<ApprovedTool>
 ```
 
-协议类型（`PendingToolApproval`、`ApprovedTool`）在 tidev-types 中，属于跨 crate 协议。
+协议类型（`PendingToolApproval`、`ApprovedTool`）在 **tidev-agent** 中定义（tidev-agent/src/context.rs），不在 tidev-types。原因：`PendingToolApproval` 包含 `tokio::sync::oneshot::Sender`，`ApprovedTool` 包含 `uuid::Uuid`，这些是运行时依赖，不属于纯数据类型层。tidev-core 依赖 tidev-agent 即可访问这些类型；tidev-tui 通过 tidev-core 间接使用。
 
 ### 7. 子代理
 
@@ -289,47 +293,34 @@ pub trait AgentContext: Send + Sync {
     async fn load_messages(&self, session_id: Uuid) -> Result<Vec<Message>>;
 }
 ```
-
-### tidev-tools
-
-```
 src/
-  lib.rs            导出 execute_tool_call, ExecutionContext, ToolExecutor 等
-  builtin/
-    mod.rs          分派路由，definitions()，execute_tool_call()
-    file.rs         read / write / edit / apply_patch
-    exec.rs         bash（含 ACTIVE_CHILDREN, kill_all_children, kill_process_group）
-    search.rs       glob / grep
-    task.rs         子代理参数验证
-    todo.rs         todowrite + TodoPersistence trait
-    sudo.rs         sudo 检测和包装
-    sensitive.rs    敏感文件检测
-    utils.rs        truncate_in_place 等工具函数
-    web/
-      mod.rs        websearch / webfetch 分派
-      fetch.rs      webfetch 实现
-      brave.rs      Brave Search
-      exa.rs        Exa Search
-      google.rs     Google Custom Search
-      tavily.rs     Tavily Search
-    apply_patch/
-      mod.rs        导出
-      parser.rs     patch 解析器
-      seek_sequence.rs  模糊行匹配
-      apply.rs      patch 应用
-  skills.rs         SkillCatalog
-
-pub fn execute_tool_call(
-    tool_name: &str,
-    arguments: &Value,
-    ctx: &ExecutionContext,
-) -> Result<ToolExecutionResult>;
-
-pub trait TodoPersistence: Send + Sync {
-    fn load_todos(&self, session_id: Uuid) -> Result<Vec<TodoItem>>;
-    fn replace_todos(&self, session_id: Uuid, todos: &[TodoItem]) -> Result<()>;
-}
+  lib.rs            导出 Runtime, RuntimeBuilder
+  runtime.rs        Runtime / RuntimeBuilder
+  context.rs        ContextManager
+  agent_ctx.rs      AgentContext impl（CoreContext）
+  registry.rs       ToolRegistry
+  session.rs        SessionManager
+  message_buf.rs    MessageBuffer（Vec<Message>, append-only）
 ```
+
+`Runtime`：
+
+```rust
+pub struct Runtime {
+    pub session_manager: SessionManager,
+    store: SessionStore,
+    tool_registry: Arc<ToolRegistry>,
+    snapshot_service: SnapshotService,
+    file_read_tracker: Arc<FileReadTracker>,
+    event_tx: UnboundedSender<BackendEvent>,
+    event_rx: UnboundedReceiver<BackendEvent>,  // → TUI
+    perm_tx: UnboundedSender<PendingToolApproval>,
+    perm_rx: UnboundedReceiver<PendingToolApproval>,  // → TUI
+    cancel_token: CancellationToken,
+    run_loop_handle: Option<JoinHandle<()>>,
+    message_buffers: HashMap<Uuid, Arc<RwLock<MessageBuffer>>>,
+    _background_tasks: Vec<JoinHandle<()>>,
+}```
 
 ### tidev-core
 
@@ -339,9 +330,9 @@ src/
   runtime.rs        Runtime / RuntimeBuilder
   context.rs        ContextManager
   agent_ctx.rs      AgentContext impl（CoreContext）
-  registry.rs       ToolRegistry（impl ToolExecutor）
+  registry.rs       ToolRegistry
   session.rs        SessionManager
-  cache.rs          消息缓存（Vec<Message>, append-only）
+  message_buf.rs    MessageBuffer（Vec<Message>, append-only）
 ```
 
 `Runtime`：
@@ -350,7 +341,7 @@ src/
 pub struct Runtime {
     pub session_manager: SessionManager,
     store: SessionStore,
-    tool_executor: Arc<dyn ToolExecutor>,
+    tool_registry: Arc<ToolRegistry>,
     snapshot_service: SnapshotService,
     file_read_tracker: Arc<FileReadTracker>,
     event_tx: UnboundedSender<BackendEvent>,
@@ -359,7 +350,7 @@ pub struct Runtime {
     perm_rx: UnboundedReceiver<PendingToolApproval>,  // → TUI
     cancel_token: CancellationToken,
     run_loop_handle: Option<JoinHandle<()>>,
-    message_cache: MessageCache,
+    message_buffers: HashMap<Uuid, Arc<RwLock<MessageBuffer>>>,
     _background_tasks: Vec<JoinHandle<()>>,
 }
 
@@ -376,11 +367,11 @@ impl Runtime {
 1. ConfigPaths / AppConfig / AuthStore（tidev-config）
 2. SessionStore / Database（tidev-storage）
 3. LlmClient（tidev-llm）
-4. ToolRegistry（实现 ToolExecutor）
+4. ToolRegistry
 5. ContextManager
 6. SnapshotService（tidev-snapshot）
 7. SessionManager
-8. 消息��存（从 DB 加载当前 session）
+8. 消息缓冲（从 DB 加载当前 session）
 9. 事件通道 / 审批通道 / CancellationToken
 10. 后台任务
 

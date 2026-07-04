@@ -25,7 +25,7 @@ pub enum MessageAttachment {
     Image {
         filename: String,
         mime: String,
-        data_url: String,
+        data: Vec<u8>,
         file_size: u64,
     },
 }
@@ -158,6 +158,10 @@ pub struct ToolExecutionResult {
     pub metadata: ToolMetadata,
     #[serde(default)]
     pub instruction_sources: Vec<String>,
+    #[serde(default)]
+    pub snapshot_hash: Option<String>,
+    #[serde(default)]
+    pub patch_files: Option<String>,
 }
 
 impl ToolExecutionResult {
@@ -167,6 +171,8 @@ impl ToolExecutionResult {
             attachments: Vec::new(),
             metadata: ToolMetadata::default(),
             instruction_sources: Vec::new(),
+            snapshot_hash: None,
+            patch_files: None,
         }
     }
 
@@ -180,6 +186,8 @@ impl ToolExecutionResult {
             attachments: self.attachments.clone(),
             metadata: self.metadata.clone(),
             instruction_sources: self.instruction_sources.clone(),
+            snapshot_hash: self.snapshot_hash.clone(),
+            patch_files: self.patch_files.clone(),
         }
     }
 }
@@ -442,8 +450,8 @@ impl Message {
             cache_write_tokens: None,
             model_id: None,
             tokens_per_second: None,
-            snapshot_hash: None,
-            patch_files: None,
+            snapshot_hash: result.snapshot_hash,
+            patch_files: result.patch_files,
             file_diffs: None,
             mode: None,
             thinking_level: None,
@@ -522,12 +530,6 @@ pub enum BackendEvent {
         content_delta: Option<String>,
         reasoning_delta: Option<String>,
     },
-    SubagentToolResult {
-        session_id: Uuid,
-        request_id: u64,
-        child_session_id: Uuid,
-        message: Message,
-    },
     SubagentCompleted {
         session_id: Uuid,
         request_id: u64,
@@ -587,7 +589,6 @@ impl BackendEvent {
             | Self::Retrying { session_id, .. }
             | Self::ToolCompleted { session_id, .. }
             | Self::SubagentStatus { session_id, .. }
-            | Self::SubagentToolResult { session_id, .. }
             | Self::SubagentCompleted { session_id, .. }
             | Self::UsageStats { session_id, .. }
             | Self::InstructionsLoaded { session_id, .. }
@@ -609,7 +610,6 @@ impl BackendEvent {
             | Self::Retrying { request_id, .. }
             | Self::ToolCompleted { request_id, .. }
             | Self::SubagentStatus { request_id, .. }
-            | Self::SubagentToolResult { request_id, .. }
             | Self::SubagentCompleted { request_id, .. }
             | Self::UsageStats { request_id, .. }
             | Self::SidebarSnapshotReady { request_id, .. }

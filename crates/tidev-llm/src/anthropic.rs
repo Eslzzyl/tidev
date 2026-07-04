@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -508,16 +509,12 @@ fn build_anthropic_request(
                     });
                 }
                 for attachment in images {
-                    if let MessageAttachment::Image { mime, data_url, .. } = attachment {
-                        let data = data_url
-                            .split_once(',')
-                            .map(|(_, data)| data.to_string())
-                            .unwrap_or_else(|| data_url.clone());
+                    if let MessageAttachment::Image { mime, data, .. } = attachment {
                         content.push(AnthropicContentBlock::Image {
                             source: AnthropicImageSource {
                                 kind: "base64".to_string(),
                                 media_type: mime.clone(),
-                                data,
+                                data: BASE64.encode(data),
                             },
                         });
                     }
@@ -710,16 +707,12 @@ fn user_message_content(
     }
 
     for attachment in images {
-        if let MessageAttachment::Image { mime, data_url, .. } = attachment {
-            let data = data_url
-                .split_once(',')
-                .map(|(_, data)| data.to_string())
-                .unwrap_or_else(|| data_url.clone());
+        if let MessageAttachment::Image { mime, data, .. } = attachment {
             content.push(AnthropicContentBlock::Image {
                 source: AnthropicImageSource {
                     kind: "base64".to_string(),
                     media_type: mime.clone(),
-                    data,
+                    data: BASE64.encode(data),
                 },
             });
         }

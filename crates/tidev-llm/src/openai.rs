@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -533,10 +534,11 @@ impl ChatMessagePayload {
                 }));
             }
             for attachment in images {
-                if let MessageAttachment::Image { data_url, .. } = attachment {
+                if let MessageAttachment::Image { mime, data, .. } = attachment {
+                    let b64 = BASE64.encode(data);
                     parts.push(serde_json::json!({
                         "type": "image_url",
-                        "image_url": { "url": data_url },
+                        "image_url": { "url": format!("data:{};base64,{}", mime, b64) },
                     }));
                 }
             }
@@ -580,10 +582,11 @@ fn user_message_content(model: &LlmProviderConfig, message: &Message) -> Result<
     }
 
     for attachment in images {
-        if let MessageAttachment::Image { data_url, .. } = attachment {
+        if let MessageAttachment::Image { mime, data, .. } = attachment {
+            let b64 = BASE64.encode(data);
             parts.push(serde_json::json!({
                 "type": "image_url",
-                "image_url": { "url": data_url },
+                "image_url": { "url": format!("data:{};base64,{}", mime, b64) },
             }));
         }
     }
@@ -615,6 +618,7 @@ mod tests {
             max_output_tokens: 1024,
             temperature: Some(0.7),
             supports_images: false,
+            context_window: 128000,
             system_prompt: Some("base system prompt".to_string()),
             api_key: None,
             extra_body: None,
@@ -663,6 +667,7 @@ mod tests {
             max_output_tokens: 1024,
             temperature: Some(0.7),
             supports_images: false,
+            context_window: 128000,
             system_prompt: Some("base system prompt".to_string()),
             api_key: None,
             extra_body: None,

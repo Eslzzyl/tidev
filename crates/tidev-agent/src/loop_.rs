@@ -44,6 +44,12 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
     });
 
     for _turn_index in 0..MAX_TURNS {
+        // ─── 0. Cancellation check ──────────────────────────────────────
+        if config.cancel.is_cancelled() {
+            log::info!("agent loop cancelled for session {session_id}");
+            return Ok(());
+        }
+
         // ─── 1. Load messages ────────────────────────────────────────────
         let messages = ctx.load_messages(session_id).await?;
 
@@ -51,9 +57,23 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
         let system_prompt = compose_system_prompt(&config, &messages);
 
         // ─── 3. Stream LLM turn ──────────────────────────────────────────
-        let turn = ctx
+        let turn = match ctx
             .stream_turn(&messages, &system_prompt, &config.thinking_level)
-            .await?;
+            .await
+        {
+            Ok(turn) => turn,
+            Err(_e) if config.cancel.is_cancelled() => {
+                // Cancellation is expected — exit cleanly.
+                // Already-streamed content was forwarded to the TUI via events;
+                // the TUI will mark the message as done and append a cancel note.
+                let _ = event_tx.send(BackendEvent::StreamEnd {
+                    session_id,
+                    request_id,
+                });
+                return Ok(());
+            }
+            Err(e) => return Err(e),
+        };
 
         // ─── 4. No tool calls → done ─────────────────────────────────────
         if turn.tool_calls.is_empty() {

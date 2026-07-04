@@ -20,6 +20,7 @@
 //! - Parts may carry a `thoughtSignature` that must be echoed back (Gemini 3+)
 
 use anyhow::{Context, Result};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -595,34 +596,21 @@ fn build_gemini_request(
                         anyhow::bail!("current model does not support image attachments");
                     }
 
-                    if let MessageAttachment::Image { data_url, .. } = attachment {
-                        // Parse "data:mime/type;base64,<data>" format
-                        if let Some(rest) = data_url.strip_prefix("data:")
-                            && let Some(semicolon) = rest.find(';')
-                        {
-                            let mime_type = &rest[..semicolon];
-                            let after_semi = &rest[semicolon + 1..];
-                            if let Some(comma) = after_semi.find(',') {
-                                let encoding = &after_semi[..comma];
-                                let data = &after_semi[comma + 1..];
-                                if encoding == "base64" {
-                                    parts.push(GeminiPart {
-                                        text: None,
-                                        inline_data: Some(GeminiBlob {
-                                            mime_type: mime_type.to_string(),
-                                            data: data.to_string(),
-                                        }),
-                                        file_data: None,
-                                        function_call: None,
-                                        function_response: None,
-                                        executable_code: None,
-                                        code_execution_result: None,
-                                        thought: None,
-                                        thought_signature: None,
-                                    });
-                                }
-                            }
-                        }
+                    if let MessageAttachment::Image { mime, data, .. } = attachment {
+                        parts.push(GeminiPart {
+                            text: None,
+                            inline_data: Some(GeminiBlob {
+                                mime_type: mime.clone(),
+                                data: BASE64.encode(data),
+                            }),
+                            file_data: None,
+                            function_call: None,
+                            function_response: None,
+                            executable_code: None,
+                            code_execution_result: None,
+                            thought: None,
+                            thought_signature: None,
+                        });
                     }
                 }
 
@@ -713,34 +701,21 @@ fn user_message_parts(model: &LlmProviderConfig, message: &Message) -> Result<Ve
             anyhow::bail!("current model does not support image attachments");
         }
 
-        if let MessageAttachment::Image { data_url, .. } = attachment {
-            // Parse "data:mime/type;base64,<data>" format
-            if let Some(rest) = data_url.strip_prefix("data:")
-                && let Some(semicolon) = rest.find(';')
-            {
-                let mime_type = &rest[..semicolon];
-                let after_semi = &rest[semicolon + 1..];
-                if let Some(comma) = after_semi.find(',') {
-                    let encoding = &after_semi[..comma];
-                    let data = &after_semi[comma + 1..];
-                    if encoding == "base64" {
-                        parts.push(GeminiPart {
-                            text: None,
-                            inline_data: Some(GeminiBlob {
-                                mime_type: mime_type.to_string(),
-                                data: data.to_string(),
-                            }),
-                            file_data: None,
-                            function_call: None,
-                            function_response: None,
-                            executable_code: None,
-                            code_execution_result: None,
-                            thought: None,
-                            thought_signature: None,
-                        });
-                    }
-                }
-            }
+        if let MessageAttachment::Image { mime, data, .. } = attachment {
+            parts.push(GeminiPart {
+                text: None,
+                inline_data: Some(GeminiBlob {
+                    mime_type: mime.clone(),
+                    data: BASE64.encode(data),
+                }),
+                file_data: None,
+                function_call: None,
+                function_response: None,
+                executable_code: None,
+                code_execution_result: None,
+                thought: None,
+                thought_signature: None,
+            });
         }
     }
 

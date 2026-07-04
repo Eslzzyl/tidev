@@ -1,6 +1,6 @@
 # 图片 base64 编码职责错位
 
-**状态**: 待修复
+**状态**: ✅ 已完成
 **涉及文件**: `tidev-types/src/message.rs`、`tidev-llm/src/*.rs`
 
 ## 问题

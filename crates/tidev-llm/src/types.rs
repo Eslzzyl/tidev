@@ -50,6 +50,7 @@ pub struct LlmProviderConfig {
     pub thinking_level: tidev_types::reasoning::ThinkingLevelType,
     pub extra_body: Option<Value>,
     pub max_output_tokens: usize,
+    pub context_window: usize,
     pub temperature: Option<f32>,
     pub supports_images: bool,
 }

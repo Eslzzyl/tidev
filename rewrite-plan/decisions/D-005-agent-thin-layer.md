@@ -18,6 +18,8 @@ tidev-agent（薄层）
 ├── AgentOverride                — 覆盖配置
 ├── prompts.rs                   — 各 agent 系统提示词
 ├── AgentContext trait           — 循环需要的外部能力接口
+├── PendingToolApproval          — 权限审批请求（含 oneshot 通道）
+├── ApprovedTool                 — 审批结果（含 rejection/child_session_id）
 └── run_agent_loop()             — 循环骨架函数
 
 tidev-core（编排层）
@@ -34,7 +36,7 @@ pub trait AgentContext: Send + Sync {
     fn tools(&self) -> Vec<ToolDefinition>;
 
     /// 事件通道
-    fn event_tx(&self) -> &UnboundedSender<BackendEvent>;
+    fn event_tx(&self) -> UnboundedSender<BackendEvent>;
 
     /// 流式调用 LLM
     async fn stream_turn(&self, messages: &[Message],
@@ -44,17 +46,34 @@ pub trait AgentContext: Send + Sync {
     async fn request_tool_approval(&self,
         tool_calls: &[ToolCall], mode: SessionMode) -> Result<Vec<ApprovedTool>>;
 
-    /// 执行一批已审批的工具
+    /// 执行一批已审批的工具调用并返回其执行结果。
+    ///
+    /// 实现职责：
+    /// - 分离只读和写入工具（并行 vs 串行执行）
+    /// - 处理 task 工具（子代理委托）
+    /// - 发送 BackendEvent::ToolCompleted 事件
+    ///
+    /// 注意：本方法**不负责持久化工具结果**。持久化由
+    /// `run_agent_loop` 统一通过 `save_messages()` 处理。
+    /// 避免在内部分配 Message ID 或写入 message buffer/DB。
     async fn execute_tools(&self,
-        approved_tools: &[ApprovedTool], request_id: u64) -> Result<Vec<(ToolCall, ToolExecutionResult)>>;
+        approved_tools: &[ApprovedTool],
+        session_id: uuid::Uuid,
+        request_id: u64) -> Result<Vec<(ToolCall, ToolExecutionResult)>>;
 
-    /// 持久化消息
-    async fn save_messages(&self, messages: &[Message]) -> Result<()>;
+    /// 持久化消息（追加到缓存 + 写入 DB）。
+    async fn save_messages(&self, session_id: uuid::Uuid, messages: &[Message]) -> Result<()>;
 
-    /// 加载消息历史
-    async fn load_messages(&self) -> Result<Vec<Message>>;
+    /// 加载消息历史（从内存缓存读取，不读 DB）。
+    async fn load_messages(&self, session_id: uuid::Uuid) -> Result<Vec<Message>>;
 }
 ```
+
+### 与设计变更相关
+
+- `session_id` 参数：`save_messages`/`load_messages`/`execute_tools` 均接受 `session_id`，使 trait 不隐含 single-session 假设
+- `event_tx` 返回值：返回 `UnboundedSender` 本身而非引用，因为 sender 是 `Clone`，更灵活
+- `execute_tools` 不持久化：详见 architecture.md §4
 
 ## 依赖
 

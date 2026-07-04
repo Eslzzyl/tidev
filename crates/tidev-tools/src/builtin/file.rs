@@ -1,5 +1,4 @@
 use anyhow::{Context, Result, bail};
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use diffy::DiffOptions;
 use serde_json::Value;
 use std::{fs, io::BufRead, path::Path};
@@ -207,6 +206,8 @@ pub fn execute_tool_call(
                 attachments: Vec::new(),
                 metadata,
                 instruction_sources: Vec::new(),
+                snapshot_hash: None,
+                patch_files: None,
             })
         }
         Some(other) => bail!("unsupported file tool '{}'", other),
@@ -278,6 +279,8 @@ fn file_change_output(
         attachments: Vec::new(),
         metadata,
         instruction_sources: Vec::new(),
+        snapshot_hash: None,
+        patch_files: None,
     }
 }
 
@@ -346,11 +349,6 @@ pub(super) fn read_path(
             )
         })?;
         let file_size = content.len() as u64;
-        let data_url = format!(
-            "data:{};base64,{}",
-            mime_str,
-            BASE64_STANDARD.encode(content)
-        );
 
         let mut result = ToolExecutionResult::new("Image read successfully.");
         result.attachments.push(MessageAttachment::Image {
@@ -359,7 +357,7 @@ pub(super) fn read_path(
                 .map(|s| s.to_string_lossy().to_string())
                 .unwrap_or_default(),
             mime: mime_str,
-            data_url,
+            data: content,
             file_size,
         });
         return Ok(result);
@@ -1223,17 +1221,12 @@ pub fn read_file_for_at_reference(
     let mime_str = mime.to_string();
 
     if mime_str.starts_with("image/") && mime_str != "image/svg+xml" {
-        let content = fs::read(&path).with_context(|| {
+        let _content = fs::read(&path).with_context(|| {
             format!(
                 "failed to read image {}",
                 display_workspace_relative(workspace_root, &path)
             )
         })?;
-        let _data_url = format!(
-            "data:{};base64,{}",
-            mime_str,
-            BASE64_STANDARD.encode(content)
-        );
         let output = format!("Image read successfully.\n\n[Binary content: {}]", mime_str);
         return Ok((output, false));
     }

@@ -29,6 +29,7 @@ const BUNDLED_PRESETS_TOML: &str = include_str!("../../../presets.toml");
 // ---------------------------------------------------------------------------
 
 pub use crate::types::ApiType;
+pub use crate::reasoning::ThinkingLevelType;
 pub use crate::reasoning::ThinkingMatcher;
 
 // ---------------------------------------------------------------------------
@@ -653,6 +654,112 @@ impl AppConfig {
             extra_body: model.extra_body.clone(),
             thinking_level,
         })
+    }
+
+    // ── Agent model overrides ──────────────────────────────────────
+
+    /// Resolve an ActiveModel for a sub-agent type, checking the `[agent.models]` config.
+    ///
+    /// If the agent type has a configured model string, it is resolved.
+    /// If the model string is in `"provider/model_id"` format, the provider prefix is used;
+    /// otherwise, the default provider is assumed.
+    ///
+    /// Returns `None` when no override is configured (caller should fall back to parent model).
+    pub fn resolve_agent_active_model(
+        &self,
+        auth: &AuthStore,
+        agent_type: &str,
+    ) -> Result<Option<ActiveModel>> {
+        let Some(model_str) = self
+            .agent
+            .model_for(agent_type)
+            .or_else(|| self.agent.default_model())
+        else {
+            return Ok(None);
+        };
+
+        let (provider_id, model_id) = if let Some(slash_pos) = model_str.find('/') {
+            let provider = &model_str[..slash_pos];
+            let model = &model_str[slash_pos + 1..];
+            (provider.to_string(), model.to_string())
+        } else {
+            // Use the default provider
+            (self.default_provider.clone(), model_str.to_string())
+        };
+
+        let mut model = self.resolve_model_by_ids(auth, &provider_id, &model_id)?;
+
+        // Apply agent-specific thinking_level override if configured.
+        // Only override when the model actually supports thinking (auto-detected
+        // level is not None); otherwise a stale override from a previous model
+        // would force invalid thinking parameters onto the API request.
+        if let Some(tl_str) = self.agent.thinking_levels.get(agent_type)
+            && model.thinking_level.is_supported()
+        {
+            model.thinking_level = ThinkingLevelType::from_string(tl_str);
+        }
+
+        Ok(Some(model))
+    }
+
+    /// Set the model override for a specific agent type and persist to config.
+    /// `model_str` should be in `"provider/model_id"` format.
+    pub fn set_agent_model(
+        &mut self,
+        paths: &ConfigPaths,
+        agent_type: &str,
+        model_str: &str,
+    ) -> Result<()> {
+        if model_str.is_empty() {
+            self.agent.models.remove(agent_type);
+        } else {
+            self.agent
+                .models
+                .insert(agent_type.to_string(), model_str.to_string());
+        }
+        self.save(paths)
+    }
+
+    /// Set both the model override and thinking level for an agent type.
+    /// `model_str` in `"provider/model_id"` format, `thinking_level` in
+    /// `ThinkingLevelType::to_string()` format (e.g. "deepseek:High").
+    /// Pass empty `thinking_level` to clear the override.
+    pub fn set_agent_model_and_thinking(
+        &mut self,
+        paths: &ConfigPaths,
+        agent_type: &str,
+        model_str: &str,
+        thinking_level: &str,
+    ) -> Result<()> {
+        if model_str.is_empty() {
+            self.agent.models.remove(agent_type);
+        } else {
+            self.agent
+                .models
+                .insert(agent_type.to_string(), model_str.to_string());
+        }
+        if thinking_level.is_empty() {
+            self.agent.thinking_levels.remove(agent_type);
+        } else {
+            self.agent
+                .thinking_levels
+                .insert(agent_type.to_string(), thinking_level.to_string());
+        }
+        self.save(paths)
+    }
+
+    /// Return the configured model label for an agent type, if any.
+    /// Format: `"provider/model_id"` or `None` (inherit).
+    pub fn agent_model_label(&self, agent_type: &str) -> Option<&str> {
+        self.agent.models.get(agent_type).map(|s| s.as_str())
+    }
+
+    /// Return a human-readable label for an agent type's current model,
+    /// or the string `"<inherit>"` if none is configured.
+    pub fn agent_model_display(&self, agent_type: &str) -> String {
+        self.agent_model_label(agent_type)
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "<inherit>".to_string())
     }
 
     // ── Theme ──────────────────────────────────────────────────────

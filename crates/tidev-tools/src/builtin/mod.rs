@@ -1,8 +1,8 @@
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 use std::path::Path;
-use std::sync::{Arc, atomic::AtomicBool};
 use tokio::sync::mpsc::UnboundedSender;
+use tokio_util::sync::CancellationToken;
 
 use tidev_types::message::BackendEvent;
 use tidev_types::message::ToolCall;
@@ -151,10 +151,13 @@ pub fn execute_tool_call(
 ///
 /// When `event_tx` is `Some`, the bash tool will emit [`BackendEvent::ShellOutput`]
 /// events as output is produced. Other tools ignore the sender and execute normally.
+///
+/// The `cancel` token is used for cooperative cancellation of the bash tool.
+/// When cancelled, the process group is killed and partial output is returned.
 pub fn execute_tool_call_streaming(
     ctx: &ToolContext<'_>,
     call: &ToolCall,
-    cancelled: Option<Arc<AtomicBool>>,
+    cancel: &CancellationToken,
 ) -> Result<ToolExecutionResult> {
     let arguments: Value = serde_json::from_str(&call.arguments)
         .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
@@ -187,7 +190,7 @@ pub fn execute_tool_call_streaming(
                 &call.name,
                 arguments,
                 ctx.max_output_bytes,
-                cancelled.unwrap_or_else(|| Arc::new(AtomicBool::new(false))),
+                cancel,
                 ctx.session_id,
                 ctx.event_tx.clone(),
             )?;

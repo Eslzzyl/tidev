@@ -2475,6 +2475,12 @@ dependencies = [
 name = "tidev-core"
 version = "0.7.0"
 dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "dirs",
+ "log",
+ "serde_json",
  "tidev-agent",
  "tidev-config",
  "tidev-instructions",
@@ -2482,6 +2488,10 @@ dependencies = [
  "tidev-snapshot",
  "tidev-storage",
  "tidev-tools",
+ "tidev-types",
+ "tokio",
+ "tokio-util",
+ "uuid",
 ]
 
 [[package]]
@@ -2591,6 +2601,7 @@ dependencies = [
  "tidev-types",
  "tidev-utils",
  "tokio",
+ "tokio-util",
  "url",
  "uuid",
 ]

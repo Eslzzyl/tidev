@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -684,10 +685,11 @@ fn build_responses_request(
                     }));
                 }
                 for attachment in images {
-                    if let MessageAttachment::Image { data_url, .. } = attachment {
+                    if let MessageAttachment::Image { mime, data, .. } = attachment {
+                        let b64 = BASE64.encode(data);
                         content.push(serde_json::json!({
                             "type": "input_image",
-                            "image_url": data_url,
+                            "image_url": format!("data:{};base64,{}", mime, b64),
                             "detail": "auto",
                         }));
                     }
@@ -755,10 +757,11 @@ fn build_responses_request(
                 if !images.is_empty() {
                     let mut image_content = Vec::new();
                     for attachment in images {
-                        if let MessageAttachment::Image { data_url, .. } = attachment {
+                        if let MessageAttachment::Image { mime, data, .. } = attachment {
+                            let b64 = BASE64.encode(data);
                             image_content.push(serde_json::json!({
                                 "type": "input_image",
-                                "image_url": data_url,
+                                "image_url": format!("data:{};base64,{}", mime, b64),
                                 "detail": "auto",
                             }));
                         }
@@ -1725,6 +1728,7 @@ mod tests {
             max_output_tokens: 4096,
             temperature: Some(0.7),
             supports_images: true,
+            context_window: 128000,
             system_prompt: Some("You are helpful.".to_string()),
             api_key: None,
             extra_body: None,
@@ -1758,6 +1762,7 @@ mod tests {
             max_output_tokens: 4096,
             temperature: Some(0.7),
             supports_images: false,
+            context_window: 128000,
             system_prompt: Some("Base system prompt".to_string()),
             api_key: None,
             extra_body: None,
@@ -1792,6 +1797,7 @@ mod tests {
             max_output_tokens: 4096,
             temperature: Some(0.7),
             supports_images: false,
+            context_window: 128000,
             system_prompt: Some("You are helpful.".to_string()),
             api_key: None,
             extra_body: None,

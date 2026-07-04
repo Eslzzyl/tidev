@@ -38,8 +38,8 @@ macro_rules! map_row {
 pub struct SessionStore {
     /// Shared write connection (behind Mutex for thread-safety).
     write_conn: Arc<Mutex<Connection>>,
-    /// Connection for read operations (SELECT).
-    read_conn: Connection,
+    /// Connection for read operations (SELECT, behind Mutex for Sync).
+    read_conn: Mutex<Connection>,
     path: PathBuf,
 }
 
@@ -47,10 +47,27 @@ impl Clone for SessionStore {
     fn clone(&self) -> Self {
         Self {
             write_conn: Arc::clone(&self.write_conn),
-            read_conn: Connection::open(&self.path)
-                .expect("failed to clone SessionStore read_conn"),
+            read_conn: Mutex::new(
+                Connection::open(&self.path).expect("failed to clone SessionStore read_conn"),
+            ),
             path: self.path.clone(),
         }
+    }
+}
+
+impl SessionStore {
+    /// Execute a read operation against the read connection.
+    ///
+    /// The closure receives a `&Connection` and runs while holding the
+    /// read lock. Because every query method returns owned data (no
+    /// references escape the closure), this preserves the borrow checker's
+    /// safety guarantees.
+    fn read<F, R>(&self, f: F) -> Result<R>
+    where
+        F: FnOnce(&Connection) -> Result<R>,
+    {
+        let conn = self.read_conn.lock().unwrap();
+        f(&conn)
     }
 }
 
@@ -130,8 +147,8 @@ impl SessionStore {
              LEFT JOIN session_workspaces sw ON sw.session_id = s.id \
              WHERE s.id = ?1"
         );
-        self.read_conn
-            .query_row(&sql, params![session_id.to_string()], |row| {
+        self.read(|conn| {
+            conn.query_row(&sql, params![session_id.to_string()], |row| {
                 Ok(map_row!(SessionRecord, row,
                     session_id: 0 => Uuid::parse_str(&row.get::<_, String>(0)?).unwrap_or_default(),
                     parent_session_id: 1 => row.get::<_, Option<String>>(1)?.and_then(|s| Uuid::parse_str(&s).ok()),
@@ -152,6 +169,7 @@ impl SessionStore {
             })
             .optional()
             .map_err(Into::into)
+        })
     }
 
     /// Load a conversation (session + messages).
@@ -185,7 +203,8 @@ impl SessionStore {
              LEFT JOIN session_workspaces sw ON sw.session_id = s.id \
              ORDER BY s.created_at DESC LIMIT ?1 OFFSET ?2"
         );
-        let mut stmt = self.read_conn.prepare(&sql)?;
+        self.read(|conn| {
+        let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(params![limit, offset], |row| {
             Ok(map_row!(SessionRecord, row,
                 session_id: 0 => Uuid::parse_str(&row.get::<_, String>(0)?).unwrap_or_default(),
@@ -210,6 +229,7 @@ impl SessionStore {
             sessions.push(row?);
         }
         Ok(sessions)
+        })
     }
 
     /// Update session metadata.
@@ -278,14 +298,12 @@ impl SessionStore {
             idx += 1;
         }
 
-        let sql = format!(
-            "UPDATE sessions SET {} WHERE id = ?{idx}",
-            sets.join(", ")
-        );
+        let sql = format!("UPDATE sessions SET {} WHERE id = ?{idx}", sets.join(", "));
         params.push(Box::new(session_id.to_string()));
 
         let mut stmt = conn.prepare(&sql)?;
-        let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
         stmt.execute(param_refs.as_slice())?;
         Ok(())
     }
@@ -313,29 +331,32 @@ impl SessionStore {
 
     /// Count total number of sessions.
     pub fn count_sessions(&self) -> Result<i64> {
-        self.read_conn
-            .query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))
-            .map_err(Into::into)
+        self.read(|conn| {
+            conn.query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))
+                .map_err(Into::into)
+        })
     }
 
     /// Count sessions per workspace.
     pub fn count_sessions_by_workspace(&self) -> Result<Vec<WorkspaceSessionCount>> {
-        let mut stmt = self.read_conn.prepare(
-            "SELECT sw.workspace_root, COUNT(*) as cnt FROM sessions s \
-             LEFT JOIN session_workspaces sw ON sw.session_id = s.id \
-             GROUP BY sw.workspace_root ORDER BY cnt DESC",
-        )?;
-        let rows = stmt.query_map([], |row| {
-            Ok(WorkspaceSessionCount {
-                workspace_root: row.get(0)?,
-                session_count: row.get(1)?,
-            })
-        })?;
-        let mut counts = Vec::new();
-        for row in rows {
-            counts.push(row?);
-        }
-        Ok(counts)
+        self.read(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT sw.workspace_root, COUNT(*) as cnt FROM sessions s \
+                 LEFT JOIN session_workspaces sw ON sw.session_id = s.id \
+                 GROUP BY sw.workspace_root ORDER BY cnt DESC",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok(WorkspaceSessionCount {
+                    workspace_root: row.get(0)?,
+                    session_count: row.get(1)?,
+                })
+            })?;
+            let mut counts = Vec::new();
+            for row in rows {
+                counts.push(row?);
+            }
+            Ok(counts)
+        })
     }
 
     /// Search sessions by title.
@@ -347,8 +368,11 @@ impl SessionStore {
              ORDER BY s.created_at DESC LIMIT ?3"
         );
         let pattern = format!("%{}%", query);
-        let id_match = Uuid::parse_str(query).map(|id| id.to_string()).unwrap_or_default();
-        let mut stmt = self.read_conn.prepare(&sql)?;
+        let id_match = Uuid::parse_str(query)
+            .map(|id| id.to_string())
+            .unwrap_or_default();
+        self.read(|conn| {
+        let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(params![pattern, id_match, limit], |row| {
             Ok(map_row!(SessionRecord, row,
                 session_id: 0 => Uuid::parse_str(&row.get::<_, String>(0)?).unwrap_or_default(),
@@ -373,20 +397,23 @@ impl SessionStore {
             sessions.push(row?);
         }
         Ok(sessions)
+        })
     }
 
     /// Get workspaces that have sessions.
     pub fn list_workspaces(&self, limit: i64, offset: i64) -> Result<Vec<String>> {
-        let mut stmt = self.read_conn.prepare(
-            "SELECT DISTINCT workspace_root FROM session_workspaces \
-             ORDER BY workspace_root LIMIT ?1 OFFSET ?2",
-        )?;
-        let rows = stmt.query_map(params![limit, offset], |row| row.get(0))?;
-        let mut workspaces = Vec::new();
-        for row in rows {
-            workspaces.push(row?);
-        }
-        Ok(workspaces)
+        self.read(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT DISTINCT workspace_root FROM session_workspaces \
+                 ORDER BY workspace_root LIMIT ?1 OFFSET ?2",
+            )?;
+            let rows = stmt.query_map(params![limit, offset], |row| row.get(0))?;
+            let mut workspaces = Vec::new();
+            for row in rows {
+                workspaces.push(row?);
+            }
+            Ok(workspaces)
+        })
     }
 }
 
@@ -415,10 +442,14 @@ impl SessionStore {
                 compress_text(&msg.content),
                 serde_json::to_string(&msg.attachments).unwrap_or_else(|_| "[]".to_string()),
                 compress_text(&msg.reasoning),
-                compress_text(&serde_json::to_string(&msg.tool_calls).unwrap_or_else(|_| "[]".to_string())),
+                compress_text(
+                    &serde_json::to_string(&msg.tool_calls).unwrap_or_else(|_| "[]".to_string())
+                ),
                 msg.tool_call_id.as_deref(),
                 msg.tool_name.as_deref(),
-                compress_text(&serde_json::to_string(&msg.metadata).unwrap_or_else(|_| "{}".to_string())),
+                compress_text(
+                    &serde_json::to_string(&msg.metadata).unwrap_or_else(|_| "{}".to_string())
+                ),
                 now,
                 completed,
                 msg.streaming as i64,
@@ -432,8 +463,12 @@ impl SessionStore {
                 msg.snapshot_hash,
                 compress_text(msg.patch_files.as_deref().unwrap_or("")),
                 compress_text(msg.file_diffs.as_deref().unwrap_or("")),
-                msg.mode.as_ref().map(|m| serde_json::to_string(m).unwrap_or_default()),
-                msg.thinking_level.as_ref().map(|t| serde_json::to_string(t).unwrap_or_default()),
+                msg.mode
+                    .as_ref()
+                    .map(|m| serde_json::to_string(m).unwrap_or_default()),
+                msg.thinking_level
+                    .as_ref()
+                    .map(|t| serde_json::to_string(t).unwrap_or_default()),
             ],
         )?;
         // Update session timestamp
@@ -446,106 +481,119 @@ impl SessionStore {
 
     /// Load all messages for a session, ordered by creation time.
     pub fn load_messages(&self, session_id: Uuid) -> Result<Vec<Message>> {
-        let mut stmt = self.read_conn.prepare(
-            "SELECT id, role, content, attachments, reasoning, tool_calls, tool_call_id, \
+        self.read(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, role, content, attachments, reasoning, tool_calls, tool_call_id, \
              tool_name, metadata, created_at, completed_at, streaming, input_tokens, \
              output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, \
              tokens_per_second, snapshot_hash, patch_files, file_diffs, mode, thinking_level \
              FROM messages WHERE session_id = ?1 ORDER BY created_at ASC",
-        )?;
-        let rows = stmt.query_map(params![session_id.to_string()], |row| {
-            let role_str: String = match row.get(1) {
-                Ok(s) => s,
-                Err(_) => return Ok(Message::new(MessageRole::User, "")),
-            };
-            let metadata_raw: Vec<u8> = row.get(8).unwrap_or_default();
-            let metadata: tidev_types::message::ToolMetadata =
-                serde_json::from_str(&decompress_text(&metadata_raw))
+            )?;
+            let rows = stmt.query_map(params![session_id.to_string()], |row| {
+                let role_str: String = match row.get(1) {
+                    Ok(s) => s,
+                    Err(_) => return Ok(Message::new(MessageRole::User, "")),
+                };
+                let metadata_raw: Vec<u8> = row.get(8).unwrap_or_default();
+                let metadata: tidev_types::message::ToolMetadata =
+                    serde_json::from_str(&decompress_text(&metadata_raw)).unwrap_or_default();
+
+                let content = row
+                    .get::<_, Vec<u8>>(2)
+                    .map(|b| decompress_text(&b))
+                    .unwrap_or_else(|_| row.get::<_, String>(2).unwrap_or_default());
+
+                let attachments_raw: String = row.get(3).unwrap_or_default();
+                let attachments: Vec<tidev_types::message::MessageAttachment> =
+                    serde_json::from_str(&attachments_raw).unwrap_or_default();
+
+                let completed_at: Option<String> = row.get(11).ok().flatten();
+                let streaming: bool = row.get::<_, i64>(12).unwrap_or(0) != 0;
+
+                let reasoning = row
+                    .get::<_, Vec<u8>>(4)
+                    .map(|b| decompress_text(&b))
                     .unwrap_or_default();
 
-            let content = row.get::<_, Vec<u8>>(2)
-                .map(|b| decompress_text(&b))
-                .unwrap_or_else(|_| {
-                    row.get::<_, String>(2).unwrap_or_default()
-                });
+                let tool_calls_json = row
+                    .get::<_, Vec<u8>>(5)
+                    .map(|b| decompress_text(&b))
+                    .unwrap_or_else(|_| "[]".to_string());
 
-            let attachments_raw: String = row.get(3).unwrap_or_default();
-            let attachments: Vec<tidev_types::message::MessageAttachment> =
-                serde_json::from_str(&attachments_raw).unwrap_or_default();
+                let patch_files = row
+                    .get::<_, Vec<u8>>(21)
+                    .ok()
+                    .filter(|b| !b.is_empty())
+                    .map(|b| decompress_text(&b));
 
-            let completed_at: Option<String> = row.get(11).ok().flatten();
-            let streaming: bool = row.get::<_, i64>(12).unwrap_or(0) != 0;
+                let file_diffs = row
+                    .get::<_, Vec<u8>>(22)
+                    .ok()
+                    .filter(|b| !b.is_empty())
+                    .map(|b| decompress_text(&b));
 
-            let reasoning = row.get::<_, Vec<u8>>(4)
-                .map(|b| decompress_text(&b))
-                .unwrap_or_default();
+                let mode: Option<String> = row.get(23).ok().flatten();
+                let thinking_level: Option<String> = row.get(24).ok().flatten();
 
-            let tool_calls_json = row.get::<_, Vec<u8>>(5)
-                .map(|b| decompress_text(&b))
-                .unwrap_or_else(|_| "[]".to_string());
-
-            let patch_files = row.get::<_, Vec<u8>>(21)
-                .ok()
-                .filter(|b| !b.is_empty())
-                .map(|b| decompress_text(&b));
-
-            let file_diffs = row.get::<_, Vec<u8>>(22)
-                .ok()
-                .filter(|b| !b.is_empty())
-                .map(|b| decompress_text(&b));
-
-            let mode: Option<String> = row.get(23).ok().flatten();
-            let thinking_level: Option<String> = row.get(24).ok().flatten();
-
-            Ok(Message {
-                id: Uuid::parse_str(&row.get::<_, String>(0).unwrap_or_default()).unwrap_or_default(),
-                role: MessageRole::from_db_value(&role_str),
-                content,
-                attachments,
-                reasoning,
-                tool_calls: serde_json::from_str(&tool_calls_json).unwrap_or_default(),
-                tool_call_id: row.get(7).ok().flatten(),
-                tool_name: row.get(8).ok().flatten(),
-                metadata,
-                created_at: DateTime::parse_from_rfc3339(
-                    &row.get::<_, String>(9).unwrap_or_default(),
-                )
-                .map(|dt| dt.with_timezone(&Utc))
-                .unwrap_or_default(),
-                completed_at: completed_at
-                    .and_then(|s| {
+                Ok(Message {
+                    id: Uuid::parse_str(&row.get::<_, String>(0).unwrap_or_default())
+                        .unwrap_or_default(),
+                    role: MessageRole::from_db_value(&role_str),
+                    content,
+                    attachments,
+                    reasoning,
+                    tool_calls: serde_json::from_str(&tool_calls_json).unwrap_or_default(),
+                    tool_call_id: row.get(7).ok().flatten(),
+                    tool_name: row.get(8).ok().flatten(),
+                    metadata,
+                    created_at: DateTime::parse_from_rfc3339(
+                        &row.get::<_, String>(9).unwrap_or_default(),
+                    )
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .unwrap_or_default(),
+                    completed_at: completed_at.and_then(|s| {
                         DateTime::parse_from_rfc3339(&s)
                             .ok()
                             .map(|dt| dt.with_timezone(&Utc))
                     }),
-                streaming,
-                input_tokens: row.get(13).ok().flatten(),
-                output_tokens: row.get(14).ok().flatten(),
-                total_tokens: row.get(15).ok().flatten(),
-                cache_read_tokens: row.get(16).ok().flatten(),
-                cache_write_tokens: row.get(17).ok().flatten(),
-                model_id: row.get(18).ok().flatten(),
-                tokens_per_second: row.get(19).ok().flatten(),
-                snapshot_hash: row.get(20).ok().flatten(),
-                patch_files,
-                file_diffs,
-                mode: mode.and_then(|m| serde_json::from_str(&m).ok()),
-                thinking_level: thinking_level.and_then(|t| serde_json::from_str(&t).ok()),
-            })
-        })?;
-        let mut messages = Vec::new();
-        for row in rows {
-            messages.push(row?);
-        }
-        Ok(messages)
+                    streaming,
+                    input_tokens: row.get(13).ok().flatten(),
+                    output_tokens: row.get(14).ok().flatten(),
+                    total_tokens: row.get(15).ok().flatten(),
+                    cache_read_tokens: row.get(16).ok().flatten(),
+                    cache_write_tokens: row.get(17).ok().flatten(),
+                    model_id: row.get(18).ok().flatten(),
+                    tokens_per_second: row.get(19).ok().flatten(),
+                    snapshot_hash: row.get(20).ok().flatten(),
+                    patch_files,
+                    file_diffs,
+                    mode: mode.and_then(|m| serde_json::from_str(&m).ok()),
+                    thinking_level: thinking_level.and_then(|t| serde_json::from_str(&t).ok()),
+                })
+            })?;
+            let mut messages = Vec::new();
+            for row in rows {
+                messages.push(row?);
+            }
+            Ok(messages)
+        })
     }
 
     /// Update a message's content (used for streaming).
-    pub fn update_message_content(&self, session_id: Uuid, message_id: Uuid, content: &str) -> Result<()> {
+    pub fn update_message_content(
+        &self,
+        session_id: Uuid,
+        message_id: Uuid,
+        content: &str,
+    ) -> Result<()> {
         let conn = self.write_conn.lock().unwrap();
         conn.execute(
             "UPDATE messages SET content = ?1 WHERE id = ?2 AND session_id = ?3",
-            params![compress_text(content), message_id.to_string(), session_id.to_string()],
+            params![
+                compress_text(content),
+                message_id.to_string(),
+                session_id.to_string()
+            ],
         )?;
         Ok(())
     }
@@ -561,7 +609,11 @@ impl SessionStore {
         let conn = self.write_conn.lock().unwrap();
         conn.execute(
             "UPDATE messages SET tool_calls = ?1 WHERE id = ?2 AND session_id = ?3",
-            params![compress_text(&json), message_id.to_string(), session_id.to_string()],
+            params![
+                compress_text(&json),
+                message_id.to_string(),
+                session_id.to_string()
+            ],
         )?;
         Ok(())
     }
@@ -611,104 +663,116 @@ impl SessionStore {
 
     /// Get token statistics for a session.
     pub fn get_session_token_stats(&self, session_id: Uuid) -> Result<SessionTokenStats> {
-        self.read_conn.query_row(
-            "SELECT COALESCE(SUM(input_tokens), 0) as input_tokens, \
-             COALESCE(SUM(output_tokens), 0) as output_tokens \
-             FROM messages WHERE session_id = :session_id",
-            named_params! { ":session_id": session_id.to_string() },
-            |row| {
-                Ok(SessionTokenStats {
-                    input_tokens: row.get::<_, i64>(0)? as u32,
-                    output_tokens: row.get::<_, i64>(1)? as u32,
-                })
-            },
-        )
-        .map_err(Into::into)
+        self.read(|conn| {
+            conn.query_row(
+                "SELECT COALESCE(SUM(input_tokens), 0) as input_tokens, \
+                 COALESCE(SUM(output_tokens), 0) as output_tokens \
+                 FROM messages WHERE session_id = :session_id",
+                named_params! { ":session_id": session_id.to_string() },
+                |row| {
+                    Ok(SessionTokenStats {
+                        input_tokens: row.get::<_, i64>(0)? as u32,
+                        output_tokens: row.get::<_, i64>(1)? as u32,
+                    })
+                },
+            )
+            .map_err(Into::into)
+        })
     }
 
     /// Get the most recent message for a session.
     pub fn get_last_message(&self, session_id: Uuid) -> Result<Option<Message>> {
-        let mut stmt = self.read_conn.prepare(
-            "SELECT id, role, content, attachments, reasoning, tool_calls, tool_call_id, \
-             tool_name, metadata, created_at, completed_at, streaming, input_tokens, \
-             output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, \
-             tokens_per_second, snapshot_hash, patch_files, file_diffs, mode, thinking_level \
-             FROM messages WHERE session_id = ?1 ORDER BY created_at DESC LIMIT 1",
-        )?;
-        let mut rows = stmt.query_map(params![session_id.to_string()], |row| {
-            Ok(build_message_from_row(row))
-        })?;
-        match rows.next() {
-            Some(Ok(msg)) => Ok(Some(msg)),
-            _ => Ok(None),
-        }
+        self.read(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, role, content, attachments, reasoning, tool_calls, tool_call_id, \
+                 tool_name, metadata, created_at, completed_at, streaming, input_tokens, \
+                 output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, \
+                 tokens_per_second, snapshot_hash, patch_files, file_diffs, mode, thinking_level \
+                 FROM messages WHERE session_id = ?1 ORDER BY created_at DESC LIMIT 1",
+            )?;
+            let mut rows = stmt.query_map(params![session_id.to_string()], |row| {
+                Ok(Self::build_message_from_row(row))
+            })?;
+            match rows.next() {
+                Some(Ok(msg)) => Ok(Some(msg)),
+                _ => Ok(None),
+            }
+        })
     }
-}
 
-/// Build a Message from a SQLite row (used by load_messages and get_last_message).
-fn build_message_from_row(row: &rusqlite::Row) -> Message {
-    let role_str: String = row.get(1).unwrap_or_default();
-    let content = row.get::<_, Vec<u8>>(2)
-        .map(|b| decompress_text(&b))
-        .unwrap_or_else(|_| row.get::<_, String>(2).unwrap_or_default());
-    let attachments_raw: String = row.get(3).unwrap_or_default();
-    let attachments: Vec<tidev_types::message::MessageAttachment> =
-        serde_json::from_str(&attachments_raw).unwrap_or_default();
-    let metadata_raw: Vec<u8> = row.get(8).unwrap_or_default();
-    let metadata: tidev_types::message::ToolMetadata =
-        serde_json::from_str(&decompress_text(&metadata_raw)).unwrap_or_default();
-    let completed_at: Option<String> = row.get(11).ok().flatten();
-    let streaming: bool = row.get::<_, i64>(12).unwrap_or(0) != 0;
+    /// Build a Message from a SQLite row (used by load_messages and get_last_message).
+    fn build_message_from_row(row: &rusqlite::Row) -> Message {
+        let role_str: String = row.get(1).unwrap_or_default();
+        let content = row
+            .get::<_, Vec<u8>>(2)
+            .map(|b| decompress_text(&b))
+            .unwrap_or_else(|_| row.get::<_, String>(2).unwrap_or_default());
+        let attachments_raw: String = row.get(3).unwrap_or_default();
+        let attachments: Vec<tidev_types::message::MessageAttachment> =
+            serde_json::from_str(&attachments_raw).unwrap_or_default();
+        let metadata_raw: Vec<u8> = row.get(8).unwrap_or_default();
+        let metadata: tidev_types::message::ToolMetadata =
+            serde_json::from_str(&decompress_text(&metadata_raw)).unwrap_or_default();
+        let completed_at: Option<String> = row.get(11).ok().flatten();
+        let streaming: bool = row.get::<_, i64>(12).unwrap_or(0) != 0;
 
-    let reasoning = row.get::<_, Vec<u8>>(4)
-        .map(|b| decompress_text(&b))
-        .unwrap_or_default();
+        let reasoning = row
+            .get::<_, Vec<u8>>(4)
+            .map(|b| decompress_text(&b))
+            .unwrap_or_default();
 
-    let tool_calls_json = row.get::<_, Vec<u8>>(5)
-        .map(|b| decompress_text(&b))
-        .unwrap_or_else(|_| "[]".to_string());
+        let tool_calls_json = row
+            .get::<_, Vec<u8>>(5)
+            .map(|b| decompress_text(&b))
+            .unwrap_or_else(|_| "[]".to_string());
 
-    let patch_files = row.get::<_, Vec<u8>>(21)
-        .ok()
-        .filter(|b| !b.is_empty())
-        .map(|b| decompress_text(&b));
+        let patch_files = row
+            .get::<_, Vec<u8>>(21)
+            .ok()
+            .filter(|b| !b.is_empty())
+            .map(|b| decompress_text(&b));
 
-    let file_diffs = row.get::<_, Vec<u8>>(22)
-        .ok()
-        .filter(|b| !b.is_empty())
-        .map(|b| decompress_text(&b));
+        let file_diffs = row
+            .get::<_, Vec<u8>>(22)
+            .ok()
+            .filter(|b| !b.is_empty())
+            .map(|b| decompress_text(&b));
 
-    let mode: Option<String> = row.get(23).ok().flatten();
-    let thinking_level: Option<String> = row.get(24).ok().flatten();
+        let mode: Option<String> = row.get(23).ok().flatten();
+        let thinking_level: Option<String> = row.get(24).ok().flatten();
 
-    Message {
-        id: Uuid::parse_str(&row.get::<_, String>(0).unwrap_or_default()).unwrap_or_default(),
-        role: MessageRole::from_db_value(&role_str),
-        content,
-        attachments,
-        reasoning,
-        tool_calls: serde_json::from_str(&tool_calls_json).unwrap_or_default(),
-        tool_call_id: row.get(7).ok().flatten(),
-        tool_name: row.get(8).ok().flatten(),
-        metadata,
-        created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(9).unwrap_or_default())
-            .map(|dt| dt.with_timezone(&Utc))
-            .unwrap_or_default(),
-        completed_at: completed_at
-            .and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|dt| dt.with_timezone(&Utc))),
-        streaming,
-        input_tokens: row.get(13).ok().flatten(),
-        output_tokens: row.get(14).ok().flatten(),
-        total_tokens: row.get(15).ok().flatten(),
-        cache_read_tokens: row.get(16).ok().flatten(),
-        cache_write_tokens: row.get(17).ok().flatten(),
-        model_id: row.get(18).ok().flatten(),
-        tokens_per_second: row.get(19).ok().flatten(),
-        snapshot_hash: row.get(20).ok().flatten(),
-        patch_files,
-        file_diffs,
-        mode: mode.and_then(|m| serde_json::from_str(&m).ok()),
-        thinking_level: thinking_level.and_then(|t| serde_json::from_str(&t).ok()),
+        Message {
+            id: Uuid::parse_str(&row.get::<_, String>(0).unwrap_or_default()).unwrap_or_default(),
+            role: MessageRole::from_db_value(&role_str),
+            content,
+            attachments,
+            reasoning,
+            tool_calls: serde_json::from_str(&tool_calls_json).unwrap_or_default(),
+            tool_call_id: row.get(7).ok().flatten(),
+            tool_name: row.get(8).ok().flatten(),
+            metadata,
+            created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(9).unwrap_or_default())
+                .map(|dt| dt.with_timezone(&Utc))
+                .unwrap_or_default(),
+            completed_at: completed_at.and_then(|s| {
+                DateTime::parse_from_rfc3339(&s)
+                    .ok()
+                    .map(|dt| dt.with_timezone(&Utc))
+            }),
+            streaming,
+            input_tokens: row.get(13).ok().flatten(),
+            output_tokens: row.get(14).ok().flatten(),
+            total_tokens: row.get(15).ok().flatten(),
+            cache_read_tokens: row.get(16).ok().flatten(),
+            cache_write_tokens: row.get(17).ok().flatten(),
+            model_id: row.get(18).ok().flatten(),
+            tokens_per_second: row.get(19).ok().flatten(),
+            snapshot_hash: row.get(20).ok().flatten(),
+            patch_files,
+            file_diffs,
+            mode: mode.and_then(|m| serde_json::from_str(&m).ok()),
+            thinking_level: thinking_level.and_then(|t| serde_json::from_str(&t).ok()),
+        }
     }
 }
 
@@ -743,25 +807,27 @@ impl SessionStore {
 
     /// Load file reads for a session.
     pub fn load_file_reads(&self, session_id: Uuid) -> Result<Vec<FileReadRecord>> {
-        let mut stmt = self.read_conn.prepare(
-            "SELECT file_path, read_at, mtime, size FROM file_reads \
-             WHERE session_id = ?1 ORDER BY read_at DESC",
-        )?;
-        let rows = stmt.query_map(params![session_id.to_string()], |row| {
-            Ok(FileReadRecord {
-                file_path: row.get(0)?,
-                read_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(1)?)
-                    .map(|dt| dt.with_timezone(&Utc))
-                    .unwrap_or_default(),
-                mtime: row.get(2)?,
-                size: row.get(3)?,
-            })
-        })?;
-        let mut records = Vec::new();
-        for row in rows {
-            records.push(row?);
-        }
-        Ok(records)
+        self.read(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT file_path, read_at, mtime, size FROM file_reads \
+                 WHERE session_id = ?1 ORDER BY read_at DESC",
+            )?;
+            let rows = stmt.query_map(params![session_id.to_string()], |row| {
+                Ok(FileReadRecord {
+                    file_path: row.get(0)?,
+                    read_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(1)?)
+                        .map(|dt| dt.with_timezone(&Utc))
+                        .unwrap_or_default(),
+                    mtime: row.get(2)?,
+                    size: row.get(3)?,
+                })
+            })?;
+            let mut records = Vec::new();
+            for row in rows {
+                records.push(row?);
+            }
+            Ok(records)
+        })
     }
 }
 
@@ -771,9 +837,16 @@ impl SessionStore {
 
 impl SessionStore {
     /// Save/overwrite all todo items for a session.
-    pub fn save_todos(&self, session_id: Uuid, todos: &[tidev_types::tools::TodoItem]) -> Result<()> {
+    pub fn save_todos(
+        &self,
+        session_id: Uuid,
+        todos: &[tidev_types::tools::TodoItem],
+    ) -> Result<()> {
         let conn = self.write_conn.lock().unwrap();
-        conn.execute("DELETE FROM todos WHERE session_id = ?1", params![session_id.to_string()])?;
+        conn.execute(
+            "DELETE FROM todos WHERE session_id = ?1",
+            params![session_id.to_string()],
+        )?;
         for (i, item) in todos.iter().enumerate() {
             conn.execute(
                 "INSERT INTO todos (session_id, position, content, status) VALUES (?1, ?2, ?3, ?4)",
@@ -785,20 +858,22 @@ impl SessionStore {
 
     /// Load todo items for a session.
     pub fn load_todos(&self, session_id: Uuid) -> Result<Vec<tidev_types::tools::TodoItem>> {
-        let mut stmt = self.read_conn.prepare(
-            "SELECT content, status FROM todos WHERE session_id = ?1 ORDER BY position ASC",
-        )?;
-        let rows = stmt.query_map(params![session_id.to_string()], |row| {
-            Ok(tidev_types::tools::TodoItem {
-                content: row.get(0)?,
-                status: row.get(1)?,
-            })
-        })?;
-        let mut items = Vec::new();
-        for row in rows {
-            items.push(row?);
-        }
-        Ok(items)
+        self.read(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT content, status FROM todos WHERE session_id = ?1 ORDER BY position ASC",
+            )?;
+            let rows = stmt.query_map(params![session_id.to_string()], |row| {
+                Ok(tidev_types::tools::TodoItem {
+                    content: row.get(0)?,
+                    status: row.get(1)?,
+                })
+            })?;
+            let mut items = Vec::new();
+            for row in rows {
+                items.push(row?);
+            }
+            Ok(items)
+        })
     }
 }
 
@@ -826,18 +901,20 @@ impl SessionStore {
 
     /// Load all tool permissions for a session.
     pub fn load_tool_permissions(&self, session_id: Uuid) -> Result<Vec<(String, bool)>> {
-        let mut stmt = self.read_conn.prepare(
-            "SELECT tool_name, allowed FROM tool_permissions \
-             WHERE session_id = ?1 ORDER BY created_at DESC",
-        )?;
-        let rows = stmt.query_map(params![session_id.to_string()], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? != 0))
-        })?;
-        let mut permissions = Vec::new();
-        for row in rows {
-            permissions.push(row?);
-        }
-        Ok(permissions)
+        self.read(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT tool_name, allowed FROM tool_permissions \
+                 WHERE session_id = ?1 ORDER BY created_at DESC",
+            )?;
+            let rows = stmt.query_map(params![session_id.to_string()], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? != 0))
+            })?;
+            let mut permissions = Vec::new();
+            for row in rows {
+                permissions.push(row?);
+            }
+            Ok(permissions)
+        })
     }
 }
 
@@ -871,37 +948,38 @@ impl SessionStore {
     }
 
     /// Load snapshot patch data for a message.
-    pub fn load_snapshot(
-        &self,
-        message_id: Uuid,
-    ) -> Result<Option<(String, String, String)>> {
-        let mut stmt = self.read_conn.prepare(
-            "SELECT snapshot_hash, patch_files, file_diffs FROM messages WHERE id = ?1",
-        )?;
-        let mut rows = stmt.query_map(params![message_id.to_string()], |row| {
-            let hash: String = row.get(0).unwrap_or_default();
-            let patches = row.get::<_, Vec<u8>>(1)
-                .ok()
-                .filter(|b| !b.is_empty())
-                .map(|b| decompress_text(&b))
-                .unwrap_or_default();
-            let diffs = row.get::<_, Vec<u8>>(2)
-                .ok()
-                .filter(|b| !b.is_empty())
-                .map(|b| decompress_text(&b))
-                .unwrap_or_default();
-            Ok((hash, patches, diffs))
-        })?;
-        match rows.next() {
-            Some(Ok(result)) => {
-                if result.0.is_empty() {
-                    Ok(None)
-                } else {
-                    Ok(Some(result))
+    pub fn load_snapshot(&self, message_id: Uuid) -> Result<Option<(String, String, String)>> {
+        self.read(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT snapshot_hash, patch_files, file_diffs FROM messages WHERE id = ?1",
+            )?;
+            let mut rows = stmt.query_map(params![message_id.to_string()], |row| {
+                let hash: String = row.get(0).unwrap_or_default();
+                let patches = row
+                    .get::<_, Vec<u8>>(1)
+                    .ok()
+                    .filter(|b| !b.is_empty())
+                    .map(|b| decompress_text(&b))
+                    .unwrap_or_default();
+                let diffs = row
+                    .get::<_, Vec<u8>>(2)
+                    .ok()
+                    .filter(|b| !b.is_empty())
+                    .map(|b| decompress_text(&b))
+                    .unwrap_or_default();
+                Ok((hash, patches, diffs))
+            })?;
+            match rows.next() {
+                Some(Ok(result)) => {
+                    if result.0.is_empty() {
+                        Ok(None)
+                    } else {
+                        Ok(Some(result))
+                    }
                 }
+                _ => Ok(None),
             }
-            _ => Ok(None),
-        }
+        })
     }
 }
 
@@ -911,11 +989,7 @@ impl SessionStore {
 
 impl SessionStore {
     /// Save instruction sources for a session (replaces all existing).
-    pub fn save_instruction_sources(
-        &self,
-        session_id: Uuid,
-        sources: &[String],
-    ) -> Result<()> {
+    pub fn save_instruction_sources(&self, session_id: Uuid, sources: &[String]) -> Result<()> {
         let conn = self.write_conn.lock().unwrap();
         conn.execute(
             "DELETE FROM session_instruction_sources WHERE session_id = ?1",
@@ -932,19 +1006,20 @@ impl SessionStore {
 
     /// Load instruction sources for a session.
     pub fn load_instruction_sources(&self, session_id: Uuid) -> Result<Vec<String>> {
-        let mut stmt = self.read_conn.prepare(
-            "SELECT source FROM session_instruction_sources WHERE session_id = ?1 \
-             ORDER BY source",
-        )?;
-        let rows = stmt.query_map(params![session_id.to_string()], |row| row.get(0))?;
-        let mut sources = Vec::new();
-        for row in rows {
-            sources.push(row?);
-        }
-        Ok(sources)
+        self.read(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT source FROM session_instruction_sources WHERE session_id = ?1 \
+                 ORDER BY source",
+            )?;
+            let rows = stmt.query_map(params![session_id.to_string()], |row| row.get(0))?;
+            let mut sources = Vec::new();
+            for row in rows {
+                sources.push(row?);
+            }
+            Ok(sources)
+        })
     }
 }
-
 // ---------------------------------------------------------------------------
 // Session revert support
 // ---------------------------------------------------------------------------
@@ -968,25 +1043,20 @@ impl SessionStore {
     }
 
     /// Load revert state for a session.
-    pub fn load_revert_state(
-        &self,
-        session_id: Uuid,
-    ) -> Result<Option<(Uuid, Option<Vec<u8>>)>> {
-        let mut stmt = self.read_conn.prepare(
-            "SELECT message_id, redo_snapshot FROM session_reverts WHERE session_id = ?1",
-        )?;
-        let mut rows = stmt.query_map(params![session_id.to_string()], |row| {
-            let msg_id: String = row.get(0)?;
-            let snapshot: Option<Vec<u8>> = row.get(1)?;
-            Ok((
-                Uuid::parse_str(&msg_id).unwrap_or_default(),
-                snapshot,
-            ))
-        })?;
-        match rows.next() {
-            Some(Ok(result)) => Ok(Some(result)),
-            _ => Ok(None),
-        }
+    pub fn load_revert_state(&self, session_id: Uuid) -> Result<Option<(Uuid, Option<Vec<u8>>)>> {
+        self.read(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT message_id, redo_snapshot FROM session_reverts WHERE session_id = ?1",
+            )?;
+            let mut rows = stmt.query_map(params![session_id.to_string()], |row| {
+                let msg_id: String = row.get(0)?;
+                let snapshot: Option<Vec<u8>> = row.get(1)?;
+                Ok((Uuid::parse_str(&msg_id).unwrap_or_default(), snapshot))
+            })?;
+            match rows.next() {
+                Some(Ok(result)) => Ok(Some(result)),
+                _ => Ok(None),
+            }
+        })
     }
 }
-
