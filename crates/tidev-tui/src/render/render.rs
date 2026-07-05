@@ -177,7 +177,9 @@ impl App {
             area,
         );
 
-        let card_width = self.runtime.config()
+        let card_width = self
+            .runtime
+            .config()
             .ui
             .welcome_width
             .min(area.width.saturating_sub(4).max(32));
@@ -208,12 +210,12 @@ impl App {
 
         // https://patorjk.com/software/taag/#p=display&f=BlurVision+ASCII&t=tidev&x=none&v=4&h=4&w=80&we=false
         let ascii_art = Paragraph::new(
-            r#"░▒▓████████▓▒░▒▓█▓▒░▒▓███████▓▒░░▒▓████████▓▒░▒▓█▓▒░░▒▓█▓▒░
-   ░▒▓█▓▒░   ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░
-   ░▒▓█▓▒░   ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░       ░▒▓█▓▒▒▓█▓▒░
-   ░▒▓█▓▒░   ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓██████▓▒░  ░▒▓█▓▒▒▓█▓▒░
-   ░▒▓█▓▒░   ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░        ░▒▓█▓▓█▓▒░
-   ░▒▓█▓▒░   ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░        ░▒▓█▓▓█▓▒░
+            r#"░▒▓████████▓▒░▒▓█▓▒░▒▓███████▓▒░░▒▓████████▓▒░▒▓█▓▒░░▒▓█▓▒░ 
+   ░▒▓█▓▒░   ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░ 
+   ░▒▓█▓▒░   ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░       ░▒▓█▓▒▒▓█▓▒░  
+   ░▒▓█▓▒░   ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓██████▓▒░  ░▒▓█▓▒▒▓█▓▒░  
+   ░▒▓█▓▒░   ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░        ░▒▓█▓▓█▓▒░   
+   ░▒▓█▓▒░   ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░        ░▒▓█▓▓█▓▒░   
    ░▒▓█▓▒░   ░▒▓█▓▒░▒▓███████▓▒░░▒▓████████▓▒░  ░▒▓██▓▒░    "#,
         )
         .alignment(Alignment::Center)
@@ -687,7 +689,9 @@ impl App {
         let queued_count = self.ui.pending_prompt_queue.len();
 
         if self.ui.pending_request
-            && self.ui.abort_confirmation_deadline
+            && self
+                .ui
+                .abort_confirmation_deadline
                 .is_some_and(|deadline| deadline > std::time::Instant::now())
         {
             return "Esc again to stop".to_string();
@@ -717,7 +721,9 @@ impl App {
                 let label = if count == 1 { "subagent" } else { "subagents" };
                 format!("{} Waiting for {} {}", spinner, count, label)
             } else if !self.ui.running_tool_executions.is_empty() {
-                let tool_names: Vec<_> = self.ui.running_tool_executions
+                let tool_names: Vec<_> = self
+                    .ui
+                    .running_tool_executions
                     .iter()
                     .map(|r| r.tool_call.name.as_str())
                     .collect();
