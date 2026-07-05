@@ -1,0 +1,13 @@
+[package]
+name = "tidev-logging"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Custom file + console logging for tidev"
+
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+log = "0.4"
+tidev-config = { path = "../tidev-config" }

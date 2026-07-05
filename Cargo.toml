@@ -8,6 +8,7 @@ members = [
     "crates/tidev-instructions",
     "crates/tidev-snapshot",
     "crates/tidev-search",
+    "crates/tidev-logging",
     "crates/tidev-utils",
     "crates/tidev-tools",
     "crates/tidev-agent",
@@ -43,8 +44,6 @@ include = ["/src", "/README.md", "/LICENSE"]
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
-env_logger = "0.11"
-log = "0.4"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 tidev-core = { path = "crates/tidev-core" }
 tidev-config = { path = "crates/tidev-config" }

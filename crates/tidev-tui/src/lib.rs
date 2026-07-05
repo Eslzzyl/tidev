@@ -534,6 +534,9 @@ impl App {
         terminal.show_cursor()?;
         println!();
 
+        // ── 6. Shutdown background tasks ──
+        self.runtime.shutdown().await;
+
         Ok(())
     }
 

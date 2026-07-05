@@ -30,10 +30,8 @@ enum Command {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    env_logger::Builder::from_env(
-        env_logger::Env::default().default_filter_or("info"),
-    )
-    .init();
+    // Logging is initialised inside Runtime::builder().build() via tidev_logging.
+    // No env_logger here — the custom TidevLogger handles both file and console.
 
     match Cli::parse().command {
         None => run_tui().await,

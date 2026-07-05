@@ -6,7 +6,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use rusqlite::Connection;
+use rusqlite::{Connection, functions::FunctionFlags};
 
 use crate::migration;
 use crate::{SessionStore, schema::SCHEMA_SQL};
@@ -45,6 +45,29 @@ impl Database {
         write_conn
             .pragma_update(None, "mmap_size", "268435456")
             .context("failed to set mmap_size")?;
+        write_conn
+            .pragma_update(None, "cache_size", "-64000")
+            .context("failed to set cache_size")?;
+        write_conn
+            .pragma_update(None, "temp_store", "MEMORY")
+            .context("failed to set temp_store")?;
+        write_conn
+            .busy_timeout(Duration::from_secs(5))
+            .context("failed to set busy_timeout")?;
+
+        // Register zstd_decode(blob) → text for CLI debugging
+        write_conn
+            .create_scalar_function(
+                "zstd_decode",
+                1,
+                FunctionFlags::SQLITE_UTF8,
+                |ctx| {
+                    let blob = ctx.get::<Vec<u8>>(0)?;
+                    let text = crate::compression::decompress_text(&blob);
+                    Ok(text)
+                },
+            )
+            .context("failed to register zstd_decode function")?;
 
         let write_conn = Arc::new(Mutex::new(write_conn));
 

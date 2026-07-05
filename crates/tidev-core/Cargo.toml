@@ -14,6 +14,8 @@ tidev-storage = { path = "../tidev-storage" }
 tidev-llm = { path = "../tidev-llm" }
 tidev-snapshot = { path = "../tidev-snapshot" }
 tidev-instructions = { path = "../tidev-instructions" }
+tidev-logging = { path = "../tidev-logging" }
+tidev-utils = { path = "../tidev-utils" }
 tidev-types = { path = "../tidev-types" }
 anyhow = "1"
 tokio = { version = "1", features = ["sync"] }

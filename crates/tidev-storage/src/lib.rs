@@ -635,6 +635,43 @@ impl SessionStore {
         Ok(())
     }
 
+    /// Delete tool outputs older than `max_age_days`.
+    pub fn delete_expired_tool_outputs(&self, max_age_days: i64) -> Result<usize> {
+        let cutoff = (Utc::now() - Duration::days(max_age_days)).to_rfc3339();
+        self.write_execute(
+            "DELETE FROM tool_outputs WHERE created_at < :cutoff",
+            named_params! { ":cutoff": cutoff },
+        )
+    }
+
+    /// Start a background thread that periodically deletes tool outputs
+    /// older than `max_age_days`.  The thread runs every `interval` and
+    /// uses a cloned database connection so it does not block the main
+    /// thread.
+    pub fn start_output_cleanup(&self, max_age_days: i64, interval: std::time::Duration) {
+        let conn = self.write_conn.clone();
+        std::thread::spawn(move || loop {
+            std::thread::sleep(interval);
+            let cutoff =
+                (Utc::now() - Duration::days(max_age_days)).to_rfc3339();
+            match conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "DELETE FROM tool_outputs WHERE created_at < :cutoff",
+                    rusqlite::named_params! { ":cutoff": cutoff },
+                ) {
+                Ok(count) if count > 0 => {
+                    log::info!("Cleaned up {count} old tool output(s)");
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    log::warn!("Failed to clean old tool outputs: {e}");
+                }
+            }
+        });
+    }
+
     /// Remember a tool permission (allow/deny) for a session.
     pub fn remember_tool_permission(
         &self,

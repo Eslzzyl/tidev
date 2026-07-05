@@ -10,3 +10,4 @@
 
 pub mod encoding;
 pub mod path;
+pub mod tmp;

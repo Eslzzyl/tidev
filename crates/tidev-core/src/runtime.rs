@@ -20,7 +20,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock as StdRwLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -29,11 +29,11 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use tidev_config::{paths::ConfigPaths, AppConfig, AuthStore};
+use tidev_config::auth::ActiveModel;
 use tidev_storage::SessionStore;
 use tidev_types::message::BackendEvent;
 use tidev_types::message::Message;
 use tidev_types::prompts::SessionMode;
-use tidev_types::tools::ToolDefinition;
 use tidev_types::tools::TodoItem;
 
 use tidev_agent::{AgentDefinition, PendingToolApproval};
@@ -114,6 +114,9 @@ pub struct Runtime {
 
     /// Currently running agent loop handle.
     run_loop_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
+
+    /// Cancellation token for background cleanup tasks.
+    cleanup_cancel: CancellationToken,
 
     /// Workspace root.
     workspace_root: PathBuf,
@@ -472,6 +475,15 @@ impl Runtime {
         tidev_tools::kill_all_children();
     }
 
+    /// Gracefully shut down background tasks.
+    ///
+    /// Cancels the output cleanup task and kills any remaining child processes.
+    /// Call this when the application exits (e.g., after the TUI event loop).
+    pub async fn shutdown(&self) {
+        self.cleanup_cancel.cancel();
+        tidev_tools::kill_all_children();
+    }
+
     /// Undo — revert to the previous user message's state.
     pub async fn undo(&self, session_id: Uuid) -> Result<()> {
         let buf = self.message_buffer(session_id).await;
@@ -735,8 +747,27 @@ impl RuntimeBuilder {
         self
     }
 
+    /// Resolve the active model, falling back to the first available model
+    /// if the default is not configured.
+    fn resolve_fallback_model(
+        config: &AppConfig,
+        auth: &AuthStore,
+    ) -> Result<ActiveModel> {
+        if let Ok(model) = config.resolve_active_model(auth) {
+            return Ok(model);
+        }
+        let summary = config
+            .available_models()
+            .into_iter()
+            .next()
+            .context("no models are configured")?;
+        config.resolve_model_by_ids(auth, &summary.provider_id, &summary.model_id)
+    }
+
     /// Build the runtime.
     pub async fn build(self) -> Result<Runtime> {
+        let _start = Instant::now();
+
         // 1. Config paths.
         let mut paths = ConfigPaths::discover()?;
         if let Some(ref d) = self.config_dir {
@@ -750,41 +781,82 @@ impl RuntimeBuilder {
         }
         paths.ensure_directories()?;
 
-        // 2. Config + auth.
-        let config = AppConfig::load(&paths)?;
+        // 2. Config + auth (with project-level overlay).
+        let workspace_root = self.workspace_root.clone().unwrap_or_default();
+        let config = AppConfig::load_with_overlay(&paths, &workspace_root)?;
         let auth = AuthStore::load_or_create(&paths)?;
 
-        // 3. Database + session store.
+        // ── Startup initialisation ─────────────────────────────────
+        //
+        // Everything below is best-effort initialisation that follows
+        // the old tidev v0.6.x startup sequence.
+
+        // 3. Logging (file + console via custom TidevLogger).
+        tidev_logging::init(&paths.data_dir, &config.logging);
+        log::info!("Runtime initialising, workspace={}", workspace_root.display());
+        log::info!("startup: config + auth loaded in {:?}", _start.elapsed());
+
+        // 4. Shell detection (must happen before any tool execution).
+        tidev_tools::shell::init(config.shell.windows_shell.clone(), Some(&paths));
+
+        // 5. Auto-cleanup of temp files (best-effort, ignore errors).
+        if config.tmp.auto_cleanup {
+            let max_age = Duration::from_secs(config.tmp.max_age_hours * 3600);
+            match tidev_utils::tmp::clean_temp_files(max_age, false) {
+                Ok(removed) if !removed.is_empty() => {
+                    log::info!("Cleaned up {} temp file(s)", removed.len());
+                }
+                Ok(_) => {}
+                Err(e) => log::warn!("Failed to clean temp files: {e}"),
+            }
+        }
+
+        // 6. Database + session store.
+        let _t_db = Instant::now();
         let database = tidev_storage::database::Database::open(&paths.database_file)
             .context("failed to open database")?;
         let store = database.create_store()?;
+        log::info!("startup: database opened in {:?}", _t_db.elapsed());
 
-        // 4. LLM client.
-        let active_model = config.resolve_active_model(&auth)?;
+        // Delete expired tool outputs on startup (best-effort).
+        if let Ok(count) = store.delete_expired_tool_outputs(7) {
+            if count > 0 {
+                log::info!("Cleaned up {count} old tool output(s)");
+            }
+        }
+
+        // 7. LLM client + model resolution (with fallback).
+        let _t_llm = Instant::now();
+        let active_model = Self::resolve_fallback_model(&config, &auth)
+            .context("no models are configured — set up a provider API key first")?;
         let llm = tidev_llm::LlmClient::new(
             config.logging.save_request_body,
             config.logging.max_request_files,
             config.logging.save_response_body,
             config.logging.max_response_files,
         )?;
+        log::info!("startup: LLM client ready in {:?}", _t_llm.elapsed());
 
-        // 5. Skills catalog.
+        // 8. Skills catalog.
+        let _t_skills = Instant::now();
         let skills = tidev_tools::SkillCatalog::discover(
-            &self.workspace_root.clone().unwrap_or_default(),
+            &workspace_root,
             &paths.config_dir,
             &config.skills,
             None,
         );
+        log::info!("startup: skills catalog ready in {:?}", _t_skills.elapsed());
 
-        // 6. Todo persistence bridge.
+        // 9. Todo persistence bridge.
         let todo = Arc::new(TodoStore {
             store: store.clone(),
         });
 
-        // 7. Tool registry.
+        // 10. Tool registry.
+        let _t_tools = Instant::now();
         let max_output_bytes = active_model.max_output_tokens * 2; // heuristic: 2x output tokens ≈ bytes
         let tool_registry = Arc::new(ToolRegistry::new(
-            self.workspace_root.clone().unwrap_or_default(),
+            workspace_root.clone(),
             paths.config_dir.clone(),
             skills.clone(),
             todo,
@@ -793,28 +865,55 @@ impl RuntimeBuilder {
             max_output_bytes,
             config.permissions.clone(),
         ));
+        log::info!("startup: tool registry ready in {:?}", _t_tools.elapsed());
 
-        // 7. Snapshot service.
+        // 11. Snapshot service.
+        let _t_snap = Instant::now();
         let snapshot_config = Arc::new(config.snapshot.clone());
         let snapshot = if snapshot_config.enabled {
             Some(tidev_snapshot::SnapshotService::new(
-                &self.workspace_root.clone().unwrap_or_default(),
+                &workspace_root,
                 &paths,
                 snapshot_config,
             )?)
         } else {
             None
         };
+        log::info!("startup: snapshot service ready in {:?}", _t_snap.elapsed());
 
         // Store active model for loop construction.
         let active_model = Arc::new(StdRwLock::new(active_model));
 
-        // 8. Session manager.
+        // 12. Session manager.
         let session_manager = SessionManager::new(store.clone());
 
-        // 9. Channels.
+        // 13. Start background tool-output cleanup (hourly).
+        let cleanup_cancel = CancellationToken::new();
+        {
+            let cancel = cleanup_cancel.clone();
+            let cstore = store.clone();
+            tokio::spawn(async move {
+                let interval = Duration::from_secs(3600);
+                loop {
+                    tokio::select! {
+                        _ = tokio::time::sleep(interval) => {
+                            if let Ok(count) = cstore.delete_expired_tool_outputs(7) {
+                                if count > 0 {
+                                    log::info!("Cleaned up {count} old tool output(s)");
+                                }
+                            }
+                        }
+                        _ = cancel.cancelled() => break,
+                    }
+                }
+            });
+        }
+
+        // 14. Channels.
         let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
         let (perm_tx, perm_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        log::info!("startup: runtime ready in {:?}", _start.elapsed());
 
         Ok(Runtime {
             config: Arc::new(StdRwLock::new(config)),
@@ -834,7 +933,8 @@ impl RuntimeBuilder {
             perm_tx,
             _perm_rx: Arc::new(Mutex::new(Some(perm_rx))),
             run_loop_handle: Arc::new(Mutex::new(None)),
-            workspace_root: self.workspace_root.unwrap_or_default(),
+            cleanup_cancel,
+            workspace_root,
         })
     }
 }
