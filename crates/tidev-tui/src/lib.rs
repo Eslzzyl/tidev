@@ -288,7 +288,7 @@ impl UiState {
         at_mention.start_background_indexing(runtime.workspace_root());
 
         Self {
-            screen: Screen::Chat,
+            screen: Screen::Welcome,
             theme,
             chat_context: ChatContext::default(),
             context_usage: ContextUsage::default(),
