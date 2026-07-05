@@ -3,7 +3,6 @@ use std::collections::HashMap;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum CommandAction {
     Connect,
-    Mcp,
     Memory,
     Model,
     Search,
@@ -20,7 +19,6 @@ pub enum CommandAction {
     Init,
     Agents,
     Skills,
-    Sync,
 }
 
 #[derive(Clone, Debug)]
@@ -244,13 +242,6 @@ pub static COMMANDS: &[CommandSpec] = &[
         action: CommandAction::Connect,
     },
     CommandSpec {
-        name: "mcp",
-        aliases: &[],
-        description: "Open the MCP panel",
-        usage: "/mcp",
-        action: CommandAction::Mcp,
-    },
-    CommandSpec {
         name: "memory",
         aliases: &["mem"],
         description: "Open the memory panel to manage cross-session memories",
@@ -361,12 +352,5 @@ pub static COMMANDS: &[CommandSpec] = &[
         description: "Browse and preview available skills",
         usage: "/skills",
         action: CommandAction::Skills,
-    },
-    CommandSpec {
-        name: "sync",
-        aliases: &[],
-        description: "Sync sessions with remote machines (see CLI: tidev sync)",
-        usage: "/sync",
-        action: CommandAction::Sync,
     },
 ];

@@ -1,11 +1,15 @@
+use super::*;
+
 pub mod agents_panel;
 pub mod connect;
 pub mod fork_confirm;
+pub mod image_viewer;
 pub mod message_panel;
 pub mod model_panel;
 pub mod permission;
 pub mod question;
 pub mod rename;
+pub mod search_panel;
 pub mod sensitive;
 pub mod session_panel;
 pub mod settings_panel;

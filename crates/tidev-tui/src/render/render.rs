@@ -1,5 +1,6 @@
 use crate::input::composer::{InlineSpan, InlineSpanKind};
 use crate::theme::ThemePalette;
+use crate::utils::TokenUsage;
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Position, Rect},
     prelude::{Frame, Modifier, Style, Text},
@@ -7,7 +8,6 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
-use crate::utils::TokenUsage;
 
 /// Render a vertical scrollbar (1 column wide) into the given area.
 /// Draws a track (░) with a thumb (█) proportional to the visible fraction.
@@ -68,74 +68,64 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use super::{App, Composer, Screen};
 
 impl App {
-    pub(crate) fn palette(&self) -> ThemePalette {
-        self.theme.palette()
-    }
-
     pub(crate) fn render(&mut self, frame: &mut Frame<'_>) {
-        self.message_content_area = None;
-        self.message_scrollbar_area = None;
-        self.sidebar_area = None;
-        self.input_area.set(None);
-        if self.at_mention.visible {
+        self.ui.message_content_area = None;
+        self.ui.message_scrollbar_area = None;
+        self.ui.sidebar_area = None;
+        self.ui.input_area.set(None);
+        if self.ui.at_mention.visible {
             self.refresh_at_mention_state();
         }
-        if self.snippet_state.visible && self.snippet_state.is_enabled() {
+        if self.ui.snippet_state.visible && self.ui.snippet_state.is_enabled() {
             self.refresh_snippet_state();
         }
-        match self.screen {
+        match self.ui.screen {
             Screen::Welcome => self.render_welcome(frame),
             Screen::Chat => self.render_chat(frame),
         }
         let area = frame.area();
         self.render_connect_dialog(frame, area);
         self.render_panel_launcher(frame, area);
-        if let Some(panel) = &self.theme_panel {
+        if let Some(panel) = &self.ui.theme_panel {
             self.render_theme_panel(frame, area, panel);
         }
-        if let Some(panel) = &self.agents_panel {
+        if let Some(panel) = &self.ui.agents_panel {
             self.render_agents_panel(frame, area, panel);
         }
-        if let Some(panel) = &self.skills_panel {
+        if let Some(panel) = &self.ui.skills_panel {
             self.render_skills_panel(frame, area, panel);
         }
-        if let Some(panel) = &self.settings_panel {
+        if let Some(panel) = &self.ui.settings_panel {
             self.render_settings_panel(frame, area, panel);
         }
-        if let Some(panel) = &self.mcp_panel {
-            self.render_mcp_panel(frame, area, panel);
-        }
-        if let Some(panel) = &self.model_panel {
+        if let Some(panel) = &self.ui.model_panel {
             self.render_model_panel(frame, area, panel);
         }
-        if let Some(panel) = &self.search_panel {
+        if let Some(panel) = &self.ui.search_panel {
             self.render_search_panel(frame, area, panel);
         }
-        if let Some(panel) = &self.message_panel {
+        if let Some(panel) = &self.ui.message_panel {
             self.render_message_panel(frame, area, panel);
         }
-        if let Some(panel) = &self.session_panel {
+        if let Some(panel) = &self.ui.session_panel {
             self.render_session_panel(frame, area, panel);
             self.render_session_panel_dialog(frame, area, panel);
         }
-        if let Some(panel) = &self.sync_panel {
-            self.render_sync_panel(frame, area, panel);
-        }
-        if let Some(dialog) = &self.rename_dialog {
+        if let Some(dialog) = &self.ui.rename_dialog {
             self.render_rename_session_dialog(frame, area, dialog);
         }
-        if let Some(dialog) = &self.permission_dialog {
+        if let Some(dialog) = &self.ui.permission_dialog {
             self.render_permission_dialog(frame, area, dialog);
         }
-        if self.fork_confirm_dialog.is_some() {
+        if self.ui.fork_confirm_dialog.is_some() {
             self.render_fork_confirm_dialog(frame, area);
         }
-        if self.undo_confirm_dialog.is_some() {
+        if self.ui.undo_confirm_dialog.is_some() {
             self.render_undo_confirm_dialog(frame, area);
         }
         self.finish_mouse_selection(frame);
         // Image viewer overlay — rendered last so it's on top of everything
-        if let (Some(viewer), Some(picker)) = (&mut self.image_viewer, &self.image_picker) {
+        if let (Some(viewer), Some(picker)) = (&mut self.ui.image_viewer, &self.ui.image_picker) {
             viewer.render(frame, frame.area(), picker);
         }
         self.render_toast(frame);
@@ -143,7 +133,7 @@ impl App {
 
     fn render_toast(&mut self, frame: &mut Frame<'_>) {
         let now = Instant::now();
-        let Some((message, expires_at)) = self.toast.take() else {
+        let Some((message, expires_at)) = self.ui.toast.take() else {
             return;
         };
 
@@ -151,7 +141,7 @@ impl App {
             return;
         }
 
-        let Some(message_area) = self.message_content_area else {
+        let Some(message_area) = self.ui.message_content_area else {
             return;
         };
 
@@ -175,7 +165,7 @@ impl App {
         frame.render_widget(Clear, rect);
         frame.render_widget(paragraph, rect);
 
-        self.toast = Some((message, expires_at));
+        self.ui.toast = Some((message, expires_at));
     }
 
     fn render_welcome(&mut self, frame: &mut Frame<'_>) {
@@ -187,10 +177,7 @@ impl App {
             area,
         );
 
-        let card_width = self
-            .config
-            .read()
-            .unwrap()
+        let card_width = self.runtime.config()
             .ui
             .welcome_width
             .min(area.width.saturating_sub(4).max(32));
@@ -211,11 +198,9 @@ impl App {
             Constraint::Length(8),
             Constraint::Length(1),
             Constraint::Length(
-                self.composer
-                    .preferred_height(
-                        card_inner_width,
-                        self.config.read().unwrap().ui.max_input_lines,
-                    )
+                self.ui
+                    .composer
+                    .preferred_height(card_inner_width, self.runtime.config().ui.max_input_lines)
                     .saturating_add(2),
             ),
         ])
@@ -223,12 +208,12 @@ impl App {
 
         // https://patorjk.com/software/taag/#p=display&f=BlurVision+ASCII&t=tidev&x=none&v=4&h=4&w=80&we=false
         let ascii_art = Paragraph::new(
-            r#"░▒▓████████▓▒░▒▓█▓▒░▒▓███████▓▒░░▒▓████████▓▒░▒▓█▓▒░░▒▓█▓▒░ 
-   ░▒▓█▓▒░   ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░ 
-   ░▒▓█▓▒░   ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░       ░▒▓█▓▒▒▓█▓▒░  
-   ░▒▓█▓▒░   ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓██████▓▒░  ░▒▓█▓▒▒▓█▓▒░  
-   ░▒▓█▓▒░   ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░        ░▒▓█▓▓█▓▒░   
-   ░▒▓█▓▒░   ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░        ░▒▓█▓▓█▓▒░   
+            r#"░▒▓████████▓▒░▒▓█▓▒░▒▓███████▓▒░░▒▓████████▓▒░▒▓█▓▒░░▒▓█▓▒░
+   ░▒▓█▓▒░   ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░
+   ░▒▓█▓▒░   ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░       ░▒▓█▓▒▒▓█▓▒░
+   ░▒▓█▓▒░   ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓██████▓▒░  ░▒▓█▓▒▒▓█▓▒░
+   ░▒▓█▓▒░   ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░        ░▒▓█▓▓█▓▒░
+   ░▒▓█▓▒░   ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░        ░▒▓█▓▓█▓▒░
    ░▒▓█▓▒░   ░▒▓█▓▒░▒▓███████▓▒░░▒▓████████▓▒░  ░▒▓██▓▒░    "#,
         )
         .alignment(Alignment::Center)
@@ -244,22 +229,22 @@ impl App {
             .style(Style::default().fg(palette.muted));
         frame.render_widget(subtitle, sections[1]);
 
-        let prompt_title = match self.pending_mode.as_ref() {
-            Some(pending) if self.pending_request => {
+        let prompt_title = match self.ui.pending_mode.as_ref() {
+            Some(pending) if self.ui.pending_request => {
                 format!(
                     "{} (current), {} (on completion)",
-                    self.mode.title(),
+                    self.ui.mode.title(),
                     pending.title()
                 )
             }
-            _ => self.mode.title().to_string(),
+            _ => self.ui.mode.title().to_string(),
         };
-        let prompt_placeholder = self.composer.placeholder().to_string();
+        let prompt_placeholder = self.ui.composer.placeholder().to_string();
         self.render_input_block_with_composer(
             frame,
             sections[2],
             &prompt_title,
-            &self.composer,
+            &self.ui.composer,
             &prompt_placeholder,
             false,
             true,
@@ -267,7 +252,7 @@ impl App {
         );
 
         // Model info is now displayed inside the composer as metadata
-        let workspace_path = self.workspace_root.display().to_string();
+        let workspace_path = self.runtime.workspace_root().display().to_string();
         let display_path = workspace_path.replace(
             &dirs::home_dir().unwrap_or_default().display().to_string(),
             "~",
@@ -290,7 +275,7 @@ impl App {
 
         // When there is a notice, show it on the row directly above the
         // workspace path so the two always sit together at the bottom.
-        if let Some(message) = self.last_notice.as_deref() {
+        if let Some(message) = self.ui.last_notice.as_deref() {
             let notice_y = area.bottom().saturating_sub(2);
             if notice_y < workspace_area.y {
                 frame.render_widget(
@@ -325,7 +310,7 @@ impl App {
             frame,
             area,
             title,
-            &self.composer,
+            &self.ui.composer,
             placeholder,
             mask_input,
             true,
@@ -380,7 +365,7 @@ impl App {
         };
 
         if register_input_area {
-            self.input_area.set(Some(text_area));
+            self.ui.input_area.set(Some(text_area));
         }
 
         let visible_lines = text_area.height.max(1) as usize;
@@ -389,7 +374,7 @@ impl App {
 
         // Use stored scroll offset, clamped to valid range
         let scroll = if register_input_area {
-            self.input_scroll_offset.min(max_scroll) as u16
+            self.ui.input_scroll_offset.min(max_scroll) as u16
         } else {
             0
         };
@@ -489,11 +474,7 @@ impl App {
                             None => {
                                 // Plain text segment — apply selection if active
                                 let plain_spans = render_plain_segments(
-                                    text,
-                                    *seg_start,
-                                    *seg_end,
-                                    selection,
-                                    palette,
+                                    text, *seg_start, *seg_end, selection, palette,
                                 );
                                 line_spans.extend(plain_spans);
                             }
@@ -508,13 +489,13 @@ impl App {
 
         // Left accent bar (mode-colored) — only for the main composer
         if show_left_accent {
-            let accent_color = if self.shell_mode {
+            let accent_color = if self.ui.shell_mode {
                 palette.success
-            } else if let Some(pending) = self.pending_mode {
+            } else if let Some(pending) = self.ui.pending_mode {
                 // Pending mode switch — show future mode's color immediately
                 palette.border_mode_color(pending)
             } else {
-                palette.border_mode_color(self.mode)
+                palette.border_mode_color(self.ui.mode)
             };
             for row in 0..area.height {
                 frame.render_widget(
@@ -532,25 +513,25 @@ impl App {
                 let mut meta_spans: Vec<Span> = Vec::new();
 
                 // Mode label (Build / Plan / Shell)
-                let (mode_label, mode_style) = if self.shell_mode {
+                let (mode_label, mode_style) = if self.ui.shell_mode {
                     (
                         "Shell".to_string(),
                         Style::default()
                             .fg(palette.success)
                             .add_modifier(Modifier::BOLD),
                     )
-                } else if let Some(pending) = self.pending_mode {
+                } else if let Some(pending) = self.ui.pending_mode {
                     (
-                        format!("{} → {}", self.mode.title(), pending.title()),
+                        format!("{} → {}", self.ui.mode.title(), pending.title()),
                         Style::default()
                             .fg(palette.border_mode_color(pending))
                             .add_modifier(Modifier::BOLD),
                     )
                 } else {
                     (
-                        self.mode.title().to_string(),
+                        self.ui.mode.title().to_string(),
                         Style::default()
-                            .fg(palette.border_mode_color(self.mode))
+                            .fg(palette.border_mode_color(self.ui.mode))
                             .add_modifier(Modifier::BOLD),
                     )
                 };
@@ -560,8 +541,9 @@ impl App {
                 meta_spans.push(Span::styled(" · ", Style::default().fg(palette.muted)));
 
                 // Model label
+                let active_model = self.runtime.active_model();
                 meta_spans.push(Span::styled(
-                    &self.active_model.display_name,
+                    &active_model.display_name,
                     Style::default().fg(palette.text),
                 ));
 
@@ -570,15 +552,15 @@ impl App {
 
                 // Provider
                 meta_spans.push(Span::styled(
-                    &self.active_model.provider_display_name,
+                    &active_model.provider_display_name,
                     Style::default().fg(palette.muted),
                 ));
 
                 // Thinking level (if supported)
-                if self.thinking_level.is_supported() {
+                if self.ui.thinking_level.is_supported() {
                     meta_spans.push(Span::styled(" · ", Style::default().fg(palette.muted)));
                     meta_spans.push(Span::styled(
-                        format!("[{}]", self.thinking_level.display_name()),
+                        format!("[{}]", self.ui.thinking_level.display_name()),
                         Style::default().fg(palette.accent_soft),
                     ));
                 }
@@ -702,42 +684,40 @@ impl App {
     }
 
     fn footer_status_text(&mut self) -> String {
-        let queued_count = self.pending_prompt_queue.len();
+        let queued_count = self.ui.pending_prompt_queue.len();
 
-        if self.pending_request
-            && self
-                .abort_confirmation_deadline
+        if self.ui.pending_request
+            && self.ui.abort_confirmation_deadline
                 .is_some_and(|deadline| deadline > std::time::Instant::now())
         {
             return "Esc again to stop".to_string();
         }
 
-        let token_status = self.context_usage.as_ref().map(|usage| {
+        let token_status = {
             let token_usage = TokenUsage::new(
-                usage.input_tokens,
-                usage.output_tokens,
-                usage.cache_read_tokens,
-                usage.cache_write_tokens,
+                self.ui.context_usage.input_tokens,
+                self.ui.context_usage.output_tokens,
+                self.ui.context_usage.cache_read_tokens,
+                self.ui.context_usage.cache_write_tokens,
             );
-            let max_context = self.active_model.context_window;
+            let max_context = self.runtime.active_model().context_window;
             let percent = token_usage.context_usage_pct(max_context);
-            let used_k = usage.input_tokens / 1000;
+            let used_k = self.ui.context_usage.input_tokens / 1000;
             let max_k = max_context as u32 / 1000;
-            format!("{:.1}% ({}K/{}K)", percent, used_k, max_k)
-        });
+            Some(format!("{:.1}% ({}K/{}K)", percent, used_k, max_k))
+        };
 
-        if self.pending_request {
+        if self.ui.pending_request {
             let spinner = self.loading_spinner();
 
-            let status = if self.conversation.parent_session_id.is_some() {
+            let status = if self.ui.chat_context.parent_session_id.is_some() {
                 format!("{} Thinking...", spinner)
-            } else if !self.running_subagent_executions.is_empty() {
-                let count = self.running_subagent_executions.len();
+            } else if !self.ui.running_subagent_executions.is_empty() {
+                let count = self.ui.running_subagent_executions.len();
                 let label = if count == 1 { "subagent" } else { "subagents" };
                 format!("{} Waiting for {} {}", spinner, count, label)
-            } else if !self.running_tool_executions.is_empty() {
-                let tool_names: Vec<_> = self
-                    .running_tool_executions
+            } else if !self.ui.running_tool_executions.is_empty() {
+                let tool_names: Vec<_> = self.ui.running_tool_executions
                     .iter()
                     .map(|r| r.tool_call.name.as_str())
                     .collect();
@@ -752,19 +732,19 @@ impl App {
                         tool_names.join(", ")
                     )
                 }
-            } else if self.pending_tool_execution.is_some() {
+            } else if self.ui.pending_tool_execution.is_some() {
                 format!("{} Running tools", spinner)
             } else {
-                match self.pending_mode.as_ref() {
+                match self.ui.pending_mode.as_ref() {
                     Some(pending) => {
                         format!(
                             "{} {} → {} (on completion)",
                             spinner,
-                            self.mode.title(),
+                            self.ui.mode.title(),
                             pending.title()
                         )
                     }
-                    None => format!("{} {}", spinner, self.mode.title()),
+                    None => format!("{} {}", spinner, self.ui.mode.title()),
                 }
             };
 
@@ -799,7 +779,7 @@ impl App {
             return token_status;
         }
 
-        if let Some(message) = self.last_notice.as_deref() {
+        if let Some(message) = self.ui.last_notice.as_deref() {
             let background_running = self.background_running_count();
             let background_waiting = self.background_waiting_question_count();
             if background_running > 0 || background_waiting > 0 {
@@ -820,7 +800,7 @@ impl App {
             );
         }
 
-        if self.conversation.parent_session_id.is_some() {
+        if self.ui.chat_context.parent_session_id.is_some() {
             return "Subsession active · Ctrl+X then Up arrow to return".to_string();
         }
 
@@ -831,7 +811,7 @@ impl App {
         const FRAMES: [&str; 4] = ["|", "/", "-", "\\"];
         const FRAME_DURATION_MS: u128 = 100;
 
-        let elapsed = self.spinner_start.elapsed().as_millis();
+        let elapsed = self.ui.spinner_start.elapsed().as_millis();
         let frame_index = (elapsed / FRAME_DURATION_MS) as usize;
 
         FRAMES[frame_index % FRAMES.len()]
@@ -1049,11 +1029,7 @@ fn shorten_by_width(s: &str, max_width: usize) -> String {
 }
 
 /// Check if a byte range `[start, end)` overlaps with an optional selection range.
-fn selection_overlaps(
-    start: usize,
-    end: usize,
-    selection: Option<(usize, usize)>,
-) -> bool {
+fn selection_overlaps(start: usize, end: usize, selection: Option<(usize, usize)>) -> bool {
     selection
         .map(|(sel_start, sel_end)| start < sel_end && end > sel_start)
         .unwrap_or(false)
@@ -1093,7 +1069,8 @@ fn render_plain_segments(
                 result.push(Span::styled(before, Style::default().fg(palette.text)));
             }
             // Selection
-            let selected = text[sel_in_seg_start - seg_start..sel_in_seg_end - seg_start].to_string();
+            let selected =
+                text[sel_in_seg_start - seg_start..sel_in_seg_end - seg_start].to_string();
             result.push(Span::styled(
                 selected,
                 Style::default().fg(palette.text).bg(palette.accent),

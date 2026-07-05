@@ -10,6 +10,7 @@ description = "Shared utility functions for tidev"
 anyhow = "1"
 dunce = "1"
 dirs = "6"
+globset = "0.4"
 log = "0.4"
 
 [target.'cfg(windows)'.dependencies]

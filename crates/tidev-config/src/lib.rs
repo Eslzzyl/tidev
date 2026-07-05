@@ -15,8 +15,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::auth::{ActiveModel, ModelSummary};
 pub use crate::auth::AuthStore;
+use crate::auth::{ActiveModel, ModelSummary};
 use crate::paths::ConfigPaths;
 use crate::provider::{ProviderConfig, ProviderSource};
 use tidev_types::tools::PermissionConfig;
@@ -28,9 +28,9 @@ const BUNDLED_PRESETS_TOML: &str = include_str!("../../../presets.toml");
 // Public re-exports
 // ---------------------------------------------------------------------------
 
-pub use crate::types::ApiType;
 pub use crate::reasoning::ThinkingLevelType;
 pub use crate::reasoning::ThinkingMatcher;
+pub use crate::types::ApiType;
 
 // ---------------------------------------------------------------------------
 // WebSearchConfig
@@ -238,52 +238,6 @@ impl Default for TmpConfig {
 }
 
 // ---------------------------------------------------------------------------
-// McpConfig
-// ---------------------------------------------------------------------------
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct McpConfig {
-    #[serde(default)]
-    pub servers: BTreeMap<String, McpServerConfig>,
-}
-
-impl McpConfig {
-    pub fn is_empty(&self) -> bool {
-        self.servers.is_empty()
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum McpServerConfig {
-    Stdio {
-        command: String,
-        #[serde(default)]
-        args: Vec<String>,
-        #[serde(default)]
-        cwd: Option<String>,
-        #[serde(default)]
-        env: BTreeMap<String, String>,
-    },
-    Http {
-        url: String,
-    },
-    Sse {
-        url: String,
-    },
-}
-
-impl McpServerConfig {
-    pub fn kind_label(&self) -> &'static str {
-        match self {
-            Self::Stdio { .. } => "stdio",
-            Self::Http { .. } => "http",
-            Self::Sse { .. } => "sse",
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
 // LogConfig
 // ---------------------------------------------------------------------------
 
@@ -309,12 +263,24 @@ pub struct LogConfig {
     pub max_response_files: usize,
 }
 
-fn default_log_enabled() -> bool { true }
-fn default_log_level() -> String { "INFO".to_string() }
-fn default_max_size_mb() -> u32 { 10 }
-fn default_max_files() -> u32 { 5 }
-fn default_max_request_files() -> usize { 100 }
-fn default_max_response_files() -> usize { 100 }
+fn default_log_enabled() -> bool {
+    true
+}
+fn default_log_level() -> String {
+    "INFO".to_string()
+}
+fn default_max_size_mb() -> u32 {
+    10
+}
+fn default_max_files() -> u32 {
+    5
+}
+fn default_max_request_files() -> usize {
+    100
+}
+fn default_max_response_files() -> usize {
+    100
+}
 
 impl Default for LogConfig {
     fn default() -> Self {
@@ -349,8 +315,12 @@ pub struct UiConfig {
     pub tab_width: usize,
 }
 
-fn default_scroll_speed() -> f32 { 3.0 }
-fn default_tab_width() -> usize { 4 }
+fn default_scroll_speed() -> f32 {
+    3.0
+}
+fn default_tab_width() -> usize {
+    4
+}
 
 impl Default for UiConfig {
     fn default() -> Self {
@@ -389,8 +359,6 @@ pub struct AppConfig {
     pub instructions: Vec<String>,
     #[serde(default)]
     pub skills: Vec<String>,
-    #[serde(default, skip_serializing_if = "McpConfig::is_empty")]
-    pub mcp: McpConfig,
     #[serde(default)]
     pub permissions: PermissionConfig,
     #[serde(default)]
@@ -426,7 +394,6 @@ impl Default for AppConfig {
             providers: BTreeMap::new(),
             instructions: Vec::new(),
             skills: Vec::new(),
-            mcp: McpConfig::default(),
             permissions: PermissionConfig::default(),
             access_control: AccessControlConfig::default(),
             notifications: NotificationConfig::default(),
@@ -467,7 +434,10 @@ impl AppConfig {
     }
 
     /// Load config and overlay with project-level `.tidev/config.toml`.
-    pub fn load_with_overlay(paths: &ConfigPaths, workspace_root: &std::path::Path) -> Result<Self> {
+    pub fn load_with_overlay(
+        paths: &ConfigPaths,
+        workspace_root: &std::path::Path,
+    ) -> Result<Self> {
         let mut config = Self::load_global(paths)?;
 
         // Apply project-level overlay
@@ -491,28 +461,49 @@ impl AppConfig {
         let has = |key: &str| top_level_toml_keys(overlay_toml).contains(key);
 
         // Scalar fields: replaced when present
-        if has("theme") { self.theme = overlay.theme; }
-        if has("default_provider") { self.default_provider = overlay.default_provider; }
-        if has("default_model") { self.default_model = overlay.default_model; }
-
-        // MCP servers: extend (project servers add to global)
-        if has("mcp") {
-            self.mcp.servers.extend(overlay.mcp.servers);
+        if has("theme") {
+            self.theme = overlay.theme;
+        }
+        if has("default_provider") {
+            self.default_provider = overlay.default_provider;
+        }
+        if has("default_model") {
+            self.default_model = overlay.default_model;
         }
 
         // Lists: append
-        if has("instructions") { self.instructions.extend(overlay.instructions); }
-        if has("skills") { self.skills.extend(overlay.skills); }
+        if has("instructions") {
+            self.instructions.extend(overlay.instructions);
+        }
+        if has("skills") {
+            self.skills.extend(overlay.skills);
+        }
 
         // Sub-configs: full replacement when section is present
-        if has("ui") { self.ui = overlay.ui; }
-        if has("logging") { self.logging = overlay.logging; }
-        if has("permissions") { self.permissions = overlay.permissions; }
-        if has("access_control") { self.access_control = overlay.access_control; }
-        if has("notifications") { self.notifications = overlay.notifications; }
-        if has("agent") { self.agent = overlay.agent; }
-        if has("shell") { self.shell = overlay.shell; }
-        if has("tmp") { self.tmp = overlay.tmp; }
+        if has("ui") {
+            self.ui = overlay.ui;
+        }
+        if has("logging") {
+            self.logging = overlay.logging;
+        }
+        if has("permissions") {
+            self.permissions = overlay.permissions;
+        }
+        if has("access_control") {
+            self.access_control = overlay.access_control;
+        }
+        if has("notifications") {
+            self.notifications = overlay.notifications;
+        }
+        if has("agent") {
+            self.agent = overlay.agent;
+        }
+        if has("shell") {
+            self.shell = overlay.shell;
+        }
+        if has("tmp") {
+            self.tmp = overlay.tmp;
+        }
     }
 
     // ── Saving ───────────────────────────────────────────────────────
@@ -542,6 +533,11 @@ impl AppConfig {
         } else {
             None
         }
+    }
+
+    pub fn provider_display_name(&self, provider_id: &str) -> Option<&str> {
+        self.provider(provider_id)
+            .map(|provider| provider.display_name.as_str())
     }
 
     pub fn provider_exists(&self, provider_id: &str) -> bool {
@@ -606,6 +602,24 @@ impl AppConfig {
 
     pub fn resolve_active_model(&self, auth: &AuthStore) -> Result<ActiveModel> {
         self.resolve_model(auth, None, None)
+    }
+
+    /// Resolve a model for a given provider using its first configured model.
+    pub fn resolve_provider_default_model(
+        &self,
+        auth: &AuthStore,
+        provider_id: &str,
+    ) -> Result<ActiveModel> {
+        let provider = self
+            .provider(provider_id)
+            .with_context(|| format!("unknown provider '{provider_id}'"))?;
+        let model_id = provider
+            .models
+            .keys()
+            .next()
+            .cloned()
+            .with_context(|| format!("provider '{provider_id}' has no configured models"))?;
+        self.resolve_model_by_ids(auth, provider_id, &model_id)
     }
 
     pub fn resolve_model_by_ids(
@@ -863,7 +877,11 @@ mod tests {
         let config = AppConfig::default();
         let auth = AuthStore::default();
         let model = config.resolve_model_by_ids(&auth, "deepseek", "deepseek-v4-flash");
-        assert!(model.is_ok(), "resolve_model should succeed: {:?}", model.err());
+        assert!(
+            model.is_ok(),
+            "resolve_model should succeed: {:?}",
+            model.err()
+        );
         let model = model.unwrap();
         assert_eq!(model.provider_id, "deepseek");
         assert_eq!(model.model_id, "deepseek-v4-flash");

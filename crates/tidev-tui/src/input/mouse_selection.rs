@@ -197,24 +197,23 @@ impl App {
             .fg(palette.selection_fg);
 
         let buffer = frame.buffer_mut();
-        self.mouse_selection.apply_overlay(
+        self.ui.mouse_selection.apply_overlay(
             buffer,
-            self.message_scroll_offset,
-            &self.selectable_regions,
+            self.ui.message_scroll_offset,
+            &self.ui.selectable_regions,
             selection_style,
         );
 
-        let Some(_) = self
-            .mouse_selection
-            .take_pending_copy(self.message_scroll_offset)
+        let Some(_) = self.ui.mouse_selection
+            .take_pending_copy(self.ui.message_scroll_offset)
         else {
             return;
         };
 
-        let Some(text) = self.mouse_selection.selected_text(
+        let Some(text) = self.ui.mouse_selection.selected_text(
             buffer,
-            self.message_scroll_offset,
-            &self.selectable_regions,
+            self.ui.message_scroll_offset,
+            &self.ui.selectable_regions,
         ) else {
             return;
         };
@@ -225,15 +224,15 @@ impl App {
 
         match copy_to_clipboard(&text) {
             Ok(lease) => {
-                self.selection_clipboard_lease = lease;
-                self.mouse_selection.clear();
-                self.toast = Some((
+                self.ui.selection_clipboard_lease = lease;
+                self.ui.mouse_selection.clear();
+                self.ui.toast = Some((
                     "Selection copied to clipboard".to_string(),
                     Instant::now() + Duration::from_secs(3),
                 ));
             }
             Err(error) => {
-                self.toast = Some((
+                self.ui.toast = Some((
                     format!("Failed to copy selection: {error}"),
                     Instant::now() + Duration::from_secs(3),
                 ));

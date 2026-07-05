@@ -129,6 +129,11 @@ impl FileSearchIndex {
         Self::default()
     }
 
+    /// Return the current revision number, incremented on each index rebuild.
+    pub fn revision(&self) -> u64 {
+        self.revision.load(Ordering::Acquire)
+    }
+
     pub fn ensure_background_indexing(self: &Arc<Self>, workspace_root: &Path) {
         let generation = self.ensure_root(workspace_root);
         self.ensure_workspace_watcher(workspace_root);

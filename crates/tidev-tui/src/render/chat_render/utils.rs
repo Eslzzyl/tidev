@@ -6,7 +6,7 @@ use ratatui::{
     text::{Line, Span},
 };
 use std::path::Path;
-use tidev_utils::display_workspace_relative;
+use tidev_utils::path::display_workspace_relative;
 use tidev_types::tools::canonical_tool_name;
 
 pub(super) fn render_reasoning_markdown_lines(

@@ -148,41 +148,18 @@ impl PermissionConfig {
 pub enum ToolOrigin {
     /// A built-in tool implemented by tidev itself.
     Local,
-    /// A tool exposed by an MCP server.
-    Mcp {
-        server_name: String,
-        tool_name: String,
-    },
 }
 
 impl ToolOrigin {
     pub fn permission_key(&self, name: &str) -> String {
         match self {
             Self::Local => name.to_string(),
-            Self::Mcp {
-                server_name,
-                tool_name,
-            } => format!("mcp:{server_name}:{tool_name}"),
         }
     }
 
     pub fn permission_label(&self, display_name: &str, _name: &str) -> String {
         match self {
             Self::Local => display_name.to_string(),
-            Self::Mcp {
-                server_name,
-                tool_name,
-            } => format!("{server_name} / {tool_name} ({display_name})"),
-        }
-    }
-
-    pub fn as_mcp(&self) -> Option<(&str, &str)> {
-        match self {
-            Self::Local => None,
-            Self::Mcp {
-                server_name,
-                tool_name,
-            } => Some((server_name.as_str(), tool_name.as_str())),
         }
     }
 }
@@ -222,39 +199,6 @@ impl ToolDefinition {
         }
     }
 
-    /// Build an MCP tool name (`mcp__{server}__{tool}`).
-    pub fn mcp_name(server_name: &str, tool_name: &str) -> String {
-        let mut name = String::from("mcp__");
-        name.push_str(&sanitize_name(server_name));
-        name.push_str("__");
-        name.push_str(&sanitize_name(tool_name));
-        name
-    }
-
-    /// Create a new MCP tool definition.
-    #[allow(clippy::too_many_arguments)]
-    pub fn mcp(
-        name: String,
-        display_name: String,
-        description: String,
-        parameters: Value,
-        permission: ToolPermission,
-        server_name: String,
-        tool_name: String,
-    ) -> Self {
-        Self {
-            name,
-            display_name,
-            description,
-            parameters,
-            permission,
-            origin: ToolOrigin::Mcp {
-                server_name,
-                tool_name,
-            },
-        }
-    }
-
     pub fn needs_confirmation(&self) -> bool {
         self.permission.needs_confirmation()
     }
@@ -265,44 +209,6 @@ impl ToolDefinition {
 
     pub fn permission_label(&self) -> String {
         self.origin.permission_label(&self.display_name, &self.name)
-    }
-
-    pub fn mcp_target(&self) -> Option<(&str, &str)> {
-        self.origin.as_mcp()
-    }
-}
-
-/// Sanitize a value for use in MCP tool names.
-fn sanitize_name(value: &str) -> String {
-    let mut sanitized = String::new();
-    let mut last_was_separator = false;
-
-    for ch in value.chars() {
-        let mapped = if ch.is_ascii_alphanumeric() {
-            Some(ch.to_ascii_lowercase())
-        } else if matches!(ch, '-' | '_') {
-            Some(ch)
-        } else {
-            None
-        };
-
-        match mapped {
-            Some(ch) => {
-                sanitized.push(ch);
-                last_was_separator = false;
-            }
-            None if !last_was_separator => {
-                sanitized.push('_');
-                last_was_separator = true;
-            }
-            None => {}
-        }
-    }
-
-    if sanitized.trim_matches('_').is_empty() {
-        "mcp".to_string()
-    } else {
-        sanitized.trim_matches('_').to_string()
     }
 }
 
@@ -703,7 +609,10 @@ mod tests {
     #[test]
     fn test_read_args_schema() {
         let schema = ReadArgs::schema();
-        let props = schema.get("properties").and_then(|v| v.as_object()).unwrap();
+        let props = schema
+            .get("properties")
+            .and_then(|v| v.as_object())
+            .unwrap();
         assert!(props.contains_key("file_path"));
         assert!(props.contains_key("offset"));
         assert!(props.contains_key("limit"));
@@ -715,7 +624,10 @@ mod tests {
     #[test]
     fn test_write_args_schema() {
         let schema = WriteArgs::schema();
-        let props = schema.get("properties").and_then(|v| v.as_object()).unwrap();
+        let props = schema
+            .get("properties")
+            .and_then(|v| v.as_object())
+            .unwrap();
         assert!(props.contains_key("file_path"));
         assert!(props.contains_key("content"));
     }

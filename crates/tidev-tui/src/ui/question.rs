@@ -428,29 +428,28 @@ impl App {
         tool_call: ToolCall,
         args: QuestionArgs,
     ) -> Result<()> {
-        self.connect_dialog = None;
-        self.theme_panel = None;
-        self.model_panel = None;
-        self.session_panel = None;
-        self.mcp_panel = None;
-        self.command_palette.clear();
-        self.at_mention.clear();
-        self.draft_attachments.clear();
-        self.restored_attachments.clear();
+        self.ui.connect_dialog = None;
+        self.ui.theme_panel = None;
+        self.ui.model_panel = None;
+        self.ui.session_panel = None;
+        self.ui.command_palette.clear();
+        self.ui.at_mention.clear();
+        self.ui.draft_attachments.clear();
+        self.ui.restored_attachments.clear();
 
         let dialog = QuestionDialogState::new(tool_call, args.questions);
-        self.question_dialog = Some(dialog);
+        self.ui.question_dialog = Some(dialog);
 
         // Save composer content so it can be restored after the dialog closes
-        let text = self.composer.text().to_string();
+        let text = self.ui.composer.text().to_string();
         if !text.is_empty() {
-            self.saved_composer_text = Some(text);
+            self.ui.saved_composer_text = text;
         }
 
-        self.composer.clear();
-        self.composer
+        self.ui.composer.clear();
+        self.ui.composer
             .set_placeholder("Type your own answer and press Enter");
-        self.last_notice =
+        self.ui.last_notice =
             Some("Use arrows to choose, Space to toggle, Enter to select or continue".to_string());
         Ok(())
     }
@@ -458,10 +457,8 @@ impl App {
     pub(crate) fn handle_question_dialog_key(
         &mut self,
         key: KeyEvent,
-        runtime: &Runtime,
     ) -> Result<()> {
-        let Some(is_editing_custom) = self
-            .question_dialog
+        let Some(is_editing_custom) = self.ui.question_dialog
             .as_ref()
             .map(|dialog| dialog.editing_custom)
         else {
@@ -470,11 +467,11 @@ impl App {
 
         if is_editing_custom {
             if matches!(key.code, KeyCode::Esc) {
-                if let Some(dialog) = self.question_dialog.as_mut() {
+                if let Some(dialog) = self.ui.question_dialog.as_mut() {
                     dialog.stop_custom_editing();
                 }
-                self.composer.clear();
-                self.composer
+                self.ui.composer.clear();
+                self.ui.composer
                     .set_placeholder("Type your own answer and press Enter");
                 return Ok(());
             }
@@ -484,11 +481,10 @@ impl App {
                 && !key.modifiers.contains(KeyModifiers::ALT)
             {
                 let should_advance = {
-                    let dialog = self
-                        .question_dialog
+                    let dialog = self.ui.question_dialog
                         .as_mut()
                         .expect("question dialog exists");
-                    dialog.sync_current_custom_input(self.composer.text());
+                    dialog.sync_current_custom_input(self.ui.composer.text());
                     let allow_multiple = dialog
                         .current_question()
                         .is_some_and(|question| question.multiple.unwrap_or(false));
@@ -496,21 +492,21 @@ impl App {
                     !allow_multiple
                 };
 
-                self.composer.clear();
-                self.composer
+                self.ui.composer.clear();
+                self.ui.composer
                     .set_placeholder("Type your own answer and press Enter");
 
                 if should_advance {
-                    self.advance_question_dialog(runtime)?;
+                    self.advance_question_dialog( )?;
                 }
 
                 return Ok(());
             }
 
-            let _ = self.composer.handle_key_with_history(key, false);
+            let _ = self.ui.composer.handle_key_with_history(key, false);
             self.ensure_input_cursor_visible();
-            if let Some(dialog) = self.question_dialog.as_mut() {
-                dialog.sync_current_custom_input(self.composer.text());
+            if let Some(dialog) = self.ui.question_dialog.as_mut() {
+                dialog.sync_current_custom_input(self.ui.composer.text());
             }
             return Ok(());
         }
@@ -518,23 +514,24 @@ impl App {
         if matches!(key.code, KeyCode::Esc) {
             // Record a tool result for the dismissed question before aborting,
             // so the assistant message's tool_calls remain balanced with a tool response.
-            if let Some(dialog) = self.question_dialog.take() {
+            if let Some(dialog) = self.ui.question_dialog.take() {
                 self.record_tool_result(
                     dialog.tool_call,
                     ToolExecutionResult::new("Tool 'question' was dismissed by user"),
                 )?;
                 self.advance_pending_tool_execution();
             }
-            if let Some(saved) = self.saved_composer_text.take() {
-                self.composer.set_text(saved);
-                self.composer
+            let saved = std::mem::take(&mut self.ui.saved_composer_text);
+            if !saved.is_empty() {
+                self.ui.composer.set_text(saved);
+                self.ui.composer
                     .set_placeholder("Ask tidev about your code, task, or question...");
             } else {
-                self.composer.clear();
-                self.composer
+                self.ui.composer.clear();
+                self.ui.composer
                     .set_placeholder("Ask tidev about your code, task, or question...");
             }
-            self.last_notice = Some("Question dialog dismissed, request stopped".to_string());
+            self.ui.last_notice = Some("Question dialog dismissed, request stopped".to_string());
             self.abort_current_request();
             return Ok(());
         }
@@ -542,11 +539,11 @@ impl App {
         if (matches!(key.code, KeyCode::Char('p')) && key.modifiers.contains(KeyModifiers::CONTROL))
             || (matches!(key.code, KeyCode::Left) && key.modifiers.is_empty())
         {
-            if let Some(dialog) = self.question_dialog.as_mut() {
+            if let Some(dialog) = self.ui.question_dialog.as_mut() {
                 dialog.move_previous();
             }
-            self.composer.clear();
-            self.composer
+            self.ui.composer.clear();
+            self.ui.composer
                 .set_placeholder("Type your own answer and press Enter");
             return Ok(());
         }
@@ -554,26 +551,26 @@ impl App {
         if (matches!(key.code, KeyCode::Char('n')) && key.modifiers.contains(KeyModifiers::CONTROL))
             || (matches!(key.code, KeyCode::Right) && key.modifiers.is_empty())
         {
-            self.advance_question_dialog(runtime)?;
+            self.advance_question_dialog( )?;
             return Ok(());
         }
 
         if matches!(key.code, KeyCode::Up | KeyCode::Char('k')) {
-            if let Some(dialog) = self.question_dialog.as_mut() {
+            if let Some(dialog) = self.ui.question_dialog.as_mut() {
                 dialog.move_selection(-1);
             }
             return Ok(());
         }
 
         if matches!(key.code, KeyCode::Down | KeyCode::Char('j')) {
-            if let Some(dialog) = self.question_dialog.as_mut() {
+            if let Some(dialog) = self.ui.question_dialog.as_mut() {
                 dialog.move_selection(1);
             }
             return Ok(());
         }
 
         if matches!(key.code, KeyCode::Char(' ')) {
-            self.handle_question_dialog_selection(false, runtime)?;
+            self.handle_question_dialog_selection(false)?;
             return Ok(());
         }
 
@@ -581,11 +578,11 @@ impl App {
             && !key.modifiers.contains(KeyModifiers::SHIFT)
             && !key.modifiers.contains(KeyModifiers::ALT)
         {
-            self.handle_question_dialog_selection(true, runtime)?;
+            self.handle_question_dialog_selection(true)?;
             return Ok(());
         }
 
-        if let Some(dialog) = self.question_dialog.as_mut()
+        if let Some(dialog) = self.ui.question_dialog.as_mut()
             && dialog
                 .custom_option_index()
                 .is_some_and(|index| index == dialog.selected_index())
@@ -599,12 +596,12 @@ impl App {
         {
             let custom_text = dialog.current_custom_input().to_string();
             dialog.toggle_custom_option();
-            self.composer.set_text(custom_text);
-            self.composer
+            self.ui.composer.set_text(custom_text);
+            self.ui.composer
                 .set_placeholder("Type your own answer and press Enter");
-            let _ = self.composer.handle_key_with_history(key, false);
-            if let Some(dialog) = self.question_dialog.as_mut() {
-                dialog.sync_current_custom_input(self.composer.text());
+            let _ = self.ui.composer.handle_key_with_history(key, false);
+            if let Some(dialog) = self.ui.question_dialog.as_mut() {
+                dialog.sync_current_custom_input(self.ui.composer.text());
             }
             return Ok(());
         }
@@ -615,9 +612,8 @@ impl App {
     fn handle_question_dialog_selection(
         &mut self,
         from_enter: bool,
-        runtime: &Runtime,
     ) -> Result<()> {
-        let Some(dialog) = self.question_dialog.as_mut() else {
+        let Some(dialog) = self.ui.question_dialog.as_mut() else {
             return Ok(());
         };
 
@@ -628,12 +624,12 @@ impl App {
         if is_custom_selected {
             dialog.toggle_custom_option();
             if dialog.editing_custom {
-                self.composer
+                self.ui.composer
                     .set_text(dialog.current_custom_input().to_string());
-                self.composer
+                self.ui.composer
                     .set_placeholder("Type your own answer and press Enter");
             } else {
-                self.composer.clear();
+                self.ui.composer.clear();
             }
             return Ok(());
         }
@@ -645,38 +641,37 @@ impl App {
         dialog.toggle_regular_option(selected_index);
 
         if from_enter && !allow_multiple {
-            self.advance_question_dialog(runtime)?;
+            self.advance_question_dialog( )?;
         }
 
         Ok(())
     }
 
-    fn advance_question_dialog(&mut self, runtime: &Runtime) -> Result<()> {
-        if self
-            .question_dialog
+    fn advance_question_dialog(&mut self) -> Result<()> {
+        if self.ui.question_dialog
             .as_ref()
             .is_some_and(QuestionDialogState::is_last)
         {
-            self.resolve_question_dialog(true, runtime)?;
+            self.resolve_question_dialog(true)?;
             return Ok(());
         }
 
-        if let Some(dialog) = self.question_dialog.as_mut() {
+        if let Some(dialog) = self.ui.question_dialog.as_mut() {
             dialog.move_next();
         }
 
-        self.composer.clear();
-        self.composer
+        self.ui.composer.clear();
+        self.ui.composer
             .set_placeholder("Type your own answer and press Enter");
         Ok(())
     }
 
-    fn resolve_question_dialog(&mut self, allow: bool, runtime: &Runtime) -> Result<()> {
-        let Some(dialog) = self.question_dialog.take() else {
+    fn resolve_question_dialog(&mut self, allow: bool) -> Result<()> {
+        let Some(dialog) = self.ui.question_dialog.take() else {
             return Ok(());
         };
 
-        if self.pending_permission_response.is_some() {
+        if self.ui.pending_permission_response.is_some() {
             // Permission channel mode — result is sent back via channel
             let output = if allow {
                 dialog.formatted_output()
@@ -688,20 +683,21 @@ impl App {
             // renders in the TUI tool cards.  Persistence is handled by
             // AgentRuntime::persist_tool_result.
             self.record_tool_result(dialog.tool_call.clone(), result.clone())?;
-            self.pending_rejected_tools.push((dialog.tool_call, result));
+            self.ui.pending_rejected_tools.push(dialog.tool_call);
         }
 
-        if let Some(saved) = self.saved_composer_text.take() {
-            self.composer.set_text(saved);
-            self.composer
+        let saved = std::mem::take(&mut self.ui.saved_composer_text);
+        if !saved.is_empty() {
+            self.ui.composer.set_text(saved);
+            self.ui.composer
                 .set_placeholder("Ask tidev about your code, task, or question...");
         } else {
-            self.composer.clear();
-            self.composer
+            self.ui.composer.clear();
+            self.ui.composer
                 .set_placeholder("Ask tidev about your code, task, or question...");
         }
         self.advance_pending_tool_execution();
-        self.process_pending_tool_execution(runtime)
+        self.process_pending_tool_execution( )
     }
 }
 

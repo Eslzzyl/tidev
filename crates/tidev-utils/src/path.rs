@@ -195,9 +195,8 @@ pub fn display_workspace_relative(workspace_root: &Path, path: &Path) -> String 
     }
 }
 
-/// Extract the file path from a codex-format patch string.
-/// Returns the first file path found, or None if parsing fails.
-/// Looks for `*** Add File:`, `*** Update File:`, `*** Delete File:` markers.
+/// Extract the file path from a unified-diff header line like
+/// `*** Add File: src/main.rs` or `*** Update File: Cargo.toml`.
 pub fn extract_file_path_from_patch(patch: &str) -> Option<String> {
     const ADD_MARKER: &str = "*** Add File: ";
     const UPDATE_MARKER: &str = "*** Update File: ";
@@ -217,8 +216,59 @@ pub fn extract_file_path_from_patch(patch: &str) -> Option<String> {
 }
 
 // ---------------------------------------------------------------------------
-// Tests
+// Sensitive file detection
 // ---------------------------------------------------------------------------
+
+const SENSITIVE_FILE_NAME: &str = ".tidev/sensitive.txt";
+
+/// Load sensitive-file glob patterns from `.tidev/sensitive.txt`.
+///
+/// Returns the patterns as strings exactly as they appear in the file
+/// (comments and blank lines excluded).  Patterns are relative to the
+/// workspace root — they will be matched against absolute paths.
+pub fn load_sensitive_patterns(workspace_root: &Path) -> Vec<String> {
+    let path = workspace_root.join(SENSITIVE_FILE_NAME);
+    let content = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+
+    content
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        })
+        .collect()
+}
+
+/// Check whether `resolved_path` matches any of the sensitive-file patterns.
+pub fn is_path_sensitive(workspace_root: &Path, resolved_path: &Path, patterns: &[String]) -> bool {
+    if patterns.is_empty() {
+        return false;
+    }
+
+    for pattern_str in patterns {
+        let abs_pattern = workspace_root.join(pattern_str);
+        let pattern_str = abs_pattern.to_string_lossy();
+
+        match globset::Glob::new(&pattern_str) {
+            Ok(glob) => {
+                let matcher = glob.compile_matcher();
+                if matcher.is_match(resolved_path) {
+                    return true;
+                }
+            }
+            Err(_) => continue,
+        }
+    }
+
+    false
+}
 
 #[cfg(test)]
 mod tests {

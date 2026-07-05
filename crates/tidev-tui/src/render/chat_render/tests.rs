@@ -10,8 +10,8 @@ use ratatui::text::Line;
 use std::collections::{HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
 use tempfile::TempDir;
-use tidev_engine::config::{AppConfig, AuthStore};
-use tidev_session::session::{Conversation, Message, MessageRole};
+use tidev_config::{AppConfig, AuthStore};
+use tidev_types::message::{Conversation, Message, MessageRole};
 use tidev_types::prompts::SessionMode;
 
 fn line_text(line: &Line<'static>) -> String {
@@ -46,7 +46,7 @@ impl DerefMut for TestApp {
 
 fn test_app() -> TestApp {
     let temp_root = TempDir::new().expect("temp dir should be created");
-    let paths = tidev_engine::config::ConfigPaths {
+    let paths = tidev_config::paths::ConfigPaths {
         config_dir: temp_root.path().join(".config").join("tidev"),
         data_dir: temp_root.path().join(".local").join("share").join("tidev"),
         config_file: temp_root
@@ -121,8 +121,8 @@ fn reasoning_lines_shows_thinking_during_streaming() {
 
 #[test]
 fn render_tool_result_detail_lines_todowrite_formats_checkbox_list() {
-    use tidev_engine::tooling::TodoItem;
-    use tidev_session::session::{Message, ToolExecutionResult};
+    use tidev_types::tools::TodoItem;
+    use tidev_types::message::{Message, ToolExecutionResult};
 
     let todos = vec![
         TodoItem {
@@ -175,7 +175,7 @@ fn render_tool_result_detail_lines_todowrite_formats_checkbox_list() {
 
 #[test]
 fn streaming_tool_call_switches_to_summary_after_arguments_parse() {
-    use tidev_session::session::ToolCall;
+    use tidev_types::message::ToolCall;
 
     let tool_call = ToolCall {
         id: "tool-call-id".to_string(),
@@ -285,9 +285,9 @@ fn render_question_result_pairs_fallback_on_empty_input() {
 #[test]
 fn message_render_cache_hits_on_second_render_same_width() {
     let mut app = test_app();
-    app.conversation
+    app.ui.chat_context
         .push(Message::new(MessageRole::User, "show file list"));
-    app.conversation.push(Message::new(
+    app.ui.chat_context.push(Message::new(
         MessageRole::Assistant,
         "Summary with **markdown** and `inline code`.",
     ));
@@ -313,9 +313,9 @@ fn message_render_cache_hits_on_second_render_same_width() {
 #[test]
 fn message_render_cache_width_change_causes_miss() {
     let mut app = test_app();
-    app.conversation
+    app.ui.chat_context
         .push(Message::new(MessageRole::User, "open README"));
-    app.conversation.push(Message::new(
+    app.ui.chat_context.push(Message::new(
         MessageRole::Assistant,
         "A longer paragraph that should wrap differently at another width.",
     ));
@@ -337,15 +337,15 @@ fn message_render_cache_width_change_causes_miss() {
 #[test]
 fn message_render_cache_invalidation_refreshes_updated_content() {
     let mut app = test_app();
-    app.conversation
+    app.ui.chat_context
         .push(Message::new(MessageRole::Assistant, "old cached content"));
 
     let (before, _, _, _, _, _, _, _) = app.messages_text(Some(80));
     let before_text = text_lines_to_string(&before.lines);
     assert!(before_text.contains("old cached content"));
 
-    let message_id = app.conversation.messages[0].id;
-    app.conversation.messages[0].content = "new refreshed content".to_string();
+    let message_id = app.ui.chat_context.messages[0].id;
+    app.ui.chat_context.messages[0].content = "new refreshed content".to_string();
     app.invalidate_active_message_render_cache_for(message_id);
 
     let (after, _, _, _, _, _, _, _) = app.messages_text(Some(80));
@@ -356,7 +356,7 @@ fn message_render_cache_invalidation_refreshes_updated_content() {
 #[test]
 fn first_user_message_has_leading_blank_line() {
     let mut app = test_app();
-    app.conversation
+    app.ui.chat_context
         .push(Message::new(MessageRole::User, "hello there"));
 
     let (text, _, _, _, _, _, _, _) = app.messages_text(Some(80));
@@ -377,7 +377,7 @@ fn virtualized_render_clamps_scroll_and_keeps_content_visible() {
     app.message_scroll_offset = usize::MAX;
 
     for idx in 0..24 {
-        app.conversation.push(Message::new(
+        app.ui.chat_context.push(Message::new(
             MessageRole::Assistant,
             format!("message {idx}\n\n```rust\nfn item_{idx}() {{\n    println!(\"ok\");\n}}\n```"),
         ));

@@ -52,12 +52,24 @@ pub struct AtMentionState {
 }
 
 impl AtMentionState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     pub fn clear(&mut self) {
         self.visible = false;
         self.query.clear();
         self.selected_index = 0;
         self.suggestions.clear();
         self.last_index_revision = 0;
+    }
+
+    pub fn selected_count(&self) -> usize {
+        self.suggestions.len()
+    }
+
+    pub fn selected_suggestion(&self, index: usize) -> Option<&AtMentionSuggestion> {
+        self.suggestions.get(index)
     }
 
     pub fn start_background_indexing(&self, workspace_root: &Path) {

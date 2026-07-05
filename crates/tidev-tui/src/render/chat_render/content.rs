@@ -17,7 +17,7 @@ use uuid::Uuid;
 use super::RenderContext;
 use super::tool::{render_compaction_divider_line, render_tool_call_with_result};
 use super::utils::render_reasoning_markdown_lines;
-use crate::core::state::{
+use crate::state::{
     MessageRenderCacheEntry, MessageRenderCacheKey, MessageRenderCacheKind, MessageRenderCacheValue,
 };
 use crate::diff_render::render_unified_diff_text;
@@ -330,7 +330,7 @@ pub(super) fn render_assistant_body_lines(
             &message.content,
             body_width,
             ctx.palette,
-            ctx.config.read().unwrap().ui.tab_width,
+            ctx.config.ui.tab_width,
         )
         {
             lines.extend(diff_lines);
@@ -359,8 +359,6 @@ pub(super) fn render_assistant_body_lines(
             .as_ref()
             .and_then(|model_id| {
                 ctx.config
-                    .read()
-                    .unwrap()
                     .resolve_model_by_ids(ctx.auth, &ctx.conversation.provider_id, model_id)
                     .ok()
                     .map(|model| model.display_name)
@@ -518,8 +516,6 @@ pub(super) fn render_message_cards_inner(
                         .as_ref()
                         .and_then(|model_id| {
                             ctx.config
-                                .read()
-                                .unwrap()
                                 .resolve_model_by_ids(
                                     ctx.auth,
                                     &ctx.conversation.provider_id,

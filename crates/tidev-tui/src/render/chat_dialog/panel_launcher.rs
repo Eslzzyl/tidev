@@ -9,13 +9,13 @@ use ratatui::{
 
 impl App {
     pub(crate) fn render_panel_launcher(&self, frame: &mut Frame<'_>, area: Rect) {
-        if !self.panel_launcher.visible {
+        if !self.ui.panel_launcher.visible {
             return;
         }
 
         let palette = self.palette();
         let width = area.width.min(56);
-        let height = (self.panel_launcher.filtered.len() as u16 + 3) // entries + search bar + border
+        let height = (self.ui.panel_launcher.filtered.len() as u16 + 3) // entries + search bar + border
             .min(18)
             .saturating_add(2); // border
         let rect = centered_rect(width, height, area);
@@ -26,10 +26,10 @@ impl App {
         self.register_selection_region(inner);
 
         // --- Search bar line ---
-        let search_text = if self.panel_launcher.query.is_empty() {
+        let search_text = if self.ui.panel_launcher.query.is_empty() {
             "  Type to filter panels...".to_string()
         } else {
-            format!("  {}", self.panel_launcher.query)
+            format!("  {}", self.ui.panel_launcher.query)
         };
         let search_style = Style::default().fg(palette.muted);
         frame.render_widget(
@@ -61,15 +61,14 @@ impl App {
 
         let list_area = Rect::new(inner.x, list_y, inner.width, list_height);
 
-        let items: Vec<ListItem<'_>> = self
-            .panel_launcher
+        let items: Vec<ListItem<'_>> = self.ui.panel_launcher
             .filtered
             .iter()
             .map(|entry| ListItem::new(Line::from(ratatui::text::Span::raw(entry.description))))
             .collect();
 
         let mut state = ListState::default();
-        state.select(Some(self.panel_launcher.selected_index));
+        state.select(Some(self.ui.panel_launcher.selected_index));
 
         let block = Block::default().style(Style::default().bg(palette.panel_alt));
 

@@ -8,11 +8,13 @@ pub mod database;
 pub mod migration;
 pub mod schema;
 
-use anyhow::Result;
-use chrono::{DateTime, Utc};
-use rusqlite::{Connection, OptionalExtension, named_params, params};
+use anyhow::{Context, Result};
+use chrono::{DateTime, Duration, Utc};
+use rusqlite::{Connection, OptionalExtension, named_params, params, params_from_iter, types::Type};
 use std::{
-    path::PathBuf,
+    fs,
+    io::Write,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
 use tidev_types::message::{Message, MessageRole};
@@ -55,6 +57,10 @@ impl Clone for SessionStore {
     }
 }
 
+fn parse_datetime(value: &str) -> std::result::Result<DateTime<Utc>, chrono::ParseError> {
+    Ok(DateTime::parse_from_rfc3339(value)?.with_timezone(&Utc))
+}
+
 impl SessionStore {
     /// Execute a read operation against the read connection.
     ///
@@ -68,6 +74,168 @@ impl SessionStore {
     {
         let conn = self.read_conn.lock().unwrap();
         f(&conn)
+    }
+
+    // ─── Internal query helpers ─────────────────────────────────────
+
+    /// Execute a write query on the shared write connection.
+    fn write_execute(&self, sql: &str, params: impl rusqlite::Params) -> Result<usize> {
+        self.write_conn
+            .lock()
+            .unwrap()
+            .execute(sql, params)
+            .map_err(anyhow::Error::from)
+    }
+
+    /// Prepare a query, map all rows, and collect into a Vec.
+    fn read_query<T>(
+        &self,
+        sql: &str,
+        params: impl rusqlite::Params,
+        f: impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<T>,
+    ) -> Result<Vec<T>> {
+        self.read(|conn| {
+            let mut stmt = conn.prepare(sql)?;
+            let rows = stmt.query_map(params, f)?;
+            let mut result = Vec::new();
+            for row in rows {
+                result.push(row?);
+            }
+            Ok(result)
+        })
+    }
+
+    /// Query a single optional row from the read connection.
+    fn read_query_opt<T>(
+        &self,
+        sql: &str,
+        params: impl rusqlite::Params,
+        f: impl FnOnce(&rusqlite::Row<'_>) -> rusqlite::Result<T>,
+    ) -> Result<Option<T>> {
+        self.read(|conn| {
+            let mut stmt = conn.prepare(sql)?;
+            stmt.query_row(params, f)
+                .optional()
+                .map_err(anyhow::Error::from)
+        })
+    }
+
+    /// Query a single row from the read connection (error if not found).
+    fn read_query_row<T>(
+        &self,
+        sql: &str,
+        params: impl rusqlite::Params,
+        f: impl FnOnce(&rusqlite::Row<'_>) -> rusqlite::Result<T>,
+    ) -> Result<T> {
+        self.read(|conn| {
+            let mut stmt = conn.prepare(sql)?;
+            stmt.query_row(params, f).map_err(anyhow::Error::from)
+        })
+    }
+
+    fn session_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRecord> {
+        let id = row.get::<_, String>(0)?;
+        let parent_session_id = row.get::<_, Option<String>>(1)?;
+        let provider_id = row.get::<_, String>(2)?;
+        let provider_display_name = row.get::<_, String>(3)?;
+        let model_id = row.get::<_, String>(4)?;
+        let model_display_name = row.get::<_, String>(5)?;
+        let title = row.get::<_, String>(6)?;
+        let created_at = row.get::<_, String>(7)?;
+        let updated_at = row.get::<_, String>(8)?;
+        let status = row.get::<_, String>(9)?;
+        let ended_at = row.get::<_, Option<String>>(10)?;
+        let context_summary = row.get::<_, String>(11)?;
+        let context_retained_from = row.get::<_, i64>(12)? as usize;
+        let system_prompt = row.get::<_, String>(13)?;
+        let workspace_root = row.get::<_, String>(14)?;
+
+        let parent_session_id = parent_session_id
+            .map(|value| {
+                Uuid::parse_str(&value).map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(1, Type::Text, Box::new(error))
+                })
+            })
+            .transpose()?;
+
+        Ok(SessionRecord {
+            session_id: Uuid::parse_str(&id).map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(error))
+            })?,
+            parent_session_id,
+            workspace_root,
+            provider_id: provider_id.clone(),
+            provider_display_name: if provider_display_name.trim().is_empty() {
+                provider_id.clone()
+            } else {
+                provider_display_name
+            },
+            model_id: model_id.clone(),
+            model_display_name: if model_display_name.trim().is_empty() {
+                model_id.clone()
+            } else {
+                model_display_name
+            },
+            title,
+            created_at: parse_datetime(&created_at).map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(7, Type::Text, Box::new(error))
+            })?,
+            updated_at: parse_datetime(&updated_at).map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(8, Type::Text, Box::new(error))
+            })?,
+            status: if status.trim().is_empty() {
+                "active".to_string()
+            } else {
+                status
+            },
+            ended_at: match ended_at {
+                Some(ref v) if !v.trim().is_empty() => {
+                    Some(parse_datetime(v).map_err(|error| {
+                        rusqlite::Error::FromSqlConversionFailure(10, Type::Text, Box::new(error))
+                    })?)
+                }
+                _ => None,
+            },
+            context_summary: if context_summary.trim().is_empty() {
+                None
+            } else {
+                Some(context_summary)
+            },
+            context_retained_from,
+            system_prompt,
+        })
+    }
+
+    fn delete_sessions_by_ids(&self, session_ids: &[String]) -> Result<()> {
+        if session_ids.is_empty() {
+            return Ok(());
+        }
+
+        let placeholders: Vec<&str> = session_ids.iter().map(|_| "?").collect();
+        let sql = format!(
+            "DELETE FROM sessions WHERE id IN ({})",
+            placeholders.join(",")
+        );
+
+        let params: Vec<String> = session_ids.to_vec();
+        self.write_conn
+            .lock()
+            .unwrap()
+            .execute(&sql, params_from_iter(params))?;
+
+        Ok(())
+    }
+
+    fn touch_session(&self, session_id: Uuid) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        self.write_execute(
+            "UPDATE sessions SET updated_at = :updated_at WHERE id = :id",
+            named_params! {
+                ":updated_at": now,
+                ":id": session_id.to_string(),
+            },
+        )?;
+        Ok(())
     }
 }
 
@@ -327,6 +495,230 @@ impl SessionStore {
             params![session_id.to_string()],
         )?;
         Ok(())
+    }
+
+    /// Delete multiple sessions at once.
+    pub fn delete_sessions(&self, session_ids: &[Uuid]) -> Result<()> {
+        let ids: Vec<String> = session_ids.iter().map(|id| id.to_string()).collect();
+        self.delete_sessions_by_ids(&ids)
+    }
+
+    /// Return sessions older than the given duration.
+    pub fn get_sessions_older_than_preview(
+        &self,
+        duration: Duration,
+    ) -> Result<Vec<SessionRecord>> {
+        let cutoff = Utc::now() - duration;
+        let cutoff_text = cutoff.to_rfc3339();
+        self.read_query(
+            &format!(
+                "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s \
+                 INNER JOIN session_workspaces sw ON sw.session_id = s.id \
+                 WHERE s.updated_at < :cutoff AND s.parent_session_id IS NULL \
+                 ORDER BY sw.workspace_root, s.updated_at DESC"
+            ),
+            named_params! { ":cutoff": cutoff_text },
+            Self::session_from_row,
+        )
+    }
+
+    /// Delete sessions older than the given duration. Returns the deleted records.
+    pub fn delete_sessions_older_than(&self, duration: Duration) -> Result<Vec<SessionRecord>> {
+        let cutoff = Utc::now() - duration;
+        let cutoff_text = cutoff.to_rfc3339();
+
+        let records: Vec<SessionRecord> = self.read_query(
+            &format!(
+                "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s \
+                 INNER JOIN session_workspaces sw ON sw.session_id = s.id \
+                 WHERE s.updated_at < :cutoff AND s.parent_session_id IS NULL \
+                 ORDER BY s.updated_at DESC"
+            ),
+            named_params! { ":cutoff": cutoff_text },
+            Self::session_from_row,
+        )?;
+
+        let session_ids: Vec<String> = records.iter().map(|r| r.session_id.to_string()).collect();
+        self.delete_sessions_by_ids(&session_ids)?;
+
+        Ok(records)
+    }
+
+    /// Delete all sessions in a workspace. Returns the deleted records.
+    pub fn delete_sessions_in_workspace(&self, workspace_root: &Path) -> Result<Vec<SessionRecord>> {
+        let root = workspace_root.display().to_string();
+
+        let records: Vec<SessionRecord> = self.read_query(
+            &format!(
+                "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s \
+                 INNER JOIN session_workspaces sw ON sw.session_id = s.id \
+                 WHERE sw.workspace_root = :workspace_root AND s.parent_session_id IS NULL \
+                 ORDER BY s.updated_at DESC"
+            ),
+            named_params! { ":workspace_root": root },
+            Self::session_from_row,
+        )?;
+
+        let session_ids: Vec<String> = records.iter().map(|r| r.session_id.to_string()).collect();
+        self.delete_sessions_by_ids(&session_ids)?;
+
+        Ok(records)
+    }
+
+    /// Export a session as JSONL file. Returns the file path.
+    pub fn export_session_to_jsonl(
+        &self,
+        session_id: Uuid,
+        export_dir: &Path,
+    ) -> Result<PathBuf> {
+        let messages = self.load_messages(session_id)?;
+        std::fs::create_dir_all(export_dir)?;
+        let file_path = export_dir.join(format!("session_{session_id}.jsonl"));
+        let mut file = std::fs::File::create(&file_path)?;
+        for msg in &messages {
+            let line = serde_json::to_string(msg)?;
+            writeln!(file, "{line}")?;
+        }
+        Ok(file_path)
+    }
+
+    /// Count sessions in a workspace.
+    pub fn get_current_workspace_sessions_count(&self, workspace_root: &Path) -> Result<i64> {
+        self.read(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM session_workspaces WHERE workspace_root = ?1",
+                params![workspace_root.to_string_lossy().to_string()],
+                |row| row.get(0),
+            )
+            .map_err(Into::into)
+        })
+    }
+
+    /// Alias for load_session (compatibility).
+    pub fn load_session_record(&self, session_id: Uuid) -> Result<Option<SessionRecord>> {
+        self.load_session(session_id)
+    }
+
+    /// Load tool output content for a message from tool_outputs table.
+    pub fn load_tool_output(&self, message_id: Uuid) -> Result<Option<String>> {
+        self.read_query_opt(
+            "SELECT output FROM tool_outputs WHERE message_id = :message_id",
+            named_params! { ":message_id": message_id.to_string() },
+            |row| {
+                let blob: Vec<u8> = row.get(0)?;
+                Ok(decompress_text(&blob))
+            },
+        )
+    }
+
+    /// Save tool output for a message.
+    pub fn save_tool_output(
+        &self,
+        session_id: Uuid,
+        message_id: Uuid,
+        tool_name: &str,
+        output: &str,
+    ) -> Result<()> {
+        let compressed = compress_text(output);
+        self.write_execute(
+            "INSERT OR REPLACE INTO tool_outputs \
+             (message_id, session_id, tool_name, output, created_at) \
+             VALUES (:message_id, :session_id, :tool_name, :output, :created_at)",
+            named_params! {
+                ":message_id": message_id.to_string(),
+                ":session_id": session_id.to_string(),
+                ":tool_name": tool_name,
+                ":output": compressed,
+                ":created_at": Utc::now().to_rfc3339(),
+            },
+        )?;
+        Ok(())
+    }
+
+    /// Remember a tool permission (allow/deny) for a session.
+    pub fn remember_tool_permission(
+        &self,
+        session_id: Uuid,
+        tool_name: &str,
+        allowed: bool,
+    ) -> Result<()> {
+        self.write_execute(
+            "INSERT INTO tool_permissions (session_id, tool_name, allowed, created_at) \
+             VALUES (:session_id, :tool_name, :allowed, :created_at) \
+             ON CONFLICT(session_id, tool_name) DO UPDATE \
+             SET allowed = excluded.allowed, created_at = excluded.created_at",
+            named_params! {
+                ":session_id": session_id.to_string(),
+                ":tool_name": tool_name,
+                ":allowed": if allowed { 1_i64 } else { 0_i64 },
+                ":created_at": Utc::now().to_rfc3339(),
+            },
+        )?;
+        self.touch_session(session_id)?;
+        Ok(())
+    }
+
+    /// Save the user's thinking level preference for a specific model.
+    pub fn save_model_thinking_level(
+        &self,
+        provider_id: &str,
+        model_id: &str,
+        thinking_level: &str,
+    ) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        self.write_execute(
+            "INSERT OR REPLACE INTO model_thinking_levels \
+             (provider_id, model_id, thinking_level, updated_at) \
+             VALUES (:provider_id, :model_id, :thinking_level, :updated_at)",
+            named_params! {
+                ":provider_id": provider_id,
+                ":model_id": model_id,
+                ":thinking_level": thinking_level,
+                ":updated_at": now,
+            },
+        )?;
+        Ok(())
+    }
+
+    /// Load the user's thinking level preference for a specific model.
+    pub fn load_model_thinking_level(
+        &self,
+        provider_id: &str,
+        model_id: &str,
+    ) -> Result<Option<String>> {
+        self.read_query_opt(
+            "SELECT thinking_level FROM model_thinking_levels \
+             WHERE provider_id = :provider_id AND model_id = :model_id \
+             LIMIT 1",
+            named_params! {
+                ":provider_id": provider_id,
+                ":model_id": model_id,
+            },
+            |row| row.get::<_, String>(0),
+        )
+    }
+
+    /// Load a single tool permission by permission key (tool_name) for a session.
+    pub fn load_tool_permission(
+        &self,
+        session_id: Uuid,
+        permission_key: &str,
+    ) -> Result<Option<bool>> {
+        self.read(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT allowed FROM tool_permissions \
+                 WHERE session_id = ?1 AND tool_name = ?2 \
+                 ORDER BY created_at DESC LIMIT 1",
+            )?;
+            let mut rows = stmt.query_map(
+                params![session_id.to_string(), permission_key],
+                |row| row.get::<_, i64>(0),
+            )?;
+            match rows.next() {
+                Some(Ok(val)) => Ok(Some(val != 0)),
+                _ => Ok(None),
+            }
+        })
     }
 
     /// Count total number of sessions.
@@ -774,11 +1166,292 @@ impl SessionStore {
             thinking_level: thinking_level.and_then(|t| serde_json::from_str(&t).ok()),
         }
     }
+
+    /// Export one or more sessions to an uncompressed SQLite database.
+    ///
+    /// The output database uses the [`EXPORT_SCHEMA_SQL`] schema where all
+    /// text columns are stored as plain TEXT (no zstd compression), suitable
+    /// for inspection with standard SQLite tools or re-import.
+    pub fn export_to_sqlite(
+        &self,
+        session_ids: &[Uuid],
+        output_path: &Path,
+    ) -> Result<()> {
+        // Remove existing file so we start fresh.
+        let _ = fs::remove_file(output_path);
+        if let Some(parent) = output_path.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create export directory {}", parent.display()))?;
+        }
+
+        let export_conn = Connection::open(output_path)
+            .with_context(|| format!("failed to create export database {}", output_path.display()))?;
+        export_conn.execute_batch("PRAGMA foreign_keys = OFF")?;
+        export_conn.execute_batch(crate::schema::EXPORT_SCHEMA_SQL)?;
+
+        let sid_strs: Vec<String> = session_ids.iter().map(|id| id.to_string()).collect();
+        let placeholder = sid_strs.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+
+        let tx = export_conn.unchecked_transaction()?;
+
+        // ── 1. meta ── copy all rows ─────────────────────────────────────
+        {
+            let rows = self.read_query(
+                "SELECT key, value FROM meta",
+                [],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )?;
+            let mut insert = tx.prepare(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
+            )?;
+            for (key, value) in &rows {
+                insert.execute(params![key, value])?;
+            }
+        }
+
+        // ── 2. sessions ── only the requested ones ───────────────────────
+        {
+            let sql = format!(
+                "SELECT id, parent_session_id, provider_id, provider_display_name, \
+                        model_id, model_display_name, title, created_at, updated_at, \
+                        status, ended_at, context_summary, context_retained_from, system_prompt \
+                 FROM sessions WHERE id IN ({placeholder})"
+            );
+            let params: Vec<&dyn rusqlite::types::ToSql> =
+                sid_strs.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+            let rows = self.read_query(&sql, params.as_slice(), |row| {
+                let parent: Option<String> = row.get(1)?;
+                Ok((
+                    row.get::<_, String>(0)?, parent,
+                    row.get::<_, String>(2)?, row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?, row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?, row.get::<_, String>(7)?,
+                    row.get::<_, String>(8)?, row.get::<_, String>(9)?,
+                    row.get::<_, Option<String>>(10)?,
+                    row.get::<_, String>(11)?, row.get::<_, i64>(12)?,
+                    row.get::<_, String>(13)?,
+                ))
+            })?;
+            let mut insert = tx.prepare(
+                "INSERT OR REPLACE INTO sessions \
+                 (id, parent_session_id, provider_id, provider_display_name, \
+                  model_id, model_display_name, title, created_at, updated_at, \
+                  status, ended_at, context_summary, context_retained_from, system_prompt) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+            )?;
+            for row in &rows {
+                insert.execute(params![
+                    row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7,
+                    row.8, row.9, row.10, row.11, row.12, row.13,
+                ])?;
+            }
+        }
+
+        // ── 3. session_workspaces ────────────────────────────────────────
+        {
+            let sql = format!(
+                "SELECT session_id, workspace_root FROM session_workspaces \
+                 WHERE session_id IN ({placeholder})"
+            );
+            let params: Vec<&dyn rusqlite::types::ToSql> =
+                sid_strs.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+            let rows = self.read_query(&sql, params.as_slice(), |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?;
+            let mut insert = tx.prepare(
+                "INSERT OR REPLACE INTO session_workspaces (session_id, workspace_root) \
+                 VALUES (?1, ?2)",
+            )?;
+            for (sid, root) in &rows {
+                insert.execute(params![sid, root])?;
+            }
+        }
+
+        // ── 4. session_instruction_sources ───────────────────────────────
+        {
+            let sql = format!(
+                "SELECT session_id, source FROM session_instruction_sources \
+                 WHERE session_id IN ({placeholder})"
+            );
+            let params: Vec<&dyn rusqlite::types::ToSql> =
+                sid_strs.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+            let rows = self.read_query(&sql, params.as_slice(), |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?;
+            let mut insert = tx.prepare(
+                "INSERT OR REPLACE INTO session_instruction_sources (session_id, source) \
+                 VALUES (?1, ?2)",
+            )?;
+            for (sid, src) in &rows {
+                insert.execute(params![sid, src])?;
+            }
+        }
+
+        // ── 5. session_reverts ── decompress redo_snapshot BLOB → TEXT ───
+        {
+            let sql = format!(
+                "SELECT session_id, message_id, CAST(redo_snapshot AS BLOB), created_at \
+                 FROM session_reverts WHERE session_id IN ({placeholder})"
+            );
+            let params: Vec<&dyn rusqlite::types::ToSql> =
+                sid_strs.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+            let rows = self.read_query(&sql, params.as_slice(), |row| {
+                let blob: Option<Vec<u8>> = row.get(2)?;
+                let redo_text = blob.as_deref().map(decompress_text);
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    redo_text,
+                    row.get::<_, String>(3)?,
+                ))
+            })?;
+            let mut insert = tx.prepare(
+                "INSERT OR REPLACE INTO session_reverts \
+                 (session_id, message_id, redo_snapshot, created_at) \
+                 VALUES (?1, ?2, ?3, ?4)",
+            )?;
+            for (sid, mid, snap, created) in &rows {
+                insert.execute(params![sid, mid, snap, created])?;
+            }
+        }
+
+        // ── 6. messages ── decompress BLOB columns → TEXT ────────────────
+        {
+            let sql = format!(
+                "SELECT id, session_id, role, CAST(content AS BLOB), attachments, \
+                        CAST(reasoning AS BLOB), CAST(tool_calls AS BLOB), tool_call_id, \
+                        tool_name, CAST(metadata AS BLOB), created_at, completed_at, \
+                        streaming, input_tokens, output_tokens, total_tokens, \
+                        cache_read_tokens, cache_write_tokens, model_id, tokens_per_second, \
+                        snapshot_hash, CAST(patch_files AS BLOB), CAST(file_diffs AS BLOB), \
+                        mode, thinking_level \
+                 FROM messages WHERE session_id IN ({placeholder})"
+            );
+            let params: Vec<&dyn rusqlite::types::ToSql> =
+                sid_strs.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+            let rows = self.read_query(&sql, params.as_slice(), |row| {
+                let content = blob_or_empty_to_text(row, 3)?;
+                let reasoning = opt_blob_to_text(row, 5)?;
+                let tool_calls = blob_or_empty_to_text(row, 6)?;
+                let metadata = blob_or_empty_to_text(row, 9)?;
+                let patch_files = opt_blob_to_text(row, 21)?;
+                let file_diffs = opt_blob_to_text(row, 22)?;
+                Ok((
+                    row.get::<_, String>(0)?,  // id
+                    row.get::<_, String>(1)?,  // session_id
+                    row.get::<_, String>(2)?,  // role
+                    content,
+                    row.get::<_, String>(4)?,  // attachments
+                    reasoning,
+                    tool_calls,
+                    row.get::<_, Option<String>>(7)?,  // tool_call_id
+                    row.get::<_, Option<String>>(8)?,  // tool_name
+                    metadata,
+                    row.get::<_, String>(10)?, // created_at
+                    row.get::<_, Option<String>>(11)?, // completed_at
+                    row.get::<_, i64>(12)?,    // streaming
+                    row.get::<_, Option<i64>>(13)?, row.get::<_, Option<i64>>(14)?,
+                    row.get::<_, Option<i64>>(15)?, row.get::<_, Option<i64>>(16)?,
+                    row.get::<_, Option<i64>>(17)?, row.get::<_, Option<String>>(18)?,
+                    row.get::<_, Option<f64>>(19)?, row.get::<_, Option<String>>(20)?,
+                    patch_files, file_diffs,
+                    row.get::<_, Option<String>>(23)?, // mode
+                    row.get::<_, Option<String>>(24)?, // thinking_level
+                ))
+            })?;
+            let mut insert = tx.prepare(
+                "INSERT OR REPLACE INTO messages \
+                 (id, session_id, role, content, attachments, reasoning, tool_calls, \
+                  tool_call_id, tool_name, metadata, created_at, completed_at, streaming, \
+                  input_tokens, output_tokens, total_tokens, cache_read_tokens, \
+                  cache_write_tokens, model_id, tokens_per_second, snapshot_hash, \
+                  patch_files, file_diffs, mode, thinking_level) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, \
+                         ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
+            )?;
+            for row in &rows {
+                insert.execute(params![
+                    row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7,
+                    row.8, row.9, row.10, row.11, row.12, row.13, row.14,
+                    row.15, row.16, row.17, row.18, row.19, row.20, row.21,
+                    row.22, row.23, row.24,
+                ])?;
+            }
+        }
+
+        // ── 7. todos ──────────────────────────────────────────────────────
+        {
+            let sql = format!(
+                "SELECT session_id, position, content, status FROM todos \
+                 WHERE session_id IN ({placeholder})"
+            );
+            let params: Vec<&dyn rusqlite::types::ToSql> =
+                sid_strs.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+            let rows = self.read_query(&sql, params.as_slice(), |row| {
+                Ok((
+                    row.get::<_, String>(0)?, row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?, row.get::<_, String>(3)?,
+                ))
+            })?;
+            let mut insert = tx.prepare(
+                "INSERT OR REPLACE INTO todos (session_id, position, content, status) \
+                 VALUES (?1, ?2, ?3, ?4)",
+            )?;
+            for (sid, pos, content, status) in &rows {
+                insert.execute(params![sid, pos, content, status])?;
+            }
+        }
+
+        // ── 8. tool_permissions ───────────────────────────────────────────
+        {
+            let sql = format!(
+                "SELECT session_id, tool_name, allowed, created_at FROM tool_permissions \
+                 WHERE session_id IN ({placeholder})"
+            );
+            let params: Vec<&dyn rusqlite::types::ToSql> =
+                sid_strs.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+            let rows = self.read_query(&sql, params.as_slice(), |row| {
+                Ok((
+                    row.get::<_, String>(0)?, row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?, row.get::<_, String>(3)?,
+                ))
+            })?;
+            let mut insert = tx.prepare(
+                "INSERT OR REPLACE INTO tool_permissions \
+                 (session_id, tool_name, allowed, created_at) VALUES (?1, ?2, ?3, ?4)",
+            )?;
+            for (sid, name, allowed, created) in &rows {
+                insert.execute(params![sid, name, allowed, created])?;
+            }
+        }
+
+        tx.commit()?;
+        Ok(())
+    }
 }
 
-// ---------------------------------------------------------------------------
-// File read tracking
-// ---------------------------------------------------------------------------
+// ── Export helpers ───────────────────────────────────────────────────
+
+/// Read a non-nullable BLOB column, decompress it to text.
+/// Returns an empty string if the BLOB is empty.
+fn blob_or_empty_to_text(row: &rusqlite::Row<'_>, idx: usize) -> rusqlite::Result<String> {
+    let blob: Vec<u8> = row.get(idx)?;
+    if blob.is_empty() {
+        Ok(String::new())
+    } else {
+        Ok(decompress_text(&blob))
+    }
+}
+
+/// Read an optional BLOB column, decompress it to optional text.
+fn opt_blob_to_text(row: &rusqlite::Row<'_>, idx: usize) -> rusqlite::Result<Option<String>> {
+    let blob: Option<Vec<u8>> = row.get(idx)?;
+    match blob {
+        Some(b) if !b.is_empty() => Ok(Some(decompress_text(&b))),
+        _ => Ok(None),
+    }
+}
+
 
 impl SessionStore {
     /// Record that a file was read.

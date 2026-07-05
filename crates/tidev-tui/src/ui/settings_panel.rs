@@ -42,8 +42,8 @@ pub struct SettingsPanelState {
 }
 
 impl SettingsPanelState {
-    pub fn new(config: &SharedConfig) -> Self {
-        let config = config.read().unwrap();
+    pub fn new(config: &AppConfig) -> Self {
+        let config = config;
         let log_levels = vec![
             "DEBUG".to_string(),
             "INFO".to_string(),

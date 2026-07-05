@@ -390,6 +390,36 @@ impl Message {
         )
     }
 
+    /// Create a streaming message (role + content, streaming = true).
+    pub fn streaming(role: MessageRole, content: impl Into<String>) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            role,
+            content: content.into(),
+            attachments: Vec::new(),
+            reasoning: String::new(),
+            tool_calls: Vec::new(),
+            tool_call_id: None,
+            tool_name: None,
+            metadata: ToolMetadata::default(),
+            created_at: Utc::now(),
+            completed_at: None,
+            streaming: true,
+            input_tokens: None,
+            output_tokens: None,
+            total_tokens: None,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+            model_id: None,
+            tokens_per_second: None,
+            snapshot_hash: None,
+            patch_files: None,
+            file_diffs: None,
+            mode: None,
+            thinking_level: None,
+        }
+    }
+
     pub fn persisted(
         id: Uuid,
         role: MessageRole,

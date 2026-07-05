@@ -1,13 +1,15 @@
 use crate::App;
 use crate::render::render::centered_rect;
+use crate::ui::connect::ConnectDialog;
 use crate::ui::connect::ProviderPickerItem;
-use crate::ui::sensitive::{SensitiveFileConfirmDialogState, SensitiveFileDialogState};
 use crate::ui::permission::PermissionDialogState;
 use crate::ui::question::QuestionDialogState;
-use crate::ui::session_panel::{SessionPanelDialog, SessionPanelState};
 use crate::ui::rename::RenameSessionDialogState;
-use crate::ui::workspace_boundary::{WorkspaceBoundaryConfirmDialogState, WorkspaceBoundaryDialogState};
-use crate::ui::connect::ConnectDialog;
+use crate::ui::sensitive::{SensitiveFileConfirmDialogState, SensitiveFileDialogState};
+use crate::ui::session_panel::{SessionPanelDialog, SessionPanelState};
+use crate::ui::workspace_boundary::{
+    WorkspaceBoundaryConfirmDialogState, WorkspaceBoundaryDialogState,
+};
 use chrono;
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Rect},
@@ -16,11 +18,10 @@ use ratatui::{
     widgets::{Block, Clear, List, ListItem, ListState, Paragraph, Wrap},
 };
 use tidev_config::provider::ProviderSource;
-use crate::ui::connect::ConnectDialog;
 
 impl App {
     pub(crate) fn render_connect_dialog(&self, frame: &mut Frame<'_>, area: Rect) {
-        let Some(dialog) = &self.connect_dialog else {
+        let Some(dialog) = &self.ui.connect_dialog else {
             return;
         };
 
@@ -84,7 +85,7 @@ impl App {
                     frame,
                     sections[1],
                     "Search",
-                    self.composer.placeholder(),
+                    self.ui.composer.placeholder(),
                     false,
                 );
 
@@ -155,19 +156,14 @@ impl App {
                 frame.render_stateful_widget(list, sections[2], &mut state);
 
                 frame.render_widget(
-                    Paragraph::new(
-                        "Enter to connect · Ctrl+P to prune orphans · Esc to cancel",
-                    )
-                    .alignment(Alignment::Center)
-                    .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
+                    Paragraph::new("Enter to connect · Ctrl+P to prune orphans · Esc to cancel")
+                        .alignment(Alignment::Center)
+                        .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                     sections[3],
                 );
             }
             ConnectDialog::ApiKey { provider_id } => {
-                let label = self
-                    .config
-                    .read()
-                    .unwrap()
+                let label = self.runtime.config()
                     .provider_display_name(provider_id)
                     .unwrap_or(provider_id)
                     .to_string();
@@ -205,7 +201,7 @@ impl App {
                     frame,
                     lines[2],
                     "API Key",
-                    self.composer.placeholder(),
+                    self.ui.composer.placeholder(),
                     true,
                 );
 
@@ -657,7 +653,7 @@ impl App {
     }
 
     pub(crate) fn render_fork_confirm_dialog(&self, frame: &mut Frame<'_>, area: Rect) {
-        let Some(dialog) = &self.fork_confirm_dialog else {
+        let Some(dialog) = &self.ui.fork_confirm_dialog else {
             return;
         };
 
@@ -712,7 +708,7 @@ impl App {
     }
 
     pub(crate) fn render_undo_confirm_dialog(&self, frame: &mut Frame<'_>, area: Rect) {
-        let Some(dialog) = &self.undo_confirm_dialog else {
+        let Some(dialog) = &self.ui.undo_confirm_dialog else {
             return;
         };
 
@@ -791,11 +787,10 @@ impl App {
             let available_input_height = inner
                 .height
                 .saturating_sub(options_height.saturating_add(6));
-            let input_height = self
-                .composer
+            let input_height = self.ui.composer
                 .preferred_height(
                     inner.width.saturating_sub(3),
-                    self.config.read().unwrap().ui.max_input_lines,
+                    self.runtime.config().ui.max_input_lines,
                 )
                 .min(available_input_height.max(3));
 
@@ -1183,352 +1178,11 @@ impl App {
         );
 
         frame.render_widget(
-            Paragraph::new(self.composer.text())
+            Paragraph::new(self.ui.composer.text())
                 .style(Style::default().bg(palette.panel_alt).fg(palette.text))
                 .wrap(Wrap { trim: false }),
             sections[4],
         );
-    }
-    pub(crate) fn render_sync_panel(
-        &self,
-        frame: &mut Frame<'_>,
-        area: Rect,
-        panel: &crate::ui::sync_panel::SyncPanelState,
-    ) {
-        use crate::ui::sync_panel::{AddRemoteStep, SyncView};
-
-        let palette = self.palette();
-        let (overlay_width, overlay_height) = match &panel.view {
-            SyncView::RemoteList => (72, 18),
-            SyncView::RemoteActions { .. } => (60, 16),
-            SyncView::SessionPicker { .. } => (80, 24),
-            SyncView::AddRemote { .. } => (66, 10),
-            SyncView::Confirm { .. } => (60, 10),
-            SyncView::Result { .. } => (60, 10),
-        };
-        let overlay = centered_rect(overlay_width, overlay_height, area);
-        frame.render_widget(Clear, overlay);
-
-        let block = Block::default().style(Style::default().bg(palette.panel_alt));
-        frame.render_widget(block, overlay);
-
-        let inner = overlay.inner(Margin {
-            horizontal: 1,
-            vertical: 1,
-        });
-
-        match &panel.view {
-            SyncView::RemoteList => {
-                let sections = Layout::vertical([
-                    Constraint::Length(1),
-                    Constraint::Min(1),
-                    Constraint::Length(1),
-                ])
-                .split(inner);
-
-                frame.render_widget(
-                    Paragraph::new(Line::from(vec![Span::styled(
-                        " Sync - Remote Machines ",
-                        Style::default()
-                            .fg(palette.accent)
-                            .add_modifier(Modifier::BOLD),
-                    )]))
-                    .style(Style::default().bg(palette.panel_alt)),
-                    sections[0],
-                );
-
-                let remotes: Vec<_> = self.config.read().unwrap().sync.remotes.clone();
-                if remotes.is_empty() {
-                    frame.render_widget(
-                        Paragraph::new("No remotes configured. Press 'a' to add one.")
-                            .style(Style::default().fg(palette.muted))
-                            .alignment(Alignment::Center),
-                        sections[1],
-                    );
-                } else {
-                    let items: Vec<ListItem> = remotes
-                        .iter()
-                        .enumerate()
-                        .map(|(i, r)| {
-                            let prefix = if i == panel.selected_index {
-                                "> "
-                            } else {
-                                "  "
-                            };
-                            let last = r.last_sync_at.as_deref().unwrap_or("never");
-                            let text =
-                                format!("{}{}  ({})  last sync: {}", prefix, r.name, r.host, last);
-                            let style = if i == panel.selected_index {
-                                Style::default().fg(palette.accent)
-                            } else {
-                                Style::default().fg(palette.text)
-                            };
-                            ListItem::new(text).style(style)
-                        })
-                        .collect();
-                    frame.render_widget(
-                        List::new(items).style(Style::default().bg(palette.panel_alt)),
-                        sections[1],
-                    );
-                }
-
-                frame.render_widget(
-                    Paragraph::new("a: add remote  up/down: navigate  Enter: select  Esc: close")
-                        .alignment(Alignment::Center)
-                        .style(Style::default().fg(palette.muted)),
-                    sections[2],
-                );
-            }
-
-            SyncView::RemoteActions { remote_index } => {
-                let sections = Layout::vertical([
-                    Constraint::Length(1),
-                    Constraint::Length(1),
-                    Constraint::Min(1),
-                    Constraint::Length(1),
-                ])
-                .split(inner);
-
-                let remote = self
-                    .config
-                    .read()
-                    .unwrap()
-                    .sync
-                    .remotes
-                    .get(*remote_index)
-                    .cloned();
-                if let Some(remote) = remote {
-                    frame.render_widget(
-                        Paragraph::new(Line::from(vec![Span::styled(
-                            format!(" {} - Actions ", remote.name),
-                            Style::default()
-                                .fg(palette.accent)
-                                .add_modifier(Modifier::BOLD),
-                        )]))
-                        .style(Style::default().bg(palette.panel_alt)),
-                        sections[0],
-                    );
-
-                    frame.render_widget(
-                        Paragraph::new(format!("Host: {}", remote.host))
-                            .style(Style::default().fg(palette.muted)),
-                        sections[1],
-                    );
-
-                    frame.render_widget(
-                        Paragraph::new(
-                            "p  Push sessions to remote\nu  Pull sessions from remote\nt  Test SSH connection\nd  Remove this remote",
-                        )
-                        .style(Style::default().fg(palette.text)),
-                        sections[2],
-                    );
-
-                    frame.render_widget(
-                        Paragraph::new("Esc: back")
-                            .alignment(Alignment::Center)
-                            .style(Style::default().fg(palette.muted)),
-                        sections[3],
-                    );
-                }
-            }
-
-            SyncView::SessionPicker {
-                action,
-                selected_indices,
-                cursor,
-                ..
-            } => {
-                let sections = Layout::vertical([
-                    Constraint::Length(1),
-                    Constraint::Length(1),
-                    Constraint::Min(1),
-                    Constraint::Length(1),
-                ])
-                .split(inner);
-
-                let action_label = action.label();
-                frame.render_widget(
-                    Paragraph::new(Line::from(vec![Span::styled(
-                        format!(" {} - Select Sessions ", action_label),
-                        Style::default()
-                            .fg(palette.accent)
-                            .add_modifier(Modifier::BOLD),
-                    )]))
-                    .style(Style::default().bg(palette.panel_alt)),
-                    sections[0],
-                );
-
-                let count = selected_indices.len();
-                frame.render_widget(
-                    Paragraph::new(format!(
-                        "{} session(s) selected.  Space: toggle  Ctrl+A: all  Enter: confirm",
-                        count
-                    ))
-                    .style(Style::default().fg(palette.muted)),
-                    sections[1],
-                );
-
-                let items: Vec<ListItem> = panel
-                    .sessions
-                    .iter()
-                    .enumerate()
-                    .map(|(i, s)| {
-                        let checked = if selected_indices.contains(&i) {
-                            "[*]"
-                        } else {
-                            "[ ]"
-                        };
-                        let prefix = if i == *cursor { "> " } else { "  " };
-                        let title = if s.title.is_empty() {
-                            &s.session_id.to_string()[..8]
-                        } else {
-                            &s.title
-                        };
-                        let style = if i == *cursor {
-                            Style::default().fg(palette.accent)
-                        } else {
-                            Style::default().fg(palette.text)
-                        };
-                        ListItem::new(format!("{}{}{}  {}", prefix, checked, title, s.model_id))
-                            .style(style)
-                    })
-                    .collect();
-
-                frame.render_widget(
-                    List::new(items).style(Style::default().bg(palette.panel_alt)),
-                    sections[2],
-                );
-
-                frame.render_widget(
-                    Paragraph::new("up/down: navigate  Space: toggle  Esc: back")
-                        .alignment(Alignment::Center)
-                        .style(Style::default().fg(palette.muted)),
-                    sections[3],
-                );
-            }
-
-            SyncView::AddRemote { step, .. } => {
-                let sections = Layout::vertical([
-                    Constraint::Length(1),
-                    Constraint::Length(1),
-                    Constraint::Length(1),
-                    Constraint::Length(1),
-                ])
-                .split(inner);
-
-                let step_title = match step {
-                    AddRemoteStep::Host => "Step 1/2 - SSH Host",
-                    AddRemoteStep::Name => "Step 2/2 - Display Name",
-                };
-
-                frame.render_widget(
-                    Paragraph::new(Line::from(vec![Span::styled(
-                        format!(" {} ", step_title),
-                        Style::default()
-                            .fg(palette.accent)
-                            .add_modifier(Modifier::BOLD),
-                    )]))
-                    .style(Style::default().bg(palette.panel_alt)),
-                    sections[0],
-                );
-
-                let prompt = match step {
-                    AddRemoteStep::Host => {
-                        "SSH host alias or user@host (e.g. devbox or eslzzyl@192.168.1.100):"
-                    }
-                    AddRemoteStep::Name => "Friendly name (or empty to use host):",
-                };
-
-                frame.render_widget(
-                    Paragraph::new(prompt).style(Style::default().fg(palette.text)),
-                    sections[1],
-                );
-
-                let hint = match step {
-                    AddRemoteStep::Host => "Enter: continue  Esc: cancel",
-                    AddRemoteStep::Name => "Enter: confirm  Backspace: previous step  Esc: cancel",
-                };
-                frame.render_widget(
-                    Paragraph::new(hint)
-                        .alignment(Alignment::Center)
-                        .style(Style::default().fg(palette.muted)),
-                    sections[3],
-                );
-            }
-
-            SyncView::Confirm { message, .. } => {
-                let sections = Layout::vertical([
-                    Constraint::Length(1),
-                    Constraint::Length(3),
-                    Constraint::Length(3),
-                ])
-                .split(inner);
-
-                frame.render_widget(
-                    Paragraph::new(Line::from(vec![Span::styled(
-                        " Confirm ",
-                        Style::default()
-                            .fg(palette.accent)
-                            .add_modifier(Modifier::BOLD),
-                    )]))
-                    .style(Style::default().bg(palette.panel_alt)),
-                    sections[0],
-                );
-
-                frame.render_widget(
-                    Paragraph::new(message.as_str())
-                        .style(Style::default().fg(palette.text))
-                        .alignment(Alignment::Center),
-                    sections[1],
-                );
-
-                frame.render_widget(
-                    Paragraph::new("y/Enter: confirm  n/Esc: cancel")
-                        .alignment(Alignment::Center)
-                        .style(Style::default().fg(palette.muted)),
-                    sections[2],
-                );
-            }
-
-            SyncView::Result { message, success } => {
-                let sections = Layout::vertical([
-                    Constraint::Length(1),
-                    Constraint::Min(1),
-                    Constraint::Length(3),
-                ])
-                .split(inner);
-
-                let title = if *success { "Success" } else { "Error" };
-                let title_color = if *success {
-                    palette.success
-                } else {
-                    palette.error
-                };
-
-                frame.render_widget(
-                    Paragraph::new(Line::from(vec![Span::styled(
-                        title,
-                        Style::default()
-                            .fg(title_color)
-                            .add_modifier(Modifier::BOLD),
-                    )]))
-                    .style(Style::default().bg(palette.panel_alt)),
-                    sections[0],
-                );
-
-                frame.render_widget(
-                    Paragraph::new(message.as_str()).style(Style::default().fg(palette.text)),
-                    sections[1],
-                );
-
-                frame.render_widget(
-                    Paragraph::new("Enter/Esc: close")
-                        .alignment(Alignment::Center)
-                        .style(Style::default().fg(palette.muted)),
-                    sections[2],
-                );
-            }
-        }
     }
 }
 

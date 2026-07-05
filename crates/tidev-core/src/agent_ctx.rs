@@ -6,7 +6,7 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock as StdRwLock};
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -164,10 +164,10 @@ pub struct CoreContext {
     /// tool calls is saved. Consumed when tool results are saved, to compute
     /// the diff of files changed in this round.
     pre_round_hash: Arc<Mutex<Option<String>>>,
-    /// Application config (for subagent model resolution).
-    config: AppConfig,
-    /// Auth store (for subagent model resolution).
-    auth: AuthStore,
+    /// Application config (shared, hot-reloadable).
+    config: Arc<StdRwLock<AppConfig>>,
+    /// Auth store (shared, hot-reloadable).
+    auth: Arc<StdRwLock<AuthStore>>,
 }
 
 impl CoreContext {
@@ -191,8 +191,8 @@ impl CoreContext {
         workspace_root: PathBuf,
         active_model: ActiveModel,
         snapshot: Option<SnapshotService>,
-        config: AppConfig,
-        auth: AuthStore,
+        config: Arc<StdRwLock<AppConfig>>,
+        auth: Arc<StdRwLock<AuthStore>>,
     ) -> Self {
         Self {
             llm,
@@ -651,8 +651,8 @@ struct SubagentSpawner {
     mode: SessionMode,
     system_prompt: String,
     snapshot: Option<SnapshotService>,
-    config: AppConfig,
-    auth: AuthStore,
+    config: Arc<StdRwLock<AppConfig>>,
+    auth: Arc<StdRwLock<AuthStore>>,
 }
 
 /// Parameters describing a subagent invocation.
@@ -702,9 +702,9 @@ async fn run_subagent_inner(
     // 4. Resolve child model: check [agent.models] config, fall back to parent model.
     let child_model = {
         let agent_type_name = agent_type.display_name();
-        match spawner
-            .config
-            .resolve_agent_active_model(&spawner.auth, agent_type_name)
+        let cfg = spawner.config.read().unwrap();
+        let auth = spawner.auth.read().unwrap();
+        match cfg.resolve_agent_active_model(&auth, agent_type_name)
         {
             Ok(Some(model)) => model,
             _ => {

@@ -1,10 +1,10 @@
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent};
 
-use tidev_core::{ApprovedTool, PendingToolApproval};
-use tidev_types::tools::QuestionArgs;
+use tidev_core::ApprovedTool;
 use tidev_types::message::{ToolCall, ToolExecutionResult};
 use tidev_types::prompts::SessionMode;
+use tidev_types::tools::QuestionArgs;
 
 use super::App;
 
@@ -162,29 +162,25 @@ impl App {
         &mut self,
         tool_calls: Vec<ToolCall>,
         execution_mode: SessionMode,
-        runtime: &Runtime,
     ) -> Result<()> {
-        self.pending_tool_execution = Some(PendingToolExecution::new(tool_calls, execution_mode));
-        self.process_pending_tool_execution(runtime)
+        self.ui.pending_tool_execution =
+            Some(PendingToolExecution::new(tool_calls, execution_mode));
+        self.process_pending_tool_execution()
     }
 
-    pub(crate) fn handle_permission_dialog_key(
-        &mut self,
-        key: KeyEvent,
-        runtime: &Runtime,
-    ) -> Result<()> {
+    pub(crate) fn handle_permission_dialog_key(&mut self, key: KeyEvent) -> Result<()> {
         match key.code {
             KeyCode::Char('y') | KeyCode::Char('Y') => {
-                self.resolve_permission_prompt(true, false, runtime)?;
+                self.resolve_permission_prompt(true, false)?;
             }
             KeyCode::Char('r') | KeyCode::Char('R') => {
-                self.resolve_permission_prompt(true, true, runtime)?;
+                self.resolve_permission_prompt(true, true)?;
             }
             KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
-                self.resolve_permission_prompt(false, false, runtime)?;
+                self.resolve_permission_prompt(false, false)?;
             }
             KeyCode::Char('x') | KeyCode::Char('X') => {
-                self.resolve_permission_prompt(false, true, runtime)?;
+                self.resolve_permission_prompt(false, true)?;
             }
             _ => {}
         }
@@ -192,12 +188,12 @@ impl App {
         Ok(())
     }
 
-    pub(crate) fn process_pending_tool_execution(&mut self, runtime: &Runtime) -> Result<()> {
-        let Some(_) = self.pending_tool_execution.as_ref() else {
+    pub(crate) fn process_pending_tool_execution(&mut self) -> Result<()> {
+        let Some(_) = self.ui.pending_tool_execution.as_ref() else {
             return Ok(());
         };
 
-        if !self.running_tool_executions.is_empty() {
+        if !self.ui.running_tool_executions.is_empty() {
             log::info!("process_pending_tool_execution: waiting for running_tool_executions");
             return Ok(());
         }
@@ -220,10 +216,10 @@ impl App {
                 total,
                 tool_call.id
             );
-            let permission_key = self.tools.permission_key_for_call(&tool_call);
-            let permission_label = self.tools.permission_label_for_call(&tool_call);
+            let permission_key = self.runtime.tool_registry().permission_key_for_call(&tool_call);
+            let permission_label = self.runtime.tool_registry().permission_label_for_call(&tool_call);
 
-            if !self.tools.can_execute(&tool_call.name, effective_mode) {
+            if !self.runtime.tool_registry().can_execute(&tool_call.name, effective_mode) {
                 let output = format!(
                     "Tool '{}' is disabled in {} mode. \
                      If you need to modify files, you must explain your intent to the user and ask them to switch to Build mode.",
@@ -235,16 +231,16 @@ impl App {
                 continue;
             }
 
-            if let Some(remembered) = self
-                .store
-                .load_tool_permission(self.conversation.session_id, &permission_key)?
+            if let Some(remembered) = self.runtime.session_manager().store()
+                .load_tool_permission(self.ui.chat_context.session_id, &permission_key)?
             {
                 if remembered {
                     log::info!(
                         "process_pending_tool_execution: remembered permission allowed for {}",
                         tool_call.name
                     );
-                    self.pending_tool_execution
+                    self.ui
+                        .pending_tool_execution
                         .as_mut()
                         .unwrap()
                         .add_ready(tool_call);
@@ -261,7 +257,7 @@ impl App {
                 }
             }
 
-            let Some(definition) = self.tools.definition_for(&tool_call.name) else {
+            let Some(definition) = self.runtime.tool_registry().definition_for(&tool_call.name) else {
                 let output = format!("Tool '{}' is unknown", tool_call.name);
                 rejected.push((tool_call, ToolExecutionResult::new(output)));
                 self.advance_pending_tool_execution();
@@ -271,7 +267,7 @@ impl App {
             // Check for workspace boundary violations before proceeding
             if let Some(violation_path) =
                 crate::ui::workspace_boundary::extract_boundary_violation_path(
-                    &self.workspace_root,
+                    &self.runtime.workspace_root(),
                     &tool_call,
                 )
             {
@@ -281,7 +277,7 @@ impl App {
                 // operation will fail anyway. Skip this for tools that can
                 // create files (write, apply_patch).
                 let needs_existing = matches!(
-                    tidev_engine::tooling::canonical_tool_name(&tool_call.name),
+                    tidev_types::tools::canonical_tool_name(&tool_call.name),
                     Some("read" | "edit" | "glob" | "grep")
                 );
                 if needs_existing && !violation_path.exists() {
@@ -293,10 +289,16 @@ impl App {
                 }
 
                 // Check access control config for skip
-                if self.config.read().unwrap().access_control.allow_outside_workspace_access {
-                    self.workspace_boundary_approved
+                if self
+                    .runtime
+                    .config()
+                    .access_control
+                    .allow_outside_workspace_access
+                {
+                    self.ui.workspace_boundary_approved
                         .insert(tool_call.id.clone(), true);
-                    self.pending_tool_execution
+                    self.ui
+                        .pending_tool_execution
                         .as_mut()
                         .unwrap()
                         .add_ready(tool_call);
@@ -320,9 +322,10 @@ impl App {
                     // In channel mode, don't execute synchronously.
                     // The runtime will execute it with allow_outside tracked
                     // via workspace_boundary_approved.
-                    self.workspace_boundary_approved
+                    self.ui.workspace_boundary_approved
                         .insert(tool_call.id.clone(), true);
-                    self.pending_tool_execution
+                    self.ui
+                        .pending_tool_execution
                         .as_mut()
                         .unwrap()
                         .add_ready(tool_call);
@@ -330,12 +333,12 @@ impl App {
                     continue;
                 } else {
                     // No stored permission - show dialog
-                    self.workspace_boundary_dialog = Some(
+                    self.ui.workspace_boundary_dialog = Some(
                         crate::ui::workspace_boundary::WorkspaceBoundaryDialogState {
                             pending: crate::ui::workspace_boundary::PendingWorkspaceBoundaryCheck {
                                 tool_call: tool_call.clone(),
                                 requested_path: violation_path,
-                                workspace_root: self.workspace_root.clone(),
+                                workspace_root: self.runtime.workspace_root().clone(),
                             },
                             current_index,
                             total,
@@ -346,7 +349,7 @@ impl App {
             }
 
             // Check for sensitive file reads (only for the read tool)
-            if tidev_engine::tooling::canonical_tool_name(&tool_call.name) == Some("read") {
+            if tidev_types::tools::canonical_tool_name(&tool_call.name) == Some("read") {
                 // Extract the file path from arguments
                 let file_path: Option<String> =
                     serde_json::from_str::<serde_json::Value>(&tool_call.arguments)
@@ -354,37 +357,41 @@ impl App {
                         .and_then(|v| v.get("file_path")?.as_str().map(|s| s.to_string()));
 
                 if let Some(ref path_str) = file_path
-                    && let Ok(resolved_path) =
-                        tidev_engine::tooling::builtin::utils::resolve_workspace_path(
-                            &self.workspace_root,
-                            std::path::Path::new(path_str),
-                            false,
-                        )
+                    && let Ok(resolved_path) = tidev_utils::path::resolve_workspace_path(
+                        &self.runtime.workspace_root(),
+                        std::path::Path::new(path_str),
+                        false,
+                    )
                 {
-                    let patterns =
-                        tidev_engine::tooling::builtin::sensitive::load_sensitive_patterns(
-                            &self.workspace_root,
-                        );
-                    if tidev_engine::tooling::builtin::sensitive::is_path_sensitive(
-                        &self.workspace_root,
+                    let patterns = tidev_utils::path::load_sensitive_patterns(
+                        &self.runtime.workspace_root(),
+                    );
+                    if tidev_utils::path::is_path_sensitive(
+                        &self.runtime.workspace_root(),
                         &resolved_path,
                         &patterns,
                     ) {
                         let path_str = resolved_path.display().to_string();
 
-                // Check access control config for skip
-                if self.config.read().unwrap().access_control.allow_sensitive_file_access {
-                    self.sensitive_file_approved
-                        .insert(tool_call.id.clone(), true);
-                    self.pending_tool_execution
-                        .as_mut()
-                        .unwrap()
-                        .add_ready(tool_call);
-                    self.advance_pending_tool_execution();
-                    continue;
-                }
+                        // Check access control config for skip
+                        if self
+                            .runtime
+                            .config()
+                            .access_control
+                            .allow_sensitive_file_access
+                        {
+                            self.ui.sensitive_file_approved
+                                .insert(tool_call.id.clone(), true);
+                            self.ui
+                                .pending_tool_execution
+                                .as_mut()
+                                .unwrap()
+                                .add_ready(tool_call);
+                            self.advance_pending_tool_execution();
+                            continue;
+                        }
 
-                // Check stored permissions in memory
+                        // Check stored permissions in memory
                         if let Some(allowed) = self.is_sensitive_file_allowed(&path_str) {
                             if !allowed {
                                 let output = format!(
@@ -396,9 +403,10 @@ impl App {
                                 continue;
                             }
                             // Previously allowed — execute with sensitive_file_approved=true
-                            self.sensitive_file_approved
+                            self.ui.sensitive_file_approved
                                 .insert(tool_call.id.clone(), true);
-                            self.pending_tool_execution
+                            self.ui
+                                .pending_tool_execution
                                 .as_mut()
                                 .unwrap()
                                 .add_ready(tool_call);
@@ -406,12 +414,12 @@ impl App {
                             continue;
                         } else {
                             // No stored permission - show dialog
-                            self.sensitive_file_dialog =
+                            self.ui.sensitive_file_dialog =
                                 Some(crate::ui::sensitive::SensitiveFileDialogState {
                                     pending: crate::ui::sensitive::PendingSensitiveFileCheck {
                                         tool_call: tool_call.clone(),
                                         sensitive_path: resolved_path,
-                                        workspace_root: self.workspace_root.clone(),
+                                        workspace_root: self.runtime.workspace_root().clone(),
                                     },
                                     current_index,
                                     total,
@@ -448,11 +456,11 @@ impl App {
             }
 
             if definition.needs_confirmation() {
-                self.last_notice = Some(format!(
+                self.ui.last_notice = Some(format!(
                     "Approve tool call {} of {}: {}",
                     current_index, total, permission_label
                 ));
-                self.permission_dialog = Some(PermissionDialogState {
+                self.ui.permission_dialog = Some(PermissionDialogState {
                     permission_key,
                     display_name: permission_label,
                     tool_call,
@@ -462,7 +470,8 @@ impl App {
                 return Ok(());
             }
 
-            self.pending_tool_execution
+            self.ui
+                .pending_tool_execution
                 .as_mut()
                 .unwrap()
                 .add_ready(tool_call);
@@ -470,37 +479,35 @@ impl App {
             continue;
         }
 
-        let ready_calls = self
-            .pending_tool_execution
+        let ready_calls = self.ui.pending_tool_execution
             .as_mut()
             .map(|p| p.take_ready())
             .unwrap_or_default();
 
         if !ready_calls.is_empty() {
-            return self.send_permission_approval(ready_calls, rejected, runtime);
+            return self.send_permission_approval(ready_calls, rejected);
         }
 
         if question_opened {
             return Ok(());
         }
 
-        if self
-            .pending_tool_execution
+        if self.ui.pending_tool_execution
             .as_ref()
             .is_some_and(PendingToolExecution::is_finished)
         {
             log::info!(
                 "process_pending_tool_execution: finished, running_subagent_executions={}",
-                self.running_subagent_executions.len()
+                self.ui.running_subagent_executions.len()
             );
-            self.pending_tool_execution = None;
+            self.ui.pending_tool_execution = None;
             // All tools rejected — send empty approval to continue the loop
-            return self.send_permission_approval(ready_calls, rejected, runtime);
+            return self.send_permission_approval(ready_calls, rejected);
         } else {
             log::info!(
                 "process_pending_tool_execution: loop ended but not finished, pending_tool_execution={}, running_subagent_executions={}",
-                self.pending_tool_execution.is_some(),
-                self.running_subagent_executions.len()
+                self.ui.pending_tool_execution.is_some(),
+                self.ui.running_subagent_executions.len()
             );
         }
 
@@ -512,22 +519,23 @@ impl App {
         &mut self,
         mut ready_calls: Vec<ToolCall>,
         mut rejected: Vec<(ToolCall, ToolExecutionResult)>,
-        _runtime: &Runtime,
     ) -> Result<()> {
         log::info!(
             "send_permission_approval: ready_calls={}, rejected={}",
             ready_calls.len(),
             rejected.len(),
         );
-        let response_tx = match self.pending_permission_response.take() {
+        let response_tx = match self.ui.pending_permission_response.take() {
             Some(tx) => tx,
             None => return Ok(()),
         };
-        self.pending_tool_execution = None;
+        self.ui.pending_tool_execution = None;
 
         // Merge any rejected tools that were added outside the main loop
         // (e.g. from resolve_permission_prompt or question dialog resolution)
-        rejected.append(&mut self.pending_rejected_tools);
+        for tc in self.ui.pending_rejected_tools.drain(..) {
+            rejected.push((tc, ToolExecutionResult::new("denied")));
+        }
 
         // Immediately record rejected tool results in the in-memory conversation
         // so the TUI can render the rejection without waiting for the async
@@ -555,12 +563,11 @@ impl App {
             } else {
                 None
             };
-            let allow_outside = self
-                .workspace_boundary_approved
+            let allow_outside = self.ui.workspace_boundary_approved
                 .remove(&tc.id)
                 .unwrap_or(false);
             let sensitive_file_approved =
-                self.sensitive_file_approved.remove(&tc.id).unwrap_or(false);
+                self.ui.sensitive_file_approved.remove(&tc.id).unwrap_or(false);
             approvals.push(ApprovedTool {
                 tool_call: tc,
                 rejection: None,
@@ -581,16 +588,18 @@ impl App {
         // so the TUI can show subagent cards with status updates.
         for approval in &approvals {
             if approval.rejection.is_none() {
-                self.running_tool_executions.push(RunningToolExecution::new(
-                    self.active_request_id,
-                    approval.tool_call.clone(),
-                ));
+                self.ui
+                    .running_tool_executions
+                    .push(RunningToolExecution::new(
+                        self.ui.active_request_id,
+                        approval.tool_call.clone(),
+                    ));
 
                 // If this is a task/subagent tool, also track it as a
                 // RunningSubagentExecution so the runtime's SubagentStatus
                 // events can update the subagent card in the UI.
                 if approval.tool_call.name == "task"
-                    && let Ok(args) = serde_json::from_str::<tidev_engine::tooling::TaskArgs>(
+                    && let Ok(args) = serde_json::from_str::<tidev_types::tools::TaskArgs>(
                         &approval.tool_call.arguments,
                     )
                 {
@@ -601,13 +610,16 @@ impl App {
 
                     // Register the mapping from tool_call_id to child_session_id
                     // so the TUI can navigate into the subsession on click.
-                    self.subagent_task_map
-                        .insert(approval.tool_call.id.clone(), child_session_id);
+                    if let Ok(tc_id) = uuid::Uuid::parse_str(&approval.tool_call.id) {
+                        self.ui.subagent_task_map
+                            .insert(tc_id, child_session_id);
+                    }
 
-                    self.running_subagent_executions
+                    self.ui
+                        .running_subagent_executions
                         .push(RunningSubagentExecution::new(
-                            self.active_request_id,
-                            self.conversation.session_id,
+                            self.ui.active_request_id,
+                            self.ui.chat_context.session_id,
                             approval.tool_call.clone(),
                             child_session_id,
                             description,
@@ -623,29 +635,27 @@ impl App {
         Ok(())
     }
 
-    fn resolve_permission_prompt(
-        &mut self,
-        allow: bool,
-        remember: bool,
-        runtime: &Runtime,
-    ) -> Result<()> {
-        let Some(dialog) = self.permission_dialog.take() else {
+    fn resolve_permission_prompt(&mut self, allow: bool, remember: bool) -> Result<()> {
+        let Some(dialog) = self.ui.permission_dialog.take() else {
             return Ok(());
         };
 
         if remember {
-            self.store.remember_tool_permission(
-                self.conversation.session_id,
-                &dialog.permission_key,
-                allow,
-            )?;
+            self.runtime
+                .session_manager()
+                .store()
+                .remember_tool_permission(
+                    self.ui.chat_context.session_id,
+                    &dialog.permission_key,
+                    allow,
+                )?;
         }
 
         if allow {
-            if let Some(p) = self.pending_tool_execution.as_mut() {
+            if let Some(p) = self.ui.pending_tool_execution.as_mut() {
                 p.add_ready(dialog.tool_call);
             }
-            return self.process_pending_tool_execution(runtime);
+            return self.process_pending_tool_execution();
         }
 
         let output = if remember {
@@ -654,14 +664,14 @@ impl App {
             format!("Tool '{}' was denied", dialog.display_name)
         };
 
-        if self.pending_permission_response.is_some() {
-            self.pending_rejected_tools
-                .push((dialog.tool_call, ToolExecutionResult::new(output)));
+        if self.ui.pending_permission_response.is_some() {
+            self.ui.pending_rejected_tools
+                .push(dialog.tool_call);
         } else {
             self.record_tool_result(dialog.tool_call, ToolExecutionResult::new(output))?;
         }
         self.advance_pending_tool_execution();
-        self.process_pending_tool_execution(runtime)
+        self.process_pending_tool_execution()
     }
 
     pub(crate) fn record_tool_result(
@@ -670,11 +680,14 @@ impl App {
         mut result: ToolExecutionResult,
     ) -> Result<()> {
         let is_task = tool_call.name == "task";
-        let tool_call_id = tool_call.id.clone();
+        let tool_call_id = match uuid::Uuid::parse_str(&tool_call.id) {
+            Ok(id) => id,
+            Err(_) => return Ok(()),
+        };
 
         // For task (subagent) results: inject child_session_id into metadata
         // so it persists in the stored message for click navigation after restart.
-        if is_task && let Some(&child_session_id) = self.subagent_task_map.get(&tool_call_id) {
+        if is_task && let Some(&child_session_id) = self.ui.subagent_task_map.get(&tool_call_id) {
             result.metadata.child_session_id = Some(child_session_id);
         }
 
@@ -685,7 +698,7 @@ impl App {
         } else {
             result.preview_for_storage(Some(tool_call.name.as_str()))
         };
-        let message = tidev_session::session::Message::tool_result(
+        let message = tidev_types::message::Message::tool_result(
             tool_call.id,
             tool_call.name.clone(),
             display_result,
@@ -696,8 +709,8 @@ impl App {
         // The task tool stores the full output inside the subagent session
         // rather than here, so we skip it.
         if tool_call.name != "task"
-            && let Err(e) = self.store.save_tool_output(
-                self.conversation.session_id,
+            && let Err(e) = self.runtime.session_manager().store().save_tool_output(
+                self.ui.chat_context.session_id,
                 message.id,
                 &tool_call.name,
                 &result.output,
@@ -708,39 +721,38 @@ impl App {
 
         // Persistence is handled by AgentRuntime::persist_tool_result.
 
-        if !result.instruction_sources.is_empty() {
-            self.update_loaded_instruction_sources(&result.instruction_sources)
-                .ok();
-        }
-
-        self.conversation.push(message.clone());
+        self.ui.chat_context.push(message.clone());
 
         // For task (subagent) results, also register the message_id →
         // child_session_id mapping so click navigation works reliably.
-        if is_task && let Some(&child_session_id) = self.subagent_task_map.get(&tool_call_id) {
-            self.subagent_result_message_map
+        if is_task && let Some(&child_session_id) = self.ui.subagent_task_map.get(&tool_call_id) {
+            self.ui.subagent_result_message_map
                 .insert(message.id, child_session_id);
         }
 
         // Invalidate layout index and render cache since we added a new message
-        self.message_layout_index.borrow_mut().valid = false;
+        self.ui.message_layout_index.borrow_mut().valid = false;
         self.clear_message_render_cache();
 
         if tool_call.name == "todowrite" {
-            self.todos = self.store.load_todos(self.conversation.session_id)?;
+            self.ui.todos = self
+                .runtime
+                .session_manager()
+                .store()
+                .load_todos(self.ui.chat_context.session_id)?;
         }
 
         Ok(())
     }
 
     pub(crate) fn advance_pending_tool_execution(&mut self) {
-        if let Some(execution) = self.pending_tool_execution.as_mut() {
+        if let Some(execution) = self.ui.pending_tool_execution.as_mut() {
             execution.advance();
         }
     }
 
     fn pending_tool_snapshot(&self) -> Option<(ToolCall, usize, usize, SessionMode)> {
-        let execution = self.pending_tool_execution.as_ref()?;
+        let execution = self.ui.pending_tool_execution.as_ref()?;
         let tool_call = execution.current()?.clone();
         Some((
             tool_call,

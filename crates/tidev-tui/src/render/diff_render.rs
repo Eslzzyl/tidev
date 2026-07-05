@@ -1,4 +1,4 @@
-use crate::core::state::SelectableRegionRange;
+use crate::state::SelectableRegionRange;
 use crate::markdown::{WrapOptions, adaptive_wrap_lines, highlight_code_to_lines_for_path};
 use crate::render::render::expand_tabs;
 use crate::theme::{ThemeName, ThemePalette};

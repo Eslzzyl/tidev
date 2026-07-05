@@ -149,7 +149,7 @@ impl App {
         let target = std::path::Path::new(path);
         let mut result: Option<bool> = None;
         let mut longest_prefix: usize = 0;
-        for (stored_path, allowed) in &self.workspace_boundary_permissions {
+        for (stored_path, allowed) in &self.ui.workspace_boundary_permissions {
             let stored = std::path::Path::new(stored_path);
             if target.starts_with(stored) {
                 let components = stored.components().count();
@@ -164,16 +164,15 @@ impl App {
 
     /// Store a workspace boundary permission in memory.
     pub(crate) fn remember_workspace_boundary_permission(&mut self, path: String, allowed: bool) {
-        self.workspace_boundary_permissions.insert(path, allowed);
+        self.ui.workspace_boundary_permissions.insert(path, allowed);
     }
 
     /// Resolve the workspace boundary dialog with the user's decision.
     fn resolve_workspace_boundary_dialog(
         &mut self,
         decision: BoundaryDecision,
-        runtime: &Runtime,
     ) -> Result<()> {
-        let Some(dialog) = self.workspace_boundary_dialog.take() else {
+        let Some(dialog) = self.ui.workspace_boundary_dialog.take() else {
             return Ok(());
         };
 
@@ -207,7 +206,7 @@ impl App {
                             )),
                         )?;
                         self.advance_pending_tool_execution();
-                        return self.process_pending_tool_execution(runtime);
+                        return self.process_pending_tool_execution( );
                     }
                 };
 
@@ -219,7 +218,7 @@ impl App {
                         ),
                     )?;
                     self.advance_pending_tool_execution();
-                    return self.process_pending_tool_execution(runtime);
+                    return self.process_pending_tool_execution( );
                 }
 
                 self.begin_question_dialog(dialog.pending.tool_call, args)?;
@@ -228,14 +227,14 @@ impl App {
 
             // For all other tools, route through normal runtime flow
             // via send_permission_approval, which propagates allow_outside.
-            self.workspace_boundary_approved
+            self.ui.workspace_boundary_approved
                 .insert(dialog.pending.tool_call.id.clone(), true);
-            self.pending_tool_execution
+            self.ui.pending_tool_execution
                 .as_mut()
                 .unwrap()
                 .add_ready(dialog.pending.tool_call);
             self.advance_pending_tool_execution();
-            return self.process_pending_tool_execution(runtime);
+            return self.process_pending_tool_execution( );
         } else {
             // Record the denial with a message that won't trigger error rendering
             let output = format!(
@@ -248,13 +247,13 @@ impl App {
             // Add to pending_rejected_tools so runtime persists it to DB via
             // send_permission_approval → ApprovedTool.rejection → persist_tool_result.
             // Without this, the orphaned tool call causes "no matching tool result" error.
-            self.pending_rejected_tools
-                .push((dialog.pending.tool_call, result));
+            self.ui.pending_rejected_tools
+                .push(dialog.pending.tool_call);
             self.advance_pending_tool_execution();
         }
 
         // Continue processing pending tools
-        self.process_pending_tool_execution(runtime)
+        self.process_pending_tool_execution( )
     }
 
     /// Handle keyboard input for the workspace boundary dialog.
@@ -262,12 +261,11 @@ impl App {
     pub(crate) fn handle_workspace_boundary_dialog_key(
         &mut self,
         key: KeyEvent,
-        runtime: &Runtime,
     ) -> Result<()> {
         // Intercept AllowUntilExit / DenyUntilExit to show confirmation dialog
         if matches!(key.code, KeyCode::Char('a') | KeyCode::Char('A')) {
-            if let Some(ref dialog) = self.workspace_boundary_dialog {
-                self.workspace_boundary_confirm_dialog =
+            if let Some(ref dialog) = self.ui.workspace_boundary_dialog {
+                self.ui.workspace_boundary_confirm_dialog =
                     Some(WorkspaceBoundaryConfirmDialogState {
                         pending: dialog.pending.clone(),
                         action: BoundaryDecision::AllowUntilExit,
@@ -279,8 +277,8 @@ impl App {
             return Ok(());
         }
         if matches!(key.code, KeyCode::Char('d') | KeyCode::Char('D')) {
-            if let Some(ref dialog) = self.workspace_boundary_dialog {
-                self.workspace_boundary_confirm_dialog =
+            if let Some(ref dialog) = self.ui.workspace_boundary_dialog {
+                self.ui.workspace_boundary_confirm_dialog =
                     Some(WorkspaceBoundaryConfirmDialogState {
                         pending: dialog.pending.clone(),
                         action: BoundaryDecision::DenyUntilExit,
@@ -300,7 +298,7 @@ impl App {
         };
 
         if let Some(decision) = decision {
-            self.resolve_workspace_boundary_dialog(decision, runtime)?;
+            self.resolve_workspace_boundary_dialog(decision)?;
         }
 
         Ok(())
@@ -311,9 +309,8 @@ impl App {
     pub(crate) fn handle_workspace_boundary_confirm_dialog_key(
         &mut self,
         key: KeyEvent,
-        runtime: &Runtime,
     ) -> Result<()> {
-        let Some(ref mut confirm) = self.workspace_boundary_confirm_dialog else {
+        let Some(ref mut confirm) = self.ui.workspace_boundary_confirm_dialog else {
             return Ok(());
         };
 
@@ -328,16 +325,16 @@ impl App {
                 if confirm.selected_index == 0 {
                     // Confirm — execute the remembered action
                     let action = confirm.action;
-                    self.workspace_boundary_confirm_dialog = None;
-                    self.resolve_workspace_boundary_dialog(action, runtime)?;
+                    self.ui.workspace_boundary_confirm_dialog = None;
+                    self.resolve_workspace_boundary_dialog(action)?;
                 } else {
                     // Cancel — go back to the original dialog
-                    self.workspace_boundary_confirm_dialog = None;
+                    self.ui.workspace_boundary_confirm_dialog = None;
                 }
             }
             KeyCode::Esc => {
                 // Cancel — go back to the original dialog
-                self.workspace_boundary_confirm_dialog = None;
+                self.ui.workspace_boundary_confirm_dialog = None;
             }
             _ => {}
         }

@@ -1,10 +1,10 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::Duration as ChronoDuration;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::path::Path;
 use uuid::Uuid;
 
-use tidev_storage::SessionRecord;
+use tidev_core::SessionRecord;
 
 use super::App;
 
@@ -198,39 +198,39 @@ impl SessionPanelState {
 
 impl App {
     pub(crate) fn open_session_panel(&mut self, initial_query: String) -> Result<()> {
-        self.command_palette.clear();
-        self.connect_dialog = None;
-        self.theme_panel = None;
-        self.model_panel = None;
-        self.mcp_panel = None;
+        self.ui.command_palette.clear();
+        self.ui.connect_dialog = None;
+        self.ui.theme_panel = None;
+        self.ui.model_panel = None;
 
-        let sessions = self
-            .store
-            .load_sessions_for_workspace(Path::new(&self.workspace_root))?;
-        self.session_panel = Some(SessionPanelState::new(
+        let sessions = self.runtime.session_manager().store()
+            .list_sessions(1000, 0)?;
+        self.ui.session_panel = Some(SessionPanelState::new(
             sessions,
             SessionViewMode::CurrentWorkspace,
         ));
-        self.composer.clear();
-        self.composer
+        self.ui.composer.clear();
+        self.ui
+            .composer
             .set_placeholder("Search sessions by title, model, or id");
-        self.composer.set_text(initial_query);
+        self.ui.composer.set_text(initial_query);
         self.reset_session_panel_selection();
         Ok(())
     }
 
     pub(crate) fn close_session_panel(&mut self) {
-        if self.session_panel.take().is_some() {
-            self.composer.clear();
-            self.composer
+        if self.ui.session_panel.take().is_some() {
+            self.ui.composer.clear();
+            self.ui
+                .composer
                 .set_placeholder("Ask tidev about your code, task, or question...");
         }
     }
 
     pub(crate) fn reset_session_panel_selection(&mut self) {
-        let current_session_id = self.conversation.session_id;
-        let query = self.composer.text().to_string();
-        if let Some(panel) = &mut self.session_panel {
+        let current_session_id = self.ui.chat_context.session_id;
+        let query = self.ui.composer.text().to_string();
+        if let Some(panel) = &mut self.ui.session_panel {
             panel.reset_selection(&query, current_session_id);
         }
     }
@@ -238,16 +238,13 @@ impl App {
     pub(crate) fn handle_session_panel_key(
         &mut self,
         key: KeyEvent,
-        runtime: &tokio::runtime::Runtime,
     ) -> Result<()> {
-        let Some(panel) = self.session_panel.clone() else {
+        let Some(panel) = self.ui.session_panel.clone() else {
             return Ok(());
         };
 
         match (&panel.dialog, key.code) {
-            (SessionPanelDialog::None, _) => {
-                self.handle_session_panel_main_key(panel, key, runtime)
-            }
+            (SessionPanelDialog::None, _) => self.handle_session_panel_main_key(panel, key),
             (SessionPanelDialog::DeleteConfirm { .. }, KeyCode::Enter) => {
                 self.confirm_delete_session()
             }
@@ -283,31 +280,30 @@ impl App {
         &mut self,
         panel: SessionPanelState,
         key: KeyEvent,
-        runtime: &tokio::runtime::Runtime,
     ) -> Result<()> {
         match key.code {
             KeyCode::Up => {
-                let query = self.composer.text().to_string();
+                let query = self.ui.composer.text().to_string();
                 let mut next_panel = panel;
                 next_panel.move_selection(&query, -1);
-                self.session_panel = Some(next_panel);
+                self.ui.session_panel = Some(next_panel);
             }
             KeyCode::Down => {
-                let query = self.composer.text().to_string();
+                let query = self.ui.composer.text().to_string();
                 let mut next_panel = panel;
                 next_panel.move_selection(&query, 1);
-                self.session_panel = Some(next_panel);
+                self.ui.session_panel = Some(next_panel);
             }
             KeyCode::Enter => {
-                let query = self.composer.text().to_string();
+                let query = self.ui.composer.text().to_string();
                 if let Some(session) = panel.selected_session(&query).cloned() {
-                    self.switch_session(session.session_id, runtime)?;
+                    self.switch_session(session.session_id)?;
                     self.close_session_panel();
                 }
             }
             KeyCode::Esc => {
                 if panel.operation_mode == OperationMode::MultiSelect {
-                    if let Some(p) = &mut self.session_panel {
+                    if let Some(p) = &mut self.ui.session_panel {
                         p.clear_selection();
                     }
                 } else {
@@ -316,25 +312,25 @@ impl App {
             }
             KeyCode::Tab => self.toggle_session_view_mode()?,
             KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                let query = self.composer.text().to_string();
+                let query = self.ui.composer.text().to_string();
                 let mut next_panel = panel;
                 next_panel.move_selection(&query, -1);
-                self.session_panel = Some(next_panel);
+                self.ui.session_panel = Some(next_panel);
             }
             KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                let query = self.composer.text().to_string();
+                let query = self.ui.composer.text().to_string();
                 let mut next_panel = panel;
                 next_panel.move_selection(&query, 1);
-                self.session_panel = Some(next_panel);
+                self.ui.session_panel = Some(next_panel);
             }
             KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.toggle_multi_select_mode()?
             }
             KeyCode::Char(' ') => {
-                if let Some(p) = &mut self.session_panel {
+                if let Some(p) = &mut self.ui.session_panel {
                     p.toggle_selection();
                 }
-                self.session_panel = Some(panel);
+                self.ui.session_panel = Some(panel);
             }
             KeyCode::Char('d') | KeyCode::Char('D') => {
                 self.open_delete_confirmation()?;
@@ -350,9 +346,9 @@ impl App {
                 return Ok(());
             }
             _ => {
-                let previous_query = self.composer.text().to_string();
-                let _ = self.composer.handle_key_with_history(key, false);
-                if self.composer.text() != previous_query {
+                let previous_query = self.ui.composer.text().to_string();
+                let _ = self.ui.composer.handle_key_with_history(key, false);
+                if self.ui.composer.text() != previous_query {
                     self.reset_session_panel_selection();
                 }
             }
@@ -362,7 +358,7 @@ impl App {
     }
 
     pub(crate) fn toggle_session_view_mode(&mut self) -> Result<()> {
-        if let Some(panel) = &mut self.session_panel {
+        if let Some(panel) = &mut self.ui.session_panel {
             let new_mode = if panel.view_mode == SessionViewMode::CurrentWorkspace {
                 SessionViewMode::AllSessions
             } else {
@@ -370,10 +366,14 @@ impl App {
             };
 
             let sessions = if new_mode == SessionViewMode::AllSessions {
-                self.store.load_all_sessions().unwrap_or_default()
+                self.runtime
+                    .session_manager()
+                    .store()
+                    .list_sessions(1000, 0)
+                    .unwrap_or_default()
             } else {
-                self.store
-                    .load_sessions_for_workspace(Path::new(&self.workspace_root))
+                self.runtime.session_manager().store()
+                    .list_sessions(1000, 0)
                     .unwrap_or_default()
             };
 
@@ -383,17 +383,22 @@ impl App {
     }
 
     pub(crate) fn switch_to_all_sessions_view(&mut self) -> Result<()> {
-        if let Some(panel) = &mut self.session_panel
+        if let Some(panel) = &mut self.ui.session_panel
             && panel.view_mode == SessionViewMode::CurrentWorkspace
         {
-            let sessions = self.store.load_all_sessions().unwrap_or_default();
+            let sessions = self
+                .runtime
+                .session_manager()
+                .store()
+                .list_sessions(1000, 0)
+                .unwrap_or_default();
             *panel = SessionPanelState::new(sessions, SessionViewMode::AllSessions);
         }
         Ok(())
     }
 
     pub(crate) fn toggle_multi_select_mode(&mut self) -> Result<()> {
-        if let Some(panel) = &mut self.session_panel {
+        if let Some(panel) = &mut self.ui.session_panel {
             if panel.operation_mode == OperationMode::Select {
                 panel.operation_mode = OperationMode::MultiSelect;
                 panel.selected_indices.clear();
@@ -405,8 +410,8 @@ impl App {
     }
 
     pub(crate) fn open_delete_confirmation(&mut self) -> Result<()> {
-        if let Some(panel) = &mut self.session_panel {
-            let query = self.composer.text().to_string();
+        if let Some(panel) = &mut self.ui.session_panel {
+            let query = self.ui.composer.text().to_string();
             let session_ids = panel.get_selected_session_ids(&query);
             let session_titles = panel.get_selected_session_titles(&query);
 
@@ -421,12 +426,15 @@ impl App {
     }
 
     pub(crate) fn confirm_delete_session(&mut self) -> Result<()> {
-        if let Some(panel) = self.session_panel.take()
+        if let Some(panel) = self.ui.session_panel.take()
             && let SessionPanelDialog::DeleteConfirm { session_ids, .. } = panel.dialog
         {
-            self.store.delete_sessions(&session_ids)?;
+            self.runtime
+                .session_manager()
+                .store()
+                .delete_sessions(&session_ids)?;
             let count = session_ids.len();
-            self.last_notice = Some(format!("Deleted {} session(s)", count));
+            self.ui.last_notice = Some(format!("Deleted {} session(s)", count));
         }
 
         self.close_session_panel();
@@ -435,13 +443,12 @@ impl App {
     }
 
     pub(crate) fn open_cleanup_dialog(&mut self) -> Result<()> {
-        let sessions = self
-            .store
+        let sessions = self.runtime.session_manager().store()
             .get_sessions_older_than_preview(ChronoDuration::days(1))
             .unwrap_or_default();
         let preview = CleanupPreview::from_sessions(sessions);
 
-        if let Some(panel) = &mut self.session_panel {
+        if let Some(panel) = &mut self.ui.session_panel {
             panel.dialog = SessionPanelDialog::Cleanup {
                 preview,
                 selected_duration: None,
@@ -452,11 +459,10 @@ impl App {
     }
 
     pub(crate) fn select_cleanup_duration(&mut self, duration: ChronoDuration) -> Result<()> {
-        if let Some(panel) = &mut self.session_panel
+        if let Some(panel) = &mut self.ui.session_panel
             && let SessionPanelDialog::Cleanup { .. } = &panel.dialog
         {
-            let sessions = self
-                .store
+            let sessions = self.runtime.session_manager().store()
                 .get_sessions_older_than_preview(duration)
                 .unwrap_or_default();
             let new_preview = CleanupPreview::from_sessions(sessions);
@@ -471,22 +477,21 @@ impl App {
     }
 
     pub(crate) fn select_cleanup_workspace(&mut self) -> Result<()> {
-        if let Some(panel) = &mut self.session_panel
+        if let Some(panel) = &mut self.ui.session_panel
             && let SessionPanelDialog::Cleanup {
                 preview: _,
                 selected_duration,
                 ..
             } = &panel.dialog
         {
-            let sessions = self
-                .store
-                .get_current_workspace_sessions_count(Path::new(&self.workspace_root))
+            let sessions = self.runtime.session_manager().store()
+                .get_current_workspace_sessions_count(Path::new(&self.runtime.workspace_root()))
                 .unwrap_or(0);
 
             let new_preview = CleanupPreview {
                 sessions: vec![],
                 workspace_counts: vec![(
-                    self.workspace_root.to_string_lossy().to_string(),
+                    self.runtime.workspace_root().to_string_lossy().to_string(),
                     sessions as usize,
                 )],
                 total_count: sessions as usize,
@@ -502,7 +507,7 @@ impl App {
     }
 
     pub(crate) fn confirm_cleanup_sessions(&mut self) -> Result<()> {
-        if let Some(panel) = self.session_panel.take()
+        if let Some(panel) = self.ui.session_panel.take()
             && let SessionPanelDialog::Cleanup {
                 preview: _,
                 selected_duration,
@@ -510,16 +515,19 @@ impl App {
             } = panel.dialog
         {
             if cleanup_workspace {
-                let deleted = self
-                    .store
-                    .delete_sessions_in_workspace(Path::new(&self.workspace_root))?;
+                let deleted = self.runtime.session_manager().store()
+                    .delete_sessions_in_workspace(Path::new(&self.runtime.workspace_root()))?;
                 let count = deleted.len();
-                self.last_notice =
+                self.ui.last_notice =
                     Some(format!("Deleted {} session(s) in current workspace", count));
             } else if let Some(duration) = selected_duration {
-                let deleted = self.store.delete_sessions_older_than(duration)?;
+                let deleted = self
+                    .runtime
+                    .session_manager()
+                    .store()
+                    .delete_sessions_older_than(duration)?;
                 let count = deleted.len();
-                self.last_notice = Some(format!("Deleted {} old session(s)", count));
+                self.ui.last_notice = Some(format!("Deleted {} old session(s)", count));
             }
         }
 
@@ -529,8 +537,8 @@ impl App {
     }
 
     pub(crate) fn open_export_dialog(&mut self) -> Result<()> {
-        if let Some(panel) = &mut self.session_panel {
-            let query = self.composer.text().to_string();
+        if let Some(panel) = &mut self.ui.session_panel {
+            let query = self.ui.composer.text().to_string();
             let session_ids = panel.get_selected_session_ids(&query);
             let session_titles = panel.get_selected_session_titles(&query);
 
@@ -545,22 +553,27 @@ impl App {
     }
 
     pub(crate) fn confirm_export_session(&mut self) -> Result<()> {
-        if let Some(panel) = self.session_panel.take()
+        if let Some(panel) = self.ui.session_panel.take()
             && let SessionPanelDialog::ExportConfirm { session_ids, .. } = panel.dialog
         {
-            let export_dir = self.paths.data_dir.join("export");
+            let export_dir = self.runtime.paths().data_dir.join("export");
 
             log::info!("Export dir: {}", export_dir.display());
 
             for session_id in &session_ids {
-                match self.store.export_session_to_jsonl(*session_id, &export_dir) {
+                match self
+                    .runtime
+                    .session_manager()
+                    .store()
+                    .export_session_to_jsonl(*session_id, &export_dir)
+                {
                     Ok(path) => log::info!("Exported: {}", path.display()),
                     Err(e) => log::error!("Export failed: {}", e),
                 }
             }
 
             let count = session_ids.len();
-            self.last_notice = Some(format!(
+            self.ui.last_notice = Some(format!(
                 "Exported {} session(s) to {}",
                 count,
                 export_dir.display()
@@ -573,7 +586,7 @@ impl App {
     }
 
     pub(crate) fn close_session_panel_dialog(&mut self) -> Result<()> {
-        if let Some(panel) = &mut self.session_panel {
+        if let Some(panel) = &mut self.ui.session_panel {
             panel.dialog = SessionPanelDialog::None;
         }
         Ok(())
@@ -582,54 +595,131 @@ impl App {
     pub(crate) fn switch_session(
         &mut self,
         session_id: Uuid,
-        runtime: &tokio::runtime::Runtime,
     ) -> Result<()> {
-        if self.conversation.session_id == session_id {
-            self.last_notice = Some("Already on that session".to_string());
+        if self.ui.chat_context.session_id == session_id {
+            self.ui.last_notice = Some("Already on that session".to_string());
             return Ok(());
         }
 
         let fallback_model =
-            Self::resolve_fallback_model(&self.config.read().unwrap(), &self.auth)?;
+            Self::resolve_fallback_model(&self.runtime.config(), &self.runtime.auth())?;
         self.cache_active_session_runtime();
 
         if let Err(error) = self.restore_or_load_session(session_id, &fallback_model) {
-            self.last_notice = Some(error.to_string());
+            self.ui.last_notice = Some(error.to_string());
             return Ok(());
         }
 
-        *self.current_session_id.write().unwrap() = session_id;
+        self.ui.chat_context.session_id = session_id;
 
-        self.screen = if self.conversation.visible_messages().is_empty() {
+        self.ui.screen = if self.ui.chat_context.visible_messages().is_empty() {
             super::Screen::Welcome
         } else {
             super::Screen::Chat
         };
         self.clear_mouse_selection();
-        self.connect_dialog = None;
-        self.theme_panel = None;
-        self.model_panel = None;
-        self.session_panel = None;
-        self.mcp_panel = None;
-        self.command_palette.clear();
+        self.ui.connect_dialog = None;
+        self.ui.theme_panel = None;
+        self.ui.model_panel = None;
+        self.ui.session_panel = None;
+        self.ui.command_palette.clear();
 
-        if let Some(dialog) = self.question_dialog.as_ref() {
-            self.composer.set_text(dialog.current_answer_text());
-            self.composer.set_placeholder(dialog.answer_placeholder());
+        if let Some(dialog) = self.ui.question_dialog.as_ref() {
+            self.ui.composer.set_text(dialog.current_answer_text());
+            self.ui
+                .composer
+                .set_placeholder(dialog.answer_placeholder());
         } else {
-            self.composer
+            self.ui
+                .composer
                 .set_placeholder("Ask tidev about your code, task, or question...");
         }
 
-        if self.pending_assistant_turns.remove(&session_id) {
+        if self.ui.pending_assistant_turns.remove(&session_id) {
             log::info!(
                 "switch_session: session {} has pending assistant turn, starting now",
                 session_id
             );
-            if !self.pending_request {
-                self.spawn_agent_loop(runtime)?;
+            if !self.ui.pending_request {
+                self.spawn_agent_loop()?;
             }
         }
+
+        Ok(())
+    }
+
+    /// Load or restore a session into the UI.
+    ///
+    /// Checks the in-memory cache first; if not found, loads from the
+    /// database via [`SessionManager`] and builds a fresh [`ChatContext`].
+    pub(crate) fn restore_or_load_session(
+        &mut self,
+        session_id: Uuid,
+        _fallback_model: &tidev_config::auth::ActiveModel,
+    ) -> Result<()> {
+        // 1. Try the in-memory cache.
+        if let Some(cached) = self.ui.cached_sessions.remove(&session_id) {
+            self.ui.chat_context = crate::chat_context::ChatContext::new(
+                session_id,
+                String::new(), // title not cached yet
+                self.runtime.workspace_root().to_string_lossy().to_string(),
+                cached.messages,
+                None,
+                cached.provider_id,
+                cached.model_id,
+                String::new(),
+                String::new(),
+            );
+            return Ok(());
+        }
+
+        // 2. Load from the database.
+        let record = self
+            .runtime
+            .session_manager()
+            .load_session(session_id)?
+            .context("session not found")?;
+        let messages = self
+            .runtime
+            .session_manager()
+            .load_messages(session_id)?;
+
+        self.ui.chat_context = crate::chat_context::ChatContext::new(
+            session_id,
+            record.title,
+            record.workspace_root,
+            messages,
+            record.parent_session_id,
+            record.provider_id,
+            record.model_id,
+            record.model_display_name,
+            record.provider_display_name,
+        );
+        Ok(())
+    }
+
+    /// Start (or resume) the agent loop for the current session.
+    ///
+    /// Used when switching to a session that has a pending assistant turn
+    /// (e.g. after a subagent returned its result while the user was away).
+    pub(crate) fn spawn_agent_loop(&mut self) -> Result<()> {
+        if self.ui.pending_request {
+            return Ok(());
+        }
+
+        self.ui.pending_request = true;
+        self.ui.last_notice = Some(match self.ui.mode {
+            tidev_types::prompts::SessionMode::Plan => "Planning...".to_string(),
+            tidev_types::prompts::SessionMode::Build => "Thinking...".to_string(),
+        });
+
+        let session_id = self.ui.chat_context.session_id;
+        let runtime = self.runtime.clone();
+        tokio::spawn(async move {
+            if let Err(e) = runtime.continue_session(session_id).await {
+                log::error!("spawn_agent_loop: continue_session failed: {e}");
+            }
+        });
 
         Ok(())
     }

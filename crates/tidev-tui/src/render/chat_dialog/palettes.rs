@@ -9,7 +9,7 @@ use ratatui::{
 
 impl App {
     pub(crate) fn render_command_palette(&self, frame: &mut Frame<'_>, area: Rect) {
-        if !self.command_palette.visible || self.command_palette.suggestions.is_empty() {
+        if !self.ui.command_palette.visible || self.ui.command_palette.suggestions.is_empty() {
             return;
         }
 
@@ -18,7 +18,7 @@ impl App {
             .width
             .min(72)
             .min(frame.area().width.saturating_sub(area.x));
-        let height = (self.command_palette.suggestions.len() as u16)
+        let height = (self.ui.command_palette.suggestions.len() as u16)
             .min(6)
             .saturating_add(2);
         let rect = Rect::new(area.x, area.y.saturating_sub(height), width, height);
@@ -28,8 +28,7 @@ impl App {
         });
         self.register_selection_region(inner);
 
-        let items = self
-            .command_palette
+        let items = self.ui.command_palette
             .suggestions
             .iter()
             .map(|suggestion| {
@@ -50,7 +49,7 @@ impl App {
             .collect::<Vec<_>>();
 
         let mut state = ListState::default();
-        state.select(Some(self.command_palette.selected_index));
+        state.select(Some(self.ui.command_palette.selected_index));
 
         let panel = Block::default().style(Style::default().bg(palette.panel_alt));
 
@@ -69,7 +68,7 @@ impl App {
     }
 
     pub(crate) fn render_at_mention_palette(&self, frame: &mut Frame<'_>, area: Rect) {
-        if !self.at_mention.visible || self.at_mention.suggestions.is_empty() {
+        if !self.ui.at_mention.visible || self.ui.at_mention.suggestions.is_empty() {
             return;
         }
 
@@ -78,7 +77,7 @@ impl App {
             .width
             .min(72)
             .min(frame.area().width.saturating_sub(area.x));
-        let height = (self.at_mention.suggestions.len() as u16)
+        let height = (self.ui.at_mention.suggestions.len() as u16)
             .min(6)
             .saturating_add(2);
         let rect = Rect::new(area.x, area.y.saturating_sub(height), width, height);
@@ -88,8 +87,7 @@ impl App {
         });
         self.register_selection_region(inner);
 
-        let items = self
-            .at_mention
+        let items = self.ui.at_mention
             .suggestions
             .iter()
             .map(|suggestion| {
@@ -118,7 +116,7 @@ impl App {
             .collect::<Vec<_>>();
 
         let mut state = ListState::default();
-        state.select(Some(self.at_mention.selected_index));
+        state.select(Some(self.ui.at_mention.selected_index));
 
         let panel = Block::default().style(Style::default().bg(palette.panel_alt));
 
@@ -137,7 +135,7 @@ impl App {
     }
 
     pub(crate) fn render_snippet_palette(&self, frame: &mut Frame<'_>, area: Rect) {
-        if !self.snippet_state.visible || self.snippet_state.snippets.is_empty() {
+        if !self.ui.snippet_state.visible || self.ui.snippet_state.snippets.is_empty() {
             return;
         }
 
@@ -146,7 +144,7 @@ impl App {
             .width
             .min(72)
             .min(frame.area().width.saturating_sub(area.x));
-        let height = (self.snippet_state.snippets.len() as u16)
+        let height = (self.ui.snippet_state.snippets.len() as u16)
             .min(6)
             .saturating_add(2);
         let rect = Rect::new(area.x, area.y.saturating_sub(height), width, height);
@@ -156,8 +154,7 @@ impl App {
         });
         self.register_selection_region(inner);
 
-        let items = self
-            .snippet_state
+        let items = self.ui.snippet_state
             .snippets
             .iter()
             .map(|snippet| {
@@ -180,7 +177,7 @@ impl App {
             .collect::<Vec<_>>();
 
         let mut state = ListState::default();
-        state.select(Some(self.snippet_state.selected_index));
+        state.select(Some(self.ui.snippet_state.selected_index));
 
         let panel = Block::default().style(Style::default().bg(palette.panel_alt));
 

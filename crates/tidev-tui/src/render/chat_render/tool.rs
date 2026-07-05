@@ -4,9 +4,10 @@ use crate::markdown::{WrapOptions, render_markdown_text_with_width_and_cwd, word
 use crate::theme::ThemePalette;
 use tidev_types::message::{Message, MessageAttachment, ToolCall};
 use tidev_types::tools::canonical_tool_name;
-use tidev_utils::display_workspace_relative;
+use tidev_types::tools::TodoItem;
+use tidev_utils::path::display_workspace_relative;
 
-use crate::core::state::SelectableRegionRange;
+use crate::state::SelectableRegionRange;
 use ratatui::{
     prelude::{Modifier, Style},
     text::{Line, Span},
@@ -1003,7 +1004,7 @@ pub(super) fn render_tool_result_detail_lines(
     ctx: &RenderContext<'_>,
 ) -> (Vec<Line<'static>>, Option<i32>, Vec<SelectableRegionRange>) {
     let palette = ctx.palette;
-    let tab_width = ctx.config.read().unwrap().ui.tab_width;
+    let tab_width = ctx.config.ui.tab_width;
     let output = tool_output_from_message(message, ctx);
     let tool_name = message.tool_name.as_deref().unwrap_or(message.role.label());
     let canonical_name = canonical_tool_name(tool_name).unwrap_or(tool_name);

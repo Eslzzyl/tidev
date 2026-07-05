@@ -8,7 +8,7 @@ use tidev_types::message::Message;
 
 /// A lightweight replacement for the old `Conversation` type.
 /// Holds the message list and session metadata needed by rendering code.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct ChatContext {
     pub session_id: Uuid,
     pub title: String,
@@ -19,6 +19,8 @@ pub struct ChatContext {
     pub parent_session_id: Option<Uuid>,
     pub provider_id: String,
     pub model_id: String,
+    pub model_display_name: String,
+    pub provider_display_name: String,
 }
 
 impl ChatContext {
@@ -30,6 +32,8 @@ impl ChatContext {
         parent_session_id: Option<Uuid>,
         provider_id: String,
         model_id: String,
+        model_display_name: String,
+        provider_display_name: String,
     ) -> Self {
         let visible_count = messages.len();
         Self {
@@ -41,6 +45,8 @@ impl ChatContext {
             parent_session_id,
             provider_id,
             model_id,
+            model_display_name,
+            provider_display_name,
         }
     }
 
@@ -59,5 +65,10 @@ impl ChatContext {
     /// Normalised workspace root for display.
     pub fn cwd(&self) -> &Path {
         Path::new(&self.workspace_root)
+    }
+
+    /// Push a message to the context.
+    pub fn push(&mut self, message: Message) {
+        self.messages.push(message);
     }
 }

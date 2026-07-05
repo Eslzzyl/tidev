@@ -104,21 +104,20 @@ impl SensitiveFileConfirmDialogState {
 impl App {
     /// Check if a sensitive file path has been allowed in memory.
     pub(crate) fn is_sensitive_file_allowed(&self, path: &str) -> Option<bool> {
-        self.sensitive_file_permissions.get(path).copied()
+        self.ui.sensitive_file_permissions.get(path).copied()
     }
 
     /// Store a sensitive file permission in memory.
     pub(crate) fn remember_sensitive_file_permission(&mut self, path: String, allowed: bool) {
-        self.sensitive_file_permissions.insert(path, allowed);
+        self.ui.sensitive_file_permissions.insert(path, allowed);
     }
 
     /// Resolve the sensitive file dialog with the user's decision.
     fn resolve_sensitive_file_dialog(
         &mut self,
         decision: SensitiveFileDecision,
-        runtime: &Runtime,
     ) -> Result<()> {
-        let Some(dialog) = self.sensitive_file_dialog.take() else {
+        let Some(dialog) = self.ui.sensitive_file_dialog.take() else {
             return Ok(());
         };
 
@@ -139,14 +138,14 @@ impl App {
 
         if allowed {
             // Route through normal runtime flow via send_permission_approval
-            self.sensitive_file_approved
+            self.ui.sensitive_file_approved
                 .insert(dialog.pending.tool_call.id.clone(), true);
-            self.pending_tool_execution
+            self.ui.pending_tool_execution
                 .as_mut()
                 .unwrap()
                 .add_ready(dialog.pending.tool_call);
             self.advance_pending_tool_execution();
-            return self.process_pending_tool_execution(runtime);
+            return self.process_pending_tool_execution( );
         } else {
             // Record the denial
             let output = format!(
@@ -159,13 +158,13 @@ impl App {
             // Add to pending_rejected_tools so runtime persists it to DB via
             // send_permission_approval → ApprovedTool.rejection → persist_tool_result.
             // Without this, the orphaned tool call causes "no matching tool result" error.
-            self.pending_rejected_tools
-                .push((dialog.pending.tool_call, result));
+            self.ui.pending_rejected_tools
+                .push(dialog.pending.tool_call);
             self.advance_pending_tool_execution();
         }
 
         // Continue processing pending tools
-        self.process_pending_tool_execution(runtime)
+        self.process_pending_tool_execution( )
     }
 
     /// Handle keyboard input for the sensitive file dialog.
@@ -173,12 +172,11 @@ impl App {
     pub(crate) fn handle_sensitive_file_dialog_key(
         &mut self,
         key: KeyEvent,
-        runtime: &Runtime,
     ) -> Result<()> {
         // Intercept AllowUntilExit / DenyUntilExit to show confirmation dialog
         if matches!(key.code, KeyCode::Char('a') | KeyCode::Char('A')) {
-            if let Some(ref dialog) = self.sensitive_file_dialog {
-                self.sensitive_file_confirm_dialog = Some(SensitiveFileConfirmDialogState {
+            if let Some(ref dialog) = self.ui.sensitive_file_dialog {
+                self.ui.sensitive_file_confirm_dialog = Some(SensitiveFileConfirmDialogState {
                     pending: dialog.pending.clone(),
                     action: SensitiveFileDecision::AllowUntilExit,
                     selected_index: 0,
@@ -189,8 +187,8 @@ impl App {
             return Ok(());
         }
         if matches!(key.code, KeyCode::Char('d') | KeyCode::Char('D')) {
-            if let Some(ref dialog) = self.sensitive_file_dialog {
-                self.sensitive_file_confirm_dialog = Some(SensitiveFileConfirmDialogState {
+            if let Some(ref dialog) = self.ui.sensitive_file_dialog {
+                self.ui.sensitive_file_confirm_dialog = Some(SensitiveFileConfirmDialogState {
                     pending: dialog.pending.clone(),
                     action: SensitiveFileDecision::DenyUntilExit,
                     selected_index: 0,
@@ -209,7 +207,7 @@ impl App {
         };
 
         if let Some(decision) = decision {
-            self.resolve_sensitive_file_dialog(decision, runtime)?;
+            self.resolve_sensitive_file_dialog(decision)?;
         }
 
         Ok(())
@@ -220,9 +218,8 @@ impl App {
     pub(crate) fn handle_sensitive_file_confirm_dialog_key(
         &mut self,
         key: KeyEvent,
-        runtime: &Runtime,
     ) -> Result<()> {
-        let Some(ref mut confirm) = self.sensitive_file_confirm_dialog else {
+        let Some(ref mut confirm) = self.ui.sensitive_file_confirm_dialog else {
             return Ok(());
         };
 
@@ -237,16 +234,16 @@ impl App {
                 if confirm.selected_index == 0 {
                     // Confirm — execute the remembered action
                     let action = confirm.action;
-                    self.sensitive_file_confirm_dialog = None;
-                    self.resolve_sensitive_file_dialog(action, runtime)?;
+                    self.ui.sensitive_file_confirm_dialog = None;
+                    self.resolve_sensitive_file_dialog(action)?;
                 } else {
                     // Cancel — go back to the original dialog
-                    self.sensitive_file_confirm_dialog = None;
+                    self.ui.sensitive_file_confirm_dialog = None;
                 }
             }
             KeyCode::Esc => {
                 // Cancel — go back to the original dialog
-                self.sensitive_file_confirm_dialog = None;
+                self.ui.sensitive_file_confirm_dialog = None;
             }
             _ => {}
         }

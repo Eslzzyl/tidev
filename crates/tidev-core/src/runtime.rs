@@ -19,7 +19,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock as StdRwLock};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -33,6 +33,7 @@ use tidev_storage::SessionStore;
 use tidev_types::message::BackendEvent;
 use tidev_types::message::Message;
 use tidev_types::prompts::SessionMode;
+use tidev_types::tools::ToolDefinition;
 use tidev_types::tools::TodoItem;
 
 use tidev_agent::{AgentDefinition, PendingToolApproval};
@@ -76,10 +77,12 @@ impl tidev_tools::TodoPersistence for TodoStore {
 /// (Arc-based) so the runtime can be shared across tasks.
 #[derive(Clone)]
 pub struct Runtime {
-    /// Application configuration.
-    pub config: AppConfig,
-    /// Authentication store.
-    pub auth: AuthStore,
+    /// Application configuration (behind RwLock for hot-reload).
+    config: Arc<StdRwLock<AppConfig>>,
+    /// Authentication store (API keys, web search credentials).
+    auth: Arc<StdRwLock<AuthStore>>,
+    /// Config paths (directories for config, data, auth file, database).
+    paths: ConfigPaths,
     /// Session manager (SQLite).
     pub session_manager: SessionManager,
     /// LLM client.
@@ -88,8 +91,9 @@ pub struct Runtime {
     pub tool_registry: Arc<ToolRegistry>,
     /// Skills catalog.
     pub skills: tidev_tools::SkillCatalog,
-    /// Resolved model (for loop construction).
-    active_model: Arc<tidev_config::auth::ActiveModel>,
+    /// Resolved model (for loop construction). Behind RwLock so the TUI can
+    /// update it when the user switches providers.
+    active_model: Arc<StdRwLock<tidev_config::auth::ActiveModel>>,
     /// Co-operative cancellation token for the currently active agent loop.
     /// Replaced on each `submit_prompt` so cancellation is one-shot per loop.
     active_loop_cancel: Arc<Mutex<Option<CancellationToken>>>,
@@ -113,8 +117,6 @@ pub struct Runtime {
 
     /// Workspace root.
     workspace_root: PathBuf,
-    /// Config directory.
-    config_dir: PathBuf,
 }
 
 impl Runtime {
@@ -192,23 +194,87 @@ impl Runtime {
 
     /// Get the config directory.
     pub fn config_dir(&self) -> &PathBuf {
-        &self.config_dir
+        &self.paths.config_dir
+    }
+
+    /// Get ConfigPaths (for save operations).
+    pub fn paths(&self) -> &ConfigPaths {
+        &self.paths
+    }
+
+    /// Get a snapshot of the current application configuration.
+    pub fn config(&self) -> AppConfig {
+        self.config.read().unwrap().clone()
+    }
+
+    /// Atomically update the application configuration.
+    /// Optionally saves to disk if `save` is true.
+    pub fn update_config(&self, f: impl FnOnce(&mut AppConfig)) {
+        f(&mut self.config.write().unwrap());
+    }
+
+    /// Save the current config to disk.
+    pub fn save_config(&self) -> Result<()> {
+        let cfg = self.config();
+        cfg.save(&self.paths)?;
+        Ok(())
+    }
+
+    /// Get a snapshot of the current auth store.
+    pub fn auth(&self) -> AuthStore {
+        self.auth.read().unwrap().clone()
+    }
+
+    /// Atomically update the auth store.
+    pub fn update_auth(&self, f: impl FnOnce(&mut AuthStore)) {
+        f(&mut self.auth.write().unwrap());
+    }
+
+    /// Save the auth store to disk.
+    pub fn save_auth(&self) -> Result<()> {
+        let auth = self.auth.read().unwrap().clone();
+        auth.save(&self.paths)?;
+        Ok(())
     }
 
     /// Get the active model ID string (for display).
     pub fn active_model_id(&self) -> String {
-        self.active_model.model_id.clone()
+        self.active_model.read().unwrap().model_id.clone()
     }
 
     /// Get the active provider ID string.
     pub fn active_provider_id(&self) -> String {
-        self.active_model.provider_id.clone()
+        self.active_model.read().unwrap().provider_id.clone()
+    }
+
+    /// Get a clone of the currently resolved active model.
+    pub fn active_model(&self) -> tidev_config::auth::ActiveModel {
+        self.active_model.read().unwrap().clone()
+    }
+
+    /// Update the active model (called by TUI on provider/model switch).
+    pub fn set_active_model(&self, model: tidev_config::auth::ActiveModel) {
+        *self.active_model.write().unwrap() = model;
+    }
+
+    /// Save a thinking level preference for an agent type to config.
+    pub fn set_model_thinking_level(
+        &self,
+        _provider_id: &str,
+        _model_id: &str,
+        thinking_level: &str,
+    ) -> Result<()> {
+        // Update active model's thinking level if the model matches.
+        let mut active = self.active_model.write().unwrap();
+        active.thinking_level =
+            tidev_types::reasoning::ThinkingLevelType::from_string(thinking_level);
+        Ok(())
     }
 
     /// Create a new session with current workspace and active model settings.
     pub fn create_default_session(&self, title: &str) -> Result<Uuid> {
         let session_id = Uuid::new_v4();
-        let model = &self.active_model;
+        let model = self.active_model.read().unwrap();
         self.session_manager.create_session(
             session_id,
             &self.workspace_root.to_string_lossy(),
@@ -225,6 +291,21 @@ impl Runtime {
     // Operations
     // -----------------------------------------------------------------------
 
+    /// Append a message to a session (both in-memory buffer and store).
+    ///
+    /// This is the single correct way for external code (e.g. the TUI's
+    /// request handler) to add messages to a session — it keeps the
+    /// [`MessageBuffer`] and SQLite in sync so that [`continue_session`]
+    /// picks up the new data.
+    pub async fn append_message(&self, session_id: Uuid, msg: tidev_types::message::Message) -> Result<()> {
+        {
+            let buf = self.message_buffer(session_id).await;
+            buf.write().await.append(msg.clone());
+        }
+        self.session_manager.append_message(session_id, &msg)?;
+        Ok(())
+    }
+
     /// Submit a user prompt for a session.
     pub async fn submit_prompt(&self, session_id: Uuid, content: String) -> Result<()> {
         use tidev_types::message::{Message, MessageRole};
@@ -239,15 +320,48 @@ impl Runtime {
         self.session_manager.append_message(session_id, &user_msg)?;
 
         // 2. Check if a loop is already running.
-        {
-            let handle = self.run_loop_handle.lock().await;
-            if handle.is_some() {
-                // Loop running — new message will be picked up on next turn.
-                return Ok(());
-            }
+        if self.is_loop_running().await {
+            // Loop running — new message will be picked up on next turn.
+            return Ok(());
         }
 
         // 3. Build CoreContext + AgentLoopConfig and spawn the loop.
+        self.start_agent_loop(session_id).await
+    }
+
+    /// Continue an existing session without adding a new user message.
+    ///
+    /// Used when resuming the parent session after a subagent returns — the
+    /// tool result message is already in the store and gets loaded into the
+    /// [`MessageBuffer`] here.
+    pub async fn continue_session(&self, session_id: Uuid) -> Result<()> {
+        if self.is_loop_running().await {
+            // Already running — new data will be picked up on next turn.
+            return Ok(());
+        }
+
+        // Reload the buffer from the store so any messages added while the
+        // loop wasn't running (e.g. subagent results) are picked up.
+        self.reload_message_buffer(session_id).await;
+
+        self.start_agent_loop(session_id).await
+    }
+
+    /// Check whether an agent loop is currently running.
+    async fn is_loop_running(&self) -> bool {
+        self.run_loop_handle.lock().await.is_some()
+    }
+
+    /// Reload the in-memory [`MessageBuffer`] for a session from the store.
+    async fn reload_message_buffer(&self, session_id: Uuid) {
+        let buf = self.message_buffer(session_id).await;
+        if let Ok(messages) = self.session_manager.load_messages(session_id) {
+            buf.write().await.replace_all(messages);
+        }
+    }
+
+    /// Build [`CoreContext`] + [`AgentLoopConfig`] and spawn the agent loop.
+    async fn start_agent_loop(&self, session_id: Uuid) -> Result<()> {
         // Create a fresh cancellation token for this loop — retired on cancel().
         let cancel = CancellationToken::new();
         *self.active_loop_cancel.lock().await = Some(cancel.clone());
@@ -261,11 +375,12 @@ impl Runtime {
                 Some(s) if !s.system_prompt.is_empty() => s.system_prompt,
                 _ => {
                     // New session — compose and persist.
+                    let instructions = self.config.read().unwrap().instructions.clone();
                     let sp = crate::agent_ctx::compose_system_prompt(
                         tidev_types::agent_type::AgentType::General,
-                        &self.config.instructions,
+                        &instructions,
                         &self.workspace_root,
-                        &self.config_dir,
+                        &self.paths.config_dir,
                         SessionMode::Build,
                     );
                     // Persist system prompt to session.
@@ -276,7 +391,8 @@ impl Runtime {
             }
         };
 
-        let llm_config = crate::agent_ctx::to_llm_provider_config(&self.active_model);
+        let active_model = self.active_model.read().unwrap().clone();
+        let llm_config = crate::agent_ctx::to_llm_provider_config(&active_model);
 
         let agent_def = AgentDefinition {
             agent_type: tidev_types::agent_type::AgentType::General,
@@ -298,13 +414,13 @@ impl Runtime {
             self.perm_tx.clone(),
             session_id,
             SessionMode::Build,
-            self.active_model.thinking_level.clone(),
+            active_model.thinking_level.clone(),
             system_prompt,
             llm_config,
             cancel.clone(),
             self.tool_registry.definitions(),
             self.workspace_root.clone(),
-            self.active_model.as_ref().clone(),
+            active_model.clone(),
             self.snapshot.clone(),
             self.config.clone(),
             self.auth.clone(),
@@ -314,7 +430,7 @@ impl Runtime {
             session_id,
             definition: agent_def,
             mode: SessionMode::Build,
-            thinking_level: self.active_model.thinking_level.clone(),
+            thinking_level: active_model.thinking_level.clone(),
             event_tx: self.event_tx.clone(),
             cancel,
         };
@@ -398,6 +514,75 @@ impl Runtime {
         }
 
         log::info!("redo completed for session {session_id}");
+        Ok(())
+    }
+
+    /// Manually trigger context compaction for a session.
+    ///
+    /// Used by the `/compact` command. The TUI provides the current `mode`
+    /// (active session mode) and an optional `stream_request_id` for streaming
+    /// compaction output.
+    pub async fn compact_session(
+        &self,
+        session_id: Uuid,
+        mode: SessionMode,
+        stream_request_id: Option<u64>,
+    ) -> Result<()> {
+        use crate::agent_ctx::to_llm_provider_config;
+
+        // 1. Collect the inputs: messages, context manager, model config, tools.
+        let messages = {
+            let buf = self.message_buffer(session_id).await;
+            buf.read().await.load().to_vec()
+        };
+        let cm = self.context_manager(session_id).await;
+        let model_config = {
+            let active = self.active_model.read().unwrap();
+            to_llm_provider_config(&active)
+        };
+        let tools = self.tool_registry.definitions();
+
+        // 2. Run compaction (async, no locks held on ContextManager).
+        let result = {
+            let cm_lock = cm.lock().await;
+            cm_lock
+                .compact(
+                    &self.llm,
+                    &model_config,
+                    &tools,
+                    &messages,
+                    mode,
+                    session_id,
+                    Some(self.event_tx.clone()),
+                )
+                .await?
+        };
+
+        // 3. Apply compaction state.
+        {
+            let mut cm_lock = cm.lock().await;
+            cm_lock.apply_compaction(result.summary.clone(), result.retained_from);
+        }
+
+        // 4. Persist compaction state to the session store.
+        self.session_manager.update_context_state(
+            session_id,
+            Some(&result.summary),
+            result.retained_from,
+        )?;
+
+        // 5. Notify the TUI (BackendEvent::ContextCompacted is already sent by
+        //    compact() via event_tx when streaming, but for consistency we
+        //    always send the final event here as well).
+        let _ = self.event_tx.send(BackendEvent::ContextCompacted {
+            session_id,
+            compacted: true,
+            manual: stream_request_id.is_some(),
+            summary: Some(result.summary),
+            retained_from: result.retained_from,
+            error: None,
+        });
+
         Ok(())
     }
 
@@ -606,6 +791,7 @@ impl RuntimeBuilder {
             config.websearch.clone(),
             auth.clone(),
             max_output_bytes,
+            config.permissions.clone(),
         ));
 
         // 7. Snapshot service.
@@ -621,7 +807,7 @@ impl RuntimeBuilder {
         };
 
         // Store active model for loop construction.
-        let active_model = Arc::new(active_model);
+        let active_model = Arc::new(StdRwLock::new(active_model));
 
         // 8. Session manager.
         let session_manager = SessionManager::new(store.clone());
@@ -631,8 +817,9 @@ impl RuntimeBuilder {
         let (perm_tx, perm_rx) = tokio::sync::mpsc::unbounded_channel();
 
         Ok(Runtime {
-            config,
-            auth,
+            config: Arc::new(StdRwLock::new(config)),
+            auth: Arc::new(StdRwLock::new(auth)),
+            paths,
             session_manager,
             llm,
             tool_registry,
@@ -648,7 +835,6 @@ impl RuntimeBuilder {
             _perm_rx: Arc::new(Mutex::new(Some(perm_rx))),
             run_loop_handle: Arc::new(Mutex::new(None)),
             workspace_root: self.workspace_root.unwrap_or_default(),
-            config_dir: paths.config_dir,
         })
     }
 }

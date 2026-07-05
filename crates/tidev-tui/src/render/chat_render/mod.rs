@@ -10,14 +10,13 @@ use content::IMAGE_BADGE_RE;
 
 use tidev_types::prompts::SessionMode;
 
-use crate::theme::ThemePalette;
-use crate::{
-    App,
-    core::state::{
-        MessageRenderCacheEntry, MessageRenderCacheKey, MessageRenderCacheKind,
-        MessageRenderCacheValue, SelectableRegionRange,
-    },
+use crate::App;
+use crate::state::{
+    MessageRenderCacheEntry, MessageRenderCacheKey, MessageRenderCacheKind,
+    MessageRenderCacheValue, MessageBlock, SelectableRegionRange,
 };
+use crate::theme::ThemePalette;
+use crate::utils::{TokenUsage, format_token_count};
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Rect},
     prelude::{Frame, Modifier, Style, Text},
@@ -31,15 +30,14 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 use tidev_types::message::{Message, MessageRole, ToolCall};
 use tidev_types::tools::canonical_tool_name;
-use crate::utils::{TokenUsage, format_token_count};
 use unicode_width::UnicodeWidthStr;
 use uuid::Uuid;
 
-use crate::ui::permission::{RunningSubagentExecution, SubagentStatus};
 use crate::render::render::{
     decorate_card_lines, line_with_prefix, line_with_style, shorten, shorten_single_line,
     wrap_text_lines,
 };
+use crate::ui::permission::{RunningSubagentExecution, SubagentStatus};
 
 use crate::chat_render::content::BlockComputation;
 
@@ -71,7 +69,7 @@ struct RenderContext<'a> {
     expanded_tool_outputs: &'a HashMap<Uuid, String>,
     config: &'a tidev_config::AppConfig,
     auth: &'a tidev_config::auth::AuthStore,
-    chat_ctx: &'a crate::chat_context::ChatContext,
+    conversation: &'a crate::chat_context::ChatContext,
     mode: SessionMode,
 }
 
@@ -98,10 +96,7 @@ impl App {
 
         const SIDEBAR_GAP: u16 = 2;
         let sidebar_visible = area.width
-            >= self
-                .config
-                .read()
-                .unwrap()
+            >= self.runtime.config()
                 .ui
                 .sidebar_width
                 .saturating_add(70)
@@ -110,36 +105,41 @@ impl App {
             let split = Layout::horizontal([
                 Constraint::Min(20),
                 Constraint::Length(SIDEBAR_GAP),
-                Constraint::Length(self.config.read().unwrap().ui.sidebar_width),
+                Constraint::Length(self.runtime.config().ui.sidebar_width),
             ])
             .split(area);
-            self.sidebar_area = Some(split[2]);
+            self.ui.sidebar_area = Some(split[2]);
             self.render_sidebar(frame, split[2]);
             split[0]
         } else {
             area
         };
 
-        let composer_height_raw = self
-            .composer
+        let composer_height_raw = self.ui.composer
             .preferred_height(
                 main_area.width.saturating_sub(5),
-                self.config.read().unwrap().ui.max_input_lines,
+                self.runtime.config().ui.max_input_lines,
             )
             .min(main_area.height.saturating_sub(3).max(3));
 
         // Calculate queued messages area height (frozen area above input box)
-        let queued_count = if self.chat_ctx.parent_session_id.is_some() {
+        let queued_count = if self.ui.chat_context.parent_session_id.is_some() {
             0
         } else {
-            self.pending_prompt_queue.len()
+            self.ui.pending_prompt_queue.len()
         };
         let queued_height = if queued_count > 0 {
             let visible = queued_count.min(MAX_VISIBLE_QUEUED_PROMPTS);
             // Compute actual wrapped line count per visible queued prompt
             let text_width = main_area.width.saturating_sub(5).max(1) as usize;
             let mut inner: usize = 0;
-            for (i, queued) in self.pending_prompt_queue.iter().take(visible).enumerate() {
+            for (i, queued) in self
+                .ui
+                .pending_prompt_queue
+                .iter()
+                .take(visible)
+                .enumerate()
+            {
                 let wrapped = wrap_text_lines(&queued.prompt, text_width, MAX_QUEUED_PROMPT_LINES);
                 inner += wrapped.len();
                 // Separator between items (not after last)
@@ -174,7 +174,7 @@ impl App {
         let subsession_nav_height: u16 = 3;
 
         // Handle workspace boundary confirm dialog (shown before the boundary dialog)
-        if let Some(dialog) = self.workspace_boundary_confirm_dialog.clone() {
+        if let Some(dialog) = self.ui.workspace_boundary_confirm_dialog.clone() {
             let dialog_height = dialog
                 .dialog_height(main_area.width)
                 .min(main_area.height.saturating_sub(3).max(6));
@@ -193,7 +193,7 @@ impl App {
         }
 
         // Handle workspace boundary dialog (similar to question dialog)
-        if let Some(dialog) = self.workspace_boundary_dialog.clone() {
+        if let Some(dialog) = self.ui.workspace_boundary_dialog.clone() {
             let dialog_height = dialog
                 .dialog_height(main_area.width)
                 .min(main_area.height.saturating_sub(3).max(6));
@@ -212,7 +212,7 @@ impl App {
         }
 
         // Handle sensitive file confirm dialog (shown before the sensitive file dialog)
-        if let Some(dialog) = self.sensitive_file_confirm_dialog.clone() {
+        if let Some(dialog) = self.ui.sensitive_file_confirm_dialog.clone() {
             let dialog_height = dialog
                 .dialog_height(main_area.width)
                 .min(main_area.height.saturating_sub(3).max(6));
@@ -231,7 +231,7 @@ impl App {
         }
 
         // Handle sensitive file dialog
-        if let Some(dialog) = self.sensitive_file_dialog.clone() {
+        if let Some(dialog) = self.ui.sensitive_file_dialog.clone() {
             let dialog_height = dialog
                 .dialog_height(main_area.width)
                 .min(main_area.height.saturating_sub(3).max(6));
@@ -249,7 +249,7 @@ impl App {
             return;
         }
 
-        if let Some(dialog) = self.question_dialog.clone() {
+        if let Some(dialog) = self.ui.question_dialog.clone() {
             let question_height = dialog
                 .prompt_height(main_area.width, composer_height)
                 .min(main_area.height.saturating_sub(3).max(6));
@@ -270,7 +270,7 @@ impl App {
         let layout = Layout::vertical([
             Constraint::Min(6),
             Constraint::Length(queued_height as u16),
-            Constraint::Length(if self.chat_ctx.parent_session_id.is_some() {
+            Constraint::Length(if self.ui.chat_context.parent_session_id.is_some() {
                 subsession_nav_height
             } else {
                 composer_height
@@ -281,35 +281,35 @@ impl App {
 
         self.render_messages(frame, layout[0]);
 
-        self.queued_card_bounds.clear();
+        self.ui.queued_card_bounds.clear();
         if queued_height > 0 {
             self.render_queued_prompts(frame, layout[1]);
         }
 
         // In subsession, show navigation panel instead of input box
-        if self.chat_ctx.parent_session_id.is_some() {
+        if self.ui.chat_context.parent_session_id.is_some() {
             self.render_subsession_navigation(frame, layout[2]);
         } else {
-            let prompt_title = if self.shell_mode {
+            let prompt_title = if self.ui.shell_mode {
                 "Shell".to_string()
             } else {
-                match self.pending_mode.as_ref() {
-                    Some(pending) if self.pending_request => {
+                match self.ui.pending_mode.as_ref() {
+                    Some(pending) if self.ui.pending_request => {
                         format!(
                             "{} (current), {} (on completion)",
-                            self.mode.title(),
+                            self.ui.mode.title(),
                             pending.title()
                         )
                     }
-                    _ => self.mode.title().to_string(),
+                    _ => self.ui.mode.title().to_string(),
                 }
             };
             self.render_input_block_with_composer(
                 frame,
                 layout[2],
                 &prompt_title,
-                &self.composer,
-                self.composer.placeholder(),
+                &self.ui.composer,
+                self.ui.composer.placeholder(),
                 false,
                 true,
                 true,
@@ -332,7 +332,7 @@ impl App {
     /// Rows are separated by a thin rule. Each row is independently hover-highlighted.
     fn render_queued_prompts(&mut self, frame: &mut Frame<'_>, area: Rect) {
         let palette = self.palette();
-        let count = self.pending_prompt_queue.len();
+        let count = self.ui.pending_prompt_queue.len();
         let visible = count.min(MAX_VISIBLE_QUEUED_PROMPTS);
 
         // Build title: " QUEUE " badge with background color + count
@@ -374,7 +374,13 @@ impl App {
 
         let mut y_offset: u16 = 0;
 
-        for (i, queued) in self.pending_prompt_queue.iter().take(visible).enumerate() {
+        for (i, queued) in self
+            .ui
+            .pending_prompt_queue
+            .iter()
+            .take(visible)
+            .enumerate()
+        {
             if y_offset as usize >= inner_height {
                 break;
             }
@@ -399,10 +405,10 @@ impl App {
                 inner.width,
                 render_height as u16,
             );
-            self.queued_card_bounds.push((i, row_rect));
+            self.ui.queued_card_bounds.push((i, row_rect));
 
             // Apply hover highlight
-            let is_hovered = self.hovered_queued_index == Some(i);
+            let is_hovered = self.ui.hovered_queued_index == Some(i);
             if is_hovered {
                 let hover_bg = palette.hover_bg(palette.panel);
                 frame.render_widget(
@@ -573,8 +579,8 @@ impl App {
         };
 
         let content_area = scrollbar_area.0;
-        self.message_content_area = Some(content_area);
-        self.message_viewport_lines = content_area.height as usize;
+        self.ui.message_content_area = Some(content_area);
+        self.ui.message_viewport_lines = content_area.height as usize;
         let content_width = content_area.width.max(1) as usize;
         let (
             text,
@@ -587,32 +593,32 @@ impl App {
             inline_running_card_ranges,
         ) = self.messages_text(Some(content_width));
 
-        self.message_total_lines = total_lines;
+        self.ui.message_total_lines = total_lines;
 
-        let max_scroll = total_lines.saturating_sub(self.message_viewport_lines);
-        let scroll = if self.message_follow_tail {
+        let max_scroll = total_lines.saturating_sub(self.ui.message_viewport_lines);
+        let scroll = if self.ui.message_follow_tail {
             max_scroll
         } else {
-            self.message_scroll_offset.min(max_scroll)
+            self.ui.message_scroll_offset.min(max_scroll)
         };
 
-        self.message_scroll_offset = scroll;
-        self.message_follow_tail = scroll >= max_scroll;
+        self.ui.message_scroll_offset = scroll;
+        self.ui.message_follow_tail = scroll >= max_scroll;
         let render_scroll = if rendered_virtualized {
             virtualized_render_scroll
         } else {
             scroll
         };
 
-        self.selectable_regions.clear();
+        self.ui.selectable_regions.clear();
         for r in selectable_regions_ranges {
             let screen_start = r.start_line.saturating_sub(render_scroll);
             let screen_end = r.end_line.saturating_sub(render_scroll);
-            if screen_end == 0 || screen_start >= self.message_viewport_lines {
+            if screen_end == 0 || screen_start >= self.ui.message_viewport_lines {
                 continue;
             }
             let visible_start = screen_start as u16;
-            let visible_end = (screen_end.min(self.message_viewport_lines)) as u16;
+            let visible_end = (screen_end.min(self.ui.message_viewport_lines)) as u16;
             if visible_start < visible_end {
                 let y = content_area.y.saturating_add(visible_start);
                 let height = visible_end.saturating_sub(visible_start);
@@ -623,7 +629,7 @@ impl App {
                     .unwrap_or(content_area.x.saturating_add(content_area.width));
                 let width = max_x.saturating_sub(min_x);
                 if width > 0 {
-                    self.selectable_regions.push(Rect {
+                    self.ui.selectable_regions.push(Rect {
                         x: min_x,
                         y,
                         width,
@@ -634,17 +640,17 @@ impl App {
         }
 
         // Calculate screen positions for tool result cards
-        self.tool_result_card_bounds.clear();
+        self.ui.tool_result_card_bounds.clear();
         for card_range in card_ranges {
             let screen_start = card_range.start_line.saturating_sub(render_scroll);
             let screen_end = card_range.end_line.saturating_sub(render_scroll);
 
-            if screen_end == 0 || screen_start >= self.message_viewport_lines {
+            if screen_end == 0 || screen_start >= self.ui.message_viewport_lines {
                 continue;
             }
 
             let visible_start = screen_start as u16;
-            let visible_end = (screen_end.min(self.message_viewport_lines)) as u16;
+            let visible_end = (screen_end.min(self.ui.message_viewport_lines)) as u16;
 
             if visible_start < visible_end {
                 let card_rect = Rect {
@@ -653,23 +659,23 @@ impl App {
                     width: content_area.width,
                     height: visible_end.saturating_sub(visible_start),
                 };
-                self.tool_result_card_bounds
+                self.ui.tool_result_card_bounds
                     .push((card_range.message_id, card_rect));
             }
         }
 
         // Calculate screen positions for user message cards
-        self.user_card_bounds.clear();
+        self.ui.user_card_bounds.clear();
         for &(message_id, start_line, end_line) in &user_card_ranges {
             let screen_start = start_line.saturating_sub(render_scroll);
             let screen_end = end_line.saturating_sub(render_scroll);
 
-            if screen_end == 0 || screen_start >= self.message_viewport_lines {
+            if screen_end == 0 || screen_start >= self.ui.message_viewport_lines {
                 continue;
             }
 
             let visible_start = screen_start as u16;
-            let visible_end = (screen_end.min(self.message_viewport_lines)) as u16;
+            let visible_end = (screen_end.min(self.ui.message_viewport_lines)) as u16;
 
             if visible_start < visible_end {
                 let card_rect = Rect {
@@ -678,13 +684,13 @@ impl App {
                     width: content_area.width,
                     height: visible_end.saturating_sub(visible_start),
                 };
-                self.user_card_bounds.push((message_id, card_rect));
+                self.ui.user_card_bounds.push((message_id, card_rect));
             }
         }
 
         // Calculate screen positions for inline running subagent cards
         // inline_running_card_ranges contain absolute line positions within the full text.
-        self.inline_subagent_card_bounds.clear();
+        self.ui.inline_subagent_card_bounds.clear();
         for card_range in &inline_running_card_ranges {
             let abs_start = card_range.start_line;
             let abs_end = card_range.end_line;
@@ -692,12 +698,12 @@ impl App {
             let screen_start = abs_start.saturating_sub(render_scroll);
             let screen_end = abs_end.saturating_sub(render_scroll);
 
-            if screen_end == 0 || screen_start >= self.message_viewport_lines {
+            if screen_end == 0 || screen_start >= self.ui.message_viewport_lines {
                 continue;
             }
 
             let visible_start = screen_start as u16;
-            let visible_end = (screen_end.min(self.message_viewport_lines)) as u16;
+            let visible_end = (screen_end.min(self.ui.message_viewport_lines)) as u16;
 
             if visible_start < visible_end {
                 let card_rect = Rect {
@@ -706,26 +712,25 @@ impl App {
                     width: content_area.width,
                     height: visible_end.saturating_sub(visible_start),
                 };
-                self.inline_subagent_card_bounds
+                self.ui.inline_subagent_card_bounds
                     .push((card_range.execution_index, card_rect));
             }
         }
 
         // Scan user message cards for image badge spans and record their
         // screen positions so mouse clicks can open the image viewer.
-        self.user_image_badge_bounds.clear();
+        self.ui.user_image_badge_bounds.clear();
         {
-            let messages = self.chat_ctx.visible_messages();
+            let messages = self.ui.chat_context.visible_messages();
             for &(message_id, start_line, end_line) in &user_card_ranges {
                 // Collect data_urls from Image attachments for this message
                 let mut data_urls: Vec<String> = Vec::new();
                 if let Some(msg) = messages.iter().find(|m| m.id == message_id) {
                     for att in &msg.attachments {
-                        if let tidev_types::message::MessageAttachment::Image {
-                            data_url, ..
-                        } = att
+                        if let tidev_types::message::MessageAttachment::Image { filename: _, mime, data, file_size: _ } = att
                         {
-                            data_urls.push(data_url.clone());
+                            use base64::Engine;
+                            data_urls.push(format!("data:{mime};base64,{}", Engine::encode(&base64::engine::general_purpose::STANDARD, data)));
                         }
                     }
                 }
@@ -740,24 +745,16 @@ impl App {
                         let span_text: &str = span.content.as_ref();
                         // Find all image badge patterns in this span
                         let mut search_start = 0;
-                        while let Some(m) = IMAGE_BADGE_RE
-                            .find(&span_text[search_start..])
-                            .unwrap()
+                        while let Some(m) = IMAGE_BADGE_RE.find(&span_text[search_start..]).unwrap()
                         {
-                            let badge_col =
-                                col_offset + search_start + m.start();
+                            let badge_col = col_offset + search_start + m.start();
                             let badge_width = m.end() - m.start();
-                            let screen_line =
-                                line_idx.saturating_sub(render_scroll);
-                            if screen_line < self.message_viewport_lines {
-                                let screen_x =
-                                    content_area.x + badge_col as u16;
-                                let screen_y =
-                                    content_area.y + screen_line as u16;
-                                let data_url =
-                                    data_urls[url_idx % data_urls.len()]
-                                        .clone();
-                                self.user_image_badge_bounds.push((
+                            let screen_line = line_idx.saturating_sub(render_scroll);
+                            if screen_line < self.ui.message_viewport_lines {
+                                let screen_x = content_area.x + badge_col as u16;
+                                let screen_y = content_area.y + screen_line as u16;
+                                let data_url = data_urls[url_idx % data_urls.len()].clone();
+                                self.ui.user_image_badge_bounds.push((
                                     message_id,
                                     Rect {
                                         x: screen_x,
@@ -800,7 +797,7 @@ impl App {
                     },
                 );
             }
-            self.message_scrollbar_area = Some(scrollbar_area);
+            self.ui.message_scrollbar_area = Some(scrollbar_area);
             self.render_scrollbar(frame, scrollbar_area, scroll, max_scroll);
         }
     }
@@ -812,7 +809,7 @@ impl App {
         // Session title (top)
         lines.push(Line::from(""));
         let session_title = shorten(
-            &self.chat_ctx.title,
+            &self.ui.chat_context.title,
             (area.width.saturating_sub(4).max(1)) as usize,
         );
         lines.push(Line::from(vec![Span::styled(
@@ -831,18 +828,17 @@ impl App {
                 .fg(palette.accent)
                 .add_modifier(Modifier::BOLD),
         )]));
+        let active_model = self.runtime.active_model();
         lines.push(Line::from(vec![Span::styled(
-            &self.active_model.display_name,
+            &active_model.display_name,
             Style::default().fg(palette.text),
         )]));
         lines.push(Line::from(vec![Span::styled(
-            &self.active_model.provider_display_name,
+            &active_model.provider_display_name,
             Style::default().fg(palette.muted),
         )]));
 
-        if let Some(usage) = &self.context_usage {
-            let session_tps: Vec<f32> = self
-                .conversation
+            let session_tps: Vec<f32> = self.ui.chat_context
                 .messages
                 .iter()
                 .filter(|m| matches!(m.role, MessageRole::Assistant))
@@ -855,13 +851,12 @@ impl App {
                     format!("Speed: {:.1} t/s (avg)", avg_tps),
                     Style::default().fg(palette.muted),
                 )]));
-            } else if let Some(current_tps) = usage.tokens_per_second {
+            } else if let Some(current_tps) = self.ui.context_usage.tokens_per_second {
                 lines.push(Line::from(vec![Span::styled(
                     format!("Speed: {:.1} t/s", current_tps),
                     Style::default().fg(palette.muted),
                 )]));
             }
-        }
 
         // Token statistics (session cumulative)
         lines.push(Line::from(""));
@@ -873,13 +868,17 @@ impl App {
         )]));
 
         let mut token_usage = TokenUsage::default();
-        for m in self
-            .conversation
+        for m in self.ui.chat_context
             .messages
             .iter()
             .filter(|m| matches!(m.role, MessageRole::Assistant))
         {
-            token_usage.add(m.token_usage());
+            token_usage.add(TokenUsage::new(
+                m.input_tokens.unwrap_or(0),
+                m.output_tokens.unwrap_or(0),
+                m.cache_read_tokens.unwrap_or(0),
+                m.cache_write_tokens.unwrap_or(0),
+            ));
         }
 
         let total = token_usage.total();
@@ -911,8 +910,7 @@ impl App {
         lines.push(Line::from(""));
 
         // Request count
-        let request_count = self
-            .conversation
+        let request_count = self.ui.chat_context
             .messages
             .iter()
             .filter(|m| matches!(m.role, MessageRole::Assistant))
@@ -927,10 +925,9 @@ impl App {
 
         let mut all_diffs = Vec::new();
         let mut seen_files = std::collections::HashSet::new();
-        for msg in self.chat_ctx.visible_messages() {
+        for msg in self.ui.chat_context.visible_messages() {
             if let Some(diffs_json) = &msg.file_diffs
-                && let Ok(diffs) =
-                    serde_json::from_str::<Vec<tidev_core::FileDiff>>(diffs_json)
+                && let Ok(diffs) = serde_json::from_str::<Vec<tidev_core::FileDiff>>(diffs_json)
             {
                 for d in &diffs {
                     if seen_files.insert(d.file.clone()) {
@@ -1025,13 +1022,13 @@ impl App {
         // Todos section
         lines.push(Line::from(""));
         lines.push(Line::from(vec![Span::styled(
-            format!("Todos ({})", self.todos.len()),
+            format!("Todos ({})", self.ui.todos.len()),
             Style::default()
                 .fg(palette.accent)
                 .add_modifier(Modifier::BOLD),
         )]));
 
-        for todo in &self.todos {
+        for todo in &self.ui.todos {
             let (checkbox, style) = match todo.status.as_str() {
                 "completed" => (
                     "✔ ",
@@ -1052,7 +1049,7 @@ impl App {
         }
 
         // Undo state (only when active)
-        if self.chat_ctx.is_reverted() {
+        if self.ui.chat_context.is_reverted() {
             lines.push(Line::from(""));
             lines.push(Line::from(vec![Span::styled(
                 "⚠ Undo active",
@@ -1074,7 +1071,7 @@ impl App {
         let sidebar_content_width = sidebar_padded.width as usize;
 
         // Build fixed footer (workspace path, always visible)
-        let workspace_path = self.workspace_root.display().to_string();
+        let workspace_path = self.runtime.workspace_root().display().to_string();
         let display_path = workspace_path.replace(
             &dirs::home_dir().unwrap_or_default().display().to_string(),
             "~",
@@ -1111,7 +1108,7 @@ impl App {
         };
 
         // Estimate total lines for scroll max (accounts for word wrapping)
-        self.sidebar_total_lines = lines
+        self.ui.sidebar_total_lines = lines
             .iter()
             .map(|line| {
                 let w: usize = line
@@ -1128,16 +1125,15 @@ impl App {
             .sum();
 
         let sidebar_viewport_lines = content_height as usize;
-        let max_scroll = self
-            .sidebar_total_lines
+        let max_scroll = self.ui.sidebar_total_lines
             .saturating_sub(sidebar_viewport_lines);
-        self.sidebar_scroll_offset = self.sidebar_scroll_offset.min(max_scroll);
+        self.ui.sidebar_scroll_offset = self.ui.sidebar_scroll_offset.min(max_scroll);
 
         // Render scrollable content
         let paragraph = Paragraph::new(Text::from(lines))
             .style(Style::default().fg(palette.text))
             .wrap(Wrap { trim: false })
-            .scroll((self.sidebar_scroll_offset as u16, 0));
+            .scroll((self.ui.sidebar_scroll_offset as u16, 0));
         frame.render_widget(paragraph, content_area);
 
         // Render fixed footer (workspace path)
@@ -1151,7 +1147,7 @@ impl App {
         let palette = self.palette();
         let width = content_width.unwrap_or(1).max(1);
         let body_width = width.saturating_sub(2).max(1);
-        let messages = self.chat_ctx.visible_messages();
+        let messages = self.ui.chat_context.visible_messages();
 
         let mut lines = Vec::new();
         let mut card_ranges = Vec::new();
@@ -1160,7 +1156,7 @@ impl App {
         let mut inline_running_card_ranges = Vec::new();
 
         // Header for subsessions (always visible at top)
-        let header_lines = if self.chat_ctx.parent_session_id.is_some() {
+        let header_lines = if self.ui.chat_context.parent_session_id.is_some() {
             vec![
                 line_with_style(
                     "SUBSESSION active — viewing a child session.",
@@ -1205,24 +1201,24 @@ impl App {
         self.update_message_layout_index(width, body_width, false);
         if let Some(scroll_offset) = self.resolve_message_scroll_target(messages, width, body_width)
         {
-            self.message_scroll_offset = scroll_offset;
-            self.message_follow_tail = false;
-            self.message_scroll_target = None;
+            self.ui.message_scroll_offset = scroll_offset;
+            self.ui.message_follow_tail = false;
+            self.ui.message_scroll_target = None;
         }
 
         // Calculate visible range based on scroll position
-        let viewport = self.message_viewport_lines.max(1);
-        let total_message_lines = self.message_layout_index.borrow().total_lines;
+        let viewport = self.ui.message_viewport_lines.max(1);
+        let total_message_lines = self.ui.message_layout_index.borrow().total_lines;
         let total_overall_lines = total_message_lines;
         let header_line_count = header_lines.len();
 
         let max_scroll = (header_line_count + total_overall_lines).saturating_sub(viewport);
-        let scroll = if self.message_follow_tail {
+        let scroll = if self.ui.message_follow_tail {
             max_scroll
         } else {
-            self.message_scroll_offset.min(max_scroll)
+            self.ui.message_scroll_offset.min(max_scroll)
         };
-        self.message_scroll_offset = scroll;
+        self.ui.message_scroll_offset = scroll;
 
         // the 'scroll' includes header lines. To find the correct message block, we must
         // offset the scroll past the header
@@ -1263,16 +1259,17 @@ impl App {
         // Create render context for tool calls
         let expanded_tool_outputs = self.load_expanded_tool_outputs(messages);
         let spinner = self.loading_spinner();
+        let config = self.runtime.config();
         let ctx = RenderContext {
             palette,
             spinner,
-            workspace_root: self.workspace_root.as_path(),
-            expanded_tool_results: &self.expanded_tool_results,
+            workspace_root: self.runtime.workspace_root().as_path(),
+            expanded_tool_results: &self.ui.expanded_tool_results,
             expanded_tool_outputs: &expanded_tool_outputs,
-            config: self.config.clone(),
-            auth: &self.auth,
-            conversation: &self.chat_ctx,
-            mode: self.mode,
+            config: &config,
+            auth: &self.runtime.auth(),
+            conversation: &self.ui.chat_context,
+            mode: self.ui.mode,
         };
 
         // Render visible blocks
@@ -1312,7 +1309,7 @@ impl App {
         let mut total_lines = header_line_count + total_overall_lines;
 
         // Append retrying hint as a temporary message at the bottom of chat area
-        if let Some((attempt, max_attempts, reason, deadline)) = self.retrying_hint.as_ref() {
+        if let Some((attempt, max_attempts, reason, deadline)) = self.ui.retrying_hint.as_ref() {
             let now = Instant::now();
             let remaining = if *deadline > now {
                 deadline.duration_since(now).as_secs()
@@ -1368,7 +1365,7 @@ impl App {
 
         let elapsed = started_at.elapsed();
         if elapsed > Duration::from_millis(12) {
-            let (hits, misses, entries) = self.message_render_cache_stats();
+            let (hits, misses, entries) = self.ui.message_render_cache_stats();
             log::debug!(
                 "messages_text: messages={}, visible_blocks={}, width={}, took={:?}, cache_hits={}, cache_misses={}, cache_entries={}",
                 messages.len(),
@@ -1408,7 +1405,7 @@ impl App {
 
         let tick = self.next_message_render_cache_tick();
         let key = MessageRenderCacheKey {
-            session_id: self.chat_ctx.session_id,
+            session_id: self.ui.chat_context.session_id,
             message_id: message.id, // Binds the cache to the Assistant message hosting this tool call
             width: body_width,
             is_round_end: !is_streaming, // Approximation, cache differs when streaming is done
@@ -1416,7 +1413,7 @@ impl App {
         };
 
         {
-            let mut cache = self.message_render_cache.borrow_mut();
+            let mut cache = self.ui.message_render_cache.borrow_mut();
             if let Some(entry) = cache.get_mut(&key) {
                 entry.last_used_tick = tick;
                 self.record_message_render_cache_hit();
@@ -1439,8 +1436,8 @@ impl App {
         );
 
         {
-            let mut cache = self.message_render_cache.borrow_mut();
-            cache.insert(
+            let mut cache = self.ui.message_render_cache.borrow_mut();
+            cache.put(
                 key,
                 MessageRenderCacheEntry {
                     value: MessageRenderCacheValue::ToolResult(result.0.clone(), result.1.clone()),
@@ -1460,7 +1457,7 @@ impl App {
         is_round_end: bool,
     ) -> Vec<(Color, Vec<Line<'static>>)> {
         let key = MessageRenderCacheKey {
-            session_id: self.chat_ctx.session_id,
+            session_id: self.ui.chat_context.session_id,
             message_id: message.id,
             width: body_width,
             is_round_end,
@@ -1469,7 +1466,7 @@ impl App {
         let tick = self.next_message_render_cache_tick();
 
         {
-            let mut cache = self.message_render_cache.borrow_mut();
+            let mut cache = self.ui.message_render_cache.borrow_mut();
             if let Some(entry) = cache.get_mut(&key) {
                 entry.last_used_tick = tick;
                 self.record_message_render_cache_hit();
@@ -1484,8 +1481,8 @@ impl App {
         let cards = content::render_message_cards_inner(ctx, message, body_width, is_round_end);
 
         {
-            let mut cache = self.message_render_cache.borrow_mut();
-            cache.insert(
+            let mut cache = self.ui.message_render_cache.borrow_mut();
+            cache.put(
                 key,
                 MessageRenderCacheEntry {
                     value: MessageRenderCacheValue::Cards(cards.clone()),
@@ -1504,11 +1501,16 @@ impl App {
             .iter()
             .filter(|m| matches!(m.role, MessageRole::Tool))
         {
-            if !self.expanded_tool_results.contains(&msg.id) {
+            if !self.ui.expanded_tool_results.contains(&msg.id) {
                 continue;
             }
             // Try to load the full output from the tool_outputs table.
-            if let Ok(Some(output)) = self.store.load_tool_output(msg.id) {
+            if let Ok(Some(output)) = self
+                .runtime
+                .session_manager()
+                .store()
+                .load_tool_output(msg.id)
+            {
                 map.insert(msg.id, output);
             }
             // Not in the table → message.content (preview) will be used instead.
@@ -1601,7 +1603,7 @@ impl App {
                                 &tool_call.name,
                                 &tool_call.arguments,
                                 body_width.saturating_sub(10),
-                                self.workspace_root.as_path(),
+                                self.runtime.workspace_root().as_path(),
                             )
                         } else {
                             let canonical_display = canonical_tool_name(&tool_call.name)
@@ -1664,8 +1666,8 @@ impl App {
     /// For incremental updates, only blocks with dirty messages are recomputed,
     /// preserving positions for unchanged blocks.
     fn update_message_layout_index(&self, width: usize, body_width: usize, force_rebuild: bool) {
-        let messages = self.chat_ctx.visible_messages();
-        let mut index = self.message_layout_index.borrow_mut();
+        let messages = self.ui.chat_context.visible_messages();
+        let mut index = self.ui.message_layout_index.borrow_mut();
 
         // Check if message count changed (new messages added or removed)
         let indexed_message_count = index
@@ -1698,18 +1700,19 @@ impl App {
 
             let expanded_tool_outputs = self.load_expanded_tool_outputs(messages);
             let spinner = self.loading_spinner();
+            let config = self.runtime.config();
             let ctx = RenderContext {
                 palette: self.palette(),
                 spinner,
-                workspace_root: self.workspace_root.as_path(),
-                expanded_tool_results: &self.expanded_tool_results,
+                workspace_root: self.runtime.workspace_root().as_path(),
+                expanded_tool_results: &self.ui.expanded_tool_results,
                 expanded_tool_outputs: &expanded_tool_outputs,
-                config: self.config.clone(),
-                auth: &self.auth,
-                conversation: &self.chat_ctx,
-                mode: self.mode,
+                config: &config,
+                auth: &self.runtime.auth(),
+                conversation: &self.ui.chat_context,
+                mode: self.ui.mode,
             };
-            let session_id = self.chat_ctx.session_id;
+            let session_id = self.ui.chat_context.session_id;
 
             // Step 1: Determine block boundaries sequentially (cheap)
             struct BlockInfo {
@@ -1778,7 +1781,7 @@ impl App {
 
                 // Step 3: Build layout index and insert cache entries sequentially
                 let mut current_line = 0;
-                let mut cache = self.message_render_cache.borrow_mut();
+                let mut cache = self.ui.message_render_cache.borrow_mut();
                 for (comp_idx, comp) in computations.iter().enumerate() {
                     // Adjust line count for running subagent task tool calls:
                     // compute_block_data uses render_tool_call_with_result which returns
@@ -1791,15 +1794,14 @@ impl App {
                         if msg.role == MessageRole::Assistant {
                             for tool_call in &msg.tool_calls {
                                 if tool_call.name == "task" {
-                                    if let Some(execution) = self
-                                        .running_subagent_executions
+                                    if let Some(execution) = self.ui.running_subagent_executions
                                         .iter()
                                         .find(|e| e.tool_call.id == tool_call.id)
                                     {
-                                        let running_height = Self::count_running_subagent_card_lines(
-                                            execution,
-                                            body_width,
-                                        );
+                                        let running_height =
+                                            Self::count_running_subagent_card_lines(
+                                                execution, body_width,
+                                            );
                                         // Generic tool call card: 1 empty + 1 summary = 2 lines
                                         line_count = line_count.saturating_sub(2) + running_height;
                                     }
@@ -1808,7 +1810,7 @@ impl App {
                         }
                     }
 
-                    let block = super::MessageBlock {
+                    let block = MessageBlock {
                         message_id: comp.message_id,
                         message_start_idx: blocks_info[comp_idx].start_idx,
                         message_count: comp.message_count,
@@ -1821,7 +1823,7 @@ impl App {
                     // Insert cache entries with fresh ticks
                     for (key, entry) in &comp.cache_entries {
                         let tick = self.next_message_render_cache_tick();
-                        cache.insert(
+                        cache.put(
                             key.clone(),
                             MessageRenderCacheEntry {
                                 value: entry.value.clone(),
@@ -1839,18 +1841,19 @@ impl App {
 
             let expanded_tool_outputs = self.load_expanded_tool_outputs(messages);
             let spinner = self.loading_spinner();
+            let config = self.runtime.config();
             let ctx = RenderContext {
                 palette: self.palette(),
                 spinner,
-                workspace_root: self.workspace_root.as_path(),
-                expanded_tool_results: &self.expanded_tool_results,
+                workspace_root: self.runtime.workspace_root().as_path(),
+                expanded_tool_results: &self.ui.expanded_tool_results,
                 expanded_tool_outputs: &expanded_tool_outputs,
-                config: self.config.clone(),
-                auth: &self.auth,
-                conversation: &self.chat_ctx,
-                mode: self.mode,
+                config: &config,
+                auth: &self.runtime.auth(),
+                conversation: &self.ui.chat_context,
+                mode: self.ui.mode,
             };
-            let session_id = self.chat_ctx.session_id;
+            let session_id = self.ui.chat_context.session_id;
 
             // Find and recompute dirty blocks
             let mut i = 0;
@@ -1888,15 +1891,13 @@ impl App {
                         if msg.role == MessageRole::Assistant {
                             for tool_call in &msg.tool_calls {
                                 if tool_call.name == "task" {
-                                    if let Some(execution) = self
-                                        .running_subagent_executions
+                                    if let Some(execution) = self.ui.running_subagent_executions
                                         .iter()
                                         .find(|e| e.tool_call.id == tool_call.id)
                                     {
                                         let running_height =
                                             Self::count_running_subagent_card_lines(
-                                                execution,
-                                                body_width,
+                                                execution, body_width,
                                             );
                                         adjusted_line_count =
                                             adjusted_line_count.saturating_sub(2) + running_height;
@@ -1907,8 +1908,7 @@ impl App {
                     }
 
                     let old_line_count = index.blocks[i].line_count;
-                    let line_count_diff =
-                        adjusted_line_count as isize - old_line_count as isize;
+                    let line_count_diff = adjusted_line_count as isize - old_line_count as isize;
 
                     // Update the block
                     index.blocks[i].line_count = adjusted_line_count;
@@ -1924,10 +1924,10 @@ impl App {
                     }
 
                     // Insert cache entries for this block
-                    let mut cache = self.message_render_cache.borrow_mut();
+                    let mut cache = self.ui.message_render_cache.borrow_mut();
                     for (key, entry) in &comp.cache_entries {
                         let tick = self.next_message_render_cache_tick();
-                        cache.insert(
+                        cache.put(
                             key.clone(),
                             MessageRenderCacheEntry {
                                 value: entry.value.clone(),
@@ -1948,21 +1948,23 @@ impl App {
         width: usize,
         body_width: usize,
     ) -> Option<usize> {
-        let message_id = self.message_scroll_target?;
+        let message_id = self.ui.message_scroll_target?;
 
         // Create a minimal context for block data calculation
-        let expanded_tool_outputs = self.load_expanded_tool_outputs(messages);
-        let spinner = self.loading_spinner();
-        let ctx = RenderContext {
-            palette: self.palette(),
-            spinner,
-            workspace_root: self.workspace_root.as_path(),
-            expanded_tool_results: &self.expanded_tool_results,
-            expanded_tool_outputs: &expanded_tool_outputs,
-            config: self.config.clone(),
-            auth: &self.auth,
-            conversation: &self.chat_ctx,
-            mode: self.mode,
+            let expanded_tool_outputs = self.load_expanded_tool_outputs(messages);
+            let spinner = self.loading_spinner();
+            let config = self.runtime.config();
+            let config = self.runtime.config();
+            let ctx = RenderContext {
+                palette: self.palette(),
+                spinner,
+                workspace_root: self.runtime.workspace_root().as_path(),
+                expanded_tool_results: &self.ui.expanded_tool_results,
+                expanded_tool_outputs: &expanded_tool_outputs,
+                config: &config,
+            auth: &self.runtime.auth(),
+            conversation: &self.ui.chat_context,
+            mode: self.ui.mode,
         };
 
         let mut offset = 0;
@@ -2119,8 +2121,8 @@ impl App {
         &self,
         scroll: usize,
         viewport_height: usize,
-    ) -> Vec<super::MessageBlock> {
-        let index = self.message_layout_index.borrow();
+    ) -> Vec<MessageBlock> {
+        let index = self.ui.message_layout_index.borrow();
 
         if index.blocks.is_empty() {
             return Vec::new();
@@ -2166,7 +2168,7 @@ impl App {
     fn render_message_block_to_lines(
         &self,
         messages: &[Message],
-        block: &super::MessageBlock,
+        block: &MessageBlock,
         width: usize,
         body_width: usize,
         card_ranges: &mut Vec<ToolResultCardRange>,
@@ -2242,17 +2244,16 @@ impl App {
                         // This eliminates the dual-card problem (tool call card + running overlay).
                         if tool_result.is_none()
                             && tool_call.name == "task"
-                            && let Some(exec_index) = self
-                                .running_subagent_executions
+                            && let Some(exec_index) = self.ui.running_subagent_executions
                                 .iter()
                                 .position(|e| e.tool_call.id == tool_call.id)
                         {
-                            let execution = &self.running_subagent_executions[exec_index];
+                            let execution = &self.ui.running_subagent_executions[exec_index];
                             let running_lines =
                                 self.render_running_subagent_lines(execution, body_width);
                             let start_line = current_line_offset + lines.len();
                             let mut card_bg = palette.panel;
-                            if self.hovered_inline_subagent == Some(exec_index) {
+                            if self.ui.hovered_inline_subagent == Some(execution.child_session_id) {
                                 card_bg = palette.hover_bg(card_bg);
                             }
                             let decorated = decorate_card_lines(running_lines, width, card_bg, 2);
@@ -2339,14 +2340,14 @@ impl App {
                                                 > TOOL_OUTPUT_PREVIEW_LINES
                                     }
                                     // All other tools (task, websearch, webfetch, memory,
-                                    // bash, MCP, etc.) use expanded_tool_results — only
+                                    // bash, etc.) use expanded_tool_results — only
                                     // meaningful if output exceeds preview threshold
                                     _ => {
                                         result_msg.content.lines().count()
                                             > TOOL_OUTPUT_PREVIEW_LINES
                                     }
                                 };
-                                if self.hovered_card == Some(result_msg.id) && has_expandable {
+                                if self.ui.hovered_card == Some(result_msg.id) && has_expandable {
                                     card_bg = palette.hover_bg(card_bg);
                                 }
                             }
@@ -2377,7 +2378,7 @@ impl App {
                 };
                 // Apply hover highlight for user message cards
                 if matches!(message.role, MessageRole::User | MessageRole::Shell)
-                    && self.hovered_card == Some(message.id)
+                    && self.ui.hovered_card == Some(message.id)
                 {
                     bg = palette.hover_bg(bg);
                 }
@@ -2444,9 +2445,9 @@ impl App {
             frame,
             area,
             scroll,
-            self.message_total_lines,
+            self.ui.message_total_lines,
             self.palette(),
-            self.scrollbar_hovered,
+            self.ui.scrollbar_hovered,
         );
     }
 }

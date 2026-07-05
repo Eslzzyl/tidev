@@ -3,14 +3,14 @@ use crate::ui::model_panel::{ModelPanelItem, thinking_options_for_model};
 
 impl App {
     pub(crate) fn handle_theme_panel_key(&mut self, key: KeyEvent) -> Result<()> {
-        if let Some(panel) = &mut self.theme_panel {
+        if let Some(panel) = &mut self.ui.theme_panel {
             match key.code {
                 // Navigation
                 KeyCode::Up | KeyCode::Char('k') => {
                     let previous_theme = panel.preview_theme;
                     panel.move_up();
                     if panel.preview_theme != previous_theme {
-                        self.theme.set_mode(panel.preview_theme);
+                        self.ui.theme.set_mode(panel.preview_theme);
                         self.clear_message_render_cache();
                     }
                 }
@@ -18,20 +18,20 @@ impl App {
                     let previous_theme = panel.preview_theme;
                     panel.move_down();
                     if panel.preview_theme != previous_theme {
-                        self.theme.set_mode(panel.preview_theme);
+                        self.ui.theme.set_mode(panel.preview_theme);
                         self.clear_message_render_cache();
                     }
                 }
                 // Search: backspace removes char
                 KeyCode::Backspace => {
                     panel.backspace_query();
-                    self.theme.set_mode(panel.preview_theme);
+                    self.ui.theme.set_mode(panel.preview_theme);
                     self.clear_message_render_cache();
                 }
                 // Search: any printable char filters
                 KeyCode::Char(ch) if !ch.is_control() => {
                     panel.append_query(ch);
-                    self.theme.set_mode(panel.preview_theme);
+                    self.ui.theme.set_mode(panel.preview_theme);
                     self.clear_message_render_cache();
                 }
                 // Confirm
@@ -49,10 +49,10 @@ impl App {
     }
 
     pub(crate) fn handle_agents_panel_key(&mut self, key: KeyEvent) -> Result<()> {
-        if let Some(panel) = &mut self.agents_panel {
+        if let Some(panel) = &mut self.ui.agents_panel {
             match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => {
-                    self.agents_panel = None;
+                    self.ui.agents_panel = None;
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
                     panel.scroll_up(1);
@@ -76,11 +76,11 @@ impl App {
         // Handle close actions first to avoid borrowing issues
         let should_close = matches!(key.code, KeyCode::Esc | KeyCode::Char('q'));
         if should_close {
-            self.skills_panel = None;
+            self.ui.skills_panel = None;
             return Ok(());
         }
 
-        if let Some(panel) = &mut self.skills_panel {
+        if let Some(panel) = &mut self.ui.skills_panel {
             // When query is active, handle text input first
             if panel.query_active {
                 match key.code {
@@ -110,9 +110,9 @@ impl App {
                     // Copy selected skill name to composer and close
                     if let Some(name) = panel.selected_skill_name() {
                         let name = name.to_string();
-                        self.composer.set_text(format!("/skill {}", name));
-                        self.skills_panel = None;
-                        self.last_notice = Some(format!("Skill '{}' selected", name));
+                        self.ui.composer.set_text(format!("/skill {}", name));
+                        self.ui.skills_panel = None;
+                        self.ui.last_notice = Some(format!("Skill '{}' selected", name));
                     }
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
@@ -147,7 +147,7 @@ impl App {
     }
 
     pub(crate) fn handle_settings_panel_key(&mut self, key: KeyEvent) -> Result<()> {
-        if let Some(panel) = &mut self.settings_panel {
+        if let Some(panel) = &mut self.ui.settings_panel {
             match key.code {
                 KeyCode::Up => {
                     panel.move_up();
@@ -174,7 +174,7 @@ impl App {
     }
 
     pub(crate) fn handle_model_panel_key(&mut self, key: KeyEvent) -> Result<()> {
-        let Some(mut panel) = self.model_panel.clone() else {
+        let Some(mut panel) = self.ui.model_panel.clone() else {
             return Ok(());
         };
 
@@ -183,13 +183,13 @@ impl App {
                 let items = self.model_panel_items(&panel);
                 let mut next_panel = panel;
                 next_panel.move_selection(&items, -1);
-                self.model_panel = Some(next_panel);
+                self.ui.model_panel = Some(next_panel);
             }
             KeyCode::Down => {
                 let items = self.model_panel_items(&panel);
                 let mut next_panel = panel;
                 next_panel.move_selection(&items, 1);
-                self.model_panel = Some(next_panel);
+                self.ui.model_panel = Some(next_panel);
             }
             KeyCode::Enter => {
                 let items = self.model_panel_items(&panel);
@@ -220,7 +220,7 @@ impl App {
                         if next_panel.is_general_tab() {
                             // Save thinking level preference and switch model
                             if !tl.is_empty() {
-                                let _ = self.store.save_model_thinking_level(
+                                let _ = self.runtime.set_model_thinking_level(
                                     &summary.provider_id,
                                     &summary.model_id,
                                     &tl,
@@ -238,24 +238,34 @@ impl App {
                                 .map(|t| t.agent_type_str.clone())
                                 .unwrap_or_default();
                             let model_str = summary.label();
-                            self.config.write().unwrap().set_agent_model_and_thinking(
-                                &self.paths,
-                                &agent_type_str,
-                                &model_str,
-                                &tl,
-                            )?;
+                            let at = agent_type_str.clone();
+                        let ms = model_str.clone();
+                        let tl_str = tl.clone();
+                        self.runtime.update_config(|c| {
+                            if ms.is_empty() {
+                                c.agent.models.remove(&at);
+                            } else {
+                                c.agent.models.insert(at.clone(), ms);
+                            }
+                            if tl_str.is_empty() {
+                                c.agent.thinking_levels.remove(&at);
+                            } else {
+                                c.agent.thinking_levels.insert(at, tl_str);
+                            }
+                        });
+                        let _ = self.runtime.save_config();
                             if let Some(t) = next_panel.current_tab_mut() {
                                 t.current_label = model_str.clone();
                                 t.thinking_level_expanded = false;
                             }
-                            self.last_notice = Some(format!(
+                            self.ui.last_notice = Some(format!(
                                 "Agent '{}' model set to {} ({})",
                                 agent_type_str,
                                 model_str,
                                 if tl.is_empty() { "auto" } else { &tl },
                             ));
                         }
-                        self.model_panel = Some(next_panel);
+                        self.ui.model_panel = Some(next_panel);
                     }
                 } else {
                     // Expand to show thinking level options
@@ -272,7 +282,7 @@ impl App {
                                 if let Some(t) = next_panel.current_tab_mut() {
                                     t.current_label = summary.label();
                                 }
-                                self.model_panel = Some(next_panel);
+                                self.ui.model_panel = Some(next_panel);
                             } else {
                                 let agent_type_str = panel
                                     .current_tab()
@@ -281,18 +291,22 @@ impl App {
                                 let model_str = summary.label();
                                 // Clear stale thinking level when switching to a
                                 // model that does not support thinking.
-                                self.config.write().unwrap().set_agent_model_and_thinking(
-                                    &self.paths,
-                                    &agent_type_str,
-                                    &model_str,
-                                    "",
-                                )?;
+                                let at = agent_type_str.clone();
+                        let ms = model_str.clone();
+                        self.runtime.update_config(|c| {
+                            if ms.is_empty() {
+                                c.agent.models.remove(&at);
+                            } else {
+                                c.agent.models.insert(at, ms);
+                            }
+                        });
+                        let _ = self.runtime.save_config();
                                 let mut next_panel = panel;
                                 if let Some(t) = next_panel.current_tab_mut() {
                                     t.current_label = model_str.clone();
                                 }
-                                self.model_panel = Some(next_panel);
-                                self.last_notice = Some(format!(
+                                self.ui.model_panel = Some(next_panel);
+                                self.ui.last_notice = Some(format!(
                                     "Agent '{}' model set to {}",
                                     agent_type_str, model_str
                                 ));
@@ -305,13 +319,13 @@ impl App {
                                 // Calculate the index matching the current thinking level
                                 let tl_options =
                                     thinking_options_for_model(&items, t.selected_index);
-                                let current_tl = self.thinking_level.to_string();
+                                let current_tl = self.ui.thinking_level.to_string();
                                 t.thinking_level_index = tl_options
                                     .iter()
                                     .position(|opt| opt.to_ascii_lowercase() == current_tl)
                                     .unwrap_or(0);
                             }
-                            self.model_panel = Some(next_panel);
+                            self.ui.model_panel = Some(next_panel);
                         }
                     }
                 }
@@ -326,7 +340,7 @@ impl App {
                     if let Some(t) = next_panel.current_tab_mut() {
                         t.thinking_level_expanded = false;
                     }
-                    self.model_panel = Some(next_panel);
+                    self.ui.model_panel = Some(next_panel);
                 } else {
                     self.close_model_panel();
                 }
@@ -337,20 +351,20 @@ impl App {
                 let items = self.model_panel_items(&next_panel);
                 let is_general = next_panel.is_general_tab();
                 if is_general {
-                    // General tab: use self.active_model directly (authoritative source)
+                    // General tab: use self.runtime.active_model() directly (authoritative source)
                     next_panel.reset_selection(
                         &items,
-                        Some((&self.active_model.provider_id, &self.active_model.model_id)),
+                        Some((&self.runtime.active_model().provider_id, &self.runtime.active_model().model_id)),
                     );
                 } else {
-                    let active = agent_tab_active_model(&next_panel, &self.active_model);
+                    let active = agent_tab_active_model(&next_panel, &self.runtime.active_model());
                     if let Some((p, m)) = active {
                         next_panel.reset_selection(&items, Some((&p, &m)));
                     } else {
                         next_panel.reset_selection(&items, None);
                     }
                 }
-                self.model_panel = Some(next_panel);
+                self.ui.model_panel = Some(next_panel);
             }
             KeyCode::BackTab | KeyCode::Tab if key.modifiers.contains(KeyModifiers::SHIFT) => {
                 let mut next_panel = panel;
@@ -360,17 +374,17 @@ impl App {
                 if is_general {
                     next_panel.reset_selection(
                         &items,
-                        Some((&self.active_model.provider_id, &self.active_model.model_id)),
+                        Some((&self.runtime.active_model().provider_id, &self.runtime.active_model().model_id)),
                     );
                 } else {
-                    let active = agent_tab_active_model(&next_panel, &self.active_model);
+                    let active = agent_tab_active_model(&next_panel, &self.runtime.active_model());
                     if let Some((p, m)) = active {
                         next_panel.reset_selection(&items, Some((&p, &m)));
                     } else {
                         next_panel.reset_selection(&items, None);
                     }
                 }
-                self.model_panel = Some(next_panel);
+                self.ui.model_panel = Some(next_panel);
             }
             _ => {
                 let previous_query = panel.query.text().to_string();
@@ -382,19 +396,19 @@ impl App {
                     if next_panel.is_general_tab() {
                         next_panel.reset_selection(
                             &items,
-                            Some((&self.active_model.provider_id, &self.active_model.model_id)),
+                            Some((&self.runtime.active_model().provider_id, &self.runtime.active_model().model_id)),
                         );
                     } else {
-                        let active = agent_tab_active_model(&next_panel, &self.active_model);
+                        let active = agent_tab_active_model(&next_panel, &self.runtime.active_model());
                         if let Some((p, m)) = active {
                             next_panel.reset_selection(&items, Some((&p, &m)));
                         } else {
                             next_panel.reset_selection(&items, None);
                         }
                     }
-                    self.model_panel = Some(next_panel);
+                    self.ui.model_panel = Some(next_panel);
                 } else {
-                    self.model_panel = Some(panel);
+                    self.ui.model_panel = Some(panel);
                 }
             }
         }
@@ -403,7 +417,7 @@ impl App {
     }
 
     pub(crate) fn handle_search_panel_key(&mut self, key: KeyEvent) -> Result<()> {
-        let Some(mut panel) = self.search_panel.clone() else {
+        let Some(mut panel) = self.ui.search_panel.clone() else {
             return Ok(());
         };
 
@@ -416,36 +430,36 @@ impl App {
                     if !input.is_empty() {
                         let provider = panel.editing_api_key.clone().unwrap_or_default();
                         if panel.editing_cx {
-                            self.auth.web.google_cx = Some(input);
+                            self.runtime.auth().web.google_cx = Some(input);
                         } else {
-                            self.auth
+                            self.runtime.auth()
                                 .web
                                 .search_api_keys
                                 .insert(provider.clone(), input);
                         }
-                        self.auth.save(&self.paths)?;
+                        self.runtime.save_auth()?;
                     }
                     // Clear editing state
                     panel.editing_api_key = None;
                     panel.editing_cx = false;
-                    self.search_panel = Some(panel);
+                    self.ui.search_panel = Some(panel);
                 }
                 KeyCode::Esc => {
                     panel.editing_api_key = None;
                     panel.editing_cx = false;
-                    self.search_panel = Some(panel);
+                    self.ui.search_panel = Some(panel);
                 }
                 KeyCode::Char(c) => {
                     panel
                         .input_buffer
                         .handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::empty()));
-                    self.search_panel = Some(panel);
+                    self.ui.search_panel = Some(panel);
                 }
                 KeyCode::Backspace => {
                     panel
                         .input_buffer
                         .handle_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::empty()));
-                    self.search_panel = Some(panel);
+                    self.ui.search_panel = Some(panel);
                 }
                 _ => {}
             }
@@ -455,26 +469,26 @@ impl App {
         match key.code {
             KeyCode::Up => {
                 panel.move_selection(-1);
-                self.search_panel = Some(panel);
+                self.ui.search_panel = Some(panel);
             }
             KeyCode::Down => {
                 panel.move_selection(1);
-                self.search_panel = Some(panel);
+                self.ui.search_panel = Some(panel);
             }
             KeyCode::Enter => {
-                let auth = &self.auth;
+                let auth = &self.runtime.auth();
 
                 // Case 1: provider needs API key but none set → enter key edit mode
                 if panel.selected_provider_missing_key(auth) {
                     panel.start_editing_api_key();
-                    self.search_panel = Some(panel);
+                    self.ui.search_panel = Some(panel);
                     return Ok(());
                 }
 
                 // Case 2: provider needs Google CX but none set → enter cx edit mode
                 if panel.selected_provider_missing_cx(auth) {
                     panel.start_editing_cx();
-                    self.search_panel = Some(panel);
+                    self.ui.search_panel = Some(panel);
                     return Ok(());
                 }
 
@@ -486,14 +500,14 @@ impl App {
                 {
                     self.switch_search_provider(info.id)?;
                     panel.active_provider = info.id.to_string();
-                    self.search_panel = Some(panel);
+                    self.ui.search_panel = Some(panel);
                 }
             }
             KeyCode::Esc => {
                 if panel.editing_api_key.is_some() {
                     panel.editing_api_key = None;
                     panel.editing_cx = false;
-                    self.search_panel = Some(panel);
+                    self.ui.search_panel = Some(panel);
                 } else {
                     self.close_search_panel();
                 }
@@ -505,7 +519,7 @@ impl App {
     }
 
     pub(crate) fn handle_model_panel_paste(&mut self, text: &str) -> Result<()> {
-        let Some(mut panel) = self.model_panel.clone() else {
+        let Some(mut panel) = self.ui.model_panel.clone() else {
             return Ok(());
         };
 
@@ -515,7 +529,7 @@ impl App {
 
         if panel.query.text() != previous_query {
             let items = self.model_panel_items(&panel);
-            let active = agent_tab_active_model(&panel, &self.active_model);
+            let active = agent_tab_active_model(&panel, &self.runtime.active_model());
             if let Some((p, m)) = active {
                 panel.reset_selection(&items, Some((&p, &m)));
             } else {
@@ -523,30 +537,30 @@ impl App {
             }
         }
 
-        self.model_panel = Some(panel);
+        self.ui.model_panel = Some(panel);
         Ok(())
     }
 
     pub(crate) fn handle_message_panel_key(&mut self, key: KeyEvent) -> Result<()> {
-        let Some(panel) = self.message_panel.clone() else {
+        let Some(panel) = self.ui.message_panel.clone() else {
             return Ok(());
         };
 
         match key.code {
             KeyCode::Up => {
-                let query = self.composer.text().to_string();
+                let query = self.ui.composer.text().to_string();
                 let mut next_panel = panel;
                 next_panel.move_selection(&query, -1);
-                self.message_panel = Some(next_panel);
+                self.ui.message_panel = Some(next_panel);
             }
             KeyCode::Down => {
-                let query = self.composer.text().to_string();
+                let query = self.ui.composer.text().to_string();
                 let mut next_panel = panel;
                 next_panel.move_selection(&query, 1);
-                self.message_panel = Some(next_panel);
+                self.ui.message_panel = Some(next_panel);
             }
             KeyCode::Enter => {
-                let query = self.composer.text().to_string();
+                let query = self.ui.composer.text().to_string();
                 if let Some(message) = panel.selected_message(&query) {
                     self.scroll_messages_to_message(message.message_id);
                     self.close_message_panel();
@@ -556,7 +570,7 @@ impl App {
                 self.close_message_panel();
             }
             KeyCode::Char('f') => {
-                let query = self.composer.text().to_string();
+                let query = self.ui.composer.text().to_string();
                 if let Some(message) = panel.selected_message(&query) {
                     // 计算要复制的消息数量
                     let message_count = self
@@ -564,7 +578,7 @@ impl App {
                         .map(|idx| idx + 1)
                         .unwrap_or(1);
 
-                    self.fork_confirm_dialog =
+                    self.ui.fork_confirm_dialog =
                         Some(crate::ui::fork_confirm::ForkConfirmDialogState::new(
                             message.message_id,
                             message_count,
@@ -572,9 +586,9 @@ impl App {
                 }
             }
             KeyCode::Char('u') => {
-                let query = self.composer.text().to_string();
+                let query = self.ui.composer.text().to_string();
                 if let Some(message) = panel.selected_message(&query) {
-                    self.undo_confirm_dialog =
+                    self.ui.undo_confirm_dialog =
                         Some(crate::ui::undo_confirm::UndoConfirmDialogState::new(
                             message.message_id,
                             message.content.clone(),
@@ -582,21 +596,21 @@ impl App {
                 }
             }
             KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                let query = self.composer.text().to_string();
+                let query = self.ui.composer.text().to_string();
                 let mut next_panel = panel;
                 next_panel.move_selection(&query, -1);
-                self.message_panel = Some(next_panel);
+                self.ui.message_panel = Some(next_panel);
             }
             KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                let query = self.composer.text().to_string();
+                let query = self.ui.composer.text().to_string();
                 let mut next_panel = panel;
                 next_panel.move_selection(&query, 1);
-                self.message_panel = Some(next_panel);
+                self.ui.message_panel = Some(next_panel);
             }
             _ => {
-                let previous_query = self.composer.text().to_string();
-                let _ = self.composer.handle_key_with_history(key, false);
-                if self.composer.text() != previous_query {
+                let previous_query = self.ui.composer.text().to_string();
+                let _ = self.ui.composer.handle_key_with_history(key, false);
+                if self.ui.composer.text() != previous_query {
                     self.reset_message_panel_selection();
                 }
             }
@@ -609,14 +623,13 @@ impl App {
     pub(crate) fn handle_fork_confirm_dialog_key(
         &mut self,
         key: KeyEvent,
-        runtime: &Runtime,
     ) -> Result<()> {
         match key.code {
             KeyCode::Enter => {
-                self.confirm_fork_session(runtime)?;
+                self.confirm_fork_session( )?;
             }
             KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
-                self.fork_confirm_dialog = None;
+                self.ui.fork_confirm_dialog = None;
             }
             _ => {}
         }
@@ -626,14 +639,13 @@ impl App {
     pub(crate) fn handle_undo_confirm_dialog_key(
         &mut self,
         key: KeyEvent,
-        runtime: &Runtime,
     ) -> Result<()> {
         match key.code {
             KeyCode::Enter => {
-                self.confirm_undo_to_message(runtime)?;
+                self.confirm_undo_to_message( )?;
             }
             KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
-                self.undo_confirm_dialog = None;
+                self.ui.undo_confirm_dialog = None;
             }
             _ => {}
         }
@@ -643,7 +655,6 @@ impl App {
     pub(crate) fn handle_rename_session_dialog_key(
         &mut self,
         key: KeyEvent,
-        _runtime: &Runtime,
     ) -> Result<()> {
         match key.code {
             KeyCode::Esc => {
@@ -657,7 +668,7 @@ impl App {
                 self.confirm_rename_session()
             }
             _ => {
-                let _ = self.composer.handle_key_with_history(key, false);
+                let _ = self.ui.composer.handle_key_with_history(key, false);
                 Ok(())
             }
         }

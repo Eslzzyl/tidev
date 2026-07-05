@@ -108,6 +108,29 @@ impl SessionManager {
         &self.store
     }
 
+    /// Update the provider/model info for a session.
+    pub fn update_session_model(
+        &self,
+        session_id: Uuid,
+        provider_id: &str,
+        provider_display_name: &str,
+        model_id: &str,
+        model_display_name: &str,
+    ) -> Result<()> {
+        self.store.update_session(
+            session_id,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(provider_id),
+            Some(provider_display_name),
+            Some(model_id),
+            Some(model_display_name),
+        )
+    }
+
     /// Persist revert state for undo/redo.
     pub fn save_revert_state(
         &self,

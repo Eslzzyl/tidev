@@ -1,53 +1,51 @@
 use super::*;
 
 use crate::App;
+use tidev_search::current_at_fragment;
+use tidev_types::prompts::init_command_with_args;
 
 impl App {
     pub(crate) fn refresh_at_mention_state(&mut self) {
-        if self.command_palette.visible
-            || self.connect_dialog.is_some()
-            || self.theme_panel.is_some()
-            || self.model_panel.is_some()
-            || self.message_panel.is_some()
-            || self.session_panel.is_some()
-            || self.mcp_panel.is_some()
-            || self.agents_panel.is_some()
-            || self.question_dialog.is_some()
+        if self.ui.command_palette.visible
+            || self.ui.connect_dialog.is_some()
+            || self.ui.theme_panel.is_some()
+            || self.ui.model_panel.is_some()
+            || self.ui.message_panel.is_some()
+            || self.ui.session_panel.is_some()
+            || self.ui.agents_panel.is_some()
+            || self.ui.question_dialog.is_some()
         {
-            self.at_mention.clear();
+            self.ui.at_mention.clear();
             return;
         }
 
-        let text = self.composer.text();
-        let cursor = self.composer.cursor();
-        self.at_mention
-            .sync(self.workspace_root.as_path(), text, cursor);
+        let text = self.ui.composer.text();
+        let cursor = self.ui.composer.cursor();
+        self.ui
+            .at_mention
+            .sync(self.runtime.workspace_root().as_path(), text, cursor);
     }
 
     pub(crate) fn accept_at_mention(&mut self) {
-        let text = self.composer.text().to_string();
-        let cursor = self.composer.cursor();
-        log::info!(
-            "accept_at_mention: text={:?}, cursor={}",
-            text,
-            cursor,
-        );
+        let text = self.ui.composer.text().to_string();
+        let cursor = self.ui.composer.cursor();
+        log::info!("accept_at_mention: text={:?}, cursor={}", text, cursor,);
         let Some((start, _query)) =
-            current_at_fragment(self.composer.text(), self.composer.cursor())
+            current_at_fragment(self.ui.composer.text(), self.ui.composer.cursor())
         else {
             log::info!("accept_at_mention: current_at_fragment returned None, clearing");
-            self.at_mention.clear();
+            self.ui.at_mention.clear();
             return;
         };
         log::info!(
             "accept_at_mention: start={}, cursor={}",
             start,
-            self.composer.cursor(),
+            self.ui.composer.cursor(),
         );
 
-        let Some(selection) = self.at_mention.selected().cloned() else {
+        let Some(selection) = self.ui.at_mention.selected().cloned() else {
             log::info!("accept_at_mention: no selection, clearing");
-            self.at_mention.clear();
+            self.ui.at_mention.clear();
             return;
         };
 
@@ -58,101 +56,106 @@ impl App {
         log::info!(
             "accept_at_mention: replacing range {}..{} with {:?}",
             start,
-            self.composer.cursor(),
+            self.ui.composer.cursor(),
             replacement,
         );
-        self.composer
-            .replace_range(start, self.composer.cursor(), &replacement);
+        self.ui
+            .composer
+            .replace_range(start, self.ui.composer.cursor(), &replacement);
         // Register an atomic inline span for the accepted @ reference
-        let span_end = self.composer.cursor();
-        self.composer.register_span(
+        let span_end = self.ui.composer.cursor();
+        self.ui.composer.register_span(
             start,
             span_end,
             replacement,
             InlineSpanKind::AtReference,
             None,
         );
-        self.at_mention.clear();
+        self.ui.at_mention.clear();
         self.refresh_at_mention_state();
         self.refresh_snippet_state();
-        self.command_palette
-            .sync(self.composer.text(), &self.commands);
+        self.ui
+            .command_palette
+            .sync(self.ui.composer.text(), &self.ui.commands);
     }
 
     pub(crate) fn refresh_snippet_state(&mut self) {
         // If snippets haven't been loaded yet, we need to load them first
         // to determine if they are available
-        if self.snippet_state.needs_load() {
-            self.snippet_state
-                .load_snippets(self.workspace_root.as_path(), &self.paths.config_dir);
+        if self.ui.snippet_state.needs_load() {
+            self.ui.snippet_state.load_snippets(
+                self.runtime.workspace_root().as_path(),
+                &self.runtime.paths().config_dir,
+            );
         }
 
         // If no snippets available, skip entirely
-        if !self.snippet_state.is_enabled() {
+        if !self.ui.snippet_state.is_enabled() {
             return;
         }
 
-        if self.command_palette.visible
-            || self.connect_dialog.is_some()
-            || self.theme_panel.is_some()
-            || self.model_panel.is_some()
-            || self.message_panel.is_some()
-            || self.session_panel.is_some()
-            || self.mcp_panel.is_some()
-            || self.agents_panel.is_some()
-            || self.question_dialog.is_some()
-            || self.at_mention.visible
+        if self.ui.command_palette.visible
+            || self.ui.connect_dialog.is_some()
+            || self.ui.theme_panel.is_some()
+            || self.ui.model_panel.is_some()
+            || self.ui.message_panel.is_some()
+            || self.ui.session_panel.is_some()
+            || self.ui.agents_panel.is_some()
+            || self.ui.question_dialog.is_some()
+            || self.ui.at_mention.visible
         {
-            self.snippet_state.clear();
+            self.ui.snippet_state.clear();
             return;
         }
 
-        let text = self.composer.text();
-        let cursor = self.composer.cursor();
-        self.snippet_state.sync(
-            self.workspace_root.as_path(),
-            &self.paths.config_dir,
+        let text = self.ui.composer.text();
+        let cursor = self.ui.composer.cursor();
+        self.ui.snippet_state.sync(
+            self.runtime.workspace_root().as_path(),
+            &self.runtime.paths().config_dir,
             text,
             cursor,
         );
     }
 
     pub(crate) fn accept_snippet(&mut self) {
-        let Some(completion) = self.snippet_state.apply_completion() else {
-            self.snippet_state.clear();
+        let Some(completion) = self.ui.snippet_state.apply_completion() else {
+            self.ui.snippet_state.clear();
             return;
         };
 
         // Get current word range and replace it
-        let cursor = self.composer.cursor();
-        let query = self.snippet_state.query.clone();
+        let cursor = self.ui.composer.cursor();
+        let query = self.ui.snippet_state.query.clone();
 
         // Since query is the exact substring extracted going backwards from cursor,
         // its byte length exactly corresponds to the byte offset of the word start.
         let actual_start = cursor.saturating_sub(query.len());
 
-        self.composer
+        self.ui
+            .composer
             .replace_range(actual_start, cursor, &completion);
-        self.snippet_state.clear();
+        self.ui.snippet_state.clear();
         self.refresh_snippet_state();
-        self.command_palette
-            .sync(self.composer.text(), &self.commands);
+        self.ui
+            .command_palette
+            .sync(self.ui.composer.text(), &self.ui.commands);
     }
 
     /// Execute a command line (starting with /).
-    pub(crate) fn execute_command_line(&mut self, line: &str, runtime: &Runtime) -> Result<()> {
-        let Some((name, args)) = self.commands.parse_invocation(line) else {
+    pub(crate) fn execute_command_line(&mut self, line: &str) -> Result<()> {
+        let Some((name, args)) = self.ui.commands.parse_invocation(line) else {
             // Not a valid command format, treat as regular message
-            return self.submit_prompt(line.to_string(), runtime);
+            return self.submit_prompt(line.to_string());
         };
 
-        let Some(spec) = self.commands.command(&name).cloned() else {
+        let Some(spec) = self.ui.commands.command(&name).cloned() else {
             // Unknown command, treat as regular message
-            return self.submit_prompt(line.to_string(), runtime);
+            return self.submit_prompt(line.to_string());
         };
 
-        self.run_command(spec.name, spec.action, &args, runtime)?;
-        self.commands.mark_used(spec.name);
+        self.run_command(spec.name, spec.action, &args)?;
+        self.ui.commands.mark_used(spec.name);
         Ok(())
     }
 
@@ -161,9 +164,8 @@ impl App {
         _command_name: &str,
         action: CommandAction,
         args: &[String],
-        runtime: &Runtime,
     ) -> Result<()> {
-        if self.pending_request {
+        if self.ui.pending_request {
             match action {
                 CommandAction::Theme
                 | CommandAction::Quit
@@ -172,7 +174,6 @@ impl App {
                 | CommandAction::Session
                 | CommandAction::Clear
                 | CommandAction::Connect
-                | CommandAction::Mcp
                 | CommandAction::Model
                 | CommandAction::Message
                 | CommandAction::Rename
@@ -180,10 +181,9 @@ impl App {
                 | CommandAction::Init
                 | CommandAction::Agents
                 | CommandAction::Search
-                | CommandAction::Skills
-                | CommandAction::Sync => {}
+                | CommandAction::Skills => {}
                 _ => {
-                    self.last_notice = Some(
+                    self.ui.last_notice = Some(
                         "A response is still streaming. Wait for it to finish before changing sessions.".to_string(),
                     );
                     return Ok(());
@@ -194,37 +194,10 @@ impl App {
         match action {
             CommandAction::Connect => {
                 if !args.is_empty() {
-                    self.last_notice = Some("Ignoring arguments to /connect".to_string());
+                    self.ui.last_notice = Some("Ignoring arguments to /connect".to_string());
                 }
                 self.open_connect_dialog()?;
             }
-            CommandAction::Mcp => match args.first().map(|value| value.as_str()) {
-                Some("add") | Some("new") | Some("create") => {
-                    self.open_mcp_panel(String::new());
-                    self.open_new_mcp_server_editor(String::new());
-                }
-                Some("edit") => {
-                    if let Some(server_name) = args.get(1) {
-                        self.open_mcp_panel(server_name.clone());
-                        self.open_existing_mcp_server_editor(String::new(), server_name.clone())?;
-                    } else {
-                        self.last_notice = Some("Usage: /mcp edit <server-name>".to_string());
-                    }
-                }
-                Some("remove") | Some("delete") | Some("rm") => {
-                    if let Some(server_name) = args.get(1) {
-                        if let Err(error) = self.remove_mcp_server_from_editor(runtime, server_name)
-                        {
-                            self.last_notice = Some(error.to_string());
-                        }
-                    } else {
-                        self.last_notice = Some("Usage: /mcp remove <server-name>".to_string());
-                    }
-                }
-                _ => {
-                    self.open_mcp_panel(args.join(" "));
-                }
-            },
             CommandAction::Model => {
                 self.open_model_panel(args.join(" "));
             }
@@ -235,17 +208,16 @@ impl App {
                 self.open_session_panel(args.join(" "))?;
             }
             CommandAction::Compact => {
-                self.active_request_id = self.active_request_id.wrapping_add(1);
-                let request_id = self.active_request_id;
+                self.ui.active_request_id = self.ui.active_request_id.wrapping_add(1);
+                let request_id = self.ui.active_request_id;
                 let msg = tidev_types::message::Message::streaming(
                     tidev_types::message::MessageRole::System,
                     format!("{}\n\n", tidev_types::message::COMPACTION_MESSAGE_LABEL),
                 );
-                self.conversation.push(msg);
+                self.ui.chat_context.push(msg);
 
                 self.schedule_context_compaction_for_session(
-                    self.conversation.session_id,
-                    runtime,
+                    self.ui.chat_context.session_id,
                     Some(request_id),
                 );
             }
@@ -259,10 +231,10 @@ impl App {
                 self.start_new_session()?;
             }
             CommandAction::Undo => {
-                self.undo_last_user_message(runtime)?;
+                self.undo_last_user_message()?;
             }
             CommandAction::Redo => {
-                self.redo_last_user_message(runtime)?;
+                self.redo_last_user_message()?;
             }
             CommandAction::Theme => {
                 self.apply_theme_command(args)?;
@@ -271,21 +243,19 @@ impl App {
                 self.open_settings_panel();
             }
             CommandAction::Quit => {
-                self.should_quit = true;
+                self.ui.should_quit = true;
             }
             CommandAction::Init => {
-                self.composer
+                self.ui
+                    .composer
                     .set_text(init_command_with_args(&args.join(" ")));
-                self.last_notice = Some("Init prompt loaded".to_string());
+                self.ui.last_notice = Some("Init prompt loaded".to_string());
             }
             CommandAction::Agents => {
-                self.agents_panel = Some(ui::agents_panel::AgentsPanelState::new());
+                self.ui.agents_panel = Some(ui::agents_panel::AgentsPanelState::new());
             }
             CommandAction::Skills => {
                 self.open_skills_panel();
-            }
-            CommandAction::Sync => {
-                self.open_sync_panel();
             }
             CommandAction::Memory => {
                 // TODO: implement memory panel

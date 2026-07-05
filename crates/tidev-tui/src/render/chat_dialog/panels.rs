@@ -1,7 +1,6 @@
 use crate::App;
 use crate::render::render::{centered_rect, render_scrollbar, shorten};
 use crate::{
-    mcp_panel::McpPanelState,
     message_panel::MessagePanelState,
     model_panel::{ModelPanelItem, ModelPanelState, thinking_options_for_model},
     session_panel::{SessionPanelState, SessionViewMode},
@@ -31,7 +30,7 @@ impl App {
     ) {
         let palette = self.palette();
         let overlay = centered_rect(36, 22, area);
-        self.theme_panel_overlay.set(Some(overlay));
+        self.ui.theme_panel_overlay.set(Some(overlay));
 
         let block = Block::default().style(Style::default().bg(palette.panel_alt));
 
@@ -172,7 +171,7 @@ impl App {
     ) {
         let palette = self.palette();
         let overlay = centered_rect(70, 24, area);
-        self.agents_panel_overlay.set(Some(overlay));
+        self.ui.agents_panel_overlay.set(Some(overlay));
 
         frame.render_widget(Clear, overlay);
         let panel_block = Block::default().style(Style::default().bg(palette.panel_alt));
@@ -314,7 +313,7 @@ impl App {
         let current_palette = self.palette();
         // 10 items × ~2 lines each = 22 rows
         let overlay = centered_rect(64, 22, area);
-        self.settings_panel_overlay.set(Some(overlay));
+        self.ui.settings_panel_overlay.set(Some(overlay));
 
         let items: Vec<ListItem> = panel
             .items
@@ -405,7 +404,7 @@ impl App {
     ) {
         let palette = self.palette();
         let overlay = centered_rect(area.width.min(112), area.height.min(36), area);
-        self.session_panel_overlay.set(Some(overlay));
+        self.ui.session_panel_overlay.set(Some(overlay));
         frame.render_widget(Clear, overlay);
 
         let title = Block::default().style(Style::default().bg(palette.panel_alt));
@@ -454,11 +453,11 @@ impl App {
             frame,
             sections[2],
             "Search sessions",
-            self.composer.placeholder(),
+            self.ui.composer.placeholder(),
             false,
         );
 
-        let query = self.composer.text().to_string();
+        let query = self.ui.composer.text().to_string();
         let matches = panel.matching_indices(&query);
 
         let is_multi_select =
@@ -488,7 +487,7 @@ impl App {
                         .format("%Y-%m-%d %H:%M")
                         .to_string();
                     let mut w = pm.chars().count() + 2 + time.chars().count();
-                    if session.session_id == self.conversation.session_id {
+                    if session.session_id == self.ui.chat_context.session_id {
                         w += 9; // "  current"
                     }
                     if session.parent_session_id.is_some() {
@@ -524,7 +523,7 @@ impl App {
                     ]));
                 }
 
-                let is_current = session.session_id == self.conversation.session_id;
+                let is_current = session.session_id == self.ui.chat_context.session_id;
                 let updated_at = session
                     .updated_at
                     .with_timezone(&Local)
@@ -633,7 +632,7 @@ impl App {
     ) {
         let palette = self.palette();
         let overlay = centered_rect(area.width.min(112), area.height.min(36), area);
-        self.message_panel_overlay.set(Some(overlay));
+        self.ui.message_panel_overlay.set(Some(overlay));
         frame.render_widget(Clear, overlay);
 
         let title = Block::default().style(Style::default().bg(palette.panel_alt));
@@ -678,11 +677,11 @@ impl App {
             frame,
             sections[2],
             "Search user messages",
-            self.composer.placeholder(),
+            self.ui.composer.placeholder(),
             false,
         );
 
-        let query = self.composer.text().to_string();
+        let query = self.ui.composer.text().to_string();
         let matches = panel.matching_indices(&query);
 
         if matches.is_empty() {
@@ -773,7 +772,7 @@ impl App {
     ) {
         let palette = self.palette();
         let overlay = centered_rect(area.width.min(104), area.height.min(34), area);
-        self.model_panel_overlay.set(Some(overlay));
+        self.ui.model_panel_overlay.set(Some(overlay));
         frame.render_widget(Clear, overlay);
         let title = Block::default().style(Style::default().bg(palette.panel_alt));
         frame.render_widget(title, overlay);
@@ -903,16 +902,13 @@ impl App {
         let active_index = if panel.is_general_tab() {
             items.iter().position(|item| {
                 matches!(item, ModelPanelItem::Model { summary, .. }
-                    if summary.provider_id == self.active_model.provider_id
-                    && summary.model_id == self.active_model.model_id)
+                    if summary.provider_id == self.runtime.active_model().provider_id
+                    && summary.model_id == self.runtime.active_model().model_id)
             })
         } else {
             // Agent tab: find the model currently configured for this agent type
             panel.current_tab().and_then(|tab| {
-                let current = self
-                    .config
-                    .read()
-                    .unwrap()
+                let current = self.runtime.config()
                     .agent
                     .models
                     .get(&tab.agent_type_str)
@@ -958,8 +954,8 @@ impl App {
                     let is_selected = panel
                         .current_tab()
                         .is_some_and(|t| t.selected_index == index);
-                    let is_active = summary.provider_id == self.active_model.provider_id
-                        && summary.model_id == self.active_model.model_id
+                    let is_active = summary.provider_id == self.runtime.active_model().provider_id
+                        && summary.model_id == self.runtime.active_model().model_id
                         && panel.is_general_tab();
                     let thinking_level_tag: Option<String> = if is_selected
                         && panel
@@ -978,12 +974,12 @@ impl App {
                         } else {
                             None
                         }
-                    } else if is_active && self.thinking_level.is_supported() {
-                        Some(self.thinking_level.display_name().to_string())
+                    } else if is_active && self.ui.thinking_level.is_supported() {
+                        Some(self.ui.thinking_level.display_name().to_string())
                     } else if !panel.is_general_tab() {
                         if let Some(tab) = panel.current_tab() {
                             let model_label = summary.label();
-                            let config = self.config.read().unwrap();
+                            let config = self.runtime.config();
                             if let Some(tl_str) =
                                 config.agent.thinking_levels.get(&tab.agent_type_str)
                                 && config
@@ -997,7 +993,8 @@ impl App {
                                 .is_supported()
                             {
                                 let tl_level =
-                                tl_str.rsplit_once(':').map(|(_, v)| v).unwrap_or(tl_str);                                Some(tl_level.to_string())
+                                    tl_str.rsplit_once(':').map(|(_, v)| v).unwrap_or(tl_str);
+                                Some(tl_level.to_string())
                             } else {
                                 None
                             }
@@ -1227,7 +1224,7 @@ impl App {
         // --- Provider list ---
         let mut rows: Vec<ListItem> = Vec::new();
         for (i, info) in BUILTIN_PROVIDERS.iter().enumerate() {
-            let status_text = panel.provider_status(i, &self.auth);
+            let status_text = panel.provider_status(i, &self.runtime.auth());
 
             let is_selected = i == panel.selected_index;
             let row_style = if is_selected {
@@ -1284,196 +1281,6 @@ impl App {
         );
     }
 
-    pub(crate) fn render_mcp_panel(
-        &self,
-        frame: &mut Frame<'_>,
-        area: Rect,
-        panel: &McpPanelState,
-    ) {
-        let palette = self.palette();
-        let has_editor = panel.editor.is_some();
-        let overlay = centered_rect(
-            area.width.min(112),
-            if has_editor {
-                area.height.min(42)
-            } else {
-                area.height.min(34)
-            },
-            area,
-        );
-        self.mcp_panel_overlay.set(Some(overlay));
-        frame.render_widget(Clear, overlay);
-        let title = Block::default().style(Style::default().bg(palette.panel_alt));
-        frame.render_widget(title, overlay);
-
-        let inner = overlay.inner(Margin {
-            horizontal: 1,
-            vertical: 1,
-        });
-        self.register_selection_region(inner);
-
-        let mcp_title = panel
-            .editor
-            .as_ref()
-            .map(|e| e.title())
-            .unwrap_or_else(|| " MCP servers ".to_string());
-
-        frame.render_widget(
-            Paragraph::new(Line::from(vec![Span::styled(
-                &mcp_title,
-                Style::default()
-                    .fg(palette.accent)
-                    .add_modifier(Modifier::BOLD),
-            )]))
-            .style(Style::default().bg(palette.panel_alt)),
-            Rect::new(inner.x, inner.y, inner.width, 1),
-        );
-        let body = Rect::new(
-            inner.x,
-            inner.y + 1,
-            inner.width,
-            inner.height.saturating_sub(1),
-        );
-
-        if let Some(editor) = &panel.editor {
-            let sections = Layout::vertical([
-                Constraint::Length(2),
-                Constraint::Length(3),
-                Constraint::Min(8),
-                Constraint::Length(1),
-            ])
-            .split(body);
-
-            frame.render_widget(
-                Paragraph::new(editor.help())
-                    .alignment(Alignment::Center)
-                    .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
-                sections[0],
-            );
-
-            self.render_input_block(
-                frame,
-                sections[1],
-                editor.step_label(),
-                self.composer.placeholder(),
-                false,
-            );
-
-            frame.render_widget(
-                Paragraph::new(editor.draft.summary_text())
-                    .style(Style::default().bg(palette.panel_alt).fg(palette.text))
-                    .wrap(Wrap { trim: false }),
-                sections[2],
-            );
-
-            frame.render_widget(
-                Paragraph::new("Enter advance/save · Tab advance/save · Esc cancel")
-                    .alignment(Alignment::Center)
-                    .style(
-                        Style::default()
-                            .bg(palette.panel_alt)
-                            .fg(palette.accent_soft),
-                    ),
-                sections[3],
-            );
-        } else {
-            let sections = Layout::vertical([
-                Constraint::Length(2),
-                Constraint::Length(3),
-                Constraint::Min(8),
-                Constraint::Length(1),
-            ])
-            .split(body);
-
-            frame.render_widget(
-                Paragraph::new("Type to filter by server name, transport, or status. Enter toggles connect/disconnect.")
-                    .alignment(Alignment::Center)
-                    .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
-                sections[0],
-            );
-
-            self.render_input_block(
-                frame,
-                sections[1],
-                "Search MCP servers",
-                self.composer.placeholder(),
-                false,
-            );
-
-            let items = self.mcp_panel_items();
-            let mut rows = Vec::new();
-            for item in &items {
-                let summary = &item.summary;
-                rows.push(ListItem::new(Line::from(vec![
-                    Span::styled(
-                        summary.name.clone(),
-                        Style::default()
-                            .fg(palette.text)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw("  "),
-                    Span::styled(
-                        format!("({})", summary.kind),
-                        Style::default().fg(palette.muted),
-                    ),
-                    Span::raw("  "),
-                    Span::styled(
-                        summary.status_text(),
-                        Style::default().fg(match summary.status.label() {
-                            "connected" => palette.success,
-                            "connecting" => palette.warning,
-                            "failed" => palette.error,
-                            _ => palette.muted,
-                        }),
-                    ),
-                    Span::raw("  "),
-                    Span::styled(
-                        format!("{} tools", summary.tool_count),
-                        Style::default().fg(palette.accent_soft),
-                    ),
-                ])));
-            }
-
-            if rows.is_empty() {
-                frame.render_widget(
-                    Paragraph::new("No MCP servers match this search.")
-                        .alignment(Alignment::Center)
-                        .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
-                    sections[2],
-                );
-            } else {
-                let mut state = ListState::default();
-                state.select(Some(
-                    panel.selected_index.min(items.len().saturating_sub(1)),
-                ));
-
-                let list = List::new(rows)
-                    .style(Style::default().bg(palette.panel_alt).fg(palette.text))
-                    .highlight_style(
-                        Style::default()
-                            .bg(palette.selection_bg)
-                            .fg(palette.selection_fg)
-                            .add_modifier(Modifier::BOLD),
-                    );
-
-                frame.render_stateful_widget(list, sections[2], &mut state);
-            }
-
-            frame.render_widget(
-                Paragraph::new(
-                    "Enter connect/disconnect · a add · e edit · d remove · R refresh · Esc close",
-                )
-                .alignment(Alignment::Center)
-                .style(
-                    Style::default()
-                        .bg(palette.panel_alt)
-                        .fg(palette.accent_soft),
-                ),
-                sections[3],
-            );
-        }
-    }
-
     /// Render the skills panel with a two-pane layout:    /// - Left: searchable list of skills
     /// - Right: markdown preview of selected skill
     pub(crate) fn render_skills_panel(
@@ -1488,7 +1295,7 @@ impl App {
 
         // Main overlay - 85% width, 80% height
         let overlay = centered_rect(85, 80, area);
-        self.skills_panel_overlay.set(Some(overlay));
+        self.ui.skills_panel_overlay.set(Some(overlay));
         frame.render_widget(Clear, overlay);
         let panel_block = Block::default().style(Style::default().bg(palette.panel_alt));
         frame.render_widget(panel_block, overlay);
@@ -1735,7 +1542,8 @@ impl App {
         if let Some(skill) = panel.selected_skill() {
             // Get rendered skill content from catalog
             let content = self
-                .tools
+                .runtime
+                .tool_registry()
                 .skills()
                 .render_skill(&skill.name)
                 .unwrap_or_default();

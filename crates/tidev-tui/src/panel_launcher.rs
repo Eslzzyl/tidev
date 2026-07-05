@@ -2,7 +2,6 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PanelAction {
     Agents,
-    Mcp,
     Message,
     Model,
     Session,
@@ -35,10 +34,6 @@ pub(crate) static PANEL_ENTRIES: &[PanelEntry] = &[
     PanelEntry {
         description: "Configure application settings",
         action: PanelAction::Settings,
-    },
-    PanelEntry {
-        description: "Manage MCP servers",
-        action: PanelAction::Mcp,
     },
     PanelEntry {
         description: "List available sub-agent types",
