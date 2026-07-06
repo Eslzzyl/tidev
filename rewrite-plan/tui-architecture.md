@@ -1,5 +1,18 @@
 # tidev-tui 架构设计
 
+> **2026-07-06 实现更新：**
+> 出于隔离风险考虑，新架构代码移到独立 crate `crates/tidev-tui-new/`，与旧 `crates/tidev-tui/` 完全分离。
+> 新 crate 通过 `tidev_tui::*` 导入旧 crate 的公开类型（`ThemeName`、`ThemePalette`、`ChatContext`），
+> 其余代码为独立实现。旧 crate 上一行未改。以下「文件结构」部分以 `tidev-tui-new` 为根。
+
+## 铁律
+
+操作本项目【任何】文件时，必须严格遵守下面的铁律，没有任何例外：
+
+- 总是使用简体中文提交信息
+- **不得擅自对实现进行任何简化**。没有例外。任何违反都会导致工作前功尽弃。如果你觉得做不到，直接说然后停下
+- **严禁使用任何 subagent**。没有例外
+
 ## 1. 现状与问题
 
 ### 1.1 规模
@@ -64,6 +77,32 @@ input/event/panels.rs       → App::handle_theme_panel_key() (按键)
 5. **Runtime 是异步的唯一权威** — 组件不直接 spawn task，通过 Action 触发异步操作
 
 ## 3. 架构总览
+
+实现分布在两个 crate 中：
+
+- **`tidev-tui`** — 旧代码，不动，作为新 crate 的依赖提供公开类型
+- **`tidev-tui-new`** — 新架构实现，通过 `tidev_tui::*` 使用旧 crate 的 ThemeName / ThemePalette / ChatContext
+
+```
+┌─────────────────────────────────────────────┐
+│                  main()                      │
+├─────────────────────────────────────────────┤
+│  Tui (终端层)                                │
+│  • 持有 Terminal<CrosstermBackend>           │
+│  • 事件轮询（crossterm + Runtime 双通道）     │
+│  • 调用 App::update() / App::draw()           │
+├─────────────────────────────────────────────┤
+│  App (根组件)                                │
+│  • 持有 Runtime（异步资源最终权威）            │
+│  • 管理组件树                                │
+│  • Action 路由 + 异步命令执行                 │
+├─────────────────────────────────────────────┤
+│  Component Tree                              │
+│  ChatScreen → MessageList + Composer         │
+│  OverlayStack → 所有浮层（统一管理）           │
+│  StatusBar                                   │
+└─────────────────────────────────────────────┘
+```
 
 ```
 ┌─────────────────────────────────────────────┐
@@ -472,86 +511,84 @@ impl App {
 ## 10. 模块文件结构
 
 ```
-tidev-tui/src/
-├── lib.rs                    ← 入口 + 模块声明
-├── app.rs                    ← App 根组件 + 事件循环 + Action 路由
-├── action.rs                 ← Action 枚举分层定义
-├── component.rs              ← Component trait + 辅助类型
-├── context.rs                ← InitContext, DrawContext, UpdateContext
+tidev-tui-new/src/
+├── bin/
+│   └── tidev_new.rs            ← 独立二进制入口
+├── lib.rs                      ← 模块声明 + run() 函数
+├── app.rs                      ← App 根组件 + OverlayStack + Action 路由 + draw
+├── action.rs                   ← Action 枚举分层定义（含 PanelAction 本地定义）
+├── component.rs                ← Component trait + 辅助类型
+├── context.rs                  ← InitContext, DrawContext, UpdateContext
+├── tui.rs                      ← Tui 终端层（setup/teardown + 事件轮询）
+├── utils.rs                    ← centered_rect + render_scrollbar
+├── ansi.rs                     ← strip_ansi（从 tidev-tui 拷贝）
 │
 ├── components/
 │   ├── mod.rs
-│   ├── welcome.rs            ← 欢迎页
-│   ├── chat.rs               ← ChatScreen（消息列表 + 输入框的父组件）
-│   │   ├── mod.rs
-│   │   ├── message_list.rs   ← 消息列表（虚拟化 + 缓存，从 render/chat_render 迁入）
-│   │   └── composer.rs       ← 输入框（从 input/composer.rs 迁入）
-│   ├── overlay_stack.rs      ← OverlayStack 容器
-│   ├── overlays/             ← 所有浮层组件（每个文件一个）
-│   │   ├── permission.rs     ← 从 ui/permission.rs + dialogs.rs 合并
-│   │   ├── question.rs       ← 从 ui/question.rs + dialogs.rs 合并
-│   │   ├── connect.rs        ← 从 ui/connect.rs + dialogs.rs 合并
-│   │   ├── session.rs        ← 从 ui/session_panel.rs + panels.rs 合并
-│   │   ├── settings.rs       ← 合并
-│   │   ├── theme.rs          ← 合并
-│   │   ├── model.rs          ← 合并
-│   │   ├── agents.rs
-│   │   ├── skills.rs
-│   │   ├── search.rs
-│   │   ├── message.rs
-│   │   ├── rename.rs
-│   │   ├── fork.rs
-│   │   ├── undo.rs
-│   │   ├── workspace.rs
-│   │   ├── sensitive.rs
-│   │   ├── image.rs
-│   │   ├── command_palette.rs
-│   │   ├── panel_launcher.rs
-│   │   └── notifications.rs
-│   └── status_bar.rs
+│   ├── overlay_stack.rs        ← OverlayStack 容器
+│   └── overlays/               ← 所有浮层组件（每个文件一个）
+│       ├── mod.rs
+│       ├── theme.rs            ← 从 tidev-tui 迁移
+│       ├── agents.rs           ← 从 tidev-tui 迁移
+│       ├── skills.rs           ← 从 tidev-tui 迁移（含 markdown 预览）
+│       ├── permission.rs       ← 待迁移
+│       ├── question.rs         ← 待迁移
+│       ├── connect.rs          ← 待迁移
+│       ├── session.rs          ← 待迁移
+│       ├── settings.rs         ← 待迁移
+│       ├── model.rs            ← 待迁移
+│       ├── search.rs           ← 待迁移
+│       ├── message.rs          ← 待迁移
+│       ├── rename.rs           ← 待迁移
+│       ├── fork.rs             ← 待迁移
+│       ├── undo.rs             ← 待迁移
+│       ├── workspace.rs        ← 待迁移
+│       ├── sensitive.rs        ← 待迁移
+│       ├── image.rs            ← 待迁移
+│       ├── command_palette.rs  ← 待迁移
+│       ├── panel_launcher.rs   ← 待迁移
+│       └── notifications.rs    ← 待迁移
 │
-├── theme/                    ← 保留（纯数据，不重构）
-├── markdown/                 ← 保留（纯工具函数，不重构）
-├── state.rs                  ← 精简：只保留渲染缓存和共享类型
-├── ansi.rs                   ← 保留（纯函数）
-└── utils.rs                  ← 保留（工具函数）
-
-render/ 目录消除，功能并入组件。
-input/ 目录大部分消除，功能并入组件。
+├── markdown/                   ← 从 tidev-tui 完整拷贝（含 syntax highlighting）
+│   ├── mod.rs
+│   ├── highlight.rs
+│   ├── styles.rs
+│   ├── wrap.rs
+│   ├── table.rs
+│   ├── line.rs
+│   └── links.rs
+│
+└──── (theme/, state/, chat_context/ 等保留在 tidev-tui，通过 tidev_tui::* 导入)
 ```
+
+render/ 和 input/ 目录不再存在，功能已并入组件。
 
 ## 11. 迁移路线
 
-共 7 阶段，每阶段新组件与旧代码并行工作，验证后再删旧路径。
+> **实现变更：** 原计划「原地桥接」改为「新 crate 隔离」。
+> 已迁移的组件位于 `crates/tidev-tui-new/src/`，旧 `crates/tidev-tui/` 完全不动。
+> 因此阶段 7 不再需要「接入 App」——最小路由已在阶段 3 完成。
 
-| 阶段 | 内容 | 风险 | 说明 |
+| 阶段 | 内容 | 风险 | 状态 |
 |---|---|---|---|
-| 1 | 定义 `Component` trait、`Action` 枚举、`Tui`/`App` 分离 | 低 | 新建文件，不修改现有代码 |
-| 2 | 迁移**自包含叶子组件**（ThemePanel, SkillsPanel, AgentsPanel） | 低 | 无外部依赖，可逐个迁移验证 |
-| 3 | 迁移剩余面板（ModelPanel, SessionPanel, SettingsPanel, SearchPanel, MessagePanel） | 中 | 涉及更多状态同步 |
-| 4 | 迁移对话框（Permission, Question, Connect, Rename, Fork, Undo, Workspace, Sensitive） | 中 | 涉及 Runtime 交互逻辑 |
-| 5 | 提取 **Chat** 组件（MessageList + 渲染管线） | **高** | 2453 行的核心代码，不能破坏虚拟化 |
-| 6 | 提取 **Composer** 组件（1135 行的输入处理） | 中 | 涉及 @mention、snippet、图片粘贴 |
-| 7 | App 作为根组件接入，移除 24 个 `impl App` 块 | **高** | 最后集成，删除旧代码 |
+| 1 | 定义 `Component` trait、`Action` 枚举、context 类型 | 低 | ✅ 已完成 |
+| 2 | 迁移**自包含叶子组件**（ThemePanel, SkillsPanel, AgentsPanel） | 低 | ✅ 已完成 |
+| 3 | **OverlayStack + App 最小路由**（使阶段 2 组件可运行） | 低 | ✅ 已完成 |
+| 4 | 迁移剩余面板（ModelPanel, SessionPanel, SettingsPanel, SearchPanel, MessagePanel） | 中 | ☐ 待做 |
+| 5 | 迁移对话框（Permission, Question, Connect, Rename, Fork, Undo, Workspace, Sensitive） | 中 | ☐ 待做 |
+| 6 | 提取 **Chat** 组件（MessageList + 渲染管线，2453 行） | **高** | ☐ 待做 |
+| 7 | 提取 **Composer** 组件（1135 行的输入处理） | 中 | ☐ 待做 |
+| 8 | 全部迁移完成，删除旧代码 | — | ☐ 待做 |
 
-### 11.1 并行策略
+### 11.1 过渡策略
 
-每个阶段创建一个新模块目录（如 `components/overlays/theme.rs`），新组件接收事件并渲染。
+由于新旧代码分属不同 crate，过渡期间两者完全独立：
 
-```rust
-// 旧代码路径（过渡期）：
-if self.ui.theme_panel.is_some() {
-    return self.handle_theme_panel_key(key);  // 旧 impl App 方法
-}
+- `cargo run` → 旧 `tidev-tui`，功能不变
+- `cargo run -p tidev-tui-new --bin tidev_new` → 新架构
 
-// 新代码路径（过渡期）：
-if let Some(action) = self.overlays.handle_key(key) {
-    // overlay_stack 内部路由到 ThemePanel 组件
-    return Ok(action);
-}
-```
-
-验证通过、稳定运行后，删除旧路径和旧的 `ThemePanelState` 定义。
+每迁移一个组件，新 crate 中对应功能即可用。
+全部迁移完成后，新 crate 改名为 `tidev-tui`，旧 crate 删除。
 
 ## 12. 性能保障清单
 

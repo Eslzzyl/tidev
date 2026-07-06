@@ -3747,6 +3747,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "tidev-tui-new"
+version = "0.7.0"
+dependencies = [
+ "ansi-to-tui",
+ "anyhow",
+ "base64",
+ "blake3",
+ "crossterm 0.28.1",
+ "dirs",
+ "libc",
+ "log",
+ "lru",
+ "pulldown-cmark",
+ "ratatui",
+ "rayon",
+ "serde",
+ "serde_json",
+ "syntect",
+ "textwrap",
+ "tidev-config",
+ "tidev-core",
+ "tidev-tools",
+ "tidev-tui",
+ "tidev-types",
+ "tokio",
+ "two-face",
+ "unicode-width",
+ "url",
+ "urlencoding",
+ "uuid",
+]
+
+[[package]]
 name = "tidev-types"
 version = "0.7.0"
 dependencies = [

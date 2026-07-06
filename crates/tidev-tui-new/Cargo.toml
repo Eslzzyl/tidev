@@ -1,0 +1,37 @@
+[package]
+name = "tidev-tui-new"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "New-architecture TUI frontend for tidev (replaces tidev-tui)"
+
+[dependencies]
+tidev-tui = { path = "../tidev-tui" }
+tidev-core = { path = "../tidev-core" }
+tidev-types = { path = "../tidev-types" }
+tidev-config = { path = "../tidev-config" }
+tidev-tools = { path = "../tidev-tools" }
+
+anyhow = "1"
+ansi-to-tui = "8"
+base64 = "0.22"
+blake3 = "1"
+crossterm = "0.28"
+dirs = "6"
+log = "0.4"
+pulldown-cmark = "0.13"
+ratatui = { version = "0.30", default-features = false, features = ["crossterm", "macros"] }
+rayon = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+syntect = "5.3"
+textwrap = "0.16"
+tokio = { version = "1", features = ["sync", "rt", "macros", "io-std", "time", "fs"] }
+lru = "0.18"
+unicode-width = "0.2"
+url = "2"
+urlencoding = "2"
+uuid = { version = "1", features = ["v4"] }
+two-face = { version = "0.5", default-features = false, features = ["syntect-default-onig"] }
+libc = "0.2"
