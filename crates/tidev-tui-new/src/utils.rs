@@ -98,3 +98,36 @@ pub(crate) fn render_scrollbar(
     let paragraph = Paragraph::new(lines).style(Style::default().bg(bg));
     frame.render_widget(paragraph, area);
 }
+
+/// Strip `<system-reminder>...</system-reminder>` XML-like tags from text.
+///
+/// These tags are injected by the LLM prompt template to mark system instructions
+/// and should not be shown in the UI. Also strips trailing whitespace/newlines
+/// after the closing tag.
+pub(crate) fn strip_system_reminder_tags(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    let mut rest = text;
+    loop {
+        if let Some(start) = rest.find("<system-reminder") {
+            // Push content before the tag
+            result.push_str(&rest[..start]);
+            // Find the closing tag
+            if let Some(end) = rest[start..].find("</system-reminder>") {
+                let after_close = start + end + "</system-reminder>".len();
+                rest = &rest[after_close..];
+                // Skip trailing whitespace/newlines after the closing tag
+                while rest.starts_with('\n') || rest.starts_with('\r') || rest.starts_with(' ') {
+                    rest = &rest[1..];
+                }
+            } else {
+                // No closing tag — keep the rest as-is
+                result.push_str(&rest[start..]);
+                break;
+            }
+        } else {
+            result.push_str(rest);
+            break;
+        }
+    }
+    result
+}

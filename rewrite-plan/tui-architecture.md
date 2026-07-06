@@ -520,7 +520,7 @@ tidev-tui-new/src/
 ├── component.rs                ← Component trait + 辅助类型
 ├── context.rs                  ← InitContext, DrawContext, UpdateContext
 ├── tui.rs                      ← Tui 终端层（setup/teardown + 事件轮询）
-├── utils.rs                    ← centered_rect + render_scrollbar
+├── utils.rs                    ← centered_rect + render_scrollbar + strip_system_reminder_tags
 ├── ansi.rs                     ← strip_ansi（从 tidev-tui 拷贝）
 │
 ├── components/
@@ -528,17 +528,17 @@ tidev-tui-new/src/
 │   ├── overlay_stack.rs        ← OverlayStack 容器
 │   └── overlays/               ← 所有浮层组件（每个文件一个）
 │       ├── mod.rs
-│       ├── theme.rs            ← 从 tidev-tui 迁移
-│       ├── agents.rs           ← 从 tidev-tui 迁移
-│       ├── skills.rs           ← 从 tidev-tui 迁移（含 markdown 预览）
+│       ├── theme.rs            ✅ 已完成
+│       ├── agents.rs           ✅ 已完成
+│       ├── skills.rs           ✅ 已完成（含 markdown 预览）
+│       ├── settings.rs         ✅ 已完成
+│       ├── search.rs           ✅ 已完成
+│       ├── message.rs          ✅ 已完成
+│       ├── model.rs            ✅ 已完成
+│       ├── session.rs          ✅ 已完成
 │       ├── permission.rs       ← 待迁移
 │       ├── question.rs         ← 待迁移
 │       ├── connect.rs          ← 待迁移
-│       ├── session.rs          ← 待迁移
-│       ├── settings.rs         ← 待迁移
-│       ├── model.rs            ← 待迁移
-│       ├── search.rs           ← 待迁移
-│       ├── message.rs          ← 待迁移
 │       ├── rename.rs           ← 待迁移
 │       ├── fork.rs             ← 待迁移
 │       ├── undo.rs             ← 待迁移
@@ -570,16 +570,20 @@ render/ 和 input/ 目录不再存在，功能已并入组件。
 > 因此阶段 7 不再需要「接入 App」——最小路由已在阶段 3 完成。
 
 | 阶段 | 内容 | 风险 | 状态 |
-|---|---|---|---|
+|---|---|---|---|---|
 | 1 | 定义 `Component` trait、`Action` 枚举、context 类型 | 低 | ✅ 已完成 |
 | 2 | 迁移**自包含叶子组件**（ThemePanel, SkillsPanel, AgentsPanel） | 低 | ✅ 已完成 |
 | 3 | **OverlayStack + App 最小路由**（使阶段 2 组件可运行） | 低 | ✅ 已完成 |
-| 4 | 迁移剩余面板（ModelPanel, SessionPanel, SettingsPanel, SearchPanel, MessagePanel） | 中 | ☐ 待做 |
+| 4 | 迁移剩余面板 | 中 | ✅ 已完成 |
+|   | · SettingsPanel | 低 | ✅ 已完成 |
+|   | · SearchPanel | 中 | ✅ 已完成 |
+|   | · MessagePanel | 中 | ✅ 已完成 |
+|   | · ModelPanel | 中 | ✅ 已完成 |
+|   | · SessionPanel | 中 | ✅ 已完成 |
 | 5 | 迁移对话框（Permission, Question, Connect, Rename, Fork, Undo, Workspace, Sensitive） | 中 | ☐ 待做 |
 | 6 | 提取 **Chat** 组件（MessageList + 渲染管线，2453 行） | **高** | ☐ 待做 |
 | 7 | 提取 **Composer** 组件（1135 行的输入处理） | 中 | ☐ 待做 |
 | 8 | 全部迁移完成，删除旧代码 | — | ☐ 待做 |
-
 ### 11.1 过渡策略
 
 由于新旧代码分属不同 crate，过渡期间两者完全独立：

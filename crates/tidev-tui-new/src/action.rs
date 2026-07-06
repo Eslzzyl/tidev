@@ -39,18 +39,21 @@ pub(crate) struct SessionSummary {
 
 /// Session management actions.
 ///
-/// Note: `Loaded`/`Deleted` contain `anyhow::Result` (not `Clone`),
-/// so this enum only derives `Debug`, not `Clone`.
+/// Note: variants containing `Result` only derive `Debug`, not `Clone`.
 #[derive(Debug)]
 pub(crate) enum SessionAction {
     Create,
     Select(Uuid),
     Delete(Uuid),
+    DeleteBatch(Vec<Uuid>),
     Rename(Uuid, String),
     Fork(Uuid),
     Undo,
     Redo,
     Compact,
+    ExportBatch(Vec<Uuid>),
+    /// Reload session list from store (after view mode change).
+    Reload,
     /// Async result from a session load operation.
     Loaded(Result<Vec<SessionSummary>>),
     Deleted(Result<()>),
@@ -104,6 +107,19 @@ pub(crate) enum LauncherAction {
     Execute(PanelAction),
 }
 
+/// Search provider panel actions.
+#[derive(Clone, Debug)]
+pub(crate) enum SearchAction {
+    /// Switch to the given provider and persist to config.
+    SwitchProvider(String),
+    /// Save an API key (or Google CX) to auth store.
+    SaveApiKey {
+        provider: String,
+        key: String,
+        is_cx: bool,
+    },
+}
+
 /// Async command execution result.
 ///
 /// Note: `result` contains `anyhow::Result` (not `Clone`),
@@ -121,7 +137,7 @@ pub(crate) enum CommandAction {
 // ---------------------------------------------------------------------------
 
 /// Identifier for every overlay component.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum OverlayKind {
     ImageViewer,
     CommandPalette,
@@ -130,8 +146,14 @@ pub(crate) enum OverlayKind {
     QuestionDialog,
     WorkspaceBoundaryDialog,
     SensitiveFileDialog,
-    ForkConfirmDialog,
-    UndoConfirmDialog,
+    ForkConfirmDialog {
+        message_id: Uuid,
+        message_count: usize,
+    },
+    UndoConfirmDialog {
+        message_id: Uuid,
+        content: String,
+    },
     ConnectDialog,
     RenameDialog,
     SessionPanel,
@@ -164,6 +186,7 @@ pub(crate) enum Action {
     Overlay(OverlayAction),
     Theme(ThemeAction),
     Launcher(LauncherAction),
+    Search(SearchAction),
     Command(CommandAction),
 
     // ── Internal ──
