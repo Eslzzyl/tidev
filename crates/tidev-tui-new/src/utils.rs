@@ -7,6 +7,17 @@ use ratatui::widgets::Paragraph;
 
 use tidev_tui::theme::ThemePalette;
 
+/// Try to read text from the system clipboard.
+///
+/// Returns `None` when the clipboard is unavailable or doesn't contain text.
+/// This is the single shared entry point for paste — all components (RenameDialog,
+/// ConnectDialog, future Composer) call this instead of reaching into `arboard`
+/// directly.
+pub(crate) fn paste_from_clipboard() -> Option<String> {
+    let mut clipboard = arboard::Clipboard::new().ok()?;
+    clipboard.get_text().ok().filter(|t| !t.is_empty())
+}
+
 /// Expand tab characters to spaces.
 pub(crate) fn expand_tabs(text: &str, tab_width: usize) -> String {
     if !text.contains('\t') {

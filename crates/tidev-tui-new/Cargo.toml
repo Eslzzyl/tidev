@@ -15,14 +15,17 @@ tidev-tools = { path = "../tidev-tools" }
 
 anyhow = "1"
 ansi-to-tui = "8"
+arboard = "3"
 base64 = "0.22"
 blake3 = "1"
 chrono = { version = "0.4", features = ["serde"] }
 crossterm = "0.28"
 dirs = "6"
+image = { version = "0.25", default-features = false, features = ["png"] }
 log = "0.4"
 pulldown-cmark = "0.13"
 ratatui = { version = "0.30", default-features = false, features = ["crossterm", "macros"] }
+ratatui-image = { version = "11", default-features = false, features = ["crossterm"] }
 rayon = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

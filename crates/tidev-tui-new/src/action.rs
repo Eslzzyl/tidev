@@ -120,6 +120,18 @@ pub(crate) enum SearchAction {
     },
 }
 
+/// Connect/configure LLM provider actions.
+#[derive(Clone, Debug)]
+pub(crate) enum ConnectAction {
+    /// Save an API key for the given LLM provider.
+    SaveApiKey {
+        provider_id: String,
+        key: String,
+    },
+    /// Prune orphan auth entries whose provider is no longer in config.
+    PruneOrphans,
+}
+
 /// Async command execution result.
 ///
 /// Note: `result` contains `anyhow::Result` (not `Clone`),
@@ -187,6 +199,7 @@ pub(crate) enum Action {
     Theme(ThemeAction),
     Launcher(LauncherAction),
     Search(SearchAction),
+    Connect(ConnectAction),
     Command(CommandAction),
 
     // ── Internal ──

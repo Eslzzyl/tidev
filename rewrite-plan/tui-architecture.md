@@ -96,11 +96,13 @@ input/event/panels.rs       → App::handle_theme_panel_key() (按键)
 │  • 持有 Runtime（异步资源最终权威）            │
 │  • 管理组件树                                │
 │  • Action 路由 + 异步命令执行                 │
+│  • `last_notice` 底部状态文字                 │
+│  • `toast` 右上角瞬态弹窗（自动过期）          │
 ├─────────────────────────────────────────────┤
 │  Component Tree                              │
 │  ChatScreen → MessageList + Composer         │
 │  OverlayStack → 所有浮层（统一管理）           │
-│  StatusBar                                   │
+│  StatusBar (含 last_notice 状态文字)          │
 └─────────────────────────────────────────────┘
 ```
 
@@ -117,7 +119,7 @@ input/event/panels.rs       → App::handle_theme_panel_key() (按键)
 │  • 持有 Runtime（异步资源最终权威）            │
 │  • 管理组件树                                │
 │  • Action 路由 + 异步命令执行                 │
-├─────────────────────────────────────────────┤
+│  • `last_notice` 底部状态文字                 │├─────────────────────────────────────────────┤
 │  Component Tree                              │
 │  ChatScreen → MessageList + Composer         │
 │  OverlayStack → 所有浮层（统一管理）           │
@@ -291,6 +293,18 @@ pub(crate) enum LauncherAction {
     Execute(PanelAction),
 }
 
+/// 搜索
+pub(crate) enum SearchAction {
+    SwitchProvider(String),
+    SaveApiKey { provider: String, key: String, is_cx: bool },
+}
+
+/// LLM 提供商连接
+pub(crate) enum ConnectAction {
+    SaveApiKey { provider_id: String, key: String },
+    PruneOrphans,
+}
+
 /// 异步命令结果
 pub(crate) enum CommandAction {
     Response { id: Uuid, result: Result<Box<[u8]>> },
@@ -313,8 +327,9 @@ pub(crate) enum Action {
     Overlay(OverlayAction),
     Theme(ThemeAction),
     Launcher(LauncherAction),
+    Search(SearchAction),
+    Connect(ConnectAction),
     Command(CommandAction),
-
     // ── 内部 ──
     Noop,
     Error(String),
@@ -520,7 +535,7 @@ tidev-tui-new/src/
 ├── component.rs                ← Component trait + 辅助类型
 ├── context.rs                  ← InitContext, DrawContext, UpdateContext
 ├── tui.rs                      ← Tui 终端层（setup/teardown + 事件轮询）
-├── utils.rs                    ← centered_rect + render_scrollbar + strip_system_reminder_tags
+├── utils.rs                    ← centered_rect + render_scrollbar + strip_system_reminder_tags + paste_from_clipboard
 ├── ansi.rs                     ← strip_ansi（从 tidev-tui 拷贝）
 │
 ├── components/
@@ -536,19 +551,17 @@ tidev-tui-new/src/
 │       ├── message.rs          ✅ 已完成
 │       ├── model.rs            ✅ 已完成
 │       ├── session.rs          ✅ 已完成
+│       ├── connect.rs          ✅ 已完成（含 ProviderPicker + ApiKey 两阶段）
+│       ├── rename.rs           ✅ 已完成（带 Ctrl+V 粘贴）
+│       ├── fork.rs             ✅ 已完成
+│       ├── undo.rs             ✅ 已完成
+│       ├── image.rs            ✅ 已完成（Picker 缓存）
 │       ├── permission.rs       ← 待迁移
 │       ├── question.rs         ← 待迁移
-│       ├── connect.rs          ← 待迁移
-│       ├── rename.rs           ← 待迁移
-│       ├── fork.rs             ← 待迁移
-│       ├── undo.rs             ← 待迁移
 │       ├── workspace.rs        ← 待迁移
 │       ├── sensitive.rs        ← 待迁移
-│       ├── image.rs            ← 待迁移
 │       ├── command_palette.rs  ← 待迁移
-│       ├── panel_launcher.rs   ← 待迁移
-│       └── notifications.rs    ← 待迁移
-│
+│       ├── panel_launcher.rs   ← 待迁移│
 ├── markdown/                   ← 从 tidev-tui 完整拷贝（含 syntax highlighting）
 │   ├── mod.rs
 │   ├── highlight.rs
@@ -580,7 +593,16 @@ render/ 和 input/ 目录不再存在，功能已并入组件。
 |   | · MessagePanel | 中 | ✅ 已完成 |
 |   | · ModelPanel | 中 | ✅ 已完成 |
 |   | · SessionPanel | 中 | ✅ 已完成 |
-| 5 | 迁移对话框（Permission, Question, Connect, Rename, Fork, Undo, Workspace, Sensitive） | 中 | ☐ 待做 |
+| 5a | 迁移简单对话框（ForkConfirm, UndoConfirm, RenameDialog） | 低 | ✅ 已完成 |
+|   | · ForkConfirmDialog | 低 | ✅ 已完成 |
+|   | · UndoConfirmDialog | 低 | ✅ 已完成 |
+|   | · RenameDialog（自包含 text buffer + Ctrl+V 粘贴） | 低 | ✅ 已完成 |
+| 5b | 迁移 Notifications/Toast + ImageViewer + ConnectDialog | 中 | ✅ 已完成 |
+|   | · last_notice + toast（App 内联渲染） | 低 | ✅ 已完成 |
+|   | · ImageViewer（Picker 缓存） | 中 | ✅ 已完成 |
+|   | · ConnectDialog（ProviderPicker + ApiKey，粘贴支持） | 中 | ✅ 已完成 |
+| 5c | 迁移安全对话框（WorkspaceBoundary, SensitiveFile） | 中 | ☐ 待做 |
+| 5d | 迁移工具执行对话框（Permission, Question） | **高** | ☐ 待做 |
 | 6 | 提取 **Chat** 组件（MessageList + 渲染管线，2453 行） | **高** | ☐ 待做 |
 | 7 | 提取 **Composer** 组件（1135 行的输入处理） | 中 | ☐ 待做 |
 | 8 | 全部迁移完成，删除旧代码 | — | ☐ 待做 |
