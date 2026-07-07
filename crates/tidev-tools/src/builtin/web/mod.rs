@@ -11,6 +11,7 @@ pub mod google;
 pub mod tavily;
 
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
@@ -116,9 +117,45 @@ pub fn definitions() -> Vec<ToolDefinition> {
     ]
 }
 
+/// Shared tokio runtime used by the sync wrapper.
+///
+/// Avoids constructing a new runtime on every call (the old per-call pattern).
+static WEB_RT: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("failed to build web tools runtime")
+});
+
+/// Execute a `websearch` or `webfetch` tool call asynchronously.
+///
+/// Unlike the sync wrapper, this does not create or rely on a nested runtime.
+/// Call from an async context (e.g. `execute_tool_call_streaming`).
+pub async fn execute_tool_call_async(
+    tool_name: &str,
+    arguments: Value,
+    web_search_config: &WebSearchConfig,
+    auth_store: &AuthStore,
+) -> Result<String> {
+    match tidev_types::tools::canonical_tool_name(tool_name) {
+        Some("websearch") => {
+            let args = serde_json::from_value::<WebSearchToolArgs>(arguments)?;
+            execute_search(args, web_search_config, auth_store).await
+        }
+        Some("webfetch") => {
+            let args = serde_json::from_value::<WebFetchToolArgs>(arguments)?;
+            fetch::fetch(args).await
+        }
+        Some(other) => bail!("unsupported web tool '{}'", other),
+        None => bail!("unknown tool '{}'", tool_name),
+    }
+}
+
 /// Execute a `websearch` or `webfetch` tool call synchronously.
 ///
-/// This function creates a short-lived tokio runtime for async I/O.
+/// Uses a shared [`LazyLock`] runtime so no per-call runtime is constructed.
+/// Intended for the sync dispatch path (`ToolRegistry::execute` via
+/// `spawn_blocking`).
 pub fn execute_tool_call(
     _workspace_root: &std::path::Path,
     tool_name: &str,
@@ -127,27 +164,12 @@ pub fn execute_tool_call(
     web_search_config: &WebSearchConfig,
     auth_store: &AuthStore,
 ) -> Result<String> {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .context("failed to construct webtools runtime")?;
-
-    match tidev_types::tools::canonical_tool_name(tool_name) {
-        Some("websearch") => {
-            let args = serde_json::from_value::<WebSearchToolArgs>(arguments).map_err(|e| {
-                anyhow::anyhow!("failed to decode arguments for tool '{}': {}", tool_name, e)
-            })?;
-            runtime.block_on(execute_search(args, web_search_config, auth_store))
-        }
-        Some("webfetch") => {
-            let args = serde_json::from_value::<WebFetchToolArgs>(arguments).map_err(|e| {
-                anyhow::anyhow!("failed to decode arguments for tool '{}': {}", tool_name, e)
-            })?;
-            runtime.block_on(fetch::fetch(args))
-        }
-        Some(other) => bail!("unsupported web tool '{}'", other),
-        None => bail!("unknown tool '{}'", tool_name),
-    }
+    WEB_RT.block_on(execute_tool_call_async(
+        tool_name,
+        arguments,
+        web_search_config,
+        auth_store,
+    ))
 }
 
 async fn execute_search(

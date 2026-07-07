@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 use std::path::Path;
+use std::sync::Arc;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_util::sync::CancellationToken;
 
@@ -20,7 +21,7 @@ pub struct ToolContext<'a> {
     pub workspace_root: &'a Path,
     pub config_dir: &'a Path,
     pub skills: &'a SkillCatalog,
-    pub todo: &'a dyn TodoPersistence,
+    pub todo: Arc<dyn TodoPersistence + Send + Sync>,
     pub session_id: uuid::Uuid,
     pub max_output_bytes: usize,
     pub mode: SessionMode,
@@ -63,98 +64,13 @@ pub fn definitions(skill_description: String) -> Vec<ToolDefinition> {
     definitions
 }
 
-pub fn execute_tool_call(
-    ctx: &ToolContext<'_>,
-    call: &ToolCall,
-) -> Result<ToolExecutionResult> {
-    let arguments: Value = serde_json::from_str(&call.arguments)
-        .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
-
-    let result = match canonical_tool_name(&call.name) {
-        Some("read") | Some("write") | Some("edit") | Some("apply_patch") => {
-            file::execute_tool_call(
-                ctx.workspace_root,
-                ctx.config_dir,
-                &call.name,
-                arguments,
-                ctx.max_output_bytes,
-                ctx.allow_outside,
-                ctx.sensitive_file_approved,
-            )?
-        }
-        Some("glob") | Some("grep") => {
-            let output = search::execute_tool_call(
-                ctx.workspace_root,
-                &call.name,
-                arguments,
-                ctx.max_output_bytes,
-                ctx.allow_outside,
-            )?;
-            ToolExecutionResult::new(output)
-        }
-        Some("bash") => {
-            let result = exec::execute_tool_call(
-                ctx.workspace_root,
-                &call.name,
-                arguments,
-                ctx.max_output_bytes,
-                ctx.session_id,
-                ctx.event_tx.clone(),
-            )?;
-            ToolExecutionResult::new(result.output)
-        }
-        Some("task") => {
-            let output = task::execute_tool_call(
-                ctx.workspace_root,
-                ctx.todo,
-                ctx.session_id,
-                &call.name,
-                arguments,
-                ctx.mode,
-            )?;
-            ToolExecutionResult::new(output)
-        }
-        Some("todowrite") => {
-            let output = todo::execute_tool_call(
-                ctx.workspace_root,
-                ctx.todo,
-                ctx.session_id,
-                &call.name,
-                arguments,
-            )?;
-            ToolExecutionResult::new(output)
-        }
-        Some("skill") => {
-            let args = parse_arguments::<SkillArgs>(&call.name, arguments)?;
-            let output = ctx.skills.render_skill(&args.name)?;
-            ToolExecutionResult::new(output)
-        }
-        Some("websearch") | Some("webfetch") => {
-            let output = web::execute_tool_call(
-                ctx.workspace_root,
-                &call.name,
-                arguments,
-                ctx.max_output_bytes,
-                ctx.web_search_config,
-                ctx.auth_store,
-            )?;
-            ToolExecutionResult::new(output)
-        }
-        None => bail!("unknown tool '{}'", call.name),
-        Some(other) => bail!("unsupported tool '{}'", other),
-    };
-
-    Ok(result)
-}
-
-/// Execute a tool call with optional streaming output events.
+/// Execute a tool call with streaming output support.
 ///
-/// When `event_tx` is `Some`, the bash tool will emit [`BackendEvent::ShellOutput`]
-/// events as output is produced. Other tools ignore the sender and execute normally.
-///
-/// The `cancel` token is used for cooperative cancellation of the bash tool.
-/// When cancelled, the process group is killed and partial output is returned.
-pub fn execute_tool_call_streaming(
+/// Bash emits [`BackendEvent::ShellOutput`] events when `event_tx` is `Some`.
+/// Other tools execute in [`tokio::task::spawn_blocking`] to avoid blocking the
+/// async runtime. The `cancel` token is used for cooperative cancellation of
+/// the bash tool.
+pub async fn execute_tool_call(
     ctx: &ToolContext<'_>,
     call: &ToolCall,
     cancel: &CancellationToken,
@@ -163,29 +79,50 @@ pub fn execute_tool_call_streaming(
         .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
 
     let result = match canonical_tool_name(&call.name) {
+        // ── File operations ────────────────────────────────────────────
         Some("read") | Some("write") | Some("edit") | Some("apply_patch") => {
-            file::execute_tool_call(
-                ctx.workspace_root,
-                ctx.config_dir,
-                &call.name,
-                arguments,
-                ctx.max_output_bytes,
-                ctx.allow_outside,
-                ctx.sensitive_file_approved,
-            )?
+            let workspace_root = ctx.workspace_root.to_path_buf();
+            let config_dir = ctx.config_dir.to_path_buf();
+            let call_name = call.name.clone();
+            let max_output_bytes = ctx.max_output_bytes;
+            let allow_outside = ctx.allow_outside;
+            let sensitive_file_approved = ctx.sensitive_file_approved;
+            tokio::task::spawn_blocking(move || {
+                file::execute_tool_call(
+                    &workspace_root,
+                    &config_dir,
+                    &call_name,
+                    arguments,
+                    max_output_bytes,
+                    allow_outside,
+                    sensitive_file_approved,
+                )
+            })
+            .await??
         }
+
+        // ── Search operations ──────────────────────────────────────────
         Some("glob") | Some("grep") => {
-            let output = search::execute_tool_call(
-                ctx.workspace_root,
-                &call.name,
-                arguments,
-                ctx.max_output_bytes,
-                ctx.allow_outside,
-            )?;
+            let workspace_root = ctx.workspace_root.to_path_buf();
+            let call_name = call.name.clone();
+            let max_output_bytes = ctx.max_output_bytes;
+            let allow_outside = ctx.allow_outside;
+            let output = tokio::task::spawn_blocking(move || {
+                search::execute_tool_call(
+                    &workspace_root,
+                    &call_name,
+                    arguments,
+                    max_output_bytes,
+                    allow_outside,
+                )
+            })
+            .await??;
             ToolExecutionResult::new(output)
         }
+
+        // ── Bash (truly async) ─────────────────────────────────────────
         Some("bash") => {
-            let result = exec::execute_tool_call_with_cancel(
+            let result = exec::execute_tool_call_with_cancel_async(
                 ctx.workspace_root,
                 &call.name,
                 arguments,
@@ -193,46 +130,75 @@ pub fn execute_tool_call_streaming(
                 cancel,
                 ctx.session_id,
                 ctx.event_tx.clone(),
-            )?;
+            )
+            .await?;
             ToolExecutionResult::new(result.output)
         }
+
+        // ── Sub-agent task ─────────────────────────────────────────────
         Some("task") => {
-            let output = task::execute_tool_call(
-                ctx.workspace_root,
-                ctx.todo,
-                ctx.session_id,
-                &call.name,
-                arguments,
-                ctx.mode,
-            )?;
+            let workspace_root = ctx.workspace_root.to_path_buf();
+            let store = ctx.todo.clone();
+            let session_id = ctx.session_id;
+            let call_name = call.name.clone();
+            let mode = ctx.mode;
+            let output = tokio::task::spawn_blocking(move || {
+                task::execute_tool_call(
+                    &workspace_root,
+                    &*store,
+                    session_id,
+                    &call_name,
+                    arguments,
+                    mode,
+                )
+            })
+            .await??;
             ToolExecutionResult::new(output)
         }
+
+        // ── Todo persistence ───────────────────────────────────────────
         Some("todowrite") => {
-            let output = todo::execute_tool_call(
-                ctx.workspace_root,
-                ctx.todo,
-                ctx.session_id,
-                &call.name,
-                arguments,
-            )?;
+            let workspace_root = ctx.workspace_root.to_path_buf();
+            let store = ctx.todo.clone();
+            let session_id = ctx.session_id;
+            let call_name = call.name.clone();
+            let output = tokio::task::spawn_blocking(move || {
+                todo::execute_tool_call(
+                    &workspace_root,
+                    &*store,
+                    session_id,
+                    &call_name,
+                    arguments,
+                )
+            })
+            .await??;
             ToolExecutionResult::new(output)
         }
+
+        // ── Skill rendering ────────────────────────────────────────────
         Some("skill") => {
             let args = parse_arguments::<SkillArgs>(&call.name, arguments)?;
-            let output = ctx.skills.render_skill(&args.name)?;
+            let skill_name = args.name.clone();
+            let skills = ctx.skills.clone();
+            let output = tokio::task::spawn_blocking(move || {
+                skills.render_skill(&skill_name)
+            })
+            .await??;
             ToolExecutionResult::new(output)
         }
+
+        // ── Web search / fetch ─────────────────────────────────────────
         Some("websearch") | Some("webfetch") => {
-            let output = web::execute_tool_call(
-                ctx.workspace_root,
+            let output = web::execute_tool_call_async(
                 &call.name,
                 arguments,
-                ctx.max_output_bytes,
                 ctx.web_search_config,
                 ctx.auth_store,
-            )?;
+            )
+            .await?;
             ToolExecutionResult::new(output)
         }
+
         None => bail!("unknown tool '{}'", call.name),
         Some(other) => bail!("unsupported tool '{}'", other),
     };

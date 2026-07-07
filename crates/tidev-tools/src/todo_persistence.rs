@@ -10,7 +10,7 @@ use tidev_types::TodoItem;
 ///
 /// This trait has only two methods, keeping the abstraction as lightweight
 /// as possible while still cutting the dependency on `tidev-storage`.
-pub trait TodoPersistence {
+pub trait TodoPersistence: Send + Sync {
     /// Load all todo items for the given session.
     fn load_todos(&self, session_id: uuid::Uuid) -> anyhow::Result<Vec<TodoItem>>;
 

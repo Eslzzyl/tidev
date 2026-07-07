@@ -78,7 +78,9 @@ pub fn compose_system_prompt(
 
 /// Tool names that can be read-only and thus run concurrently.
 fn read_only_tool_names() -> HashSet<&'static str> {
-    ["read", "glob", "grep"].into_iter().collect()
+    ["read", "glob", "grep", "websearch", "webfetch"]
+        .into_iter()
+        .collect()
 }
 
 /// Whether a tool call is read-only (and may thus run in parallel with others).
@@ -410,9 +412,19 @@ impl AgentContext for CoreContext {
                 let reg = self.tool_registry.clone();
                 let sid = session_id;
                 let mode = self.mode;
-                let handle = tokio::task::spawn_blocking(move || {
-                    reg.execute(&tc, sid, mode, allow_outside, sensitive_approved)
-                        .map(|result| (tc, result))
+                let cancel = self.cancel.clone();
+                let handle = tokio::spawn(async move {
+                    reg.execute(
+                        &tc,
+                        sid,
+                        mode,
+                        allow_outside,
+                        sensitive_approved,
+                        &cancel,
+                        None,
+                    )
+                    .await
+                    .map(|result| (tc, result))
                 });
                 handles.push(handle);
             }
@@ -437,7 +449,11 @@ impl AgentContext for CoreContext {
 
         // --- Write tools: serial execution (preserve ordering for side effects) ---
         for (tc, allow_outside, sensitive_approved) in write {
-            let result = self.tool_registry.execute_streaming(
+            if self.cancel.is_cancelled() {
+                return Ok(results);
+            }
+
+            let result = self.tool_registry.execute(
                 &tc,
                 session_id,
                 self.mode,
@@ -445,7 +461,8 @@ impl AgentContext for CoreContext {
                 sensitive_approved,
                 &self.cancel,
                 Some(self.event_tx.clone()),
-            )?;
+            )
+            .await?;
 
             self.emit(BackendEvent::ToolCompleted {
                 session_id,

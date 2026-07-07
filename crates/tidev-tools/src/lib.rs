@@ -21,7 +21,6 @@ mod bundled_skills;
 // Re-export key public types.
 pub use builtin::ToolContext;
 pub use builtin::execute_tool_call;
-pub use builtin::execute_tool_call_streaming;
 pub use builtin::definitions as tool_definitions;
 pub use builtin::kill_all_children;
 pub use skills::{SkillCatalog, SkillInfo};

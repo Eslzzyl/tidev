@@ -12,16 +12,17 @@ use std::{
     thread,
     time::Duration,
 };
+use tokio::io::AsyncReadExt;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
 
 use super::utils::truncate_in_place;
 use crate::builtin::utils::decode_tool_args;
+use tidev_types::message::BackendEvent;
 use tidev_types::tools::{BashArgs, ToolDefinition, ToolPermission};
 use tidev_utils::encoding::decode_command_output;
 use tidev_utils::encoding::prepare_command_for_shell;
-use tidev_types::message::BackendEvent;
-use uuid::Uuid;
 
 /// Registry of active child process PIDs spawned by the bash tool.
 /// Used during program exit to prevent orphaned processes.
@@ -145,7 +146,7 @@ pub fn execute_tool_call_with_cancel(
     event_tx: Option<UnboundedSender<BackendEvent>>,
 ) -> Result<BashExecutionResult> {
     let args = decode_tool_args::<BashArgs>(tool_name, arguments)?;
-    let timeout = args.timeout.unwrap_or(120_000) as u64; // default 2 minutes
+    let timeout = args.timeout.unwrap_or(120_000) as u64;
     run_shell_inner(
         workspace_root,
         &args.command,
@@ -157,6 +158,261 @@ pub fn execute_tool_call_with_cancel(
     )
 }
 
+/// Execute a bash command with streaming output, cancellation, and timeout.
+///
+/// Uses `tokio::process::Command` for non-blocking process execution.
+/// Stdout is streamed chunk-by-chunk via `BackendEvent::ShellOutput` events.
+/// The `cancel` token terminates the process group on cancellation.
+#[allow(clippy::too_many_arguments)]
+pub async fn execute_tool_call_with_cancel_async(
+    workspace_root: &Path,
+    tool_name: &str,
+    arguments: Value,
+    max_output_bytes: usize,
+    cancel: &CancellationToken,
+    session_id: Uuid,
+    event_tx: Option<UnboundedSender<BackendEvent>>,
+) -> Result<BashExecutionResult> {
+    let args = decode_tool_args::<BashArgs>(tool_name, arguments)?;
+    let timeout = args.timeout.unwrap_or(120_000) as u64;
+    run_shell_streaming(
+        workspace_root,
+        &args.command,
+        max_output_bytes,
+        cancel,
+        timeout,
+        event_tx,
+        session_id,
+    )
+    .await
+}
+
+/// Async streaming bash execution — non-blocking, supports cancellation and timeout.
+///
+/// Internally uses `tokio::process::Command` so the calling async task is never
+/// blocked by a running shell command. Output is read chunk-by-chunk and
+/// forwarded as [`BackendEvent::ShellOutput`] events.
+async fn run_shell_streaming(
+    workspace_root: &Path,
+    command: &str,
+    max_output_bytes: usize,
+    cancel: &CancellationToken,
+    timeout_ms: u64,
+    event_tx: Option<UnboundedSender<BackendEvent>>,
+    session_id: Uuid,
+) -> Result<BashExecutionResult> {
+    let mut actual_command = command.to_string();
+
+    // ── Layer 1: Privilege escalation handling (sudo/doas/pkexec) ──────
+    let mut sudo_guard: Option<super::sudo::AskpassGuard> = None;
+    let _sudo_active = if super::sudo::has_privilege_escalation(&actual_command) {
+        let guard = super::sudo::create_askpass_script()?;
+        let wrapped = super::sudo::wrap_command(&actual_command, guard.path());
+        log::info!("sudo: privilege escalation detected, wrapping command with SUDO_ASKPASS");
+        sudo_guard = Some(guard);
+        actual_command = wrapped;
+        true
+    } else {
+        false
+    };
+
+    // ── Build & spawn the shell process ───────────────────────────────
+    let mut child = if cfg!(target_os = "windows") {
+        let shell = crate::shell::get();
+        let shell_command = prepare_command_for_shell(&actual_command, &shell.program, &shell.arg);
+
+        let mut cmd = tokio::process::Command::new(&shell.program);
+        let mut all_args: Vec<&str> = shell.arg.split_whitespace().collect();
+        all_args.push(&shell_command);
+        cmd.args(&all_args)
+            .current_dir(workspace_root)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        cmd.env("LANG", "C.UTF-8");
+        cmd.env("LC_ALL", "C.UTF-8");
+        cmd.env("MSYS2_ENCODING", "UTF-8");
+        cmd.env("PYTHONIOENCODING", "utf-8:surrogateescape");
+
+        if let Some(ref guard) = sudo_guard {
+            cmd.env("SUDO_ASKPASS", guard.path());
+        }
+
+        cmd.spawn()
+            .with_context(|| format!("failed to run command '{actual_command}'"))?
+    } else {
+        let mut cmd = tokio::process::Command::new("sh");
+        cmd.arg("-lc")
+            .arg(&actual_command)
+            .current_dir(workspace_root)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        if let Some(ref guard) = sudo_guard {
+            cmd.env("SUDO_ASKPASS", guard.path());
+        }
+
+        // Disconnect from controlling terminal (setsid) so the child has no
+        // controlling terminal, preventing it from stealing the TUI's terminal.
+        #[cfg(unix)]
+        unsafe {
+            cmd.pre_exec(move || {
+                libc::setsid();
+                Ok(())
+            });
+        }
+
+        cmd.spawn()
+            .with_context(|| format!("failed to run command '{actual_command}'"))?
+    };
+
+    let child_pid = child.id().expect("child process should have a PID");
+    register_child(child_pid);
+
+    let mut stdout = child.stdout.take().expect("piped stdout");
+    let stderr_handle = child.stderr.take();
+
+    let timeout_dur = Duration::from_millis(timeout_ms);
+    let deadline = tokio::time::Instant::now() + timeout_dur;
+
+    let mut raw_bytes: Vec<u8> = Vec::new();
+    let mut output_buf = String::new();
+    let mut read_buf = [0u8; 8192];
+
+    // ── Async read loop with cancellation and timeout ─────────────────
+    'read_loop: loop {
+        tokio::select! {
+            biased; // check cancel/timeout first
+
+            _ = cancel.cancelled() => {
+                kill_process_group(child_pid);
+                let _ = child.wait().await;
+                unregister_child(child_pid);
+
+                if let Some(ref tx) = event_tx {
+                    let _ = tx.send(BackendEvent::ShellOutput {
+                        session_id,
+                        content: output_buf.clone(),
+                        finished: true,
+                        exit_code: None,
+                    });
+                }
+
+                truncate_in_place(&mut output_buf, max_output_bytes);
+                return Ok(BashExecutionResult {
+                    output: format!("[exit -1] (cancelled)\n{}", output_buf),
+                });
+            }
+
+            _ = tokio::time::sleep_until(deadline) => {
+                kill_process_group(child_pid);
+                let _ = child.wait().await;
+                unregister_child(child_pid);
+
+                if let Some(ref tx) = event_tx {
+                    let _ = tx.send(BackendEvent::ShellOutput {
+                        session_id,
+                        content: output_buf.clone(),
+                        finished: true,
+                        exit_code: None,
+                    });
+                }
+
+                truncate_in_place(&mut output_buf, max_output_bytes);
+                return Ok(BashExecutionResult {
+                    output: format!(
+                        "[exit -1] (timed out after {}s)\n{}",
+                        timeout_ms / 1000,
+                        output_buf
+                    ),
+                });
+            }
+
+            result = stdout.read(&mut read_buf) => {
+                match result {
+                    Ok(0) => break 'read_loop, // EOF
+                    Ok(n) => {
+                        raw_bytes.extend_from_slice(&read_buf[..n]);
+                        output_buf = decode_command_output(&raw_bytes);
+
+                        // Align raw_bytes to character boundary when truncated
+                        if raw_bytes.len() > max_output_bytes {
+                            let truncated_str: String =
+                                output_buf.chars().take(max_output_bytes).collect();
+                            let byte_len = truncated_str.len();
+                            raw_bytes.truncate(byte_len);
+                            output_buf = truncated_str;
+                            if raw_bytes.len() > max_output_bytes {
+                                raw_bytes.truncate(max_output_bytes);
+                                output_buf = decode_command_output(&raw_bytes);
+                            }
+                        }
+
+                        // Send streaming event
+                        if let Some(ref tx) = event_tx {
+                            let _ = tx.send(BackendEvent::ShellOutput {
+                                session_id,
+                                content: output_buf.clone(),
+                                finished: false,
+                                exit_code: None,
+                            });
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("Failed to read from shell stdout: {e}");
+                        break 'read_loop;
+                    }
+                }
+            }
+        }
+    }
+
+    // ─── Wait for process exit ────────────────────────────────────────
+    let exit_code = match child.wait().await {
+        Ok(status) => {
+            unregister_child(child_pid);
+            status.code()
+        }
+        Err(e) => {
+            unregister_child(child_pid);
+            return Err(anyhow::anyhow!("failed to wait for shell command: {e}"));
+        }
+    };
+
+    // ─── Merge stderr ─────────────────────────────────────────────────
+    let mut combined = output_buf;
+    if let Some(mut stderr_handle) = stderr_handle {
+        let mut stderr_bytes = Vec::new();
+        let _ = stderr_handle.read_to_end(&mut stderr_bytes).await;
+        let error_output = decode_command_output(&stderr_bytes);
+        if !error_output.is_empty() {
+            if !combined.is_empty() {
+                combined.push('\n');
+            }
+            combined.push_str(&error_output);
+        }
+    }
+
+    truncate_in_place(&mut combined, max_output_bytes);
+
+    // Send final event with exit code
+    if let Some(ref tx) = event_tx {
+        let _ = tx.send(BackendEvent::ShellOutput {
+            session_id,
+            content: combined.clone(),
+            finished: true,
+            exit_code,
+        });
+    }
+
+    let status_code = exit_code.unwrap_or_default();
+
+    Ok(BashExecutionResult {
+        output: format!("[exit {status_code}]\n{}", combined),
+    })
+}
 #[allow(clippy::too_many_arguments)]
 fn run_shell_inner(
     workspace_root: &Path,
