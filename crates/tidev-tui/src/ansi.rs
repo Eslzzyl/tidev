@@ -45,3 +45,35 @@ pub(crate) fn strip_ansi(text: &str) -> Cow<'_, str> {
     }
     Cow::Owned(result)
 }
+
+/// Convert an ANSI-escape-sequence-rich string into styled ratatui lines.
+///
+/// Each line in the input becomes a `Line<'static>` with foreground/background
+/// colours applied from the ANSI codes.  This is the inverse of `strip_ansi`.
+pub(crate) fn ansi_to_styled_line(text: &str, default_style: Style) -> Vec<Line<'static>> {
+    // ansi_to_tui::IntoText produces one Line per input line.
+    match text.into_text() {
+        Ok(text) => text
+            .lines
+            .iter()
+            .map(|line| {
+                let spans: Vec<Span<'static>> = line
+                    .spans
+                    .iter()
+                    .map(|s| {
+                        let mut combined = default_style;
+                        combined.patch(s.style);
+                        Span::styled(s.content.clone(), combined)
+                    })
+                    .collect();
+                Line::from(spans)
+            })
+            .collect(),
+        Err(_) => {
+            // Fallback: plain text with default style
+            text.lines()
+                .map(|l| Line::from(Span::styled(l.to_string(), default_style)))
+                .collect()
+        }
+    }
+}

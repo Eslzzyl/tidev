@@ -20,7 +20,7 @@ use tidev_types::tools::QuestionArgs;
 use tidev_tui_old::theme::{ThemeName, ThemePalette};
 use uuid::Uuid;
 
-use crate::action::{Action, BoundaryDecision, ChatAction, ConnectAction, OverlayAction,
+use crate::action::{Action, BoundaryDecision, ConnectAction, OverlayAction,
     OverlayKind, PermissionDecision, SearchAction, SensitiveFileDecision, SessionAction,
     ThemeAction};
 use crate::component::Component;
@@ -43,6 +43,7 @@ use crate::components::overlays::skills::{SkillItem, SkillsPanel};
 use crate::components::overlays::theme::ThemePanel;
 use crate::components::overlays::undo::UndoConfirmDialog;
 use crate::components::overlays::workspace::WorkspaceBoundaryDialog;
+use crate::components::chat::MessageList;
 use crate::context::{DrawContext, UpdateContext};
 use crate::utils::strip_system_reminder_tags;
 
@@ -63,6 +64,9 @@ pub struct App {
     pub(crate) request_rx: Option<tokio::sync::mpsc::UnboundedReceiver<tidev_core::TuiRequest>>,
     /// Receiver for backend events (streaming deltas, tool results, etc.).
     pub(crate) event_rx: Option<tokio::sync::mpsc::UnboundedReceiver<BackendEvent>>,
+
+    /// Chat message list component.
+    pub(crate) message_list: Option<MessageList>,
 
     // ── Tool approval pipeline ──
 
@@ -109,6 +113,7 @@ impl App {
             approved_tools: Vec::new(),
             boundary_permissions: HashMap::new(),
             sensitive_permissions: HashMap::new(),
+            message_list: None,
         }
     }
 
@@ -132,37 +137,14 @@ impl App {
 
     /// Handle a backend event from the agent loop (streaming, tool results, etc.).
     pub(crate) fn handle_backend_event(&mut self, event: BackendEvent) {
+        // Forward to MessageList for all chat-related events.
+        if let Some(ref mut chat) = self.message_list {
+            chat.handle_backend_event(&event);
+        }
+
         match event {
-            BackendEvent::Delta { .. } => {
-                // TODO: Phase 6 — forward to message rendering
-            }
-            BackendEvent::ReasoningDelta { .. } => {
-                // TODO: Phase 6 — forward to message rendering
-            }
-            BackendEvent::ToolCallUpdated { .. } => {
-                // TODO: Phase 6 — update tool call display
-            }
-            BackendEvent::Finished { .. } => {
-                // TODO: Phase 6 — message completed
-            }
-            BackendEvent::ToolCompleted { .. } => {
-                // TODO: Phase 6 — tool result received
-            }
-            BackendEvent::ShellOutput { .. } => {
-                // TODO: Phase 6 — bash output streaming
-            }
-            BackendEvent::SubagentStatus { .. }
-            | BackendEvent::SubagentCompleted { .. } => {
-                // TODO: Phase 6 — subagent progress
-            }
             BackendEvent::UsageStats { .. } => {
                 // TODO: show usage in status bar
-            }
-            BackendEvent::TurnStarting { .. } => {
-                // TODO: Phase 6 — new turn starting
-            }
-            BackendEvent::StreamEnd { .. } => {
-                // TODO: Phase 6 — streaming finished
             }
             _ => {
                 log::debug!("Unhandled backend event: {event:?}");
@@ -423,11 +405,25 @@ impl App {
         // 2. OverlayStack top-first
         if let Some(action) = self.overlays.handle_key_event(key) {
             self.process_action(action);
+            return;
+        }
+
+        // 3. MessageList (only when no overlay consumed the event)
+        if let Some(ref mut chat) = self.message_list {
+            if let Some(action) = chat.handle_key_event(key) {
+                self.process_action(action);
+            }
         }
     }
 
-    pub fn handle_mouse_event(&mut self, _mouse: MouseEvent) {
-        // TODO: route to overlays
+    pub fn handle_mouse_event(&mut self, mouse: MouseEvent) {
+        use crossterm::event::MouseEventKind;
+        // MessageList click-to-expand
+        if let MouseEventKind::Down(crossterm::event::MouseButton::Left) = mouse.kind {
+            if let Some(ref mut chat) = self.message_list {
+                chat.handle_mouse_click(mouse.column, mouse.row);
+            }
+        }
     }
 
     pub fn handle_resize(&mut self, _w: u16, _h: u16) {
@@ -602,22 +598,53 @@ impl App {
                     self.current_session_id = Some(session_id);
                     self.scroll_target = None;
 
-                    // Load session record (for logging)
-                    match self.runtime.session_manager().load_session(session_id) {
-                        Ok(Some(record)) => {
-                            log::info!(
-                                "Switching to session: {} ({})",
-                                record.title,
-                                session_id
-                            );
+                    // Load session record and messages for chat display
+                    let messages = self
+                        .runtime
+                        .session_manager()
+                        .load_messages(session_id)
+                        .unwrap_or_default();
+
+                    let chat_context = {
+                        let config = self.runtime.config();
+                        let active_model = config.resolve_active_model(&self.runtime.auth()).ok();
+                        let model_display = active_model
+                            .as_ref()
+                            .map(|m| m.label())
+                            .unwrap_or_default();
+                        let provider_display = active_model
+                            .as_ref()
+                            .map(|m| m.provider_display_name.clone())
+                            .unwrap_or_default();
+                        let workspace_root = self.runtime.workspace_root().to_string_lossy().to_string();
+
+                        let mut ctx = tidev_tui_old::chat_context::ChatContext::new(
+                            session_id,
+                            String::new(),
+                            workspace_root,
+                            messages,
+                            None,
+                            self.runtime.active_provider_id(),
+                            self.runtime.active_model_id(),
+                            model_display,
+                            provider_display,
+                        );
+
+                        if let Ok(Some(record)) = self.runtime.session_manager().load_session(session_id)
+                        {
+                            ctx.title = record.title;
                         }
-                        Ok(None) => {
-                            log::warn!("Session not found: {session_id}");
-                        }
-                        Err(e) => {
-                            log::error!("Failed to load session: {e}");
-                        }
-                    }
+
+                        ctx
+                    };
+
+                    let session_title = chat_context.title.clone();
+
+                    // Create or update MessageList
+                    self.message_list.get_or_insert_with(MessageList::new)
+                        .set_chat_context(chat_context);
+
+                    log::info!("Switching to session: {} ({})", session_title, session_id);
 
                     // Continue the agent loop if the session has pending work
                     let rt = self.runtime.clone();
@@ -782,13 +809,16 @@ impl App {
                         Err(e) => log::error!("Failed to rename session: {e}"),
                     }
                 }
-                Action::Chat(ChatAction::SetInput(text)) => {
-                    // TODO: route to Composer once migrated
-                    log::info!("SetInput: {}", text);
-                }
-                Action::Chat(ChatAction::ScrollTo(message_id)) => {
-                    self.scroll_target = Some(message_id);
-                    log::info!("ScrollTo: {}", message_id);
+                Action::Chat(action) => {
+                    // Forward chat actions (scroll, stream, etc.) to MessageList
+                    if let Some(ref mut chat) = self.message_list {
+                        let palette = &self.current_palette;
+                        let mut ctx = UpdateContext {
+                            runtime: &mut self.runtime,
+                            palette,
+                        };
+                        queue.extend(chat.update(&Action::Chat(action), &mut ctx));
+                    }
                 }
                 Action::Noop => {}
                 // ── Tool approval pipeline ──
@@ -1107,8 +1137,16 @@ impl App {
             area,
         );
 
-        // Welcome / status text when no overlay is open
-        if self.overlays.is_empty() {
+        // Chat message area (when session is active)
+        if let Some(ref mut chat) = self.message_list {
+            let draw_ctx = DrawContext {
+                palette,
+                focused: self.overlays.is_empty(),
+                chat_context: None,
+            };
+            chat.draw(frame, area, &draw_ctx);
+        } else if self.overlays.is_empty() {
+            // Welcome / status text when no session or overlay is active
             let welcome = Paragraph::new(Line::from(vec![
                 Span::styled(
                     "tidev",

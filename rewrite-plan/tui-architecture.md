@@ -100,7 +100,7 @@ input/event/panels.rs       → App::handle_theme_panel_key() (按键)
 │  • `toast` 右上角瞬态弹窗（自动过期）          │
 ├─────────────────────────────────────────────┤
 │  Component Tree                              │
-│  ChatScreen → MessageList + Composer         │
+│  MessageList + Composer (由 App 直接持有)     │
 │  OverlayStack → 所有浮层（统一管理）           │
 │  StatusBar (含 last_notice 状态文字)          │
 └─────────────────────────────────────────────┘
@@ -121,7 +121,7 @@ input/event/panels.rs       → App::handle_theme_panel_key() (按键)
 │  • Action 路由 + 异步命令执行                 │
 │  • `last_notice` 底部状态文字                 │├─────────────────────────────────────────────┤
 │  Component Tree                              │
-│  ChatScreen → MessageList + Composer         │
+│  MessageList + Composer (由 App 直接持有)     │
 │  OverlayStack → 所有浮层（统一管理）           │
 │  StatusBar                                   │
 └─────────────────────────────────────────────┘
@@ -131,9 +131,9 @@ input/event/panels.rs       → App::handle_theme_panel_key() (按键)
 
 ```
 App
-├── ChatScreen                     ← 主要聊天界面
-│   ├── MessageList                ← 消息列表（虚拟化 + 渲染缓存）
-│   └── Composer                   ← 输入框（@mention、snippet、图片粘贴）
+├── MessageList                   ← 主要聊天消息列表（虚拟化 + 渲染缓存）
+├── Composer                      ← 输入框（@mention、snippet、图片粘贴）
+│                                   由 App 直接持有，可在 Welcome 和 Chat 页复用
 ├── OverlayStack                   ← 所有浮层，按 z-order 排列
 │   ├── ImageViewer                ← 最顶层，Esc 关闭
 │   ├── CommandPalette             ← Ctrl+P 打开
@@ -362,11 +362,9 @@ pub(crate) enum Action {
           │   └── return None → 下一层
           │   └── blocks_input() == true → 停止传递
           │
-          ├── ChatScreen
-          │   ├── Composer 优先
-          │   └── MessageList
+          ├── MessageList (键盘滚动、展开/折叠)
           │
-          └── StatusBar
+          └── Composer (输入、补全、粘贴)
 ```
 
 ### 7.2 App 层的显式路由
@@ -429,31 +427,28 @@ impl App {
 ### 8.2 Dirty Marking
 
 ```rust
-struct ChatScreen {
-    message_list: MessageList,
-    composer: Composer,
-    // 复合 dirty：自身 + 子组件
-    dirty: Cell<bool>,
-    resize_dirty: Cell<bool>,
+struct App {
+    message_list: Option<MessageList>,
+    composer: Option<Composer>,
+    // ...
 }
 
-impl Component for ChatScreen {
-    fn is_dirty(&self) -> bool {
-        self.dirty.get()
-            || self.message_list.is_dirty()
-            || self.composer.is_dirty()
-            || self.resize_dirty.get()
-    }
-
-    fn mark_clean(&mut self) {
-        self.dirty.set(false);
-        self.resize_dirty.set(false);
-        self.message_list.mark_clean();
-        self.composer.mark_clean();
+// App 在 draw() 中分别检查并渲染
+impl App {
+    fn draw(&mut self, frame: &mut Frame) {
+        if let Some(ref mut ml) = self.message_list {
+            if ml.is_dirty() {
+                ml.draw(frame, message_area, &draw_ctx);
+            }
+        }
+        if let Some(ref mut comp) = self.composer {
+            if comp.is_dirty() {
+                comp.draw(frame, composer_area, &draw_ctx);
+            }
+        }
     }
 }
 ```
-
 ### 8.3 保留的现有优化
 
 | 优化 | 位置 | 保留方式 |
@@ -600,7 +595,7 @@ render/ 和 input/ 目录不再存在，功能已并入组件。
 |   | · ConnectDialog（ProviderPicker + ApiKey，粘贴支持） | 中 | ✅ 已完成 |
 | 5c | 迁移安全对话框（WorkspaceBoundary, SensitiveFile） | 中 | ☐ 待做 |
 | 5d | 迁移工具执行对话框（Permission, Question） | **高** | ☐ 待做 |
-| 6 | 提取 **Chat** 组件（MessageList + 渲染管线，2453 行） | **高** | ☐ 待做 |
+| 6 | 提取 **Chat** 组件（MessageList + 渲染管线，2453 行） | **高** | ✅ 已完成 |
 | 7 | 提取 **Composer** 组件（1135 行的输入处理） | 中 | ☐ 待做 |
 | 8 | 全部迁移完成，删除旧代码 | — | ☐ 待做 |
 ### 11.1 当前状态
@@ -719,17 +714,16 @@ selectable_regions          → 应归 MessageList
 ```
 src/components/
 └── chat/
-    ├── mod.rs           ← ChatScreen Component（容器 + 滚动 + BackendEvent 分发）
+    ├── mod.rs           ← MessageList Component（容器 + 滚动 + BackendEvent 分发）
     ├── layout_index.rs  ← MessageBlock + MessageLayoutIndex（增量更新）
     ├── render_cache.rs  ← MessageRenderCache + key/value 类型
     ├── render.rs        ← messages_text() → render_message_block_to_lines() 管线
+    ├── streaming.rs     ← StreamingBuffer（Delta 累积 + 同步）
     └── tool.rs          ← tool call 卡片渲染（对应旧 tool.rs）
 ```
 
 ### 13.6 迁移原则
 
 - **结构重组，行为保留。** 渲染逻辑、缓存策略、并行计算、流式增量全部原样迁移。
-- **只改代码归属**：从 `impl App` 方法改为 `impl MessageList / impl ChatScreen` 方法。
-- **只改类型封装**：8 元组 → 命名结构体，12 参数 → 上下文结构体。
-- **不删不减**：不合并渲染 Pass，不简化 LRU 逻辑，不省略任何 tool call 渲染分支。
+- **只改代码归属**：从 `impl App` 方法改为 `impl MessageList` 方法。Composer 是独立 Component，由 App 直接持有。**没有 ChatScreen 这个组件。**
 
