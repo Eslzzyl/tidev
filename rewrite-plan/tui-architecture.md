@@ -622,3 +622,114 @@ render/ 和 input/ 目录不再存在，功能已并入组件。
 - [ ] **组件粒度不穿透到 widget 级别** — 避免虚函数开销
 - [ ] **不每帧 clone ChatContext** — 通过 `&DrawContext` 传递引用
 - [ ] **LayoutIndex 增量更新** — streaming 时不触发全量 `update_message_layout_index`
+
+## 13. Chat 组件迁移评估（2026-07-07）
+
+### 13.1 规模
+
+旧代码中 Chat 渲染相关代码约 **6,000 行**：
+
+| 旧文件 | 行数 | 功能 |
+|--------|------|------|
+| `render/chat_render/mod.rs` | 2,456 | 主渲染管线、布局索引、滚动、缓存、流式 |
+| `render/chat_render/tool.rs` | 1,653 | Tool call / tool result / subagent 卡片 |
+| `render/chat_render/content.rs` | 819 | 消息内容渲染、BlockComputation 并行计算 |
+| `render/chat_render/utils.rs` | 541 | 辅助函数 |
+| `render/chat_render/tests.rs` | 394 | 测试 |
+| `core/state.rs` (布局索引部分) | ~100 | MessageLayoutIndex, MessageBlock |
+| **合计** | **~6,000** | |
+
+### 13.2 已具备的条件
+
+| 基础设施 | 位置 | 状态 |
+|---------|------|------|
+| Markdown 渲染管线 | `crates/tidev-tui/src/markdown/` (2,465 行) | ✅ 已完整拷贝 |
+| Message 类型 | `tidev-types::message::Message` | ✅ 存在 |
+| ChatContext | `tidev_tui_old::chat_context::ChatContext` | ✅ 存在 |
+| Component trait | `component.rs` | ✅ 存在 |
+| 全局 MARKDOWN_RENDER_CACHE | `markdown/mod.rs` LazyLock | ✅ 存在 |
+
+### 13.3 旧代码的设计问题（需在迁移中修复）
+
+**问题 1：`messages_text()` 的 God Return Type**
+
+```rust
+type MessagesTextResult = (
+    Text<'static>,                // 渲染行
+    usize,                        // 总行数
+    Vec<ToolResultCardRange>,     // 工具卡片范围
+    Vec<(Uuid, usize, usize)>,    // 用户卡片范围
+    Vec<SelectableRegionRange>,   // 可选中区域
+    bool,                         // 是否流式中
+    usize,                        // 滚动偏移修正
+    Vec<InlineRunningCardRange>,  // 运行中卡片范围
+);
+```
+
+一个函数返回 8 个值，调用方需记忆每个位置的语义。**应替换为命名结构体。**
+
+**问题 2：`render_message_block_to_lines` 12 个参数**
+
+加了 `#[allow(clippy::too_many_arguments)]`。6 个 `&mut Vec<...>` 收集器应收进一个 `RenderOutput` 结构体。
+
+**问题 3：三重遍历消息**
+
+```
+Pass 1 (sequential): 确定 block 边界 (BlockInfo)
+Pass 2 (rayon):      并行计算每个 block 行数
+Pass 3 (sequential): 渲染每个 block 的行内容（重新计算了 Pass 2 已算过的内容）
+```
+
+Pass 2 算出的行数在 Pass 3 中没有被复用。这是历史演化导致的性能浪费。
+
+**问题 4：RefCell 内变异性**
+
+```rust
+self.message_layout_index.borrow_mut()
+```
+
+旧架构中因 ratatui draw closure 限制导致的 hack。新架构 `Component::draw(&mut self)` 不需要。
+
+**问题 5：所有状态散落在 App 上**
+
+```
+message_layout_index        → 应归 MessageList
+message_render_cache        → 应归 MessageList  
+expanded_tool_results       → 应归 MessageList
+expanded_tool_outputs       → 应归 MessageList
+message_scroll_offset       → 应归 MessageList
+message_follow_tail         → 应归 MessageList
+selectable_regions          → 应归 MessageList
+```
+
+### 13.4 不需要改的行为
+
+| 模块 | 处理方式 |
+|------|---------|
+| `MessageLayoutIndex` 增量更新逻辑（dirty_messages、contains_streaming_messages） | **保留原样** |
+| `MessageRenderCache` LRU 淘汰策略 | **保留原样** |
+| Rayon 并行 block 计算 | **保留**，改用独立 thread pool |
+| Tool call 卡片展开/折叠/图片切换 | **保留**，交互行为不变 |
+| SelectableRegion 追踪 | **保留**，鼠标点击交互 |
+| 流式增量标记逻辑（streaming 期间不清缓存） | **保留** |
+| MARKDOWN_RENDER_CACHE 全局缓存 | **保留**，纯函数 |
+
+### 13.5 建议的文件结构
+
+```
+src/components/
+└── chat/
+    ├── mod.rs           ← ChatScreen Component（容器 + 滚动 + BackendEvent 分发）
+    ├── layout_index.rs  ← MessageBlock + MessageLayoutIndex（增量更新）
+    ├── render_cache.rs  ← MessageRenderCache + key/value 类型
+    ├── render.rs        ← messages_text() → render_message_block_to_lines() 管线
+    └── tool.rs          ← tool call 卡片渲染（对应旧 tool.rs）
+```
+
+### 13.6 迁移原则
+
+- **结构重组，行为保留。** 渲染逻辑、缓存策略、并行计算、流式增量全部原样迁移。
+- **只改代码归属**：从 `impl App` 方法改为 `impl MessageList / impl ChatScreen` 方法。
+- **只改类型封装**：8 元组 → 命名结构体，12 参数 → 上下文结构体。
+- **不删不减**：不合并渲染 Pass，不简化 LRU 逻辑，不省略任何 tool call 渲染分支。
+
