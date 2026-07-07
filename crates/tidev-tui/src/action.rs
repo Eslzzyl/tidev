@@ -3,6 +3,8 @@
 //! Domain sub-actions are grouped by module; the top-level `Action` provides
 //! unified routing.
 
+use std::path::PathBuf;
+
 use anyhow::Result;
 use uuid::Uuid;
 
@@ -145,6 +147,45 @@ pub(crate) enum CommandAction {
 }
 
 // ---------------------------------------------------------------------------
+// Tool approval pipeline types
+// ---------------------------------------------------------------------------
+
+/// User decision for a workspace boundary violation.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum BoundaryDecision {
+    /// Allow this one-time access.
+    AllowOnce,
+    /// Allow and remember in memory until exit.
+    AllowUntilExit,
+    /// Deny this one-time access.
+    DenyOnce,
+    /// Deny and remember in memory until exit.
+    DenyUntilExit,
+}
+
+/// User decision for a sensitive file access violation.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum SensitiveFileDecision {
+    AllowOnce,
+    AllowUntilExit,
+    DenyOnce,
+    DenyUntilExit,
+}
+
+/// User decision for the main tool permission dialog.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum PermissionDecision {
+    /// Y — allow this one time.
+    Allow,
+    /// R — allow and persist to DB.
+    AllowAndRemember,
+    /// N / Esc — deny this one time.
+    Deny,
+    /// X — deny and persist to DB.
+    DenyAndRemember,
+}
+
+// ---------------------------------------------------------------------------
 // OverlayKind
 // ---------------------------------------------------------------------------
 
@@ -201,6 +242,27 @@ pub(crate) enum Action {
     Search(SearchAction),
     Connect(ConnectAction),
     Command(CommandAction),
+
+    // ── Tool approval pipeline ──
+    /// Result from a WorkspaceBoundaryDialog.
+    WorkspaceBoundaryResponse {
+        path: PathBuf,
+        decision: BoundaryDecision,
+    },
+    /// Result from a SensitiveFileDialog.
+    SensitiveFileResponse {
+        path: PathBuf,
+        decision: SensitiveFileDecision,
+    },
+    /// Result from a PermissionDialog (final approve / reject).
+    PermissionResponse {
+        decision: PermissionDecision,
+    },
+    /// Result from a QuestionDialog.
+    /// `None` means the dialog was dismissed (rejected).
+    QuestionResponse {
+        output: Option<String>,
+    },
 
     // ── Internal ──
     Noop,

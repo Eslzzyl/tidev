@@ -3,6 +3,8 @@
 //! Owns the Runtime, manages the component tree via OverlayStack,
 //! routes Actions, and dispatches async commands.
 
+use std::collections::HashMap;
+use std::path::Path;
 use std::time::Instant;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent};
@@ -10,12 +12,17 @@ use ratatui::layout::{Alignment, Rect};
 use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
+use tidev_core::{ApprovedTool, ToolCallWithViolations};
+use tidev_core::TuiResponse;
 use tidev_types::agent_type::AgentType;
-use tidev_types::message::{BackendEvent, MessageRole};
+use tidev_types::message::{BackendEvent, MessageRole, ToolExecutionResult};
+use tidev_types::tools::QuestionArgs;
 use tidev_tui_old::theme::{ThemeName, ThemePalette};
+use uuid::Uuid;
 
-use crate::action::{Action, ChatAction, ConnectAction, OverlayAction, OverlayKind, SearchAction,
-    SessionAction, ThemeAction};
+use crate::action::{Action, BoundaryDecision, ChatAction, ConnectAction, OverlayAction,
+    OverlayKind, PermissionDecision, SearchAction, SensitiveFileDecision, SessionAction,
+    ThemeAction};
 use crate::component::Component;
 use crate::components::overlay_stack::OverlayStack;
 use crate::components::overlays::agents::AgentsPanel;
@@ -24,13 +31,17 @@ use crate::components::overlays::fork::ForkConfirmDialog;
 use crate::components::overlays::image::ImageViewer;
 use crate::components::overlays::message::{MessagePanel, MessagePanelMessage};
 use crate::components::overlays::model::ModelPanel;
+use crate::components::overlays::permission::PermissionDialog;
+use crate::components::overlays::question::QuestionDialog;
 use crate::components::overlays::rename::RenameDialog;
 use crate::components::overlays::search::SearchPanel;
+use crate::components::overlays::sensitive::SensitiveFileDialog;
 use crate::components::overlays::session::SessionPanel;
 use crate::components::overlays::settings::SettingsPanel;
 use crate::components::overlays::skills::{SkillItem, SkillsPanel};
 use crate::components::overlays::theme::ThemePanel;
 use crate::components::overlays::undo::UndoConfirmDialog;
+use crate::components::overlays::workspace::WorkspaceBoundaryDialog;
 use crate::context::{DrawContext, UpdateContext};
 use crate::utils::strip_system_reminder_tags;
 
@@ -51,6 +62,25 @@ pub struct App {
     pub(crate) request_rx: Option<tokio::sync::mpsc::UnboundedReceiver<tidev_core::TuiRequest>>,
     /// Receiver for backend events (streaming deltas, tool results, etc.).
     pub(crate) event_rx: Option<tokio::sync::mpsc::UnboundedReceiver<BackendEvent>>,
+
+    // ── Tool approval pipeline ──
+
+    /// Oneshot sender for responding to a pending TuiRequest.
+    pending_response_tx: Option<tokio::sync::oneshot::Sender<TuiResponse>>,
+    /// Tools still awaiting user decisions.
+    pending_tools: Vec<ToolCallWithViolations>,
+    /// Current index into pending_tools.
+    tool_index: usize,
+    /// Accumulated approved/rejected tools.
+    approved_tools: Vec<ApprovedTool>,
+
+    // ── In-memory permission caches ──
+
+    /// allowlist for workspace boundary (canonical path → allowed).
+    /// Uses prefix matching so allowing a directory allows all files under it.
+    boundary_permissions: HashMap<String, bool>,
+    /// allowlist for sensitive file access (canonical path → allowed).
+    sensitive_permissions: HashMap<String, bool>,
 }
 
 impl App {
@@ -72,6 +102,12 @@ impl App {
             toast: None,
             request_rx,
             event_rx,
+            pending_response_tx: None,
+            pending_tools: Vec::new(),
+            tool_index: 0,
+            approved_tools: Vec::new(),
+            boundary_permissions: HashMap::new(),
+            sensitive_permissions: HashMap::new(),
         }
     }
 
@@ -138,8 +174,242 @@ impl App {
         &mut self,
         request: tidev_core::TuiRequest,
     ) {
-        // TODO: Phase 5c/5d — show permission/security dialogs, collect decisions
-        log::debug!("TuiRequest: {:#?}", request.kind);
+        match request.kind {
+            tidev_core::TuiRequestKind::ToolApproval(tools_with_violations) => {
+                log::info!(
+                    "handle_tui_request: {} tool(s) pending approval",
+                    tools_with_violations.len()
+                );
+                self.pending_response_tx = Some(request.response_tx);
+                self.pending_tools = tools_with_violations;
+                self.tool_index = 0;
+                self.approved_tools = Vec::new();
+                self.process_next_tool();
+            }
+        }
+    }
+
+    /// Process the next pending tool in the approval pipeline.
+    /// Opens the appropriate dialog (workspace boundary, sensitive file,
+    /// question, or permission) for the tool at `tool_index`. When all tools
+    /// are processed, sends the approval response back to the runtime.
+    fn process_next_tool(&mut self) {
+        while self.tool_index < self.pending_tools.len() {
+            // Clone data we need before borrowing self for mutations.
+            let (boundary_path, sensitive_path, is_question, args, perm_key, perm_label, tc)
+                = {
+                let twv = &self.pending_tools[self.tool_index];
+                let tc = &twv.tool_call;
+                (
+                    twv.workspace_boundary_violation.clone(),
+                    twv.sensitive_file_violation.clone(),
+                    tc.name == "question",
+                    tc.arguments.clone(),
+                    twv.permission_key.clone(),
+                    twv.permission_label.clone(),
+                    tc.clone(),
+                )
+            };
+            let current_index = self.tool_index + 1;
+            let total = self.pending_tools.len();
+
+            // Step 1: Workspace boundary violation check
+            if let Some(ref path) = boundary_path {
+                let path_str = path.to_string_lossy().to_string();
+                match Self::is_path_allowed(&self.boundary_permissions, &path_str) {
+                    Some(true) => {
+                        log::info!("Boundary path already allowed: {path_str}");
+                    }
+                    Some(false) => {
+                        log::info!("Boundary path previously denied: {path_str}");
+                        self.approved_tools.push(ApprovedTool {
+                            tool_call: tc,
+                            rejection: Some(ToolExecutionResult::new(format!(
+                                "Path '{}' was denied by remembered boundary permission.",
+                                path_str
+                            ))),
+                            child_session_id: None,
+                            allow_outside: false,
+                            sensitive_file_approved: false,
+                        });
+                        self.tool_index += 1;
+                        continue;
+                    }
+                    None => {
+                        log::info!("Opening WorkspaceBoundaryDialog for: {path_str}");
+                        self.set_notice("Workspace boundary violation — please make a decision");
+                        self.overlays.push(Box::new(
+                            WorkspaceBoundaryDialog::new(
+                                path.clone(),
+                                self.runtime.workspace_root().clone(),
+                                current_index,
+                                total,
+                            ),
+                        ));
+                        return;
+                    }
+                }
+            }
+
+            // Step 2: Sensitive file violation check
+            if let Some(ref path) = sensitive_path {
+                let path_str = path.to_string_lossy().to_string();
+                match Self::is_path_allowed(&self.sensitive_permissions, &path_str) {
+                    Some(true) => {
+                        log::info!("Sensitive path already allowed: {path_str}");
+                    }
+                    Some(false) => {
+                        log::info!("Sensitive path previously denied: {path_str}");
+                        self.approved_tools.push(ApprovedTool {
+                            tool_call: tc,
+                            rejection: Some(ToolExecutionResult::new(format!(
+                                "Sensitive file '{}' was denied by remembered permission.",
+                                path_str
+                            ))),
+                            child_session_id: None,
+                            allow_outside: false,
+                            sensitive_file_approved: false,
+                        });
+                        self.tool_index += 1;
+                        continue;
+                    }
+                    None => {
+                        log::info!("Opening SensitiveFileDialog for: {path_str}");
+                        self.set_notice("Sensitive file access — please make a decision");
+                        self.overlays.push(Box::new(
+                            SensitiveFileDialog::new(
+                                path.clone(),
+                                self.runtime.workspace_root().clone(),
+                                current_index,
+                                total,
+                            ),
+                        ));
+                        return;
+                    }
+                }
+            }
+
+            // Step 3: Question tool?
+            if is_question {
+                match serde_json::from_str::<QuestionArgs>(&args) {
+                    Ok(qa) if !qa.questions.is_empty() => {
+                        log::info!("Opening QuestionDialog ({} questions)", qa.questions.len());
+                        self.set_notice("LLM has questions — please provide answers");
+                        self.overlays.push(Box::new(QuestionDialog::new(qa.questions)));
+                        return;
+                    }
+                    _ => {
+                        log::warn!("Invalid or empty question tool call arguments");
+                        self.approved_tools.push(ApprovedTool {
+                            tool_call: tc,
+                            rejection: Some(ToolExecutionResult::new(
+                                "Tool 'question' was rejected: invalid or empty arguments.",
+                            )),
+                            child_session_id: None,
+                            allow_outside: false,
+                            sensitive_file_approved: false,
+                        });
+                        self.tool_index += 1;
+                        continue;
+                    }
+                }
+            }
+
+            // Step 4: PermissionDialog — final approve / reject
+            log::info!(
+                "Opening PermissionDialog for tool: {} ({}/{})",
+                perm_label,
+                current_index,
+                total
+            );
+            self.set_notice(format!(
+                "Approve tool call {} of {}: {}",
+                current_index, total, perm_label
+            ));
+            self.overlays.push(Box::new(PermissionDialog::new(
+                perm_key,
+                perm_label,
+                args,
+                current_index,
+                total,
+            )));
+            return;
+        }
+
+        // All tools processed — send response
+        self.send_approval_response();
+    }
+
+    /// Send the accumulated approval response back to the runtime.
+    fn send_approval_response(&mut self) {
+        let response_tx = match self.pending_response_tx.take() {
+            Some(tx) => tx,
+            None => {
+                log::warn!("send_approval_response: no pending response_tx");
+                return;
+            }
+        };
+
+        let tools = std::mem::take(&mut self.approved_tools);
+        log::info!(
+            "send_approval_response: {} tool(s) approved/rejected",
+            tools.len()
+        );
+
+        let _ = response_tx.send(TuiResponse::ToolApproval(tools));
+        self.pending_tools.clear();
+        self.tool_index = 0;
+    }
+
+    /// Check whether a path is in an allowlist, using prefix matching so that
+    /// allowing a directory also allows all files under it.
+    fn is_path_allowed(cache: &HashMap<String, bool>, path: &str) -> Option<bool> {
+        let target = Path::new(path);
+        let mut result: Option<bool> = None;
+        let mut longest_prefix: usize = 0;
+        for (stored, allowed) in cache {
+            let stored_path = Path::new(stored);
+            if target.starts_with(stored_path) {
+                let components = stored_path.components().count();
+                if components > longest_prefix {
+                    longest_prefix = components;
+                    result = Some(*allowed);
+                }
+            }
+        }
+        result
+    }
+
+    /// Record a workspace boundary decision in the in-memory cache.
+    fn record_boundary_decision(&mut self, path: &std::path::PathBuf, decision: &BoundaryDecision) {
+        match decision {
+            BoundaryDecision::AllowOnce => {}
+            BoundaryDecision::AllowUntilExit => {
+                let path_str = path.to_string_lossy().to_string();
+                self.boundary_permissions.insert(path_str, true);
+            }
+            BoundaryDecision::DenyOnce => {}
+            BoundaryDecision::DenyUntilExit => {
+                let path_str = path.to_string_lossy().to_string();
+                self.boundary_permissions.insert(path_str, false);
+            }
+        }
+    }
+
+    /// Record a sensitive file decision in the in-memory cache.
+    fn record_sensitive_decision(&mut self, path: &std::path::PathBuf, decision: &SensitiveFileDecision) {
+        match decision {
+            SensitiveFileDecision::AllowOnce => {}
+            SensitiveFileDecision::AllowUntilExit => {
+                let path_str = path.to_string_lossy().to_string();
+                self.sensitive_permissions.insert(path_str, true);
+            }
+            SensitiveFileDecision::DenyOnce => {}
+            SensitiveFileDecision::DenyUntilExit => {
+                let path_str = path.to_string_lossy().to_string();
+                self.sensitive_permissions.insert(path_str, false);
+            }
+        }
     }
 
     pub fn handle_key_event(&mut self, key: KeyEvent) {
@@ -517,6 +787,147 @@ impl App {
                     log::info!("ScrollTo: {}", message_id);
                 }
                 Action::Noop => {}
+                // ── Tool approval pipeline ──
+                Action::WorkspaceBoundaryResponse { path, decision } => {
+                    self.record_boundary_decision(&path, &decision);
+
+                    // Resolve the tool's boundary flag based on decision
+                    let allowed = matches!(
+                        decision,
+                        BoundaryDecision::AllowOnce | BoundaryDecision::AllowUntilExit
+                    );
+
+                    if self.tool_index < self.pending_tools.len() {
+                        // Record the boundary approval in the tool's pending entry
+                        // so process_next_tool can skip this check.
+                        self.boundary_permissions.insert(
+                            path.to_string_lossy().to_string(),
+                            allowed,
+                        );
+                    }
+
+                    self.process_next_tool();
+                }
+                Action::SensitiveFileResponse { path, decision } => {
+                    self.record_sensitive_decision(&path, &decision);
+
+                    if self.tool_index < self.pending_tools.len() {
+                        self.sensitive_permissions.insert(
+                            path.to_string_lossy().to_string(),
+                            matches!(
+                                decision,
+                                SensitiveFileDecision::AllowOnce
+                                    | SensitiveFileDecision::AllowUntilExit
+                            ),
+                        );
+                    }
+
+                    self.process_next_tool();
+                }
+                Action::PermissionResponse { decision } => {
+                    let allow = matches!(
+                        decision,
+                        PermissionDecision::Allow | PermissionDecision::AllowAndRemember
+                    );
+                    let remember = matches!(
+                        decision,
+                        PermissionDecision::AllowAndRemember
+                            | PermissionDecision::DenyAndRemember
+                    );
+
+                    if self.tool_index < self.pending_tools.len() {
+                        let twv = &self.pending_tools[self.tool_index];
+
+                        // Persist to DB if remember
+                        if remember {
+                            if let Some(session_id) = self.current_session_id {
+                                if let Err(e) = self
+                                    .runtime
+                                    .session_manager()
+                                    .store()
+                                    .remember_tool_permission(
+                                        session_id,
+                                        &twv.permission_key,
+                                        allow,
+                                    )
+                                {
+                                    log::warn!("Failed to remember tool permission: {e}");
+                                }
+                            }
+                        }
+
+                        // Build the approved tool
+                        let (rejection, allow_outside, sensitive_approved) = if allow {
+                            let path_str = twv
+                                .workspace_boundary_violation
+                                .as_ref()
+                                .map(|p| p.to_string_lossy().to_string());
+                            let sensitive_str = twv
+                                .sensitive_file_violation
+                                .as_ref()
+                                .map(|p| p.to_string_lossy().to_string());
+                            (
+                                None,
+                                path_str
+                                    .and_then(|p| Self::is_path_allowed(&self.boundary_permissions, &p))
+                                    .unwrap_or(false),
+                                sensitive_str
+                                    .and_then(|p| Self::is_path_allowed(&self.sensitive_permissions, &p))
+                                    .unwrap_or(false),
+                            )
+                        } else {
+                            let msg = if remember {
+                                format!("Tool '{}' was denied and remembered", twv.permission_label)
+                            } else {
+                                format!("Tool '{}' was denied", twv.permission_label)
+                            };
+                            (
+                                Some(ToolExecutionResult::new(msg)),
+                                false,
+                                false,
+                            )
+                        };
+
+                        let child_session_id = if twv.tool_call.name == "task" {
+                            Some(Uuid::new_v4())
+                        } else {
+                            None
+                        };
+
+                        self.approved_tools.push(ApprovedTool {
+                            tool_call: twv.tool_call.clone(),
+                            rejection,
+                            child_session_id,
+                            allow_outside,
+                            sensitive_file_approved: sensitive_approved,
+                        });
+                    }
+
+                    self.tool_index += 1;
+                    self.process_next_tool();
+                }
+                Action::QuestionResponse { output } => {
+                    if self.tool_index < self.pending_tools.len() {
+                        let twv = &self.pending_tools[self.tool_index];
+                        let result = match output {
+                            Some(answers) => ToolExecutionResult::new(answers),
+                            None => ToolExecutionResult::new(
+                                "Tool 'question' was dismissed by user",
+                            ),
+                        };
+
+                        self.approved_tools.push(ApprovedTool {
+                            tool_call: twv.tool_call.clone(),
+                            rejection: Some(result),
+                            child_session_id: None,
+                            allow_outside: false,
+                            sensitive_file_approved: false,
+                        });
+                    }
+
+                    self.tool_index += 1;
+                    self.process_next_tool();
+                }
                 _ => {
                     // Broadcast to all overlays
                     let palette = &self.current_palette;
@@ -646,6 +1057,14 @@ impl App {
             OverlayKind::ConnectDialog => {
                 Some(Box::new(ConnectDialog::new()))
             }
+            // Permission / security dialogs are triggered by handle_tui_request,
+            // not by user keystrokes. These branches exist as fallback placeholders.
+            OverlayKind::PermissionDialog
+            | OverlayKind::QuestionDialog
+            | OverlayKind::WorkspaceBoundaryDialog
+            | OverlayKind::SensitiveFileDialog
+            | OverlayKind::CommandPalette
+            | OverlayKind::PanelLauncher => None,
             _ => None,
         };
         if let Some(component) = component {

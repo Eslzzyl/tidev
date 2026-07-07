@@ -110,6 +110,16 @@ pub(crate) fn render_scrollbar(
     frame.render_widget(paragraph, area);
 }
 
+/// Pretty-print JSON tool arguments for display in the permission dialog.
+pub(crate) fn pretty_tool_arguments(arguments: &str) -> String {
+    match serde_json::from_str::<serde_json::Value>(arguments) {
+        Ok(value) => {
+            serde_json::to_string_pretty(&value).unwrap_or_else(|_| arguments.to_string())
+        }
+        Err(_) => arguments.to_string(),
+    }
+}
+
 /// Strip `<system-reminder>...</system-reminder>` XML-like tags from text.
 ///
 /// These tags are injected by the LLM prompt template to mark system instructions
