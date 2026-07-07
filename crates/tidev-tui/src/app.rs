@@ -20,7 +20,7 @@ use tidev_types::tools::QuestionArgs;
 use tidev_tui_old::theme::{ThemeName, ThemePalette};
 use uuid::Uuid;
 
-use crate::action::{Action, BoundaryDecision, ConnectAction, OverlayAction,
+use crate::action::{Action, BoundaryDecision, ChatAction, ConnectAction, OverlayAction,
     OverlayKind, PermissionDecision, SearchAction, SensitiveFileDecision, SessionAction,
     ThemeAction};
 use crate::component::Component;
@@ -44,6 +44,7 @@ use crate::components::overlays::theme::ThemePanel;
 use crate::components::overlays::undo::UndoConfirmDialog;
 use crate::components::overlays::workspace::WorkspaceBoundaryDialog;
 use crate::components::chat::MessageList;
+use crate::components::composer::Composer;
 use crate::context::{DrawContext, UpdateContext};
 use crate::utils::strip_system_reminder_tags;
 
@@ -67,6 +68,9 @@ pub struct App {
 
     /// Chat message list component.
     pub(crate) message_list: Option<MessageList>,
+
+    /// Text input composer.
+    pub(crate) composer: Option<Composer>,
 
     // ── Tool approval pipeline ──
 
@@ -96,6 +100,13 @@ impl App {
     ) -> Self {
         let theme_str = runtime.config().theme;
         let current_palette = ThemePalette::from_name(&theme_str);
+
+        // Capture before runtime is moved into Self.
+        let file_index = runtime.file_search_index();
+        let ws_root = runtime.workspace_root().clone();
+        let cfg_dir = runtime.config_dir().clone();
+        let supports_images = runtime.active_model().supports_images;
+
         Self {
             runtime,
             overlays: OverlayStack::new(),
@@ -114,6 +125,14 @@ impl App {
             boundary_permissions: HashMap::new(),
             sensitive_permissions: HashMap::new(),
             message_list: None,
+            composer: {
+                let mut c = Composer::new("Ask tidev...");
+                c.set_file_search_index(file_index);
+                c.set_workspace_root(ws_root);
+                c.set_config_dir(cfg_dir);
+                c.set_model_supports_images(supports_images);
+                Some(c)
+            },
         }
     }
 
@@ -408,7 +427,15 @@ impl App {
             return;
         }
 
-        // 3. MessageList (only when no overlay consumed the event)
+        // 3. Composer (when no overlay consumed the event)
+        if let Some(ref mut composer) = self.composer {
+            if let Some(action) = composer.handle_key_event(key) {
+                self.process_action(action);
+                return;
+            }
+        }
+
+        // 4. MessageList (only when no overlay/composer consumed the event)
         if let Some(ref mut chat) = self.message_list {
             if let Some(action) = chat.handle_key_event(key) {
                 self.process_action(action);
@@ -541,6 +568,11 @@ impl App {
                     {
                         Ok(model) => {
                             self.runtime.set_active_model(model.clone());
+
+                            // Update composer's image support flag.
+                            if let Some(ref mut composer) = self.composer {
+                                composer.set_model_supports_images(model.supports_images);
+                            }
 
                             // Persist model to current session if one is active
                             if let Some(session_id) = self.current_session_id {
@@ -810,17 +842,98 @@ impl App {
                     }
                 }
                 Action::Chat(action) => {
-                    // Forward chat actions (scroll, stream, etc.) to MessageList
-                    if let Some(ref mut chat) = self.message_list {
-                        let palette = &self.current_palette;
-                        let mut ctx = UpdateContext {
-                            runtime: &mut self.runtime,
-                            palette,
-                        };
-                        queue.extend(chat.update(&Action::Chat(action), &mut ctx));
+                    match &action {
+                        ChatAction::SendMessage { text, attachments } => {
+                            let text = text.clone();
+                            let attachments = attachments.clone();
+
+                            // Check if this is a /command.
+                            if let Some((name, args)) =
+                                crate::components::composer::command_palette::CommandRegistry::new()
+                                    .parse_invocation(&text)
+                            {
+                                use crate::components::composer::command_palette::COMMANDS;
+                                if let Some(spec) =
+                                    crate::components::composer::command_palette::CommandRegistry::new()
+                                        .command(&name)
+                                {
+                                    let actions =
+                                        crate::components::composer::command_palette::execute_command(
+                                            spec.name,
+                                            spec.action,
+                                            &args,
+                                        );
+                                    for action in actions {
+                                        self.process_action(action);
+                                    }
+                                    return;
+                                }
+                                // Unknown command — fall through to submit as prompt.
+                            }
+
+                            // Extract @-reference paths from the text (matching old
+                            // `inline_file_references` behaviour).
+                            let ref_paths = extract_inline_refs(&text);
+
+                            // Also collect paths from any inline spans (the composer
+                            // puts accepted @mention paths into the attachments field as
+                            // a placeholder — handled below).
+                            let workspace_root = self.runtime.workspace_root().clone();
+                            let mut final_attachments =
+                                tidev_core::attachment::build_attachments(&workspace_root, &ref_paths);
+
+                            // Append any already-built attachments (images, files from
+                            // composer spans).
+                            final_attachments.extend(attachments);
+
+                            // If no active session, create one.
+                            let session_id = self.current_session_id;
+                            let sid = match session_id {
+                                Some(id) => id,
+                                None => {
+                                    match self.runtime.create_default_session("Untitled session") {
+                                        Ok(id) => {
+                                            self.current_session_id = Some(id);
+                                            id
+                                        }
+                                        Err(e) => {
+                                            log::error!("Failed to create session: {e}");
+                                            self.set_notice("Failed to create session");
+                                            return;
+                                        }
+                                    }
+                                }
+                            };
+
+                            // Spawn submission to avoid blocking the UI.
+                            let rt = self.runtime.clone();
+                            self.set_notice("Sending...");
+                            tokio::spawn(async move {
+                                if let Err(e) = rt
+                                    .submit_prompt_with_attachments(sid, text, final_attachments)
+                                    .await
+                                {
+                                    log::error!("submit_prompt failed: {e}");
+                                }
+                            });
+                        }
+                        _ => {
+                            // Forward other chat actions (scroll, stream, etc.) to MessageList.
+                            if let Some(ref mut chat) = self.message_list {
+                                let palette = &self.current_palette;
+                                let mut ctx = UpdateContext {
+                                    runtime: &mut self.runtime,
+                                    palette,
+                                };
+                                queue.extend(chat.update(&Action::Chat(action), &mut ctx));
+                            }
+                        }
                     }
                 }
                 Action::Noop => {}
+                Action::Error(msg) => {
+                    self.set_notice(msg);
+                }
                 // ── Tool approval pipeline ──
                 Action::WorkspaceBoundaryResponse { path, decision } => {
                     self.record_boundary_decision(&path, &decision);
@@ -1137,6 +1250,35 @@ impl App {
             area,
         );
 
+        // Calculate composer height if present.
+        let composer_height = self
+            .composer
+            .as_ref()
+            .map(|c| {
+                let width = area.width.saturating_sub(4);
+                c.preferred_height(width, 6).min(area.height.saturating_sub(2))
+            })
+            .unwrap_or(0);
+
+        // Split: message area + composer area (reserve 1 line for notice).
+        let notice_height: u16 = 1;
+        let (content_area, notice_line) = if composer_height > 0 {
+            let split = ratatui::layout::Layout::vertical([
+                ratatui::layout::Constraint::Min(1),
+                ratatui::layout::Constraint::Length(composer_height),
+                ratatui::layout::Constraint::Length(notice_height),
+            ])
+            .split(area);
+            (split[0], split[2])
+        } else {
+            let split = ratatui::layout::Layout::vertical([
+                ratatui::layout::Constraint::Min(1),
+                ratatui::layout::Constraint::Length(notice_height),
+            ])
+            .split(area);
+            (split[0], split[1])
+        };
+
         // Chat message area (when session is active)
         if let Some(ref mut chat) = self.message_list {
             let draw_ctx = DrawContext {
@@ -1144,7 +1286,7 @@ impl App {
                 focused: self.overlays.is_empty(),
                 chat_context: None,
             };
-            chat.draw(frame, area, &draw_ctx);
+            chat.draw(frame, content_area, &draw_ctx);
         } else if self.overlays.is_empty() {
             // Welcome / status text when no session or overlay is active
             let welcome = Paragraph::new(Line::from(vec![
@@ -1175,7 +1317,24 @@ impl App {
                 Span::raw(" quit"),
             ]))
             .style(Style::default().fg(palette.text).bg(palette.background));
-            frame.render_widget(welcome, area);
+            frame.render_widget(welcome, content_area);
+        }
+
+        // ── Composer ─────────────────────────────────────────────────
+        // Rendered above the notice line, below the message area.
+        if let Some(ref mut composer) = self.composer {
+            let composer_area = Rect {
+                x: area.x,
+                y: area.bottom().saturating_sub(composer_height + notice_height),
+                width: area.width,
+                height: composer_height,
+            };
+            let draw_ctx = DrawContext {
+                palette,
+                focused: self.overlays.is_empty(),
+                chat_context: None,
+            };
+            composer.draw(frame, composer_area, &draw_ctx);
         }
 
         // Build DrawContext
@@ -1189,16 +1348,14 @@ impl App {
         self.overlays.draw(frame, area, &draw_ctx);
 
         // ── Status notice (last_notice) ──
-        // Rendered at the very bottom line, visible regardless of overlays.
         if let Some((msg, _)) = &self.last_notice {
-            let notice_y = area.bottom().saturating_sub(1);
             frame.render_widget(
                 Paragraph::new(Line::from(Span::styled(
                     msg.as_str(),
                     Style::default().fg(palette.muted),
                 )))
                 .style(Style::default().bg(palette.background)),
-                Rect::new(area.x + 1, notice_y, area.width.saturating_sub(2), 1),
+                Rect::new(area.x + 1, notice_line.y, notice_line.width.saturating_sub(2), 1),
             );
         }
 
@@ -1229,4 +1386,74 @@ impl App {
             }
         }
     }
+}
+
+// ── Inline @-reference extraction ───────────────────────────────────────
+
+/// Extract file/directory paths from `@path` references in the prompt text.
+///
+/// Mirrors the old `tidev_tui::App::inline_file_references` behaviour:
+/// finds `@` that is not preceded by a word character or backtick, and
+/// captures the following path.
+fn extract_inline_refs(prompt: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+
+    let bytes = prompt.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+
+    while i < len {
+        // Find the next '@' byte.
+        let at_pos = match bytes[i..].iter().position(|&b| b == b'@') {
+            Some(pos) => i + pos,
+            None => break,
+        };
+
+        // Look-behind: check that '@' is not preceded by a word char or backtick.
+        if at_pos > 0 {
+            let prev = bytes[at_pos - 1];
+            if prev.is_ascii_alphanumeric() || prev == b'_' || prev == b'`' {
+                i = at_pos + 1;
+                continue;
+            }
+        }
+
+        // Capture the path: starting from at_pos + 1.
+        let start = at_pos + 1;
+        if start >= len {
+            break;
+        }
+
+        // Path characters: non-whitespace, not backtick, not comma, not period at end.
+        let mut end = start;
+        while end < len {
+            let c = bytes[end];
+            if c == b' ' || c == b'\t' || c == b'\n' || c == b'\r'
+                || c == b'`' || c == b','
+            {
+                break;
+            }
+            // Comma is allowed in middle of path (not at end).
+            end += 1;
+        }
+
+        // Skip empty captures.
+        if end == start {
+            i = end;
+            continue;
+        }
+
+        let path = &prompt[start..end];
+        // Trim trailing period (allowed at end only for dotted extensions).
+        let path = path.trim_end_matches('.');
+        if !path.is_empty() && !seen.contains(path) {
+            seen.insert(path.to_string());
+            paths.push(path.to_string());
+        }
+
+        i = end;
+    }
+
+    paths
 }

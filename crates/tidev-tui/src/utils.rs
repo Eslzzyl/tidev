@@ -11,11 +11,43 @@ use tidev_tui_old::theme::ThemePalette;
 ///
 /// Returns `None` when the clipboard is unavailable or doesn't contain text.
 /// This is the single shared entry point for paste — all components (RenameDialog,
-/// ConnectDialog, future Composer) call this instead of reaching into `arboard`
+/// ConnectDialog, Composer) call this instead of reaching into `arboard`
 /// directly.
 pub(crate) fn paste_from_clipboard() -> Option<String> {
     let mut clipboard = arboard::Clipboard::new().ok()?;
     clipboard.get_text().ok().filter(|t| !t.is_empty())
+}
+
+/// Try to read an image from the system clipboard.
+///
+/// Returns `(filename, mime, data, file_size)` on success:
+/// - `filename`: display name for the attachment
+/// - `mime`: MIME type (e.g. `"image/png"`)
+/// - `data`: raw encoded bytes (PNG)
+/// - `file_size`: size in bytes
+///
+/// This consumes the clipboard — call it only after `paste_from_clipboard()`
+/// returns `None` (i.e. clipboard does not contain text).
+pub(crate) fn paste_image_from_clipboard() -> Option<(String, String, Vec<u8>, u64)> {
+    let mut clipboard = arboard::Clipboard::new().ok()?;
+    let img = clipboard.get_image().ok()?;
+
+    // Encode RGBA bytes as PNG.
+    let rgba = image::RgbaImage::from_raw(img.width as u32, img.height as u32, img.bytes.into_owned())?;
+    let mut png_bytes = Vec::new();
+    rgba.write_to(
+        &mut std::io::Cursor::new(&mut png_bytes),
+        image::ImageFormat::Png,
+    )
+    .ok()?;
+
+    let file_size = png_bytes.len() as u64;
+    Some((
+        format!("clipboard_{}x{}.png", img.width, img.height),
+        "image/png".to_string(),
+        png_bytes,
+        file_size,
+    ))
 }
 
 /// Expand tab characters to spaces.

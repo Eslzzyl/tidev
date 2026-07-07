@@ -136,8 +136,7 @@ App
 │                                   由 App 直接持有，可在 Welcome 和 Chat 页复用
 ├── OverlayStack                   ← 所有浮层，按 z-order 排列
 │   ├── ImageViewer                ← 最顶层，Esc 关闭
-│   ├── CommandPalette             ← Ctrl+P 打开
-│   ├── PanelLauncher              ← 面板启动器
+│   ├── PanelLauncher              ← Ctrl+P 打开
 │   ├── PermissionDialog           ← 工具执行权限
 │   ├── QuestionDialog             ← LLM 提问
 │   ├── WorkspaceBoundaryDialog    ← 工作区边界确认
@@ -156,6 +155,10 @@ App
 │   ├── MessagePanel               ← 消息详情
 │   └── Notifications              ← Toast 通知
 └── StatusBar                      ← 底部状态栏
+
+> **注意：** `CommandPalette`（`/command` 建议弹窗）不是独立的 Overlay，而是 `Composer` 内部的
+> 三个内联弹窗之一（另外两个是 @mention 和 snippet），在 Composer 内部渲染为输入框上方的
+> 弹出列表，不经过 OverlayStack。
 ```
 
 ### 4.1 关于 Panel vs Dialog
@@ -549,12 +552,12 @@ tidev-tui/src/
 │       ├── fork.rs             ✅ 已完成
 │       ├── undo.rs             ✅ 已完成
 │       ├── image.rs            ✅ 已完成（Picker 缓存）
-│       ├── permission.rs       ← 待迁移
-│       ├── question.rs         ← 待迁移
-│       ├── workspace.rs        ← 待迁移
-│       ├── sensitive.rs        ← 待迁移
-│       ├── command_palette.rs  ← 待迁移
-│       ├── panel_launcher.rs   ← 待迁移│
+│       ├── permission.rs       ✅ 已完成
+│       ├── question.rs         ✅ 已完成
+│       ├── workspace.rs        ✅ 已完成
+│       ├── sensitive.rs        ✅ 已完成
+│       ├── command_palette.rs  ✅ 已完成
+│       ├── panel_launcher.rs   ✅ 已完成│
 ├── markdown/                   ← 从 tidev-tui 完整拷贝（含 syntax highlighting）
 │   ├── mod.rs
 │   ├── highlight.rs
@@ -593,11 +596,11 @@ render/ 和 input/ 目录不再存在，功能已并入组件。
 |   | · last_notice + toast（App 内联渲染） | 低 | ✅ 已完成 |
 |   | · ImageViewer（Picker 缓存） | 中 | ✅ 已完成 |
 |   | · ConnectDialog（ProviderPicker + ApiKey，粘贴支持） | 中 | ✅ 已完成 |
-| 5c | 迁移安全对话框（WorkspaceBoundary, SensitiveFile） | 中 | ☐ 待做 |
-| 5d | 迁移工具执行对话框（Permission, Question） | **高** | ☐ 待做 |
-| 6 | 提取 **Chat** 组件（MessageList + 渲染管线，2453 行） | **高** | ✅ 已完成 |
-| 7 | 提取 **Composer** 组件（1135 行的输入处理） | 中 | ☐ 待做 |
-| 8 | 全部迁移完成，删除旧代码 | — | ☐ 待做 |
+| 5c | 迁移安全对话框（WorkspaceBoundary, SensitiveFile） | 中 | ✅ 已完成 |
+| 5d | 迁移工具执行对话框（Permission, Question） | **高** | ✅ 已完成 |
+| 6 | 提取 **Chat** 组件（MessageList + 渲染管线，~6000 行） | **高** | ✅ 已完成 |
+| 7 | 提取 **Composer** 组件（1135 行的输入处理 + @mention + /command + snippet + paste） | **高** | ✅ 已完成 |
+| 8 | 全部迁移完成，删除 `tidev-tui-old` | — | ☐ 待做 |
 ### 11.1 当前状态
 
 - `cargo run` → 新 `tidev-tui`，新架构

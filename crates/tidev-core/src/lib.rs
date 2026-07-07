@@ -1,5 +1,6 @@
 //! tidev-core: core orchestration layer.
 
+pub mod attachment;
 pub mod message_buf;
 pub mod registry;
 pub mod context;

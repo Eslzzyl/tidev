@@ -8,6 +8,7 @@ description = "TUI frontend for tidev"
 
 [dependencies]
 tidev-tui-old = { path = "../tidev-tui-old" }
+tidev-search = { path = "../tidev-search" }
 tidev-core = { path = "../tidev-core" }
 tidev-types = { path = "../tidev-types" }
 tidev-config = { path = "../tidev-config" }

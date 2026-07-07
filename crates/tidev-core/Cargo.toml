@@ -15,6 +15,7 @@ tidev-llm = { path = "../tidev-llm" }
 tidev-snapshot = { path = "../tidev-snapshot" }
 tidev-instructions = { path = "../tidev-instructions" }
 tidev-logging = { path = "../tidev-logging" }
+tidev-search = { path = "../tidev-search" }
 tidev-utils = { path = "../tidev-utils" }
 tidev-types = { path = "../tidev-types" }
 anyhow = "1"

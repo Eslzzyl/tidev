@@ -19,7 +19,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock as StdRwLock};
+use std::sync::{Arc, OnceLock, RwLock as StdRwLock};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -30,9 +30,9 @@ use uuid::Uuid;
 
 use tidev_config::{paths::ConfigPaths, AppConfig, AuthStore};
 use tidev_config::auth::ActiveModel;
+use tidev_search::FileSearchIndex;
 use tidev_storage::SessionStore;
-use tidev_types::message::BackendEvent;
-use tidev_types::message::Message;
+use tidev_types::message::{BackendEvent, Message, MessageAttachment, MessageRole};
 use tidev_types::prompts::SessionMode;
 use tidev_types::tools::TodoItem;
 
@@ -120,6 +120,10 @@ pub struct Runtime {
 
     /// Workspace root.
     workspace_root: PathBuf,
+
+    /// File search index for @mention autocomplete.
+    /// Lazily initialised on first access.
+    file_search_index: OnceLock<Arc<FileSearchIndex>>,
 }
 
 impl Runtime {
@@ -268,6 +272,21 @@ impl Runtime {
         *self.active_model.write().unwrap() = model;
     }
 
+    /// Get the file search index for @mention autocomplete.
+    ///
+    /// The index is lazily created on first access and bound to the
+    /// workspace root.  Background indexing and file-system watching
+    /// are managed by the index itself.
+    pub fn file_search_index(&self) -> Arc<FileSearchIndex> {
+        self.file_search_index
+            .get_or_init(|| {
+                let index = Arc::new(FileSearchIndex::new());
+                index.ensure_background_indexing(&self.workspace_root);
+                index
+            })
+            .clone()
+    }
+
     /// Save a thinking level preference for an agent type to config.
     pub fn set_model_thinking_level(
         &self,
@@ -319,9 +338,23 @@ impl Runtime {
 
     /// Submit a user prompt for a session.
     pub async fn submit_prompt(&self, session_id: Uuid, content: String) -> Result<()> {
-        use tidev_types::message::{Message, MessageRole};
+        self.submit_prompt_with_attachments(session_id, content, Vec::new())
+            .await
+    }
 
-        let user_msg = Message::new(MessageRole::User, content);
+    /// Submit a user prompt with file/directory/image attachments.
+    ///
+    /// Attachments are typically built from `@`-references by
+    /// [`crate::attachment::build_attachments`] and represent files
+    /// the user wants to include with their message.
+    pub async fn submit_prompt_with_attachments(
+        &self,
+        session_id: Uuid,
+        content: String,
+        attachments: Vec<MessageAttachment>,
+    ) -> Result<()> {
+        let mut user_msg = Message::new(MessageRole::User, content);
+        user_msg.attachments = attachments;
 
         // 1. Persist the user message.
         {
@@ -943,6 +976,7 @@ impl RuntimeBuilder {
             run_loop_handle: Arc::new(Mutex::new(None)),
             cleanup_cancel,
             workspace_root,
+            file_search_index: OnceLock::new(),
         })
     }
 }
