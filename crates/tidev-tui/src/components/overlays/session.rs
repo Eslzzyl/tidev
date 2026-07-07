@@ -15,7 +15,7 @@ use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Cell, Clear, Paragraph, Row, Table, TableState};
 use tidev_core::SessionRecord;
-use tidev_tui::utils::shorten;
+use tidev_tui_old::utils::shorten;
 use uuid::Uuid;
 
 use crate::action::{Action, OverlayAction, OverlayKind, SessionAction};

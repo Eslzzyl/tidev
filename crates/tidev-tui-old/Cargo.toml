@@ -1,17 +1,17 @@
 [package]
-name = "tidev-tui-new"
+name = "tidev-tui-old"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "New-architecture TUI frontend for tidev (replaces tidev-tui)"
+description = "Legacy TUI frontend for tidev (replaced by tidev-tui)"
 
 [dependencies]
-tidev-tui = { path = "../tidev-tui" }
 tidev-core = { path = "../tidev-core" }
 tidev-types = { path = "../tidev-types" }
 tidev-config = { path = "../tidev-config" }
-tidev-tools = { path = "../tidev-tools" }
+tidev-utils = { path = "../tidev-utils" }
+tidev-search = { path = "../tidev-search" }
 
 anyhow = "1"
 ansi-to-tui = "8"
@@ -19,24 +19,26 @@ arboard = "3"
 base64 = "0.22"
 blake3 = "1"
 chrono = { version = "0.4", features = ["serde"] }
-crossterm = { version = "0.28", features = ["event-stream"] }
+crossterm = "0.28"
+diffy = "0.5"
 dirs = "6"
-futures = "0.3"
+fancy-regex = "0.18"
 image = { version = "0.25", default-features = false, features = ["png"] }
 log = "0.4"
+lru = "0.18"
+libc = "0.2"
 pulldown-cmark = "0.13"
 ratatui = { version = "0.30", default-features = false, features = ["crossterm", "macros"] }
 ratatui-image = { version = "11", default-features = false, features = ["crossterm"] }
 rayon = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+shlex = "2"
 syntect = "5.3"
 textwrap = "0.16"
 tokio = { version = "1", features = ["sync", "rt", "macros", "io-std", "time", "fs"] }
-lru = "0.18"
+two-face = { version = "0.5", default-features = false, features = ["syntect-default-onig"] }
 unicode-width = "0.2"
 url = "2"
 urlencoding = "2"
 uuid = { version = "1", features = ["v4"] }
-two-face = { version = "0.5", default-features = false, features = ["syntect-default-onig"] }
-libc = "0.2"

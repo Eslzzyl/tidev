@@ -2,8 +2,8 @@
 
 use std::path::Path;
 
-use tidev_tui::chat_context::ChatContext;
-use tidev_tui::theme::ThemePalette;
+use tidev_tui_old::chat_context::ChatContext;
+use tidev_tui_old::theme::ThemePalette;
 
 /// Immutable resources passed to every component during initialisation.
 pub(crate) struct InitContext<'a> {

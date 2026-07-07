@@ -1,9 +1,9 @@
 # tidev-tui 架构设计
 
-> **2026-07-06 实现更新：**
-> 出于隔离风险考虑，新架构代码移到独立 crate `crates/tidev-tui-new/`，与旧 `crates/tidev-tui/` 完全分离。
-> 新 crate 通过 `tidev_tui::*` 导入旧 crate 的公开类型（`ThemeName`、`ThemePalette`、`ChatContext`），
-> 其余代码为独立实现。旧 crate 上一行未改。以下「文件结构」部分以 `tidev-tui-new` 为根。
+> **2026-07-07 实现更新：**
+> `tidev-tui-new` 已重命名为 `tidev-tui`，旧 `tidev-tui` 已重命名为 `tidev-tui-old`。
+> 新 crate 通过 `tidev_tui_old::*` 导入旧 crate 的公开类型（`ThemeName`、`ThemePalette`、`ChatContext`），
+> 其余代码为独立实现。
 
 ## 铁律
 
@@ -80,8 +80,8 @@ input/event/panels.rs       → App::handle_theme_panel_key() (按键)
 
 实现分布在两个 crate 中：
 
-- **`tidev-tui`** — 旧代码，不动，作为新 crate 的依赖提供公开类型
-- **`tidev-tui-new`** — 新架构实现，通过 `tidev_tui::*` 使用旧 crate 的 ThemeName / ThemePalette / ChatContext
+- **`tidev-tui-old`** — 旧代码，不动，作为新 crate 的依赖提供公开类型
+- **`tidev-tui`** — 新架构实现，通过 `tidev_tui_old::*` 使用旧 crate 的 ThemeName / ThemePalette / ChatContext
 
 ```
 ┌─────────────────────────────────────────────┐
@@ -526,9 +526,7 @@ impl App {
 ## 10. 模块文件结构
 
 ```
-tidev-tui-new/src/
-├── bin/
-│   └── tidev_new.rs            ← 独立二进制入口
+tidev-tui/src/
 ├── lib.rs                      ← 模块声明 + run() 函数
 ├── app.rs                      ← App 根组件 + OverlayStack + Action 路由 + draw
 ├── action.rs                   ← Action 枚举分层定义（含 PanelAction 本地定义）
@@ -571,16 +569,15 @@ tidev-tui-new/src/
 │   ├── line.rs
 │   └── links.rs
 │
-└──── (theme/, state/, chat_context/ 等保留在 tidev-tui，通过 tidev_tui::* 导入)
+└──── (theme/, state/, chat_context/ 等保留在 tidev-tui-old，通过 tidev_tui_old::* 导入)
 ```
 
 render/ 和 input/ 目录不再存在，功能已并入组件。
 
 ## 11. 迁移路线
 
-> **实现变更：** 原计划「原地桥接」改为「新 crate 隔离」。
-> 已迁移的组件位于 `crates/tidev-tui-new/src/`，旧 `crates/tidev-tui/` 完全不动。
-> 因此阶段 7 不再需要「接入 App」——最小路由已在阶段 3 完成。
+> **实现变更：** `tidev-tui-new` 已完成重命名为 `tidev-tui`，旧 crate 为 `tidev-tui-old`。
+> 二进制入口已切换到新架构。
 
 | 阶段 | 内容 | 风险 | 状态 |
 |---|---|---|---|---|
@@ -606,15 +603,12 @@ render/ 和 input/ 目录不再存在，功能已并入组件。
 | 6 | 提取 **Chat** 组件（MessageList + 渲染管线，2453 行） | **高** | ☐ 待做 |
 | 7 | 提取 **Composer** 组件（1135 行的输入处理） | 中 | ☐ 待做 |
 | 8 | 全部迁移完成，删除旧代码 | — | ☐ 待做 |
-### 11.1 过渡策略
+### 11.1 当前状态
 
-由于新旧代码分属不同 crate，过渡期间两者完全独立：
-
-- `cargo run` → 旧 `tidev-tui`，功能不变
-- `cargo run -p tidev-tui-new --bin tidev_new` → 新架构
+- `cargo run` → 新 `tidev-tui`，新架构
+- `crates/tidev-tui-old/` 保留待删
 
 每迁移一个组件，新 crate 中对应功能即可用。
-全部迁移完成后，新 crate 改名为 `tidev-tui`，旧 crate 删除。
 
 ## 12. 性能保障清单
 

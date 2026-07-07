@@ -13,8 +13,8 @@ members = [
     "crates/tidev-tools",
     "crates/tidev-agent",
     "crates/tidev-core",
+    "crates/tidev-tui-old",
     "crates/tidev-tui",
-    "crates/tidev-tui-new",
 ]
 default-members = ["."]
 resolver = "2"

@@ -7,7 +7,7 @@ use anyhow::Result;
 use uuid::Uuid;
 
 use tidev_types::message::MessageAttachment;
-use tidev_tui::theme::ThemeName;
+use tidev_tui_old::theme::ThemeName;
 
 /// Panel action identifiers (launcher target).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

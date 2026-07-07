@@ -12,7 +12,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
 use tidev_types::agent_type::AgentType;
 use tidev_types::message::{BackendEvent, MessageRole};
-use tidev_tui::theme::{ThemeName, ThemePalette};
+use tidev_tui_old::theme::{ThemeName, ThemePalette};
 
 use crate::action::{Action, ChatAction, ConnectAction, OverlayAction, OverlayKind, SearchAction,
     SessionAction, ThemeAction};

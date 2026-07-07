@@ -84,6 +84,7 @@ pub struct TuiRequest {
 }
 
 /// Variants of [`TuiRequest`].
+#[derive(Debug)]
 pub enum TuiRequestKind {
     /// Ask the user to approve or reject tool calls.
     ToolApproval(Vec<ToolCallWithViolations>),

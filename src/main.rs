@@ -30,29 +30,15 @@ enum Command {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Logging is initialised inside Runtime::builder().build() via tidev_logging.
-    // No env_logger here — the custom TidevLogger handles both file and console.
-
     match Cli::parse().command {
-        None => run_tui().await,
-        Some(Command::Tui) => run_tui().await,
+        None => tidev_tui::run(),
+        Some(Command::Tui) => tidev_tui::run(),
         Some(Command::Export {
             session,
             all,
             output,
         }) => run_export(session, all, output),
     }
-}
-
-/// Start the terminal UI.
-async fn run_tui() -> Result<()> {
-    let runtime = tidev_core::Runtime::builder()
-        .workspace_root(std::env::current_dir()?)
-        .build()
-        .await?;
-
-    let mut app = tidev_tui::App::new(runtime);
-    app.run().await
 }
 
 /// Export one or more sessions to a portable SQLite file.

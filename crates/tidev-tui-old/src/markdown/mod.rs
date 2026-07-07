@@ -26,7 +26,7 @@ pub use wrap::{RtOptions as WrapOptions, adaptive_wrap_lines, word_wrap_line};
 pub use links::is_local_path_like_link;
 
 use crate::ansi::strip_ansi;
-use crate::utils::expand_tabs;
+use crate::render::render::expand_tabs;
 use links::{render_local_link_target, should_render_link_destination};
 use styles::MarkdownStyles;
 use table::TableState;
