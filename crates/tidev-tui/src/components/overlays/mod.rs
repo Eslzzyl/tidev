@@ -4,6 +4,7 @@ pub(crate) mod fork;
 pub(crate) mod image;
 pub(crate) mod message;
 pub(crate) mod model;
+pub(crate) mod panel_launcher;
 pub(crate) mod permission;
 pub(crate) mod question;
 pub(crate) mod rename;

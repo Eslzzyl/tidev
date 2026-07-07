@@ -17,6 +17,7 @@ pub(crate) enum PanelAction {
     Agents,
     Message,
     Model,
+    Search,
     Session,
     Settings,
     Skills,

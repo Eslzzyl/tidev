@@ -31,6 +31,7 @@ use crate::components::overlays::fork::ForkConfirmDialog;
 use crate::components::overlays::image::ImageViewer;
 use crate::components::overlays::message::{MessagePanel, MessagePanelMessage};
 use crate::components::overlays::model::ModelPanel;
+use crate::components::overlays::panel_launcher::PanelLauncher;
 use crate::components::overlays::permission::PermissionDialog;
 use crate::components::overlays::question::QuestionDialog;
 use crate::components::overlays::rename::RenameDialog;
@@ -446,6 +447,9 @@ impl App {
             KeyCode::F(6) => Some(Action::Overlay(OverlayAction::Open(OverlayKind::MessagePanel))),
             KeyCode::F(7) => Some(Action::Overlay(OverlayAction::Open(OverlayKind::ModelPanel))),
             KeyCode::F(8) => Some(Action::Overlay(OverlayAction::Open(OverlayKind::SessionPanel))),
+            KeyCode::Char('p') if key.modifiers == KeyModifiers::CONTROL => {
+                Some(Action::Overlay(OverlayAction::Open(OverlayKind::PanelLauncher)))
+            }
             KeyCode::Esc if !self.overlays.is_empty() => {
                 Some(Action::Overlay(OverlayAction::CloseTop))
             }
@@ -1056,6 +1060,9 @@ impl App {
             }
             OverlayKind::ConnectDialog => {
                 Some(Box::new(ConnectDialog::new()))
+            }
+            OverlayKind::PanelLauncher => {
+                Some(Box::new(PanelLauncher::new()))
             }
             // Permission / security dialogs are triggered by handle_tui_request,
             // not by user keystrokes. These branches exist as fallback placeholders.
