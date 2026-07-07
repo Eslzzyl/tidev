@@ -17,7 +17,19 @@ pub use runtime::Runtime;
 
 // Re-export approval types from tidev-agent so tidev-tui can access them
 // without depending on tidev-agent directly.
-pub use tidev_agent::{ApprovedTool, PendingToolApproval};
+pub use tidev_agent::{ApprovedTool, ToolCallWithViolations, TuiRequest, TuiRequestKind, TuiResponse};
+
+// ── Backward compatibility with tidev-tui (old crate) ──────────────────
+// These are deprecated and will be removed when tidev-tui is deleted.
+
+/// Deprecated — kept for tidev-tui compatibility.
+/// The new type is [`TuiRequest`].
+#[derive(Debug)]
+pub struct PendingToolApproval {
+    pub tool_calls: Vec<tidev_types::message::ToolCall>,
+    pub mode: tidev_types::prompts::SessionMode,
+    pub response_tx: tokio::sync::oneshot::Sender<Vec<ApprovedTool>>,
+}
 
 // Re-export storage/snapshot types so tidev-tui can use them
 // without depending on tidev-storage / tidev-snapshot directly.

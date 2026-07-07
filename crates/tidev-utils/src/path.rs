@@ -4,6 +4,7 @@
 //! and display helpers.
 
 use anyhow::{Context, Result, bail};
+use serde_json::Value;
 use std::ffi::OsStr;
 use std::path::{Component, Path, PathBuf};
 
@@ -268,6 +269,93 @@ pub fn is_path_sensitive(workspace_root: &Path, resolved_path: &Path, patterns: 
     }
 
     false
+}
+
+// ---------------------------------------------------------------------------
+// ToolCall analysis helpers (for TUI security dialogs / backend approval)
+// ---------------------------------------------------------------------------
+
+/// Extract the first file path from a tool call's arguments that would violate
+/// workspace boundaries. Returns the resolved absolute path so it can be used
+/// as a consistent key for permission lookups.
+///
+/// Supports `read`, `write`, `edit` (field `file_path`), `glob`, `grep`
+/// (field `path`), and `apply_patch` (extracts path from patch header).
+/// Returns `None` if the tool call does not reference any path outside the
+/// workspace (e.g. `bash`).
+pub fn extract_boundary_violation_path(
+    workspace_root: &Path,
+    tool_name: &str,
+    arguments: &Value,
+) -> Option<PathBuf> {
+    let canonical_name = tidev_types::tools::canonical_tool_name(tool_name)?;
+
+    let path_buf: PathBuf = match canonical_name {
+        "read" | "write" | "edit" | "glob" | "grep" => {
+            let path_str = arguments
+                .get("file_path")
+                .or_else(|| arguments.get("path"))?
+                .as_str()?;
+            PathBuf::from(path_str)
+        }
+        "apply_patch" => {
+            let patch = arguments.get("patch_text")?.as_str()?;
+            PathBuf::from(extract_file_path_from_patch(patch)?)
+        }
+        "bash" => return None,
+        _ => return None,
+    };
+
+    if !is_path_outside_workspace(workspace_root, &path_buf) {
+        return None;
+    }
+
+    let resolved = resolve_path_unchecked(workspace_root, &path_buf)
+        .unwrap_or_else(|_| path_buf);
+
+    Some(canonicalize_for_comparison(&resolved))
+}
+
+/// Extract the file path from a tool call's arguments that would match a
+/// sensitive-file pattern. Returns the resolved path, or `None` if the
+/// tool call does not target a sensitive file.
+pub fn extract_sensitive_file_path(
+    workspace_root: &Path,
+    tool_name: &str,
+    arguments: &Value,
+    sensitive_patterns: &[String],
+) -> Option<PathBuf> {
+    if sensitive_patterns.is_empty() {
+        return None;
+    }
+
+    let canonical_name = tidev_types::tools::canonical_tool_name(tool_name)?;
+
+    let path_buf: PathBuf = match canonical_name {
+        "read" => {
+            let path_str = arguments.get("file_path")?.as_str()?;
+            PathBuf::from(path_str)
+        }
+        _ => return None,
+    };
+
+    let resolved = resolve_path_unchecked(workspace_root, &path_buf)
+        .unwrap_or_else(|_| path_buf);
+
+    // Check against sensitive patterns using the existing logic.
+    let resolved_str = resolved.to_string_lossy();
+    for pattern_str in sensitive_patterns {
+        let abs_pattern = workspace_root.join(pattern_str);
+        let abs_str = abs_pattern.to_string_lossy();
+        if let Ok(glob) = globset::Glob::new(&abs_str) {
+            let matcher = glob.compile_matcher();
+            if matcher.is_match(resolved_str.as_ref()) {
+                return Some(resolved);
+            }
+        }
+    }
+
+    None
 }
 
 #[cfg(test)]

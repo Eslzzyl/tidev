@@ -12,5 +12,5 @@ pub mod prompts;
 // Re-export types from tidev-types (defined there as shared protocol types).
 pub use tidev_types::agent_type::{AgentDefinition, AgentOverride, AgentType};
 pub use agent_type::{create_agent, create_all_agents, create_sub_agents};
-pub use context::{AgentContext, AgentLoopConfig, ApprovedTool, PendingToolApproval};
+pub use context::{AgentContext, AgentLoopConfig, ApprovedTool, ToolCallWithViolations, TuiRequest, TuiRequestKind, TuiResponse};
 pub use loop_::run_agent_loop;

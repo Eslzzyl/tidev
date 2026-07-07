@@ -3832,7 +3832,9 @@ dependencies = [
  "encoding_rs",
  "globset",
  "log",
+ "serde_json",
  "tempfile",
+ "tidev-types",
  "uuid",
 ]
 

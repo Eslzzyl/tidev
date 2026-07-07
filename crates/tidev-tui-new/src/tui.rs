@@ -42,7 +42,7 @@ impl Tui {
         let mut reader = EventStream::new();
 
         // Take ownership of receivers so select! branches don't conflict with app.
-        let mut perm_rx = app.perm_rx.take();
+        let mut request_rx = app.request_rx.take();
         let mut event_rx = app.event_rx.take();
 
         // Initial render
@@ -74,13 +74,13 @@ impl Tui {
 
                 // ── Tool permission requests ────────────────────────────
                 result = async {
-                    match perm_rx.as_mut() {
+                    match request_rx.as_mut() {
                         Some(rx) => rx.recv().await,
                         None => futures::future::pending().await,
                     }
                 } => {
-                    if let Some(approval) = result {
-                        app.handle_pending_approval(approval);
+                    if let Some(request) = result {
+                        app.handle_tui_request(request);
                     }
                 }
             }

@@ -17,7 +17,7 @@ use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use tidev_agent::{AgentContext, AgentLoopConfig, ApprovedTool, PendingToolApproval};
+use tidev_agent::{AgentContext, AgentLoopConfig, ApprovedTool, ToolCallWithViolations, TuiRequest, TuiRequestKind, TuiResponse};
 use tidev_config::auth::ActiveModel;
 use tidev_config::{AppConfig, AuthStore};
 use tidev_types::agent_type::{AgentDefinition, AgentType};
@@ -27,6 +27,7 @@ use tidev_types::message::{
 use tidev_types::prompts::SessionMode;
 use tidev_types::reasoning::ThinkingLevelType;
 use tidev_types::tools::ToolDefinition;
+use tidev_utils::path::{extract_boundary_violation_path, extract_sensitive_file_path, load_sensitive_patterns};
 
 use tidev_llm::{LlmClient, LlmProviderConfig};
 use tidev_snapshot::SnapshotService;
@@ -140,8 +141,8 @@ pub struct CoreContext {
     buffer: Arc<RwLock<MessageBuffer>>,
     /// Channel for sending events to the UI.
     event_tx: UnboundedSender<BackendEvent>,
-    /// Channel for requesting tool permission approval.
-    perm_tx: UnboundedSender<PendingToolApproval>,
+    /// Channel for sending UI requests (tool approval etc.).
+    request_tx: UnboundedSender<TuiRequest>,
     /// This loop's session ID.
     session_id: Uuid,
     /// Current session mode.
@@ -182,7 +183,7 @@ impl CoreContext {
         context_manager: Arc<Mutex<ContextManager>>,
         buffer: Arc<RwLock<MessageBuffer>>,
         event_tx: UnboundedSender<BackendEvent>,
-        perm_tx: UnboundedSender<PendingToolApproval>,
+        request_tx: UnboundedSender<TuiRequest>,
         session_id: Uuid,
         mode: SessionMode,
         thinking_level: ThinkingLevelType,
@@ -203,7 +204,7 @@ impl CoreContext {
             context_manager,
             buffer,
             event_tx,
-            perm_tx,
+            request_tx,
             session_id,
             mode,
             thinking_level,
@@ -340,35 +341,128 @@ impl AgentContext for CoreContext {
         tool_calls: &[ToolCall],
         mode: SessionMode,
     ) -> Result<Vec<ApprovedTool>> {
-        let (response_tx, mut response_rx) = tokio::sync::oneshot::channel();
+        // Load sensitive-file patterns once (file read).
+        let sensitive_patterns = load_sensitive_patterns(&self.workspace_root);
 
-        let approval = PendingToolApproval {
-            tool_calls: tool_calls.to_vec(),
-            mode,
-            response_tx,
-        };
+        let mut approved: Vec<ApprovedTool> = Vec::with_capacity(tool_calls.len());
+        let mut pending: Vec<ToolCallWithViolations> = Vec::new();
+        let mut user_approved: Vec<ApprovedTool> = Vec::new();
 
-        self.perm_tx.send(approval).map_err(|_| {
-            anyhow::anyhow!("Permission channel closed — UI may have exited")
-        })?;
-
-        tokio::select! {
-            _ = self.cancel.cancelled() => {
-                // Cancelled — reject all tools.
-                Ok(tool_calls.iter().map(|tc| ApprovedTool {
+        for tc in tool_calls {
+            // 1. Permission check: is this tool allowed in the current mode?
+            if !self.tool_registry.can_execute(&tc.name, mode) {
+                approved.push(ApprovedTool {
                     tool_call: tc.clone(),
-                    rejection: Some(ToolExecutionResult::new(
-                        "[Operation cancelled]".to_string(),
-                    )),
+                    rejection: Some(ToolExecutionResult::new(format!(
+                        "Tool '{}' is disabled in {} mode.",
+                        tc.name,
+                        mode.as_str(),
+                    ))),
                     child_session_id: None,
                     allow_outside: false,
                     sensitive_file_approved: false,
-                }).collect())
+                });
+                continue;
+            }
+
+            // 2. Check remembered DB permission.
+            let permission_key = self.tool_registry.permission_key_for_call(tc);
+            let remembered = self
+                .session_manager
+                .store()
+                .load_tool_permission(self.session_id, &permission_key)?;
+
+            if let Some(allowed) = remembered {
+                if allowed {
+                    approved.push(ApprovedTool {
+                        tool_call: tc.clone(),
+                        rejection: None,
+                        child_session_id: None,
+                        allow_outside: false,
+                        sensitive_file_approved: false,
+                    });
+                } else {
+                    approved.push(ApprovedTool {
+                        tool_call: tc.clone(),
+                        rejection: Some(ToolExecutionResult::new(format!(
+                            "Tool '{}' was denied by remembered permission.",
+                            tc.name,
+                        ))),
+                        child_session_id: None,
+                        allow_outside: false,
+                        sensitive_file_approved: false,
+                    });
+                }
+                continue;
+            }
+
+            // 3. Check workspace boundary & sensitive file violations.
+            let arguments: Value = serde_json::from_str(&tc.arguments)
+                .unwrap_or(Value::Null);
+            let boundary_violation = extract_boundary_violation_path(
+                &self.workspace_root,
+                &tc.name,
+                &arguments,
+            );
+            let sensitive_violation = extract_sensitive_file_path(
+                &self.workspace_root,
+                &tc.name,
+                &arguments,
+                &sensitive_patterns,
+            );
+
+            // 4. If no violations → auto-approve (fast path).
+            if boundary_violation.is_none() && sensitive_violation.is_none() {
+                approved.push(ApprovedTool {
+                    tool_call: tc.clone(),
+                    rejection: None,
+                    child_session_id: None,
+                    allow_outside: false,
+                    sensitive_file_approved: false,
+                });
+                continue;
+            }
+
+            // 5. Has violations → needs user input.
+            pending.push(ToolCallWithViolations {
+                tool_call: tc.clone(),
+                workspace_boundary_violation: boundary_violation,
+                sensitive_file_violation: sensitive_violation,
+                permission_key,
+                permission_label: self.tool_registry.permission_label_for_call(tc),
+            });
+        }
+
+        // If nothing needs user input, return all auto-decided.
+        if pending.is_empty() {
+            return Ok(approved);
+        }
+
+        // ─── Send to TUI for user interaction ──────────────────────────
+        let (response_tx, mut response_rx) = tokio::sync::oneshot::channel();
+
+        self.request_tx
+            .send(TuiRequest {
+                kind: TuiRequestKind::ToolApproval(pending),
+                response_tx,
+            })
+            .map_err(|_| anyhow::anyhow!("UI request channel closed — UI may have exited"))?;
+
+        let user_approved = tokio::select! {
+            _ = self.cancel.cancelled() => {
+                // Cancelled — reject all pending tools.
+                Vec::new()
             }
             result = &mut response_rx => {
-                Ok(result.map_err(|_| anyhow::anyhow!("Permission response channel closed"))?)
+                match result {
+                    Ok(TuiResponse::ToolApproval(tools)) => tools,
+                    Err(_) => Vec::new(), // channel closed → reject all pending
+                }
             }
-        }
+        };
+
+        approved.extend(user_approved);
+        Ok(approved)
     }
 
     // -----------------------------------------------------------------------

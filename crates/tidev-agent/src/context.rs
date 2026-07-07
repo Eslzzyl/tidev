@@ -3,6 +3,8 @@
 //!
 //! tidev-agent defines the loop skeleton; tidev-core implements [`AgentContext`].
 
+use std::path::PathBuf;
+
 use anyhow::Result;
 use async_trait::async_trait;
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
@@ -36,7 +38,7 @@ pub struct AgentLoopConfig {
 }
 
 // ---------------------------------------------------------------------------
-// ApprovedTool & PendingToolApproval
+// ApprovedTool, TuiRequest & TuiResponse
 // ---------------------------------------------------------------------------
 
 /// A tool call with an optional rejection reason.
@@ -57,13 +59,40 @@ pub struct ApprovedTool {
     pub sensitive_file_approved: bool,
 }
 
-/// Request sent by the agent loop to the frontend for tool permission approval.
+/// A tool call augmented with pre-computed violation info for the UI.
+#[derive(Debug)]
+pub struct ToolCallWithViolations {
+    pub tool_call: ToolCall,
+    /// If the tool targets a path outside the workspace, the resolved path.
+    pub workspace_boundary_violation: Option<PathBuf>,
+    /// If the tool targets a sensitive file, the resolved path.
+    pub sensitive_file_violation: Option<PathBuf>,
+    /// Stable permission key for for DB lookups.
+    pub permission_key: String,
+    /// Human-readable label.
+    pub permission_label: String,
+}
+
+/// Request sent by the agent loop to the frontend, requiring user interaction.
 ///
-/// The frontend sends back a `Vec<ApprovedTool>` through `response_tx`.
-pub struct PendingToolApproval {
-    pub tool_calls: Vec<ToolCall>,
-    pub mode: SessionMode,
-    pub response_tx: oneshot::Sender<Vec<ApprovedTool>>,
+/// The frontend processes the request and sends back a [`TuiResponse`] through
+/// `response_tx`. If the sender is dropped without sending, the agent loop
+/// treats it as a rejection of all pending tools.
+pub struct TuiRequest {
+    pub kind: TuiRequestKind,
+    pub response_tx: oneshot::Sender<TuiResponse>,
+}
+
+/// Variants of [`TuiRequest`].
+pub enum TuiRequestKind {
+    /// Ask the user to approve or reject tool calls.
+    ToolApproval(Vec<ToolCallWithViolations>),
+}
+
+/// Response sent by the frontend to the agent loop after user interaction.
+pub enum TuiResponse {
+    /// User decisions for a [`TuiRequestKind::ToolApproval`] request.
+    ToolApproval(Vec<ApprovedTool>),
 }
 
 // ---------------------------------------------------------------------------

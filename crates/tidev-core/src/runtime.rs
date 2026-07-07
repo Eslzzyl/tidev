@@ -36,7 +36,7 @@ use tidev_types::message::Message;
 use tidev_types::prompts::SessionMode;
 use tidev_types::tools::TodoItem;
 
-use tidev_agent::{AgentDefinition, PendingToolApproval};
+use tidev_agent::{AgentDefinition, TuiRequest};
 
 use crate::context::ContextManager;
 use crate::message_buf::MessageBuffer;
@@ -108,9 +108,9 @@ pub struct Runtime {
     /// Event channel (sender → UI, receiver → TUI).
     event_tx: UnboundedSender<BackendEvent>,
     _event_rx: Arc<Mutex<Option<UnboundedReceiver<BackendEvent>>>>,
-    /// Permission approval channel.
-    perm_tx: UnboundedSender<PendingToolApproval>,
-    _perm_rx: Arc<Mutex<Option<UnboundedReceiver<PendingToolApproval>>>>,
+    /// Request channel (sender → UI).
+    request_tx: UnboundedSender<TuiRequest>,
+    _request_rx: Arc<Mutex<Option<UnboundedReceiver<TuiRequest>>>>,
 
     /// Currently running agent loop handle.
     run_loop_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
@@ -137,9 +137,17 @@ impl Runtime {
         self._event_rx.lock().await.take()
     }
 
-    /// Get the permission receiver (consumed by the TUI).
-    pub async fn perm_rx(&self) -> Option<UnboundedReceiver<PendingToolApproval>> {
-        self._perm_rx.lock().await.take()
+    /// Get the request receiver (consumed by the TUI).
+    pub async fn request_rx(&self) -> Option<UnboundedReceiver<TuiRequest>> {
+        self._request_rx.lock().await.take()
+    }
+
+    /// Deprecated — use [`request_rx`] instead.
+    #[doc(hidden)]
+    pub async fn perm_rx(
+        &self,
+    ) -> Option<tokio::sync::mpsc::UnboundedReceiver<crate::PendingToolApproval>> {
+        None
     }
 
     /// Get (or create) the message buffer for a session.
@@ -414,7 +422,7 @@ impl Runtime {
             context_manager,
             buffer,
             self.event_tx.clone(),
-            self.perm_tx.clone(),
+            self.request_tx.clone(),
             session_id,
             SessionMode::Build,
             active_model.thinking_level.clone(),
@@ -911,7 +919,7 @@ impl RuntimeBuilder {
 
         // 14. Channels.
         let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (perm_tx, perm_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (request_tx, request_rx) = tokio::sync::mpsc::unbounded_channel::<TuiRequest>();
 
         log::info!("startup: runtime ready in {:?}", _start.elapsed());
 
@@ -930,8 +938,8 @@ impl RuntimeBuilder {
             context_managers: Arc::new(Mutex::new(HashMap::new())),
             event_tx,
             _event_rx: Arc::new(Mutex::new(Some(event_rx))),
-            perm_tx,
-            _perm_rx: Arc::new(Mutex::new(Some(perm_rx))),
+            request_tx,
+            _request_rx: Arc::new(Mutex::new(Some(request_rx))),
             run_loop_handle: Arc::new(Mutex::new(None)),
             cleanup_cancel,
             workspace_root,

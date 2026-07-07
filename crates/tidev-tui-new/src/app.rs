@@ -48,7 +48,7 @@ pub struct App {
     /// Transient popup notification in top-right corner (auto-expires).
     toast: Option<(String, Instant)>,
     /// Receiver for tool permission requests from the agent loop.
-    pub(crate) perm_rx: Option<tokio::sync::mpsc::UnboundedReceiver<tidev_core::PendingToolApproval>>,
+    pub(crate) request_rx: Option<tokio::sync::mpsc::UnboundedReceiver<tidev_core::TuiRequest>>,
     /// Receiver for backend events (streaming deltas, tool results, etc.).
     pub(crate) event_rx: Option<tokio::sync::mpsc::UnboundedReceiver<BackendEvent>>,
 }
@@ -56,7 +56,7 @@ pub struct App {
 impl App {
     pub fn new(
         runtime: tidev_core::Runtime,
-        perm_rx: Option<tokio::sync::mpsc::UnboundedReceiver<tidev_core::PendingToolApproval>>,
+        request_rx: Option<tokio::sync::mpsc::UnboundedReceiver<tidev_core::TuiRequest>>,
         event_rx: Option<tokio::sync::mpsc::UnboundedReceiver<BackendEvent>>,
     ) -> Self {
         let theme_str = runtime.config().theme;
@@ -70,7 +70,7 @@ impl App {
             current_session_id: None,
             last_notice: None,
             toast: None,
-            perm_rx,
+            request_rx,
             event_rx,
         }
     }
@@ -134,16 +134,12 @@ impl App {
     }
 
     /// Handle a pending tool approval request from the agent loop.
-    pub(crate) fn handle_pending_approval(
+    pub(crate) fn handle_tui_request(
         &mut self,
-        approval: tidev_core::PendingToolApproval,
+        request: tidev_core::TuiRequest,
     ) {
         // TODO: Phase 5c/5d — show permission/security dialogs, collect decisions
-        log::debug!(
-            "PendingToolApproval: {} tool call(s), mode={:?}",
-            approval.tool_calls.len(),
-            approval.mode,
-        );
+        log::debug!("TuiRequest: {:#?}", request.kind);
     }
 
     pub fn handle_key_event(&mut self, key: KeyEvent) {
