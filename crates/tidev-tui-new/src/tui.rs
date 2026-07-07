@@ -1,16 +1,18 @@
 //! Tui — terminal layer.
 //!
 //! Owns the `Terminal`, handles setup/teardown and event polling.
+//! Uses a dual-channel event loop multiplexing crossterm input, backend events,
+//! and tool permission requests via `tokio::select!`.
 
 use std::io;
-use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::event::{self, DisableBracketedPaste, DisableFocusChange, DisableMouseCapture,
-    EnableBracketedPaste, EnableFocusChange, EnableMouseCapture, Event};
+use crossterm::event::{DisableBracketedPaste, DisableFocusChange, DisableMouseCapture,
+    EnableBracketedPaste, EnableFocusChange, EnableMouseCapture, Event, EventStream};
 use crossterm::terminal::{DisableLineWrap, EnableLineWrap, EnterAlternateScreen,
     LeaveAlternateScreen, disable_raw_mode, enable_raw_mode};
 use crossterm::execute;
+use futures::StreamExt;
 use ratatui::{Terminal, backend::CrosstermBackend};
 
 use crate::app::App;
@@ -37,25 +39,49 @@ impl Tui {
     }
 
     pub async fn run(&mut self, app: &mut App) -> Result<()> {
-        let tick_rate = Duration::from_millis(50);
+        let mut reader = EventStream::new();
+
+        // Take ownership of receivers so select! branches don't conflict with app.
+        let mut perm_rx = app.perm_rx.take();
+        let mut event_rx = app.event_rx.take();
 
         // Initial render
         self.terminal.draw(|frame| app.draw(frame))?;
 
         while !app.should_quit() {
-            if event::poll(tick_rate)? {
-                let event = event::read()?;
-                match event {
-                    Event::Key(key) => {
-                        app.handle_key_event(key);
+            tokio::select! {
+                // ── Crossterm input events ──────────────────────────────
+                Some(Ok(event)) = reader.next() => {
+                    match event {
+                        Event::Key(key) => app.handle_key_event(key),
+                        Event::Mouse(mouse) => app.handle_mouse_event(mouse),
+                        Event::Resize(w, h) => app.handle_resize(w, h),
+                        _ => {}
                     }
-                    Event::Mouse(mouse) => {
-                        app.handle_mouse_event(mouse);
+                }
+
+                // ── Backend events (streaming, tool results, etc.) ─────
+                result = async {
+                    match event_rx.as_mut() {
+                        Some(rx) => rx.recv().await,
+                        None => futures::future::pending().await,
                     }
-                    Event::Resize(w, h) => {
-                        app.handle_resize(w, h);
+                } => {
+                    if let Some(event) = result {
+                        app.handle_backend_event(event);
                     }
-                    _ => {}
+                }
+
+                // ── Tool permission requests ────────────────────────────
+                result = async {
+                    match perm_rx.as_mut() {
+                        Some(rx) => rx.recv().await,
+                        None => futures::future::pending().await,
+                    }
+                } => {
+                    if let Some(approval) = result {
+                        app.handle_pending_approval(approval);
+                    }
                 }
             }
 

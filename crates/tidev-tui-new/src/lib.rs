@@ -24,7 +24,10 @@ pub fn run() -> anyhow::Result<()> {
             .build()
             .await?;
 
-        let mut app = app::App::new(runtime);
+        let perm_rx = runtime.perm_rx().await;
+        let event_rx = runtime.event_rx().await;
+
+        let mut app = app::App::new(runtime, perm_rx, event_rx);
         let mut tui = tui::Tui::new()?;
         tui.run(&mut app).await
     })

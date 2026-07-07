@@ -19,8 +19,9 @@ arboard = "3"
 base64 = "0.22"
 blake3 = "1"
 chrono = { version = "0.4", features = ["serde"] }
-crossterm = "0.28"
+crossterm = { version = "0.28", features = ["event-stream"] }
 dirs = "6"
+futures = "0.3"
 image = { version = "0.25", default-features = false, features = ["png"] }
 log = "0.4"
 pulldown-cmark = "0.13"

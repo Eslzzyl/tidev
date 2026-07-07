@@ -11,7 +11,7 @@ use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
 use tidev_types::agent_type::AgentType;
-use tidev_types::message::MessageRole;
+use tidev_types::message::{BackendEvent, MessageRole};
 use tidev_tui::theme::{ThemeName, ThemePalette};
 
 use crate::action::{Action, ChatAction, ConnectAction, OverlayAction, OverlayKind, SearchAction,
@@ -35,7 +35,7 @@ use crate::context::{DrawContext, UpdateContext};
 use crate::utils::strip_system_reminder_tags;
 
 pub struct App {
-    runtime: tidev_core::Runtime,
+    pub(crate) runtime: tidev_core::Runtime,
     overlays: OverlayStack,
     current_palette: ThemePalette,
     should_quit: bool,
@@ -47,10 +47,18 @@ pub struct App {
     last_notice: Option<(String, Instant)>,
     /// Transient popup notification in top-right corner (auto-expires).
     toast: Option<(String, Instant)>,
+    /// Receiver for tool permission requests from the agent loop.
+    pub(crate) perm_rx: Option<tokio::sync::mpsc::UnboundedReceiver<tidev_core::PendingToolApproval>>,
+    /// Receiver for backend events (streaming deltas, tool results, etc.).
+    pub(crate) event_rx: Option<tokio::sync::mpsc::UnboundedReceiver<BackendEvent>>,
 }
 
 impl App {
-    pub fn new(runtime: tidev_core::Runtime) -> Self {
+    pub fn new(
+        runtime: tidev_core::Runtime,
+        perm_rx: Option<tokio::sync::mpsc::UnboundedReceiver<tidev_core::PendingToolApproval>>,
+        event_rx: Option<tokio::sync::mpsc::UnboundedReceiver<BackendEvent>>,
+    ) -> Self {
         let theme_str = runtime.config().theme;
         let current_palette = ThemePalette::from_name(&theme_str);
         Self {
@@ -62,6 +70,8 @@ impl App {
             current_session_id: None,
             last_notice: None,
             toast: None,
+            perm_rx,
+            event_rx,
         }
     }
 
@@ -82,6 +92,59 @@ impl App {
     }
 
     // ── Event handling ──
+
+    /// Handle a backend event from the agent loop (streaming, tool results, etc.).
+    pub(crate) fn handle_backend_event(&mut self, event: BackendEvent) {
+        match event {
+            BackendEvent::Delta { .. } => {
+                // TODO: Phase 6 — forward to message rendering
+            }
+            BackendEvent::ReasoningDelta { .. } => {
+                // TODO: Phase 6 — forward to message rendering
+            }
+            BackendEvent::ToolCallUpdated { .. } => {
+                // TODO: Phase 6 — update tool call display
+            }
+            BackendEvent::Finished { .. } => {
+                // TODO: Phase 6 — message completed
+            }
+            BackendEvent::ToolCompleted { .. } => {
+                // TODO: Phase 6 — tool result received
+            }
+            BackendEvent::ShellOutput { .. } => {
+                // TODO: Phase 6 — bash output streaming
+            }
+            BackendEvent::SubagentStatus { .. }
+            | BackendEvent::SubagentCompleted { .. } => {
+                // TODO: Phase 6 — subagent progress
+            }
+            BackendEvent::UsageStats { .. } => {
+                // TODO: show usage in status bar
+            }
+            BackendEvent::TurnStarting { .. } => {
+                // TODO: Phase 6 — new turn starting
+            }
+            BackendEvent::StreamEnd { .. } => {
+                // TODO: Phase 6 — streaming finished
+            }
+            _ => {
+                log::debug!("Unhandled backend event: {event:?}");
+            }
+        }
+    }
+
+    /// Handle a pending tool approval request from the agent loop.
+    pub(crate) fn handle_pending_approval(
+        &mut self,
+        approval: tidev_core::PendingToolApproval,
+    ) {
+        // TODO: Phase 5c/5d — show permission/security dialogs, collect decisions
+        log::debug!(
+            "PendingToolApproval: {} tool call(s), mode={:?}",
+            approval.tool_calls.len(),
+            approval.mode,
+        );
+    }
 
     pub fn handle_key_event(&mut self, key: KeyEvent) {
         // 1. Global shortcuts (unaffected by overlays)
