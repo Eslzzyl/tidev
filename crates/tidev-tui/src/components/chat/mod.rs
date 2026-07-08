@@ -4,6 +4,7 @@
 //! tool call interaction state, subagent tracking, and streaming buffer.
 
 use std::collections::{HashMap, HashSet};
+use std::time::Instant;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use ratatui::layout::Rect;
@@ -68,12 +69,17 @@ pub(crate) struct MessageList {
     expanded_tool_results: HashSet<Uuid>,
     expanded_tool_outputs: HashMap<Uuid, String>,
     selectable_regions: Vec<SelectableRegionRange>,
+    hovered_card: Option<Uuid>,
+    card_bounds: Vec<(Uuid, usize, usize)>,
 
     /// The area into which messages were rendered (for mouse selection clamping).
     pub content_area: Option<Rect>,
 
     /// Scrollbar drag state (None = not dragging).
     scrollbar_drag: Option<ScrollbarDrag>,
+
+    // ── Spinner animation ──
+    spinner_start: Instant,
 
     // ── Streaming state ──
     streaming_buffer: StreamingBuffer,
@@ -102,8 +108,11 @@ impl MessageList {
             expanded_tool_results: HashSet::new(),
             expanded_tool_outputs: HashMap::new(),
             selectable_regions: Vec::new(),
+            hovered_card: None,
+            card_bounds: Vec::new(),
             content_area: None,
             scrollbar_drag: None,
+            spinner_start: Instant::now(),
             streaming_buffer: StreamingBuffer::new(),
             current_streaming_message_id: None,
             running_subagents: Vec::new(),
@@ -360,16 +369,16 @@ impl MessageList {
         }
     }
 
-    /// Handle mouse click: find which selectable region was clicked,
-    /// or whether a subagent card was clicked for subsession navigation.
+    /// Handle mouse click: find which selectable region was clicked
+    /// and toggle tool result expansion for the associated block.
     /// Returns an Action if a subsession switch is requested.
     pub fn handle_mouse_click(&mut self, x: u16, y: u16) -> Option<Action> {
         let scroll = self.scroll_offset;
         let y_u = y as usize;
         let absolute_line = scroll + y_u;
+
         // Check subagent card bounds first.
         if !self.running_subagents.is_empty() {
-            // The total message lines (including subagent cards) determines position.
             let msg_end_line = self.layout_index.total_lines;
             let card_start = msg_end_line.saturating_sub(scroll);
             for (i, sa) in self.running_subagents.iter().enumerate() {
@@ -381,32 +390,29 @@ impl MessageList {
                 }
             }
         }
-        for region in &self.selectable_regions {
-            if absolute_line >= region.start_line && absolute_line < region.end_line {
-                if x >= region.min_x && region.max_x.map_or(true, |max| x <= max) {
-                    if let Some(ref ctx) = self.chat_context {
-                        let mut line = 0usize;
-                        for msg in &ctx.messages {
-                            if msg.role != tidev_types::message::MessageRole::Tool {
-                                let msg_lines = 1 + msg.content.lines().count()
-                                    + msg.tool_calls.len().saturating_mul(3);
-                                let msg_end = line + msg_lines;
-                                if absolute_line >= line && absolute_line < msg_end {
-                                    if self.expanded_tool_results.contains(&msg.id) {
-                                        self.expanded_tool_results.remove(&msg.id);
-                                    } else {
-                                        self.expanded_tool_results.insert(msg.id);
-                                    }
-                                    self.dirty = true;
-                                    return None;
-                                }
-                                line += msg_lines;
-                            }
-                        }
-                    }
+
+        // Use the layout index to find which block was clicked.
+        // The index has accurate line counts from the rendering pipeline,
+        // so this is far more reliable than the old heuristic.
+        let block_idx = self
+            .layout_index
+            .blocks
+            .partition_point(|b| b.start_line + b.line_count <= absolute_line);
+        if block_idx < self.layout_index.blocks.len() {
+            let block = &self.layout_index.blocks[block_idx];
+            // Only toggle for assistant and user blocks (tool blocks are
+            // absorbed into their parent assistant block).
+            if block.message_count > 0 {
+                if self.expanded_tool_results.contains(&block.message_id) {
+                    self.expanded_tool_results.remove(&block.message_id);
+                } else {
+                    self.expanded_tool_results.insert(block.message_id);
                 }
+                self.layout_index.mark_dirty(block.message_id);
+                self.dirty = true;
             }
         }
+
         None
     }
 
@@ -554,6 +560,7 @@ impl Component for MessageList {
             }
         }
 
+        self.card_bounds.clear();
         render_mod::render_messages(
             frame,
             rect,
@@ -569,6 +576,9 @@ impl Component for MessageList {
             self.current_streaming_message_id,
             &mut self.render_tick,
             &self.running_subagents,
+            self.spinner_start,
+            self.hovered_card,
+            &mut self.card_bounds,
         );
 
         self.dirty = false;
@@ -654,6 +664,23 @@ impl MessageList {
     /// Whether the message list is currently receiving streaming content.
     pub fn is_streaming(&self) -> bool {
         self.streaming_buffer.is_streaming
+    }
+
+    /// Update hovered card based on mouse position.
+    /// `x`, `y` are screen coordinates. Call on every mouse move event.
+    pub fn set_hovered_card(&mut self, x: u16, y: u16) {
+        let scroll = self.scroll_offset;
+        let absolute_line = scroll + y as usize;
+
+        let prev = self.hovered_card;
+        self.hovered_card = self
+            .card_bounds
+            .iter()
+            .find(|&&(_, start, end)| absolute_line >= start && absolute_line < end)
+            .map(|&(id, _, _)| id);
+        if self.hovered_card != prev {
+            self.dirty = true;
+        }
     }
 }
 

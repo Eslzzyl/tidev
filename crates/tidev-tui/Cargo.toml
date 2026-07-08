@@ -36,6 +36,7 @@ syntect = "5.3"
 textwrap = "0.16"
 tokio = { version = "1", features = ["sync", "rt", "macros", "io-std", "time", "fs"] }
 lru = "0.18"
+fancy-regex = "0.18"
 unicode-width = "0.2"
 url = "2"
 urlencoding = "2"
