@@ -158,8 +158,8 @@ pub(crate) static COMMANDS: &[CommandSpec] = &[
         action: CommandAction::Skills,
     },
     CommandSpec {
-        name: "quit",
-        aliases: &["exit", "q"],
+        name: "exit",
+        aliases: &["quit", "q"],
         description: "Exit tidev",
         action: CommandAction::Quit,
     },

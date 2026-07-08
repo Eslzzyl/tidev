@@ -164,31 +164,55 @@ pub(crate) fn draw_composer(
         );
     }
 
-    // ── Metadata row (mode + model + cursor) ────────────────────────
+    // ── Metadata row (mode + model + provider + thinking) ────────────
     if metadata_area.width > 0 && metadata_area.height > 1 {
-        let width = composer.last_input_width;
-        let (cursor_line, _) = composer.cursor_position(width);
-        let total_lines = composer.display_line_count(width as usize);
+        let mut meta_spans: Vec<Span> = Vec::new();
 
+        // Mode label (Build / Plan)
         let mode_label = if let Some(pending) = &ctx.pending_mode {
             format!("{} → {}", ctx.mode.title(), pending.title())
         } else {
             ctx.mode.title().to_string()
         };
-        let mode_style = Style::default()
-            .fg(accent_color)
-            .add_modifier(Modifier::BOLD);
-        let meta_text = format!("{}  ·  {}/{}", mode_label, cursor_line + 1, total_lines);
+        meta_spans.push(Span::styled(
+            mode_label,
+            Style::default()
+                .fg(accent_color)
+                .add_modifier(Modifier::BOLD),
+        ));
+
+        // · Model display name
+        if let Some(model) = ctx.model_display {
+            meta_spans.push(Span::styled(" · ", Style::default().fg(palette.muted)));
+            meta_spans.push(Span::styled(model, Style::default().fg(palette.text)));
+        }
+
+        // · Provider display name
+        if let Some(provider) = ctx.provider_display {
+            meta_spans.push(Span::styled(" · ", Style::default().fg(palette.muted)));
+            meta_spans.push(Span::styled(
+                provider,
+                Style::default().fg(palette.muted),
+            ));
+        }
+
+        // · [thinking level]
+        if let Some(level) = ctx.thinking_level {
+            if level.is_supported() {
+                meta_spans.push(Span::styled(" · ", Style::default().fg(palette.muted)));
+                meta_spans.push(Span::styled(
+                    format!("[{}]", level.display_name()),
+                    Style::default().fg(palette.accent_soft),
+                ));
+            }
+        }
+
+        // Render on the second row of metadata_area (first row is blank spacer)
+        let meta_rect = Rect::new(metadata_area.x, metadata_area.y + 1, metadata_area.width, 1);
         frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled(mode_label, mode_style),
-                Span::styled(
-                    format!("  ·  {}/{}", cursor_line + 1, total_lines),
-                    Style::default().fg(palette.muted),
-                ),
-            ]))
-            .style(Style::default().bg(palette.panel)),
-            metadata_area,
+            Paragraph::new(Line::from(meta_spans))
+                .style(Style::default().bg(palette.panel)),
+            meta_rect,
         );
     }
 
@@ -197,9 +221,10 @@ pub(crate) fn draw_composer(
         let cp = &composer.command_palette;
         let popup_height = cp.popup_height();
         if popup_height > 0 {
-            let width = area.width.min(72).max(20).min(frame.area().width.saturating_sub(area.x));
+            let popup_x = area.x + 2;
+            let width = area.width.min(72).max(20).min(frame.area().width.saturating_sub(popup_x));
             let popup_rect = Rect::new(
-                area.x,
+                popup_x,
                 area.y.saturating_sub(popup_height),
                 width,
                 popup_height,
@@ -253,9 +278,10 @@ pub(crate) fn draw_composer(
         let am = &composer.at_mention;
         let popup_height = am.popup_height();
         if popup_height > 0 {
-            let width = area.width.min(56).max(20).min(frame.area().width.saturating_sub(area.x));
+            let popup_x = area.x + 2;
+            let width = area.width.min(56).max(20).min(frame.area().width.saturating_sub(popup_x));
             let popup_rect = Rect::new(
-                area.x,
+                popup_x,
                 area.y.saturating_sub(popup_height),
                 width,
                 popup_height,
@@ -308,9 +334,10 @@ pub(crate) fn draw_composer(
         let sn = &composer.snippet_state;
         let popup_height = sn.popup_height();
         if popup_height > 0 {
-            let width = area.width.min(56).max(20).min(frame.area().width.saturating_sub(area.x));
+            let popup_x = area.x + 2;
+            let width = area.width.min(56).max(20).min(frame.area().width.saturating_sub(popup_x));
             let popup_rect = Rect::new(
-                area.x,
+                popup_x,
                 area.y.saturating_sub(popup_height),
                 width,
                 popup_height,
@@ -350,6 +377,25 @@ pub(crate) fn draw_composer(
             frame.render_widget(panel, popup_rect);
             frame.render_stateful_widget(list, inner, &mut state);
         }
+    }
+
+    // ── Cursor positioning ───────────────────────────────────────────
+    if text_area.width > 0 && text_area.height > 0 {
+        let (cursor_line, cursor_col) = composer.cursor_position(text_area.width);
+        let mut cursor_line = cursor_line.saturating_sub(composer.input_scroll_offset as u16);
+        let mut cursor_col = cursor_col;
+
+        if composer.cursor_wraps_to_next_row(text_area.width as usize) {
+            cursor_line = cursor_line.saturating_add(1);
+            cursor_col = 0;
+        }
+
+        let cursor_x = text_area.x.saturating_add(cursor_col);
+        let cursor_y = text_area
+            .y
+            .saturating_add(cursor_line.min(text_area.height.saturating_sub(1)));
+
+        frame.set_cursor(cursor_x, cursor_y);
     }
 }
 

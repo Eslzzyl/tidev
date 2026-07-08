@@ -107,6 +107,12 @@ impl SnippetState {
 
         let query = Self::current_word(input, cursor);
 
+        // Minimum 2 characters required to trigger snippets (matches old TUI).
+        if query.len() < 2 {
+            self.clear();
+            return;
+        }
+
         // Try to find the longest suffix of the current word that matches a
         // snippet prefix.  This allows triggering snippets like "你好世界"
         // when typing "请你输出你好" without spacing.
@@ -117,6 +123,9 @@ impl SnippetState {
             let possible_query: String = full_word_chars[start_idx..].iter().collect();
             if possible_query.is_empty() {
                 continue;
+            }
+            if possible_query.len() < 2 {
+                break;
             }
 
             let matched = self.candidates(&possible_query);

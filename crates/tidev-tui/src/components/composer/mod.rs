@@ -213,6 +213,11 @@ impl Composer {
         self.text.is_empty()
     }
 
+    /// Whether any autocomplete popup (command palette, @-mention, or snippet) is visible.
+    pub fn has_popup(&self) -> bool {
+        self.command_palette.visible || self.at_mention.visible || self.snippet_state.visible
+    }
+
     pub fn spans(&self) -> &[InlineSpan] {
         &self.spans
     }
@@ -403,9 +408,7 @@ impl Composer {
 
             // ── Backspace ───────────────────────────────────────────────
             KeyCode::Backspace => {
-                if self.has_selection() {
-                    self.delete_selection();
-                } else if key.modifiers.contains(KeyModifiers::SUPER) {
+                if key.modifiers.contains(KeyModifiers::SUPER) {
                     self.delete_to_line_start();
                 } else if key.modifiers.contains(KeyModifiers::ALT)
                     || key.modifiers.contains(KeyModifiers::CONTROL)
@@ -418,14 +421,12 @@ impl Composer {
 
             // ── Delete ──────────────────────────────────────────────────
             KeyCode::Delete => {
-                if self.has_selection() {
-                    self.delete_selection();
-                } else if key.modifiers.contains(KeyModifiers::SUPER) {
+                if key.modifiers.contains(KeyModifiers::SUPER) {
                     self.delete_to_line_start();
                 } else if key.modifiers.contains(KeyModifiers::ALT)
                     || key.modifiers.contains(KeyModifiers::CONTROL)
                 {
-                    self.delete_next_word();
+                    self.delete_previous_word();
                 } else {
                     self.delete_next_char();
                 }
@@ -721,6 +722,7 @@ impl Composer {
         self.cursor = pos + ch.len_utf8();
         self.preferred_column = None;
         self.visual_line_hint = None;
+        self.history_cursor = None;
     }
 
     pub fn insert_str(&mut self, value: &str) {
@@ -732,6 +734,7 @@ impl Composer {
         self.cursor = pos + value.len();
         self.preferred_column = None;
         self.visual_line_hint = None;
+        self.history_cursor = None;
     }
 
     pub fn replace_range(&mut self, start: usize, end: usize, replacement: &str) {
@@ -744,6 +747,7 @@ impl Composer {
         self.cursor = start + replacement.len();
         self.preferred_column = None;
         self.visual_line_hint = None;
+        self.history_cursor = None;
     }
 
     fn delete_previous_char(&mut self) {
@@ -763,25 +767,30 @@ impl Composer {
             self.cursor = start;
             self.preferred_column = None;
             self.visual_line_hint = None;
+            self.history_cursor = None;
+            return;
+        }
+        // If cursor is right after a span, delete the entire span.
+        if let Some(span) = self.span_before(self.cursor) {
+            let span_start = span.start;
+            let span_end = span.end;
+            self.text.drain(span_start..span_end);
+            self.cursor = span_start;
+            self.spans.retain(|s| s.start != span_start || s.end != span_end);
+            self.adjust_after_edit(span_start, span_end - span_start, 0);
+            self.preferred_column = None;
+            self.visual_line_hint = None;
+            self.history_cursor = None;
             return;
         }
         let prev = self.previous_char_boundary(self.cursor);
-        // If the previous char is at the start of a span, delete the whole span.
-        let containing = self.span_containing(prev).map(|s| (s.start, s.end));
-        if let Some((start, end)) = containing {
-            let deleted = end - start;
-            self.spans.retain(|s| s.start != start);
-            self.text.drain(start..end);
-            self.adjust_after_edit(start, deleted, 0);
-            self.cursor = start;
-        } else {
-            let deleted = self.cursor - prev;
-            self.text.drain(prev..self.cursor);
-            self.adjust_after_edit(prev, deleted, 0);
-            self.cursor = prev;
-        }
+        let deleted = self.cursor - prev;
+        self.text.drain(prev..self.cursor);
+        self.adjust_after_edit(prev, deleted, 0);
+        self.cursor = prev;
         self.preferred_column = None;
         self.visual_line_hint = None;
+        self.history_cursor = None;
     }
 
     fn delete_next_char(&mut self) {
@@ -801,6 +810,7 @@ impl Composer {
             self.cursor = end;
             self.preferred_column = None;
             self.visual_line_hint = None;
+            self.history_cursor = None;
             return;
         }
         // If cursor is right before a span, delete the entire span.
@@ -812,6 +822,7 @@ impl Composer {
             self.adjust_after_edit(start, end - start, 0);
             self.preferred_column = None;
             self.visual_line_hint = None;
+            self.history_cursor = None;
             return;
         }
         let next = self.next_char_boundary(self.cursor);
@@ -819,6 +830,7 @@ impl Composer {
         self.adjust_after_edit(self.cursor, next - self.cursor, 0);
         self.preferred_column = None;
         self.visual_line_hint = None;
+        self.history_cursor = None;
     }
 
     fn delete_previous_word(&mut self) {
@@ -836,6 +848,7 @@ impl Composer {
         self.cursor = start;
         self.preferred_column = None;
         self.visual_line_hint = None;
+        self.history_cursor = None;
     }
 
     fn delete_next_word(&mut self) {
@@ -850,6 +863,7 @@ impl Composer {
         self.adjust_after_edit(self.cursor, end - self.cursor, 0);
         self.preferred_column = None;
         self.visual_line_hint = None;
+        self.history_cursor = None;
     }
 
     fn delete_to_line_start(&mut self) {
@@ -867,6 +881,7 @@ impl Composer {
         self.cursor = start;
         self.preferred_column = None;
         self.visual_line_hint = None;
+        self.history_cursor = None;
     }
 
     /// Delete the current selection, returning true if anything was deleted.
@@ -879,10 +894,14 @@ impl Composer {
             self.selection_anchor = None;
             self.preferred_column = None;
             self.visual_line_hint = None;
+            self.history_cursor = None;
             true
         } else {
-            // Clear stale zero-width anchor so next insert_char doesn't
-            // trigger selection-replacement logic.
+            // Clear any stale zero-width selection anchor (e.g. from a mouse
+            // click without drag).  If we don't clear it here, the next
+            // `insert_char` will move the cursor past the anchor and make it
+            // look like a real selection — causing the *next* character to
+            // silently delete the one we just inserted.
             self.selection_anchor = None;
             false
         }
@@ -916,6 +935,7 @@ impl Composer {
         self.preferred_column = None;
         self.visual_line_hint = None;
         self.selection_anchor = None;
+        self.history_cursor = None;
     }
 
     // ── Span management ─────────────────────────────────────────────────
@@ -939,9 +959,14 @@ impl Composer {
         self.spans.iter().find(|s| s.start <= pos && pos < s.end)
     }
 
-    /// Return the span that starts at or after the given position.
+    /// Find the span that ends exactly at `pos` (cursor is right after it).
+    fn span_before(&self, pos: usize) -> Option<&InlineSpan> {
+        self.spans.iter().find(|s| s.end == pos)
+    }
+
+    /// Find the span that starts exactly at `pos` (cursor is right before it).
     fn span_after(&self, pos: usize) -> Option<&InlineSpan> {
-        self.spans.iter().find(|s| s.start >= pos)
+        self.spans.iter().find(|s| s.start == pos)
     }
 
     /// Remove all spans that overlap the byte range `[start, end)`.
@@ -1011,12 +1036,18 @@ impl Composer {
         self.command_palette.sync(&self.text, &self.commands);
         self.at_mention
             .sync(&self.workspace_root, &self.text, self.cursor);
-        self.snippet_state.sync(
-            &self.workspace_root,
-            &self.config_dir,
-            &self.text,
-            self.cursor,
-        );
+
+        // Snippets are lower priority: suppress when command palette or @-mention is active.
+        if self.command_palette.visible || self.at_mention.visible {
+            self.snippet_state.clear();
+        } else {
+            self.snippet_state.sync(
+                &self.workspace_root,
+                &self.config_dir,
+                &self.text,
+                self.cursor,
+            );
+        }
     }
 
     /// Accept the currently selected @mention suggestion and insert it as an

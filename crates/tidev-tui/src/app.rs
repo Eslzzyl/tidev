@@ -8,7 +8,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent};
-use ratatui::layout::{Alignment, Rect};
+use ratatui::layout::{Alignment, Constraint, Layout, Margin, Rect};
 use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
@@ -64,6 +64,12 @@ pub(crate) struct ContextUsage {
     pub cache_write_tokens: u32,
     pub model_id: String,
     pub tokens_per_second: Option<f32>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AppScreen {
+    Welcome,
+    Chat,
 }
 
 pub struct App {
@@ -138,6 +144,9 @@ pub struct App {
 
     /// Queue of prompts waiting to be sent (when a request is already in progress).
     pending_prompt_queue: Vec<QueuedPrompt>,
+
+    /// Current screen state.
+    screen: AppScreen,
 }
 
 /// A prompt queued for submission when the current request finishes.
@@ -187,13 +196,14 @@ impl App {
             toast: None,
             abort_confirmation_deadline: None,
             pending_prompt_queue: Vec::new(),
+            screen: AppScreen::Welcome,
             message_list: None,
             sidebar: Sidebar::new(),
             mouse_selection: MouseSelection::default(),
             sidebar_area: None,
             todos: Vec::new(),
             composer: {
-                let mut c = Composer::new("Ask tidev...");
+                let mut c = Composer::new("Ask tidev about your code, task, or question...");
                 c.set_file_search_index(file_index);
                 c.set_workspace_root(ws_root);
                 c.set_config_dir(cfg_dir);
@@ -742,10 +752,12 @@ impl App {
             }
         }
 
-        // 2b. Tab: session mode switch (only when no overlay/composer popup is active).
+        // 2b. Tab: session mode switch (only when no composer popup is active).
         if key.code == KeyCode::Tab && key.modifiers.is_empty() {
-            self.handle_tab_mode_switch();
-            return;
+            if !self.composer.as_ref().is_some_and(|c| c.has_popup()) {
+                self.handle_tab_mode_switch();
+                return;
+            }
         }
 
         // 2c. Shift+Tab / Ctrl+T: cycle thinking level.
@@ -1122,6 +1134,7 @@ impl App {
                     // Switch to the selected session
                     self.current_session_id = Some(session_id);
                     self.scroll_target = None;
+                    self.screen = AppScreen::Chat;
 
                     // Load session record and messages for chat display
                     let messages = self
@@ -1444,7 +1457,7 @@ impl App {
                                 return;
                             }
 
-                            // If no active session, create one.
+                            // If no active session, create one and enter Chat mode.
                             let session_id = self.current_session_id;
                             let sid = match session_id {
                                 Some(id) => id,
@@ -1452,6 +1465,37 @@ impl App {
                                     match self.runtime.create_default_session("Untitled session") {
                                         Ok(id) => {
                                             self.current_session_id = Some(id);
+
+                                            // Initialize MessageList for the new session.
+                                            let ws_root = self.runtime.workspace_root()
+                                                .to_string_lossy().to_string();
+                                            let config = self.runtime.config();
+                                            let auth = self.runtime.auth();
+                                            let active_model = config.resolve_active_model(&auth)
+                                                .ok();
+                                            let provider_id = self.runtime.active_provider_id();
+                                            let model_id = self.runtime.active_model_id();
+                                            let model_display = active_model.as_ref()
+                                                .map(|m| m.label()).unwrap_or_default();
+                                            let provider_display = active_model.as_ref()
+                                                .map(|m| m.provider_display_name.clone())
+                                                .unwrap_or_default();
+                                            let chat_context = crate::chat_context::ChatContext::new(
+                                                id,
+                                                String::new(),
+                                                ws_root,
+                                                Vec::new(),
+                                                None,
+                                                provider_id,
+                                                model_id,
+                                                model_display,
+                                                provider_display,
+                                            );
+                                            self.message_list
+                                                .get_or_insert_with(MessageList::new)
+                                                .set_chat_context(chat_context);
+                                            self.screen = AppScreen::Chat;
+
                                             id
                                         }
                                         Err(e) => {
@@ -1833,6 +1877,23 @@ impl App {
             area,
         );
 
+        if self.screen == AppScreen::Welcome {
+            self.draw_welcome(frame);
+            // Draw overlays on top of welcome content.
+            let draw_ctx = DrawContext {
+                palette,
+                focused: true,
+                chat_context: None,
+                mode: self.mode,
+                pending_mode: self.pending_mode,
+                model_display: None,
+                provider_display: None,
+                thinking_level: None,
+            };
+            self.overlays.draw(frame, area, &draw_ctx);
+            return;
+        }
+
         // Determine sidebar visibility and split the layout.
         // Use the same threshold as the old TUI.
         const SIDEBAR_GAP: u16 = 2;
@@ -1889,39 +1950,11 @@ impl App {
                 chat_context: None,
                 mode: self.mode,
                 pending_mode: self.pending_mode,
+                model_display: None,
+                provider_display: None,
+                thinking_level: None,
             };
             chat.draw(frame, content_area, &draw_ctx);
-        } else if self.overlays.is_empty() {
-            // Welcome / status text when no session or overlay is active
-            let welcome = Paragraph::new(Line::from(vec![
-                Span::styled(
-                    "tidev",
-                    Style::default()
-                        .fg(palette.accent)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw("  —  "),
-                Span::styled("F1", Style::default().fg(palette.accent)),
-                Span::raw(" Theme  ·  "),
-                Span::styled("F2", Style::default().fg(palette.accent)),
-                Span::raw(" Agents  ·  "),
-                Span::styled("F3", Style::default().fg(palette.accent)),
-                Span::raw(" Skills  ·  "),
-                Span::styled("F4", Style::default().fg(palette.accent)),
-                Span::raw(" Settings  ·  "),
-                Span::styled("F5", Style::default().fg(palette.accent)),
-                Span::raw(" Search  ·  "),
-                Span::styled("F6", Style::default().fg(palette.accent)),
-                Span::raw(" Messages  ·  "),
-                Span::styled("F7", Style::default().fg(palette.accent)),
-                Span::raw(" Models  ·  "),
-                Span::styled("F8", Style::default().fg(palette.accent)),
-                Span::raw(" Sessions  ·  "),
-                Span::styled("Ctrl+C", Style::default().fg(palette.accent)),
-                Span::raw(" quit"),
-            ]))
-            .style(Style::default().fg(palette.text).bg(palette.background));
-            frame.render_widget(welcome, content_area);
         }
 
         // ── Composer ─────────────────────────────────────────────────
@@ -1933,12 +1966,16 @@ impl App {
                 width: main_area.width,
                 height: composer_height,
             };
+            let active_model = self.runtime.active_model();
             let draw_ctx = DrawContext {
                 palette,
                 focused: self.overlays.is_empty(),
                 chat_context: None,
                 mode: self.mode,
                 pending_mode: self.pending_mode,
+                model_display: Some(&active_model.display_name),
+                provider_display: Some(&active_model.provider_display_name),
+                thinking_level: Some(&active_model.thinking_level),
             };
             composer.draw(frame, composer_area, &draw_ctx);
         }
@@ -1950,6 +1987,9 @@ impl App {
             chat_context: None,
             mode: self.mode,
             pending_mode: self.pending_mode,
+            model_display: None,
+            provider_display: None,
+            thinking_level: None,
         };
 
         // Draw overlays
@@ -2085,6 +2125,129 @@ impl App {
                             self.set_toast(format!("Copy failed: {e}"), std::time::Duration::from_secs(5));
                         }
                     }
+                }
+            }
+        }
+    }
+
+    /// Render the welcome screen with logo, subtitle, and composer.
+    fn draw_welcome(&mut self, frame: &mut Frame) {
+        let palette = self.current_palette;
+        let area = frame.area();
+
+        // Centered card — exact match to old TUI's render_welcome
+        let card_width = self
+            .runtime
+            .config()
+            .ui
+            .welcome_width
+            .min(area.width.saturating_sub(4).max(32));
+        let card_height = 20u16.min(area.height.saturating_sub(2).max(10));
+        let card = Rect::new(
+            (area.width - card_width) / 2,
+            (area.height - card_height) / 2,
+            card_width,
+            card_height,
+        );
+
+        let card_inner_width = card.width.saturating_sub(7);
+
+        let inner = card.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
+
+        let composer_height = self
+            .composer
+            .as_ref()
+            .map(|c| {
+                c.preferred_height(
+                    card_inner_width,
+                    self.runtime.config().ui.max_input_lines,
+                )
+                .saturating_add(2)
+            })
+            .unwrap_or(5);
+
+        let sections = Layout::vertical([
+            Constraint::Length(8),
+            Constraint::Length(1),
+            Constraint::Length(composer_height),
+        ])
+        .split(inner);
+
+        // ASCII art logo
+        let ascii_art = Paragraph::new(
+            r#"░▒▓████████▓▒░▒▓█▓▒░▒▓███████▓▒░░▒▓████████▓▒░▒▓█▓▒░░▒▓█▓▒░ 
+   ░▒▓█▓▒░   ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░ 
+   ░▒▓█▓▒░   ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░       ░▒▓█▓▒▒▓█▓▒░  
+   ░▒▓█▓▒░   ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓██████▓▒░  ░▒▓█▓▒▒▓█▓▒░  
+   ░▒▓█▓▒░   ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░        ░▒▓█▓▓█▓▒░   
+   ░▒▓█▓▒░   ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░        ░▒▓█▓▓█▓▒░   
+   ░▒▓█▓▒░   ░▒▓█▓▒░▒▓███████▓▒░░▒▓████████▓▒░  ░▒▓██▓▒░    "#,
+        )
+        .alignment(Alignment::Center)
+        .style(
+            Style::default()
+                .fg(palette.accent)
+                .add_modifier(Modifier::BOLD),
+        );
+        frame.render_widget(ascii_art, sections[0]);
+
+        // Subtitle
+        let subtitle = Paragraph::new("Terminal AI assistant for focused coding work")
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(palette.muted));
+        frame.render_widget(subtitle, sections[1]);
+
+        // Composer input block — pass section area directly, exactly as old TUI
+        if let Some(ref mut composer) = self.composer {
+            let active_model = self.runtime.active_model();
+            let draw_ctx = DrawContext {
+                palette,
+                focused: true,
+                chat_context: None,
+                mode: self.mode,
+                pending_mode: self.pending_mode,
+                model_display: Some(&active_model.display_name),
+                provider_display: Some(&active_model.provider_display_name),
+                thinking_level: Some(&active_model.thinking_level),
+            };
+            composer.draw(frame, sections[2], &draw_ctx);
+        }
+
+        // Workspace path on the very last row
+        let workspace_path = self.runtime.workspace_root().display().to_string();
+        let display_path = workspace_path.replace(
+            &dirs::home_dir().unwrap_or_default().display().to_string(),
+            "~",
+        );
+        let workspace_area = Rect::new(
+            area.x + 1,
+            area.bottom() - 1,
+            area.width.saturating_sub(2),
+            1,
+        );
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                &display_path,
+                Style::default().fg(palette.muted),
+            ))),
+            workspace_area,
+        );
+
+        // Notice, if any, on the row directly above workspace path
+        if let Some((message, _)) = &self.last_notice {
+            if !message.is_empty() {
+                let notice_y = area.bottom().saturating_sub(2);
+                if notice_y < workspace_area.y {
+                    frame.render_widget(
+                        Paragraph::new(Line::from(Span::styled(
+                            message,
+                            Style::default().fg(palette.muted),
+                        ))),
+                        Rect::new(area.x + 1, notice_y, area.width.saturating_sub(2), 1),
+                    );
                 }
             }
         }
