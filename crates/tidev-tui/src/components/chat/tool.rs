@@ -463,10 +463,21 @@ fn pretty_tool_arguments(arguments: &str) -> String {
     }
 }
 
+fn truncate_utf8(s: &str, max: usize) -> &str {
+    if s.len() <= max {
+        return s;
+    }
+    let mut end = max;
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
 fn summarize_tool_call(tool_call: &ToolCall, max_width: usize) -> String {
     let args = summarize_tool_arguments(tool_call, max_width);
     if args.len() > max_width {
-        format!("{}...", &args[..max_width.saturating_sub(3)])
+        format!("{}...", truncate_utf8(&args, max_width.saturating_sub(3)))
     } else {
         args
     }
@@ -480,7 +491,7 @@ fn summarize_tool_arguments(tool_call: &ToolCall, max_width: usize) -> String {
                     let val_str = match v {
                         serde_json::Value::String(s) => {
                             if s.len() > 40 {
-                                format!("\"{}...\"", &s[..37])
+                                format!("\"{}...\"", truncate_utf8(s, 37))
                             } else {
                                 format!("\"{}\"", s)
                             }
@@ -494,7 +505,7 @@ fn summarize_tool_arguments(tool_call: &ToolCall, max_width: usize) -> String {
                 .collect();
             let joined = parts.join(", ");
             if joined.len() > max_width {
-                format!("{}...", &joined[..max_width.saturating_sub(3)])
+                format!("{}...", truncate_utf8(&joined, max_width.saturating_sub(3)))
             } else {
                 joined
             }
