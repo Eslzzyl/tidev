@@ -26,6 +26,7 @@ pub(crate) struct ThemePanel {
     preview_theme: ThemeName,
     original_theme: ThemeName,
     query: String,
+    confirmed: bool,
 }
 
 impl ThemePanel {
@@ -42,6 +43,7 @@ impl ThemePanel {
             preview_theme: current,
             original_theme: current,
             query: String::new(),
+            confirmed: false,
         }
     }
 
@@ -175,7 +177,8 @@ impl Component for ThemePanel {
                 Some(Action::Theme(ThemeAction::Preview(self.preview_theme)))
             }
             KeyCode::Enter => {
-                Some(Action::Theme(ThemeAction::Set(self.preview_theme)))
+                self.confirmed = true;
+                Some(Action::Overlay(OverlayAction::Close(OverlayKind::ThemePanel)))
             }
             KeyCode::Esc | KeyCode::Char('q') => {
                 Some(Action::Overlay(OverlayAction::Close(OverlayKind::ThemePanel)))
@@ -246,7 +249,9 @@ impl Component for ThemePanel {
     fn update(&mut self, action: &Action, _ctx: &UpdateContext) -> Vec<Action> {
         match action {
             Action::Overlay(OverlayAction::Close(OverlayKind::ThemePanel)) => {
-                if self.preview_theme != self.original_theme {
+                if self.confirmed {
+                    vec![Action::Theme(ThemeAction::Set(self.preview_theme))]
+                } else if self.preview_theme != self.original_theme {
                     self.preview_theme = self.original_theme;
                     vec![Action::Theme(ThemeAction::Preview(self.original_theme))]
                 } else {
@@ -362,11 +367,7 @@ impl Component for ThemePanel {
                         )
                     };
                     frame.render_widget(bg_block, Rect::new(content_area.x, y, content_area.width, 1));
-                    let name = if *t == palette.name {
-                        format!("  {} ◀", t.as_str())
-                    } else {
-                        format!("  {}", t.as_str())
-                    };
+                    let name = format!("  {}", t.as_str());
                     frame.render_widget(
                         Paragraph::new(Line::from(Span::styled(name, text_style))),
                         Rect::new(content_area.x, y, content_area.width, 1),

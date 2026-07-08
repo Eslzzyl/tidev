@@ -16,6 +16,7 @@
 use std::collections::HashMap;
 
 use crate::action::{Action, ChatAction, ConnectAction, OverlayAction, OverlayKind, SessionAction, ThemeAction};
+use crate::theme::ThemeName;
 
 // ---------------------------------------------------------------------------
 // CommandAction
@@ -401,7 +402,13 @@ pub(crate) fn execute_command(name: &str, action: CommandAction, args: &[String]
             vec![Action::Overlay(OverlayAction::Open(OverlayKind::RenameDialog))]
         }
         CommandAction::Theme => {
-            vec![Action::Theme(ThemeAction::Toggle)]
+            if args.is_empty() {
+                vec![Action::Overlay(OverlayAction::Open(OverlayKind::ThemePanel))]
+            } else if let Some(theme) = ThemeName::parse(&args.join(" ")) {
+                vec![Action::Theme(ThemeAction::Set(theme))]
+            } else {
+                vec![]
+            }
         }
         CommandAction::Undo => {
             vec![Action::Session(SessionAction::Undo)]
