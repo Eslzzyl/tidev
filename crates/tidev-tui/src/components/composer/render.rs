@@ -146,8 +146,12 @@ pub(crate) fn draw_composer(
         );
     }
 
-    // ── Left accent bar ─────────────────────────────────────────────
-    let accent_color = palette.accent;
+    // ── Left accent bar (mode-colored) ──────────────────────────────
+    let accent_color = if let Some(pending) = &ctx.pending_mode {
+        palette.border_mode_color(*pending)
+    } else {
+        palette.border_mode_color(ctx.mode)
+    };
     for row in 0..area.height {
         let mut bar_style = Style::default().fg(accent_color).bg(palette.panel);
         if row == 0 {
@@ -160,17 +164,29 @@ pub(crate) fn draw_composer(
         );
     }
 
-    // ── Metadata row ────────────────────────────────────────────────
+    // ── Metadata row (mode + model + cursor) ────────────────────────
     if metadata_area.width > 0 && metadata_area.height > 1 {
         let width = composer.last_input_width;
         let (cursor_line, _) = composer.cursor_position(width);
         let total_lines = composer.display_line_count(width as usize);
-        let meta_text = format!("Build  ·  {}/{}", cursor_line + 1, total_lines);
+
+        let mode_label = if let Some(pending) = &ctx.pending_mode {
+            format!("{} → {}", ctx.mode.title(), pending.title())
+        } else {
+            ctx.mode.title().to_string()
+        };
+        let mode_style = Style::default()
+            .fg(accent_color)
+            .add_modifier(Modifier::BOLD);
+        let meta_text = format!("{}  ·  {}/{}", mode_label, cursor_line + 1, total_lines);
         frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                meta_text,
-                Style::default().fg(palette.muted),
-            )))
+            Paragraph::new(Line::from(vec![
+                Span::styled(mode_label, mode_style),
+                Span::styled(
+                    format!("  ·  {}/{}", cursor_line + 1, total_lines),
+                    Style::default().fg(palette.muted),
+                ),
+            ]))
             .style(Style::default().bg(palette.panel)),
             metadata_area,
         );

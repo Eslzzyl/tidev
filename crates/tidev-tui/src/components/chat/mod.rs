@@ -14,7 +14,7 @@ use tidev_tui_old::chat_context::ChatContext;
 use uuid::Uuid;
 use tidev_types::message::BackendEvent;
 
-use crate::action::{Action, ChatAction};
+use crate::action::{Action, ChatAction, SessionAction};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
 use crate::components::chat::layout_index::MessageLayoutIndex;
@@ -61,6 +61,9 @@ pub(crate) struct MessageList {
     // ── Subagent tracking ──
     running_subagents: Vec<render_mod::RunningSubagentInfo>,
 
+    // ── Bash tool tracking (for ShellOutput streaming) ──
+    bash_tool_call_id: Option<String>,
+
     // ── Dirty tracking ──
     dirty: bool,
 }
@@ -81,6 +84,7 @@ impl MessageList {
             streaming_buffer: StreamingBuffer::new(),
             current_streaming_message_id: None,
             running_subagents: Vec::new(),
+            bash_tool_call_id: None,
             dirty: true,
         }
     }
@@ -97,6 +101,49 @@ impl MessageList {
         self.current_streaming_message_id = None;
         self.selectable_regions.clear();
         self.running_subagents.clear();
+        self.bash_tool_call_id = None;
+    }
+
+    /// Invalidate the layout index (triggers full rebuild on next draw).
+    pub fn invalidate_layout(&mut self) {
+        self.layout_index.invalidate_all();
+        self.dirty = true;
+    }
+
+    /// Update token fields on the last streaming assistant message.
+    pub fn set_last_message_tokens(
+        &mut self,
+        input_tokens: Option<u32>,
+        output_tokens: Option<u32>,
+        total_tokens: Option<u32>,
+        cache_read_tokens: Option<u32>,
+        cache_write_tokens: Option<u32>,
+        tokens_per_second: Option<f32>,
+    ) {
+        let Some(ref mut chat_context) = self.chat_context else { return };
+        if let Some(msg) = chat_context.messages.iter_mut().rev().find(|m| {
+            m.role == tidev_types::message::MessageRole::Assistant
+        }) {
+            msg.input_tokens = input_tokens;
+            msg.output_tokens = output_tokens;
+            msg.total_tokens = total_tokens;
+            msg.cache_read_tokens = cache_read_tokens;
+            msg.cache_write_tokens = cache_write_tokens;
+            msg.tokens_per_second = tokens_per_second;
+        }
+    }
+
+    /// Mark the last streaming message as an error (on BackendEvent::Failed).
+    pub fn mark_streaming_as_error(&mut self, error: &str) {
+        let Some(ref mut chat_context) = self.chat_context else { return };
+        if let Some(msg) = chat_context.messages.iter_mut().rev().find(|m| m.streaming) {
+            msg.role = tidev_types::message::MessageRole::Error;
+            msg.streaming = false;
+            msg.content = format!("Request failed: {error}");
+        }
+        self.streaming_buffer.is_streaming = false;
+        self.current_streaming_message_id = None;
+        self.dirty = true;
     }
 
     /// Handle a backend event for streaming or tool results.
@@ -143,6 +190,9 @@ impl MessageList {
                     self.layout_index.mark_dirty(msg.id);
                     self.dirty = true;
                 }
+                if tool_call.name == "bash" {
+                    self.bash_tool_call_id = Some(tool_call.id.clone());
+                }
                 if tool_call.name == "task" {
                     let already_tracking = self.running_subagents.iter().any(|s| s.tool_call_id == tool_call.id);
                     if !already_tracking {
@@ -153,17 +203,59 @@ impl MessageList {
                             description: desc,
                             subagent_type: sub_type,
                             status_text: "Thinking".to_string(),
+                            child_session_id: None,
                         });
                     }
                 }
             }
             BackendEvent::ToolCompleted { tool_call, result, .. } => {
-                let tool_msg = tidev_types::message::Message::tool_result(
-                    tool_call.id.clone(),
-                    tool_call.name.clone(),
-                    result.clone(),
-                );
-                chat_context.messages.push(tool_msg);
+                if tool_call.name == "bash" {
+                    // Bash output was streamed via ShellOutput — find and finalize
+                    // the existing streaming Tool message instead of creating a new one.
+                    if let Some(idx) = chat_context.messages.iter().rposition(|m| {
+                        m.role == tidev_types::message::MessageRole::Tool
+                            && m.tool_call_id.as_deref() == Some(&tool_call.id)
+                            && m.streaming
+                    }) {
+                        chat_context.messages[idx].content = result.output.clone();
+                        chat_context.messages[idx].streaming = false;
+                        self.dirty = true;
+                    }
+                    self.bash_tool_call_id = None;
+                } else {
+                    let tool_msg = tidev_types::message::Message::tool_result(
+                        tool_call.id.clone(),
+                        tool_call.name.clone(),
+                        result.clone(),
+                    );
+                    chat_context.messages.push(tool_msg);
+                    self.dirty = true;
+                }
+            }
+            BackendEvent::ShellOutput { content, finished, .. } => {
+                let bash_id = match &self.bash_tool_call_id {
+                    Some(id) => id.clone(),
+                    None => return,
+                };
+                let existing = chat_context.messages.iter_mut().rev().find(|m| {
+                    m.role == tidev_types::message::MessageRole::Tool
+                        && m.tool_call_id.as_deref() == Some(&bash_id)
+                });
+                if let Some(msg) = existing {
+                    msg.content = content.clone();
+                    if *finished {
+                        msg.streaming = false;
+                    }
+                } else {
+                    let mut msg = tidev_types::message::Message::streaming(
+                        tidev_types::message::MessageRole::Tool,
+                        content.clone(),
+                    );
+                    msg.tool_call_id = Some(bash_id);
+                    msg.tool_name = Some("bash".to_string());
+                    msg.streaming = !*finished;
+                    chat_context.messages.push(msg);
+                }
                 self.dirty = true;
             }
             BackendEvent::Finished { .. } => {
@@ -175,10 +267,12 @@ impl MessageList {
                 assistant_message,
                 content_delta: _,
                 reasoning_delta: _,
+                child_session_id,
                 ..
             } => {
                 if let Some(exec) = self.running_subagents.last_mut() {
                     exec.status_text = status_text.clone();
+                    exec.child_session_id = Some(*child_session_id);
                 }
                 if let Some(msg) = assistant_message {
                     let existing = chat_context.messages.iter_mut().find(|m| m.id == msg.id);
@@ -208,15 +302,62 @@ impl MessageList {
                 chat_context.messages.push(tool_msg);
                 self.dirty = true;
             }
+            BackendEvent::SidebarSnapshotReady { message_id, file_diffs_json, .. } => {
+                if let Some(msg) = chat_context.messages.iter_mut().find(|m| m.id == *message_id) {
+                    msg.file_diffs = Some(file_diffs_json.clone());
+                    self.layout_index.mark_dirty(*message_id);
+                    self.dirty = true;
+                }
+            }
+            BackendEvent::ContextCompacted { compacted, summary, .. } => {
+                if *compacted {
+                    if let Some(summary) = summary {
+                        // The summary was already streamed via Delta events into
+                        // the last streaming message.  If manual compaction found
+                        // a streaming System message, finalize it.  Otherwise
+                        // create a compaction message.
+                        let found = chat_context.messages.iter_mut().rev().find(|m| {
+                            m.streaming && m.role == tidev_types::message::MessageRole::System
+                        });
+                        if let Some(msg) = found {
+                            msg.streaming = false;
+                        } else {
+                            let compaction_msg = tidev_types::message::Message::new(
+                                tidev_types::message::MessageRole::System,
+                                format!("Compaction\n\n{}", summary),
+                            );
+                            chat_context.messages.push(compaction_msg);
+                        }
+                    }
+                    self.layout_index.invalidate_all();
+                    self.dirty = true;
+                }
+            }
             _ => {}
         }
     }
 
     /// Handle mouse click: find which selectable region was clicked,
-    /// and toggle tool result expansion if applicable.
-    pub fn handle_mouse_click(&mut self, x: u16, y: u16) {
+    /// or whether a subagent card was clicked for subsession navigation.
+    /// Returns an Action if a subsession switch is requested.
+    pub fn handle_mouse_click(&mut self, x: u16, y: u16) -> Option<Action> {
         let scroll = self.scroll_offset;
-        let absolute_line = scroll + y as usize;
+        let y_u = y as usize;
+        let absolute_line = scroll + y_u;
+        // Check subagent card bounds first.
+        if !self.running_subagents.is_empty() {
+            // The total message lines (including subagent cards) determines position.
+            let msg_end_line = self.layout_index.total_lines;
+            let card_start = msg_end_line.saturating_sub(scroll);
+            for (i, sa) in self.running_subagents.iter().enumerate() {
+                if let Some(csid) = sa.child_session_id {
+                    let card_y = card_start + (i * 2);
+                    if y_u >= card_y && y_u < (card_y + 2) {
+                        return Some(Action::Session(SessionAction::Select(csid)));
+                    }
+                }
+            }
+        }
         for region in &self.selectable_regions {
             if absolute_line >= region.start_line && absolute_line < region.end_line {
                 if x >= region.min_x && region.max_x.map_or(true, |max| x <= max) {
@@ -226,14 +367,15 @@ impl MessageList {
                             if msg.role != tidev_types::message::MessageRole::Tool {
                                 let msg_lines = 1 + msg.content.lines().count()
                                     + msg.tool_calls.len().saturating_mul(3);
-                                if absolute_line >= line && absolute_line < line + msg_lines {
+                                let msg_end = line + msg_lines;
+                                if absolute_line >= line && absolute_line < msg_end {
                                     if self.expanded_tool_results.contains(&msg.id) {
                                         self.expanded_tool_results.remove(&msg.id);
                                     } else {
                                         self.expanded_tool_results.insert(msg.id);
                                     }
                                     self.dirty = true;
-                                    return;
+                                    return None;
                                 }
                                 line += msg_lines;
                             }
@@ -242,6 +384,7 @@ impl MessageList {
                 }
             }
         }
+        None
     }
 
     /// Calculate the scroll offset that brings a specific message into view.

@@ -36,6 +36,7 @@ pub(crate) struct RunningSubagentInfo {
     pub description: String,
     pub subagent_type: String,
     pub status_text: String,
+    pub child_session_id: Option<uuid::Uuid>,
 }
 
 // ---------------------------------------------------------------------------
@@ -468,8 +469,7 @@ fn compute_block_data(
     BlockComputation { message_id: message.id, message_count, line_count, cache_entries }
 }
 
-    // Compute and cache each block
-    // TODO: parallelise with rayon when blocks_info.len() > 4
+    // Compute and cache each block (parallelised via rayon when >4 blocks).
     let mut current_line = 0usize;
     let computations: Vec<BlockComputation> = if blocks_info.len() > 4 {
         blocks_info

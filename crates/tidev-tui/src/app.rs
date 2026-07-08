@@ -18,6 +18,8 @@ use tidev_types::agent_type::AgentType;
 use tidev_types::message::{BackendEvent, MessageRole, ToolExecutionResult};
 use tidev_types::tools::QuestionArgs;
 use tidev_tui_old::theme::{ThemeName, ThemePalette};
+use tidev_types::prompts::SessionMode;
+use tidev_types::reasoning::ThinkingLevelType;
 use uuid::Uuid;
 
 use crate::action::{Action, BoundaryDecision, ChatAction, ConnectAction, OverlayAction,
@@ -48,6 +50,18 @@ use crate::components::composer::Composer;
 use crate::context::{DrawContext, UpdateContext};
 use crate::utils::strip_system_reminder_tags;
 
+/// Token usage statistics for the current/last request.
+#[derive(Clone, Debug)]
+pub(crate) struct ContextUsage {
+    pub input_tokens: u32,
+    pub output_tokens: u32,
+    pub total_tokens: u32,
+    pub cache_read_tokens: u32,
+    pub cache_write_tokens: u32,
+    pub model_id: String,
+    pub tokens_per_second: Option<f32>,
+}
+
 pub struct App {
     pub(crate) runtime: tidev_core::Runtime,
     overlays: OverlayStack,
@@ -57,6 +71,12 @@ pub struct App {
     scroll_target: Option<uuid::Uuid>,
     /// Current active session (set by SessionPanel when switching sessions).
     current_session_id: Option<uuid::Uuid>,
+    /// Current session mode (Build / Plan).
+    mode: SessionMode,
+    /// Pending mode switch (applied on next Finished with no tool calls).
+    pending_mode: Option<SessionMode>,
+    /// Current thinking level for the active model.
+    thinking_level: ThinkingLevelType,
     /// Status notice shown at the bottom of the screen (plain text, no timeout).
     last_notice: Option<(String, Instant)>,
     /// Transient popup notification in top-right corner (auto-expires).
@@ -90,6 +110,9 @@ pub struct App {
     boundary_permissions: HashMap<String, bool>,
     /// allowlist for sensitive file access (canonical path → allowed).
     sensitive_permissions: HashMap<String, bool>,
+
+    /// Token usage statistics from the last request (for status bar display).
+    context_usage: Option<ContextUsage>,
 }
 
 impl App {
@@ -106,6 +129,7 @@ impl App {
         let ws_root = runtime.workspace_root().clone();
         let cfg_dir = runtime.config_dir().clone();
         let supports_images = runtime.active_model().supports_images;
+        let thinking_level = runtime.active_model().thinking_level.clone();
 
         Self {
             runtime,
@@ -114,6 +138,9 @@ impl App {
             should_quit: false,
             scroll_target: None,
             current_session_id: None,
+            mode: SessionMode::Build,
+            pending_mode: None,
+            thinking_level: thinking_level,
             last_notice: None,
             toast: None,
             request_rx,
@@ -124,6 +151,7 @@ impl App {
             approved_tools: Vec::new(),
             boundary_permissions: HashMap::new(),
             sensitive_permissions: HashMap::new(),
+            context_usage: None,
             message_list: None,
             composer: {
                 let mut c = Composer::new("Ask tidev...");
@@ -162,11 +190,103 @@ impl App {
         }
 
         match event {
-            BackendEvent::UsageStats { .. } => {
-                // TODO: show usage in status bar
+            BackendEvent::UsageStats {
+                input_tokens,
+                output_tokens,
+                total_tokens,
+                cache_read_tokens,
+                cache_write_tokens,
+                model_id,
+                duration_ms,
+                ..
+            } => {
+                // Store context usage for display in status bar.
+                self.context_usage = Some(ContextUsage {
+                    input_tokens,
+                    output_tokens,
+                    total_tokens,
+                    cache_read_tokens,
+                    cache_write_tokens,
+                    model_id: model_id.clone(),
+                    tokens_per_second: if let Some(ms) = duration_ms {
+                        if ms > 0 {
+                            Some(output_tokens as f32 / (ms as f32 / 1000.0))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    },
+                });
+
+                // Update the last message's token fields.
+                if let Some(ref mut chat) = self.message_list {
+                    chat.set_last_message_tokens(
+                        Some(input_tokens),
+                        Some(output_tokens),
+                        Some(total_tokens),
+                        Some(cache_read_tokens),
+                        Some(cache_write_tokens),
+                        self.context_usage.as_ref().and_then(|u| u.tokens_per_second),
+                    );
+                }
+
+                // Persist to store (record_usage API not yet available in new storage).
+                // TODO: add record_usage to tidev-storage if needed later.
+            }
+            BackendEvent::InstructionsLoaded { sources, .. } => {
+                log::info!("Instructions loaded: {sources:?}");
+                if !sources.is_empty() {
+                    self.set_notice(format!("Loaded {} instruction source(s)", sources.len()));
+                }
+            }
+            BackendEvent::Retrying {
+                attempt,
+                max_attempts,
+                reason,
+                ..
+            } => {
+                log::info!("Retrying (attempt {attempt}/{max_attempts}): {reason}");
+                self.set_toast(
+                    format!("Retry {attempt}/{max_attempts}: {reason}"),
+                    std::time::Duration::from_secs(5),
+                );
+            }
+            BackendEvent::Failed { error, .. } => {
+                log::error!("Request failed: {error}");
+                // Clean up pending state (mirrors old behaviour).
+                self.pending_tools.clear();
+                self.tool_index = 0;
+                self.approved_tools.clear();
+                self.pending_response_tx = None;
+
+                // Mark the last streaming message as error.
+                if let Some(ref mut chat) = self.message_list {
+                    chat.mark_streaming_as_error(&error);
+                }
+
+                self.set_toast(
+                    format!("Request failed: {error}"),
+                    std::time::Duration::from_secs(8),
+                );
+            }
+            BackendEvent::Finished { turn, .. } => {
+                // Apply pending mode switch on final turn (no tool calls).
+                if turn.tool_calls.is_empty() {
+                    if let Some(new_mode) = self.pending_mode.take() {
+                        self.mode = new_mode;
+                        self.set_notice(format!("Mode switched to {}", self.mode.title()));
+                    }
+                }
+            }
+            BackendEvent::ContextCompacted { .. } => {
+                self.set_notice("Context compacted");
             }
             _ => {
-                log::debug!("Unhandled backend event: {event:?}");
+                // Events already forwarded to MessageList above:
+                //   Delta, ReasoningDelta, ToolCallUpdated, Finished, ToolCompleted,
+                //   SubagentStatus, SubagentCompleted, TurnStarting, StreamEnd,
+                //   SidebarSnapshotReady, ShellOutput, ContextCompacted
             }
         }
     }
@@ -415,15 +535,65 @@ impl App {
     }
 
     pub fn handle_key_event(&mut self, key: KeyEvent) {
+        // 0. Ctrl+C: clear input (overrides quit — Ctrl+D is the quit shortcut).
+        if key.code == KeyCode::Char('c') && key.modifiers == KeyModifiers::CONTROL {
+            if let Some(ref mut composer) = self.composer {
+                if !composer.is_empty() {
+                    composer.clear();
+                    self.set_notice("Input cleared");
+                }
+            }
+            return;
+        }
+
         // 1. Global shortcuts (unaffected by overlays)
         if let Some(action) = self.handle_global_key(key) {
             self.process_action(action);
             return;
         }
 
+        // 1a. Message scrolling keys work even when overlays are open.
+        if matches!(key.code, KeyCode::PageUp | KeyCode::PageDown) {
+            if let Some(ref mut chat) = self.message_list {
+                if let Some(action) = chat.handle_key_event(key) {
+                    self.process_action(action);
+                    return;
+                }
+            }
+        }
+
         // 2. OverlayStack top-first
         if let Some(action) = self.overlays.handle_key_event(key) {
             self.process_action(action);
+            return;
+        }
+
+        // 2a. Subsession navigation (when parent_session_id is set).
+        if let Some(ref chat) = self.message_list {
+            if let Some(ref ctx) = chat.chat_context {
+                if ctx.parent_session_id.is_some() {
+                    match key.code {
+                        KeyCode::Up | KeyCode::Down | KeyCode::Left | KeyCode::Right => {
+                            self.handle_subsession_navigation(key);
+                            return;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        // 2b. Tab: session mode switch (only when no overlay/composer popup is active).
+        if key.code == KeyCode::Tab && key.modifiers.is_empty() {
+            self.handle_tab_mode_switch();
+            return;
+        }
+
+        // 2c. Shift+Tab / Ctrl+T: cycle thinking level.
+        if (key.code == KeyCode::Tab && key.modifiers.contains(KeyModifiers::SHIFT))
+            || (key.code == KeyCode::Char('t') && key.modifiers == KeyModifiers::CONTROL)
+        {
+            self.process_action(Action::Session(SessionAction::CycleThinkingLevel));
             return;
         }
 
@@ -443,24 +613,96 @@ impl App {
         }
     }
 
+    /// Handle Tab key for session mode switching.
+    fn handle_tab_mode_switch(&mut self) {
+        if let Some(ref pending) = self.pending_mode {
+            // Cancel pending mode switch.
+            self.pending_mode = None;
+            self.set_notice("Mode switch cancelled");
+        } else {
+            let new_mode = self.mode.toggle();
+            self.pending_mode = Some(new_mode);
+            self.set_notice(format!(
+                "Mode will switch to {} on next message",
+                new_mode.title()
+            ));
+        }
+    }
+
+    /// Navigate between subsessions.
+    fn handle_subsession_navigation(&mut self, key: KeyEvent) {
+        let Some(ref chat) = self.message_list else { return };
+        let Some(ref ctx) = chat.chat_context else { return };
+        let Some(parent_id) = ctx.parent_session_id else { return };
+        let current_id = ctx.session_id;
+
+        match key.code {
+            KeyCode::Up => {
+                // Switch to parent session.
+                self.switch_to_session(parent_id);
+            }
+            KeyCode::Down => {
+                // Switch to the last (most recently delegated) child.
+                let all = self.runtime.session_manager().store()
+                    .list_sessions(1000, 0).unwrap_or_default();
+                let children: Vec<_> = all.into_iter()
+                    .filter(|s| s.parent_session_id == Some(parent_id))
+                    .collect();
+                if let Some(target) = children.last() {
+                    self.switch_to_session(target.session_id);
+                }
+            }
+            KeyCode::Left | KeyCode::Right => {
+                let step = if key.code == KeyCode::Left { -1isize } else { 1 };
+                let all = self.runtime.session_manager().store()
+                    .list_sessions(1000, 0).unwrap_or_default();
+                let children: Vec<_> = all.into_iter()
+                    .filter(|s| s.parent_session_id == Some(parent_id))
+                    .collect();
+                if children.is_empty() { return; }
+                let index = children.iter()
+                    .position(|s| s.session_id == current_id)
+                    .unwrap_or(usize::MAX);
+                let next_index = if index == usize::MAX {
+                    0
+                } else {
+                    (index as isize + step).rem_euclid(children.len() as isize) as usize
+                };
+                if let Some(target) = children.get(next_index) {
+                    self.switch_to_session(target.session_id);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Switch to a different session (via SessionAction::Select).
+    fn switch_to_session(&mut self, session_id: Uuid) {
+        self.process_action(Action::Session(SessionAction::Select(session_id)));
+    }
+
     pub fn handle_mouse_event(&mut self, mouse: MouseEvent) {
         use crossterm::event::MouseEventKind;
-        // MessageList click-to-expand
+        // MessageList click-to-expand or subsession navigation
         if let MouseEventKind::Down(crossterm::event::MouseButton::Left) = mouse.kind {
             if let Some(ref mut chat) = self.message_list {
-                chat.handle_mouse_click(mouse.column, mouse.row);
+                if let Some(action) = chat.handle_mouse_click(mouse.column, mouse.row) {
+                    self.process_action(action);
+                }
             }
         }
     }
 
     pub fn handle_resize(&mut self, _w: u16, _h: u16) {
-        // TODO: mark layout dirty
+        // Full layout rebuild on resize (width change invalidates all line counts).
+        if let Some(ref mut chat) = self.message_list {
+            chat.invalidate_layout();
+        }
     }
 
     /// Global shortcuts that work regardless of overlay state.
     fn handle_global_key(&self, key: KeyEvent) -> Option<Action> {
         match key.code {
-            KeyCode::Char('c') if key.modifiers == KeyModifiers::CONTROL => Some(Action::Quit),
             KeyCode::Char('d') if key.modifiers == KeyModifiers::CONTROL => Some(Action::Quit),
             KeyCode::F(1) => Some(Action::Overlay(OverlayAction::Open(OverlayKind::ThemePanel))),
             KeyCode::F(2) => Some(Action::Overlay(OverlayAction::Open(OverlayKind::AgentsPanel))),
@@ -825,9 +1067,9 @@ impl App {
                 }
                 Action::Session(SessionAction::Rename(session_id, title)) => {
                     let final_title = if title.trim().is_empty() {
-                        "Untitled session".to_string()
+                        "Untitled session"
                     } else {
-                        title.trim().to_string()
+                        title.trim()
                     };
                     match self
                         .runtime
@@ -839,6 +1081,29 @@ impl App {
                             log::info!("Renamed session {} to {}", session_id, final_title);
                         }
                         Err(e) => log::error!("Failed to rename session: {e}"),
+                    }
+                }
+                Action::Session(SessionAction::SetMode(new_mode)) => {
+                    self.mode = new_mode;
+                    self.pending_mode = None;
+                    self.set_notice(format!("Mode switched to {}", self.mode.title()));
+                }
+                Action::Session(SessionAction::SetPendingMode(mode)) => {
+                    self.pending_mode = mode;
+                }
+                Action::Session(SessionAction::CycleThinkingLevel) => {
+                    let next = self.thinking_level.next();
+                    self.thinking_level = next.clone();
+                    let model = self.runtime.active_model();
+                    let _ = self.runtime.set_model_thinking_level(
+                        &model.provider_id,
+                        &model.model_id,
+                        &next.to_string(),
+                    );
+                    if next.is_supported() {
+                        self.set_notice(format!("Thinking: {}", next.display_name()));
+                    } else {
+                        self.set_notice("Thinking: off");
                     }
                 }
                 Action::Chat(action) => {
@@ -1122,8 +1387,26 @@ impl App {
                 )))
             }
             OverlayKind::MessagePanel => {
-                // TODO: populate from ChatContext once Chat component is migrated (Phase 6)
-                Some(Box::new(MessagePanel::new(Vec::new())))
+                let messages = self
+                    .message_list
+                    .as_ref()
+                    .and_then(|ml| ml.chat_context.as_ref())
+                    .map(|ctx| {
+                        ctx.visible_messages()
+                            .iter()
+                            .filter(|m| matches!(m.role, tidev_types::message::MessageRole::User))
+                            .enumerate()
+                            .map(|(i, m)| MessagePanelMessage {
+                                message_id: m.id,
+                                content: strip_system_reminder_tags(&m.content),
+                                created_at: m.created_at,
+                                mode: m.mode,
+                                original_index: i,
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                Some(Box::new(MessagePanel::new(messages)))
             }
             OverlayKind::ModelPanel => {
                 use crate::components::overlays::model::ModelPanelTab;
@@ -1166,8 +1449,15 @@ impl App {
                 use crate::components::overlays::session::SessionViewMode;
                 let store = self.runtime.session_manager().store();
                 let sessions = store.list_sessions(1000, 0).unwrap_or_default();
-                // TODO: get real current_session_id from ChatContext (Phase 6)
-                let current_session_id = uuid::Uuid::nil();
+                let current_session_id = self
+                    .current_session_id
+                    .or_else(|| {
+                        self.message_list
+                            .as_ref()
+                            .and_then(|ml| ml.chat_context.as_ref())
+                            .map(|ctx| ctx.session_id)
+                    })
+                    .unwrap_or(uuid::Uuid::nil());
                 Some(Box::new(SessionPanel::new(
                     sessions,
                     SessionViewMode::CurrentWorkspace,
@@ -1285,6 +1575,8 @@ impl App {
                 palette,
                 focused: self.overlays.is_empty(),
                 chat_context: None,
+                mode: self.mode,
+                pending_mode: self.pending_mode,
             };
             chat.draw(frame, content_area, &draw_ctx);
         } else if self.overlays.is_empty() {
@@ -1333,25 +1625,58 @@ impl App {
                 palette,
                 focused: self.overlays.is_empty(),
                 chat_context: None,
+                mode: self.mode,
+                pending_mode: self.pending_mode,
             };
             composer.draw(frame, composer_area, &draw_ctx);
         }
 
-        // Build DrawContext
+        // Build DrawContext for overlays
         let draw_ctx = DrawContext {
             palette,
             focused: true,
             chat_context: None,
+            mode: self.mode,
+            pending_mode: self.pending_mode,
         };
 
         // Draw overlays
         self.overlays.draw(frame, area, &draw_ctx);
 
-        // ── Status notice (last_notice) ──
-        if let Some((msg, _)) = &self.last_notice {
+        // ── Status notice (last_notice) with token usage ──
+        let notice_text = if let Some(ref usage) = self.context_usage {
+            // Format: "notice · 45.2% (12K/26K)"
+            let max_context = self
+                .runtime
+                .active_model()
+                .context_window;
+            let total = usage.input_tokens as u64 + usage.output_tokens as u64;
+            let pct = if max_context > 0 {
+                (total as f64 / max_context as f64 * 100.0).min(100.0)
+            } else {
+                0.0
+            };
+            let used_k = usage.input_tokens / 1000;
+            let max_k = (max_context as u32) / 1000;
+            let token_part = format!("{pct:.1}% ({used_k}K/{max_k}K)");
+
+            match &self.last_notice {
+                Some((msg, _)) if !msg.is_empty() => {
+                    format!("{msg} · {token_part}")
+                }
+                _ => token_part,
+            }
+        } else {
+            self.last_notice
+                .as_ref()
+                .map(|(msg, _)| msg.clone())
+                .unwrap_or_default()
+        };
+
+        if !notice_text.is_empty() {
             frame.render_widget(
                 Paragraph::new(Line::from(Span::styled(
-                    msg.as_str(),
+                    &notice_text,
                     Style::default().fg(palette.muted),
                 )))
                 .style(Style::default().bg(palette.background)),

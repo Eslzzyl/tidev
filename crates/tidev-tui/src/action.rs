@@ -9,6 +9,7 @@ use anyhow::Result;
 use uuid::Uuid;
 
 use tidev_types::message::MessageAttachment;
+use tidev_types::prompts::SessionMode;
 use tidev_tui_old::theme::ThemeName;
 
 /// Panel action identifiers (launcher target).
@@ -55,6 +56,12 @@ pub(crate) enum SessionAction {
     Redo,
     Compact,
     ExportBatch(Vec<Uuid>),
+    /// Switch session mode (Build/Plan) immediately.
+    SetMode(SessionMode),
+    /// Deferred mode switch (applied on next Finished with no tool calls).
+    SetPendingMode(Option<SessionMode>),
+    /// Cycle thinking level (Shift+Tab / Ctrl+T).
+    CycleThinkingLevel,
     /// Reload session list from store (after view mode change).
     Reload,
     /// Async result from a session load operation.

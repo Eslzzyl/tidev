@@ -114,6 +114,13 @@ impl MessageLayoutIndex {
         false
     }
 
+    /// Invalidate the entire index (forces a full rebuild on next render).
+    /// Used when window width changes.
+    pub fn invalidate_all(&mut self) {
+        self.valid = false;
+        self.dirty_messages.clear();
+    }
+
     /// Mark a message's block as needing recomputation (content-only change).
     pub fn mark_dirty(&mut self, message_id: Uuid) {
         if !self.dirty_messages.contains(&message_id) {

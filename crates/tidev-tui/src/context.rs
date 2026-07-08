@@ -4,6 +4,7 @@ use std::path::Path;
 
 use tidev_tui_old::chat_context::ChatContext;
 use tidev_tui_old::theme::ThemePalette;
+use tidev_types::prompts::SessionMode;
 
 /// Immutable resources passed to every component during initialisation.
 pub(crate) struct InitContext<'a> {
@@ -17,6 +18,10 @@ pub(crate) struct DrawContext<'a> {
     pub palette: ThemePalette,
     pub focused: bool,
     pub chat_context: Option<&'a ChatContext>,
+    /// Current session mode (Build/Plan).
+    pub mode: SessionMode,
+    /// Pending mode switch (shown as "Build → Plan").
+    pub pending_mode: Option<SessionMode>,
 }
 
 /// Mutable resources provided during action processing.
