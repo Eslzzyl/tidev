@@ -13,9 +13,9 @@ use ratatui::widgets::{Block, Paragraph, Wrap};
 use tidev_core::FileDiff;
 use tidev_types::prompts::SessionMode;
 use tidev_types::tools::TodoItem;
-use tidev_tui_old::chat_context::ChatContext;
-use tidev_tui_old::theme::ThemePalette;
-use tidev_tui_old::utils::{TokenUsage, format_token_count};
+use crate::chat_context::ChatContext;
+use crate::theme::ThemePalette;
+use crate::utils::{TokenUsage, format_token_count};
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::ContextUsage;

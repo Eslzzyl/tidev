@@ -10,7 +10,7 @@ use ratatui::layout::Rect;
 use ratatui::Frame;
 use anyhow::Result;
 use lru::LruCache;
-use tidev_tui_old::chat_context::ChatContext;
+use crate::chat_context::ChatContext;
 use uuid::Uuid;
 use tidev_types::message::BackendEvent;
 

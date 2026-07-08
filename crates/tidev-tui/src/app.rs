@@ -17,7 +17,7 @@ use tidev_core::TuiResponse;
 use tidev_types::agent_type::AgentType;
 use tidev_types::message::{BackendEvent, MessageAttachment, MessageRole, ToolExecutionResult};
 use tidev_types::tools::QuestionArgs;
-use tidev_tui_old::theme::{ThemeName, ThemePalette};
+use crate::theme::{ThemeName, ThemePalette};
 use tidev_types::prompts::SessionMode;
 use tidev_types::reasoning::ThinkingLevelType;
 use tidev_types::tools::TodoItem;
@@ -1143,7 +1143,7 @@ impl App {
                             .unwrap_or_default();
                         let workspace_root = self.runtime.workspace_root().to_string_lossy().to_string();
 
-                        let mut ctx = tidev_tui_old::chat_context::ChatContext::new(
+                        let mut ctx = crate::chat_context::ChatContext::new(
                             session_id,
                             String::new(),
                             workspace_root,

@@ -10,7 +10,7 @@ use ratatui::prelude::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use tidev_types::message::{Message, MessageRole, ToolCall};
 use tidev_types::tools::{canonical_tool_name, TaskArgs};
-use tidev_tui_old::theme::ThemePalette;
+use crate::theme::ThemePalette;
 
 use crate::ansi::ansi_to_styled_line;
 use crate::components::chat::render::RenderContext;

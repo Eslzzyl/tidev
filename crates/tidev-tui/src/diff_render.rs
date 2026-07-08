@@ -8,7 +8,7 @@ use std::path::Path;
 use diffy::{Line as DiffLine, Patch};
 use ratatui::prelude::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use tidev_tui_old::theme::{ThemeName, ThemePalette};
+use crate::theme::{ThemeName, ThemePalette};
 use unicode_width::UnicodeWidthStr;
 
 use crate::components::chat::render_cache::SelectableRegionRange;

@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use tidev_types::message::MessageAttachment;
 use tidev_types::prompts::SessionMode;
-use tidev_tui_old::theme::ThemeName;
+use crate::theme::ThemeName;
 
 /// Panel action identifiers (launcher target).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

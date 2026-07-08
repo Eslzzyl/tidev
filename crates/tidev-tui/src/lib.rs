@@ -5,6 +5,7 @@
 pub(crate) mod action;
 pub(crate) mod ansi;
 pub mod app;
+pub(crate) mod chat_context;
 pub(crate) mod component;
 pub(crate) mod components;
 pub(crate) mod context;
@@ -12,6 +13,7 @@ pub(crate) mod diff_render;
 pub(crate) mod editor;
 pub(crate) mod utils;
 mod markdown;
+pub(crate) mod theme;
 pub mod tui;
 
 /// Run the TUI application (blocking). Called from the binary entry point.

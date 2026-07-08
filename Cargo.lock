@@ -3766,7 +3766,6 @@ dependencies = [
  "tidev-core",
  "tidev-search",
  "tidev-tools",
- "tidev-tui-old",
  "tidev-types",
  "tokio",
  "two-face",

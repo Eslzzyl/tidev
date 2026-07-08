@@ -14,8 +14,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
 use rayon::prelude::*;
 use tidev_types::message::{Message, MessageRole};
-use tidev_tui_old::chat_context::ChatContext;
-use tidev_tui_old::theme::ThemePalette;
+use crate::chat_context::ChatContext;
+use crate::theme::ThemePalette;
 use uuid::Uuid;
 
 use crate::components::chat::layout_index::{MessageBlock, MessageLayoutIndex};
