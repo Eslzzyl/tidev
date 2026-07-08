@@ -8,7 +8,7 @@
 //! - Metadata row (mode label + model name)
 //! - Inline popups above the input area (command palette, @-mention, snippet)
 
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::{Constraint, Layout, Position, Rect};
 use ratatui::prelude::{Color, Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, List, ListItem, ListState, Paragraph};
@@ -380,7 +380,7 @@ pub(crate) fn draw_composer(
     }
 
     // ── Cursor positioning ───────────────────────────────────────────
-    if text_area.width > 0 && text_area.height > 0 {
+    if ctx.focused && text_area.width > 0 && text_area.height > 0 {
         let (cursor_line, cursor_col) = composer.cursor_position(text_area.width);
         let mut cursor_line = cursor_line.saturating_sub(composer.input_scroll_offset as u16);
         let mut cursor_col = cursor_col;
@@ -395,7 +395,7 @@ pub(crate) fn draw_composer(
             .y
             .saturating_add(cursor_line.min(text_area.height.saturating_sub(1)));
 
-        frame.set_cursor(cursor_x, cursor_y);
+        frame.set_cursor_position(Position::new(cursor_x, cursor_y));
     }
 }
 

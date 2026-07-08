@@ -15,6 +15,7 @@ use tidev_types::prompts::SessionMode;
 use crate::utils::shorten;
 use uuid::Uuid;
 
+use unicode_width::UnicodeWidthStr;
 use crate::action::{Action, ChatAction, OverlayAction, OverlayKind};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
@@ -307,18 +308,19 @@ impl Component for MessagePanel {
 
         // ── Search input ──
         let input_style = Style::default().bg(palette.panel_alt);
+        let prefix = " Search user messages: ";
         frame.render_widget(
             Paragraph::new(Line::from(vec![
-                Span::styled(
-                    " Search user messages: ",
-                    Style::default().fg(palette.muted),
-                ),
+                Span::styled(prefix, Style::default().fg(palette.muted)),
                 Span::styled(&self.query, Style::default().fg(palette.text)),
-                Span::styled("▎", Style::default().fg(palette.accent)),
             ]))
             .style(input_style),
             sections[2],
         );
+        frame.set_cursor_position((
+            sections[2].x + prefix.width() as u16 + self.query.as_str().width() as u16,
+            sections[2].y,
+        ));
 
         // ── Message list ──
         let matches = self.matching_indices();

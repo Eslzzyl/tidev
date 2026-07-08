@@ -6,6 +6,7 @@ use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
+use unicode_width::UnicodeWidthStr;
 use uuid::Uuid;
 
 use crate::action::{Action, OverlayAction, OverlayKind, SessionAction};
@@ -170,6 +171,10 @@ impl Component for RenameDialog {
                 .wrap(Wrap { trim: false }),
             sections[4],
         );
+        let text_w = UnicodeWidthStr::width(input_text) as u16;
+        let col = text_w % sections[4].width;
+        let row = text_w / sections[4].width;
+        frame.set_cursor_position((sections[4].x + col, sections[4].y + row));
 
         // Bottom hint
         frame.render_widget(

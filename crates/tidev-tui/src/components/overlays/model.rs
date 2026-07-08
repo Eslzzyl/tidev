@@ -13,6 +13,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, List, ListItem, Paragraph};
 use tidev_config::auth::{ActiveModel, ModelSummary};
 
+use unicode_width::UnicodeWidthStr;
 use crate::action::{Action, OverlayAction, OverlayKind};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
@@ -657,18 +658,19 @@ impl Component for ModelPanel {
 
         // ── Search box ──
         let search_style = Style::default().bg(palette.panel_alt);
+        let prefix = " Search models: ";
         frame.render_widget(
             Paragraph::new(Line::from(vec![
-                Span::styled(
-                    " Search models: ",
-                    Style::default().fg(palette.muted),
-                ),
+                Span::styled(prefix, Style::default().fg(palette.muted)),
                 Span::styled(&self.query, Style::default().fg(palette.text)),
-                Span::styled("▎", Style::default().fg(palette.accent)),
             ]))
             .style(search_style),
             sections[3],
         );
+        frame.set_cursor_position((
+            sections[3].x + prefix.width() as u16 + self.query.as_str().width() as u16,
+            sections[3].y,
+        ));
 
         // ── Model list ──
         let items = &self.items_cache;

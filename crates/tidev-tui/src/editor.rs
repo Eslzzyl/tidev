@@ -152,24 +152,44 @@ impl Drop for TempEditFile {
 // Suspend / resume helpers
 // ---------------------------------------------------------------------------
 
-/// Suspend the TUI: leave alternate screen, disable raw mode, so the editor
-/// can take over the terminal.
+/// Suspend the TUI: leave alternate screen, disable raw mode, show cursor, so
+/// the editor can take over the terminal.
 pub fn suspend_tui() -> anyhow::Result<()> {
-    use crossterm::terminal::{disable_raw_mode, LeaveAlternateScreen};
+    use crossterm::cursor::Show;
+    use crossterm::event::{DisableBracketedPaste, DisableFocusChange, DisableMouseCapture};
+    use crossterm::terminal::{DisableLineWrap, LeaveAlternateScreen, disable_raw_mode};
     use crossterm::execute;
-    execute!(std::io::stdout(), LeaveAlternateScreen)
-        .context("failed to leave alternate screen")?;
+    execute!(
+        std::io::stdout(),
+        LeaveAlternateScreen,
+        DisableLineWrap,
+        DisableBracketedPaste,
+        DisableFocusChange,
+        DisableMouseCapture,
+        Show,
+    )
+    .context("failed to leave alternate screen")?;
     disable_raw_mode().context("failed to disable raw mode")?;
     Ok(())
 }
 
-/// Resume the TUI: enable raw mode, enter alternate screen.
+/// Resume the TUI: enable raw mode, enter alternate screen, hide cursor.
 pub fn resume_tui() -> anyhow::Result<()> {
-    use crossterm::terminal::{enable_raw_mode, EnterAlternateScreen};
+    use crossterm::cursor::Hide;
+    use crossterm::event::{EnableBracketedPaste, EnableFocusChange, EnableMouseCapture};
+    use crossterm::terminal::{EnableLineWrap, EnterAlternateScreen, enable_raw_mode};
     use crossterm::execute;
     enable_raw_mode().context("failed to enable raw mode")?;
-    execute!(std::io::stdout(), EnterAlternateScreen)
-        .context("failed to enter alternate screen")?;
+    execute!(
+        std::io::stdout(),
+        EnterAlternateScreen,
+        EnableLineWrap,
+        EnableBracketedPaste,
+        EnableFocusChange,
+        EnableMouseCapture,
+        Hide,
+    )
+    .context("failed to enter alternate screen")?;
     Ok(())
 }
 

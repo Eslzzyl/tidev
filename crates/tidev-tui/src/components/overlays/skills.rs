@@ -8,6 +8,7 @@ use ratatui::layout::{Constraint, Layout, Margin, Position, Rect};
 use ratatui::prelude::{Frame, Modifier, Style, Text};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph};
+use unicode_width::UnicodeWidthStr;
 
 use crate::action::{Action, ChatAction, OverlayAction, OverlayKind};
 use crate::component::Component;
@@ -270,7 +271,7 @@ impl Component for SkillsPanel {
 
         // ── Left Pane: List ──
         let filter_text = if self.query_active {
-            format!("  Search: {}█", self.query)
+            format!("  Search: {}", self.query)
         } else if self.query.is_empty() {
             "  Search... (/)".to_string()
         } else {
@@ -286,6 +287,12 @@ impl Component for SkillsPanel {
                 .style(Style::default().bg(palette.panel_alt)),
             Rect::new(left_area.x, left_area.y, left_area.width, 1),
         );
+        if self.query_active {
+            frame.set_cursor_position((
+                left_area.x + 11 + self.query.as_str().width() as u16,
+                left_area.y,
+            ));
+        }
 
         let list_header_height = 1u16;
         let list_content_y = left_area.y + list_header_height;

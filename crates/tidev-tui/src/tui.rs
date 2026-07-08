@@ -7,6 +7,7 @@
 use std::io;
 
 use anyhow::Result;
+use crossterm::cursor::{Show, self as cursor};
 use crossterm::event::{DisableBracketedPaste, DisableFocusChange, DisableMouseCapture,
     EnableBracketedPaste, EnableFocusChange, EnableMouseCapture, Event, EventStream};
 use crossterm::terminal::{DisableLineWrap, EnableLineWrap, EnterAlternateScreen,
@@ -32,6 +33,7 @@ impl Tui {
             EnableBracketedPaste,
             EnableFocusChange,
             EnableMouseCapture,
+            cursor::Hide,
         )?;
         let backend = CrosstermBackend::new(stdout);
         let terminal = Terminal::new(backend)?;
@@ -88,7 +90,12 @@ impl Tui {
             self.terminal.draw(|frame| app.draw(frame))?;
         }
 
-        // Cleanup
+        Ok(())
+    }
+}
+
+impl Drop for Tui {
+    fn drop(&mut self) {
         let _ = disable_raw_mode();
         let _ = execute!(
             self.terminal.backend_mut(),
@@ -97,8 +104,7 @@ impl Tui {
             DisableBracketedPaste,
             DisableFocusChange,
             DisableMouseCapture,
+            Show,
         );
-
-        Ok(())
     }
 }

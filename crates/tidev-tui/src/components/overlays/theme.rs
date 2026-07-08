@@ -6,6 +6,7 @@ use ratatui::layout::{Constraint, Layout, Margin, Position, Rect};
 use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph};
+use unicode_width::UnicodeWidthStr;
 use crate::theme::ThemeName;
 
 use crate::action::{Action, OverlayAction, OverlayKind, ThemeAction};
@@ -284,6 +285,12 @@ impl Component for ThemePanel {
                 .style(Style::default().bg(palette.panel_alt)),
             Rect::new(inner.x, inner.y + 1, inner.width, 1),
         );
+        if !self.query.is_empty() {
+            frame.set_cursor_position((
+                inner.x + 2 + self.query.as_str().width() as u16,
+                inner.y + 1,
+            ));
+        }
 
         let divider_y = inner.y + 2;
         frame.render_widget(

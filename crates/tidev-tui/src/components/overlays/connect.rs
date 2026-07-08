@@ -8,6 +8,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
 use tidev_config::provider::ProviderSource;
 
+use unicode_width::UnicodeWidthStr;
 use crate::action::{Action, ConnectAction, OverlayAction, OverlayKind};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
@@ -333,6 +334,10 @@ impl Component for ConnectDialog {
                     .style(Style::default().bg(palette.panel_alt)),
                     sections[0],
                 );
+                frame.set_cursor_position((
+                    sections[0].x + 2 + self.query.as_str().width() as u16,
+                    sections[0].y,
+                ));
 
                 // Hint
                 frame.render_widget(
@@ -443,6 +448,10 @@ impl Component for ConnectDialog {
                     .wrap(Wrap { trim: false }),
                     sections[1],
                 );
+                frame.set_cursor_position((
+                    sections[1].x + 5 + buffer.as_str().width() as u16,
+                    sections[1].y,
+                ));
 
                 // Help
                 frame.render_widget(

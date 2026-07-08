@@ -4,10 +4,11 @@
 //! launcher and opens the chosen panel.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use ratatui::layout::{Constraint, Layout, Margin, Rect};
+use ratatui::layout::{Margin, Rect};
 use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, List, ListItem, ListState, Paragraph};
+use unicode_width::UnicodeWidthStr;
 use anyhow::Result;
 
 use crate::action::{Action, OverlayAction, OverlayKind, PanelAction};
@@ -220,6 +221,12 @@ impl Component for PanelLauncher {
             .style(Style::default().bg(palette.panel_alt)),
             Rect::new(inner.x, inner.y, inner.width, 1),
         );
+        if !self.query.is_empty() {
+            frame.set_cursor_position((
+                inner.x + 2 + self.query.as_str().width() as u16,
+                inner.y,
+            ));
+        }
 
         // Divider
         let divider_y = inner.y + 1;

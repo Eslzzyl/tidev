@@ -15,6 +15,7 @@ use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Cell, Clear, Paragraph, Row, Table, TableState};
 use tidev_core::SessionRecord;
+use unicode_width::UnicodeWidthStr;
 use crate::utils::shorten;
 use uuid::Uuid;
 
@@ -615,18 +616,19 @@ impl Component for SessionPanel {
 
         // Search input
         let input_style = Style::default().bg(palette.panel_alt);
+        let prefix = " Search sessions: ";
         frame.render_widget(
             Paragraph::new(Line::from(vec![
-                Span::styled(
-                    " Search sessions: ",
-                    Style::default().fg(palette.muted),
-                ),
+                Span::styled(prefix, Style::default().fg(palette.muted)),
                 Span::styled(&self.query, Style::default().fg(palette.text)),
-                Span::styled("▎", Style::default().fg(palette.accent)),
             ]))
             .style(input_style),
             sections[2],
         );
+        frame.set_cursor_position((
+            sections[2].x + UnicodeWidthStr::width(prefix) as u16 + self.query.as_str().width() as u16,
+            sections[2].y,
+        ));
 
         // Session list
         let matches = self.matching_indices();
