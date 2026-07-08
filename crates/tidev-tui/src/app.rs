@@ -20,6 +20,7 @@ use tidev_types::tools::QuestionArgs;
 use tidev_tui_old::theme::{ThemeName, ThemePalette};
 use tidev_types::prompts::SessionMode;
 use tidev_types::reasoning::ThinkingLevelType;
+use tidev_types::tools::{QuestionArgs, TodoItem};
 use uuid::Uuid;
 
 use crate::action::{Action, BoundaryDecision, ChatAction, ConnectAction, OverlayAction,
@@ -47,6 +48,7 @@ use crate::components::overlays::undo::UndoConfirmDialog;
 use crate::components::overlays::workspace::WorkspaceBoundaryDialog;
 use crate::components::chat::MessageList;
 use crate::components::composer::Composer;
+use crate::components::sidebar::Sidebar;
 use crate::context::{DrawContext, UpdateContext};
 use crate::utils::strip_system_reminder_tags;
 
@@ -91,6 +93,15 @@ pub struct App {
 
     /// Text input composer.
     pub(crate) composer: Option<Composer>,
+
+    /// Right-hand info sidebar.
+    sidebar: Sidebar,
+
+    /// Cached sidebar area for mouse hit-testing.
+    sidebar_area: Option<Rect>,
+
+    /// Current session's todo items (loaded from store).
+    todos: Vec<TodoItem>,
 
     // ── Tool approval pipeline ──
 
@@ -153,6 +164,9 @@ impl App {
             sensitive_permissions: HashMap::new(),
             context_usage: None,
             message_list: None,
+            sidebar: Sidebar::new(),
+            sidebar_area: None,
+            todos: Vec::new(),
             composer: {
                 let mut c = Composer::new("Ask tidev...");
                 c.set_file_search_index(file_index);
@@ -683,8 +697,27 @@ impl App {
 
     pub fn handle_mouse_event(&mut self, mouse: MouseEvent) {
         use crossterm::event::MouseEventKind;
+        use crossterm::event::MouseButton;
+
+        // Sidebar scroll (scroll events in the sidebar area)
+        if let Some(sidebar_area) = self.sidebar_area {
+            let position = ratatui::layout::Position::new(mouse.column, mouse.row);
+            if sidebar_area.contains(position) {
+                match mouse.kind {
+                    MouseEventKind::ScrollDown => {
+                        self.sidebar.scroll_down(3);
+                    }
+                    MouseEventKind::ScrollUp => {
+                        self.sidebar.scroll_up(3);
+                    }
+                    _ => {}
+                }
+                return;
+            }
+        }
+
         // MessageList click-to-expand or subsession navigation
-        if let MouseEventKind::Down(crossterm::event::MouseButton::Left) = mouse.kind {
+        if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
             if let Some(ref mut chat) = self.message_list {
                 if let Some(action) = chat.handle_mouse_click(mouse.column, mouse.row) {
                     self.process_action(action);
@@ -698,6 +731,7 @@ impl App {
         if let Some(ref mut chat) = self.message_list {
             chat.invalidate_layout();
         }
+        self.sidebar_area = None;
     }
 
     /// Global shortcuts that work regardless of overlay state.
@@ -1540,13 +1574,32 @@ impl App {
             area,
         );
 
+        // Determine sidebar visibility and split the layout.
+        // Use the same threshold as the old TUI.
+        const SIDEBAR_GAP: u16 = 2;
+        let sidebar_width = self.runtime.config().ui.sidebar_width;
+        let sidebar_visible = area.width
+            >= sidebar_width.saturating_add(70).saturating_add(SIDEBAR_GAP);
+        let (main_area, sidebar_area) = if sidebar_visible {
+            let split = ratatui::layout::Layout::horizontal([
+                ratatui::layout::Constraint::Min(20),
+                ratatui::layout::Constraint::Length(SIDEBAR_GAP),
+                ratatui::layout::Constraint::Length(sidebar_width),
+            ])
+            .split(area);
+            (split[0], Some(split[2]))
+        } else {
+            self.sidebar_area = None;
+            (area, None)
+        };
+
         // Calculate composer height if present.
         let composer_height = self
             .composer
             .as_ref()
             .map(|c| {
-                let width = area.width.saturating_sub(4);
-                c.preferred_height(width, 6).min(area.height.saturating_sub(2))
+                let width = main_area.width.saturating_sub(4);
+                c.preferred_height(width, 6).min(main_area.height.saturating_sub(2))
             })
             .unwrap_or(0);
 
@@ -1558,14 +1611,14 @@ impl App {
                 ratatui::layout::Constraint::Length(composer_height),
                 ratatui::layout::Constraint::Length(notice_height),
             ])
-            .split(area);
+            .split(main_area);
             (split[0], split[2])
         } else {
             let split = ratatui::layout::Layout::vertical([
                 ratatui::layout::Constraint::Min(1),
                 ratatui::layout::Constraint::Length(notice_height),
             ])
-            .split(area);
+            .split(main_area);
             (split[0], split[1])
         };
 
@@ -1616,9 +1669,9 @@ impl App {
         // Rendered above the notice line, below the message area.
         if let Some(ref mut composer) = self.composer {
             let composer_area = Rect {
-                x: area.x,
-                y: area.bottom().saturating_sub(composer_height + notice_height),
-                width: area.width,
+                x: main_area.x,
+                y: main_area.bottom().saturating_sub(composer_height + notice_height),
+                width: main_area.width,
                 height: composer_height,
             };
             let draw_ctx = DrawContext {
@@ -1642,6 +1695,26 @@ impl App {
 
         // Draw overlays
         self.overlays.draw(frame, area, &draw_ctx);
+
+        // ── Sidebar ───────────────────────────────────────────────────
+        if let Some(sidebar_area) = sidebar_area {
+            self.sidebar_area = Some(sidebar_area);
+            let chat_ctx = self
+                .message_list
+                .as_ref()
+                .and_then(|ml| ml.chat_context.as_ref());
+            self.sidebar.draw(
+                frame,
+                sidebar_area,
+                palette,
+                self.runtime.workspace_root(),
+                chat_ctx,
+                self.mode,
+                self.pending_mode,
+                self.context_usage.as_ref(),
+                &self.todos,
+            );
+        }
 
         // ── Status notice (last_notice) with token usage ──
         let notice_text = if let Some(ref usage) = self.context_usage {
@@ -1680,7 +1753,7 @@ impl App {
                     Style::default().fg(palette.muted),
                 )))
                 .style(Style::default().bg(palette.background)),
-                Rect::new(area.x + 1, notice_line.y, notice_line.width.saturating_sub(2), 1),
+                Rect::new(main_area.x + 1, notice_line.y, notice_line.width.saturating_sub(2), 1),
             );
         }
 
