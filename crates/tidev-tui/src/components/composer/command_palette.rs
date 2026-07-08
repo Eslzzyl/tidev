@@ -15,7 +15,7 @@
 
 use std::collections::HashMap;
 
-use crate::action::{Action, ConnectAction, OverlayAction, OverlayKind, SessionAction, ThemeAction};
+use crate::action::{Action, ChatAction, ConnectAction, OverlayAction, OverlayKind, SessionAction, ThemeAction};
 
 // ---------------------------------------------------------------------------
 // CommandAction
@@ -166,13 +166,13 @@ pub(crate) static COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "compact",
         aliases: &[],
-        description: "Compact the current session context (not available)",
+        description: "Compact the current session context to free space",
         action: CommandAction::Compact,
     },
     CommandSpec {
         name: "init",
         aliases: &[],
-        description: "Analyze project and create AGENTS.md (not available)",
+        description: "Analyze project and create AGENTS.md",
         action: CommandAction::Init,
     },
 ];
@@ -380,7 +380,7 @@ fn command_fragment(input: &str) -> Option<&str> {
 ///
 /// Called by the App when a `/command` text is submitted (not typed).
 /// Returns `None` if the command should be treated as a regular prompt.
-pub(crate) fn execute_command(name: &str, action: CommandAction, _args: &[String]) -> Vec<Action> {
+pub(crate) fn execute_command(name: &str, action: CommandAction, args: &[String]) -> Vec<Action> {
     match action {
         CommandAction::Connect => {
             vec![Action::Overlay(OverlayAction::Open(OverlayKind::ConnectDialog))]
@@ -424,12 +424,13 @@ pub(crate) fn execute_command(name: &str, action: CommandAction, _args: &[String
         CommandAction::Quit => {
             vec![Action::Quit]
         }
-        // Features not yet available — show a notice.
-        CommandAction::Compact | CommandAction::Init => {
-            vec![Action::Error(format!(
-                "/{} is not available in this version",
-                name
-            ))]
+        // Commands that need runtime access are handled by App.process_action.
+        CommandAction::Compact => {
+            vec![Action::Session(SessionAction::Compact)]
+        }
+        CommandAction::Init => {
+            let prompt = tidev_types::prompts::init_command_with_args(&args.join(" "));
+            vec![Action::Chat(ChatAction::SetInput(prompt))]
         }
     }
 }

@@ -8,9 +8,9 @@ pub mod app;
 pub(crate) mod component;
 pub(crate) mod components;
 pub(crate) mod context;
+pub(crate) mod diff_render;
 pub(crate) mod editor;
 pub(crate) mod utils;
-
 mod markdown;
 pub mod tui;
 

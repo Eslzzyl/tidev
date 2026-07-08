@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent};
 use ratatui::layout::{Alignment, Rect};
@@ -15,7 +15,7 @@ use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
 use tidev_core::{ApprovedTool, ToolCallWithViolations};
 use tidev_core::TuiResponse;
 use tidev_types::agent_type::AgentType;
-use tidev_types::message::{BackendEvent, MessageRole, ToolExecutionResult};
+use tidev_types::message::{BackendEvent, MessageAttachment, MessageRole, ToolExecutionResult};
 use tidev_types::tools::QuestionArgs;
 use tidev_tui_old::theme::{ThemeName, ThemePalette};
 use tidev_types::prompts::SessionMode;
@@ -49,6 +49,7 @@ use crate::components::overlays::workspace::WorkspaceBoundaryDialog;
 use crate::components::chat::MessageList;
 use crate::components::composer::Composer;
 use crate::components::sidebar::Sidebar;
+use crate::components::notification::NotificationState;
 use crate::components::selection::{MouseSelection, copy_to_clipboard};
 use crate::context::{DrawContext, UpdateContext};
 use crate::utils::strip_system_reminder_tags;
@@ -82,8 +83,8 @@ pub struct App {
     thinking_level: ThinkingLevelType,
     /// Status notice shown at the bottom of the screen (plain text, no timeout).
     last_notice: Option<(String, Instant)>,
-    /// Transient popup notification in top-right corner (auto-expires).
-    toast: Option<(String, Instant)>,
+    /// Transient popup notifications (auto-expire).
+    notifications: NotificationState,
     /// Receiver for tool permission requests from the agent loop.
     pub(crate) request_rx: Option<tokio::sync::mpsc::UnboundedReceiver<tidev_core::TuiRequest>>,
     /// Receiver for backend events (streaming deltas, tool results, etc.).
@@ -128,6 +129,22 @@ pub struct App {
 
     /// Token usage statistics from the last request (for status bar display).
     context_usage: Option<ContextUsage>,
+
+    /// Transient single-message toast popup (top-right corner, auto-expires).
+    toast: Option<(String, Instant)>,
+
+    /// Abort confirmation deadline (set on first Esc press, consumed on second).
+    abort_confirmation_deadline: Option<Instant>,
+
+    /// Queue of prompts waiting to be sent (when a request is already in progress).
+    pending_prompt_queue: Vec<QueuedPrompt>,
+}
+
+/// A prompt queued for submission when the current request finishes.
+#[derive(Clone, Debug)]
+struct QueuedPrompt {
+    prompt: String,
+    attachments: Vec<MessageAttachment>,
 }
 
 impl App {
@@ -157,7 +174,7 @@ impl App {
             pending_mode: None,
             thinking_level: thinking_level,
             last_notice: None,
-            toast: None,
+            notifications: NotificationState::new(),
             request_rx,
             event_rx,
             pending_response_tx: None,
@@ -167,6 +184,9 @@ impl App {
             boundary_permissions: HashMap::new(),
             sensitive_permissions: HashMap::new(),
             context_usage: None,
+            toast: None,
+            abort_confirmation_deadline: None,
+            pending_prompt_queue: Vec::new(),
             message_list: None,
             sidebar: Sidebar::new(),
             mouse_selection: MouseSelection::default(),
@@ -196,7 +216,73 @@ impl App {
 
     /// Set a transient toast notification (auto-expires after `duration`).
     pub(crate) fn set_toast(&mut self, msg: impl Into<String>, duration: std::time::Duration) {
-        self.toast = Some((msg.into(), Instant::now() + duration));
+        let msg = msg.into();
+        self.notifications.add(msg.clone(), duration);
+        self.toast = Some((msg, Instant::now() + duration));
+    }
+
+    /// Whether the app currently has an active request (streaming or pending tool approval).
+    fn has_active_request(&self) -> bool {
+        // Check if there are pending tools awaiting approval.
+        if !self.pending_tools.is_empty() {
+            return true;
+        }
+        // Check if the message list is currently streaming.
+        if let Some(ref chat) = self.message_list {
+            if chat.is_streaming() {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Abort the current request: cancel the agent loop, drop pending approvals,
+    /// and clear all pending state.
+    fn abort_current_request(&mut self) {
+        // Cancel the agent loop.
+        let runtime = self.runtime.clone();
+        tokio::spawn(async move {
+            runtime.cancel().await;
+        });
+
+        // Drop the pending response channel so the agent loop unblocks.
+        self.pending_response_tx = None;
+
+        // Clear pending tools and queued prompts.
+        self.pending_tools.clear();
+        self.tool_index = 0;
+        self.approved_tools.clear();
+        self.pending_prompt_queue.clear();
+
+        // Reset abort state.
+        self.abort_confirmation_deadline = None;
+
+        self.set_notice("Request cancelled");
+    }
+
+    /// Submit queued prompts now that the current request has finished.
+    fn flush_pending_prompt_queue(&mut self) {
+        while let Some(queued) = self.pending_prompt_queue.first() {
+            let text = queued.prompt.clone();
+            let attachments = queued.attachments.clone();
+            self.pending_prompt_queue.remove(0);
+
+            // Check if another request started while we were draining.
+            if self.has_active_request() {
+                break;
+            }
+
+            let Some(session_id) = self.current_session_id else { continue };
+            let rt = self.runtime.clone();
+            tokio::spawn(async move {
+                if let Err(e) = rt
+                    .submit_prompt_with_attachments(session_id, text, attachments)
+                    .await
+                {
+                    log::error!("flush queued prompt failed: {e}");
+                }
+            });
+        }
     }
 
     /// Open the composer content in an external editor. The TUI is suspended
@@ -328,6 +414,9 @@ impl App {
                         self.set_notice(format!("Mode switched to {}", self.mode.title()));
                     }
                 }
+
+                // Process any queued prompts now that the request finished.
+                self.flush_pending_prompt_queue();
             }
             BackendEvent::ContextCompacted { .. } => {
                 self.set_notice("Context compacted");
@@ -585,6 +674,20 @@ impl App {
     }
 
     pub fn handle_key_event(&mut self, key: KeyEvent) {
+        // 0. Abort confirmation: double-Esc to cancel current request.
+        if key.code == KeyCode::Esc && (self.has_active_request() || !self.pending_prompt_queue.is_empty()) {
+            if self.abort_confirmation_deadline
+                .is_some_and(|deadline| deadline > Instant::now())
+            {
+                self.abort_current_request();
+                return;
+            }
+            self.abort_confirmation_deadline = Some(Instant::now() + Duration::from_secs(3));
+            self.set_notice("Press Esc again within 3 seconds to stop the current request");
+            return;
+        }
+        self.abort_confirmation_deadline = None;
+
         // 0. Ctrl+C: clear input (overrides quit — Ctrl+D is the quit shortcut).
         if key.code == KeyCode::Char('c') && key.modifiers == KeyModifiers::CONTROL {
             if let Some(ref mut composer) = self.composer {
@@ -1213,6 +1316,34 @@ impl App {
                         }
                     });
                 }
+                Action::Session(SessionAction::Redo) => {
+                    let session_id = match self.current_session_id {
+                        Some(id) => id,
+                        None => return,
+                    };
+                    self.set_notice("Redo in progress...");
+                    let rt = self.runtime.clone();
+                    tokio::spawn(async move {
+                        // Runtime redo uses the undo method with a flag internally.
+                        if let Err(e) = rt.undo(session_id).await {
+                            log::error!("Redo failed: {e}");
+                        }
+                    });
+                }
+                Action::Session(SessionAction::Compact) => {
+                    let session_id = match self.current_session_id {
+                        Some(id) => id,
+                        None => return,
+                    };
+                    self.set_notice("Compacting session context...");
+                    let mode = self.mode;
+                    let rt = self.runtime.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = rt.compact_session(session_id, mode, None).await {
+                            log::error!("Compact failed: {e}");
+                        }
+                    });
+                }
                 Action::Session(SessionAction::Rename(session_id, title)) => {
                     let final_title = if title.trim().is_empty() {
                         "Untitled session"
@@ -1298,6 +1429,20 @@ impl App {
                             // Append any already-built attachments (images, files from
                             // composer spans).
                             final_attachments.extend(attachments);
+
+                            // If there's already an active request, queue the prompt.
+                            if self.has_active_request() {
+                                self.pending_prompt_queue.push(QueuedPrompt {
+                                    prompt: text.clone(),
+                                    attachments: final_attachments.clone(),
+                                });
+                                let queued_count = self.pending_prompt_queue.len();
+                                self.set_notice(format!(
+                                    "Prompt queued ({} pending)",
+                                    queued_count
+                                ));
+                                return;
+                            }
 
                             // If no active session, create one.
                             let session_id = self.current_session_id;

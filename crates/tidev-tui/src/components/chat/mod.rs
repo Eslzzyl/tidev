@@ -650,6 +650,11 @@ impl MessageList {
     pub fn is_scrollbar_dragging(&self) -> bool {
         self.scrollbar_drag.is_some()
     }
+
+    /// Whether the message list is currently receiving streaming content.
+    pub fn is_streaming(&self) -> bool {
+        self.streaming_buffer.is_streaming
+    }
 }
 
 // ---------------------------------------------------------------------------

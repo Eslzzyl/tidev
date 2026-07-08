@@ -3746,6 +3746,7 @@ dependencies = [
  "blake3",
  "chrono",
  "crossterm 0.28.1",
+ "diffy",
  "dirs",
  "futures",
  "image",

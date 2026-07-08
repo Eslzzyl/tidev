@@ -15,6 +15,7 @@ use tidev_tui_old::theme::ThemePalette;
 use crate::ansi::ansi_to_styled_line;
 use crate::components::chat::render::RenderContext;
 use crate::components::chat::render_cache::SelectableRegionRange;
+use crate::diff_render::render_unified_diff_text;
 use crate::markdown;
 
 // ---------------------------------------------------------------------------
@@ -144,8 +145,53 @@ pub(crate) fn render_tool_call_with_result(
     if let Some(result_msg) = tool_result {
         let output = &result_msg.content;
         let has_ansi = output.contains('\x1b');
-        if is_expanded {
-            // Full output (with ANSI if present)
+
+        // Try diff rendering for write/edit/apply_patch tools.
+        let is_diff_candidate = matches!(canonical_name, "edit" | "write" | "apply_patch");
+        if is_expanded && is_diff_candidate && !has_ansi {
+            // Try rendering as a unified diff first.
+            if let Some((diff_lines, diff_regions)) =
+                render_unified_diff_text(output, body_width.saturating_sub(2), palette, 4)
+            {
+                let start_line = lines.len();
+                for dl in &diff_lines {
+                    lines.push(dl.clone());
+                }
+                for mut r in diff_regions {
+                    r.start_line += start_line;
+                    r.end_line += start_line;
+                    regions.push(r);
+                }
+                // Also track the entire diff as a selectable region.
+                regions.push(SelectableRegionRange {
+                    start_line,
+                    end_line: lines.len(),
+                    min_x: 2,
+                    max_x: None,
+                });
+            } else {
+                // Fallback to plain text.
+                let default_style = Style::default().fg(palette.text);
+                let output_lines = if has_ansi {
+                    ansi_to_styled_line(output, default_style)
+                } else {
+                    output.lines().map(|l| Line::from(Span::styled(
+                        format!("  {}", l), default_style,
+                    ))).collect()
+                };
+                let start_line = lines.len();
+                for ol in &output_lines {
+                    lines.push(ol.clone());
+                }
+                regions.push(SelectableRegionRange {
+                    start_line,
+                    end_line: lines.len(),
+                    min_x: 2,
+                    max_x: None,
+                });
+            }
+        } else if is_expanded {
+            // Full output (with ANSI if present) for non-diff-candidate tools.
             let default_style = Style::default().fg(palette.text);
             let output_lines = if has_ansi {
                 ansi_to_styled_line(output, default_style)
@@ -158,7 +204,6 @@ pub(crate) fn render_tool_call_with_result(
             for ol in &output_lines {
                 lines.push(ol.clone());
             }
-            // Track selectable region
             regions.push(SelectableRegionRange {
                 start_line,
                 end_line: lines.len(),
