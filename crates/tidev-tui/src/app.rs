@@ -233,15 +233,15 @@ impl App {
 
     /// Whether the app currently has an active request (streaming or pending tool approval).
     fn has_active_request(&self) -> bool {
-        // Check if there are pending tools awaiting approval.
-        if !self.pending_tools.is_empty() {
+        // The Runtime is the single source of truth for agent-loop liveness.
+        if self.runtime.is_busy() {
             return true;
         }
-        // Check if the message list is currently streaming.
-        if let Some(ref chat) = self.message_list {
-            if chat.is_streaming() {
-                return true;
-            }
+        // Local UI supplement — pending tool approval dialogs.  The Runtime
+        // will also be blocked waiting for approval, but there's a tiny
+        // window between receiving the request and blocking the loop.
+        if !self.pending_tools.is_empty() {
+            return true;
         }
         false
     }
@@ -1135,6 +1135,11 @@ impl App {
                     }
                 }
                 Action::Session(SessionAction::Select(session_id)) => {
+                    // Ignore if already on this session
+                    if self.current_session_id == Some(session_id) {
+                        return;
+                    }
+
                     // Switch to the selected session
                     self.current_session_id = Some(session_id);
                     self.scroll_target = None;
@@ -1146,6 +1151,17 @@ impl App {
                         .session_manager()
                         .load_messages(session_id)
                         .unwrap_or_default();
+
+                    // Only restart the agent loop when the last message is a
+                    // Tool result that needs to be processed (e.g. a subagent
+                    // completed while the loop wasn't running).  In all other
+                    // cases — completed assistant turn, user message awaiting
+                    // input, etc. — the loop stays off until the user submits
+                    // something new, matching the old v0.6.x behaviour.
+                    let has_pending_tool = messages
+                        .last()
+                        .map(|m| m.role == MessageRole::Tool)
+                        .unwrap_or(false);
 
                     let chat_context = {
                         let config = self.runtime.config();
@@ -1188,13 +1204,14 @@ impl App {
 
                     log::info!("Switching to session: {} ({})", session_title, session_id);
 
-                    // Continue the agent loop if the session has pending work
-                    let rt = self.runtime.clone();
-                    tokio::spawn(async move {
-                        if let Err(e) = rt.continue_session(session_id).await {
-                            log::error!("continue_session failed: {e}");
-                        }
-                    });
+                    if has_pending_tool {
+                        let rt = self.runtime.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = rt.continue_session(session_id).await {
+                                log::error!("continue_session failed: {e}");
+                            }
+                        });
+                    }
                 }
                 Action::Session(SessionAction::Reload) => {
                     // Broadcast to overlays so SessionPanel reloads its list.

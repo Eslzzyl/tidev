@@ -19,6 +19,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock, RwLock as StdRwLock};
 use std::time::{Duration, Instant};
 
@@ -114,6 +115,8 @@ pub struct Runtime {
 
     /// Currently running agent loop handle.
     run_loop_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    /// Synchronous busy flag (avoids awaiting the Mutex in async-free contexts).
+    loop_busy: Arc<AtomicBool>,
 
     /// Cancellation token for background cleanup tasks.
     cleanup_cancel: CancellationToken,
@@ -391,6 +394,15 @@ impl Runtime {
         self.start_agent_loop(session_id).await
     }
 
+    /// Quick synchronous check — is the agent loop active?
+    ///
+    /// Unlike `is_loop_running` (which needs `.await`) this can be called
+    /// from sync contexts (e.g. the TUI's action handler) with no risk of
+    /// deadlock or blocking.
+    pub fn is_busy(&self) -> bool {
+        self.loop_busy.load(Ordering::SeqCst)
+    }
+
     /// Check whether an agent loop is currently running.
     async fn is_loop_running(&self) -> bool {
         self.run_loop_handle.lock().await.is_some()
@@ -479,10 +491,16 @@ impl Runtime {
             cancel,
         };
 
+        self.loop_busy.store(true, Ordering::SeqCst);
+
+        let busy_flag = self.loop_busy.clone();
+        let handle_slot = self.run_loop_handle.clone();
         let join = tokio::spawn(async move {
             if let Err(e) = tidev_agent::run_agent_loop(&ctx, loop_config).await {
                 log::error!("agent loop for session {session_id} exited with error: {e}");
             }
+            busy_flag.store(false, Ordering::SeqCst);
+            *handle_slot.lock().await = None;
         });
 
         {
@@ -500,6 +518,8 @@ impl Runtime {
         if let Some(token) = self.active_loop_cancel.lock().await.take() {
             token.cancel();
         }
+
+        self.loop_busy.store(false, Ordering::SeqCst);
 
         // Give cooperative exit a brief window, then force-abort.
         let handle = self.run_loop_handle.lock().await.take();
@@ -974,6 +994,7 @@ impl RuntimeBuilder {
             request_tx,
             _request_rx: Arc::new(Mutex::new(Some(request_rx))),
             run_loop_handle: Arc::new(Mutex::new(None)),
+            loop_busy: Arc::new(AtomicBool::new(false)),
             cleanup_cancel,
             workspace_root,
             file_search_index: OnceLock::new(),
