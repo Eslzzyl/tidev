@@ -20,7 +20,7 @@ use tidev_types::tools::QuestionArgs;
 use tidev_tui_old::theme::{ThemeName, ThemePalette};
 use tidev_types::prompts::SessionMode;
 use tidev_types::reasoning::ThinkingLevelType;
-use tidev_types::tools::{QuestionArgs, TodoItem};
+use tidev_types::tools::TodoItem;
 use uuid::Uuid;
 
 use crate::action::{Action, BoundaryDecision, ChatAction, ConnectAction, OverlayAction,
@@ -49,6 +49,7 @@ use crate::components::overlays::workspace::WorkspaceBoundaryDialog;
 use crate::components::chat::MessageList;
 use crate::components::composer::Composer;
 use crate::components::sidebar::Sidebar;
+use crate::components::selection::{MouseSelection, copy_to_clipboard};
 use crate::context::{DrawContext, UpdateContext};
 use crate::utils::strip_system_reminder_tags;
 
@@ -96,6 +97,9 @@ pub struct App {
 
     /// Right-hand info sidebar.
     sidebar: Sidebar,
+
+    /// Mouse text selection state for the message area.
+    mouse_selection: MouseSelection,
 
     /// Cached sidebar area for mouse hit-testing.
     sidebar_area: Option<Rect>,
@@ -165,6 +169,7 @@ impl App {
             context_usage: None,
             message_list: None,
             sidebar: Sidebar::new(),
+            mouse_selection: MouseSelection::default(),
             sidebar_area: None,
             todos: Vec::new(),
             composer: {
@@ -699,9 +704,10 @@ impl App {
         use crossterm::event::MouseEventKind;
         use crossterm::event::MouseButton;
 
+        let position = ratatui::layout::Position::new(mouse.column, mouse.row);
+
         // Sidebar scroll (scroll events in the sidebar area)
         if let Some(sidebar_area) = self.sidebar_area {
-            let position = ratatui::layout::Position::new(mouse.column, mouse.row);
             if sidebar_area.contains(position) {
                 match mouse.kind {
                     MouseEventKind::ScrollDown => {
@@ -716,13 +722,63 @@ impl App {
             }
         }
 
-        // MessageList click-to-expand or subsession navigation
-        if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
-            if let Some(ref mut chat) = self.message_list {
-                if let Some(action) = chat.handle_mouse_click(mouse.column, mouse.row) {
-                    self.process_action(action);
+        // Determine the message content area bounds for selection clamping.
+        let msg_bounds = self
+            .message_list
+            .as_ref()
+            .and_then(|ml| ml.content_area);
+
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                // Start mouse selection if within message area.
+                if msg_bounds.map_or(false, |b| b.contains(position)) {
+                    let scroll_offset = self
+                        .message_list
+                        .as_ref()
+                        .map(|ml| ml.scroll_offset)
+                        .unwrap_or(0);
+                    self.mouse_selection.press(position, msg_bounds, scroll_offset);
+                    return;
+                }
+
+                // MessageList click-to-expand or subsession navigation (non-drag).
+                if let Some(ref mut chat) = self.message_list {
+                    if let Some(action) = chat.handle_mouse_click(mouse.column, mouse.row) {
+                        self.process_action(action);
+                    }
                 }
             }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                if self.mouse_selection.is_dragging() || msg_bounds.map_or(false, |b| b.contains(position)) {
+                    self.mouse_selection.drag(position);
+                }
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                let scroll_offset = self
+                    .message_list
+                    .as_ref()
+                    .map(|ml| ml.scroll_offset)
+                    .unwrap_or(0);
+                self.mouse_selection.release(position, scroll_offset);
+                // Clipboard copy is handled in draw() where we have access to the frame buffer.
+            }
+            MouseEventKind::ScrollDown => {
+                if let Some(ref mut chat) = self.message_list {
+                    chat.handle_key_event(crossterm::event::KeyEvent::new(
+                        crossterm::event::KeyCode::PageDown,
+                        crossterm::event::KeyModifiers::NONE,
+                    ));
+                }
+            }
+            MouseEventKind::ScrollUp => {
+                if let Some(ref mut chat) = self.message_list {
+                    chat.handle_key_event(crossterm::event::KeyEvent::new(
+                        crossterm::event::KeyCode::PageUp,
+                        crossterm::event::KeyModifiers::NONE,
+                    ));
+                }
+            }
+            _ => {}
         }
     }
 
@@ -1781,6 +1837,52 @@ impl App {
                 );
             } else {
                 self.toast = None;
+            }
+        }
+
+        // ── Mouse selection overlay ──
+        // Apply after all widgets have been drawn, so the selection style
+        // paints on top of the rendered content.
+        let scroll_offset = self
+            .message_list
+            .as_ref()
+            .map(|ml| ml.scroll_offset)
+            .unwrap_or(0);
+        let selectable_rects = self
+            .message_list
+            .as_ref()
+            .map(|ml| ml.selectable_region_rects())
+            .unwrap_or_default();
+        let sel_style = Style::default()
+            .bg(palette.selection_bg)
+            .fg(palette.selection_fg);
+
+        if self.mouse_selection.has_selection(scroll_offset) {
+            self.mouse_selection.apply_overlay(
+                frame.buffer_mut(),
+                scroll_offset,
+                &selectable_rects,
+                sel_style,
+            );
+        }
+
+        // Handle pending clipboard copy (set by mouse up in handle_mouse_event).
+        if self.mouse_selection.take_pending_copy(scroll_offset).is_some() {
+            if let Some(text) = self.mouse_selection.selected_text(
+                frame.buffer_mut(),
+                scroll_offset,
+                &selectable_rects,
+            ) {
+                if !text.is_empty() {
+                    match copy_to_clipboard(&text) {
+                        Ok(()) => {
+                            self.set_toast("Selection copied to clipboard", std::time::Duration::from_secs(3));
+                        }
+                        Err(e) => {
+                            self.set_toast(format!("Copy failed: {e}"), std::time::Duration::from_secs(5));
+                        }
+                    }
+                }
             }
         }
     }

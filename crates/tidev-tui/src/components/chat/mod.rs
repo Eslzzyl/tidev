@@ -54,6 +54,9 @@ pub(crate) struct MessageList {
     expanded_tool_outputs: HashMap<Uuid, String>,
     selectable_regions: Vec<SelectableRegionRange>,
 
+    /// The area into which messages were rendered (for mouse selection clamping).
+    pub content_area: Option<Rect>,
+
     // ── Streaming state ──
     streaming_buffer: StreamingBuffer,
     current_streaming_message_id: Option<Uuid>,
@@ -81,6 +84,7 @@ impl MessageList {
             expanded_tool_results: HashSet::new(),
             expanded_tool_outputs: HashMap::new(),
             selectable_regions: Vec::new(),
+            content_area: None,
             streaming_buffer: StreamingBuffer::new(),
             current_streaming_message_id: None,
             running_subagents: Vec::new(),
@@ -521,6 +525,7 @@ impl Component for MessageList {
 
         self.render_tick += 1;
         self.selectable_regions.clear();
+        self.content_area = Some(rect);
 
         // Resolve scroll target if set
         if let Some(target_id) = self.scroll_target.take() {
@@ -556,6 +561,16 @@ impl Component for MessageList {
 
     fn mark_clean(&mut self) {
         self.dirty = false;
+    }
+}
+
+impl MessageList {
+    /// Return the selectable regions as Rects for mouse selection clamping.
+    pub fn selectable_region_rects(&self) -> Vec<ratatui::layout::Rect> {
+        use crate::components::chat::render_cache::SelectableRegionRange;
+        self.selectable_regions.iter().map(|r: &SelectableRegionRange| {
+            ratatui::layout::Rect::new(r.min_x, r.start_line as u16, r.max_x.unwrap_or(u16::MAX), (r.end_line - r.start_line) as u16)
+        }).collect()
     }
 }
 

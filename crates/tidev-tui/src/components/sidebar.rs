@@ -18,7 +18,7 @@ use tidev_tui_old::theme::ThemePalette;
 use tidev_tui_old::utils::{TokenUsage, format_token_count};
 use unicode_width::UnicodeWidthStr;
 
-use crate::action::ContextUsage;
+use crate::app::ContextUsage;
 use crate::utils::render_scrollbar;
 
 /// Sidebar component — right-hand info panel.
@@ -88,7 +88,7 @@ impl Sidebar {
         let sidebar_content_width = inner.width as usize;
 
         // ── Build content lines ──
-        let mut lines: Vec<Line<'static>> = Vec::new();
+        let mut lines: Vec<Line> = Vec::new();
 
         // Session title
         lines.push(Line::from(""));
