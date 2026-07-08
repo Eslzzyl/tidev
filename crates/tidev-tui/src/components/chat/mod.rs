@@ -24,6 +24,21 @@ use crate::components::chat::render_cache::{
 use crate::components::chat::render as render_mod;
 use crate::components::chat::streaming::StreamingBuffer;
 
+// ---------------------------------------------------------------------------
+// ScrollbarDrag
+// ---------------------------------------------------------------------------
+
+/// State for an in-progress scrollbar drag interaction.
+#[derive(Clone, Debug)]
+struct ScrollbarDrag {
+    /// Scroll offset when the drag started.
+    start_scroll: usize,
+    /// Mouse Y position (screen coordinate) when the drag started.
+    start_mouse_y: u16,
+    /// Maximum scroll value at drag start.
+    max_scroll: usize,
+}
+
 pub(crate) mod layout_index;
 pub(crate) mod render_cache;
 pub(crate) mod render;
@@ -57,6 +72,9 @@ pub(crate) struct MessageList {
     /// The area into which messages were rendered (for mouse selection clamping).
     pub content_area: Option<Rect>,
 
+    /// Scrollbar drag state (None = not dragging).
+    scrollbar_drag: Option<ScrollbarDrag>,
+
     // ── Streaming state ──
     streaming_buffer: StreamingBuffer,
     current_streaming_message_id: Option<Uuid>,
@@ -85,6 +103,7 @@ impl MessageList {
             expanded_tool_outputs: HashMap::new(),
             selectable_regions: Vec::new(),
             content_area: None,
+            scrollbar_drag: None,
             streaming_buffer: StreamingBuffer::new(),
             current_streaming_message_id: None,
             running_subagents: Vec::new(),
@@ -571,6 +590,65 @@ impl MessageList {
         self.selectable_regions.iter().map(|r: &SelectableRegionRange| {
             ratatui::layout::Rect::new(r.min_x, r.start_line as u16, r.max_x.unwrap_or(u16::MAX), (r.end_line - r.start_line) as u16)
         }).collect()
+    }
+
+    /// Return the scrollbar area (rightmost column of content_area), if visible.
+    pub fn scrollbar_area(&self) -> Option<Rect> {
+        let area = self.content_area?;
+        if area.width < 3 {
+            return None;
+        }
+        Some(Rect {
+            x: area.x + area.width.saturating_sub(1),
+            y: area.y,
+            width: 1,
+            height: area.height,
+        })
+    }
+
+    /// Maximum scroll offset.
+    pub fn max_scroll(&self) -> usize {
+        self.layout_index.total_lines.saturating_sub(self.content_area.map_or(0, |a| a.height as usize))
+    }
+
+    /// Start a scrollbar drag: call on mouse down on scrollbar.
+    pub fn start_scrollbar_drag(&mut self, mouse_y: u16) {
+        let max_scroll = self.max_scroll();
+        if max_scroll == 0 {
+            return;
+        }
+        self.scrollbar_drag = Some(ScrollbarDrag {
+            start_scroll: self.scroll_offset,
+            start_mouse_y: mouse_y,
+            max_scroll,
+        });
+    }
+
+    /// Continue a scrollbar drag: call on mouse drag.
+    pub fn continue_scrollbar_drag(&mut self, mouse_y: u16) {
+        let Some(ref drag) = self.scrollbar_drag else { return };
+        let track_height = self.content_area.map_or(1, |a| a.height as usize);
+        if track_height == 0 {
+            return;
+        }
+        let delta_y = mouse_y as isize - drag.start_mouse_y as isize;
+        let scroll_delta = (delta_y as f32 / track_height as f32) * drag.max_scroll as f32;
+        let new_scroll =
+            (drag.start_scroll as isize + scroll_delta.round() as isize)
+                .max(0)
+                .min(drag.max_scroll as isize) as usize;
+        self.scroll_offset = new_scroll;
+        self.follow_tail = self.scroll_offset >= drag.max_scroll;
+    }
+
+    /// End a scrollbar drag.
+    pub fn end_scrollbar_drag(&mut self) {
+        self.scrollbar_drag = None;
+    }
+
+    /// Whether a scrollbar drag is in progress.
+    pub fn is_scrollbar_dragging(&self) -> bool {
+        self.scrollbar_drag.is_some()
     }
 }
 

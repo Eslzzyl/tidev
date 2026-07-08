@@ -767,6 +767,15 @@ impl App {
 
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
+                // Check scrollbar click first.
+                if let Some(ref mut chat) = self.message_list {
+                    let sb_area = chat.scrollbar_area();
+                    if sb_area.map_or(false, |a| a.contains(position)) {
+                        chat.start_scrollbar_drag(position.y);
+                        return;
+                    }
+                }
+
                 // Start mouse selection if within message area.
                 if msg_bounds.map_or(false, |b| b.contains(position)) {
                     let scroll_offset = self
@@ -786,11 +795,23 @@ impl App {
                 }
             }
             MouseEventKind::Drag(MouseButton::Left) => {
+                // Check scrollbar drag first.
+                if let Some(ref mut chat) = self.message_list {
+                    if chat.scrollbar_area().map_or(false, |a| a.contains(position))
+                        || chat.is_scrollbar_dragging()
+                    {
+                        chat.continue_scrollbar_drag(position.y);
+                        return;
+                    }
+                }
                 if self.mouse_selection.is_dragging() || msg_bounds.map_or(false, |b| b.contains(position)) {
                     self.mouse_selection.drag(position);
                 }
             }
             MouseEventKind::Up(MouseButton::Left) => {
+                if let Some(ref mut chat) = self.message_list {
+                    chat.end_scrollbar_drag();
+                }
                 let scroll_offset = self
                     .message_list
                     .as_ref()
