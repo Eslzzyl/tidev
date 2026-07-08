@@ -621,7 +621,7 @@ impl Composer {
         if self.cursor_wraps_to_next_row(width as usize) {
             visible_lines = visible_lines.saturating_add(1);
         }
-        // Add 2 rows for metadata display.
+        // Add 2 rows for vertical padding (top/bottom margins).
         visible_lines.min(max_lines).saturating_add(2)
     }
 

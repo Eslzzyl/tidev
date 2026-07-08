@@ -1919,7 +1919,7 @@ impl App {
             .as_ref()
             .map(|c| {
                 let width = main_area.width.saturating_sub(4);
-                c.preferred_height(width, 6).min(main_area.height.saturating_sub(2))
+                c.preferred_height(width, 6).saturating_add(2).min(main_area.height.saturating_sub(2))
             })
             .unwrap_or(0);
 
