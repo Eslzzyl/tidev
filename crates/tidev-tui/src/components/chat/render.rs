@@ -223,8 +223,13 @@ fn compute_content_layout(area: Rect) -> (Rect, Option<Rect>) {
 fn render_scrollbar(frame: &mut Frame, sb: Rect, scroll_offset: usize, total_lines: usize, viewport: usize, palette: ThemePalette) {
     let max_scroll = total_lines.saturating_sub(viewport);
     let scrolled = if max_scroll > 0 { (scroll_offset as f32 / max_scroll as f32).clamp(0.0, 1.0) } else { 0.0 };
-    let thumb_pos = ((sb.height as f32 - 1.0).max(0.0) * scrolled).round() as u16;
     let thumb_height = ((sb.height as f32 * sb.height as f32 / total_lines.max(1) as f32).clamp(1.0, sb.height as f32)).round() as u16;
+    let track_span = sb.height.saturating_sub(thumb_height);
+    let thumb_pos = if track_span == 0 {
+        0
+    } else {
+        (scrolled * track_span as f32).round() as u16
+    };
 
     let lines: Vec<Line> = (0..sb.height).map(|row| {
         if row >= thumb_pos && row < thumb_pos + thumb_height {

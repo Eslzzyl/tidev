@@ -937,18 +937,22 @@ impl App {
             }
             MouseEventKind::ScrollDown => {
                 if let Some(ref mut chat) = self.message_list {
-                    chat.handle_key_event(crossterm::event::KeyEvent::new(
-                        crossterm::event::KeyCode::PageDown,
+                    if let Some(action) = chat.handle_key_event(crossterm::event::KeyEvent::new(
+                        crossterm::event::KeyCode::Down,
                         crossterm::event::KeyModifiers::NONE,
-                    ));
+                    )) {
+                        self.process_action(action);
+                    }
                 }
             }
             MouseEventKind::ScrollUp => {
                 if let Some(ref mut chat) = self.message_list {
-                    chat.handle_key_event(crossterm::event::KeyEvent::new(
-                        crossterm::event::KeyCode::PageUp,
+                    if let Some(action) = chat.handle_key_event(crossterm::event::KeyEvent::new(
+                        crossterm::event::KeyCode::Up,
                         crossterm::event::KeyModifiers::NONE,
-                    ));
+                    )) {
+                        self.process_action(action);
+                    }
                 }
             }
             _ => {}
