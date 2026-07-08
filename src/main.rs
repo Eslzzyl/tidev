@@ -31,8 +31,8 @@ enum Command {
 #[tokio::main]
 async fn main() -> Result<()> {
     match Cli::parse().command {
-        None => tidev_tui::run(),
-        Some(Command::Tui) => tidev_tui::run(),
+        None => tidev_tui::run().await,
+        Some(Command::Tui) => tidev_tui::run().await,
         Some(Command::Export {
             session,
             all,

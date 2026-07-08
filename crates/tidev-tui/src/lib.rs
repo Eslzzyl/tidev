@@ -16,22 +16,17 @@ mod markdown;
 pub(crate) mod theme;
 pub mod tui;
 
-/// Run the TUI application (blocking). Called from the binary entry point.
-pub fn run() -> anyhow::Result<()> {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?;
-    rt.block_on(async {
-        let runtime = tidev_core::Runtime::builder()
-            .workspace_root(std::env::current_dir()?)
-            .build()
-            .await?;
+/// Run the TUI application. Called from the binary entry point.
+pub async fn run() -> anyhow::Result<()> {
+    let runtime = tidev_core::Runtime::builder()
+        .workspace_root(std::env::current_dir()?)
+        .build()
+        .await?;
 
-        let request_rx = runtime.request_rx().await;
-        let event_rx = runtime.event_rx().await;
+    let request_rx = runtime.request_rx().await;
+    let event_rx = runtime.event_rx().await;
 
-        let mut app = app::App::new(runtime, request_rx, event_rx);
-        let mut tui = tui::Tui::new()?;
-        tui.run(&mut app).await
-    })
+    let mut app = app::App::new(runtime, request_rx, event_rx);
+    let mut tui = tui::Tui::new()?;
+    tui.run(&mut app).await
 }
