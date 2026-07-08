@@ -199,6 +199,37 @@ impl App {
         self.toast = Some((msg.into(), Instant::now() + duration));
     }
 
+    /// Open the composer content in an external editor. The TUI is suspended
+    /// while the editor runs, then the edited text replaces the composer.
+    fn open_external_editor(&mut self) {
+        let Some(ref mut composer) = self.composer else {
+            self.set_notice("No composer available");
+            return;
+        };
+
+        let text = composer.text().to_string();
+        if text.is_empty() {
+            self.set_notice("No text to edit");
+            return;
+        }
+
+        let ui_config = self.runtime.config().ui;
+        match crate::editor::open_external_editor(&text, &ui_config) {
+            Ok(edited) => {
+                composer.set_text(edited);
+                self.set_notice("Editor closed — text updated");
+            }
+            Err(e) => {
+                self.set_notice(format!("Editor: {e}"));
+            }
+        }
+
+        // Force full redraw after suspend/resume.
+        if let Some(ref mut chat) = self.message_list {
+            chat.invalidate_layout();
+        }
+    }
+
     // ── Event handling ──
 
     /// Handle a backend event from the agent loop (streaming, tool results, etc.).
@@ -562,6 +593,12 @@ impl App {
                     self.set_notice("Input cleared");
                 }
             }
+            return;
+        }
+
+        // 0a. Alt+E: open external editor with current composer text.
+        if key.code == KeyCode::Char('e') && key.modifiers == KeyModifiers::ALT {
+            self.open_external_editor();
             return;
         }
 
