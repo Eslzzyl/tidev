@@ -15,7 +15,7 @@ use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
 use tidev_core::{ApprovedTool, ToolCallWithViolations};
 use tidev_core::TuiResponse;
 use tidev_types::agent_type::AgentType;
-use tidev_types::message::{BackendEvent, MessageAttachment, MessageRole, ToolExecutionResult};
+use tidev_types::message::{BackendEvent, MessageAttachment, ToolExecutionResult};
 use tidev_types::tools::QuestionArgs;
 use crate::theme::{ThemeName, ThemePalette};
 use tidev_types::prompts::SessionMode;
@@ -1152,16 +1152,13 @@ impl App {
                         .load_messages(session_id)
                         .unwrap_or_default();
 
-                    // Only restart the agent loop when the last message is a
-                    // Tool result that needs to be processed (e.g. a subagent
-                    // completed while the loop wasn't running).  In all other
-                    // cases — completed assistant turn, user message awaiting
-                    // input, etc. — the loop stays off until the user submits
-                    // something new, matching the old v0.6.x behaviour.
-                    let has_pending_tool = messages
-                        .last()
-                        .map(|m| m.role == MessageRole::Tool)
-                        .unwrap_or(false);
+                    // Refresh the Runtime's in-memory message buffer so the
+                    // next submit_prompt picks up the latest data from the store.
+                    let rt = self.runtime.clone();
+                    let sid = session_id;
+                    tokio::spawn(async move {
+                        rt.reload_message_buffer(sid).await;
+                    });
 
                     let chat_context = {
                         let config = self.runtime.config();
@@ -1203,15 +1200,6 @@ impl App {
                         .set_chat_context(chat_context);
 
                     log::info!("Switching to session: {} ({})", session_title, session_id);
-
-                    if has_pending_tool {
-                        let rt = self.runtime.clone();
-                        tokio::spawn(async move {
-                            if let Err(e) = rt.continue_session(session_id).await {
-                                log::error!("continue_session failed: {e}");
-                            }
-                        });
-                    }
                 }
                 Action::Session(SessionAction::Reload) => {
                     // Broadcast to overlays so SessionPanel reloads its list.

@@ -20,7 +20,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, OnceLock, RwLock as StdRwLock};
+use std::sync::{Arc, Mutex as StdMutex, OnceLock, RwLock as StdRwLock};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -114,7 +114,7 @@ pub struct Runtime {
     _request_rx: Arc<Mutex<Option<UnboundedReceiver<TuiRequest>>>>,
 
     /// Currently running agent loop handle.
-    run_loop_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    run_loop_handle: Arc<StdMutex<Option<tokio::task::JoinHandle<()>>>>,
     /// Synchronous busy flag (avoids awaiting the Mutex in async-free contexts).
     loop_busy: Arc<AtomicBool>,
 
@@ -127,6 +127,20 @@ pub struct Runtime {
     /// File search index for @mention autocomplete.
     /// Lazily initialised on first access.
     file_search_index: OnceLock<Arc<FileSearchIndex>>,
+}
+
+/// RAII guard that clears `loop_busy` and `run_loop_handle` on drop
+/// (including on task panic).
+struct AgentLoopGuard {
+    busy: Arc<AtomicBool>,
+    handle: Arc<StdMutex<Option<tokio::task::JoinHandle<()>>>>,
+}
+
+impl Drop for AgentLoopGuard {
+    fn drop(&mut self) {
+        self.busy.store(false, Ordering::SeqCst);
+        *self.handle.lock().unwrap() = None;
+    }
 }
 
 impl Runtime {
@@ -367,7 +381,7 @@ impl Runtime {
         self.session_manager.append_message(session_id, &user_msg)?;
 
         // 2. Check if a loop is already running.
-        if self.is_loop_running().await {
+        if self.is_loop_running() {
             // Loop running — new message will be picked up on next turn.
             return Ok(());
         }
@@ -382,7 +396,7 @@ impl Runtime {
     /// tool result message is already in the store and gets loaded into the
     /// [`MessageBuffer`] here.
     pub async fn continue_session(&self, session_id: Uuid) -> Result<()> {
-        if self.is_loop_running().await {
+        if self.is_loop_running() {
             // Already running — new data will be picked up on next turn.
             return Ok(());
         }
@@ -395,21 +409,17 @@ impl Runtime {
     }
 
     /// Quick synchronous check — is the agent loop active?
-    ///
-    /// Unlike `is_loop_running` (which needs `.await`) this can be called
-    /// from sync contexts (e.g. the TUI's action handler) with no risk of
-    /// deadlock or blocking.
     pub fn is_busy(&self) -> bool {
         self.loop_busy.load(Ordering::SeqCst)
     }
 
     /// Check whether an agent loop is currently running.
-    async fn is_loop_running(&self) -> bool {
-        self.run_loop_handle.lock().await.is_some()
+    fn is_loop_running(&self) -> bool {
+        self.run_loop_handle.lock().unwrap().is_some()
     }
 
     /// Reload the in-memory [`MessageBuffer`] for a session from the store.
-    async fn reload_message_buffer(&self, session_id: Uuid) {
+    pub async fn reload_message_buffer(&self, session_id: Uuid) {
         let buf = self.message_buffer(session_id).await;
         if let Ok(messages) = self.session_manager.load_messages(session_id) {
             buf.write().await.replace_all(messages);
@@ -496,15 +506,14 @@ impl Runtime {
         let busy_flag = self.loop_busy.clone();
         let handle_slot = self.run_loop_handle.clone();
         let join = tokio::spawn(async move {
+            let _guard = AgentLoopGuard { busy: busy_flag, handle: handle_slot };
             if let Err(e) = tidev_agent::run_agent_loop(&ctx, loop_config).await {
                 log::error!("agent loop for session {session_id} exited with error: {e}");
             }
-            busy_flag.store(false, Ordering::SeqCst);
-            *handle_slot.lock().await = None;
         });
 
         {
-            let mut handle = self.run_loop_handle.lock().await;
+            let mut handle = self.run_loop_handle.lock().unwrap();
             *handle = Some(join);
         }
 
@@ -522,7 +531,7 @@ impl Runtime {
         self.loop_busy.store(false, Ordering::SeqCst);
 
         // Give cooperative exit a brief window, then force-abort.
-        let handle = self.run_loop_handle.lock().await.take();
+        let handle = self.run_loop_handle.lock().unwrap().take();
         if let Some(h) = handle {
             tokio::select! {
                 _ = h => {},
@@ -993,7 +1002,7 @@ impl RuntimeBuilder {
             _event_rx: Arc::new(Mutex::new(Some(event_rx))),
             request_tx,
             _request_rx: Arc::new(Mutex::new(Some(request_rx))),
-            run_loop_handle: Arc::new(Mutex::new(None)),
+            run_loop_handle: Arc::new(StdMutex::new(None)),
             loop_busy: Arc::new(AtomicBool::new(false)),
             cleanup_cancel,
             workspace_root,
