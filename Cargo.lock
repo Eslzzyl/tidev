@@ -3768,6 +3768,7 @@ dependencies = [
  "tidev-search",
  "tidev-tools",
  "tidev-types",
+ "tidev-utils",
  "tokio",
  "two-face",
  "unicode-width",

@@ -12,6 +12,7 @@ tidev-core = { path = "../tidev-core" }
 tidev-types = { path = "../tidev-types" }
 tidev-config = { path = "../tidev-config" }
 tidev-tools = { path = "../tidev-tools" }
+tidev-utils = { path = "../tidev-utils" }
 
 anyhow = "1"
 ansi-to-tui = "8"

@@ -471,7 +471,7 @@ fn compute_block_data(
             for tc in &message.tool_calls {
                 let tool_result = tool_results_by_id.get(&tc.id).copied();
                 let is_expanded = ctx.expanded_tool_results.contains(&message.id);
-                let (tool_lines, _regions) = tool::render_tool_call_with_result(
+                let (tool_lines, tool_regions) = tool::render_tool_call_with_result(
                     tc, tool_result, body_width, message.streaming, ctx, is_expanded,
                 );
 
@@ -483,7 +483,7 @@ fn compute_block_data(
                     kind: MessageRenderCacheKind::ToolCall(tc.id.clone()),
                 };
                 cache_entries.push((tool_key, MessageRenderCacheEntry {
-                    value: MessageRenderCacheValue::ToolResult(tool_lines.clone(), Vec::new()),
+                    value: MessageRenderCacheValue::ToolResult(tool_lines.clone(), tool_regions),
                     last_used_tick: render_tick,
                 }));
 
@@ -628,7 +628,7 @@ fn compute_and_cache_block(
             for tc in &message.tool_calls {
                 let tool_result = tool_results_by_id.get(&tc.id).copied();
                 let is_expanded = ctx.expanded_tool_results.contains(&message.id);
-                let (tool_lines, _regions) = tool::render_tool_call_with_result(
+                let (tool_lines, tool_regions) = tool::render_tool_call_with_result(
                     tc, tool_result, body_width, message.streaming, ctx, is_expanded,
                 );
 
@@ -639,9 +639,8 @@ fn compute_and_cache_block(
                     is_round_end,
                     kind: MessageRenderCacheKind::ToolCall(tc.id.clone()),
                 };
-                let regions = Vec::new();
                 cache.put(tool_key, MessageRenderCacheEntry {
-                    value: MessageRenderCacheValue::ToolResult(tool_lines.clone(), regions),
+                    value: MessageRenderCacheValue::ToolResult(tool_lines.clone(), tool_regions),
                     last_used_tick: *render_tick,
                 });
 
@@ -753,7 +752,7 @@ fn render_block_from_cache(
                 };
                 if let Some(entry) = cache.peek(&tool_key) {
                     match &entry.value {
-                        MessageRenderCacheValue::ToolResult(tool_lines, _regions) => {
+                        MessageRenderCacheValue::ToolResult(tool_lines, tool_regions) => {
                             if !tool_lines.is_empty() {
                                 let start_line = current_line_offset + lines.len();
                                 // Determine background: hover if a tool result in this block is hovered
@@ -766,6 +765,15 @@ fn render_block_from_cache(
                                     ctx.palette.panel_light
                                 };
                                 lines.extend(decorate_card_lines(tool_lines.clone(), bg, 2, width));
+                                // Add selectable regions from tool result, offset by the current line
+                                for r in tool_regions {
+                                    selectable_regions.push(SelectableRegionRange {
+                                        start_line: current_line_offset + lines.len() + r.start_line,
+                                        end_line: current_line_offset + lines.len() + r.end_line,
+                                        min_x: r.min_x,
+                                        max_x: r.max_x,
+                                    });
+                                }
                                 let end_line = current_line_offset + lines.len();
                                 if let Some(tool_msg) = tool_result_msg {
                                     card_bounds.push((tool_msg.id, start_line, end_line));
