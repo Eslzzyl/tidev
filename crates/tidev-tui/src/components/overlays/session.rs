@@ -468,11 +468,22 @@ impl Component for SessionPanel {
     fn update(&mut self, action: &Action, ctx: &UpdateContext) -> Vec<Action> {
         match action {
             Action::Session(SessionAction::Reload) => {
-                // Reload sessions from store after view mode change.
-                // Both modes load all sessions (matching old code behavior;
-                // CurrentWorkspace just omits workspace separators in rendering).
                 let session_store = ctx.runtime.session_manager().store();
-                let sessions = session_store.list_sessions(1000, 0).unwrap_or_default();
+                let sessions = match self.view_mode {
+                    SessionViewMode::CurrentWorkspace => {
+                        let workspace_root = ctx
+                            .runtime
+                            .workspace_root()
+                            .display()
+                            .to_string();
+                        session_store
+                            .list_sessions_for_workspace(&workspace_root, 1000, 0)
+                            .unwrap_or_default()
+                    }
+                    SessionViewMode::AllSessions => {
+                        session_store.list_sessions(1000, 0).unwrap_or_default()
+                    }
+                };
                 self.sessions = sessions;
                 self.selected_index = 0;
                 self.selected_indices.clear();

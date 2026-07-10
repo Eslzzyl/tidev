@@ -400,6 +400,51 @@ impl SessionStore {
         })
     }
 
+    /// List sessions for a specific workspace, ordered by creation time (newest first).
+    pub fn list_sessions_for_workspace(
+        &self,
+        workspace_root: &str,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<SessionRecord>> {
+        let sql = format!(
+            "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s \
+             INNER JOIN session_workspaces sw ON sw.session_id = s.id \
+             WHERE sw.workspace_root = ?1 \
+             ORDER BY s.created_at DESC LIMIT ?2 OFFSET ?3"
+        );
+        self.read(|conn| {
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map(
+                params![workspace_root, limit, offset],
+                |row| {
+                    Ok(map_row!(SessionRecord, row,
+                        session_id: 0 => Uuid::parse_str(&row.get::<_, String>(0)?).unwrap_or_default(),
+                        parent_session_id: 1 => row.get::<_, Option<String>>(1)?.and_then(|s| Uuid::parse_str(&s).ok()),
+                        workspace_root: 14 => row.get::<_, String>(14)?,
+                        provider_id: 2 => row.get::<_, String>(2)?,
+                        provider_display_name: 3 => row.get::<_, String>(3)?,
+                        model_id: 4 => row.get::<_, String>(4)?,
+                        model_display_name: 5 => row.get::<_, String>(5)?,
+                        title: 6 => row.get::<_, String>(6)?,
+                        created_at: 7 => DateTime::parse_from_rfc3339(&row.get::<_, String>(7)?).unwrap().with_timezone(&Utc),
+                        updated_at: 8 => DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?).unwrap().with_timezone(&Utc),
+                        status: 9 => row.get::<_, String>(9)?,
+                        ended_at: 10 => row.get::<_, Option<String>>(10)?.and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|dt| dt.with_timezone(&Utc))),
+                        context_summary: 11 => row.get::<_, Option<String>>(11)?,
+                        context_retained_from: 12 => row.get::<_, i64>(12)? as usize,
+                        system_prompt: 13 => row.get::<_, String>(13)?,
+                    ))
+                },
+            )?;
+            let mut sessions = Vec::new();
+            for row in rows {
+                sessions.push(row?);
+            }
+            Ok(sessions)
+        })
+    }
+
     /// Update session metadata.
     pub fn update_session(
         &self,

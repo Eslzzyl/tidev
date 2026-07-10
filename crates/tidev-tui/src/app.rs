@@ -1794,7 +1794,14 @@ impl App {
             OverlayKind::SessionPanel => {
                 use crate::components::overlays::session::SessionViewMode;
                 let store = self.runtime.session_manager().store();
-                let sessions = store.list_sessions(1000, 0).unwrap_or_default();
+                let workspace_root = self
+                    .runtime
+                    .workspace_root()
+                    .display()
+                    .to_string();
+                let sessions = store
+                    .list_sessions_for_workspace(&workspace_root, 1000, 0)
+                    .unwrap_or_default();
                 let current_session_id = self
                     .current_session_id
                     .or_else(|| {
