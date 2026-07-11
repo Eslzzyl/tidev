@@ -218,6 +218,22 @@ impl App {
         self.should_quit
     }
 
+    /// Whether any component needs re-drawing.
+    pub fn is_dirty(&self) -> bool {
+        self.message_list.as_ref().map_or(false, |c| c.is_dirty())
+            || self.composer.as_ref().map_or(false, |c| c.is_dirty())
+    }
+
+    /// Mark all components as clean after rendering.
+    pub fn mark_clean(&mut self) {
+        if let Some(c) = &mut self.message_list {
+            c.mark_clean();
+        }
+        if let Some(c) = &mut self.composer {
+            c.mark_clean();
+        }
+    }
+
     // ── Notifications ──
 
     /// Set a persistent status notice shown at the bottom of the screen.
@@ -940,23 +956,13 @@ impl App {
                 // Clipboard copy is handled in draw() where we have access to the frame buffer.
             }
             MouseEventKind::ScrollDown => {
-                if let Some(ref mut chat) = self.message_list {
-                    if let Some(action) = chat.handle_key_event(crossterm::event::KeyEvent::new(
-                        crossterm::event::KeyCode::Down,
-                        crossterm::event::KeyModifiers::NONE,
-                    )) {
-                        self.process_action(action);
-                    }
+                if self.message_list.is_some() {
+                    self.process_action(Action::Chat(ChatAction::ScrollDelta(3)));
                 }
             }
             MouseEventKind::ScrollUp => {
-                if let Some(ref mut chat) = self.message_list {
-                    if let Some(action) = chat.handle_key_event(crossterm::event::KeyEvent::new(
-                        crossterm::event::KeyCode::Up,
-                        crossterm::event::KeyModifiers::NONE,
-                    )) {
-                        self.process_action(action);
-                    }
+                if self.message_list.is_some() {
+                    self.process_action(Action::Chat(ChatAction::ScrollDelta(-3)));
                 }
             }
             _ => {}

@@ -480,10 +480,12 @@ impl Component for MessageList {
                 Some(Action::Chat(ChatAction::ScrollDelta(3)))
             }
             KeyCode::PageUp => {
-                Some(Action::Chat(ChatAction::ScrollDelta(-10)))
+                let page = self.content_area.map(|r| (r.height as isize).max(1)).unwrap_or(10);
+                Some(Action::Chat(ChatAction::ScrollDelta(-page)))
             }
             KeyCode::PageDown => {
-                Some(Action::Chat(ChatAction::ScrollDelta(10)))
+                let page = self.content_area.map(|r| (r.height as isize).max(1)).unwrap_or(10);
+                Some(Action::Chat(ChatAction::ScrollDelta(page)))
             }
             KeyCode::Home => {
                 self.scroll_offset = 0;
@@ -508,8 +510,8 @@ impl Component for MessageList {
             Action::Chat(ChatAction::ScrollDelta(delta)) => {
                 if self.chat_context.is_some() {
                     let total = self.layout_index.total_lines;
-                    let viewport = 20;
-                    let max_scroll = total.saturating_sub(viewport).max(0);
+                    let viewport = self.content_area.map(|r| r.height as usize).unwrap_or(20).max(1);
+                    let max_scroll = total.saturating_sub(viewport);
                     let new_scroll = (self.scroll_offset as isize + delta).max(0) as usize;
                     self.scroll_offset = new_scroll.min(max_scroll);
                     self.follow_tail = self.scroll_offset >= max_scroll;
