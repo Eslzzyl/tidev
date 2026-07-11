@@ -6,6 +6,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
+use chrono::{DateTime, Utc};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use ratatui::layout::Rect;
 use ratatui::Frame;
@@ -14,6 +15,7 @@ use lru::LruCache;
 use crate::chat_context::ChatContext;
 use uuid::Uuid;
 use tidev_types::message::BackendEvent;
+use tidev_types::prompts::SessionMode;
 
 use crate::action::{Action, ChatAction, SessionAction};
 use crate::component::Component;
@@ -151,6 +153,9 @@ impl MessageList {
         cache_read_tokens: Option<u32>,
         cache_write_tokens: Option<u32>,
         tokens_per_second: Option<f32>,
+        model_id: Option<String>,
+        completed_at: Option<DateTime<Utc>>,
+        mode: Option<SessionMode>,
     ) {
         let Some(ref mut chat_context) = self.chat_context else { return };
         if let Some(msg) = chat_context.messages.iter_mut().rev().find(|m| {
@@ -162,6 +167,13 @@ impl MessageList {
             msg.cache_read_tokens = cache_read_tokens;
             msg.cache_write_tokens = cache_write_tokens;
             msg.tokens_per_second = tokens_per_second;
+            msg.model_id = model_id;
+            if let Some(completed) = completed_at {
+                msg.completed_at = Some(completed);
+            }
+            if let Some(mode) = mode {
+                msg.mode = Some(mode);
+            }
         }
     }
 

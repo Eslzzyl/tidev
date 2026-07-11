@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+use chrono::Utc;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent};
 use ratatui::layout::{Alignment, Constraint, Layout, Margin, Rect};
 use ratatui::prelude::{Frame, Modifier, Style};
@@ -374,6 +375,9 @@ impl App {
                         Some(cache_read_tokens),
                         Some(cache_write_tokens),
                         self.context_usage.as_ref().and_then(|u| u.tokens_per_second),
+                        Some(model_id.clone()),
+                        Some(Utc::now()),
+                        Some(self.mode),
                     );
                 }
 
