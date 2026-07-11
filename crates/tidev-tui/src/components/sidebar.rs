@@ -19,14 +19,12 @@ use crate::utils::{TokenUsage, format_token_count};
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::ContextUsage;
-use crate::utils::render_scrollbar;
 
 /// Sidebar component — right-hand info panel.
 pub(crate) struct Sidebar {
     /// Scroll offset for the sidebar content area.
     pub scroll_offset: usize,
-    /// Whether the scrollbar is hovered.
-    pub scrollbar_hovered: bool,
+
     /// Cached total lines for scroll max computation.
     total_lines: usize,
 }
@@ -35,7 +33,6 @@ impl Sidebar {
     pub fn new() -> Self {
         Self {
             scroll_offset: 0,
-            scrollbar_hovered: false,
             total_lines: 0,
         }
     }
@@ -412,24 +409,6 @@ impl Sidebar {
             Paragraph::new(footer_lines).style(Style::default().fg(palette.text));
         frame.render_widget(footer_paragraph, footer_area);
 
-        // Render scrollbar if content exceeds viewport
-        if max_scroll > 0 {
-            let scrollbar_x = area.right().saturating_sub(1);
-            let scrollbar_area = Rect {
-                x: scrollbar_x,
-                y: content_area.y,
-                width: 1,
-                height: content_height,
-            };
-            render_scrollbar(
-                frame,
-                scrollbar_area,
-                self.scroll_offset,
-                self.total_lines,
-                palette,
-                self.scrollbar_hovered,
-            );
-        }
     }
 }
 
