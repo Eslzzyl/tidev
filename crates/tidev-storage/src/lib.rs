@@ -981,8 +981,8 @@ impl SessionStore {
                 let attachments: Vec<tidev_types::message::MessageAttachment> =
                     serde_json::from_str(&attachments_raw).unwrap_or_default();
 
-                let completed_at: Option<String> = row.get(11).ok().flatten();
-                let streaming: bool = row.get::<_, i64>(12).unwrap_or(0) != 0;
+                let completed_at: Option<String> = row.get(10).ok().flatten();
+                let streaming: bool = row.get::<_, i64>(11).unwrap_or(0) != 0;
 
                 let reasoning = row
                     .get::<_, Vec<u8>>(4)
@@ -995,19 +995,19 @@ impl SessionStore {
                     .unwrap_or_else(|_| "[]".to_string());
 
                 let patch_files = row
-                    .get::<_, Vec<u8>>(21)
+                    .get::<_, Vec<u8>>(20)
                     .ok()
                     .filter(|b| !b.is_empty())
                     .map(|b| decompress_text(&b));
 
                 let file_diffs = row
-                    .get::<_, Vec<u8>>(22)
+                    .get::<_, Vec<u8>>(21)
                     .ok()
                     .filter(|b| !b.is_empty())
                     .map(|b| decompress_text(&b));
 
-                let mode: Option<String> = row.get(23).ok().flatten();
-                let thinking_level: Option<String> = row.get(24).ok().flatten();
+                let mode: Option<String> = row.get(22).ok().flatten();
+                let thinking_level: Option<String> = row.get(23).ok().flatten();
 
                 Ok(Message {
                     id: Uuid::parse_str(&row.get::<_, String>(0).unwrap_or_default())
@@ -1017,8 +1017,8 @@ impl SessionStore {
                     attachments,
                     reasoning,
                     tool_calls: serde_json::from_str(&tool_calls_json).unwrap_or_default(),
-                    tool_call_id: row.get(7).ok().flatten(),
-                    tool_name: row.get(8).ok().flatten(),
+                    tool_call_id: row.get(6).ok().flatten(),
+                    tool_name: row.get(7).ok().flatten(),
                     metadata,
                     created_at: DateTime::parse_from_rfc3339(
                         &row.get::<_, String>(9).unwrap_or_default(),
@@ -1031,14 +1031,14 @@ impl SessionStore {
                             .map(|dt| dt.with_timezone(&Utc))
                     }),
                     streaming,
-                    input_tokens: row.get(13).ok().flatten(),
-                    output_tokens: row.get(14).ok().flatten(),
-                    total_tokens: row.get(15).ok().flatten(),
-                    cache_read_tokens: row.get(16).ok().flatten(),
-                    cache_write_tokens: row.get(17).ok().flatten(),
-                    model_id: row.get(18).ok().flatten(),
-                    tokens_per_second: row.get(19).ok().flatten(),
-                    snapshot_hash: row.get(20).ok().flatten(),
+                    input_tokens: row.get(12).ok().flatten(),
+                    output_tokens: row.get(13).ok().flatten(),
+                    total_tokens: row.get(14).ok().flatten(),
+                    cache_read_tokens: row.get(15).ok().flatten(),
+                    cache_write_tokens: row.get(16).ok().flatten(),
+                    model_id: row.get(17).ok().flatten(),
+                    tokens_per_second: row.get(18).ok().flatten(),
+                    snapshot_hash: row.get(19).ok().flatten(),
                     patch_files,
                     file_diffs,
                     mode: mode.and_then(|m| serde_json::from_str(&m).ok()),
@@ -1187,8 +1187,8 @@ impl SessionStore {
         let metadata_raw: Vec<u8> = row.get(8).unwrap_or_default();
         let metadata: tidev_types::message::ToolMetadata =
             serde_json::from_str(&decompress_text(&metadata_raw)).unwrap_or_default();
-        let completed_at: Option<String> = row.get(11).ok().flatten();
-        let streaming: bool = row.get::<_, i64>(12).unwrap_or(0) != 0;
+        let completed_at: Option<String> = row.get(10).ok().flatten();
+        let streaming: bool = row.get::<_, i64>(11).unwrap_or(0) != 0;
 
         let reasoning = row
             .get::<_, Vec<u8>>(4)
@@ -1201,19 +1201,19 @@ impl SessionStore {
             .unwrap_or_else(|_| "[]".to_string());
 
         let patch_files = row
-            .get::<_, Vec<u8>>(21)
+            .get::<_, Vec<u8>>(20)
             .ok()
             .filter(|b| !b.is_empty())
             .map(|b| decompress_text(&b));
 
         let file_diffs = row
-            .get::<_, Vec<u8>>(22)
+            .get::<_, Vec<u8>>(21)
             .ok()
             .filter(|b| !b.is_empty())
             .map(|b| decompress_text(&b));
 
-        let mode: Option<String> = row.get(23).ok().flatten();
-        let thinking_level: Option<String> = row.get(24).ok().flatten();
+        let mode: Option<String> = row.get(22).ok().flatten();
+        let thinking_level: Option<String> = row.get(23).ok().flatten();
 
         Message {
             id: Uuid::parse_str(&row.get::<_, String>(0).unwrap_or_default()).unwrap_or_default(),
@@ -1222,8 +1222,8 @@ impl SessionStore {
             attachments,
             reasoning,
             tool_calls: serde_json::from_str(&tool_calls_json).unwrap_or_default(),
-            tool_call_id: row.get(7).ok().flatten(),
-            tool_name: row.get(8).ok().flatten(),
+            tool_call_id: row.get(6).ok().flatten(),
+            tool_name: row.get(7).ok().flatten(),
             metadata,
             created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(9).unwrap_or_default())
                 .map(|dt| dt.with_timezone(&Utc))
@@ -1234,14 +1234,14 @@ impl SessionStore {
                     .map(|dt| dt.with_timezone(&Utc))
             }),
             streaming,
-            input_tokens: row.get(13).ok().flatten(),
-            output_tokens: row.get(14).ok().flatten(),
-            total_tokens: row.get(15).ok().flatten(),
-            cache_read_tokens: row.get(16).ok().flatten(),
-            cache_write_tokens: row.get(17).ok().flatten(),
-            model_id: row.get(18).ok().flatten(),
-            tokens_per_second: row.get(19).ok().flatten(),
-            snapshot_hash: row.get(20).ok().flatten(),
+            input_tokens: row.get(12).ok().flatten(),
+            output_tokens: row.get(13).ok().flatten(),
+            total_tokens: row.get(14).ok().flatten(),
+            cache_read_tokens: row.get(15).ok().flatten(),
+            cache_write_tokens: row.get(16).ok().flatten(),
+            model_id: row.get(17).ok().flatten(),
+            tokens_per_second: row.get(18).ok().flatten(),
+            snapshot_hash: row.get(19).ok().flatten(),
             patch_files,
             file_diffs,
             mode: mode.and_then(|m| serde_json::from_str(&m).ok()),
