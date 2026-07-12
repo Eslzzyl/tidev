@@ -2023,9 +2023,6 @@ impl App {
             thinking_level: None,
         };
 
-        // Draw overlays
-        self.overlays.draw(frame, area, &draw_ctx);
-
         // ── Sidebar ───────────────────────────────────────────────────
         if let Some(sidebar_area) = sidebar_area {
             self.sidebar_area = Some(sidebar_area);
@@ -2045,6 +2042,9 @@ impl App {
                 &self.todos,
             );
         }
+
+        // Draw overlays (on top of everything, including sidebar)
+        self.overlays.draw(frame, area, &draw_ctx);
 
         // ── Status notice (last_notice) with token usage ──
         let notice_text = if let Some(ref usage) = self.context_usage {
