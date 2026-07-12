@@ -28,5 +28,7 @@ pub async fn run() -> anyhow::Result<()> {
 
     let mut app = app::App::new(runtime, request_rx, event_rx);
     let mut tui = tui::Tui::new()?;
-    tui.run(&mut app).await
+    tui.run(&mut app).await?;
+    app.runtime.shutdown().await;
+    Ok(())
 }

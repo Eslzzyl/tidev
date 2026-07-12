@@ -6,6 +6,8 @@
 //! TUI to avoid mixing sync and async event readers.
 
 use std::io;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -62,16 +64,29 @@ impl Tui {
         // internal blocking reader) with sync poll/read calls on the same
         // event source.
         let (crossterm_tx, mut crossterm_rx) = mpsc::unbounded_channel::<Event>();
+        let reader_tx = crossterm_tx.clone();
+        let reader_running = Arc::new(AtomicBool::new(true));
+        let reader_running_clone = reader_running.clone();
         tokio::task::spawn_blocking(move || {
-            loop {
-                match crossterm::event::read() {
-                    Ok(event) => {
-                        if crossterm_tx.send(event).is_err() {
-                            break;
+            let poll_interval = Duration::from_millis(50);
+            while reader_running_clone.load(Ordering::SeqCst) {
+                match crossterm::event::poll(poll_interval) {
+                    Ok(true) => {
+                        match crossterm::event::read() {
+                            Ok(event) => {
+                                if reader_tx.send(event).is_err() {
+                                    break;
+                                }
+                            }
+                            Err(e) => {
+                                log::error!("crossterm read error: {e}");
+                                break;
+                            }
                         }
                     }
+                    Ok(false) => {}
                     Err(e) => {
-                        log::error!("crossterm read error: {e}");
+                        log::error!("crossterm poll error: {e}");
                         break;
                     }
                 }
@@ -212,6 +227,11 @@ impl Tui {
                 }
             }
         }
+
+        // Signal the blocking reader thread to stop so it doesn't prevent
+        // the tokio runtime from shutting down.
+        reader_running.store(false, Ordering::SeqCst);
+        drop(crossterm_tx);
 
         Ok(())
     }
