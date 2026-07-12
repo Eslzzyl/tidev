@@ -361,11 +361,8 @@ impl Component for SessionPanel {
                 None
             }
             KeyCode::Enter => {
-                if self.selected_session().is_some() {
-                    Some(Action::Overlay(OverlayAction::Close(OverlayKind::SessionPanel)))
-                } else {
-                    None
-                }
+                self.selected_session()
+                    .map(|s| Action::Session(SessionAction::Select(s.session_id)))
             }
             KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.operation_mode = if self.operation_mode == OperationMode::MultiSelect {
@@ -549,14 +546,7 @@ impl Component for SessionPanel {
                         vec![]
                     }
                     SessionPanelDialog::None => {
-                        // Normal close: if there's a selected session, emit Select
-                        if let Some(session) = self.selected_session() {
-                            vec![Action::Session(SessionAction::Select(
-                                session.session_id,
-                            ))]
-                        } else {
-                            vec![]
-                        }
+                        vec![]
                     }
                 }
             }

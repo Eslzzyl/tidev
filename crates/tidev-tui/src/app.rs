@@ -705,7 +705,10 @@ impl App {
 
     pub fn handle_key_event(&mut self, key: KeyEvent) {
         // 0. Abort confirmation: double-Esc to cancel current request.
-        if key.code == KeyCode::Esc && (self.has_active_request() || !self.pending_prompt_queue.is_empty()) {
+        if key.code == KeyCode::Esc
+            && self.overlays.is_empty()
+            && (self.has_active_request() || !self.pending_prompt_queue.is_empty())
+        {
             if self.abort_confirmation_deadline
                 .is_some_and(|deadline| deadline > Instant::now())
             {
@@ -992,9 +995,6 @@ impl App {
             KeyCode::Char('p') if key.modifiers == KeyModifiers::CONTROL => {
                 Some(Action::Overlay(OverlayAction::Open(OverlayKind::PanelLauncher)))
             }
-            KeyCode::Esc if !self.overlays.is_empty() => {
-                Some(Action::Overlay(OverlayAction::CloseTop))
-            }
             _ => None,
         }
     }
@@ -1210,6 +1210,11 @@ impl App {
                         .set_chat_context(chat_context);
 
                     log::info!("Switching to session: {} ({})", session_title, session_id);
+
+                    // Close the session panel overlay (mirrors old Enter → select + close).
+                    queue.push(Action::Overlay(OverlayAction::Close(
+                        OverlayKind::SessionPanel,
+                    )));
                 }
                 Action::Session(SessionAction::Reload) => {
                     // Broadcast to overlays so SessionPanel reloads its list.

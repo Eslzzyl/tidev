@@ -101,9 +101,10 @@ impl Tui {
         self.terminal.draw(|frame| app.draw(frame))?;
         let mut last_render = Instant::now();
 
+        let mut had_input = false;
+
         loop {
             // ── Phase 1: Drain all event sources (non-blocking) ────────
-            let mut had_input = false;
 
             // 1a. Crossterm events (batch up to 32).
             let mut cc_count = 0;
@@ -177,16 +178,16 @@ impl Tui {
             // ── Phase 2: Throttled render ─────────────────────────────
             //
             // Render if:
-            //   - the UI is dirty, AND
-            //   - either we just handled input (immediate response),
-            //     or enough time has passed since the last render (FPS cap).
+            //   - we just handled input (immediate response), OR
+            //   - the UI is dirty AND enough time has passed (FPS cap).
             let now = Instant::now();
-            if app.is_dirty() && (now - last_render >= FRAME_BUDGET || had_input) {
+            if had_input || (app.is_dirty() && now - last_render >= FRAME_BUDGET) {
                 self.terminal
                     .draw(|frame| app.draw(frame))
                     .context("failed to render frame")?;
                 app.mark_clean();
                 last_render = now;
+                had_input = false;
             }
 
             // ── Phase 3: Idle wait ────────────────────────────────────
@@ -202,6 +203,7 @@ impl Tui {
                             Event::Resize(w, h) => app.handle_resize(w, h),
                             _ => {}
                         }
+                        had_input = true;
                     }
                     result = async {
                         match event_rx.as_mut() {
@@ -211,6 +213,7 @@ impl Tui {
                     } => {
                         if let Some(event) = result {
                             app.handle_backend_event(event);
+                            had_input = true;
                         }
                     }
                     result = async {
@@ -221,6 +224,7 @@ impl Tui {
                     } => {
                         if let Some(request) = result {
                             app.handle_tui_request(request);
+                            had_input = true;
                         }
                     }
                     _ = tokio::time::sleep(FRAME_BUDGET) => {}
