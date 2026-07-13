@@ -89,7 +89,7 @@ pub(crate) async fn stream_openai(
     );
 
     let mut stream = response.bytes_stream();
-    let mut buffer = String::new();
+    let mut buffer = Vec::new();
     let mut assistant_text = String::new();
     let mut reasoning_text = String::new();
     let mut finish_reason: Option<String> = None;
@@ -102,10 +102,15 @@ pub(crate) async fn stream_openai(
 
     while let Some(chunk) = stream.next().await {
         let chunk = chunk?;
-        buffer.push_str(&String::from_utf8_lossy(&chunk));
+        buffer.extend_from_slice(&chunk);
 
-        while let Some(line_end) = buffer.find('\n') {
-            let line = buffer[..line_end].trim_end_matches('\r').to_string();
+        while let Some(line_end) = buffer.iter().position(|&b| b == b'\n') {
+            let tail = &buffer[..line_end];
+            let line = if tail.last() == Some(&b'\r') {
+                String::from_utf8_lossy(&tail[..tail.len() - 1]).into_owned()
+            } else {
+                String::from_utf8_lossy(tail).into_owned()
+            };
             buffer.drain(..=line_end);
 
             if line.is_empty() {

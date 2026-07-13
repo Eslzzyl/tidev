@@ -116,7 +116,7 @@ pub(crate) async fn stream_gemini(
 
     // ── SSE stream parsing ────────────────────────────────────────────────
     let mut stream = response.bytes_stream();
-    let mut buffer = String::new();
+    let mut buffer = Vec::new();
     let mut assistant_text = String::new();
     let mut reasoning_text = String::new();
     let mut finish_reason: Option<String> = None;
@@ -131,11 +131,14 @@ pub(crate) async fn stream_gemini(
 
     while let Some(chunk) = stream.next().await {
         let chunk = chunk?;
-        buffer.push_str(&String::from_utf8_lossy(&chunk));
+        buffer.extend_from_slice(&chunk);
 
         // Process complete SSE lines
-        while let Some(line_end) = buffer.find('\n') {
-            let line = buffer[..line_end].trim().to_string();
+        while let Some(line_end) = buffer.iter().position(|&b| b == b'\n') {
+            let tail = &buffer[..line_end];
+            let line = String::from_utf8_lossy(
+                if tail.last() == Some(&b'\r') { &tail[..tail.len() - 1] } else { tail }
+            ).into_owned().trim().to_string();
             buffer.drain(..=line_end);
 
             if line.is_empty() {
