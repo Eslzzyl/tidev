@@ -809,17 +809,22 @@ impl App {
 
     /// Handle Tab key for session mode switching.
     fn handle_tab_mode_switch(&mut self) {
-        if let Some(ref pending) = self.pending_mode {
+        if self.pending_mode.is_some() {
             // Cancel pending mode switch.
             self.pending_mode = None;
             self.set_notice("Mode switch cancelled");
-        } else {
+        } else if self.has_active_request() || !self.pending_prompt_queue.is_empty() {
+            // Request in progress: defer mode switch until request completes.
             let new_mode = self.mode.toggle();
             self.pending_mode = Some(new_mode);
             self.set_notice(format!(
                 "Mode will switch to {} on next message",
                 new_mode.title()
             ));
+        } else {
+            // Idle: switch mode immediately.
+            self.mode = self.mode.toggle();
+            self.set_notice(format!("Mode switched to {}", self.mode.title()));
         }
     }
 
