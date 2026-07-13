@@ -1443,6 +1443,51 @@ impl App {
                         self.set_notice("Thinking: off");
                     }
                 }
+                Action::Session(SessionAction::Create) => {
+                    let id = match self.runtime.create_default_session("Untitled session") {
+                        Ok(id) => id,
+                        Err(e) => {
+                            log::error!("Failed to create session: {e}");
+                            self.set_notice("Failed to create session");
+                            return;
+                        }
+                    };
+                    self.current_session_id = Some(id);
+
+                    let ws_root = self.runtime.workspace_root()
+                        .to_string_lossy().to_string();
+                    let config = self.runtime.config();
+                    let auth = self.runtime.auth();
+                    let active_model = config.resolve_active_model(&auth).ok();
+                    let chat_context = crate::chat_context::ChatContext::new(
+                        id,
+                        String::new(),
+                        ws_root,
+                        Vec::new(),
+                        None,
+                        self.runtime.active_provider_id(),
+                        self.runtime.active_model_id(),
+                        active_model.as_ref().map(|m| m.label()).unwrap_or_default(),
+                        active_model.as_ref().map(|m| m.provider_display_name.clone()).unwrap_or_default(),
+                    );
+                    self.message_list
+                        .get_or_insert_with(MessageList::new)
+                        .set_chat_context(chat_context);
+
+                    self.screen = AppScreen::Welcome;
+
+                    if let Some(ref mut composer) = self.composer {
+                        composer.clear();
+                    }
+
+                    self.pending_tools.clear();
+                    self.tool_index = 0;
+                    self.approved_tools.clear();
+                    self.pending_response_tx = None;
+                    self.abort_confirmation_deadline = None;
+                    self.context_usage = None;
+                    self.pending_prompt_queue.clear();
+                }
                 Action::Chat(action) => {
                     match &action {
                         ChatAction::SendMessage { text, attachments } => {
