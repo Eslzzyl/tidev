@@ -705,7 +705,7 @@ impl AgentContext for CoreContext {
         // 2. If compaction is needed, perform it (no locks held during LLM call).
         if needs_compact {
             let cm = self.context_manager.lock().await;
-            let tools = self.tool_registry.definitions();
+            let tools = self.tool_registry.definitions_for_model(&self.active_model);
             let result = cm
                 .compact(
                     &self.llm,

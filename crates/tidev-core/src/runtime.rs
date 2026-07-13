@@ -470,6 +470,7 @@ impl Runtime {
             read_only: false,
         };
 
+        let filtered_tools = self.tool_registry.definitions_for_model(&active_model);
         let ctx = crate::agent_ctx::CoreContext::new(
             self.llm.clone(),
             self.session_manager.clone(),
@@ -484,7 +485,7 @@ impl Runtime {
             system_prompt,
             llm_config,
             cancel.clone(),
-            self.tool_registry.definitions(),
+            filtered_tools,
             self.workspace_root.clone(),
             active_model.clone(),
             self.snapshot.clone(),
@@ -622,7 +623,8 @@ impl Runtime {
             let active = self.active_model.read().unwrap();
             to_llm_provider_config(&active)
         };
-        let tools = self.tool_registry.definitions();
+        let active_model = self.active_model.read().unwrap().clone();
+        let tools = self.tool_registry.definitions_for_model(&active_model);
 
         // 2. Run compaction (async, no locks held on ContextManager).
         let result = {

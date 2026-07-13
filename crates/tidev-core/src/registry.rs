@@ -17,6 +17,7 @@ use tidev_types::message::{BackendEvent, ToolCall, ToolExecutionResult};
 use tidev_types::prompts::SessionMode;
 use tidev_types::tools::{PermissionConfig, ToolDefinition};
 
+use tidev_config::auth::ActiveModel;
 use tidev_config::{AuthStore, WebSearchConfig};
 use tidev_tools::execute_tool_call;
 use tidev_tools::{SkillCatalog, TodoPersistence};
@@ -93,10 +94,25 @@ impl ToolRegistry {
         execute_tool_call(&ctx, call, cancel).await
     }
 
-    /// Return all available tool definitions.
+    /// Return all available tool definitions (unfiltered).
     pub fn definitions(&self) -> Vec<ToolDefinition> {
         let skill_description = self.skills.tool_description();
         tidev_tools::tool_definitions(skill_description)
+    }
+
+    /// Return tool definitions filtered for the given model.
+    ///
+    /// GPT models (gpt-4o, gpt-4o-mini, gpt-5, etc.) receive `apply_patch` but
+    /// not `write`/`edit`. All other models (Claude, DeepSeek, Gemini, GPT-4,
+    /// any OSS model) receive `write`/`edit` but not `apply_patch`.
+    pub fn definitions_for_model(&self, model: &ActiveModel) -> Vec<ToolDefinition> {
+        let mut definitions = tidev_tools::tool_definitions(self.skills.tool_description());
+        if model.use_apply_patch() {
+            definitions.retain(|d| d.name != "edit" && d.name != "write");
+        } else {
+            definitions.retain(|d| d.name != "apply_patch");
+        }
+        definitions
     }
 
     /// Access the skill catalog.

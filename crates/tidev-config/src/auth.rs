@@ -192,6 +192,15 @@ impl ActiveModel {
         format!("{}/{}", self.provider_display_name, self.display_name)
     }
 
+    /// Determine whether this model should receive `apply_patch` instead of `write`/`edit`.
+    ///
+    /// GPT models (gpt-4o, gpt-4o-mini, gpt-4.1, gpt-5, etc.) get `apply_patch`.
+    /// All other models (Claude, DeepSeek, Gemini, GPT-4, any OSS model) get `write`/`edit`.
+    pub fn use_apply_patch(&self) -> bool {
+        let id = self.model_id.to_ascii_lowercase();
+        id.contains("gpt-") && !id.contains("oss") && !id.contains("gpt-4")
+    }
+
     pub fn api_key_present(&self) -> bool {
         self.api_key
             .as_deref()
