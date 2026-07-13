@@ -147,8 +147,6 @@ pub struct CoreContext {
     session_id: Uuid,
     /// Current session mode.
     mode: SessionMode,
-    /// Thinking / reasoning level.
-    thinking_level: ThinkingLevelType,
     /// Pre-composed system prompt (session-scoped, immutable after creation).
     system_prompt: String,
     /// Resolved model config for the LLM call.
@@ -186,7 +184,6 @@ impl CoreContext {
         request_tx: UnboundedSender<TuiRequest>,
         session_id: Uuid,
         mode: SessionMode,
-        thinking_level: ThinkingLevelType,
         system_prompt: String,
         model_config: LlmProviderConfig,
         cancel: CancellationToken,
@@ -207,7 +204,6 @@ impl CoreContext {
             request_tx,
             session_id,
             mode,
-            thinking_level,
             system_prompt,
             model_config,
             cancel,
@@ -870,6 +866,7 @@ async fn run_subagent_inner(
     });
 
     // 7. Create child CoreContext.
+    let child_thinking_level = child_model.thinking_level.clone();
     let child_ctx = CoreContext::new(
         spawner.llm,
         spawner.session_manager,
@@ -881,7 +878,6 @@ async fn run_subagent_inner(
         tokio::sync::mpsc::unbounded_channel().0,
         child_session_id,
         spawner.mode,
-        ThinkingLevelType::None,
         agent_def.system_prompt.clone(),
         child_model_config,
         config.cancel_token.clone(),
@@ -897,7 +893,7 @@ async fn run_subagent_inner(
         session_id: child_session_id,
         definition: agent_def,
         mode: spawner.mode,
-        thinking_level: ThinkingLevelType::None,
+        thinking_level: child_thinking_level,
         event_tx: spawner.event_tx.clone(),
         cancel: config.cancel_token.clone(),
     };

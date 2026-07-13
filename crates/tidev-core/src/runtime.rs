@@ -481,7 +481,6 @@ impl Runtime {
             self.request_tx.clone(),
             session_id,
             SessionMode::Build,
-            active_model.thinking_level.clone(),
             system_prompt,
             llm_config,
             cancel.clone(),

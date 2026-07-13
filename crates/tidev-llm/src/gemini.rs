@@ -660,8 +660,8 @@ fn build_gemini_request(
         generation_config["temperature"] = serde_json::json!(temp);
     }
 
-    // Merge extra_body into generation config
-    if let Some(extra) = &model.extra_body
+    // Merge extra_body (including thinking config) into generation config
+    if let Some(extra) = model.merged_extra_body()
         && let Some(obj) = extra.as_object()
     {
         for (k, v) in obj {
