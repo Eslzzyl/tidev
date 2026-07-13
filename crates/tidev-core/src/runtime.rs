@@ -308,14 +308,20 @@ impl Runtime {
     /// Save a thinking level preference for an agent type to config.
     pub fn set_model_thinking_level(
         &self,
-        _provider_id: &str,
-        _model_id: &str,
+        provider_id: &str,
+        model_id: &str,
         thinking_level: &str,
     ) -> Result<()> {
-        // Update active model's thinking level if the model matches.
         let mut active = self.active_model.write().unwrap();
         active.thinking_level =
             tidev_types::reasoning::ThinkingLevelType::from_string(thinking_level);
+        if let Err(e) = self
+            .session_manager
+            .store()
+            .save_model_thinking_level(provider_id, model_id, thinking_level)
+        {
+            log::warn!("failed to save thinking level preference: {}", e);
+        }
         Ok(())
     }
 
@@ -906,7 +912,7 @@ impl RuntimeBuilder {
 
         // 7. LLM client + model resolution (with fallback).
         let _t_llm = Instant::now();
-        let active_model = Self::resolve_fallback_model(&config, &auth)
+        let mut active_model = Self::resolve_fallback_model(&config, &auth)
             .context("no models are configured — set up a provider API key first")?;
         let llm = tidev_llm::LlmClient::new(
             config.logging.save_request_body,
@@ -959,6 +965,17 @@ impl RuntimeBuilder {
             None
         };
         log::info!("startup: snapshot service ready in {:?}", _t_snap.elapsed());
+
+        // Load saved thinking level preference from database (if any).
+        if let Ok(Some(level_str)) =
+            store.load_model_thinking_level(
+                &active_model.provider_id,
+                &active_model.model_id,
+            )
+        {
+            active_model.thinking_level =
+                tidev_types::reasoning::ThinkingLevelType::from_string(&level_str);
+        }
 
         // Store active model for loop construction.
         let active_model = Arc::new(StdRwLock::new(active_model));
