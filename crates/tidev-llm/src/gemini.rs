@@ -911,6 +911,78 @@ struct GeminiBlobResponse {
     data: Option<String>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{ApiType, LlmProviderConfig};
+    use tidev_types::message::{Message, MessageRole};
+    use tidev_types::reasoning::{DeepSeekV4ThinkingLevel, ThinkingLevelType};
+
+    fn base_model() -> LlmProviderConfig {
+        LlmProviderConfig {
+            provider_id: "test".to_string(),
+            base_url: "https://test.com".to_string(),
+            api_type: ApiType::GoogleGemini,
+            model_id: "test-model".to_string(),
+            request_model_id: Some("test-model".to_string()),
+            max_output_tokens: 4096,
+            temperature: None,
+            supports_images: false,
+            context_window: 128000,
+            system_prompt: None,
+            api_key: None,
+            extra_body: None,
+            thinking_level: ThinkingLevelType::None,
+        }
+    }
+
+    #[test]
+    fn gemini_thinking_config_is_merged() {
+        let model = LlmProviderConfig {
+            thinking_level: ThinkingLevelType::DeepSeek(DeepSeekV4ThinkingLevel::High),
+            ..base_model()
+        };
+
+        let messages = vec![Message::new(MessageRole::User, "Hello")];
+        let request = build_gemini_request(&model, messages, &[]).expect("build request");
+        let config = request.generation_config.expect("generation_config is present");
+
+        assert_eq!(config["thinking"]["type"], "enabled");
+        assert_eq!(config["reasoning_effort"], "high");
+    }
+
+    #[test]
+    fn gemini_extra_body_is_merged() {
+        let model = LlmProviderConfig {
+            extra_body: Some(serde_json::json!({"top_k": 50})),
+            ..base_model()
+        };
+
+        let messages = vec![Message::new(MessageRole::User, "Hello")];
+        let request = build_gemini_request(&model, messages, &[]).expect("build request");
+        let config = request.generation_config.expect("generation_config is present");
+
+        assert_eq!(config["top_k"], 50);
+    }
+
+    #[test]
+    fn gemini_thinking_and_extra_body_merged_together() {
+        let model = LlmProviderConfig {
+            extra_body: Some(serde_json::json!({"top_k": 50})),
+            thinking_level: ThinkingLevelType::DeepSeek(DeepSeekV4ThinkingLevel::High),
+            ..base_model()
+        };
+
+        let messages = vec![Message::new(MessageRole::User, "Hello")];
+        let request = build_gemini_request(&model, messages, &[]).expect("build request");
+        let config = request.generation_config.expect("generation_config is present");
+
+        assert_eq!(config["top_k"], 50);
+        assert_eq!(config["thinking"]["type"], "enabled");
+        assert_eq!(config["reasoning_effort"], "high");
+    }
+}
+
 // ============================================================================
 // ToolCall builder — uses the shared ToolCallBuilder from tool_call_format
 // ============================================================================

@@ -198,7 +198,13 @@ impl ActiveModel {
     /// All other models (Claude, DeepSeek, Gemini, GPT-4, any OSS model) get `write`/`edit`.
     pub fn use_apply_patch(&self) -> bool {
         let id = self.model_id.to_ascii_lowercase();
-        id.contains("gpt-") && !id.contains("oss") && !id.contains("gpt-4")
+        if !id.starts_with("gpt-") || id.contains("oss") {
+            return false;
+        }
+        // gpt-4 and gpt-4-turbo/gpt-4-32k: no apply_patch
+        // gpt-4o, gpt-4.1, gpt-5, etc.: apply_patch
+        let after_prefix = &id[4..];
+        after_prefix != "4" && !after_prefix.starts_with("4-")
     }
 
     pub fn api_key_present(&self) -> bool {
@@ -231,5 +237,58 @@ pub struct ModelSummary {
 impl ModelSummary {
     pub fn label(&self) -> String {
         format!("{}/{}", self.provider_id, self.model_id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_model(model_id: &str) -> ActiveModel {
+        ActiveModel {
+            provider_id: "test".into(),
+            provider_display_name: "Test".into(),
+            base_url: "https://test.com".into(),
+            api_type: ApiType::OpenAiChatCompletions,
+            model_id: model_id.into(),
+            request_model_id: model_id.into(),
+            display_name: model_id.into(),
+            context_window: 128000,
+            max_output_tokens: 4096,
+            temperature: None,
+            supports_images: false,
+            system_prompt: String::new(),
+            api_key: None,
+            extra_body: None,
+            thinking_level: ThinkingLevelType::None,
+        }
+    }
+
+    #[test]
+    fn gpt_4o_uses_apply_patch() {
+        assert!(make_model("gpt-4o").use_apply_patch());
+        assert!(make_model("gpt-4o-mini").use_apply_patch());
+        assert!(make_model("gpt-4.1").use_apply_patch());
+        assert!(make_model("gpt-5").use_apply_patch());
+    }
+
+    #[test]
+    fn gpt_4_does_not_use_apply_patch() {
+        assert!(!make_model("gpt-4").use_apply_patch());
+        assert!(!make_model("gpt-4-turbo").use_apply_patch());
+        assert!(!make_model("gpt-4-32k").use_apply_patch());
+    }
+
+    #[test]
+    fn oss_models_do_not_use_apply_patch() {
+        assert!(!make_model("gpt-4o-oss").use_apply_patch());
+        assert!(!make_model("gpt-4o-oss-instruct").use_apply_patch());
+    }
+
+    #[test]
+    fn non_gpt_models_do_not_use_apply_patch() {
+        assert!(!make_model("claude-3-5-sonnet").use_apply_patch());
+        assert!(!make_model("deepseek-v4-flash").use_apply_patch());
+        assert!(!make_model("gemini-2.5-flash").use_apply_patch());
     }
 }
