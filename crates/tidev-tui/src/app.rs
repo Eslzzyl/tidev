@@ -289,6 +289,11 @@ impl App {
             runtime.cancel().await;
         });
 
+        // Finalise streaming message and append an error notice.
+        if let Some(ref mut chat) = self.message_list {
+            chat.append_interrupted_message();
+        }
+
         // Drop the pending response channel so the agent loop unblocks.
         self.pending_response_tx = None;
 

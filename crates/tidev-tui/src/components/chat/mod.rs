@@ -190,6 +190,31 @@ impl MessageList {
         self.dirty = true;
     }
 
+    /// Finalise the streaming message (if any) and append an error notice.
+    /// Called on user abort (double Esc).
+    pub fn append_interrupted_message(&mut self) {
+        let Some(ref mut chat_context) = self.chat_context else { return };
+
+        // Finalise the streaming message, preserving content and reasoning.
+        if let Some(idx) = self.streaming_buffer.finalise_message(&mut chat_context.messages) {
+            chat_context.messages[idx].completed_at = Some(Utc::now());
+            self.layout_index.mark_dirty(chat_context.messages[idx].id);
+        }
+
+        // Ensure streaming state is fully reset.
+        self.current_streaming_message_id = None;
+
+        // Append an error message to indicate the interruption.
+        let mut err_msg = tidev_types::message::Message::new(
+            tidev_types::message::MessageRole::Error,
+            "Request interrupted by user",
+        );
+        err_msg.completed_at = Some(Utc::now());
+        chat_context.messages.push(err_msg);
+
+        self.dirty = true;
+    }
+
     /// Handle a backend event for streaming or tool results.
     pub fn handle_backend_event(&mut self, event: &BackendEvent) {
         let Some(ref mut chat_context) = self.chat_context else { return };
