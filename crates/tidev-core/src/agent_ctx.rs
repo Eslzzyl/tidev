@@ -579,7 +579,6 @@ impl AgentContext for CoreContext {
                     active_model: self.active_model.clone(),
                     workspace_root: self.workspace_root.clone(),
                     event_tx: self.event_tx.clone(),
-                    parent_tools: self.tools.clone(),
                     mode: self.mode,
                     system_prompt: self.system_prompt.clone(),
                     snapshot: self.snapshot.clone(),
@@ -758,7 +757,6 @@ struct SubagentSpawner {
     active_model: ActiveModel,
     workspace_root: PathBuf,
     event_tx: UnboundedSender<BackendEvent>,
-    parent_tools: Vec<ToolDefinition>,
     mode: SessionMode,
     system_prompt: String,
     snapshot: Option<SnapshotService>,
@@ -804,13 +802,10 @@ async fn run_subagent_inner(
     let agent_type = AgentType::parse(subagent_type_str)
         .ok_or_else(|| anyhow::anyhow!("unknown subagent type '{subagent_type_str}'"))?;
 
-    // 2. Filter tools for this agent type + mode.
-    let sub_tools = filter_subagent_tools(&spawner.parent_tools, agent_type, spawner.mode)?;
-
-    // 3. Build agent definition.
+    // 2. Build agent definition.
     let agent_def = build_agent_def(agent_type, &spawner.system_prompt);
 
-    // 4. Resolve child model: check [agent.models] config, fall back to parent model.
+    // 3. Resolve child model: check [agent.models] config, fall back to parent model.
     let child_model = {
         let agent_type_name = agent_type.display_name();
         let cfg = spawner.config.read().unwrap();
@@ -827,6 +822,10 @@ async fn run_subagent_inner(
         }
     };
     let child_model_config = to_llm_provider_config(&child_model);
+
+    // 4. Filter tools based on child model, then agent type + mode.
+    let model_tools = spawner.tool_registry.definitions_for_model(&child_model);
+    let sub_tools = filter_subagent_tools(&model_tools, agent_type, spawner.mode)?;
 
     // 5. Create child session.
     let child_session_id = match config.child_session_id {
