@@ -76,6 +76,9 @@ pub(crate) struct MessageList {
 
     /// The area into which messages were rendered (for mouse selection clamping).
     pub content_area: Option<Rect>,
+    /// The scroll offset applied to the Paragraph widget (may differ from
+    /// scroll_offset when headers or padding shift visible content).
+    render_scroll: usize,
 
     /// Scrollbar drag state (None = not dragging).
     scrollbar_drag: Option<ScrollbarDrag>,
@@ -94,7 +97,7 @@ pub(crate) struct MessageList {
     bash_tool_call_id: Option<String>,
 
     // ── Dirty tracking ──
-    dirty: bool,
+    pub(crate) dirty: bool,
 }
 
 impl MessageList {
@@ -113,6 +116,7 @@ impl MessageList {
             hovered_card: None,
             card_bounds: Vec::new(),
             content_area: None,
+            render_scroll: 0,
             scrollbar_drag: None,
             spinner_start: Instant::now(),
             streaming_buffer: StreamingBuffer::new(),
@@ -600,7 +604,6 @@ impl Component for MessageList {
 
         self.render_tick += 1;
         self.selectable_regions.clear();
-        self.content_area = Some(rect);
 
         // Resolve scroll target if set
         if let Some(target_id) = self.scroll_target.take() {
@@ -611,6 +614,10 @@ impl Component for MessageList {
         }
 
         self.card_bounds.clear();
+        self.content_area = None;
+        self.render_scroll = 0;
+        let mut render_content_area = Rect::default();
+        let mut render_scroll = 0;
         render_mod::render_messages(
             frame,
             rect,
@@ -629,7 +636,12 @@ impl Component for MessageList {
             self.spinner_start,
             self.hovered_card,
             &mut self.card_bounds,
+            &mut self.selectable_regions,
+            &mut render_content_area,
+            &mut render_scroll,
         );
+        self.content_area = Some(render_content_area);
+        self.render_scroll = render_scroll;
 
         self.dirty = false;
     }
@@ -644,12 +656,37 @@ impl Component for MessageList {
 }
 
 impl MessageList {
-    /// Return the selectable regions as Rects for mouse selection clamping.
+    /// Return the selectable regions as screen-space Rects for mouse selection
+    /// clamping.  Converts from absolute line numbers to screen coordinates
+    /// (mirrors old TUI's chat_render conversion at lines 620-636).
     pub fn selectable_region_rects(&self) -> Vec<ratatui::layout::Rect> {
         use crate::components::chat::render_cache::SelectableRegionRange;
-        self.selectable_regions.iter().map(|r: &SelectableRegionRange| {
-            ratatui::layout::Rect::new(r.min_x, r.start_line as u16, r.max_x.unwrap_or(u16::MAX), (r.end_line - r.start_line) as u16)
-        }).collect()
+        let render_scroll = self.render_scroll;
+        let Some(area) = self.content_area else {
+            return Vec::new();
+        };
+        self.selectable_regions
+            .iter()
+            .filter_map(|r: &SelectableRegionRange| {
+                let visible_start = r.start_line.saturating_sub(render_scroll);
+                let visible_end = r.end_line.saturating_sub(render_scroll);
+                if visible_start >= visible_end {
+                    return None;
+                }
+                let y = area.y.saturating_add(visible_start as u16);
+                let height = (visible_end - visible_start) as u16;
+                let min_x = area.x.saturating_add(r.min_x);
+                let max_x = r
+                    .max_x
+                    .map(|mx| area.x.saturating_add(mx))
+                    .unwrap_or(area.x.saturating_add(area.width));
+                let width = max_x.saturating_sub(min_x);
+                if width == 0 {
+                    return None;
+                }
+                Some(ratatui::layout::Rect::new(min_x, y, width, height))
+            })
+            .collect()
     }
 
     /// Return the scrollbar area (rightmost column of content_area), if visible.

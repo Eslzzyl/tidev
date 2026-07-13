@@ -999,7 +999,20 @@ impl App {
                         .as_ref()
                         .map(|ml| ml.scroll_offset)
                         .unwrap_or(0);
-                    self.mouse_selection.press(position, msg_bounds, scroll_offset);
+
+                    // Refine bounds to the specific selectable region under the cursor
+                    // (mirrors old TUI's selection_bounds_for_position).
+                    let area = msg_bounds.unwrap();
+                    let refined = self
+                        .message_list
+                        .as_ref()
+                        .and_then(|ml| {
+                            let hit = ml.selectable_region_rects().iter().find(|r| r.contains(position)).copied();
+                            hit.map(|r| Rect { x: r.x, y: area.y, width: r.width, height: area.height })
+                                .or(Some(area))
+                        });
+
+                    self.mouse_selection.press(position, refined, scroll_offset);
                     return;
                 }
 
@@ -1020,9 +1033,8 @@ impl App {
                         return;
                     }
                 }
-                if self.mouse_selection.is_dragging() || msg_bounds.map_or(false, |b| b.contains(position)) {
-                    self.mouse_selection.drag(position);
-                }
+                // Always update drag position (old TUI unconditional behaviour).
+                self.mouse_selection.drag(position);
             }
             MouseEventKind::Up(MouseButton::Left) => {
                 if let Some(ref mut chat) = self.message_list {
@@ -1037,16 +1049,59 @@ impl App {
                 // Clipboard copy is handled in draw() where we have access to the frame buffer.
             }
             MouseEventKind::ScrollDown => {
+                self.mouse_selection.clear();
                 if self.message_list.is_some() {
                     self.process_action(Action::Chat(ChatAction::ScrollDelta(3)));
                 }
             }
             MouseEventKind::ScrollUp => {
+                self.mouse_selection.clear();
                 if self.message_list.is_some() {
                     self.process_action(Action::Chat(ChatAction::ScrollDelta(-3)));
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Per-frame auto-scroll while dragging a mouse selection near the
+    /// top/bottom edge of the message content area.
+    pub fn update_mouse_selection_auto_scroll(&mut self) {
+        if !self.mouse_selection.is_dragging() {
+            return;
+        }
+        let Some(area) = self
+            .message_list
+            .as_ref()
+            .and_then(|ml| ml.content_area)
+        else {
+            return;
+        };
+        let Some(pointer) = self.mouse_selection.pointer() else {
+            return;
+        };
+
+        let left = area.x;
+        let right = area.x.saturating_add(area.width);
+        if pointer.x < left || pointer.x >= right {
+            return;
+        }
+
+        let top_threshold = area.y.saturating_add(1);
+        let bottom_threshold = area.y.saturating_add(area.height.saturating_sub(2));
+
+        if pointer.y <= top_threshold {
+            let chat = self.message_list.as_mut().unwrap();
+            let new_scroll = chat.scroll_offset.saturating_sub(1);
+            chat.scroll_offset = new_scroll.min(chat.max_scroll());
+            chat.follow_tail = false;
+            chat.dirty = true;
+        } else if pointer.y >= bottom_threshold {
+            let chat = self.message_list.as_mut().unwrap();
+            let new_scroll = chat.scroll_offset.saturating_add(1);
+            chat.scroll_offset = new_scroll.min(chat.max_scroll());
+            chat.follow_tail = chat.scroll_offset >= chat.max_scroll();
+            chat.dirty = true;
         }
     }
 
@@ -1056,6 +1111,7 @@ impl App {
             chat.invalidate_layout();
         }
         self.sidebar_area = None;
+        self.mouse_selection.clear();
     }
 
     /// Global shortcuts that work regardless of overlay state.
@@ -2341,27 +2397,34 @@ impl App {
         );
 
         // ── Toast notification ──
-        // Small popup at the top-right, auto-expires.
+        // Small popup at the top-right of the message area, auto-expires.
+        // Mirrors old TUI's render_toast: positioned relative to message content area.
         if let Some((msg, expires_at)) = &self.toast.clone() {
             if Instant::now() < *expires_at {
-                let toast_width = (msg.len() as u16).min(32).saturating_add(2);
-                let toast_rect = Rect::new(
-                    area.right().saturating_sub(toast_width + 1),
-                    area.y + 1,
-                    toast_width,
-                    3,
-                );
-                frame.render_widget(Clear, toast_rect);
-                let block = Block::default()
-                    .style(Style::default().bg(palette.panel).fg(palette.text));
-                let centered = format!("\n{}", msg);
-                frame.render_widget(
-                    Paragraph::new(centered)
-                        .style(Style::default().bg(palette.panel).fg(palette.text))
-                        .alignment(Alignment::Center)
-                        .block(block),
-                    toast_rect,
-                );
+                let chat_area = self
+                    .message_list
+                    .as_ref()
+                    .and_then(|ml| ml.content_area);
+                if let Some(chat_area) = chat_area {
+                    let toast_width = (msg.len() as u16).min(32).saturating_add(2);
+                    let toast_rect = Rect::new(
+                        chat_area.right().saturating_sub(toast_width + 1),
+                        chat_area.y + 1,
+                        toast_width,
+                        3,
+                    );
+                    frame.render_widget(Clear, toast_rect);
+                    let block = Block::default()
+                        .style(Style::default().bg(palette.panel).fg(palette.text));
+                    let centered = format!("\n{}", msg);
+                    frame.render_widget(
+                        Paragraph::new(centered)
+                            .style(Style::default().bg(palette.panel).fg(palette.text))
+                            .alignment(Alignment::Center)
+                            .block(block),
+                        toast_rect,
+                    );
+                }
             } else {
                 self.toast = None;
             }
@@ -2403,9 +2466,11 @@ impl App {
                 if !text.is_empty() {
                     match copy_to_clipboard(&text) {
                         Ok(()) => {
+                            self.mouse_selection.clear();
                             self.set_toast("Selection copied to clipboard", std::time::Duration::from_secs(3));
                         }
                         Err(e) => {
+                            self.mouse_selection.clear();
                             self.set_toast(format!("Copy failed: {e}"), std::time::Duration::from_secs(5));
                         }
                     }

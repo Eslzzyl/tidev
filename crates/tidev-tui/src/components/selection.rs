@@ -58,7 +58,7 @@ impl MouseSelection {
     }
 
     /// End selection: call on mouse button up.
-    pub fn release(&mut self, position: Position, _current_scroll: usize) {
+    pub fn release(&mut self, position: Position, current_scroll: usize) {
         self.pointer = Some(position);
         if self.anchor.is_none() {
             self.clear();
@@ -66,13 +66,17 @@ impl MouseSelection {
         }
         self.focus = Some(clamp_to_bounds(position, self.bounds));
 
-        if self.has_selection(_current_scroll) {
+        if self.has_selection(current_scroll) {
             let effective = self.anchor != self.focus;
-            if effective {
-                self.pending_copy = true;
+            self.pending_copy = effective;
+            self.dragging = false;
+            if !self.pending_copy {
+                self.clear();
             }
+            return;
         }
-        self.dragging = false;
+
+        self.clear();
     }
 
     /// Whether there is an active non-zero selection.
@@ -214,19 +218,56 @@ fn apply_selection_style(
             continue;
         }
 
-        if relevant.is_empty() {
-            for x in row_start..=row_end {
-                if let Some(cell) = buffer.cell_mut((x, y)) {
-                    cell.set_style(style);
+        if !relevant.is_empty() {
+            for region in &relevant {
+                if y >= region.y && y < region.y + region.height {
+                    let rstart = row_start.max(region.x);
+                    let rend = row_end.min(region.x + region.width - 1);
+                    if rstart <= rend {
+                        let mut actual_end = None;
+                        for x in (rstart..=rend).rev() {
+                            if let Some(cell) = buffer.cell((x, y)) {
+                                let sym = cell.symbol();
+                                if sym != " " && !sym.is_empty() {
+                                    actual_end = Some(x);
+                                    break;
+                                }
+                            }
+                        }
+                        if let Some(e) = actual_end {
+                            for x in rstart..=e {
+                                if let Some(cell) = buffer.cell_mut((x, y)) {
+                                    cell.set_style(style);
+                                }
+                            }
+                        } else if rstart == row_start {
+                            if let Some(cell) = buffer.cell_mut((rstart, y)) {
+                                cell.set_style(style);
+                            }
+                        }
+                    }
                 }
             }
         } else {
-            for x in row_start..=row_end {
-                let in_any_region = relevant.iter().any(|r| r.contains(Position::new(x, y)));
-                if in_any_region {
+            let mut actual_end = None;
+            for x in (row_start..=row_end).rev() {
+                if let Some(cell) = buffer.cell((x, y)) {
+                    let sym = cell.symbol();
+                    if sym != " " && !sym.is_empty() {
+                        actual_end = Some(x);
+                        break;
+                    }
+                }
+            }
+            if let Some(e) = actual_end {
+                for x in row_start..=e {
                     if let Some(cell) = buffer.cell_mut((x, y)) {
                         cell.set_style(style);
                     }
+                }
+            } else {
+                if let Some(cell) = buffer.cell_mut((row_start, y)) {
+                    cell.set_style(style);
                 }
             }
         }
@@ -318,9 +359,7 @@ fn extract_selected_text(
                     }
                 }
             }
-            // Trim trailing whitespace from merged segments.
-            let trimmed = line_text.trim_end().to_string();
-            lines.push(trimmed);
+            lines.push(line_text);
         } else {
             let mut line_text = String::new();
             for x in row_start..=row_end {
@@ -328,8 +367,7 @@ fn extract_selected_text(
                     line_text.push_str(cell.symbol());
                 }
             }
-            let trimmed = line_text.trim_end().to_string();
-            lines.push(trimmed);
+            lines.push(line_text);
         }
     }
 
@@ -338,7 +376,45 @@ fn extract_selected_text(
         lines.pop();
     }
 
-    lines.join("\n")
+    if lines.is_empty() {
+        return String::new();
+    }
+
+    // Join lines with smart wrapping logic (mirrors old TUI behaviour):
+    // - preserve indentation (newline when trailing spaces < next indent)
+    // - join soft-wrapped lines with space
+    let mut result = String::new();
+    for i in 0..lines.len() {
+        let line = &lines[i];
+        let trimmed = line.trim_end_matches(' ');
+        let trailing_spaces = line.len() - trimmed.len();
+        result.push_str(trimmed);
+
+        if i + 1 < lines.len() {
+            let next_line = &lines[i + 1];
+            let next_trimmed = next_line.trim_start_matches(' ');
+            if next_trimmed.is_empty() {
+                result.push('\n');
+            } else {
+                let first_word_width = next_trimmed
+                    .split(' ')
+                    .next()
+                    .unwrap_or("")
+                    .len();
+                if trailing_spaces < first_word_width || trailing_spaces == 0 {
+                    let last_char = trimmed.chars().last().unwrap_or(' ');
+                    let first_next_char = next_trimmed.chars().next().unwrap_or(' ');
+                    if trailing_spaces > 0 || (last_char.is_ascii() && first_next_char.is_ascii()) {
+                        result.push(' ');
+                    }
+                } else {
+                    result.push('\n');
+                }
+            }
+        }
+    }
+
+    result
 }
 
 // ---------------------------------------------------------------------------

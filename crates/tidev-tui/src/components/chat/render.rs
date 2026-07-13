@@ -127,6 +127,9 @@ pub(crate) fn render_messages(
     spinner_start: Instant,
     hovered_card: Option<Uuid>,
     out_card_bounds: &mut Vec<(Uuid, usize, usize)>,
+    out_selectable_regions: &mut Vec<SelectableRegionRange>,
+    out_render_content_area: &mut Rect,
+    out_render_scroll: &mut usize,
 ) {
     if area.width == 0 || area.height == 0 {
         return;
@@ -165,6 +168,12 @@ pub(crate) fn render_messages(
     *scroll_offset = output.effective_scroll;
     // Export card bounds for mouse hover detection.
     *out_card_bounds = output.card_bounds;
+    // Export selectable regions for mouse selection clamping.
+    *out_selectable_regions = output.selectable_regions;
+    // Export the rendered content area and render scroll for coordinate
+    // conversion in selectable_region_rects().
+    *out_render_content_area = content_area;
+    *out_render_scroll = output.render_scroll;
 
     // Render running subagent cards (at the end of the message area)
     let total_with_subagents = {

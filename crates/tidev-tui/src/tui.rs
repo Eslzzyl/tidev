@@ -177,6 +177,10 @@ impl Tui {
 
             // ── Phase 2: Throttled render ─────────────────────────────
             //
+            // Per-frame: auto-scroll when dragging a selection near the edge
+            // of the message content area (mirrors old TUI behaviour).
+            app.update_mouse_selection_auto_scroll();
+
             // Render if:
             //   - we just handled input (immediate response), OR
             //   - the UI is dirty AND enough time has passed (FPS cap).
