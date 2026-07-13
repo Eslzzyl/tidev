@@ -45,7 +45,7 @@ use crate::session::SessionManager;
 /// Compose the complete system prompt for a session.
 ///
 /// Assembled once at session creation and stored in `AgentLoopConfig.system_prompt`.
-/// Includes: base agent prompt + instructions from files + mode reminder.
+/// Includes: base agent prompt + instructions from files + mode reminder + environment info.
 pub fn compose_system_prompt(
     agent_type: tidev_types::agent_type::AgentType,
     instructions: &[String],
@@ -62,6 +62,27 @@ pub fn compose_system_prompt(
 
     let mode_reminder = tidev_agent::prompts::mode_reminder(mode);
 
+    // Environment info (detected once, frozen for the session lifetime).
+    let system_info = crate::system_info::SystemInfo::detect();
+    let working_dir = std::env::current_dir()
+        .map(|p| p.display().to_string())
+        .unwrap_or_default();
+    let is_git = crate::system_info::is_git_repo(workspace_root);
+
+    let env_block = format!(
+        "\n\nHere is some useful information about the environment:\n\
+         <env>\n  \
+         Working directory: {}\n  \
+         Workspace root folder: {}\n  \
+         Is directory a git repo: {}\n  \
+         {}\n\
+         </env>",
+        working_dir,
+        workspace_root.display(),
+        if is_git { "yes" } else { "no" },
+        system_info.format_env(),
+    );
+
     let mut prompt = base_prompt;
     if !instruction_text.is_empty() {
         prompt.push_str("\n\n");
@@ -69,6 +90,7 @@ pub fn compose_system_prompt(
     }
     prompt.push_str("\n\n");
     prompt.push_str(mode_reminder);
+    prompt.push_str(&env_block);
 
     prompt
 }

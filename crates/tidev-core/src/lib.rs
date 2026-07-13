@@ -7,6 +7,7 @@ pub mod context;
 pub mod session;
 pub mod agent_ctx;
 pub mod runtime;
+pub mod system_info;
 pub mod undo;
 
 pub use message_buf::MessageBuffer;
