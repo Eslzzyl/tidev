@@ -1444,15 +1444,7 @@ impl App {
                     }
                 }
                 Action::Session(SessionAction::Create) => {
-                    let id = match self.runtime.create_default_session("Untitled session") {
-                        Ok(id) => id,
-                        Err(e) => {
-                            log::error!("Failed to create session: {e}");
-                            self.set_notice("Failed to create session");
-                            return;
-                        }
-                    };
-                    self.current_session_id = Some(id);
+                    self.current_session_id = None;
 
                     let ws_root = self.runtime.workspace_root()
                         .to_string_lossy().to_string();
@@ -1460,7 +1452,7 @@ impl App {
                     let auth = self.runtime.auth();
                     let active_model = config.resolve_active_model(&auth).ok();
                     let chat_context = crate::chat_context::ChatContext::new(
-                        id,
+                        uuid::Uuid::nil(),
                         String::new(),
                         ws_root,
                         Vec::new(),
