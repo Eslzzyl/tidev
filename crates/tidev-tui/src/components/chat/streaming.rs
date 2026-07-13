@@ -36,7 +36,7 @@ impl StreamingBuffer {
     /// in the messages list and returns the message ID.
     pub fn begin_streaming(&mut self, messages: &mut Vec<Message>) -> Uuid {
         let message_id = Uuid::new_v4();
-        let mut msg = Message::new(MessageRole::Assistant, String::new());
+        let mut msg = Message::streaming(MessageRole::Assistant, String::new());
         msg.id = message_id;
         messages.push(msg);
         self.current_message_id = Some(message_id);

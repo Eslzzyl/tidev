@@ -300,6 +300,22 @@ impl App {
             }
 
             let Some(session_id) = self.current_session_id else { continue };
+
+            // Add user message to chat_context so it's visible immediately.
+            let mut user_msg = tidev_types::message::Message::new(
+                tidev_types::message::MessageRole::User,
+                text.clone(),
+            );
+            user_msg.attachments = attachments.clone();
+            user_msg.mode = Some(self.mode);
+            user_msg.thinking_level = Some(self.thinking_level.clone());
+            if let Some(ref mut chat) = self.message_list {
+                if let Some(ref mut ctx) = chat.chat_context {
+                    ctx.push(user_msg);
+                }
+                chat.invalidate_layout();
+            }
+
             let rt = self.runtime.clone();
             tokio::spawn(async move {
                 if let Err(e) = rt
@@ -1536,6 +1552,39 @@ impl App {
                                 }
                             };
 
+                            // Add user message to chat_context so it's visible immediately.
+                            // submit_prompt_with_attachments persists the message to store + buffer
+                            // but does not update the MessageList's local chat_context.
+                            let mut user_msg = tidev_types::message::Message::new(
+                                tidev_types::message::MessageRole::User,
+                                text.clone(),
+                            );
+                            user_msg.attachments = final_attachments.clone();
+                            user_msg.mode = Some(self.mode);
+                            user_msg.thinking_level = Some(self.thinking_level.clone());
+                            if let Some(ref mut chat) = self.message_list {
+                                if let Some(ref mut ctx) = chat.chat_context {
+                                    ctx.push(user_msg);
+                                }
+                                chat.invalidate_layout();
+                            }
+
+                            // Update session title from prompt (matching old behaviour).
+                            if let Some(ref mut chat) = self.message_list {
+                                if let Some(ref mut ctx) = chat.chat_context {
+                                    if ctx.title.is_empty() || ctx.title == "Untitled session" {
+                                        let title = title_from_prompt(&text);
+                                        ctx.title = title.clone();
+                                        if let Err(e) = self.runtime
+                                            .session_manager()
+                                            .update_session(sid, Some(&title), None)
+                                        {
+                                            log::error!("Failed to update session title: {e}");
+                                        }
+                                    }
+                                }
+                            }
+
                             // Spawn submission to avoid blocking the UI.
                             let rt = self.runtime.clone();
                             self.set_notice("Sending...");
@@ -2358,4 +2407,17 @@ fn extract_inline_refs(prompt: &str) -> Vec<String> {
     }
 
     paths
+}
+
+/// Extract a session title from a user prompt (first line, trimmed, max 48 chars).
+fn title_from_prompt(prompt: &str) -> String {
+    let first_line = prompt.lines().next().unwrap_or("Untitled session").trim();
+    if first_line.is_empty() {
+        return "Untitled session".to_string();
+    }
+    let mut title: String = first_line.chars().take(48).collect();
+    if first_line.chars().count() > 48 {
+        title.push_str("...");
+    }
+    title
 }
