@@ -16,7 +16,7 @@ use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
 use tidev_core::{ApprovedTool, ToolCallWithViolations};
 use tidev_core::TuiResponse;
 use tidev_types::agent_type::AgentType;
-use tidev_types::message::{BackendEvent, MessageAttachment, ToolExecutionResult};
+use tidev_types::message::{BackendEvent, Message, MessageAttachment, ToolExecutionResult, COMPACTION_MESSAGE_LABEL};
 use tidev_types::tools::QuestionArgs;
 use unicode_width::UnicodeWidthStr;
 use crate::theme::{ThemeName, ThemePalette};
@@ -147,6 +147,9 @@ pub struct App {
     /// Queue of prompts waiting to be sent (when a request is already in progress).
     pending_prompt_queue: Vec<QueuedPrompt>,
 
+    /// Compact queued to run after the current request finishes.
+    pending_compact: bool,
+
     /// Current screen state.
     screen: AppScreen,
 
@@ -201,6 +204,7 @@ impl App {
             toast: None,
             abort_confirmation_deadline: None,
             pending_prompt_queue: Vec::new(),
+            pending_compact: false,
             screen: AppScreen::Welcome,
             spinner_start: Instant::now(),
             message_list: None,
@@ -288,11 +292,12 @@ impl App {
         // Drop the pending response channel so the agent loop unblocks.
         self.pending_response_tx = None;
 
-        // Clear pending tools and queued prompts.
+        // Clear pending tools, queued prompts, and queued compact.
         self.pending_tools.clear();
         self.tool_index = 0;
         self.approved_tools.clear();
         self.pending_prompt_queue.clear();
+        self.pending_compact = false;
 
         // Reset abort state.
         self.abort_confirmation_deadline = None;
@@ -339,6 +344,34 @@ impl App {
                 }
             });
         }
+    }
+
+    /// Start compaction immediately (push streaming message, spawn task).
+    fn execute_compact(&mut self) {
+        let session_id = match self.current_session_id {
+            Some(id) => id,
+            None => return,
+        };
+        // Push streaming compaction message immediately so the
+        // divider line and initial state are visible.
+        if let Some(ref mut chat) = self.message_list {
+            if let Some(ref mut ctx) = chat.chat_context {
+                let msg = Message::streaming(
+                    tidev_types::message::MessageRole::System,
+                    format!("{}\n\n", COMPACTION_MESSAGE_LABEL),
+                );
+                ctx.push(msg);
+            }
+            chat.invalidate_layout();
+        }
+        self.set_notice("Compacting session context...");
+        let mode = self.mode;
+        let rt = self.runtime.clone();
+        tokio::spawn(async move {
+            if let Err(e) = rt.compact_session(session_id, mode, None).await {
+                log::error!("Compact failed: {e}");
+            }
+        });
     }
 
     /// Open the composer content in an external editor. The TUI is suspended
@@ -476,6 +509,12 @@ impl App {
 
                 // Process any queued prompts now that the request finished.
                 self.flush_pending_prompt_queue();
+
+                // If a compact was queued and no request is active, run it now.
+                if self.pending_compact && !self.has_active_request() {
+                    self.pending_compact = false;
+                    self.execute_compact();
+                }
             }
             BackendEvent::ContextCompacted { .. } => {
                 self.set_notice("Context compacted");
@@ -1402,18 +1441,17 @@ impl App {
                     });
                 }
                 Action::Session(SessionAction::Compact) => {
-                    let session_id = match self.current_session_id {
-                        Some(id) => id,
-                        None => return,
-                    };
-                    self.set_notice("Compacting session context...");
-                    let mode = self.mode;
-                    let rt = self.runtime.clone();
-                    tokio::spawn(async move {
-                        if let Err(e) = rt.compact_session(session_id, mode, None).await {
-                            log::error!("Compact failed: {e}");
-                        }
-                    });
+                    // Guard: no session.
+                    if self.current_session_id.is_none() {
+                        return;
+                    }
+                    // If a request is in progress, queue the compact.
+                    if self.has_active_request() {
+                        self.pending_compact = true;
+                        self.set_notice("Compaction queued");
+                        return;
+                    }
+                    self.execute_compact();
                 }
                 Action::Session(SessionAction::Rename(session_id, title)) => {
                     let final_title = if title.trim().is_empty() {
@@ -1492,6 +1530,7 @@ impl App {
                     self.abort_confirmation_deadline = None;
                     self.context_usage = None;
                     self.pending_prompt_queue.clear();
+                    self.pending_compact = false;
                 }
                 Action::Chat(action) => {
                     match &action {
@@ -2069,11 +2108,14 @@ impl App {
                 }
             };
 
-            let status = if queued_count > 0 {
-                format!("{status} · queued {queued_count}")
-            } else {
-                status
+            let extra = match (queued_count, self.pending_compact) {
+                (0, false) => String::new(),
+                (1, false) => format!(" · queued 1"),
+                (q, false) => format!(" · queued {q}"),
+                (0, true) => " · compact pending".to_string(),
+                (q, true) => format!(" · queued {q} · compact pending"),
             };
+            let status = format!("{status}{extra}");
 
             if let Some(ref t) = token_status {
                 return format!("{status} · {t}");
@@ -2081,12 +2123,16 @@ impl App {
             return status;
         }
 
-        // 4. Queued messages (not streaming)
-        if queued_count > 0 {
+        // 4. Queued messages or compact pending (not streaming)
+        let has_pending = queued_count > 0 || self.pending_compact;
+        if has_pending {
+            let compact_part = if self.pending_compact { " · compact pending" } else { "" };
             let status = if queued_count == 1 {
-                "1 queued message".to_string()
+                format!("1 queued message{compact_part}")
+            } else if queued_count > 1 {
+                format!("{queued_count} queued messages{compact_part}")
             } else {
-                format!("{queued_count} queued messages")
+                format!("compact pending")
             };
             if let Some(ref t) = token_status {
                 return format!("{status} · {t}");

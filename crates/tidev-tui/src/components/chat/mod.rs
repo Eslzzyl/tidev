@@ -208,10 +208,17 @@ impl MessageList {
                 self.dirty = true;
             }
             BackendEvent::Delta { content, .. } => {
-                self.streaming_buffer.push_delta(content);
-                self.streaming_buffer.sync_pending(&mut chat_context.messages);
-                if let Some(msg_id) = self.streaming_buffer.current_message_id {
-                    self.layout_index.mark_dirty(msg_id);
+                if self.streaming_buffer.is_streaming {
+                    self.streaming_buffer.push_delta(content);
+                    self.streaming_buffer.sync_pending(&mut chat_context.messages);
+                    if let Some(msg_id) = self.streaming_buffer.current_message_id {
+                        self.layout_index.mark_dirty(msg_id);
+                    }
+                } else if let Some(msg) = chat_context.messages.iter_mut().rev().find(|m| {
+                    m.streaming && m.role == tidev_types::message::MessageRole::System
+                }) {
+                    msg.content.push_str(content);
+                    self.layout_index.mark_dirty(msg.id);
                 }
                 self.dirty = true;
             }
@@ -353,7 +360,7 @@ impl MessageList {
                     self.dirty = true;
                 }
             }
-            BackendEvent::ContextCompacted { compacted, summary, .. } => {
+            BackendEvent::ContextCompacted { compacted, summary, model_id, completed_at, .. } => {
                 if *compacted {
                     if let Some(summary) = summary {
                         // The summary was already streamed via Delta events into
@@ -365,11 +372,15 @@ impl MessageList {
                         });
                         if let Some(msg) = found {
                             msg.streaming = false;
+                            msg.model_id = model_id.clone();
+                            msg.completed_at = *completed_at;
                         } else {
-                            let compaction_msg = tidev_types::message::Message::new(
+                            let mut compaction_msg = tidev_types::message::Message::new(
                                 tidev_types::message::MessageRole::System,
                                 format!("Compaction\n\n{}", summary),
                             );
+                            compaction_msg.model_id = model_id.clone();
+                            compaction_msg.completed_at = *completed_at;
                             chat_context.messages.push(compaction_msg);
                         }
                     }

@@ -724,12 +724,15 @@ impl AgentContext for CoreContext {
                 Some(&result.summary),
                 result.retained_from,
             )?;
+            let model_id = self.active_model.model_id.clone();
             self.emit(BackendEvent::ContextCompacted {
                 session_id: self.session_id,
                 compacted: true,
                 manual: false,
                 summary: Some(result.summary),
                 retained_from: result.retained_from,
+                model_id: Some(model_id),
+                completed_at: Some(Utc::now()),
                 error: None,
             });
         }

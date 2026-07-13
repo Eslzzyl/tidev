@@ -24,6 +24,7 @@ use std::sync::{Arc, Mutex as StdMutex, OnceLock, RwLock as StdRwLock};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
+use chrono::Utc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
@@ -657,12 +658,15 @@ impl Runtime {
         // 5. Notify the TUI (BackendEvent::ContextCompacted is already sent by
         //    compact() via event_tx when streaming, but for consistency we
         //    always send the final event here as well).
+        let model_id = active_model.model_id.clone();
         let _ = self.event_tx.send(BackendEvent::ContextCompacted {
             session_id,
             compacted: true,
             manual: stream_request_id.is_some(),
             summary: Some(result.summary),
             retained_from: result.retained_from,
+            model_id: Some(model_id),
+            completed_at: Some(Utc::now()),
             error: None,
         });
 
@@ -739,6 +743,8 @@ impl Runtime {
             manual: false,
             summary: None,
             retained_from: 0,
+            model_id: None,
+            completed_at: None,
             error: None,
         });
 
@@ -773,6 +779,8 @@ impl Runtime {
             manual: false,
             summary: None,
             retained_from: 0,
+            model_id: None,
+            completed_at: None,
             error: None,
         });
 

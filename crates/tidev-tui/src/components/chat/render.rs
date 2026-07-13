@@ -328,7 +328,7 @@ fn messages_text(
     for block in &visible_blocks {
         let next_idx = block.message_start_idx + block.message_count;
         let is_round_end = next_idx >= messages.len()
-            || matches!(messages[next_idx].role, MessageRole::User);
+            || !matches!(messages[next_idx].role, MessageRole::Tool);
         let block_lines = render_block_from_cache(
             block, cache, width, is_round_end, &mut selectable_regions, ctx, &current_line_offset,
             messages, &mut card_bounds,
@@ -369,7 +369,7 @@ fn update_layout_index(
                 // Find is_round_end for this block
                 let next_idx = start_idx + block.message_count;
                 let is_round_end = next_idx >= messages.len()
-                    || matches!(messages[next_idx].role, MessageRole::User);
+                    || !matches!(messages[next_idx].role, MessageRole::Tool);
                 let old_line_count = block.line_count;
 
                 let (_msg_count, new_line_count, _) = compute_and_cache_block(
@@ -414,7 +414,7 @@ fn update_layout_index(
         };
         let next_idx = i + count;
         let is_round_end = next_idx >= messages.len()
-            || matches!(messages[next_idx].role, MessageRole::User);
+            || !matches!(messages[next_idx].role, MessageRole::Tool);
         blocks_info.push((i, is_round_end));
         i += count;
     }
@@ -1154,8 +1154,8 @@ fn render_system_card(
         // Metadata footer for compaction (same style as assistant)
         if is_round_end && !message.streaming {
             let mut parts: Vec<String> = Vec::new();
-            if let Some(ref model_id) = message.model_id {
-                parts.push(model_id.clone());
+            if message.model_id.is_some() {
+                parts.push(ctx.model_display_name.to_string());
             }
             if let Some(completed) = message.completed_at {
                 let elapsed = completed - message.created_at;

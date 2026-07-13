@@ -584,6 +584,8 @@ pub enum BackendEvent {
         manual: bool,
         summary: Option<String>,
         retained_from: usize,
+        model_id: Option<String>,
+        completed_at: Option<DateTime<Utc>>,
         error: Option<String>,
     },
     SidebarSnapshotReady {
