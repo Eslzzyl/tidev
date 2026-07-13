@@ -18,6 +18,7 @@ use tidev_core::TuiResponse;
 use tidev_types::agent_type::AgentType;
 use tidev_types::message::{BackendEvent, MessageAttachment, ToolExecutionResult};
 use tidev_types::tools::QuestionArgs;
+use unicode_width::UnicodeWidthStr;
 use crate::theme::{ThemeName, ThemePalette};
 use tidev_types::prompts::SessionMode;
 use tidev_types::reasoning::ThinkingLevelType;
@@ -148,6 +149,9 @@ pub struct App {
 
     /// Current screen state.
     screen: AppScreen,
+
+    /// Spinner animation start time.
+    spinner_start: Instant,
 }
 
 /// A prompt queued for submission when the current request finishes.
@@ -198,6 +202,7 @@ impl App {
             abort_confirmation_deadline: None,
             pending_prompt_queue: Vec::new(),
             screen: AppScreen::Welcome,
+            spinner_start: Instant::now(),
             message_list: None,
             sidebar: Sidebar::new(),
             mouse_selection: MouseSelection::default(),
@@ -261,6 +266,14 @@ impl App {
             return true;
         }
         false
+    }
+
+    fn loading_spinner(&self) -> &'static str {
+        const FRAMES: [&str; 4] = ["|", "/", "-", "\\"];
+        const FRAME_DURATION_MS: u128 = 100;
+        let elapsed = self.spinner_start.elapsed().as_millis();
+        let frame_index = (elapsed / FRAME_DURATION_MS) as usize;
+        FRAMES[frame_index % FRAMES.len()]
     }
 
     /// Abort the current request: cancel the agent loop, drop pending approvals,
@@ -1989,6 +2002,123 @@ impl App {
 
     // ── Drawing ──
 
+    fn footer_status_text(&self) -> String {
+        let queued_count = self.pending_prompt_queue.len();
+
+        // 1. Esc again to stop (abort confirmation)
+        if self.has_active_request()
+            && self.abort_confirmation_deadline
+                .is_some_and(|deadline| deadline > Instant::now())
+        {
+            return "Esc again to stop".to_string();
+        }
+
+        // 2. Token usage helper
+        let token_status = self.context_usage.as_ref().map(|usage| {
+            let max_context = self.runtime.active_model().context_window;
+            let total = usage.input_tokens as u64 + usage.output_tokens as u64;
+            let pct = if max_context > 0 {
+                (total as f64 / max_context as f64 * 100.0).min(100.0)
+            } else {
+                0.0
+            };
+            let used_k = usage.input_tokens / 1000;
+            let max_k = (max_context as u32) / 1000;
+            format!("{pct:.1}% ({used_k}K/{max_k}K)")
+        });
+
+        // 3. Active request — show spinner + status
+        if self.has_active_request() {
+            let spinner = self.loading_spinner();
+
+            // Check for subsession
+            let parent_session_id = self.message_list.as_ref()
+                .and_then(|ml| ml.chat_context.as_ref())
+                .and_then(|ctx| ctx.parent_session_id);
+
+            let status = if parent_session_id.is_some() {
+                format!("{spinner} Thinking...")
+            } else if let Some(ref ml) = self.message_list {
+                let sub_count = ml.running_subagents_count();
+                if sub_count > 0 {
+                    let label = if sub_count == 1 { "subagent" } else { "subagents" };
+                    format!("{spinner} Waiting for {sub_count} {label}")
+                } else if ml.is_streaming() {
+                    match self.pending_mode.as_ref() {
+                        Some(pending) => {
+                            format!("{spinner} {} → {} (on completion)", self.mode.title(), pending.title())
+                        }
+                        None => format!("{spinner} {}", self.mode.title()),
+                    }
+                } else if !self.pending_tools.is_empty() {
+                    format!("{spinner} Running tools")
+                } else {
+                    match self.pending_mode.as_ref() {
+                        Some(pending) => {
+                            format!("{spinner} {} → {} (on completion)", self.mode.title(), pending.title())
+                        }
+                        None => format!("{spinner} {}", self.mode.title()),
+                    }
+                }
+            } else {
+                match self.pending_mode.as_ref() {
+                    Some(pending) => {
+                        format!("{spinner} {} → {} (on completion)", self.mode.title(), pending.title())
+                    }
+                    None => format!("{spinner} {}", self.mode.title()),
+                }
+            };
+
+            let status = if queued_count > 0 {
+                format!("{status} · queued {queued_count}")
+            } else {
+                status
+            };
+
+            if let Some(ref t) = token_status {
+                return format!("{status} · {t}");
+            }
+            return status;
+        }
+
+        // 4. Queued messages (not streaming)
+        if queued_count > 0 {
+            let status = if queued_count == 1 {
+                "1 queued message".to_string()
+            } else {
+                format!("{queued_count} queued messages")
+            };
+            if let Some(ref t) = token_status {
+                return format!("{status} · {t}");
+            }
+            return status;
+        }
+
+        // 5. Token usage only
+        if let Some(t) = token_status {
+            return t;
+        }
+
+        // 6. Last notice
+        if let Some((msg, _)) = &self.last_notice {
+            if !msg.is_empty() {
+                return msg.clone();
+            }
+        }
+
+        // 7. Subsession navigation hint
+        let is_subsession = self.message_list.as_ref()
+            .and_then(|ml| ml.chat_context.as_ref())
+            .and_then(|ctx| ctx.parent_session_id)
+            .is_some();
+        if is_subsession {
+            return "Subsession active · Ctrl+X then Up arrow to return".to_string();
+        }
+
+        // 8. Ready
+        "Ready".to_string()
+    }
+
     pub fn draw(&mut self, frame: &mut Frame) {
         let palette = self.current_palette;
         let area = frame.area();
@@ -2137,46 +2267,18 @@ impl App {
         // Draw overlays (on top of everything, including sidebar)
         self.overlays.draw(frame, area, &draw_ctx);
 
-        // ── Status notice (last_notice) with token usage ──
-        let notice_text = if let Some(ref usage) = self.context_usage {
-            // Format: "notice · 45.2% (12K/26K)"
-            let max_context = self
-                .runtime
-                .active_model()
-                .context_window;
-            let total = usage.input_tokens as u64 + usage.output_tokens as u64;
-            let pct = if max_context > 0 {
-                (total as f64 / max_context as f64 * 100.0).min(100.0)
-            } else {
-                0.0
-            };
-            let used_k = usage.input_tokens / 1000;
-            let max_k = (max_context as u32) / 1000;
-            let token_part = format!("{pct:.1}% ({used_k}K/{max_k}K)");
-
-            match &self.last_notice {
-                Some((msg, _)) if !msg.is_empty() => {
-                    format!("{msg} · {token_part}")
-                }
-                _ => token_part,
-            }
-        } else {
-            self.last_notice
-                .as_ref()
-                .map(|(msg, _)| msg.clone())
-                .unwrap_or_default()
-        };
-
-        if !notice_text.is_empty() {
-            frame.render_widget(
-                Paragraph::new(Line::from(Span::styled(
-                    &notice_text,
-                    Style::default().fg(palette.muted),
-                )))
-                .style(Style::default().bg(palette.background)),
-                Rect::new(main_area.x + 1, notice_line.y, notice_line.width.saturating_sub(2), 1),
-            );
-        }
+        // ── Footer status line (right-aligned, matching v0.6.x) ──
+        let status_text = self.footer_status_text();
+        let status_width = status_text.width().min(notice_line.width.saturating_sub(2) as usize) as u16;
+        let status_x = notice_line.x + notice_line.width.saturating_sub(2).saturating_sub(status_width);
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                &status_text,
+                Style::default().fg(palette.muted),
+            )))
+            .style(Style::default().bg(palette.background)),
+            Rect::new(status_x, notice_line.y, status_width, 1),
+        );
 
         // ── Toast notification ──
         // Small popup at the top-right, auto-expires.

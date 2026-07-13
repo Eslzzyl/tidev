@@ -680,6 +680,21 @@ impl MessageList {
         self.streaming_buffer.is_streaming
     }
 
+    /// Number of running subagents.
+    pub fn running_subagents_count(&self) -> usize {
+        self.running_subagents.len()
+    }
+
+    /// Description of the first running subagent, if any.
+    pub fn first_subagent_description(&self) -> Option<&str> {
+        self.running_subagents.first().map(|s| s.description.as_str())
+    }
+
+    /// Subagent type of the first running subagent, if any.
+    pub fn first_subagent_type(&self) -> Option<&str> {
+        self.running_subagents.first().map(|s| s.subagent_type.as_str())
+    }
+
     /// Update hovered card based on mouse position.
     /// `x`, `y` are screen coordinates. Call on every mouse move event.
     pub fn set_hovered_card(&mut self, x: u16, y: u16) {
