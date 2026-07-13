@@ -56,10 +56,12 @@ impl ConnectDialog {
         }
     }
 
-    /// Rebuild the full (unfiltered) provider list from runtime config + auth.
-    fn rebuild_all_providers(&mut self, ctx: &UpdateContext) {
-        let config = ctx.runtime.config();
-        let auth = ctx.runtime.auth();
+    /// Rebuild the full (unfiltered) provider list from config + auth.
+    fn rebuild_all_providers(
+        &mut self,
+        config: &tidev_config::AppConfig,
+        auth: &tidev_config::AuthStore,
+    ) {
         self.all_providers = config
             .provider_ids()
             .into_iter()
@@ -126,14 +128,15 @@ impl ConnectDialog {
 
     fn provider_source_label(source: &ProviderSource) -> &'static str {
         match source {
-            ProviderSource::User => "user",
-            ProviderSource::Bundled => "bundled",
+            ProviderSource::User => "custom",
+            ProviderSource::Bundled => "preset",
         }
     }
 }
 
 impl Component for ConnectDialog {
-    fn init(&mut self, _ctx: &InitContext) -> Result<()> {
+    fn init(&mut self, ctx: &InitContext) -> Result<()> {
+        self.rebuild_all_providers(ctx.config, ctx.auth);
         Ok(())
     }
 
@@ -149,6 +152,7 @@ impl Component for ConnectDialog {
                         OverlayKind::ConnectDialog,
                     )))
                 }
+                KeyCode::Tab => None,
                 KeyCode::Enter
                     if !key.modifiers.contains(KeyModifiers::SHIFT)
                         && !key.modifiers.contains(KeyModifiers::ALT) =>
@@ -260,14 +264,18 @@ impl Component for ConnectDialog {
             }
             Action::Connect(ConnectAction::PruneOrphans) => {
                 // Provider list may have changed; rebuild.
-                self.rebuild_all_providers(ctx);
+                let config = ctx.runtime.config();
+                let auth = ctx.runtime.auth();
+                self.rebuild_all_providers(&config, &auth);
                 self.selected = 0;
                 vec![]
             }
             _ => {
                 // Initial build or refresh after any action.
                 if self.all_providers.is_empty() {
-                    self.rebuild_all_providers(ctx);
+                    let config = ctx.runtime.config();
+                    let auth = ctx.runtime.auth();
+                    self.rebuild_all_providers(&config, &auth);
                 }
                 vec![]
             }
@@ -278,7 +286,7 @@ impl Component for ConnectDialog {
         let palette = ctx.palette;
         let (overlay_width, overlay_height) = match &self.phase {
             ConnectPhase::ProviderPicker => (rect.width.min(92), rect.height.min(28)),
-            ConnectPhase::ApiKey { .. } => (rect.width.min(80), 10),
+            ConnectPhase::ApiKey { .. } => (rect.width.min(80), rect.height.min(24)),
         };
         let overlay = centered_rect(overlay_width, overlay_height, rect);
         frame.render_widget(Clear, overlay);
@@ -322,7 +330,7 @@ impl Component for ConnectDialog {
 
                 // Search input
                 let search_display = if self.query.is_empty() {
-                    "Search providers... (type to filter)"
+                    "Search providers by id or display name... (type to filter)"
                 } else {
                     self.query.as_str()
                 };
@@ -380,20 +388,36 @@ impl Component for ConnectDialog {
                         palette.text
                     };
 
-                    let connected_tag = if item.connected { " ✓" } else { "" };
                     let source_label = Self::provider_source_label(&item.source);
                     let prefix = if is_selected { "▶ " } else { "  " };
+                    let status_style = if item.connected {
+                        Style::default().fg(palette.success).bg(bg)
+                    } else {
+                        Style::default().fg(palette.muted).bg(bg)
+                    };
                     let line = Line::from(vec![
                         Span::styled(
                             prefix,
-                            Style::default().fg(if is_selected { palette.accent } else { bg }),
+                            Style::default().fg(if is_selected { palette.accent } else { palette.panel_alt }),
                         ),
                         Span::styled(
-                            format!(
-                                "{} ({}){}",
-                                item.display_name, source_label, connected_tag
-                            ),
-                            Style::default().fg(fg).bg(bg),
+                            &item.display_name,
+                            Style::default().fg(fg).add_modifier(Modifier::BOLD).bg(bg),
+                        ),
+                        Span::raw("  "),
+                        Span::styled(
+                            format!("({})", item.provider_id),
+                            Style::default().fg(palette.muted).bg(bg),
+                        ),
+                        Span::raw("  "),
+                        Span::styled(
+                            format!("[{}]", source_label),
+                            Style::default().fg(palette.accent_soft).bg(bg),
+                        ),
+                        Span::raw("  "),
+                        Span::styled(
+                            if item.connected { "connected" } else { "not connected" },
+                            status_style,
                         ),
                     ]);
                     frame.render_widget(
@@ -418,6 +442,7 @@ impl Component for ConnectDialog {
             } => {
                 let sections = Layout::vertical([
                     Constraint::Length(2),
+                    Constraint::Length(1),
                     Constraint::Length(3),
                     Constraint::Length(1),
                 ])
@@ -433,6 +458,13 @@ impl Component for ConnectDialog {
                     sections[0],
                 );
 
+                // Security notice
+                frame.render_widget(
+                    Paragraph::new("The key will be stored in auth.json and used for future requests.")
+                        .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
+                    sections[1],
+                );
+
                 // Key input
                 let display = if buffer.is_empty() {
                     "Paste or type your API key..."
@@ -446,18 +478,18 @@ impl Component for ConnectDialog {
                     ]))
                     .style(Style::default().bg(palette.panel_alt))
                     .wrap(Wrap { trim: false }),
-                    sections[1],
+                    sections[2],
                 );
                 frame.set_cursor_position((
-                    sections[1].x + 5 + buffer.as_str().width() as u16,
-                    sections[1].y,
+                    sections[2].x + 5 + buffer.as_str().width() as u16,
+                    sections[2].y,
                 ));
 
                 // Help
                 frame.render_widget(
                     Paragraph::new("Enter save · Esc back · type to enter key")
                         .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
-                    sections[2],
+                    sections[3],
                 );
             }
         }

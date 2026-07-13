@@ -222,7 +222,12 @@ impl ModelPanel {
                         if summary.label().to_ascii_lowercase() == label)
                 })
             } else {
-                None
+                // "<inherit>": fall back to the general tab's active model
+                self.items_cache.iter().position(|item| {
+                    matches!(item, ModelPanelItem::Model { summary, .. }
+                        if summary.provider_id == self.active_model.provider_id
+                            && summary.model_id == self.active_model.model_id)
+                })
             }
         };
 
@@ -359,6 +364,16 @@ impl Component for ModelPanel {
                         } else {
                             if let Some(t) = self.tabs.get_mut(self.selected_tab_index) {
                                 t.thinking_level_expanded = true;
+                                // Initialize index to match the current thinking level
+                                let current_tl = self
+                                    .active_model
+                                    .thinking_level
+                                    .to_string()
+                                    .to_ascii_lowercase();
+                                t.thinking_level_index = tl_options
+                                    .iter()
+                                    .position(|opt| opt.to_ascii_lowercase() == current_tl)
+                                    .unwrap_or(0);
                             }
                             None
                         }
@@ -713,11 +728,24 @@ impl Component for ModelPanel {
                             .current_tab()
                             .is_some_and(|t| t.selected_index == index);
 
-                        // Active checkmark: show if this matches the active model
-                        // (for General tab, check against self.active_model)
-                        let is_active = self.is_general_tab()
-                            && summary.provider_id == self.active_model.provider_id
-                            && summary.model_id == self.active_model.model_id;
+                        // Active checkmark: show if this model is the currently
+                        // configured model for the active tab.
+                        let is_active = self
+                            .current_tab()
+                            .map_or(false, |tab| {
+                                if tab.agent_type_str == "general" {
+                                    summary.provider_id == self.active_model.provider_id
+                                        && summary.model_id == self.active_model.model_id
+                                } else {
+                                    let label = tab.current_label.to_ascii_lowercase();
+                                    if label == "<inherit>" || label.is_empty() {
+                                        summary.provider_id == self.active_model.provider_id
+                                            && summary.model_id == self.active_model.model_id
+                                    } else {
+                                        summary.label().to_ascii_lowercase() == label
+                                    }
+                                }
+                            });
 
                         let active_marker = if is_active {
                             Span::styled("✓ ", Style::default().fg(palette.accent))
@@ -740,27 +768,42 @@ impl Component for ModelPanel {
                             ),
                         ];
 
-                        // Thinking level tag (when expanded for this item)
-                        if is_selected
-                            && self
-                                .current_tab()
-                                .is_some_and(|t| t.thinking_level_expanded)
-                        {
-                            let tl_options = thinking_options_for_model(items, index);
-                            if !tl_options.is_empty() {
-                                let tl_idx = self
+                        // Thinking level tag (expanded preview + persistent display)
+                        let tl_tag: Option<String> = {
+                            // 1. Expanded: show the selected thinking option preview
+                            if is_selected
+                                && self
                                     .current_tab()
-                                    .map(|t| t.thinking_level_index)
-                                    .unwrap_or(0);
-                                let tl = tl_options[tl_idx % tl_options.len()];
-                                let level_name =
-                                    tl.rsplit_once(':').map(|(_, v)| v).unwrap_or(tl);
-                                spans.push(Span::raw("  "));
-                                spans.push(Span::styled(
-                                    format!("[{}]", level_name),
-                                    Style::default().fg(palette.accent_soft),
-                                ));
+                                    .is_some_and(|t| t.thinking_level_expanded)
+                            {
+                                let tl_options = thinking_options_for_model(items, index);
+                                if !tl_options.is_empty() {
+                                    let tl_idx = self
+                                        .current_tab()
+                                        .map(|t| t.thinking_level_index)
+                                        .unwrap_or(0);
+                                    let tl = tl_options[tl_idx % tl_options.len()];
+                                    tl.rsplit_once(':').map(|(_, v)| v.to_string())
+                                } else {
+                                    None
+                                }
+                            // 2. Active model on General tab: show current thinking level
+                            } else if is_active
+                                && self.is_general_tab()
+                                && self.active_model.thinking_level.is_supported()
+                            {
+                                let name = self.active_model.thinking_level.display_name();
+                                if name.is_empty() { None } else { Some(name.to_string()) }
+                            } else {
+                                None
                             }
+                        };
+                        if let Some(ref tag) = tl_tag {
+                            spans.push(Span::raw("  "));
+                            spans.push(Span::styled(
+                                format!("[{}]", tag),
+                                Style::default().fg(palette.accent_soft),
+                            ));
                         }
 
                         rows.push(ListItem::new(Line::from(spans)));

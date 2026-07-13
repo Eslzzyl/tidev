@@ -53,7 +53,7 @@ use crate::components::composer::Composer;
 use crate::components::sidebar::Sidebar;
 use crate::components::notification::NotificationState;
 use crate::components::selection::{MouseSelection, copy_to_clipboard};
-use crate::context::{DrawContext, UpdateContext};
+use crate::context::{DrawContext, InitContext, UpdateContext};
 use crate::utils::strip_system_reminder_tags;
 
 /// Token usage statistics for the current/last request.
@@ -2018,7 +2018,16 @@ impl App {
             | OverlayKind::PanelLauncher => None,
             _ => None,
         };
-        if let Some(component) = component {
+        if let Some(mut component) = component {
+            let config = self.runtime.config();
+            let auth = self.runtime.auth();
+            let workspace_root = self.runtime.workspace_root().to_path_buf();
+            let init_ctx = InitContext {
+                config: &config,
+                auth: &auth,
+                workspace_root: &workspace_root,
+            };
+            let _ = component.init(&init_ctx);
             self.overlays.push(component);
         }
     }
