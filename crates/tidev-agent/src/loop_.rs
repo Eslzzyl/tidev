@@ -26,11 +26,11 @@ const MAX_TURNS: u64 = 50;
 /// # Flow
 ///
 /// ```text
-///  load messages → compose system prompt → stream LLM turn
-///       ↑                                      │
-///       │                            tool calls? ──no──→ persist → exit
-///       │                                      │
-///       └── persist results ←─ execute tools ←─┘
+///  load messages → inject mode reminder → compose system prompt → stream LLM turn
+///       ↑                                                            │
+///       │                                                  tool calls? ──no──→ persist → exit
+///       │                                                            │
+///       └── persist results ←─ execute tools ←───────────────←───────┘
 /// ```
 pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> Result<()> {
     let session_id = config.session_id;
@@ -51,12 +51,15 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
         }
 
         // ─── 1. Load messages ────────────────────────────────────────────
-        let messages = ctx.load_messages(session_id).await?;
+        let mut messages = ctx.load_messages(session_id).await?;
 
-        // ─── 2. Compose system prompt ────────────────────────────────────
-        let system_prompt = compose_system_prompt(&config, &messages);
+        // ─── 2. Inject mode reminder into the last user message ───────────
+        inject_mode_reminder(ctx, session_id, &mut messages, config.mode).await?;
 
-        // ─── 3. Stream LLM turn ──────────────────────────────────────────
+        // ─── 3. Compose system prompt (no mode reminder — injected above) ─
+        let system_prompt = config.definition.system_prompt.clone();
+
+        // ─── 4. Stream LLM turn ──────────────────────────────────────────
         let turn = match ctx
             .stream_turn(&messages, &system_prompt, &config.thinking_level)
             .await
@@ -75,7 +78,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
             Err(e) => return Err(e),
         };
 
-        // ─── 4. No tool calls → done ─────────────────────────────────────
+        // ─── 5. No tool calls → done ─────────────────────────────────────
         if turn.tool_calls.is_empty() {
             let msg = build_assistant_message(&turn);
             ctx.save_messages(session_id, &[msg]).await?;
@@ -87,11 +90,11 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
             return Ok(());
         }
 
-        // ─── 5. Persist assistant message (with tool calls) ──────────────
+        // ─── 6. Persist assistant message (with tool calls) ──────────────
         let assistant_msg = build_assistant_message(&turn);
         ctx.save_messages(session_id, &[assistant_msg]).await?;
 
-        // ─── 6. Permission approval ──────────────────────────────────────
+        // ─── 7. Permission approval ──────────────────────────────────────
         let approved = ctx
             .request_tool_approval(&turn.tool_calls, config.mode)
             .await?;
@@ -128,14 +131,10 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
             }
         }
 
-        // ─── 7. Execute tools ────────────────────────���───────────────────
-        // Execute all approved non-task tools. The context implementation
-        // handles parallel/serial execution internally.
+        // ─── 8. Execute tools ────────────────────────────────────────────
         let mut all_results: Vec<(ToolCall, ToolExecutionResult)> = Vec::new();
 
         if !other_calls.is_empty() || !task_calls.is_empty() {
-            // Convert approved tools back to the format expected by execute_tools.
-            // We pass ALL approved tools (including rejected ones already handled).
             let results = ctx
                 .execute_tools(
                     &approved,
@@ -146,7 +145,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
             all_results = results;
         }
 
-        // ─── 8. Persist tool results ──────────────────────────────────────
+        // ─── 9. Persist tool results ──────────────────────────────────────
         for (tool_call, result) in &all_results {
             let result_msg = Message::tool_result(
                 &tool_call.id,
@@ -156,7 +155,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
             ctx.save_messages(session_id, &[result_msg]).await?;
         }
 
-        // ─── 9. Prepare for next turn ────────────────────────────────────
+        // ─── 10. Prepare for next turn ────────────────────────────────────
         request_id += 1;
         let _ = event_tx.send(BackendEvent::TurnStarting {
             session_id,
@@ -170,20 +169,81 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Mode reminder injection
 // ---------------------------------------------------------------------------
 
-/// Compose the system prompt from the agent definition, mode reminder, and
-/// any additional context.
-fn compose_system_prompt(config: &AgentLoopConfig, _messages: &[Message]) -> String {
-    let mode_reminder = prompts::mode_reminder(config.mode);
+/// Inject a mode reminder into the last user message if needed.
+///
+/// Mirrors the old v0.6.x `inject_mode_reminder` logic:
+/// - First user message → inject `mode_reminder(current_mode)`
+/// - Mode changed from previous user message → inject `plan_switch_reminder()`
+///   or `build_switch_reminder()`
+/// - Same mode → no injection
+///
+/// The reminder is prepended to the message content and persisted to both
+/// the in-memory buffer and the store so subsequent turns see it.
+async fn inject_mode_reminder(
+    ctx: &dyn AgentContext,
+    session_id: uuid::Uuid,
+    messages: &mut Vec<Message>,
+    current_mode: tidev_types::prompts::SessionMode,
+) -> Result<()> {
+    // Find the last user message index.
+    let last_user_idx = match messages.iter().rposition(|m| m.role == MessageRole::User) {
+        Some(idx) => idx,
+        None => return Ok(()),
+    };
 
-    format!(
-        "{}\n\n{}",
-        config.definition.system_prompt,
-        mode_reminder,
-    )
+    // Find the mode of the most recent *previous* user message.
+    let prev_mode = messages[..last_user_idx]
+        .iter()
+        .rev()
+        .find(|m| m.role == MessageRole::User)
+        .and_then(|m| m.mode);
+
+    let is_first_user = prev_mode.is_none();
+
+    let reminder: Option<String> = match (is_first_user, prev_mode) {
+        (true, _) => Some(prompts::mode_reminder(current_mode).to_string()),
+        (false, Some(prev)) if prev != current_mode => Some(match current_mode {
+            tidev_types::prompts::SessionMode::Plan => prompts::plan_switch_reminder(),
+            tidev_types::prompts::SessionMode::Build => prompts::build_switch_reminder(),
+        }),
+        _ => None,
+    };
+
+    let Some(text) = reminder else {
+        return Ok(());
+    };
+
+    // De-duplicate: skip if the content already starts with this reminder.
+    if messages[last_user_idx].content.starts_with(&text) {
+        return Ok(());
+    }
+
+    // Prepend the reminder.
+    let new_content = format!("{text}\n\n{}", messages[last_user_idx].content);
+
+    // Update in-memory message.
+    let msg_id = messages[last_user_idx].id;
+    messages[last_user_idx].content = new_content.clone();
+
+    // Persist to buffer + store.
+    ctx.update_message_content(session_id, msg_id, new_content).await?;
+
+    log::info!(
+        "injected mode reminder into user message {} (mode={:?}, is_first={})",
+        msg_id,
+        current_mode,
+        is_first_user,
+    );
+
+    Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 /// Build a [`Message`] from an [`AssistantTurn`].
 fn build_assistant_message(turn: &AssistantTurn) -> Message {

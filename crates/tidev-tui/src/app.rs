@@ -339,10 +339,11 @@ impl App {
                 chat.invalidate_layout();
             }
 
+            let mode = self.mode;
             let rt = self.runtime.clone();
             tokio::spawn(async move {
                 if let Err(e) = rt
-                    .submit_prompt_with_attachments(session_id, text, attachments)
+                    .submit_prompt_with_attachments(session_id, mode, text, attachments)
                     .await
                 {
                     log::error!("flush queued prompt failed: {e}");
@@ -1736,11 +1737,12 @@ impl App {
                             }
 
                             // Spawn submission to avoid blocking the UI.
+                            let mode = self.mode;
                             let rt = self.runtime.clone();
                             self.set_notice("Sending...");
                             tokio::spawn(async move {
                                 if let Err(e) = rt
-                                    .submit_prompt_with_attachments(sid, text, final_attachments)
+                                    .submit_prompt_with_attachments(sid, mode, text, final_attachments)
                                     .await
                                 {
                                     log::error!("submit_prompt failed: {e}");

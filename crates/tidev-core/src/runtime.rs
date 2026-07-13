@@ -361,8 +361,13 @@ impl Runtime {
     }
 
     /// Submit a user prompt for a session.
-    pub async fn submit_prompt(&self, session_id: Uuid, content: String) -> Result<()> {
-        self.submit_prompt_with_attachments(session_id, content, Vec::new())
+    pub async fn submit_prompt(
+        &self,
+        session_id: Uuid,
+        content: String,
+        mode: SessionMode,
+    ) -> Result<()> {
+        self.submit_prompt_with_attachments(session_id, mode, content, Vec::new())
             .await
     }
 
@@ -371,14 +376,19 @@ impl Runtime {
     /// Attachments are typically built from `@`-references by
     /// [`crate::attachment::build_attachments`] and represent files
     /// the user wants to include with their message.
+    ///
+    /// `mode` is the session mode at submission time, used to tag the message
+    /// and to construct the agent loop context.
     pub async fn submit_prompt_with_attachments(
         &self,
         session_id: Uuid,
+        mode: SessionMode,
         content: String,
         attachments: Vec<MessageAttachment>,
     ) -> Result<()> {
         let mut user_msg = Message::new(MessageRole::User, content);
         user_msg.attachments = attachments;
+        user_msg.mode = Some(mode);
 
         // 1. Persist the user message.
         {
@@ -394,7 +404,7 @@ impl Runtime {
         }
 
         // 3. Build CoreContext + AgentLoopConfig and spawn the loop.
-        self.start_agent_loop(session_id).await
+        self.start_agent_loop(session_id, mode).await
     }
 
     /// Continue an existing session without adding a new user message.
@@ -402,7 +412,10 @@ impl Runtime {
     /// Used when resuming the parent session after a subagent returns — the
     /// tool result message is already in the store and gets loaded into the
     /// [`MessageBuffer`] here.
-    pub async fn continue_session(&self, session_id: Uuid) -> Result<()> {
+    ///
+    /// `mode` should be the session's current mode; it is read from the last
+    /// user message's `mode` field if `None` is passed.
+    pub async fn continue_session(&self, session_id: Uuid, mode: Option<SessionMode>) -> Result<()> {
         if self.is_loop_running() {
             // Already running — new data will be picked up on next turn.
             return Ok(());
@@ -412,7 +425,21 @@ impl Runtime {
         // loop wasn't running (e.g. subagent results) are picked up.
         self.reload_message_buffer(session_id).await;
 
-        self.start_agent_loop(session_id).await
+        // Resolve mode from the last user message if not provided.
+        let mode = match mode {
+            Some(m) => m,
+            None => {
+                let messages = self.session_manager.load_messages(session_id)?;
+                messages
+                    .iter()
+                    .rev()
+                    .find(|m| m.role == MessageRole::User)
+                    .and_then(|m| m.mode)
+                    .unwrap_or(SessionMode::Build)
+            }
+        };
+
+        self.start_agent_loop(session_id, mode).await
     }
 
     /// Quick synchronous check — is the agent loop active?
@@ -434,31 +461,29 @@ impl Runtime {
     }
 
     /// Build [`CoreContext`] + [`AgentLoopConfig`] and spawn the agent loop.
-    async fn start_agent_loop(&self, session_id: Uuid) -> Result<()> {
+    async fn start_agent_loop(&self, session_id: Uuid, mode: SessionMode) -> Result<()> {
         // Create a fresh cancellation token for this loop — retired on cancel().
         let cancel = CancellationToken::new();
         *self.active_loop_cancel.lock().await = Some(cancel.clone());
         let buffer = self.message_buffer(session_id).await;
         let context_manager = self.context_manager(session_id).await;
 
-        // Compose or load the system prompt.
+        // Compose or load the system prompt (mode-agnostic — see inject_mode_reminder).
         let system_prompt = {
             let session = self.session_manager.load_session(session_id)?;
             match session {
                 Some(s) if !s.system_prompt.is_empty() => s.system_prompt,
                 _ => {
-                    // New session — compose and persist.
                     let instructions = self.config.read().unwrap().instructions.clone();
                     let sp = crate::agent_ctx::compose_system_prompt(
                         tidev_types::agent_type::AgentType::General,
                         &instructions,
                         &self.workspace_root,
                         &self.paths.config_dir,
-                        SessionMode::Build,
                     );
-                    // Persist system prompt to session.
+                    // Persist system prompt to the session record.
                     self.session_manager
-                        .update_session(session_id, None, None)?;
+                        .update_system_prompt(session_id, &sp)?;
                     sp
                 }
             }
@@ -487,7 +512,7 @@ impl Runtime {
             self.event_tx.clone(),
             self.request_tx.clone(),
             session_id,
-            SessionMode::Build,
+            mode,
             system_prompt,
             llm_config,
             cancel.clone(),
@@ -502,7 +527,7 @@ impl Runtime {
         let loop_config = tidev_agent::AgentLoopConfig {
             session_id,
             definition: agent_def,
-            mode: SessionMode::Build,
+            mode,
             thinking_level: active_model.thinking_level.clone(),
             event_tx: self.event_tx.clone(),
             cancel,

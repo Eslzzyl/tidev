@@ -43,6 +43,18 @@ impl MessageBuffer {
         self.messages = messages;
     }
 
+    /// Update the content of a message identified by its ID.
+    /// Returns the old content if the message was found, `None` otherwise.
+    pub fn update_content(&mut self, id: uuid::Uuid, new_content: String) -> Option<String> {
+        for msg in &mut self.messages {
+            if msg.id == id {
+                let old = std::mem::replace(&mut msg.content, new_content);
+                return Some(old);
+            }
+        }
+        None
+    }
+
     /// Number of messages currently buffered.
     pub fn len(&self) -> usize {
         self.messages.len()

@@ -152,4 +152,12 @@ pub trait AgentContext: Send + Sync {
 
     /// Load all messages for the current session.
     async fn load_messages(&self, session_id: uuid::Uuid) -> Result<Vec<Message>>;
+
+    /// Update the content of an existing message in-place (both buffer and store).
+    async fn update_message_content(
+        &self,
+        session_id: uuid::Uuid,
+        message_id: uuid::Uuid,
+        content: String,
+    ) -> Result<()>;
 }

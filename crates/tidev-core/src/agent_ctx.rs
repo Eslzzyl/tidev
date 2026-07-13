@@ -45,13 +45,13 @@ use crate::session::SessionManager;
 /// Compose the complete system prompt for a session.
 ///
 /// Assembled once at session creation and stored in `AgentLoopConfig.system_prompt`.
-/// Includes: base agent prompt + instructions from files + mode reminder + environment info.
+/// Includes: base agent prompt + instructions from files + environment info.
+/// Mode reminders are injected into user messages instead (see `inject_mode_reminder`).
 pub fn compose_system_prompt(
     agent_type: tidev_types::agent_type::AgentType,
     instructions: &[String],
     workspace_root: &std::path::Path,
     config_dir: &std::path::Path,
-    mode: SessionMode,
 ) -> String {
     let base_prompt = tidev_agent::prompts::system_prompt(agent_type);
 
@@ -59,8 +59,6 @@ pub fn compose_system_prompt(
     let instruction_text =
         tidev_instructions::system_prompt(workspace_root, config_dir, instructions)
             .unwrap_or_default();
-
-    let mode_reminder = tidev_agent::prompts::mode_reminder(mode);
 
     // Environment info (detected once, frozen for the session lifetime).
     let system_info = crate::system_info::SystemInfo::detect();
@@ -88,8 +86,6 @@ pub fn compose_system_prompt(
         prompt.push_str("\n\n");
         prompt.push_str(&instruction_text);
     }
-    prompt.push_str("\n\n");
-    prompt.push_str(mode_reminder);
     prompt.push_str(&env_block);
 
     prompt
@@ -763,6 +759,24 @@ impl AgentContext for CoreContext {
         let cm = self.context_manager.lock().await;
         let buf = self.buffer.read().await;
         Ok(cm.build_request_messages(&buf, self.mode))
+    }
+
+    // -----------------------------------------------------------------------
+    async fn update_message_content(
+        &self,
+        session_id: uuid::Uuid,
+        message_id: uuid::Uuid,
+        content: String,
+    ) -> Result<()> {
+        // Update in-memory buffer.
+        {
+            let mut buf = self.buffer.write().await;
+            buf.update_content(message_id, content.clone());
+        }
+        // Persist to store.
+        self.session_manager
+            .update_message_content(session_id, message_id, &content)?;
+        Ok(())
     }
 }
 

@@ -103,6 +103,24 @@ impl SessionManager {
             .update_session(session_id, title, status, None, None, None, None, None, None, None)
     }
 
+    /// Persist the system prompt for a session.
+    pub fn update_system_prompt(&self, session_id: Uuid, system_prompt: &str) -> Result<()> {
+        self.store.update_session(
+            session_id, None, None, None, None, Some(system_prompt),
+            None, None, None, None,
+        )
+    }
+
+    /// Update the content of a single message in-place in the store.
+    pub fn update_message_content(
+        &self,
+        session_id: Uuid,
+        message_id: Uuid,
+        content: &str,
+    ) -> Result<()> {
+        self.store.update_message_content(session_id, message_id, content)
+    }
+
     /// Delegate access to the underlying store.
     pub fn store(&self) -> &SessionStore {
         &self.store
