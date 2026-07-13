@@ -588,6 +588,11 @@ pub enum BackendEvent {
         completed_at: Option<DateTime<Utc>>,
         error: Option<String>,
     },
+    UndoCompleted {
+        session_id: Uuid,
+        target_id: Uuid,
+        message_content: String,
+    },
     SidebarSnapshotReady {
         session_id: Uuid,
         request_id: u64,
@@ -625,6 +630,7 @@ impl BackendEvent {
             | Self::UsageStats { session_id, .. }
             | Self::InstructionsLoaded { session_id, .. }
             | Self::ContextCompacted { session_id, .. }
+            | Self::UndoCompleted { session_id, .. }
             | Self::SidebarSnapshotReady { session_id, .. }
             | Self::ShellOutput { session_id, .. }
             | Self::TurnStarting { session_id, .. }
@@ -649,6 +655,7 @@ impl BackendEvent {
             | Self::StreamEnd { request_id, .. } => Some(*request_id),
             Self::InstructionsLoaded { .. }
             | Self::ContextCompacted { .. }
+            | Self::UndoCompleted { .. }
             | Self::ShellOutput { .. } => None,
         }
     }

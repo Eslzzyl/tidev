@@ -779,6 +779,17 @@ impl Runtime {
             error: None,
         });
 
+        let message_content = messages
+            .iter()
+            .find(|m| m.id == target_id)
+            .map(|m| m.content.clone())
+            .unwrap_or_default();
+        let _ = self.event_tx.send(BackendEvent::UndoCompleted {
+            session_id,
+            target_id,
+            message_content,
+        });
+
         Ok(())
     }
 
@@ -813,6 +824,12 @@ impl Runtime {
             model_id: None,
             completed_at: None,
             error: None,
+        });
+
+        let _ = self.event_tx.send(BackendEvent::UndoCompleted {
+            session_id,
+            target_id: Uuid::nil(),
+            message_content: String::new(),
         });
 
         Ok(())

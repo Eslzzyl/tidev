@@ -525,6 +525,30 @@ impl App {
             BackendEvent::ContextCompacted { .. } => {
                 self.set_notice("Context compacted");
             }
+            BackendEvent::UndoCompleted {
+                target_id,
+                message_content,
+                ..
+            } => {
+                if let Some(ref mut chat) = self.message_list {
+                    if let Some(ref mut ctx) = chat.chat_context {
+                        if target_id == Uuid::nil() {
+                            ctx.revert_message_id = None;
+                        } else {
+                            ctx.revert_message_id = Some(target_id);
+                        }
+                    }
+                    chat.invalidate_layout();
+                }
+                if let Some(ref mut composer) = self.composer {
+                    if !message_content.is_empty() {
+                        composer.set_text(strip_system_reminder_tags(&message_content));
+                    } else {
+                        composer.clear();
+                    }
+                }
+                self.set_notice("Undo complete");
+            }
             _ => {
                 // Events already forwarded to MessageList above:
                 //   Delta, ReasoningDelta, ToolCallUpdated, Finished, ToolCompleted,
@@ -1496,8 +1520,7 @@ impl App {
                     self.set_notice("Redo in progress...");
                     let rt = self.runtime.clone();
                     tokio::spawn(async move {
-                        // Runtime redo uses the undo method with a flag internally.
-                        if let Err(e) = rt.undo(session_id).await {
+                        if let Err(e) = rt.redo(session_id).await {
                             log::error!("Redo failed: {e}");
                         }
                     });
