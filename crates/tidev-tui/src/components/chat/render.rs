@@ -198,8 +198,6 @@ pub(crate) fn render_messages(
     follow_tail: &mut bool,
     expanded_tool_results: &mut HashSet<Uuid>,
     expanded_tool_outputs: &mut HashMap<Uuid, String>,
-    streaming: bool,
-    current_streaming_message_id: Option<Uuid>,
     render_tick: &mut u64,
     running_subagents: &[RunningSubagentInfo],
     spinner_start: Instant,
@@ -239,9 +237,7 @@ pub(crate) fn render_messages(
         content_area.width as usize,
         *scroll_offset,
         area.height as usize,
-        streaming,
         *follow_tail,
-        current_streaming_message_id,
         render_tick,
         retrying_hint,
     );
@@ -338,9 +334,7 @@ fn messages_text(
     width: usize,
     scroll: usize,
     viewport: usize,
-    streaming: bool,
     follow_tail: bool,
-    _current_streaming_message_id: Option<Uuid>,
     render_tick: &mut u64,
     retrying_hint: &Option<(u32, u32, String, Instant)>,
 ) -> RenderOutput {
@@ -367,7 +361,7 @@ fn messages_text(
     }
 
     // Update layout index — this renders all blocks and populates the cache
-    update_layout_index(index, cache, messages, width, body_width, streaming, ctx, render_tick);
+    update_layout_index(index, cache, messages, width, body_width, ctx, render_tick);
 
     // Calculate visible range (clamp scroll and respect follow_tail)
     let mut total_overall_lines = header_line_count + index.total_lines;
@@ -469,11 +463,10 @@ fn update_layout_index(
     messages: &[Message],
     width: usize,
     body_width: usize,
-    streaming: bool,
     ctx: &RenderContext,
     render_tick: &mut u64,
 ) {
-    let needs_full = index.needs_full_rebuild(messages.len(), width, streaming);
+    let needs_full = index.needs_full_rebuild(messages.len(), width);
 
     if !needs_full {
         // Incremental update: only recompute dirty blocks
@@ -512,7 +505,7 @@ fn update_layout_index(
     }
 
     // Full rebuild
-    index.reset(width, streaming);
+    index.reset(width);
 
     if messages.is_empty() {
         return;
@@ -1061,7 +1054,7 @@ fn render_reasoning_lines(
     );
 
     // Skip leading blank lines
-    let mut rendered_lines = rendered.lines.into_iter();
+    let mut rendered_lines = rendered.lines.clone().into_iter();
     let mut first_line = rendered_lines.next();
     while let Some(ref line) = first_line {
         if line.spans.iter().all(|s| s.content.trim().is_empty() && s.style == Style::default()) {

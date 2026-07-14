@@ -6,6 +6,7 @@ mod table;
 mod wrap;
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::LazyLock;
 use std::sync::Mutex;
 
@@ -39,7 +40,8 @@ pub fn render_markdown_text(input: &str) -> Text<'static> {
 #[cfg(test)]
 pub(crate) fn render_markdown_text_with_width(input: &str, width: Option<usize>) -> Text<'static> {
     let cwd = std::env::current_dir().ok();
-    render_markdown_text_with_width_and_cwd(input, width, cwd.as_deref())
+    let arc = render_markdown_text_with_width_and_cwd(input, width, cwd.as_deref());
+    arc.as_ref().clone()
 }
 
 /// Cache key for the markdown render cache: (content_hash, wrap_width, cwd_hash)
@@ -48,8 +50,9 @@ type MarkdownCacheKey = (blake3::Hash, Option<usize>, blake3::Hash);
 /// Content-hash based cache for rendered markdown output.
 /// Keyed by (blake3::Hash of input, width, cwd_hash) to avoid re-parsing markdown
 /// when neither content, terminal width, nor workspace has changed.
+/// Wrapped in `Arc` so repeated cache hits share the same allocation.
 static MARKDOWN_RENDER_CACHE: LazyLock<
-    Mutex<std::collections::HashMap<MarkdownCacheKey, Text<'static>>>,
+    Mutex<std::collections::HashMap<MarkdownCacheKey, Arc<Text<'static>>>>,
 > = LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
 
 /// Maximum number of entries in the markdown render cache.
@@ -59,7 +62,7 @@ pub fn render_markdown_text_with_width_and_cwd(
     input: &str,
     width: Option<usize>,
     cwd: Option<&Path>,
-) -> Text<'static> {
+) -> Arc<Text<'static>> {
     let content_hash = blake3::hash(input.as_bytes());
     let cwd_hash = blake3::hash(cwd.map(|p| p.as_os_str().as_encoded_bytes()).unwrap_or(b""));
 
@@ -81,7 +84,7 @@ pub fn render_markdown_text_with_width_and_cwd(
     writer.run();
 
     // Cache the result
-    let result = writer.text;
+    let result = Arc::new(writer.text);
     {
         let mut cache = MARKDOWN_RENDER_CACHE.lock().unwrap();
         // Evict oldest entry if cache is full
@@ -94,6 +97,7 @@ pub fn render_markdown_text_with_width_and_cwd(
         cache.insert((content_hash, width, cwd_hash), result.clone());
     }
 
+    // Return Arc (callers share via clone or clone inner on demand)
     result
 }
 

@@ -52,8 +52,6 @@ pub(crate) struct MessageLayoutIndex {
     pub width: usize,
     /// Whether the index is valid and up-to-date.
     pub valid: bool,
-    /// Whether the index was last built while assistant streaming was active.
-    pub contains_streaming_messages: bool,
     /// Message IDs whose blocks need recomputation (set by content-only
     /// invalidations, cleared after incremental update is applied).
     pub dirty_messages: Vec<Uuid>,
@@ -66,18 +64,16 @@ impl MessageLayoutIndex {
             total_lines: 0,
             width: 0,
             valid: false,
-            contains_streaming_messages: false,
             dirty_messages: Vec::new(),
         }
     }
 
     /// Reset the index for a full rebuild.
-    pub fn reset(&mut self, width: usize, force_rebuild: bool) {
+    pub fn reset(&mut self, width: usize) {
         self.blocks.clear();
         self.total_lines = 0;
         self.width = width;
         self.valid = true;
-        self.contains_streaming_messages = force_rebuild;
         self.dirty_messages.clear();
     }
 
@@ -86,14 +82,7 @@ impl MessageLayoutIndex {
         &self,
         message_count: usize,
         width: usize,
-        force_rebuild: bool,
     ) -> bool {
-        if force_rebuild {
-            return true;
-        }
-        if self.contains_streaming_messages != force_rebuild {
-            return true;
-        }
         if !self.valid {
             return true;
         }

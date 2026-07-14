@@ -316,7 +316,7 @@ fn render_subagent_task_preview(
 
     // Render output as markdown
     let rendered = render_markdown_text_with_width_and_cwd(output, Some(body_width.saturating_sub(2)), None);
-    let md_lines: Vec<Line<'static>> = rendered.lines;
+    let md_lines: Vec<Line<'static>> = rendered.lines.clone();
 
     if is_expanded {
         lines.extend(md_lines);
@@ -716,7 +716,7 @@ fn render_websearch_result_lines(
     let rendered = render_markdown_text_with_width_and_cwd(
         output, Some(body_width.saturating_sub(2)), None,
     );
-    let md_lines: Vec<Line<'static>> = rendered.lines;
+    let md_lines: Vec<Line<'static>> = rendered.lines.clone();
 
     if is_expanded {
         let has_lines = !md_lines.is_empty();
@@ -775,7 +775,7 @@ fn render_webfetch_result_lines(
     let rendered = render_markdown_text_with_width_and_cwd(
         output, Some(body_width.saturating_sub(2)), None,
     );
-    let md_lines: Vec<Line<'static>> = rendered.lines;
+    let md_lines: Vec<Line<'static>> = rendered.lines.clone();
 
     if is_expanded {
         let has_lines = !md_lines.is_empty();

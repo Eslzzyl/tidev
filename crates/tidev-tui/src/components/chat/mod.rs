@@ -92,7 +92,6 @@ pub(crate) struct MessageList {
 
     // ── Streaming state ──
     streaming_buffer: StreamingBuffer,
-    current_streaming_message_id: Option<Uuid>,
 
     // ── Subagent tracking ──
     running_subagents: Vec<render_mod::RunningSubagentInfo>,
@@ -132,7 +131,6 @@ impl MessageList {
             scrollbar_drag: None,
             spinner_start: Instant::now(),
             streaming_buffer: StreamingBuffer::new(),
-            current_streaming_message_id: None,
             running_subagents: Vec::new(),
             completed_subagent_sessions: HashMap::new(),
             hovered_inline_subagent: None,
@@ -159,10 +157,8 @@ impl MessageList {
             self.active_session_id = Some(session_id);
             self.scroll_offset = 0;
             self.follow_tail = true;
-            self.render_cache.clear();
             self.layout_index = MessageLayoutIndex::new();
             self.streaming_buffer = StreamingBuffer::new();
-            self.current_streaming_message_id = None;
             self.selectable_regions.clear();
             self.hovered_inline_subagent = None;
             self.inline_subagent_card_bounds.clear();
@@ -184,10 +180,8 @@ impl MessageList {
         self.dirty = true;
         self.scroll_offset = 0;
         self.follow_tail = true;
-        self.render_cache.clear();
         self.layout_index = MessageLayoutIndex::new();
         self.streaming_buffer = StreamingBuffer::new();
-        self.current_streaming_message_id = None;
         self.selectable_regions.clear();
         self.hovered_inline_subagent = None;
         self.inline_subagent_card_bounds.clear();
@@ -278,6 +272,7 @@ impl MessageList {
         if let Some(msg) = chat_context.messages.iter_mut().rev().find(|m| {
             m.role == tidev_types::message::MessageRole::Assistant
         }) {
+            let msg_id = msg.id;
             msg.input_tokens = input_tokens;
             msg.output_tokens = output_tokens;
             msg.total_tokens = total_tokens;
@@ -291,6 +286,7 @@ impl MessageList {
             if let Some(mode) = mode {
                 msg.mode = Some(mode);
             }
+            self.layout_index.mark_dirty(msg_id);
         }
     }
 
@@ -307,7 +303,6 @@ impl MessageList {
             msg.content = format!("Request failed: {error}");
         }
         self.streaming_buffer.is_streaming = false;
-        self.current_streaming_message_id = None;
         self.dirty = true;
     }
 
@@ -325,9 +320,6 @@ impl MessageList {
             chat_context.messages[idx].completed_at = Some(Utc::now());
             self.layout_index.mark_dirty(chat_context.messages[idx].id);
         }
-
-        // Ensure streaming state is fully reset.
-        self.current_streaming_message_id = None;
 
         // Clear hover state for the subagent card.
         self.hovered_inline_subagent = None;
@@ -367,15 +359,13 @@ impl MessageList {
 
         match event {
             BackendEvent::TurnStarting { .. } => {
-                let message_id = self.streaming_buffer.begin_streaming(&mut chat_context.messages);
-                self.current_streaming_message_id = Some(message_id);
+                let _message_id = self.streaming_buffer.begin_streaming(&mut chat_context.messages);
                 self.follow_tail = true;
                 self.dirty = true;
             }
             BackendEvent::Delta { content, .. } => {
                 if self.streaming_buffer.is_streaming {
-                    self.streaming_buffer.push_delta(content);
-                    self.streaming_buffer.sync_pending(&mut chat_context.messages);
+                    self.streaming_buffer.push_delta(content, &mut chat_context.messages);
                     if let Some(msg_id) = self.streaming_buffer.current_message_id {
                         self.layout_index.mark_dirty(msg_id);
                     }
@@ -388,16 +378,18 @@ impl MessageList {
                 self.dirty = true;
             }
             BackendEvent::ReasoningDelta { content, .. } => {
-                self.streaming_buffer.push_reasoning_delta(content);
-                self.streaming_buffer.sync_pending(&mut chat_context.messages);
+                self.streaming_buffer.push_reasoning_delta(content, &mut chat_context.messages);
                 if let Some(msg_id) = self.streaming_buffer.current_message_id {
                     self.layout_index.mark_dirty(msg_id);
                 }
                 self.dirty = true;
             }
             BackendEvent::StreamEnd { .. } => {
+                let msg_id = self.streaming_buffer.current_message_id;
                 self.streaming_buffer.finalise_message(&mut chat_context.messages);
-                self.current_streaming_message_id = None;
+                if let Some(mid) = msg_id {
+                    self.layout_index.mark_dirty(mid);
+                }
                 self.dirty = true;
             }
             BackendEvent::ToolCallUpdated { tool_call, request_id, .. } => {
@@ -782,19 +774,16 @@ impl Component for MessageList {
             }
             Action::Chat(ChatAction::StreamDelta { message_id, delta: _ }) => {
                 self.streaming_buffer.is_streaming = true;
-                self.current_streaming_message_id = Some(*message_id);
                 self.dirty = true;
                 vec![]
             }
-            Action::Chat(ChatAction::StreamEnd(message_id)) => {
+            Action::Chat(ChatAction::StreamEnd(_message_id)) => {
                 self.streaming_buffer.is_streaming = false;
-                self.current_streaming_message_id = None;
                 self.dirty = true;
                 vec![]
             }
             Action::Chat(ChatAction::CancelGeneration) => {
                 self.streaming_buffer.is_streaming = false;
-                self.current_streaming_message_id = None;
                 self.dirty = true;
                 vec![]
             }
@@ -840,8 +829,6 @@ impl Component for MessageList {
             &mut self.follow_tail,
             &mut self.expanded_tool_results,
             &mut self.expanded_tool_outputs,
-            self.streaming_buffer.is_streaming,
-            self.current_streaming_message_id,
             &mut self.render_tick,
             &self.running_subagents,
             self.spinner_start,

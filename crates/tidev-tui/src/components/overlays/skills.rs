@@ -1,6 +1,7 @@
 //! SkillsPanel component — skill browsing panel.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, MouseButton, MouseEvent, MouseEventKind};
@@ -31,7 +32,7 @@ pub(crate) struct SkillsPanel {
     list_scroll: usize,
     preview_scroll: usize,
     query_active: bool,
-    cached_preview: Option<(String, Text<'static>)>,
+    cached_preview: Option<(String, Arc<Text<'static>>)>,
 }
 
 impl SkillsPanel {
@@ -385,9 +386,10 @@ impl Component for SkillsPanel {
         if let Some((_, rendered)) = &self.cached_preview {
             let total_preview_lines = rendered.lines.len();
             let scroll = self.preview_scroll;
-            let visible_lines: Vec<Line<'_>> = rendered.clone().into_iter()
+            let visible_lines: Vec<Line<'_>> = rendered.lines.iter()
                 .skip(scroll)
                 .take(preview_content_height as usize)
+                .cloned()
                 .collect();
 
             frame.render_widget(
