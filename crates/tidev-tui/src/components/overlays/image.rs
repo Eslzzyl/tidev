@@ -24,10 +24,9 @@ pub(crate) struct ImageViewer {
 }
 
 impl ImageViewer {
-    pub(crate) fn from_raw(data: Vec<u8>, filename: String) -> Option<Self> {
+    pub(crate) fn from_raw(data: Vec<u8>, filename: String, picker: Option<Picker>) -> Option<Self> {
         let dyn_img = image::load_from_memory(&data).ok()?;
         let (width, height) = (dyn_img.width(), dyn_img.height());
-        let picker = Picker::from_query_stdio().ok();
         Some(Self {
             dyn_img,
             filename,

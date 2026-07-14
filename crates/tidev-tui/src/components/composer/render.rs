@@ -60,9 +60,10 @@ pub(crate) fn draw_composer(
     let width = text_area.width as usize;
     let visible_lines = text_area.height.max(1) as usize;
 
-    // Save input width for keyboard handler.
+    // Save input area for keyboard handler and mouse hit-testing.
     composer.last_input_width = text_area.width;
     composer.last_visible_lines = visible_lines;
+    composer.last_text_area = text_area;
 
     // ── Content rendering ───────────────────────────────────────────
     if composer.text().is_empty() {

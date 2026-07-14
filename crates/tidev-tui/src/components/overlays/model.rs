@@ -544,11 +544,22 @@ impl Component for ModelPanel {
                 };
 
                 if agent_type_str == "general" {
-                    // Set active model
+                    // Persist the selection to config.
                     ctx.runtime.update_config(|cfg| {
                         cfg.default_provider = summary.provider_id.clone();
                         cfg.default_model = summary.model_id.clone();
                     });
+                    // Resolve the full ActiveModel and update runtime so that
+                    // runtime.active_model() returns the correct model immediately.
+                    let config = ctx.runtime.config();
+                    let auth = ctx.runtime.auth();
+                    if let Ok(model) = config.resolve_model_by_ids(
+                        &auth,
+                        &summary.provider_id,
+                        &summary.model_id,
+                    ) {
+                        ctx.runtime.set_active_model(model);
+                    }
                 } else {
                     // Set agent-specific model
                     let at = agent_type_str.clone();

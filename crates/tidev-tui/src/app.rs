@@ -56,6 +56,7 @@ use crate::components::desktop_notification::NotificationManager;
 use crate::components::notification::NotificationState;
 use crate::components::selection::{MouseSelection, copy_to_clipboard};
 use crate::context::{DrawContext, InitContext, UpdateContext};
+use ratatui_image::picker::Picker;
 use crate::utils::strip_system_reminder_tags;
 
 /// Token usage statistics for the current/last request.
@@ -159,6 +160,9 @@ pub struct App {
     /// Used to detect when the spinner has advanced so we can re-dirty
     /// during the pending-request gap and keep the animation alive.
     pub(crate) last_spinner_frame: u64,
+    /// Terminal graphics protocol picker (cached to avoid blocking on every
+    /// ImageViewer open).
+    image_picker: Option<Picker>,
 }
 
 /// A prompt queued for submission when the current request finishes.
@@ -219,6 +223,7 @@ impl App {
             mouse_selection: MouseSelection::default(),
             sidebar_area: None,
             todos: Vec::new(),
+            image_picker: Picker::from_query_stdio().ok(),
             composer: {
                 let mut c = Composer::new("Ask tidev about your code, task, or question...");
                 c.set_file_search_index(file_index);
@@ -1118,6 +1123,42 @@ impl App {
                 if let Some(ref mut chat) = self.message_list {
                     chat.end_scrollbar_drag();
                 }
+
+                // Composer image badge click: open ImageViewer.
+                if !self.mouse_selection.is_dragging() {
+                    if let Some(ref mut composer) = self.composer {
+                        let text_area = composer.last_text_area;
+                        if text_area.contains(position) {
+                            let scroll = composer.input_scroll_offset as u16;
+                            let local_y = position.y.saturating_sub(text_area.y);
+                            let local_x = position.x.saturating_sub(text_area.x);
+                            let target_line = scroll.saturating_add(local_y);
+                            let raw_pos = composer.raw_text_position_at_visual(
+                                text_area.width,
+                                target_line,
+                                local_x,
+                            );
+                            if let Some(span) = composer.span_at(raw_pos)
+                                && let Some(data) = &span.image_data
+                            {
+                                let action = Action::Overlay(OverlayAction::Open(
+                                    OverlayKind::ImageViewer {
+                                        data: data.clone(),
+                                        filename: span
+                                            .image_filename
+                                            .clone()
+                                            .unwrap_or_default(),
+                                    },
+                                ));
+                                self.mouse_selection
+                                    .release(position, 0);
+                                self.process_action(action);
+                                return;
+                            }
+                        }
+                    }
+                }
+
                 let scroll_offset = self
                     .message_list
                     .as_ref()
@@ -1224,7 +1265,14 @@ impl App {
                     self.open_overlay(kind);
                 }
                 Action::Overlay(OverlayAction::Close(kind)) => {
+                    let is_model_panel = kind == OverlayKind::ModelPanel;
                     self.close_overlay(kind, &mut queue);
+                    if is_model_panel {
+                        if let Some(ref mut composer) = self.composer {
+                            let model = self.runtime.active_model();
+                            composer.set_model_supports_images(model.supports_images);
+                        }
+                    }
                 }
                 Action::Theme(ThemeAction::Preview(name)) => {
                     self.current_palette = ThemePalette::from_name(name.as_str());
@@ -2058,7 +2106,8 @@ impl App {
                 Some(Box::new(RenameDialog::new(session_id, title)))
             }
             OverlayKind::ImageViewer { data, filename } => {
-                ImageViewer::from_raw(data, filename).map(|v| Box::new(v) as Box<dyn Component>)
+                ImageViewer::from_raw(data, filename, self.image_picker.clone())
+                    .map(|v| Box::new(v) as Box<dyn Component>)
             }
             OverlayKind::ConnectDialog => {
                 Some(Box::new(ConnectDialog::new()))

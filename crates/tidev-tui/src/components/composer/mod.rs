@@ -31,6 +31,7 @@ use unicode_width::UnicodeWidthChar;
 
 
 
+use tidev_types::message::MessageAttachment;
 use crate::action::{Action, ChatAction};
 use crate::component::Component;
 use crate::context::DrawContext;
@@ -53,6 +54,10 @@ pub(crate) struct InlineSpan {
     pub start: usize,
     /// Byte end index in `text` (exclusive).
     pub end: usize,
+    /// Raw image bytes (None for non-image spans).
+    pub image_data: Option<Vec<u8>>,
+    /// Display filename for the image (None for non-image spans).
+    pub image_filename: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -116,11 +121,14 @@ pub(crate) struct Composer {
     /// Whether the current model supports image attachments.
     model_supports_images: bool,
     /// Scroll offset for multi-line input area.
-    input_scroll_offset: usize,
+    pub(crate) input_scroll_offset: usize,
     /// Last input area width (set during draw, used by keyboard handler).
     last_input_width: u16,
     /// Last visible line count in the input area (set during draw).
     last_visible_lines: usize,
+    /// Screen rect of the text input area (set during draw, used for mouse
+    /// hit-testing on image badges).
+    pub(crate) last_text_area: Rect,
 }
 
 impl Composer {
@@ -147,6 +155,7 @@ impl Composer {
             input_scroll_offset: 0,
             last_input_width: 0,
             last_visible_lines: 0,
+            last_text_area: Rect::default(),
         }
     }
 
@@ -249,14 +258,17 @@ impl Composer {
     }
 
     /// Register an inline span.  Spans must not overlap and are kept sorted.
+    /// `image_data` and `image_filename` are `None` for non-image spans.
     pub fn register_span(
         &mut self,
         start: usize,
         end: usize,
+        image_data: Option<Vec<u8>>,
+        image_filename: Option<String>,
     ) {
         // Remove any existing span that overlaps the new range.
         self.spans.retain(|s| s.end <= start || s.start >= end);
-        self.spans.push(InlineSpan { start, end });
+        self.spans.push(InlineSpan { start, end, image_data, image_filename });
         self.spans.sort_by_key(|s| s.start);
     }
 
@@ -507,6 +519,34 @@ impl Composer {
         let column = display_width(&self.text[line.start..cursor]);
 
         (line_index as u16, column as u16)
+    }
+
+    /// Return the span that contains the given byte position, if any.
+    pub fn span_at(&self, pos: usize) -> Option<&InlineSpan> {
+        self.spans.iter().find(|s| s.start <= pos && pos < s.end)
+    }
+
+    /// Convert a visual (line, column) pair to a raw byte position in the text
+    /// buffer.  The inverse of `cursor_position`.
+    pub fn raw_text_position_at_visual(&self, width: u16, line: u16, column: u16) -> usize {
+        let width = width as usize;
+        if width == 0 {
+            return 0;
+        }
+        let lines = self.compute_visual_lines(width);
+        if lines.is_empty() {
+            return 0;
+        }
+        let line_index = (line as usize).min(lines.len().saturating_sub(1));
+        let vl = lines[line_index];
+        let mut col: usize = 0;
+        for (i, c) in self.text[vl.start..vl.end].char_indices() {
+            if col >= column as usize {
+                return vl.start + i;
+            }
+            col += unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
+        }
+        vl.end
     }
 
     /// Preferred height in terminal rows for a given input width.
@@ -916,6 +956,8 @@ impl Composer {
         self.register_span(
             start,
             span_end,
+            None,
+            None,
         );
         self.at_mention.clear();
         self.sync_autocomplete();
@@ -1155,7 +1197,7 @@ impl Component for Composer {
             }
             // 2. Try image paste (if model supports it).
             if self.model_supports_images {
-                if let Some((filename, _mime, _data, file_size)) =
+                if let Some((filename, _mime, data, file_size)) =
                     crate::utils::paste_image_from_clipboard()
                 {
                     let placeholder = format!("[Image: {}]", filename);
@@ -1165,9 +1207,11 @@ impl Component for Composer {
                     self.register_span(
                         insert_pos,
                         end_pos,
+                        Some(data),
+                        Some(filename),
                     );
                     self.dirty = true;
-                    log::info!("Pasted image: {} ({} bytes)", filename, file_size);
+                    log::info!("Pasted image: {} bytes", file_size);
                     return None;
                 }
             }
@@ -1181,9 +1225,19 @@ impl Component for Composer {
         self.sync_autocomplete();
 
         if let Some(text) = submitted {
+            let attachments: Vec<MessageAttachment> = self.spans.iter()
+                .filter_map(|s| {
+                    s.image_data.as_ref().map(|data| MessageAttachment::Image {
+                        data: data.clone(),
+                        filename: s.image_filename.clone().unwrap_or_default(),
+                        mime: "image/png".to_string(),
+                        file_size: data.len() as u64,
+                    })
+                })
+                .collect();
             return Some(Action::Chat(ChatAction::SendMessage {
                 text,
-                attachments: Vec::new(),
+                attachments,
             }));
         }
 
@@ -1408,7 +1462,7 @@ mod tests {
     fn test_inline_span_snap() {
         let mut c = Composer::new(">");
         c.set_text("hello @file.txt world".to_string());
-        c.register_span(6, 15);
+        c.register_span(6, 15, None, None);
 
         // Cursor at 10 (inside span) should snap to 6.
         let snapped = c.snap_to_span_edge(10);
