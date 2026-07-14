@@ -691,9 +691,12 @@ impl Runtime {
         let tools = self.tool_registry.definitions_for_model(&active_model);
 
         // 2. Run compaction (async, no locks held on ContextManager).
-        let result = {
+        //    Capture prior compaction state before it gets overwritten.
+        let (result, prior_summary, prior_retained_from) = {
             let cm_lock = cm.lock().await;
-            cm_lock
+            let prior_summary = cm_lock.summary.clone();
+            let prior_retained_from = cm_lock.retained_from;
+            let result = cm_lock
                 .compact(
                     &self.llm,
                     &model_config,
@@ -702,7 +705,8 @@ impl Runtime {
                     session_id,
                     Some(self.event_tx.clone()),
                 )
-                .await?
+                .await?;
+            (result, prior_summary, prior_retained_from)
         };
 
         // 3. Apply compaction state.
@@ -718,7 +722,18 @@ impl Runtime {
             result.retained_from,
         )?;
 
-        // 5. Notify the TUI (BackendEvent::ContextCompacted is already sent by
+        // 5. Append a compaction marker message for undo support.
+        //     Stores the prior state so revert_to_message can restore it.
+        {
+            let mut marker = Message::compaction(&result.summary);
+            marker.metadata.prior_summary = prior_summary;
+            marker.metadata.prior_retained_from = Some(prior_retained_from);
+            let buf = self.message_buffer(session_id).await;
+            buf.write().await.append(marker.clone());
+            self.session_manager.append_message(session_id, &marker)?;
+        }
+
+        // 6. Notify the TUI (BackendEvent::ContextCompacted is already sent by
         //    compact() via event_tx when streaming, but for consistency we
         //    always send the final event here as well).
         let model_id = active_model.model_id.clone();

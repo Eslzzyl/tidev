@@ -58,6 +58,10 @@ pub fn next_user_message_after(messages: &[Message], after_id: Uuid) -> Option<U
 /// message's stored prior state, if the target message is within a compacted
 /// range.
 ///
+/// Walks messages **after** `target_id` and returns the state that existed
+/// **before** the first compaction found. This restores the context to what
+/// it was at the point of `target_id`.
+///
 /// Returns `true` if state was restored.
 pub fn restore_context_from_compaction(
     messages: &[Message],
@@ -65,37 +69,27 @@ pub fn restore_context_from_compaction(
     summary: &mut Option<String>,
     retained_from: &mut usize,
 ) -> bool {
-    // Walk messages **before or at** target_id. Find the *last* compaction
-    // message whose prior state we should restore.
-    let mut found_compaction = false;
-    let mut prior_summary: Option<String> = None;
-    let mut prior_retained_from: usize = 0;
-
+    let mut found_target = false;
     for m in messages {
         if m.id == target_id {
-            break; // stop once we pass the target
+            found_target = true;
+            continue;
         }
-        if m.role == MessageRole::User
-            && m.content == COMPACTION_MESSAGE_LABEL
-            && !m.streaming
-        {
-            // This compaction message's metadata stores the state *before*
-            // the compaction was applied.
+        if !found_target {
+            continue;
+        }
+        // Compaction markers store the state *before* that compaction.
+        // The first compaction marker after target_id tells us what state
+        // was current when target_id was active.
+        if m.content.starts_with(COMPACTION_MESSAGE_LABEL) {
             if let Some((s, r)) = extract_compaction_prior_state(m) {
-                prior_summary = s;
-                prior_retained_from = r;
-                found_compaction = true;
+                *summary = s;
+                *retained_from = r;
+                return true;
             }
         }
     }
-
-    if found_compaction {
-        *summary = prior_summary;
-        *retained_from = prior_retained_from;
-        true
-    } else {
-        false
-    }
+    false
 }
 
 /// Extract prior context state stored on a compaction message's metadata.

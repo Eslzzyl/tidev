@@ -726,10 +726,15 @@ impl AgentContext for CoreContext {
 
         // 2. If compaction is needed, perform it (no locks held during LLM call).
         if needs_compact {
-            let cm = self.context_manager.lock().await;
+            // Capture prior compaction state before compact overwrites it.
+            let (prior_summary, prior_retained_from) = {
+                let cm = self.context_manager.lock().await;
+                (cm.summary.clone(), cm.retained_from)
+            };
             let tools = self.tool_registry.definitions_for_model(&self.active_model);
-            let result = cm
-                .compact(
+            let result = {
+                let cm = self.context_manager.lock().await;
+                cm.compact(
                     &self.llm,
                     &self.model_config,
                     &tools,
@@ -737,10 +742,10 @@ impl AgentContext for CoreContext {
                     self.session_id,
                     None,
                 )
-                .await?;
-            drop(cm);
+                .await?
+            };
 
-            // 3. Update state + persist + emit event.
+            // 3. Update state + persist + append marker + emit event.
             {
                 let mut cm = self.context_manager.lock().await;
                 cm.apply_compaction(result.summary.clone(), result.retained_from);
@@ -750,6 +755,15 @@ impl AgentContext for CoreContext {
                 Some(&result.summary),
                 result.retained_from,
             )?;
+
+            // Append compaction marker for undo support.
+            {
+                let mut marker = Message::compaction(&result.summary);
+                marker.metadata.prior_summary = prior_summary;
+                marker.metadata.prior_retained_from = Some(prior_retained_from);
+                self.buffer.write().await.append(marker.clone());
+                self.session_manager.append_message(self.session_id, &marker)?;
+            }
             let model_id = self.active_model.model_id.clone();
             self.emit(BackendEvent::ContextCompacted {
                 session_id: self.session_id,
