@@ -338,6 +338,7 @@ impl Runtime {
             &model.model_id,
             &model.display_name,
             title,
+            None,
         )?;
         Ok(session_id)
     }

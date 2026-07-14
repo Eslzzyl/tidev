@@ -347,7 +347,7 @@ impl App {
         // Push streaming compaction message immediately so the
         // divider line and initial state are visible.
         if let Some(ref mut chat) = self.message_list {
-            if let Some(ref mut ctx) = chat.chat_context {
+            if let Some(ref mut ctx) = chat.active_chat_context_mut() {
                 let msg = Message::streaming(
                     tidev_types::message::MessageRole::System,
                     format!("{}\n\n", COMPACTION_MESSAGE_LABEL),
@@ -513,7 +513,7 @@ impl App {
             }
             BackendEvent::UserMessageCreated { session_id, message } => {
                 if let Some(ref mut chat) = self.message_list {
-                    if let Some(ref mut ctx) = chat.chat_context {
+                    if let Some(ref mut ctx) = chat.active_chat_context_mut() {
                         if ctx.session_id == session_id {
                             ctx.push(message);
                         }
@@ -527,7 +527,7 @@ impl App {
                 ..
             } => {
                 if let Some(ref mut chat) = self.message_list {
-                    if let Some(ref mut ctx) = chat.chat_context {
+                    if let Some(ref mut ctx) = chat.active_chat_context_mut() {
                         if target_id == Uuid::nil() {
                             ctx.revert_message_id = None;
                         } else {
@@ -548,7 +548,7 @@ impl App {
             _ => {
                 // Events already forwarded to MessageList above:
                 //   Delta, ReasoningDelta, ToolCallUpdated, Finished, ToolCompleted,
-                //   SubagentStatus, SubagentCompleted, TurnStarting, StreamEnd,
+                //   SubagentStatus, TurnStarting, StreamEnd,
                 //   SidebarSnapshotReady, ShellOutput, ContextCompacted
             }
         }
@@ -856,7 +856,7 @@ impl App {
 
         // 2a. Subsession navigation (when parent_session_id is set).
         if let Some(ref chat) = self.message_list {
-            if let Some(ref ctx) = chat.chat_context {
+            if let Some(ref ctx) = chat.active_chat_context() {
                 if ctx.parent_session_id.is_some() {
                     match key.code {
                         KeyCode::Up | KeyCode::Down | KeyCode::Left | KeyCode::Right => {
@@ -925,14 +925,17 @@ impl App {
     /// Navigate between subsessions.
     fn handle_subsession_navigation(&mut self, key: KeyEvent) {
         let Some(ref chat) = self.message_list else { return };
-        let Some(ref ctx) = chat.chat_context else { return };
+        let Some(ref ctx) = chat.active_chat_context() else { return };
         let Some(parent_id) = ctx.parent_session_id else { return };
         let current_id = ctx.session_id;
 
         match key.code {
             KeyCode::Up => {
-                // Switch to parent session.
-                self.switch_to_session(parent_id);
+                // Switch to parent session in-memory (no DB load).
+                if let Some(chat) = self.message_list.as_mut() {
+                    chat.switch_to_session(parent_id);
+                    self.current_session_id = Some(parent_id);
+                }
             }
             KeyCode::Down => {
                 // Switch to the last (most recently delegated) child.
@@ -942,7 +945,13 @@ impl App {
                     .filter(|s| s.parent_session_id == Some(parent_id))
                     .collect();
                 if let Some(target) = children.last() {
-                    self.switch_to_session(target.session_id);
+                    if let Some(chat) = self.message_list.as_mut() {
+                        if chat.switch_to_session(target.session_id) {
+                            self.current_session_id = Some(target.session_id);
+                        } else {
+                            self.switch_to_session(target.session_id);
+                        }
+                    }
                 }
             }
             KeyCode::Left | KeyCode::Right => {
@@ -962,7 +971,13 @@ impl App {
                     (index as isize + step).rem_euclid(children.len() as isize) as usize
                 };
                 if let Some(target) = children.get(next_index) {
-                    self.switch_to_session(target.session_id);
+                    if let Some(chat) = self.message_list.as_mut() {
+                        if chat.switch_to_session(target.session_id) {
+                            self.current_session_id = Some(target.session_id);
+                        } else {
+                            self.switch_to_session(target.session_id);
+                        }
+                    }
                 }
             }
             _ => {}
@@ -1360,6 +1375,7 @@ impl App {
                         if let Ok(Some(record)) = self.runtime.session_manager().load_session(session_id)
                         {
                             ctx.title = record.title;
+                            ctx.parent_session_id = record.parent_session_id;
                         }
 
                         ctx
@@ -1443,6 +1459,7 @@ impl App {
                         &active_model.model_id,
                         &active_model.display_name,
                         &format!("Fork of {}", session_title),
+                        None,
                     ) {
                         log::error!("Failed to create fork session: {e}");
                         return;
@@ -1746,7 +1763,7 @@ impl App {
 
                             // Update session title from prompt (matching old behaviour).
                             if let Some(ref mut chat) = self.message_list {
-                                if let Some(ref mut ctx) = chat.chat_context {
+                                if let Some(ref mut ctx) = chat.active_chat_context_mut() {
                                     if ctx.title.is_empty() || ctx.title == "Untitled session" {
                                         let title = title_from_prompt(&text_for_title);
                                         ctx.title = title.clone();
@@ -1968,7 +1985,7 @@ impl App {
                 let messages = self
                     .message_list
                     .as_ref()
-                    .and_then(|ml| ml.chat_context.as_ref())
+                    .and_then(|ml| ml.active_chat_context())
                     .map(|ctx| {
                         ctx.visible_messages()
                             .iter()
@@ -2039,7 +2056,7 @@ impl App {
                     .or_else(|| {
                         self.message_list
                             .as_ref()
-                            .and_then(|ml| ml.chat_context.as_ref())
+                            .and_then(|ml| ml.active_chat_context())
                             .map(|ctx| ctx.session_id)
                     })
                     .unwrap_or(uuid::Uuid::nil());
@@ -2155,7 +2172,7 @@ impl App {
 
             // Check for subsession
             let parent_session_id = self.message_list.as_ref()
-                .and_then(|ml| ml.chat_context.as_ref())
+                .and_then(|ml| ml.active_chat_context())
                 .and_then(|ctx| ctx.parent_session_id);
 
             let status = if parent_session_id.is_some() {
@@ -2237,11 +2254,11 @@ impl App {
 
         // 7. Subsession navigation hint
         let is_subsession = self.message_list.as_ref()
-            .and_then(|ml| ml.chat_context.as_ref())
+            .and_then(|ml| ml.active_chat_context())
             .and_then(|ctx| ctx.parent_session_id)
             .is_some();
         if is_subsession {
-            return "Subsession active · Ctrl+X then Up arrow to return".to_string();
+            return "Subsession active · Up: parent  Left/Right: switch subagent".to_string();
         }
 
         // 8. Ready
@@ -2294,33 +2311,40 @@ impl App {
             (area, None)
         };
 
-        // Calculate composer height if present.
-        let composer_height = self
-            .composer
-            .as_ref()
-            .map(|c| {
+        // Determine if in a subsession.
+        let is_subsession = self.message_list.as_ref()
+            .and_then(|ml| ml.active_chat_context())
+            .and_then(|ctx| ctx.parent_session_id)
+            .is_some();
+        const SUBSESSION_NAV_HEIGHT: u16 = 3;
+
+        // Calculate bottom-bar height: subsession nav or composer.
+        let bottom_height = if is_subsession {
+            SUBSESSION_NAV_HEIGHT
+        } else {
+            self.composer.as_ref().map(|c| {
                 let width = main_area.width.saturating_sub(4);
                 c.preferred_height(width, 6).saturating_add(2).min(main_area.height.saturating_sub(2))
-            })
-            .unwrap_or(0);
+            }).unwrap_or(0)
+        };
 
-        // Split: message area + composer area (reserve 1 line for notice).
+        // Split: message area + bottom bar + notice line.
         let notice_height: u16 = 1;
-        let (content_area, notice_line) = if composer_height > 0 {
-            let split = ratatui::layout::Layout::vertical([
-                ratatui::layout::Constraint::Min(1),
-                ratatui::layout::Constraint::Length(composer_height),
-                ratatui::layout::Constraint::Length(notice_height),
+        let (content_area, bottom_area, notice_line) = if bottom_height > 0 {
+            let split = Layout::vertical([
+                Constraint::Min(1),
+                Constraint::Length(bottom_height),
+                Constraint::Length(notice_height),
             ])
             .split(main_area);
-            (split[0], split[2])
+            (split[0], split[1], split[2])
         } else {
-            let split = ratatui::layout::Layout::vertical([
-                ratatui::layout::Constraint::Min(1),
-                ratatui::layout::Constraint::Length(notice_height),
+            let split = Layout::vertical([
+                Constraint::Min(1),
+                Constraint::Length(notice_height),
             ])
             .split(main_area);
-            (split[0], split[1])
+            (split[0], Rect::default(), split[1])
         };
 
         // Chat message area (when session is active)
@@ -2338,15 +2362,40 @@ impl App {
             chat.draw(frame, content_area, &draw_ctx);
         }
 
-        // ── Composer ─────────────────────────────────────────────────
-        // Rendered above the notice line, below the message area.
-        if let Some(ref mut composer) = self.composer {
-            let composer_area = Rect {
-                x: main_area.x,
-                y: main_area.bottom().saturating_sub(composer_height + notice_height),
-                width: main_area.width,
-                height: composer_height,
+        // ── Bottom bar ───────────────────────────────────────────────
+        // Subsession: navigation hints.  Normal session: composer.
+        if is_subsession {
+            // Match the background with the message panel area.
+            let bg_rect = Rect {
+                x: main_area.x + 2,
+                y: bottom_area.y,
+                width: bottom_area.width.saturating_sub(2),
+                height: bottom_area.height,
             };
+            frame.render_widget(
+                Block::default().style(Style::default().bg(palette.panel)),
+                bg_rect,
+            );
+            let hint = Line::from(vec![
+                Span::styled("Up", Style::default().fg(palette.accent_soft)),
+                Span::styled(": return to parent  ", Style::default().fg(palette.muted)),
+                Span::styled("Left", Style::default().fg(palette.accent_soft)),
+                Span::styled("/", Style::default().fg(palette.muted)),
+                Span::styled("Right", Style::default().fg(palette.accent_soft)),
+                Span::styled(": switch subagent", Style::default().fg(palette.muted)),
+            ]);
+            let y_offset = bg_rect.height.saturating_sub(1) / 2;
+            let content_rect = Rect {
+                x: bg_rect.x,
+                y: bg_rect.y + y_offset,
+                width: bg_rect.width,
+                height: 1,
+            };
+            frame.render_widget(
+                Paragraph::new(hint).alignment(Alignment::Center).style(Style::default().fg(palette.text)),
+                content_rect,
+            );
+        } else if let Some(ref mut composer) = self.composer {
             let active_model = self.runtime.active_model();
             let draw_ctx = DrawContext {
                 palette,
@@ -2358,7 +2407,7 @@ impl App {
                 provider_display: Some(&active_model.provider_display_name),
                 thinking_level: Some(&active_model.thinking_level),
             };
-            composer.draw(frame, composer_area, &draw_ctx);
+            composer.draw(frame, bottom_area, &draw_ctx);
         }
 
         // Build DrawContext for overlays
@@ -2379,7 +2428,7 @@ impl App {
             let chat_ctx = self
                 .message_list
                 .as_ref()
-                .and_then(|ml| ml.chat_context.as_ref());
+                .and_then(|ml| ml.active_chat_context());
             self.sidebar.draw(
                 frame,
                 sidebar_area,

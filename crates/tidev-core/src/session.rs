@@ -28,6 +28,7 @@ impl SessionManager {
         model_id: &str,
         model_display_name: &str,
         title: &str,
+        parent_session_id: Option<Uuid>,
     ) -> Result<()> {
         self.store.create_session(
             session_id,
@@ -37,6 +38,7 @@ impl SessionManager {
             model_id,
             model_display_name,
             title,
+            parent_session_id,
         )
     }
 
@@ -119,6 +121,16 @@ impl SessionManager {
         content: &str,
     ) -> Result<()> {
         self.store.update_message_content(session_id, message_id, content)
+    }
+
+    /// Update the metadata of a single message in-place in the store.
+    pub fn update_message_metadata(
+        &self,
+        session_id: Uuid,
+        message_id: Uuid,
+        metadata: &tidev_types::message::ToolMetadata,
+    ) -> Result<()> {
+        self.store.update_message_metadata(session_id, message_id, metadata)
     }
 
     /// Delegate access to the underlying store.

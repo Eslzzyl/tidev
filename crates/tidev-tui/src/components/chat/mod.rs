@@ -27,6 +27,7 @@ use crate::components::chat::render_cache::{
 };
 use crate::components::chat::render as render_mod;
 use crate::components::chat::streaming::StreamingBuffer;
+use crate::components::chat::tool::tool_call_arguments_are_complete;
 
 // ---------------------------------------------------------------------------
 // ScrollbarDrag
@@ -54,8 +55,10 @@ pub(crate) mod tool;
 // ---------------------------------------------------------------------------
 
 pub(crate) struct MessageList {
-    /// The current chat context (messages and session info).
-    pub chat_context: Option<ChatContext>,
+    /// All open chat contexts, keyed by session_id.
+    chat_contexts: HashMap<Uuid, ChatContext>,
+    /// Which session is currently displayed.
+    active_session_id: Option<Uuid>,
 
     // ── Rendering infrastructure ──
     layout_index: MessageLayoutIndex,
@@ -108,7 +111,8 @@ pub(crate) struct MessageList {
 impl MessageList {
     pub fn new() -> Self {
         Self {
-            chat_context: None,
+            chat_contexts: HashMap::new(),
+            active_session_id: None,
             layout_index: MessageLayoutIndex::new(),
             render_cache: LruCache::new(std::num::NonZeroUsize::new(1200).unwrap()),
             render_tick: 0,
@@ -135,9 +139,43 @@ impl MessageList {
         }
     }
 
+    /// Access the currently active chat context (public for app.rs).
+    pub fn active_chat_context(&self) -> Option<&ChatContext> {
+        self.active_session_id.and_then(|id| self.chat_contexts.get(&id))
+    }
+
+    pub fn active_chat_context_mut(&mut self) -> Option<&mut ChatContext> {
+        self.active_session_id.and_then(|id| self.chat_contexts.get_mut(&id))
+    }
+
+    /// Switch the displayed session without loading from DB.
+    /// Returns true if the session was already cached, false otherwise.
+    pub fn switch_to_session(&mut self, session_id: Uuid) -> bool {
+        if self.chat_contexts.contains_key(&session_id) {
+            self.active_session_id = Some(session_id);
+            self.scroll_offset = 0;
+            self.follow_tail = true;
+            self.render_cache.clear();
+            self.layout_index = MessageLayoutIndex::new();
+            self.streaming_buffer = StreamingBuffer::new();
+            self.current_streaming_message_id = None;
+            self.selectable_regions.clear();
+            self.hovered_inline_subagent = None;
+            self.inline_subagent_card_bounds.clear();
+            self.bash_tool_call_id = None;
+            self.rebuild_subagent_state();
+            self.dirty = true;
+            true
+        } else {
+            false
+        }
+    }
+
     /// Set the chat context and mark dirty.
     pub fn set_chat_context(&mut self, ctx: ChatContext) {
-        self.chat_context = Some(ctx);
+        let session_id = ctx.session_id;
+        self.chat_contexts.insert(session_id, ctx);
+        self.active_session_id = Some(session_id);
         self.dirty = true;
         self.scroll_offset = 0;
         self.follow_tail = true;
@@ -146,11 +184,65 @@ impl MessageList {
         self.streaming_buffer = StreamingBuffer::new();
         self.current_streaming_message_id = None;
         self.selectable_regions.clear();
-        self.running_subagents.clear();
-        self.completed_subagent_sessions.clear();
         self.hovered_inline_subagent = None;
         self.inline_subagent_card_bounds.clear();
         self.bash_tool_call_id = None;
+        self.rebuild_subagent_state();
+    }
+
+    /// Rebuild subagent state from the current chat_context messages.
+    fn rebuild_subagent_state(&mut self) {
+        let session_id = match self.active_session_id {
+            Some(id) => id,
+            None => return,
+        };
+        let Some(ref ctx) = self.chat_contexts.get(&session_id) else { return };
+        let messages = ctx.visible_messages();
+
+        self.running_subagents.clear();
+        self.completed_subagent_sessions.clear();
+        self.hovered_inline_subagent = None;
+
+        let tool_result_ids: std::collections::HashSet<&str> = messages.iter()
+            .filter(|m| m.role == tidev_types::message::MessageRole::Tool)
+            .filter_map(|m| m.tool_call_id.as_deref())
+            .collect();
+
+        for msg in messages {
+            if msg.role == tidev_types::message::MessageRole::Tool
+                && msg.tool_name.as_deref() == Some("task")
+            {
+                if let Some(csid) = msg.metadata.child_session_id {
+                    self.completed_subagent_sessions.insert(msg.id, csid);
+                    // Also map by assistant message ID for click hit-testing.
+                    let assistant_id = messages.iter()
+                        .find(|m| m.role == tidev_types::message::MessageRole::Assistant
+                            && m.tool_calls.iter().any(|tc| Some(tc.id.as_str()) == msg.tool_call_id.as_deref()))
+                        .map(|m| m.id);
+                    if let Some(aid) = assistant_id {
+                        self.completed_subagent_sessions.insert(aid, csid);
+                    }
+                }
+            }
+
+            if msg.role == tidev_types::message::MessageRole::Assistant {
+                let msg_csid = msg.metadata.child_session_id;
+                for tc in &msg.tool_calls {
+                    if canonical_tool_name(&tc.name).as_deref() == Some("task")
+                        && !tool_result_ids.contains(tc.id.as_str())
+                    {
+                        self.running_subagents.push(render_mod::RunningSubagentInfo {
+                            request_id: 0,
+                            tool_call_id: tc.id.clone(),
+                            description: extract_task_description(&tc.arguments),
+                            subagent_type: extract_subagent_type(&tc.arguments),
+                            status_text: "Thinking".to_string(),
+                            child_session_id: msg_csid,
+                        });
+                    }
+                }
+            }
+        }
     }
 
     /// Invalidate the layout index (triggers full rebuild on next draw).
@@ -172,7 +264,11 @@ impl MessageList {
         completed_at: Option<DateTime<Utc>>,
         mode: Option<SessionMode>,
     ) {
-        let Some(ref mut chat_context) = self.chat_context else { return };
+        let session_id = match self.active_session_id {
+            Some(id) => id,
+            None => return,
+        };
+        let Some(ref mut chat_context) = self.chat_contexts.get_mut(&session_id) else { return };
         if let Some(msg) = chat_context.messages.iter_mut().rev().find(|m| {
             m.role == tidev_types::message::MessageRole::Assistant
         }) {
@@ -194,7 +290,11 @@ impl MessageList {
 
     /// Mark the last streaming message as an error (on BackendEvent::Failed).
     pub fn mark_streaming_as_error(&mut self, error: &str) {
-        let Some(ref mut chat_context) = self.chat_context else { return };
+        let session_id = match self.active_session_id {
+            Some(id) => id,
+            None => return,
+        };
+        let Some(ref mut chat_context) = self.chat_contexts.get_mut(&session_id) else { return };
         if let Some(msg) = chat_context.messages.iter_mut().rev().find(|m| m.streaming) {
             msg.role = tidev_types::message::MessageRole::Error;
             msg.streaming = false;
@@ -208,7 +308,11 @@ impl MessageList {
     /// Finalise the streaming message (if any) and append an error notice.
     /// Called on user abort (double Esc).
     pub fn append_interrupted_message(&mut self) {
-        let Some(ref mut chat_context) = self.chat_context else { return };
+        let session_id = match self.active_session_id {
+            Some(id) => id,
+            None => return,
+        };
+        let Some(ref mut chat_context) = self.chat_contexts.get_mut(&session_id) else { return };
 
         // Finalise the streaming message, preserving content and reasoning.
         if let Some(idx) = self.streaming_buffer.finalise_message(&mut chat_context.messages) {
@@ -218,6 +322,9 @@ impl MessageList {
 
         // Ensure streaming state is fully reset.
         self.current_streaming_message_id = None;
+
+        // Clear hover state for the subagent card.
+        self.hovered_inline_subagent = None;
 
         // Append an error message to indicate the interruption.
         let mut err_msg = tidev_types::message::Message::new(
@@ -233,23 +340,24 @@ impl MessageList {
 
     /// Handle a backend event for streaming or tool results.
     pub fn handle_backend_event(&mut self, event: &BackendEvent) {
-        let Some(ref mut chat_context) = self.chat_context else { return };
-
-        // Ignore events from other sessions (e.g. after switching sessions
-        // while the old session's agent loop is still running).
-        if event.session_id() != chat_context.session_id {
-            // Not our session — check if it belongs to a running subagent.
-            let child_sid = event.session_id();
-            if let Some(exec) = self.running_subagents.iter_mut().find(|e| e.child_session_id == Some(child_sid)) {
-                if let Some(text) = infer_subagent_status(event) {
-                    if exec.status_text != text {
-                        exec.status_text = text;
-                        self.dirty = true;
+        // Route events to the correct chat context by session_id.
+        // Known contexts stay live in chat_contexts even when not displayed.
+        let session_id = event.session_id();
+        let chat_context = match self.chat_contexts.get_mut(&session_id) {
+            Some(ctx) => ctx,
+            None => {
+                // Unknown session — check if it belongs to a running subagent.
+                if let Some(exec) = self.running_subagents.iter_mut().find(|e| e.child_session_id == Some(session_id)) {
+                    if let Some(text) = infer_subagent_status(event) {
+                        if exec.status_text != text {
+                            exec.status_text = text;
+                            self.dirty = true;
+                        }
                     }
                 }
+                return;
             }
-            return;
-        }
+        };
 
         match event {
             BackendEvent::TurnStarting { .. } => {
@@ -309,7 +417,7 @@ impl MessageList {
                                 self.dirty = true;
                             }
                         }
-                    } else {
+                    } else if tool_call_arguments_are_complete(&tool_call.arguments) {
                         self.running_subagents.push(render_mod::RunningSubagentInfo {
                             request_id: *request_id,
                             tool_call_id: tool_call.id.clone(),
@@ -336,12 +444,44 @@ impl MessageList {
                     }
                     self.bash_tool_call_id = None;
                 } else {
-                    let tool_msg = tidev_types::message::Message::tool_result(
-                        tool_call.id.clone(),
-                        tool_call.name.clone(),
-                        result.clone(),
-                    );
-                    chat_context.messages.push(tool_msg);
+                    // Dedup: if a message for this tool_call_id already exists,
+                    // update its content instead of pushing a duplicate.
+                    let existing = chat_context.messages.iter_mut().rfind(|m| {
+                        m.role == tidev_types::message::MessageRole::Tool
+                            && m.tool_call_id.as_deref() == Some(&tool_call.id)
+                    });
+                    if let Some(existing) = existing {
+                        existing.content = result.output.clone();
+                    } else {
+                        let tool_msg = tidev_types::message::Message::tool_result(
+                            tool_call.id.clone(),
+                            tool_call.name.clone(),
+                            result.clone(),
+                        );
+                        chat_context.messages.push(tool_msg);
+                    }
+                    // Track child_session_id for subagent task results.
+                    if let Some(csid) = result.metadata.child_session_id {
+                        // Map by tool message ID.
+                        let tool_msg_id = chat_context.messages.iter().rev()
+                            .find(|m| m.tool_call_id.as_deref() == Some(&tool_call.id))
+                            .map(|m| m.id);
+                        if let Some(msg_id) = tool_msg_id {
+                            self.completed_subagent_sessions.insert(msg_id, csid);
+                        }
+                        // Also map by assistant message ID for click hit-testing.
+                        let assistant_msg_id = chat_context.messages.iter().rev()
+                            .find(|m| m.role == tidev_types::message::MessageRole::Assistant
+                                && m.tool_calls.iter().any(|tc| tc.id == tool_call.id))
+                            .map(|m| m.id);
+                        if let Some(msg_id) = assistant_msg_id {
+                            self.completed_subagent_sessions.insert(msg_id, csid);
+                        }
+                        self.running_subagents.retain(|s| s.tool_call_id != tool_call.id);
+                        if self.hovered_inline_subagent.map_or(false, |i| i >= self.running_subagents.len()) {
+                            self.hovered_inline_subagent = None;
+                        }
+                    }
                     self.dirty = true;
                 }
             }
@@ -382,14 +522,28 @@ impl MessageList {
                 ..
             } => {
                 // Match by request_id (backend now sends parent_request_id).
-                let idx = self.running_subagents.iter().position(|e| e.request_id == *request_id);
-                if let Some(idx) = idx {
-                    let exec = &mut self.running_subagents[idx];
-                    exec.status_text = status_text.clone();
-                    exec.child_session_id = Some(*child_session_id);
-                } else if let Some(exec) = self.running_subagents.last_mut() {
-                    exec.status_text = status_text.clone();
-                    exec.child_session_id = Some(*child_session_id);
+                let tool_call_id = {
+                    let idx = self.running_subagents.iter().position(|e| e.request_id == *request_id);
+                    if let Some(idx) = idx {
+                        let exec = &mut self.running_subagents[idx];
+                        exec.status_text = status_text.clone();
+                        exec.child_session_id = Some(*child_session_id);
+                        exec.tool_call_id.clone()
+                    } else if let Some(exec) = self.running_subagents.last_mut() {
+                        exec.status_text = status_text.clone();
+                        exec.child_session_id = Some(*child_session_id);
+                        exec.tool_call_id.clone()
+                    } else {
+                        String::new()
+                    }
+                };
+                // Sync child_session_id into the assistant message's metadata
+                // so rebuild_subagent_state() can recover it from messages.
+                if let Some(msg) = chat_context.messages.iter_mut().rev().find(|m| {
+                    m.role == tidev_types::message::MessageRole::Assistant
+                        && m.tool_calls.iter().any(|tc| tc.id == tool_call_id)
+                }) {
+                    msg.metadata.child_session_id = Some(*child_session_id);
                 }
                 if let Some(msg) = assistant_message {
                     let existing = chat_context.messages.iter_mut().find(|m| m.id == msg.id);
@@ -408,29 +562,6 @@ impl MessageList {
                         chat_context.messages.push(msg.clone());
                     }
                 }
-                self.dirty = true;
-            }
-            BackendEvent::SubagentCompleted { tool_call, result, .. } => {
-                // Save child session mapping before removing the running entry.
-                if let Some(sa) = self.running_subagents.iter().find(|s| s.tool_call_id == tool_call.id) {
-                    if let Some(csid) = sa.child_session_id {
-                        let tool_msg = tidev_types::message::Message::tool_result(
-                            tool_call.id.clone(),
-                            tool_call.name.clone(),
-                            result.clone(),
-                        );
-                        self.completed_subagent_sessions.insert(tool_msg.id, csid);
-                        chat_context.messages.push(tool_msg);
-                    }
-                } else {
-                    let tool_msg = tidev_types::message::Message::tool_result(
-                        tool_call.id.clone(),
-                        tool_call.name.clone(),
-                        result.clone(),
-                    );
-                    chat_context.messages.push(tool_msg);
-                }
-                self.running_subagents.retain(|s| s.tool_call_id != tool_call.id);
                 self.dirty = true;
             }
             BackendEvent::SidebarSnapshotReady { message_id, file_diffs_json, .. } => {
@@ -599,7 +730,7 @@ impl Component for MessageList {
     fn update(&mut self, action: &Action, _ctx: &UpdateContext) -> Vec<Action> {
         match action {
             Action::Chat(ChatAction::ScrollDelta(delta)) => {
-                if self.chat_context.is_some() {
+                if self.active_session_id.is_some() {
                     let total = self.layout_index.total_lines;
                     let viewport = self.content_area.map(|r| r.height as usize).unwrap_or(20).max(1);
                     let max_scroll = total.saturating_sub(viewport);
@@ -649,7 +780,11 @@ impl Component for MessageList {
     }
 
     fn draw(&mut self, frame: &mut Frame, rect: Rect, ctx: &DrawContext) {
-        let Some(ref chat_context) = self.chat_context else {
+        let session_id = match self.active_session_id {
+            Some(id) => id,
+            None => return,
+        };
+        let Some(ref chat_context) = self.chat_contexts.get(&session_id) else {
             return;
         };
 

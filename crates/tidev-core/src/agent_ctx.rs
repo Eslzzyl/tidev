@@ -619,15 +619,21 @@ impl AgentContext for CoreContext {
             for handle in handles {
                 match handle.await {
                     Ok(Ok((tc, result))) => {
-                        self.emit(BackendEvent::ToolCompleted {
-                            session_id,
-                            request_id,
-                            tool_call: tc.clone(),
-                            result: result.clone(),
-                        });
+                        if !self.cancel.is_cancelled() {
+                            self.emit(BackendEvent::ToolCompleted {
+                                session_id,
+                                request_id,
+                                tool_call: tc.clone(),
+                                result: result.clone(),
+                            });
+                        }
                         results.push((tc, result));
                     }
-                    Ok(Err(e)) => return Err(e),
+                    Ok(Err(e)) => {
+                        if !self.cancel.is_cancelled() {
+                            return Err(e);
+                        }
+                    }
                     Err(join_err) => {
                         return Err(anyhow::anyhow!("Subagent join error: {join_err}"));
                     }
@@ -883,6 +889,7 @@ async fn run_subagent_inner(
                     &child_model.model_id,
                     &child_model.display_name,
                     &format!("subagent:{:?} {}", agent_type, description),
+                    Some(config.parent_session_id),
                 )
                 .context("failed to create child session")?;
             child_session_id
@@ -909,6 +916,21 @@ async fn run_subagent_inner(
         content_delta: None,
         reasoning_delta: None,
     });
+
+    // Persist child_session_id in the parent's assistant message metadata
+    // so the TUI can recover it when switching sessions.
+    if let Ok(messages) = spawner.session_manager.load_messages(config.parent_session_id) {
+        if let Some(msg) = messages.iter().find(|m| {
+            m.role == MessageRole::Assistant
+                && m.tool_calls.iter().any(|tc| tc.id == config.tool_call.id)
+        }) {
+            let mut meta = msg.metadata.clone();
+            meta.child_session_id = Some(child_session_id);
+            let _ = spawner
+                .session_manager
+                .update_message_metadata(config.parent_session_id, msg.id, &meta);
+        }
+    }
 
     // 7. Create child CoreContext.
     let child_thinking_level = child_model.thinking_level.clone();
@@ -956,29 +978,19 @@ async fn run_subagent_inner(
             .cloned()
     };
 
-    // 10. Notify completion (parent session).
-    let _ = spawner.event_tx.send(BackendEvent::SubagentCompleted {
-        session_id: config.parent_session_id,
-        request_id: config.parent_request_id,
-        tool_call: config.tool_call.clone(),
-        child_session_id,
-        result: match &final_output {
-            Some(msg) if !msg.content.is_empty() => {
-                ToolExecutionResult::new(msg.content.clone())
-            }
+    // 10. Build result with child_session_id embedded in metadata.
+    //     The parent's execute_tools emits ToolCompleted (not SubagentCompleted),
+    //     so the TUI handles subagent completion identically to any other tool.
+    let mut final_result = match result {
+        Ok(()) => match final_output {
+            Some(msg) if !msg.content.is_empty() => ToolExecutionResult::new(msg.content),
             _ => ToolExecutionResult::new("(Subagent completed without text output)".to_string()),
         },
-    });
+        Err(e) => ToolExecutionResult::new(format!("Subagent failed: {e}")),
+    };
+    final_result.metadata.child_session_id = Some(child_session_id);
 
-    match result {
-        Ok(()) => Ok(final_output
-            .filter(|m| !m.content.is_empty())
-            .map(|m| ToolExecutionResult::new(m.content))
-            .unwrap_or_else(|| {
-                ToolExecutionResult::new("(Subagent completed without text output)".to_string())
-            })),
-        Err(e) => Ok(ToolExecutionResult::new(format!("Subagent failed: {e}"))),
-    }
+    Ok(final_result)
 }
 
 fn build_agent_def(agent_type: AgentType, parent_prompt: &str) -> AgentDefinition {

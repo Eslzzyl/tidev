@@ -830,11 +830,30 @@ fn render_block_from_cache(
             _ => {}
         }
     } else {
-        // Cache miss — render placeholder
-        lines.push(Line::from(Span::styled(
-            "[cache miss]",
-            Style::default().fg(ctx.palette.muted),
-        )));
+        // Cache miss — render directly instead of showing a placeholder.
+        let msg = &messages[block.message_start_idx];
+        let cards = match msg.role {
+            MessageRole::Assistant => {
+                render_assistant_cards(ctx, msg, messages, body_width, is_round_end)
+            }
+            _ => {
+                render_single_card(ctx, msg, messages, body_width, is_round_end)
+            }
+        };
+        for (bg, card_lines) in &cards {
+            if !card_lines.is_empty() {
+                let start_line = current_line_offset + lines.len();
+                track_selectable_region(selectable_regions, card_lines, start_line);
+                let adjusted_bg = if ctx.hovered_card == Some(block.message_id) {
+                    ctx.palette.hover_bg(*bg)
+                } else {
+                    *bg
+                };
+                lines.extend(decorate_card_lines(card_lines.clone(), adjusted_bg, 2, width));
+                let end_line = current_line_offset + lines.len();
+                card_bounds.push((block.message_id, start_line, end_line));
+            }
+        }
     }
 
     // Render ToolResult entries (tool call output) for assistant blocks
@@ -885,37 +904,44 @@ fn render_block_from_cache(
                 is_round_end,
                 kind: MessageRenderCacheKind::ToolCall(tc.id.clone()),
             };
-            if let Some(entry) = cache.peek(&tool_key) {
-                match &entry.value {
-                    MessageRenderCacheValue::ToolResult(tool_lines, tool_regions) => {
-                        if !tool_lines.is_empty() {
-                            let start_line = current_line_offset + lines.len();
-                            // Determine background: hover if a tool result in this block is hovered
-                            let tool_result_msg = messages[block.message_start_idx..block.message_start_idx + block.message_count]
-                                .iter()
-                                .find(|m| m.tool_call_id.as_deref() == Some(&tc.id));
-                            let bg = if tool_result_msg.is_some_and(|m| ctx.hovered_card == Some(m.id)) {
-                                ctx.palette.hover_bg(ctx.palette.panel_light)
-                            } else {
-                                ctx.palette.panel_light
-                            };
-                            lines.extend(decorate_card_lines(tool_lines.clone(), bg, 2, width));
-                            // Add selectable regions from tool result, offset by the current line
-                            for r in tool_regions {
-                                selectable_regions.push(SelectableRegionRange {
-                                    start_line: current_line_offset + lines.len() + r.start_line,
-                                    end_line: current_line_offset + lines.len() + r.end_line,
-                                    min_x: r.min_x,
-                                    max_x: r.max_x,
-                                });
-                            }
-                            let end_line = current_line_offset + lines.len();
-                            if let Some(tool_msg) = tool_result_msg {
-                                card_bounds.push((tool_msg.id, start_line, end_line));
-                            }
+            let (tool_lines, tool_regions): (Vec<Line<'static>>, Vec<SelectableRegionRange>) =
+                if let Some(entry) = cache.peek(&tool_key) {
+                    match &entry.value {
+                        MessageRenderCacheValue::ToolResult(tl, tr) => {
+                            (tl.clone(), tr.clone())
                         }
+                        _ => (Vec::new(), Vec::new()),
                     }
-                    _ => {}
+                } else {
+                    // Cache miss — render directly.
+                    let tool_result = tool_results_by_id.get(&tc.id).copied();
+                    let is_expanded = ctx.expanded_tool_results.contains(&block.message_id);
+                    tool::render_tool_call_with_result(
+                        tc, tool_result, body_width, msg.streaming, ctx, is_expanded,
+                    )
+                };
+            if !tool_lines.is_empty() {
+                let start_line = current_line_offset + lines.len();
+                let tool_result_msg = messages[block.message_start_idx..block.message_start_idx + block.message_count]
+                    .iter()
+                    .find(|m| m.tool_call_id.as_deref() == Some(&tc.id));
+                let bg = if tool_result_msg.is_some_and(|m| ctx.hovered_card == Some(m.id)) {
+                    ctx.palette.hover_bg(ctx.palette.panel_light)
+                } else {
+                    ctx.palette.panel_light
+                };
+                lines.extend(decorate_card_lines(tool_lines, bg, 2, width));
+                for r in &tool_regions {
+                    selectable_regions.push(SelectableRegionRange {
+                        start_line: current_line_offset + lines.len() + r.start_line,
+                        end_line: current_line_offset + lines.len() + r.end_line,
+                        min_x: r.min_x,
+                        max_x: r.max_x,
+                    });
+                }
+                let end_line = current_line_offset + lines.len();
+                if let Some(tool_msg) = tool_result_msg {
+                    card_bounds.push((tool_msg.id, start_line, end_line));
                 }
             }
         }

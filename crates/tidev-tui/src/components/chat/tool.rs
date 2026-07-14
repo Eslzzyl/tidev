@@ -147,6 +147,11 @@ pub(crate) fn render_tool_call_with_result(
         lines.extend(call_lines);
     }
 
+    // Task tool with no result and not pending → cancelled, suppress card.
+    if canonical_name == "task" && tool_result.is_none() && !is_pending {
+        return (Vec::new(), Vec::new());
+    }
+
     // Show live progress during streaming or waiting for write/edit
     if (is_pending && has_live_progress) || is_waiting_result {
         let progress_text = match canonical_name {
@@ -1272,7 +1277,7 @@ fn count_diff_lines(diff: &str) -> (usize, usize) {
     (add, del)
 }
 
-fn tool_call_arguments_are_complete(arguments: &str) -> bool {
+pub(crate) fn tool_call_arguments_are_complete(arguments: &str) -> bool {
     if arguments.trim().is_empty() {
         return false;
     }

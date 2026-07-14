@@ -294,12 +294,13 @@ impl SessionStore {
         model_id: &str,
         model_display_name: &str,
         title: &str,
+        parent_session_id: Option<Uuid>,
     ) -> Result<()> {
         let now = Utc::now().to_rfc3339();
         let conn = self.write_conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO sessions (id, provider_id, provider_display_name, model_id, model_display_name, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            params![session_id.to_string(), provider_id, provider_display_name, model_id, model_display_name, title, now, now],
+            "INSERT INTO sessions (id, parent_session_id, provider_id, provider_display_name, model_id, model_display_name, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![session_id.to_string(), parent_session_id.map(|id| id.to_string()), provider_id, provider_display_name, model_id, model_display_name, title, now, now],
         )?;
         conn.execute(
             "INSERT OR REPLACE INTO session_workspaces (session_id, workspace_root) VALUES (?1, ?2)",
@@ -1083,6 +1084,26 @@ impl SessionStore {
         let conn = self.write_conn.lock().unwrap();
         conn.execute(
             "UPDATE messages SET tool_calls = ?1 WHERE id = ?2 AND session_id = ?3",
+            params![
+                compress_text(&json),
+                message_id.to_string(),
+                session_id.to_string()
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Update a message's metadata (used by subagent tracking and tool result enrichment).
+    pub fn update_message_metadata(
+        &self,
+        session_id: Uuid,
+        message_id: Uuid,
+        metadata: &tidev_types::message::ToolMetadata,
+    ) -> Result<()> {
+        let json = serde_json::to_string(metadata)?;
+        let conn = self.write_conn.lock().unwrap();
+        conn.execute(
+            "UPDATE messages SET metadata = ?1 WHERE id = ?2 AND session_id = ?3",
             params![
                 compress_text(&json),
                 message_id.to_string(),
