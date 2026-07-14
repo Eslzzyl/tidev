@@ -13,6 +13,7 @@ pub mod types;
 use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result};
+use include_dir::{include_dir, Dir};
 use serde::{Deserialize, Serialize};
 
 pub use crate::auth::AuthStore;
@@ -21,8 +22,8 @@ use crate::paths::ConfigPaths;
 use crate::provider::{ProviderConfig, ProviderSource};
 use tidev_types::tools::PermissionConfig;
 
-/// Bundled provider presets compiled into the binary.
-const BUNDLED_PRESETS_TOML: &str = include_str!("../../../presets.toml");
+/// Bundled provider presets directory embedded at compile time.
+static PRESETS_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/../../presets");
 
 // ---------------------------------------------------------------------------
 // Public re-exports
@@ -794,9 +795,20 @@ struct BundledProviderCatalog {
 }
 
 fn bundled_provider_catalog() -> Result<BTreeMap<String, ProviderConfig>> {
-    let catalog: BundledProviderCatalog =
-        toml::from_str(BUNDLED_PRESETS_TOML).context("failed to parse bundled provider catalog")?;
-    Ok(catalog.providers)
+    let mut providers = BTreeMap::new();
+    let mut files: Vec<_> = PRESETS_DIR.files().collect();
+    files.sort_by_key(|f| f.path());
+    for file in files {
+        let ext = file.path().extension();
+        if ext.is_none_or(|e| e != "toml") {
+            continue;
+        }
+        let content = file.contents_utf8().context("non-utf8 preset file")?;
+        let catalog: BundledProviderCatalog =
+            toml::from_str(content).context("failed to parse bundled provider catalog")?;
+        providers.extend(catalog.providers);
+    }
+    Ok(providers)
 }
 
 // ---------------------------------------------------------------------------

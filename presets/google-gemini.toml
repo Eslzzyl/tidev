@@ -1,0 +1,12 @@
+[providers.google-gemini]
+display_name = "Google Gemini"
+base_url = "https://generativelanguage.googleapis.com/v1beta"
+api_type = "google_gemini"
+
+[providers.google-gemini.models.gemini-3-5-flash]
+request_model_id = "gemini-3.5-flash"
+display_name = "Gemini 3.5 Flash"
+context_window = 1048576
+max_output_tokens = 8192
+supports_streaming = true
+supports_images = true

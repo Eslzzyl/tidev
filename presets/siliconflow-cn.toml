@@ -1,0 +1,51 @@
+[providers.siliconflow-cn]
+display_name = "SiliconFlow (CN)"
+base_url = "https://api.siliconflow.cn/v1"
+
+[providers.siliconflow-cn.models.qwen-3-5-4b]
+request_model_id = "Qwen/Qwen3.5-4B"
+display_name = "Qwen3.5-4B (Free)"
+context_window = 256000
+max_output_tokens = 32768
+supports_streaming = true
+supports_images = true
+
+[providers.siliconflow-cn.models.qwen-3-8b]
+request_model_id = "Qwen/Qwen3-8B"
+display_name = "Qwen3-8B (Free)"
+context_window = 128000
+max_output_tokens = 8192
+supports_streaming = true
+supports_images = false
+
+[providers.siliconflow-cn.models.deepseek-r1-0528-qwen3-8b]
+request_model_id = "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"
+display_name = "DeepSeek-R1-0528-Qwen3-8B (Free)"
+context_window = 128000
+max_output_tokens = 8192
+supports_streaming = true
+supports_images = false
+
+[providers.siliconflow-cn.models.glm-z1-9b-0414]
+request_model_id = "THUDM/GLM-Z1-9B-0414"
+display_name = "GLM-Z1-9B-0414 (Free)"
+context_window = 128000
+max_output_tokens = 8192
+supports_streaming = true
+supports_images = false
+
+[providers.siliconflow-cn.models.glm-4-9b-0414]
+request_model_id = "THUDM/GLM-4-9B-0414"
+display_name = "GLM-4-9B-0414 (Free)"
+context_window = 128000
+max_output_tokens = 8192
+supports_streaming = true
+supports_images = false
+
+[providers.siliconflow-cn.models.qwen-2-5-7b-instruct]
+request_model_id = "Qwen/Qwen2.5-7B-Instruct"
+display_name = "Qwen2.5-7B-Instruct (Free)"
+context_window = 32000
+max_output_tokens = 8192
+supports_streaming = true
+supports_images = false

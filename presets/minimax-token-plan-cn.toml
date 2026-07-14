@@ -1,0 +1,11 @@
+[providers.minimax-token-plan-cn]
+display_name = "MiniMax Token Plan (CN)"
+base_url = "https://api.minimaxi.com/v1"
+
+[providers.minimax-token-plan-cn.models.minimax-m2-7]
+request_model_id = "MiniMax-M2.7"
+display_name = "MiniMax-M2.7"
+context_window = 200000
+max_output_tokens = 32768
+supports_streaming = true
+supports_images = false

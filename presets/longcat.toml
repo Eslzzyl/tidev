@@ -1,0 +1,11 @@
+[providers.longcat]
+display_name = "LongCat"
+base_url = "https://api.longcat.chat/openai/v1"
+
+[providers.longcat.models.longcat-2]
+request_model_id = "LongCat-2.0"
+display_name = "LongCat-2.0"
+context_window = 1048576
+max_output_tokens = 32768
+supports_streaming = true
+supports_images = false
