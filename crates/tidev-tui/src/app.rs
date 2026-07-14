@@ -2445,8 +2445,6 @@ impl App {
                 palette,
                 self.runtime.workspace_root(),
                 chat_ctx,
-                self.mode,
-                self.pending_mode,
                 self.context_usage.as_ref(),
                 &self.todos,
             );

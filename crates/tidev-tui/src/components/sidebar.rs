@@ -11,7 +11,6 @@ use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph, Wrap};
 use tidev_core::FileDiff;
-use tidev_types::prompts::SessionMode;
 use tidev_types::tools::TodoItem;
 use crate::chat_context::ChatContext;
 use crate::theme::ThemePalette;
@@ -63,8 +62,6 @@ impl Sidebar {
         palette: ThemePalette,
         workspace_root: &Path,
         chat_context: Option<&ChatContext>,
-        mode: SessionMode,
-        pending_mode: Option<SessionMode>,
         context_usage: Option<&ContextUsage>,
         todos: &[TodoItem],
     ) {
@@ -72,15 +69,9 @@ impl Sidebar {
             return;
         }
 
-        // ── Background ──
-        frame.render_widget(
-            Block::default().style(Style::default().bg(palette.panel)),
-            area,
-        );
-
         let inner = area.inner(Margin {
-            horizontal: 1,
-            vertical: 1,
+            horizontal: 2,
+            vertical: 0,
         });
         let sidebar_content_width = inner.width as usize;
 
@@ -101,35 +92,6 @@ impl Sidebar {
         lines.push(Line::from(""));
         lines.push(Line::from(""));
 
-        // Mode section
-        lines.push(Line::from(vec![Span::styled(
-            "Mode",
-            Style::default()
-                .fg(palette.accent)
-                .add_modifier(Modifier::BOLD),
-        )]));
-        let mode_label = match pending_mode {
-            Some(p) => format!("{} → {}", mode.title(), p.title()),
-            None => mode.title().to_string(),
-        };
-        lines.push(Line::from(vec![Span::styled(
-            mode_label,
-            Style::default().fg(palette.text),
-        )]));
-
-        // Undo state
-        if let Some(ctx) = chat_context {
-            if ctx.is_reverted() {
-                lines.push(Line::from(""));
-                lines.push(Line::from(vec![Span::styled(
-                    "⚠ Undo active",
-                    Style::default().fg(palette.warning),
-                )]));
-            }
-        }
-
-        lines.push(Line::from(""));
-
         // Model section
         lines.push(Line::from(vec![Span::styled(
             "Model",
@@ -148,13 +110,28 @@ impl Sidebar {
             )]));
         }
 
-        // Tokens per second
-        if let Some(usage) = context_usage {
-            if let Some(tps) = usage.tokens_per_second {
+        // Tokens per second (average across session)
+        if let Some(ctx) = chat_context {
+            let session_tps: Vec<f32> = ctx
+                .messages
+                .iter()
+                .filter(|m| matches!(m.role, tidev_types::message::MessageRole::Assistant))
+                .filter_map(|m| m.tokens_per_second)
+                .collect();
+
+            if !session_tps.is_empty() {
+                let avg_tps = session_tps.iter().sum::<f32>() / session_tps.len() as f32;
                 lines.push(Line::from(vec![Span::styled(
-                    format!("Speed: {:.1} t/s", tps),
+                    format!("Speed: {:.1} t/s (avg)", avg_tps),
                     Style::default().fg(palette.muted),
                 )]));
+            } else if let Some(usage) = context_usage {
+                if let Some(current_tps) = usage.tokens_per_second {
+                    lines.push(Line::from(vec![Span::styled(
+                        format!("Speed: {:.1} t/s", current_tps),
+                        Style::default().fg(palette.muted),
+                    )]));
+                }
             }
         }
 
@@ -344,8 +321,29 @@ impl Sidebar {
             }
         }
 
+        // Undo state
+        if let Some(ctx) = chat_context {
+            if ctx.is_reverted() {
+                lines.push(Line::from(""));
+                lines.push(Line::from(vec![Span::styled(
+                    "⚠ Undo active",
+                    Style::default().fg(palette.warning),
+                )]));
+            }
+        }
+
+        // ── Background ──
+        frame.render_widget(
+            Block::default().style(Style::default().bg(palette.panel)),
+            area,
+        );
+
         // ── Footer: workspace path ──
         let display_path = workspace_root.to_string_lossy().to_string();
+        let display_path = display_path.replace(
+            &dirs::home_dir().unwrap_or_default().to_string_lossy().to_string(),
+            "~",
+        );
         let display_path = shorten(&display_path, sidebar_content_width);
         let footer_lines: Vec<Line<'static>> = vec![
             Line::from(""),
