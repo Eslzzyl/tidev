@@ -324,26 +324,12 @@ impl App {
 
             let Some(session_id) = self.current_session_id else { continue };
 
-            // Add user message to chat_context so it's visible immediately.
-            let mut user_msg = tidev_types::message::Message::new(
-                tidev_types::message::MessageRole::User,
-                text.clone(),
-            );
-            user_msg.attachments = attachments.clone();
-            user_msg.mode = Some(self.mode);
-            user_msg.thinking_level = Some(self.thinking_level.clone());
-            if let Some(ref mut chat) = self.message_list {
-                if let Some(ref mut ctx) = chat.chat_context {
-                    ctx.push(user_msg);
-                }
-                chat.invalidate_layout();
-            }
-
             let mode = self.mode;
+            let thinking_level = self.thinking_level.clone();
             let rt = self.runtime.clone();
             tokio::spawn(async move {
                 if let Err(e) = rt
-                    .submit_prompt_with_attachments(session_id, mode, text, attachments)
+                    .submit_prompt_with_attachments(session_id, mode, text, attachments, Some(thinking_level))
                     .await
                 {
                     log::error!("flush queued prompt failed: {e}");
@@ -524,6 +510,16 @@ impl App {
             }
             BackendEvent::ContextCompacted { .. } => {
                 self.set_notice("Context compacted");
+            }
+            BackendEvent::UserMessageCreated { session_id, message } => {
+                if let Some(ref mut chat) = self.message_list {
+                    if let Some(ref mut ctx) = chat.chat_context {
+                        if ctx.session_id == session_id {
+                            ctx.push(message);
+                        }
+                    }
+                    chat.invalidate_layout();
+                }
             }
             BackendEvent::UndoCompleted {
                 target_id,
@@ -1726,28 +1722,26 @@ impl App {
                                 }
                             };
 
-                            // Add user message to chat_context so it's visible immediately.
-                            // submit_prompt_with_attachments persists the message to store + buffer
-                            // but does not update the MessageList's local chat_context.
-                            let mut user_msg = tidev_types::message::Message::new(
-                                tidev_types::message::MessageRole::User,
-                                text.clone(),
-                            );
-                            user_msg.attachments = final_attachments.clone();
-                            user_msg.mode = Some(self.mode);
-                            user_msg.thinking_level = Some(self.thinking_level.clone());
-                            if let Some(ref mut chat) = self.message_list {
-                                if let Some(ref mut ctx) = chat.chat_context {
-                                    ctx.push(user_msg);
+                            // Spawn submission to avoid blocking the UI.
+                            let mode = self.mode;
+                            let thinking_level = self.thinking_level.clone();
+                            let rt = self.runtime.clone();
+                            let text_for_title = text.clone();
+                            self.set_notice("Sending...");
+                            tokio::spawn(async move {
+                                if let Err(e) = rt
+                                    .submit_prompt_with_attachments(sid, mode, text, final_attachments, Some(thinking_level))
+                                    .await
+                                {
+                                    log::error!("submit_prompt failed: {e}");
                                 }
-                                chat.invalidate_layout();
-                            }
+                            });
 
                             // Update session title from prompt (matching old behaviour).
                             if let Some(ref mut chat) = self.message_list {
                                 if let Some(ref mut ctx) = chat.chat_context {
                                     if ctx.title.is_empty() || ctx.title == "Untitled session" {
-                                        let title = title_from_prompt(&text);
+                                        let title = title_from_prompt(&text_for_title);
                                         ctx.title = title.clone();
                                         if let Err(e) = self.runtime
                                             .session_manager()
@@ -1758,19 +1752,6 @@ impl App {
                                     }
                                 }
                             }
-
-                            // Spawn submission to avoid blocking the UI.
-                            let mode = self.mode;
-                            let rt = self.runtime.clone();
-                            self.set_notice("Sending...");
-                            tokio::spawn(async move {
-                                if let Err(e) = rt
-                                    .submit_prompt_with_attachments(sid, mode, text, final_attachments)
-                                    .await
-                                {
-                                    log::error!("submit_prompt failed: {e}");
-                                }
-                            });
                         }
                         _ => {
                             // Forward other chat actions (scroll, stream, etc.) to MessageList.

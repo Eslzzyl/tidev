@@ -36,6 +36,7 @@ use tidev_search::FileSearchIndex;
 use tidev_storage::SessionStore;
 use tidev_types::message::{BackendEvent, Message, MessageAttachment, MessageRole};
 use tidev_types::prompts::SessionMode;
+use tidev_types::reasoning::ThinkingLevelType;
 use tidev_types::tools::TodoItem;
 
 use tidev_agent::{AgentDefinition, TuiRequest};
@@ -367,7 +368,7 @@ impl Runtime {
         content: String,
         mode: SessionMode,
     ) -> Result<()> {
-        self.submit_prompt_with_attachments(session_id, mode, content, Vec::new())
+        self.submit_prompt_with_attachments(session_id, mode, content, Vec::new(), None)
             .await
     }
 
@@ -385,10 +386,12 @@ impl Runtime {
         mode: SessionMode,
         content: String,
         attachments: Vec<MessageAttachment>,
+        thinking_level: Option<ThinkingLevelType>,
     ) -> Result<()> {
         let mut user_msg = Message::new(MessageRole::User, content);
         user_msg.attachments = attachments;
         user_msg.mode = Some(mode);
+        user_msg.thinking_level = thinking_level;
 
         // 1. Persist the user message.
         {
@@ -397,13 +400,19 @@ impl Runtime {
         }
         self.session_manager.append_message(session_id, &user_msg)?;
 
-        // 2. Check if a loop is already running.
+        // 2. Notify the TUI so it can display the message.
+        let _ = self.event_tx.send(BackendEvent::UserMessageCreated {
+            session_id,
+            message: user_msg,
+        });
+
+        // 3. Check if a loop is already running.
         if self.is_loop_running() {
             // Loop running — new message will be picked up on next turn.
             return Ok(());
         }
 
-        // 3. Build CoreContext + AgentLoopConfig and spawn the loop.
+        // 4. Build CoreContext + AgentLoopConfig and spawn the loop.
         self.start_agent_loop(session_id, mode).await
     }
 

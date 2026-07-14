@@ -588,6 +588,10 @@ pub enum BackendEvent {
         completed_at: Option<DateTime<Utc>>,
         error: Option<String>,
     },
+    UserMessageCreated {
+        session_id: Uuid,
+        message: Message,
+    },
     UndoCompleted {
         session_id: Uuid,
         target_id: Uuid,
@@ -631,6 +635,7 @@ impl BackendEvent {
             | Self::InstructionsLoaded { session_id, .. }
             | Self::ContextCompacted { session_id, .. }
             | Self::UndoCompleted { session_id, .. }
+            | Self::UserMessageCreated { session_id, .. }
             | Self::SidebarSnapshotReady { session_id, .. }
             | Self::ShellOutput { session_id, .. }
             | Self::TurnStarting { session_id, .. }
@@ -656,6 +661,7 @@ impl BackendEvent {
             Self::InstructionsLoaded { .. }
             | Self::ContextCompacted { .. }
             | Self::UndoCompleted { .. }
+            | Self::UserMessageCreated { .. }
             | Self::ShellOutput { .. } => None,
         }
     }
