@@ -657,11 +657,11 @@ impl AgentContext for CoreContext {
         let has_tool_results = messages.iter().any(|m| m.role == MessageRole::Tool);
         let mut enriched = messages.to_vec();
         if has_tool_results {
-            let pre_hash = self.pre_round_hash.lock().await.take();
-            if let Some(pre) = pre_hash {
+            let pre = { self.pre_round_hash.lock().await.clone() };
+            if let Some(ref pre) = pre {
                 if let Some(ref snap) = self.snapshot {
                     if let Ok(Some(post_hash)) = snap.track() {
-                        if let Ok(diffs) = snap.diff_lightweight(&pre, &post_hash).await {
+                        if let Ok(diffs) = snap.diff_lightweight(pre, &post_hash).await {
                             let files: Vec<String> = diffs
                                 .iter()
                                 .map(|d| {
@@ -672,8 +672,9 @@ impl AgentContext for CoreContext {
                                 })
                                 .collect();
                             if !files.is_empty() {
+                                *self.pre_round_hash.lock().await = None;
                                 let step_patch = serde_json::json!([{
-                                    "hash": post_hash,
+                                    "hash": pre,
                                     "files": files,
                                     "step": 1,
                                 }]);
