@@ -133,6 +133,11 @@ impl SessionManager {
         self.store.update_message_metadata(session_id, message_id, metadata)
     }
 
+    /// Delete specific messages from a session.
+    pub fn delete_messages(&self, session_id: Uuid, message_ids: &[Uuid]) -> Result<()> {
+        self.store.delete_messages(session_id, message_ids)
+    }
+
     /// Delegate access to the underlying store.
     pub fn store(&self) -> &SessionStore {
         &self.store

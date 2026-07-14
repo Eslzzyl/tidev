@@ -55,6 +55,11 @@ impl MessageBuffer {
         None
     }
 
+    /// Remove all messages from `index` onward.
+    pub fn truncate(&mut self, index: usize) {
+        self.messages.truncate(index);
+    }
+
     /// Number of messages currently buffered.
     pub fn len(&self) -> usize {
         self.messages.len()

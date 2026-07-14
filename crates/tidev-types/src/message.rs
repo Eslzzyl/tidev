@@ -617,6 +617,10 @@ pub enum BackendEvent {
         session_id: Uuid,
         request_id: u64,
     },
+    MessagesTruncated {
+        session_id: Uuid,
+        kept_count: usize,
+    },
 }
 
 impl BackendEvent {
@@ -639,7 +643,8 @@ impl BackendEvent {
             | Self::SidebarSnapshotReady { session_id, .. }
             | Self::ShellOutput { session_id, .. }
             | Self::TurnStarting { session_id, .. }
-            | Self::StreamEnd { session_id, .. } => *session_id,
+            | Self::StreamEnd { session_id, .. }
+            | Self::MessagesTruncated { session_id, .. } => *session_id,
         }
     }
 
@@ -662,7 +667,8 @@ impl BackendEvent {
             | Self::ContextCompacted { .. }
             | Self::UndoCompleted { .. }
             | Self::UserMessageCreated { .. }
-            | Self::ShellOutput { .. } => None,
+            | Self::ShellOutput { .. }
+            | Self::MessagesTruncated { .. } => None,
         }
     }
 }

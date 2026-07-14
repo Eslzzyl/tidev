@@ -541,6 +541,17 @@ impl App {
                     chat.invalidate_layout();
                 }
             }
+            BackendEvent::MessagesTruncated { session_id, kept_count } => {
+                if let Some(ref mut chat) = self.message_list {
+                    if let Some(ref mut ctx) = chat.active_chat_context_mut() {
+                        if ctx.session_id == session_id {
+                            ctx.messages.truncate(kept_count);
+                            ctx.revert_message_id = None;
+                        }
+                    }
+                    chat.invalidate_layout();
+                }
+            }
             BackendEvent::UndoCompleted {
                 target_id,
                 message_content,

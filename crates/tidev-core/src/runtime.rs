@@ -394,26 +394,50 @@ impl Runtime {
         user_msg.mode = Some(mode);
         user_msg.thinking_level = thinking_level;
 
-        // 1. Persist the user message.
+        // 1. If undo revert is active, discard hidden messages first.
+        if let Ok(Some((revert_msg_id, _))) = self.session_manager.load_revert_state(session_id) {
+            if revert_msg_id != Uuid::nil() {
+                let buf = self.message_buffer(session_id).await;
+                let pos = {
+                    let mut write_buf = buf.write().await;
+                    let pos = write_buf.load().iter()
+                        .position(|m| m.id == revert_msg_id)
+                        .unwrap_or(write_buf.len());
+                    let to_remove: Vec<Uuid> = write_buf.load()[pos..].iter().map(|m| m.id).collect();
+                    write_buf.truncate(pos);
+                    if !to_remove.is_empty() {
+                        self.session_manager.delete_messages(session_id, &to_remove)?;
+                    };
+                    pos
+                };
+                self.session_manager.save_revert_state(session_id, Uuid::nil(), None)?;
+                let _ = self.event_tx.send(BackendEvent::MessagesTruncated {
+                    session_id,
+                    kept_count: pos,
+                });
+            }
+        }
+
+        // 2. Persist the user message.
         {
             let buf = self.message_buffer(session_id).await;
             buf.write().await.append(user_msg.clone());
         }
         self.session_manager.append_message(session_id, &user_msg)?;
 
-        // 2. Notify the TUI so it can display the message.
+        // 3. Notify the TUI so it can display the message.
         let _ = self.event_tx.send(BackendEvent::UserMessageCreated {
             session_id,
             message: user_msg,
         });
 
-        // 3. Check if a loop is already running.
+        // 4. Check if a loop is already running.
         if self.is_loop_running() {
             // Loop running — new message will be picked up on next turn.
             return Ok(());
         }
 
-        // 4. Build CoreContext + AgentLoopConfig and spawn the loop.
+        // 5. Build CoreContext + AgentLoopConfig and spawn the loop.
         self.start_agent_loop(session_id, mode).await
     }
 

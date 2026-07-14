@@ -992,6 +992,26 @@ impl SessionStore {
         Ok(())
     }
 
+    /// Delete specific messages from a session.
+    pub fn delete_messages(&self, session_id: Uuid, message_ids: &[Uuid]) -> Result<()> {
+        if message_ids.is_empty() {
+            return Ok(());
+        }
+        for id in message_ids {
+            self.write_execute(
+                "DELETE FROM messages WHERE session_id = ?1 AND id = ?2",
+                params![session_id.to_string(), id.to_string()],
+            )?;
+        }
+        // Update session timestamp
+        let now = Utc::now().to_rfc3339();
+        self.write_execute(
+            "UPDATE sessions SET updated_at = ?1 WHERE id = ?2",
+            params![now, session_id.to_string()],
+        )?;
+        Ok(())
+    }
+
     /// Load all messages for a session, ordered by creation time.
     pub fn load_messages(&self, session_id: Uuid) -> Result<Vec<Message>> {
         self.read(|conn| {
