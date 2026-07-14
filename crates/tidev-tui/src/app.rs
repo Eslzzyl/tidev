@@ -408,6 +408,7 @@ impl App {
 
         match event {
             BackendEvent::UsageStats {
+                session_id,
                 input_tokens,
                 output_tokens,
                 total_tokens,
@@ -416,7 +417,7 @@ impl App {
                 model_id,
                 duration_ms,
                 ..
-            } => {
+            } if Some(session_id) == self.current_session_id => {
                 // Store context usage for display in status bar.
                 self.context_usage = Some(ContextUsage {
                     input_tokens,
@@ -461,18 +462,23 @@ impl App {
                 }
             }
             BackendEvent::Retrying {
+                session_id,
                 attempt,
                 max_attempts,
                 reason,
                 ..
-            } => {
+            } if Some(session_id) == self.current_session_id => {
                 log::info!("Retrying (attempt {attempt}/{max_attempts}): {reason}");
                 self.set_toast(
                     format!("Retry {attempt}/{max_attempts}: {reason}"),
                     std::time::Duration::from_secs(5),
                 );
             }
-            BackendEvent::Failed { error, .. } => {
+            BackendEvent::Failed {
+                session_id,
+                error,
+                ..
+            } if Some(session_id) == self.current_session_id => {
                 log::error!("Request failed: {error}");
                 // Clean up pending state (mirrors old behaviour).
                 self.pending_tools.clear();
@@ -490,7 +496,11 @@ impl App {
                     std::time::Duration::from_secs(8),
                 );
             }
-            BackendEvent::Finished { turn, .. } => {
+            BackendEvent::Finished {
+                session_id,
+                turn,
+                ..
+            } if Some(session_id) == self.current_session_id => {
                 // Apply pending mode switch on final turn (no tool calls).
                 if turn.tool_calls.is_empty() {
                     if let Some(new_mode) = self.pending_mode.take() {
