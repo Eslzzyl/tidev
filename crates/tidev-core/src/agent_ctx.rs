@@ -601,7 +601,7 @@ impl AgentContext for CoreContext {
                     auth: self.auth.clone(),
                 };
                 let handle = tokio::spawn(async move {
-                    run_subagent_inner(
+                    execute_task_tool(
                         spawner,
                         SubagentConfig {
                             tool_call: tc.clone(),
@@ -819,7 +819,7 @@ struct SubagentConfig {
 }
 
 /// Execute a `task` tool call by spawning a subagent loop.
-async fn run_subagent_inner(
+async fn execute_task_tool(
     spawner: SubagentSpawner,
     config: SubagentConfig,
 ) -> Result<ToolExecutionResult> {
