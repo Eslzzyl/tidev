@@ -940,7 +940,7 @@ impl App {
             KeyCode::Down => {
                 // Switch to the last (most recently delegated) child.
                 let all = self.runtime.session_manager().store()
-                    .list_sessions(1000, 0).unwrap_or_default();
+                    .list_sessions_unfiltered(1000, 0).unwrap_or_default();
                 let children: Vec<_> = all.into_iter()
                     .filter(|s| s.parent_session_id == Some(parent_id))
                     .collect();
@@ -957,7 +957,7 @@ impl App {
             KeyCode::Left | KeyCode::Right => {
                 let step = if key.code == KeyCode::Left { -1isize } else { 1 };
                 let all = self.runtime.session_manager().store()
-                    .list_sessions(1000, 0).unwrap_or_default();
+                    .list_sessions_unfiltered(1000, 0).unwrap_or_default();
                 let children: Vec<_> = all.into_iter()
                     .filter(|s| s.parent_session_id == Some(parent_id))
                     .collect();
