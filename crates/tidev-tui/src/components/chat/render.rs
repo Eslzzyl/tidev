@@ -17,6 +17,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use rayon::prelude::*;
 use tidev_types::message::{Message, MessageRole, COMPACTION_MESSAGE_LABEL};
+use tidev_types::tools::canonical_tool_name;
 use crate::chat_context::ChatContext;
 use crate::theme::ThemePalette;
 use chrono::Local;
@@ -808,6 +809,8 @@ fn render_block_from_cache(
         lines.push(Line::from(""));
     }
 
+    let role = messages[block.message_start_idx].role.clone();
+
     // Render Cards entry (assistant/user/shell card)
     if let Some(entry) = cache.peek(&cards_key) {
         match &entry.value {
@@ -816,14 +819,18 @@ fn render_block_from_cache(
                     if !card_lines.is_empty() {
                         let start_line = current_line_offset + lines.len();
                         track_selectable_region(selectable_regions, card_lines, start_line);
-                        let adjusted_bg = if ctx.hovered_card == Some(block.message_id) {
+                        let show_hover = ctx.hovered_card == Some(block.message_id)
+                            && matches!(role, MessageRole::User | MessageRole::Shell);
+                        let adjusted_bg = if show_hover {
                             ctx.palette.hover_bg(*bg)
                         } else {
                             *bg
                         };
                         lines.extend(decorate_card_lines(card_lines.clone(), adjusted_bg, 2, width));
                         let end_line = current_line_offset + lines.len();
-                        card_bounds.push((block.message_id, start_line, end_line));
+                        if !matches!(role, MessageRole::Assistant) {
+                            card_bounds.push((block.message_id, start_line, end_line));
+                        }
                     }
                 }
             }
@@ -844,14 +851,18 @@ fn render_block_from_cache(
             if !card_lines.is_empty() {
                 let start_line = current_line_offset + lines.len();
                 track_selectable_region(selectable_regions, card_lines, start_line);
-                let adjusted_bg = if ctx.hovered_card == Some(block.message_id) {
+                let show_hover = ctx.hovered_card == Some(block.message_id)
+                    && matches!(role, MessageRole::User | MessageRole::Shell);
+                let adjusted_bg = if show_hover {
                     ctx.palette.hover_bg(*bg)
                 } else {
                     *bg
                 };
                 lines.extend(decorate_card_lines(card_lines.clone(), adjusted_bg, 2, width));
                 let end_line = current_line_offset + lines.len();
-                card_bounds.push((block.message_id, start_line, end_line));
+                if !matches!(role, MessageRole::Assistant) {
+                    card_bounds.push((block.message_id, start_line, end_line));
+                }
             }
         }
     }
@@ -925,7 +936,21 @@ fn render_block_from_cache(
                 let tool_result_msg = messages[block.message_start_idx..block.message_start_idx + block.message_count]
                     .iter()
                     .find(|m| m.tool_call_id.as_deref() == Some(&tc.id));
-                let bg = if tool_result_msg.is_some_and(|m| ctx.hovered_card == Some(m.id)) {
+                let is_hovered = tool_result_msg.is_some_and(|m| {
+                    ctx.hovered_card == Some(m.id)
+                        && {
+                            let canonical = canonical_tool_name(&tc.name);
+                            match canonical {
+                                Some("read" | "grep" | "glob" | "skill" | "question" | "todowrite") => false,
+                                Some("write" | "edit" | "apply_patch") => {
+                                    m.metadata.diff.is_none()
+                                        && m.content.lines().count() > tool::TOOL_OUTPUT_PREVIEW_LINES
+                                }
+                                _ => m.content.lines().count() > tool::TOOL_OUTPUT_PREVIEW_LINES,
+                            }
+                        }
+                });
+                let bg = if is_hovered {
                     ctx.palette.hover_bg(ctx.palette.panel_light)
                 } else {
                     ctx.palette.panel_light

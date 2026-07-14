@@ -26,7 +26,7 @@ use crate::utils::expand_tabs;
 // Constants
 // ---------------------------------------------------------------------------
 
-const TOOL_OUTPUT_PREVIEW_LINES: usize = 5;
+pub(crate) const TOOL_OUTPUT_PREVIEW_LINES: usize = 5;
 
 // ---------------------------------------------------------------------------
 // Main entry
