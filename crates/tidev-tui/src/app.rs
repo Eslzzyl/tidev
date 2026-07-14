@@ -51,6 +51,7 @@ use crate::components::overlays::workspace::WorkspaceBoundaryDialog;
 use crate::components::chat::MessageList;
 use crate::components::composer::Composer;
 use crate::components::sidebar::Sidebar;
+use crate::components::desktop_notification::NotificationManager;
 use crate::components::notification::NotificationState;
 use crate::components::selection::{MouseSelection, copy_to_clipboard};
 use crate::context::{DrawContext, InitContext, UpdateContext};
@@ -89,6 +90,8 @@ pub struct App {
     last_notice: Option<(String, Instant)>,
     /// Transient popup notifications (auto-expire).
     notifications: NotificationState,
+    /// Desktop/terminal notifications (OSC 9 / BEL).
+    desktop_notifications: NotificationManager,
     /// Receiver for tool permission requests from the agent loop.
     pub(crate) request_rx: Option<tokio::sync::mpsc::UnboundedReceiver<tidev_core::TuiRequest>>,
     /// Receiver for backend events (streaming deltas, tool results, etc.).
@@ -179,6 +182,7 @@ impl App {
         let cfg_dir = runtime.config_dir().clone();
         let supports_images = runtime.active_model().supports_images;
         let thinking_level = runtime.active_model().thinking_level.clone();
+        let notif_config = runtime.config().notifications.clone();
 
         Self {
             runtime,
@@ -192,6 +196,7 @@ impl App {
             thinking_level: thinking_level,
             last_notice: None,
             notifications: NotificationState::new(),
+            desktop_notifications: NotificationManager::new(&notif_config),
             request_rx,
             event_rx,
             pending_response_tx: None,
@@ -256,6 +261,11 @@ impl App {
         let msg = msg.into();
         self.notifications.add(msg.clone(), duration);
         self.toast = Some((msg, Instant::now() + duration));
+    }
+
+    /// Forward terminal focus change to desktop notification manager.
+    pub(crate) fn handle_focus_event(&self, focused: bool) {
+        self.desktop_notifications.set_focused(focused);
     }
 
     /// Accessor for `spinner_start` so tui.rs can compute spinner frame.
@@ -496,6 +506,7 @@ impl App {
                     format!("Request failed: {error}"),
                     std::time::Duration::from_secs(8),
                 );
+                self.desktop_notifications.notify(&format!("Request failed: {error}"));
             }
             BackendEvent::Finished {
                 session_id,
@@ -508,6 +519,7 @@ impl App {
                         self.mode = new_mode;
                         self.set_notice(format!("Mode switched to {}", self.mode.title()));
                     }
+                    self.desktop_notifications.notify("Response complete");
                 }
 
                 // Process any queued prompts now that the request finished.

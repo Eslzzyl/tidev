@@ -115,6 +115,8 @@ impl Tui {
                             Event::Key(key) => app.handle_key_event(key),
                             Event::Mouse(mouse) => app.handle_mouse_event(mouse),
                             Event::Resize(w, h) => app.handle_resize(w, h),
+                            Event::FocusGained => app.handle_focus_event(true),
+                            Event::FocusLost => app.handle_focus_event(false),
                             _ => {}
                         }
                         cc_count += 1;
@@ -219,6 +221,8 @@ impl Tui {
                             Event::Key(key) => app.handle_key_event(key),
                             Event::Mouse(mouse) => app.handle_mouse_event(mouse),
                             Event::Resize(w, h) => app.handle_resize(w, h),
+                            Event::FocusGained => app.handle_focus_event(true),
+                            Event::FocusLost => app.handle_focus_event(false),
                             _ => {}
                         }
                         had_input = true;
