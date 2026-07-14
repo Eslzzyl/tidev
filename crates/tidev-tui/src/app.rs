@@ -1013,7 +1013,16 @@ impl App {
                     }
                 }
 
-                // Start mouse selection if within message area.
+                // MessageList click-to-expand or subsession navigation (non-drag).
+                // Run BEFORE mouse selection so interactive elements get priority.
+                if let Some(ref mut chat) = self.message_list {
+                    if let Some(action) = chat.handle_mouse_click(mouse.column, mouse.row) {
+                        self.process_action(action);
+                        return;
+                    }
+                }
+
+                // Start mouse selection if within message area (no interactive hit).
                 if msg_bounds.map_or(false, |b| b.contains(position)) {
                     let scroll_offset = self
                         .message_list
@@ -1036,12 +1045,10 @@ impl App {
                     self.mouse_selection.press(position, refined, scroll_offset);
                     return;
                 }
-
-                // MessageList click-to-expand or subsession navigation (non-drag).
+            }
+            MouseEventKind::Moved => {
                 if let Some(ref mut chat) = self.message_list {
-                    if let Some(action) = chat.handle_mouse_click(mouse.column, mouse.row) {
-                        self.process_action(action);
-                    }
+                    chat.set_hovered_card(mouse.column, mouse.row);
                 }
             }
             MouseEventKind::Drag(MouseButton::Left) => {

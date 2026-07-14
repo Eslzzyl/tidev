@@ -93,6 +93,8 @@ pub(crate) struct MessageList {
 
     // ── Subagent tracking ──
     running_subagents: Vec<render_mod::RunningSubagentInfo>,
+    /// Maps tool result message_id → child_session_id for completed subagents.
+    completed_subagent_sessions: HashMap<Uuid, Uuid>,
     hovered_inline_subagent: Option<usize>,
     inline_subagent_card_bounds: Vec<(usize, Rect)>,
 
@@ -125,6 +127,7 @@ impl MessageList {
             streaming_buffer: StreamingBuffer::new(),
             current_streaming_message_id: None,
             running_subagents: Vec::new(),
+            completed_subagent_sessions: HashMap::new(),
             hovered_inline_subagent: None,
             inline_subagent_card_bounds: Vec::new(),
             bash_tool_call_id: None,
@@ -144,6 +147,7 @@ impl MessageList {
         self.current_streaming_message_id = None;
         self.selectable_regions.clear();
         self.running_subagents.clear();
+        self.completed_subagent_sessions.clear();
         self.hovered_inline_subagent = None;
         self.inline_subagent_card_bounds.clear();
         self.bash_tool_call_id = None;
@@ -407,13 +411,26 @@ impl MessageList {
                 self.dirty = true;
             }
             BackendEvent::SubagentCompleted { tool_call, result, .. } => {
+                // Save child session mapping before removing the running entry.
+                if let Some(sa) = self.running_subagents.iter().find(|s| s.tool_call_id == tool_call.id) {
+                    if let Some(csid) = sa.child_session_id {
+                        let tool_msg = tidev_types::message::Message::tool_result(
+                            tool_call.id.clone(),
+                            tool_call.name.clone(),
+                            result.clone(),
+                        );
+                        self.completed_subagent_sessions.insert(tool_msg.id, csid);
+                        chat_context.messages.push(tool_msg);
+                    }
+                } else {
+                    let tool_msg = tidev_types::message::Message::tool_result(
+                        tool_call.id.clone(),
+                        tool_call.name.clone(),
+                        result.clone(),
+                    );
+                    chat_context.messages.push(tool_msg);
+                }
                 self.running_subagents.retain(|s| s.tool_call_id != tool_call.id);
-                let tool_msg = tidev_types::message::Message::tool_result(
-                    tool_call.id.clone(),
-                    tool_call.name.clone(),
-                    result.clone(),
-                );
-                chat_context.messages.push(tool_msg);
                 self.dirty = true;
             }
             BackendEvent::SidebarSnapshotReady { message_id, file_diffs_json, .. } => {
@@ -485,6 +502,10 @@ impl MessageList {
         if block_idx < self.layout_index.blocks.len() {
             let block = &self.layout_index.blocks[block_idx];
             if block.message_count > 0 {
+                // Completed subagent result: navigate to subsession.
+                if let Some(&child_sid) = self.completed_subagent_sessions.get(&block.message_id) {
+                    return Some(Action::Session(SessionAction::Select(child_sid)));
+                }
                 if self.expanded_tool_results.contains(&block.message_id) {
                     self.expanded_tool_results.remove(&block.message_id);
                 } else {
