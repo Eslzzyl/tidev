@@ -1362,7 +1362,7 @@ impl App {
                         let active_model = config.resolve_active_model(&self.runtime.auth()).ok();
                         let model_display = active_model
                             .as_ref()
-                            .map(|m| m.label())
+                            .map(|m| m.display_name.clone())
                             .unwrap_or_default();
                         let provider_display = active_model
                             .as_ref()
@@ -1625,7 +1625,7 @@ impl App {
                         None,
                         self.runtime.active_provider_id(),
                         self.runtime.active_model_id(),
-                        active_model.as_ref().map(|m| m.label()).unwrap_or_default(),
+                        active_model.as_ref().map(|m| m.display_name.clone()).unwrap_or_default(),
                         active_model.as_ref().map(|m| m.provider_display_name.clone()).unwrap_or_default(),
                     );
                     self.message_list
@@ -1725,7 +1725,7 @@ impl App {
                                             let provider_id = self.runtime.active_provider_id();
                                             let model_id = self.runtime.active_model_id();
                                             let model_display = active_model.as_ref()
-                                                .map(|m| m.label()).unwrap_or_default();
+                                                .map(|m| m.display_name.clone()).unwrap_or_default();
                                             let provider_display = active_model.as_ref()
                                                 .map(|m| m.provider_display_name.clone())
                                                 .unwrap_or_default();

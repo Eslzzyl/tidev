@@ -328,7 +328,7 @@ impl AgentContext for CoreContext {
                                     turn.model_id = Some(model_id);
                                     if let Some(ms) = duration_ms {
                                         turn.tokens_per_second =
-                                            Some(total_tokens as f32 / (ms as f32 / 1000.0));
+                                            Some(output_tokens as f32 / (ms as f32 / 1000.0));
                                     }
                                 }
                                 BackendEvent::Finished { .. } | BackendEvent::StreamEnd { .. } => {
