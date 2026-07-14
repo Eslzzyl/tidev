@@ -12,7 +12,6 @@ const MAX_SUGGESTIONS: usize = 12;
 #[derive(Clone, Debug)]
 pub(crate) struct Snippet {
     pub text: String,
-    pub matched_indices: Vec<usize>,
     pub score: i64,
 }
 
@@ -46,19 +45,6 @@ impl SnippetState {
         self.query.clear();
         self.selected_index = 0;
         self.snippets.clear();
-    }
-
-    /// Whether snippets are available and loaded.
-    pub fn is_enabled(&self) -> bool {
-        if !self.snippets_loaded {
-            return false;
-        }
-        self.snippets_enabled
-    }
-
-    /// Whether snippets still need to be loaded from disk.
-    pub fn needs_load(&self) -> bool {
-        !self.snippets_loaded
     }
 
     /// Load snippets from global and workspace config directories.
@@ -219,10 +205,9 @@ impl SnippetState {
             .snippets_cache
             .iter()
             .filter_map(|snippet| {
-                let (score, matched_indices) = Self::calculate_score(snippet, query)?;
+                let (score, _) = Self::calculate_score(snippet, query)?;
                 Some(Snippet {
                     text: snippet.clone(),
-                    matched_indices,
                     score,
                 })
             })

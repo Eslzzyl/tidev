@@ -13,9 +13,9 @@
 //!    3_500  alias contains query
 //!    1_000  empty query (show all)
 
-use std::collections::HashMap;
 
-use crate::action::{Action, ChatAction, ConnectAction, OverlayAction, OverlayKind, SessionAction, ThemeAction};
+
+use crate::action::{Action, ChatAction, OverlayAction, OverlayKind, SessionAction, ThemeAction};
 use crate::theme::ThemeName;
 
 // ---------------------------------------------------------------------------
@@ -191,10 +191,6 @@ impl CommandRegistry {
         Self
     }
 
-    pub fn list(&self) -> &'static [CommandSpec] {
-        COMMANDS
-    }
-
     pub fn command(&self, name: &str) -> Option<&'static CommandSpec> {
         COMMANDS
             .iter()
@@ -342,14 +338,6 @@ impl CommandPaletteState {
             .map(|s| format!("/{} ", s.spec.name))
     }
 
-    pub fn active_query(&self) -> Option<&str> {
-        if self.visible {
-            Some(self.query.as_str())
-        } else {
-            None
-        }
-    }
-
     /// Total height of the popup in terminal rows (0 if hidden).
     pub fn popup_height(&self) -> u16 {
         if !self.visible || self.suggestions.is_empty() {
@@ -381,7 +369,7 @@ fn command_fragment(input: &str) -> Option<&str> {
 ///
 /// Called by the App when a `/command` text is submitted (not typed).
 /// Returns `None` if the command should be treated as a regular prompt.
-pub(crate) fn execute_command(name: &str, action: CommandAction, args: &[String]) -> Vec<Action> {
+pub(crate) fn execute_command(action: CommandAction, args: &[String]) -> Vec<Action> {
     match action {
         CommandAction::Connect => {
             vec![Action::Overlay(OverlayAction::Open(OverlayKind::ConnectDialog))]

@@ -8,8 +8,7 @@ use std::num::NonZeroUsize;
 use std::path::Path;
 use std::sync::OnceLock;
 use std::sync::RwLock;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::thread;
+use std::sync::atomic::{AtomicU64, Ordering};
 use syntect::easy::HighlightLines;
 use syntect::highlighting::Color as SyntectColor;
 use syntect::highlighting::FontStyle;
@@ -18,7 +17,6 @@ use syntect::highlighting::Theme;
 use syntect::highlighting::ThemeSet;
 use syntect::parsing::{SyntaxReference, SyntaxSet};
 
-use crate::theme::ThemeName;
 const MAX_HIGHLIGHT_BYTES: usize = 512 * 1024;
 const MAX_HIGHLIGHT_LINES: usize = 10_000;
 
@@ -29,25 +27,11 @@ static HIGHLIGHT_CACHE: OnceLock<RwLock<LruCache<HighlightCacheKey, Vec<Line<'st
     OnceLock::new();
 static HIGHLIGHT_CACHE_GEN: AtomicU64 = AtomicU64::new(0);
 
-static THEME_SET_LOADING: AtomicBool = AtomicBool::new(false);
-
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 struct HighlightCacheKey {
     theme_gen: u64,
     lang: String,
     code_hash: [u8; 32],
-}
-
-pub fn spawn_background_load() {
-    if THEME_SET_LOADING
-        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-        .is_ok()
-    {
-        thread::spawn(|| {
-            let set = ThemeSet::load_defaults();
-            let _ = THEME_SET.set(set);
-        });
-    }
 }
 
 fn highlight_cache() -> &'static RwLock<LruCache<HighlightCacheKey, Vec<Line<'static>>>> {
@@ -74,36 +58,6 @@ fn default_theme() -> Theme {
         .or_else(|| themes.values().next())
         .cloned()
         .unwrap_or_default()
-}
-
-fn theme_name_to_syntax_theme(name: ThemeName) -> Theme {
-    let themes = &theme_set().themes;
-    let theme_key = match name {
-        ThemeName::Dark => "base16-ocean.dark",
-        ThemeName::Light => "InspiredGitHub",
-        ThemeName::Nord => "base16-ocean.dark",
-        ThemeName::OneDark => "base16-ocean.dark",
-        ThemeName::Mocha => "base16-mocha.dark",
-        ThemeName::Solarized => "Solarized (dark)",
-        ThemeName::Orng => "InspiredGitHub",
-        ThemeName::Github => "InspiredGitHub",
-        ThemeName::Material => "InspiredGitHub",
-        ThemeName::Everforest => "base16-eighties.dark",
-        ThemeName::EverforestLight => "InspiredGitHub",
-        ThemeName::Dusk => "base16-mocha.dark",
-        ThemeName::Gruvbox => "base16-eighties.dark",
-        ThemeName::GruvboxLight => "InspiredGitHub",
-        ThemeName::TokyoNight => "base16-ocean.dark",
-        ThemeName::RosePine => "base16-ocean.dark",
-        ThemeName::RosePineDawn => "InspiredGitHub",
-        ThemeName::Contrast => "base16-eighties.dark",
-    };
-    themes.get(theme_key).cloned().unwrap_or_else(default_theme)
-}
-
-pub fn set_syntax_theme_by_name(name: ThemeName) {
-    let theme = theme_name_to_syntax_theme(name);
-    set_syntax_theme(theme);
 }
 
 fn theme_lock() -> &'static RwLock<Theme> {

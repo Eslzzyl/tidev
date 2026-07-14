@@ -11,7 +11,7 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use tidev_types::message::{BackendEvent, Message, MessageRole};
-use tidev_types::prompts::SessionMode;
+
 use tidev_types::tools::ToolDefinition;
 use uuid::Uuid;
 
@@ -210,12 +210,11 @@ impl ContextManager {
         model: &LlmProviderConfig,
         tools: &[ToolDefinition],
         messages: &[Message],
-        mode: SessionMode,
         session_id: Uuid,
         event_tx: Option<tokio::sync::mpsc::UnboundedSender<BackendEvent>>,
     ) -> Result<CompactionResult> {
         // 1. Build prefix (same logic as normal request -> prefix cache hit).
-        let mut compact_msgs = self.build_request_messages_raw(messages, mode);
+        let mut compact_msgs = self.build_request_messages_raw(messages);
 
         // 2. Append summary instruction.
         compact_msgs.push(Message::new(MessageRole::User, SUMMARY_INSTRUCTION));
@@ -248,7 +247,7 @@ impl ContextManager {
     }
 
     /// Internal: build request messages from a raw message slice (without summary injection).
-    fn build_request_messages_raw(&self, messages: &[Message], mode: SessionMode) -> Vec<Message> {
+    fn build_request_messages_raw(&self, messages: &[Message]) -> Vec<Message> {
         let mut out = Vec::new();
         let mut pending_tool_calls: HashMap<String, String> = HashMap::new();
         for msg in messages.iter().skip(self.retained_from) {
@@ -384,7 +383,6 @@ impl ContextManager {
     pub fn build_request_messages(
         &self,
         buffer: &MessageBuffer,
-        mode: SessionMode,
     ) -> Vec<Message> {
         let messages = buffer.load();
         let mut out = Vec::new();
@@ -398,7 +396,7 @@ impl ContextManager {
         }
 
         // 2. Append remaining visible messages.
-        out.extend(self.build_request_messages_raw(&messages, mode));
+        out.extend(self.build_request_messages_raw(&messages));
         out
     }
 

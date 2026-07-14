@@ -101,12 +101,6 @@ impl ThemeName {
         ]
     }
 
-    pub fn toggle(self) -> Self {
-        let all = Self::all();
-        let index = all.iter().position(|theme| *theme == self).unwrap_or(0);
-        all[(index + 1) % all.len()]
-    }
-
     pub fn is_dark(self) -> bool {
         matches!(
             self,

@@ -44,7 +44,6 @@ pub(crate) enum MessageRenderCacheValue {
 #[derive(Clone, Debug)]
 pub(crate) struct MessageRenderCacheEntry {
     pub value: MessageRenderCacheValue,
-    pub last_used_tick: u64,
 }
 
 // ---------------------------------------------------------------------------

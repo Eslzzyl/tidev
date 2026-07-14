@@ -10,7 +10,7 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Position, Rect};
 use ratatui::prelude::Style;
-use unicode_width::UnicodeWidthStr;
+
 
 /// State tracking an active (or recently-finished) mouse selection.
 #[derive(Clone, Debug, Default)]

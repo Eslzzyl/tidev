@@ -13,7 +13,6 @@ use crate::context::{DrawContext, InitContext, UpdateContext};
 use crate::utils::{centered_rect, pretty_tool_arguments};
 
 pub(crate) struct PermissionDialog {
-    permission_key: String,
     display_name: String,
     arguments: String,
     current_index: usize,
@@ -23,14 +22,13 @@ pub(crate) struct PermissionDialog {
 
 impl PermissionDialog {
     pub(crate) fn new(
-        permission_key: String,
+        _permission_key: String,
         display_name: String,
         arguments: String,
         current_index: usize,
         total: usize,
     ) -> Self {
         Self {
-            permission_key,
             display_name,
             arguments,
             current_index,

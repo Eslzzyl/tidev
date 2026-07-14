@@ -361,7 +361,6 @@ impl AgentContext for CoreContext {
 
         let mut approved: Vec<ApprovedTool> = Vec::with_capacity(tool_calls.len());
         let mut pending: Vec<ToolCallWithViolations> = Vec::new();
-        let mut user_approved: Vec<ApprovedTool> = Vec::new();
 
         for tc in tool_calls {
             // 1. Permission check: is this tool allowed in the current mode?
@@ -735,7 +734,6 @@ impl AgentContext for CoreContext {
                     &self.model_config,
                     &tools,
                     &msgs_to_compact,
-                    self.mode,
                     self.session_id,
                     None,
                 )
@@ -768,7 +766,7 @@ impl AgentContext for CoreContext {
         // 4. Return the prepared message view.
         let cm = self.context_manager.lock().await;
         let buf = self.buffer.read().await;
-        Ok(cm.build_request_messages(&buf, self.mode))
+        Ok(cm.build_request_messages(&buf))
     }
 
     // -----------------------------------------------------------------------

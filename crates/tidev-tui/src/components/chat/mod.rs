@@ -63,7 +63,6 @@ pub(crate) struct MessageList {
     // ── Rendering infrastructure ──
     layout_index: MessageLayoutIndex,
     render_cache: LruCache<MessageRenderCacheKey, MessageRenderCacheEntry>,
-    render_tick: u64,
 
     // ── Scroll state ──
     pub scroll_offset: usize,
@@ -73,7 +72,7 @@ pub(crate) struct MessageList {
 
     // ── Interaction state ──
     expanded_tool_results: HashSet<Uuid>,
-    expanded_tool_outputs: HashMap<Uuid, String>,
+
     selectable_regions: Vec<SelectableRegionRange>,
     hovered_card: Option<Uuid>,
     card_bounds: Vec<(Uuid, usize, usize)>,
@@ -117,12 +116,11 @@ impl MessageList {
             active_session_id: None,
             layout_index: MessageLayoutIndex::new(),
             render_cache: LruCache::new(std::num::NonZeroUsize::new(1200).unwrap()),
-            render_tick: 0,
             scroll_offset: 0,
             follow_tail: true,
             scroll_target: None,
             expanded_tool_results: HashSet::new(),
-            expanded_tool_outputs: HashMap::new(),
+
             selectable_regions: Vec::new(),
             hovered_card: None,
             card_bounds: Vec::new(),
@@ -762,31 +760,7 @@ impl Component for MessageList {
                 self.dirty = true;
                 vec![]
             }
-            Action::Chat(ChatAction::ToggleToolResult(message_id)) => {
-                if self.expanded_tool_results.contains(message_id) {
-                    self.expanded_tool_results.remove(message_id);
-                } else {
-                    self.expanded_tool_results.insert(*message_id);
-                }
-                self.layout_index.mark_dirty(*message_id);
-                self.dirty = true;
-                vec![]
-            }
-            Action::Chat(ChatAction::StreamDelta { message_id, delta: _ }) => {
-                self.streaming_buffer.is_streaming = true;
-                self.dirty = true;
-                vec![]
-            }
-            Action::Chat(ChatAction::StreamEnd(_message_id)) => {
-                self.streaming_buffer.is_streaming = false;
-                self.dirty = true;
-                vec![]
-            }
-            Action::Chat(ChatAction::CancelGeneration) => {
-                self.streaming_buffer.is_streaming = false;
-                self.dirty = true;
-                vec![]
-            }
+
             _ => vec![],
         }
     }
@@ -800,7 +774,6 @@ impl Component for MessageList {
             return;
         };
 
-        self.render_tick += 1;
         self.selectable_regions.clear();
 
         // Resolve scroll target if set
@@ -828,8 +801,6 @@ impl Component for MessageList {
             &mut self.scroll_offset,
             &mut self.follow_tail,
             &mut self.expanded_tool_results,
-            &mut self.expanded_tool_outputs,
-            &mut self.render_tick,
             &self.running_subagents,
             self.spinner_start,
             self.hovered_card,
@@ -984,16 +955,6 @@ impl MessageList {
     /// Number of running subagents.
     pub fn running_subagents_count(&self) -> usize {
         self.running_subagents.len()
-    }
-
-    /// Description of the first running subagent, if any.
-    pub fn first_subagent_description(&self) -> Option<&str> {
-        self.running_subagents.first().map(|s| s.description.as_str())
-    }
-
-    /// Subagent type of the first running subagent, if any.
-    pub fn first_subagent_type(&self) -> Option<&str> {
-        self.running_subagents.first().map(|s| s.subagent_type.as_str())
     }
 
     /// Update hovered card based on mouse position.

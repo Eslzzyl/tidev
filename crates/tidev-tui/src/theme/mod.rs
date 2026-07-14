@@ -82,14 +82,6 @@ impl ThemePalette {
         }
     }
 
-    pub fn border_active(&self) -> Color {
-        self.accent
-    }
-
-    pub fn border_idle(&self) -> Color {
-        self.border
-    }
-
     pub fn border_mode_color(&self, mode: SessionMode) -> Color {
         match mode {
             SessionMode::Build => self.mode_build,

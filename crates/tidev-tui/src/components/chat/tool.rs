@@ -1365,24 +1365,4 @@ fn wrap_tool_title(
     }).collect()
 }
 
-/// Render a tool call summary line for inline display (compact).
-pub(crate) fn render_tool_call_summary_line(
-    tool_call: &ToolCall,
-    palette: ThemePalette,
-    _expandable: bool,
-) -> Line<'static> {
-    let name_style = Style::default().fg(palette.accent).add_modifier(Modifier::BOLD);
-    let args_style = Style::default().fg(palette.muted);
-    let preview = summarize_tool_arguments(tool_call, 40);
 
-    let summary = if preview.len() > 40 {
-        format!("{}...", &preview[..40])
-    } else {
-        preview
-    };
-
-    Line::from(vec![
-        Span::styled(format!(" {} ", tool_call.name), name_style),
-        Span::styled(summary, args_style),
-    ])
-}

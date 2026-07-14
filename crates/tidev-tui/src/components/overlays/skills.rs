@@ -1,6 +1,5 @@
 //! SkillsPanel component — skill browsing panel.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -20,8 +19,6 @@ use crate::utils::{centered_rect, render_scrollbar};
 #[derive(Clone, Debug)]
 pub(crate) struct SkillItem {
     pub name: String,
-    pub description: String,
-    pub location: PathBuf,
 }
 
 pub(crate) struct SkillsPanel {

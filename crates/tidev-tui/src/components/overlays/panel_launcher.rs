@@ -136,8 +136,7 @@ impl Component for PanelLauncher {
                 None
             }
             KeyCode::Enter => {
-                if let Some(entry) = self.filtered.get(self.selected_index) {
-                    let action = entry.action;
+                if self.filtered.get(self.selected_index).is_some() {
                     // Close self, then open the chosen panel
                     // Return two actions: first close, then the panel action
                     // Close will come first because overlay stack pops,

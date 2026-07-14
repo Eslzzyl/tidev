@@ -4,11 +4,11 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::prelude::{Frame, Modifier, Style};
-use ratatui::text::{Line, Span};
+
 use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
 use anyhow::Result;
 use textwrap::wrap;
-use tidev_types::tools::{QuestionInfo, QuestionOption};
+use tidev_types::tools::QuestionInfo;
 
 use crate::action::{Action, OverlayAction, OverlayKind};
 use crate::component::Component;

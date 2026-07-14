@@ -6,7 +6,7 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use ratatui::layout::{Constraint, Layout, Margin, Rect};
+use ratatui::layout::{Margin, Rect};
 use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph, Wrap};
@@ -45,14 +45,7 @@ impl Sidebar {
         self.scroll_offset = self.scroll_offset.saturating_add(lines).min(max_scroll);
     }
 
-    pub fn scroll_max(&self, viewport_lines: usize) -> usize {
-        self.total_lines.saturating_sub(viewport_lines)
-    }
 
-    /// Reset scroll offset when content changes.
-    pub fn reset_scroll(&mut self) {
-        self.scroll_offset = 0;
-    }
 
     /// Render the sidebar into the given area.
     pub fn draw(

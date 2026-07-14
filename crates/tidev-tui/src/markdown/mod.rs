@@ -18,8 +18,7 @@ use ratatui::text::{Line, Span, Text};
 
 pub(crate) use highlight::highlight_code_to_lines;
 pub use highlight::highlight_code_to_lines_for_path;
-pub use highlight::set_syntax_theme_by_name;
-pub use highlight::spawn_background_load;
+
 use line::push_owned_lines;
 use wrap::{RtOptions, adaptive_wrap_line};
 pub use wrap::{RtOptions as WrapOptions, adaptive_wrap_lines, word_wrap_line};

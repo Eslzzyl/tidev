@@ -120,19 +120,6 @@ impl SessionStore {
         })
     }
 
-    /// Query a single row from the read connection (error if not found).
-    fn read_query_row<T>(
-        &self,
-        sql: &str,
-        params: impl rusqlite::Params,
-        f: impl FnOnce(&rusqlite::Row<'_>) -> rusqlite::Result<T>,
-    ) -> Result<T> {
-        self.read(|conn| {
-            let mut stmt = conn.prepare(sql)?;
-            stmt.query_row(params, f).map_err(anyhow::Error::from)
-        })
-    }
-
     fn session_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRecord> {
         let id = row.get::<_, String>(0)?;
         let parent_session_id = row.get::<_, Option<String>>(1)?;

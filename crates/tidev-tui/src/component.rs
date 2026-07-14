@@ -27,6 +27,7 @@ pub(crate) trait Component {
     }
 
     /// Handle a mouse event. `area` is the component's layout rect.
+    #[allow(dead_code)]
     fn handle_mouse_event(&mut self, mouse: MouseEvent, area: Rect) -> Option<Action> {
         let _ = (mouse, area);
         None
@@ -58,11 +59,13 @@ pub(crate) trait Component {
     // ── Overlay support ──
 
     /// Whether this component is an overlay (lives in OverlayStack).
+    #[allow(dead_code)]
     fn is_overlay(&self) -> bool {
         false
     }
 
     /// Z-order (higher = on top).
+    #[allow(dead_code)]
     fn z_order(&self) -> u8 {
         0
     }

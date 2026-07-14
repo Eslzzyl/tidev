@@ -1,4 +1,4 @@
-use ratatui::prelude::Stylize;
+
 use ratatui::style::Style;
 
 pub(super) struct MarkdownStyles {

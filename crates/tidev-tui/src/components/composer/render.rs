@@ -13,7 +13,7 @@ use ratatui::prelude::{Color, Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, List, ListItem, ListState, Paragraph};
 
-use super::{Composer, InlineSpan, compute_visual_lines, display_width};
+use super::{Composer, InlineSpan, compute_visual_lines};
 use crate::context::DrawContext;
 
 /// Draw the composer component.
@@ -400,12 +400,12 @@ pub(crate) fn draw_composer(
 }
 
 /// Render a text segment with optional selection highlighting.
-fn render_line_with_selection(
-    text: &str,
+fn render_line_with_selection<'a>(
+    text: &'a str,
     byte_offset: usize,
     selection: Option<(usize, usize)>,
     text_color: Color,
-) -> Vec<Span> {
+) -> Vec<Span<'a>> {
     let default_style = Style::default().fg(text_color);
     if text.is_empty() {
         return vec![Span::styled(" ", default_style)];

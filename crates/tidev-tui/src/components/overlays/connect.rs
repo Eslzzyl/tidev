@@ -436,7 +436,7 @@ impl Component for ConnectDialog {
                 );
             }
             ConnectPhase::ApiKey {
-                provider_id,
+                provider_id: _,
                 display_name,
                 buffer,
             } => {

@@ -34,7 +34,6 @@ pub(crate) struct AtMentionSuggestion {
     pub path: String,
     pub display: String,
     pub kind: AtMentionKind,
-    pub matched_indices: Vec<usize>,
 }
 
 impl From<FileSuggestion> for AtMentionSuggestion {
@@ -43,7 +42,6 @@ impl From<FileSuggestion> for AtMentionSuggestion {
             path: s.path,
             display: s.display,
             kind: s.kind.into(),
-            matched_indices: s.matched_indices,
         }
     }
 }

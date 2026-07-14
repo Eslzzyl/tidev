@@ -337,7 +337,7 @@ impl Component for SearchPanel {
         match action {
             Action::Search(SearchAction::SaveApiKey {
                 provider,
-                key,
+                key: _,
                 is_cx,
             }) => {
                 // Update local snapshot

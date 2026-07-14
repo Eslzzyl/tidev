@@ -12,7 +12,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent};
 use ratatui::layout::{Alignment, Constraint, Layout, Margin, Rect};
 use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
+use ratatui::widgets::{Block, Clear, Paragraph};
 use tidev_core::{ApprovedTool, ToolCallWithViolations};
 use tidev_core::TuiResponse;
 use tidev_types::agent_type::AgentType;
@@ -33,7 +33,7 @@ use crate::components::overlay_stack::OverlayStack;
 use crate::components::overlays::agents::AgentsPanel;
 use crate::components::overlays::connect::ConnectDialog;
 use crate::components::overlays::fork::ForkConfirmDialog;
-use crate::components::overlays::image::ImageViewer;
+
 use crate::components::overlays::message::{MessagePanel, MessagePanelMessage};
 use crate::components::overlays::model::ModelPanel;
 use crate::components::overlays::panel_launcher::PanelLauncher;
@@ -61,10 +61,6 @@ use crate::utils::strip_system_reminder_tags;
 pub(crate) struct ContextUsage {
     pub input_tokens: u32,
     pub output_tokens: u32,
-    pub total_tokens: u32,
-    pub cache_read_tokens: u32,
-    pub cache_write_tokens: u32,
-    pub model_id: String,
     pub tokens_per_second: Option<f32>,
 }
 
@@ -367,10 +363,9 @@ impl App {
             chat.invalidate_layout();
         }
         self.set_notice("Compacting session context...");
-        let mode = self.mode;
         let rt = self.runtime.clone();
         tokio::spawn(async move {
-            if let Err(e) = rt.compact_session(session_id, mode, None).await {
+            if let Err(e) = rt.compact_session(session_id, None).await {
                 log::error!("Compact failed: {e}");
             }
         });
@@ -432,10 +427,6 @@ impl App {
                 self.context_usage = Some(ContextUsage {
                     input_tokens,
                     output_tokens,
-                    total_tokens,
-                    cache_read_tokens,
-                    cache_write_tokens,
-                    model_id: model_id.clone(),
                     tokens_per_second: if let Some(ms) = duration_ms {
                         if ms > 0 {
                             Some(output_tokens as f32 / (ms as f32 / 1000.0))
@@ -1222,23 +1213,6 @@ impl App {
                 Action::Overlay(OverlayAction::Close(kind)) => {
                     self.close_overlay(kind, &mut queue);
                 }
-                Action::Overlay(OverlayAction::CloseTop) => {
-                    if let Some(mut overlay) = self.overlays.pop() {
-                        let palette = &self.current_palette;
-                        let mut ctx = UpdateContext {
-                            runtime: &mut self.runtime,
-                            palette,
-                        };
-                        let follow = overlay.update(
-                            &Action::Overlay(OverlayAction::Close(OverlayKind::ThemePanel)),
-                            &mut ctx,
-                        );
-                        queue.extend(follow);
-                    }
-                }
-                Action::Overlay(OverlayAction::CloseAll) => {
-                    while self.overlays.pop().is_some() {}
-                }
                 Action::Theme(ThemeAction::Preview(name)) => {
                     self.current_palette = ThemePalette::from_name(name.as_str());
                 }
@@ -1247,13 +1221,6 @@ impl App {
                     self.runtime
                         .update_config(|cfg| cfg.set_theme(name.as_str()));
                     let _ = self.runtime.save_config();
-                }
-                Action::Theme(ThemeAction::Toggle) => {
-                    let current = ThemeName::parse(&self.current_palette.name.as_str())
-                        .unwrap_or(ThemeName::Dark);
-                    let next = current.toggle();
-                    self.process_action(Action::Theme(ThemeAction::Preview(next)));
-                    self.process_action(Action::Theme(ThemeAction::Set(next)));
                 }
                 Action::Search(SearchAction::SwitchProvider(provider)) => {
                     self.runtime
@@ -1389,20 +1356,15 @@ impl App {
                             .as_ref()
                             .map(|m| m.provider_display_name.clone())
                             .unwrap_or_default();
-                        let workspace_root = self.runtime.workspace_root().to_string_lossy().to_string();
 
                         let mut ctx = crate::chat_context::ChatContext::new(
                             session_id,
                             String::new(),
-                            workspace_root,
                             messages,
                             None,
-                            self.runtime.active_provider_id(),
-                            self.runtime.active_model_id(),
                             model_display,
                             provider_display,
                         );
-
                         if let Ok(Some(record)) = self.runtime.session_manager().load_session(session_id)
                         {
                             ctx.title = record.title;
@@ -1427,10 +1389,8 @@ impl App {
                 }
                 Action::Session(SessionAction::Reload) => {
                     // Broadcast to overlays so SessionPanel reloads its list.
-                    let palette = &self.current_palette;
                     let mut ctx = UpdateContext {
                         runtime: &mut self.runtime,
-                        palette,
                     };
                     queue.extend(self.overlays.update_all(&action, &mut ctx));
                 }
@@ -1607,14 +1567,6 @@ impl App {
                         Err(e) => log::error!("Failed to rename session: {e}"),
                     }
                 }
-                Action::Session(SessionAction::SetMode(new_mode)) => {
-                    self.mode = new_mode;
-                    self.pending_mode = None;
-                    self.set_notice(format!("Mode switched to {}", self.mode.title()));
-                }
-                Action::Session(SessionAction::SetPendingMode(mode)) => {
-                    self.pending_mode = mode;
-                }
                 Action::Session(SessionAction::CycleThinkingLevel) => {
                     let next = self.thinking_level.next();
                     self.thinking_level = next.clone();
@@ -1633,19 +1585,14 @@ impl App {
                 Action::Session(SessionAction::Create) => {
                     self.current_session_id = None;
 
-                    let ws_root = self.runtime.workspace_root()
-                        .to_string_lossy().to_string();
                     let config = self.runtime.config();
                     let auth = self.runtime.auth();
                     let active_model = config.resolve_active_model(&auth).ok();
                     let chat_context = crate::chat_context::ChatContext::new(
                         uuid::Uuid::nil(),
                         String::new(),
-                        ws_root,
                         Vec::new(),
                         None,
-                        self.runtime.active_provider_id(),
-                        self.runtime.active_model_id(),
                         active_model.as_ref().map(|m| m.display_name.clone()).unwrap_or_default(),
                         active_model.as_ref().map(|m| m.provider_display_name.clone()).unwrap_or_default(),
                     );
@@ -1679,14 +1626,12 @@ impl App {
                                 crate::components::composer::command_palette::CommandRegistry::new()
                                     .parse_invocation(&text)
                             {
-                                use crate::components::composer::command_palette::COMMANDS;
                                 if let Some(spec) =
                                     crate::components::composer::command_palette::CommandRegistry::new()
                                         .command(&name)
                                 {
                                     let actions =
                                         crate::components::composer::command_palette::execute_command(
-                                            spec.name,
                                             spec.action,
                                             &args,
                                         );
@@ -1737,14 +1682,10 @@ impl App {
                                             self.current_session_id = Some(id);
 
                                             // Initialize MessageList for the new session.
-                                            let ws_root = self.runtime.workspace_root()
-                                                .to_string_lossy().to_string();
                                             let config = self.runtime.config();
                                             let auth = self.runtime.auth();
                                             let active_model = config.resolve_active_model(&auth)
                                                 .ok();
-                                            let provider_id = self.runtime.active_provider_id();
-                                            let model_id = self.runtime.active_model_id();
                                             let model_display = active_model.as_ref()
                                                 .map(|m| m.display_name.clone()).unwrap_or_default();
                                             let provider_display = active_model.as_ref()
@@ -1753,11 +1694,8 @@ impl App {
                                             let chat_context = crate::chat_context::ChatContext::new(
                                                 id,
                                                 String::new(),
-                                                ws_root,
                                                 Vec::new(),
                                                 None,
-                                                provider_id,
-                                                model_id,
                                                 model_display,
                                                 provider_display,
                                             );
@@ -1808,13 +1746,16 @@ impl App {
                                 }
                             }
                         }
+                        ChatAction::SetInput(text) => {
+                            if let Some(ref mut composer) = self.composer {
+                                composer.set_text(text.clone());
+                            }
+                        }
                         _ => {
                             // Forward other chat actions (scroll, stream, etc.) to MessageList.
                             if let Some(ref mut chat) = self.message_list {
-                                let palette = &self.current_palette;
                                 let mut ctx = UpdateContext {
                                     runtime: &mut self.runtime,
-                                    palette,
                                 };
                                 queue.extend(chat.update(&Action::Chat(action), &mut ctx));
                             }
@@ -1822,9 +1763,6 @@ impl App {
                     }
                 }
                 Action::Noop => {}
-                Action::Error(msg) => {
-                    self.set_notice(msg);
-                }
                 // ── Tool approval pipeline ──
                 Action::WorkspaceBoundaryResponse { path, decision } => {
                     self.record_boundary_decision(&path, &decision);
@@ -1966,15 +1904,6 @@ impl App {
                     self.tool_index += 1;
                     self.process_next_tool();
                 }
-                _ => {
-                    // Broadcast to all overlays
-                    let palette = &self.current_palette;
-                    let mut ctx = UpdateContext {
-                        runtime: &mut self.runtime,
-                        palette,
-                    };
-                    queue.extend(self.overlays.update_all(&action, &mut ctx));
-                }
             }
         }
     }
@@ -1994,8 +1923,6 @@ impl App {
                     .iter()
                     .map(|s| SkillItem {
                         name: s.name.clone(),
-                        description: s.description.clone(),
-                        location: s.location.clone(),
                     })
                     .collect();
                 Some(Box::new(SkillsPanel::new(skills)))
@@ -2135,19 +2062,14 @@ impl App {
             OverlayKind::PermissionDialog
             | OverlayKind::QuestionDialog
             | OverlayKind::WorkspaceBoundaryDialog
-            | OverlayKind::SensitiveFileDialog
-            | OverlayKind::CommandPalette
-            | OverlayKind::PanelLauncher => None,
-            _ => None,
+            | OverlayKind::SensitiveFileDialog => None,
         };
         if let Some(mut component) = component {
             let config = self.runtime.config();
             let auth = self.runtime.auth();
-            let workspace_root = self.runtime.workspace_root().to_path_buf();
             let init_ctx = InitContext {
                 config: &config,
                 auth: &auth,
-                workspace_root: &workspace_root,
             };
             let _ = component.init(&init_ctx);
             self.overlays.push(component);
@@ -2156,10 +2078,8 @@ impl App {
 
     fn close_overlay(&mut self, kind: OverlayKind, queue: &mut Vec<Action>) {
         if let Some(mut overlay) = self.overlays.pop() {
-            let palette = &self.current_palette;
             let mut ctx = UpdateContext {
                 runtime: &mut self.runtime,
-                palette,
             };
             queue.extend(
                 overlay.update(
@@ -2312,7 +2232,6 @@ impl App {
             let draw_ctx = DrawContext {
                 palette,
                 focused: true,
-                chat_context: None,
                 mode: self.mode,
                 pending_mode: self.pending_mode,
                 model_display: None,
@@ -2383,7 +2302,6 @@ impl App {
             let draw_ctx = DrawContext {
                 palette,
                 focused: self.overlays.is_empty(),
-                chat_context: None,
                 mode: self.mode,
                 pending_mode: self.pending_mode,
                 model_display: None,
@@ -2431,7 +2349,6 @@ impl App {
             let draw_ctx = DrawContext {
                 palette,
                 focused: self.overlays.is_empty(),
-                chat_context: None,
                 mode: self.mode,
                 pending_mode: self.pending_mode,
                 model_display: Some(&active_model.display_name),
@@ -2445,7 +2362,6 @@ impl App {
         let draw_ctx = DrawContext {
             palette,
             focused: true,
-            chat_context: None,
             mode: self.mode,
             pending_mode: self.pending_mode,
             model_display: None,
@@ -2646,7 +2562,6 @@ impl App {
             let draw_ctx = DrawContext {
                 palette,
                 focused: true,
-                chat_context: None,
                 mode: self.mode,
                 pending_mode: self.pending_mode,
                 model_display: Some(&active_model.display_name),

@@ -137,10 +137,8 @@ impl Component for MessagePanel {
                 None
             }
             KeyCode::Enter => {
-                if let Some(message) = self.selected_message() {
-                    let message_id = message.message_id;
+                if let Some(_message) = self.selected_message() {
                     let close = Action::Overlay(OverlayAction::Close(OverlayKind::MessagePanel));
-                    let scroll = Action::Chat(ChatAction::ScrollTo(message_id));
                     // Return Close first so it's popped; ScrollTo will be processed
                     // after Close (stack order: Close then ScrollTo for queue pop).
                     // But we can only return ONE action from handle_key_event.
@@ -232,7 +230,7 @@ impl Component for MessagePanel {
                 if row < matches.len() {
                     self.selected_index = row;
                     // Same as Enter on selected message
-                    if let Some(message) = self.selected_message() {
+                    if self.selected_message().is_some() {
                         let close =
                             Action::Overlay(OverlayAction::Close(OverlayKind::MessagePanel));
                         return Some(close);

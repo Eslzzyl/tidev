@@ -5,11 +5,9 @@
 
 use std::path::PathBuf;
 
-use anyhow::Result;
 use uuid::Uuid;
 
 use tidev_types::message::MessageAttachment;
-use tidev_types::prompts::SessionMode;
 use crate::theme::ThemeName;
 
 /// Panel action identifiers (launcher target).
@@ -29,14 +27,6 @@ pub(crate) enum PanelAction {
 // SessionSummary
 // ---------------------------------------------------------------------------
 
-/// Summary of a session, used for display in the SessionPanel.
-#[derive(Clone, Debug)]
-pub(crate) struct SessionSummary {
-    pub id: Uuid,
-    pub title: String,
-    pub message_count: usize,
-}
-
 // ---------------------------------------------------------------------------
 // Domain sub-actions
 // ---------------------------------------------------------------------------
@@ -48,25 +38,15 @@ pub(crate) struct SessionSummary {
 pub(crate) enum SessionAction {
     Create,
     Select(Uuid),
-    Delete(Uuid),
-    DeleteBatch(Vec<Uuid>),
     Rename(Uuid, String),
     Fork(Uuid),
     Undo,
     Redo,
     Compact,
-    ExportBatch(Vec<Uuid>),
-    /// Switch session mode (Build/Plan) immediately.
-    SetMode(SessionMode),
-    /// Deferred mode switch (applied on next Finished with no tool calls).
-    SetPendingMode(Option<SessionMode>),
     /// Cycle thinking level (Shift+Tab / Ctrl+T).
     CycleThinkingLevel,
     /// Reload session list from store (after view mode change).
     Reload,
-    /// Async result from a session load operation.
-    Loaded(Result<Vec<SessionSummary>>),
-    Deleted(Result<()>),
 }
 
 /// Chat/conversation actions.
@@ -78,17 +58,8 @@ pub(crate) enum ChatAction {
     },
     /// Replace the composer input with the given text (e.g. `/skill name`).
     SetInput(String),
-    CancelGeneration,
     ScrollTo(Uuid),
     ScrollDelta(isize),
-    ToggleToolResult(Uuid),
-    ToggleImage(Uuid),
-    /// Streaming delta for incremental message rendering.
-    StreamDelta {
-        message_id: Uuid,
-        delta: String,
-    },
-    StreamEnd(Uuid),
 }
 
 /// Overlay (panel/dialog) management.
@@ -96,26 +67,16 @@ pub(crate) enum ChatAction {
 pub(crate) enum OverlayAction {
     Open(OverlayKind),
     Close(OverlayKind),
-    CloseTop,
-    CloseAll,
 }
 
 /// Theme management actions.
 #[derive(Clone, Debug)]
 pub(crate) enum ThemeAction {
     Set(ThemeName),
-    Toggle,
     Preview(ThemeName),
 }
 
-/// Panel launcher (quick-open panel) actions.
-#[derive(Clone, Debug)]
-pub(crate) enum LauncherAction {
-    Open,
-    Close,
-    Select(usize),
-    Execute(PanelAction),
-}
+
 
 /// Search provider panel actions.
 #[derive(Clone, Debug)]
@@ -142,17 +103,7 @@ pub(crate) enum ConnectAction {
     PruneOrphans,
 }
 
-/// Async command execution result.
-///
-/// Note: `result` contains `anyhow::Result` (not `Clone`),
-/// so this enum only derives `Debug`, not `Clone`.
-#[derive(Debug)]
-pub(crate) enum CommandAction {
-    Response {
-        id: Uuid,
-        result: Result<Box<[u8]>>,
-    },
-}
+
 
 // ---------------------------------------------------------------------------
 // Tool approval pipeline types
@@ -201,7 +152,6 @@ pub(crate) enum PermissionDecision {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum OverlayKind {
     ImageViewer,
-    CommandPalette,
     PanelLauncher,
     PermissionDialog,
     QuestionDialog,
@@ -225,7 +175,6 @@ pub(crate) enum OverlayKind {
     SkillsPanel,
     SearchPanel,
     MessagePanel,
-    Notifications,
 }
 
 // ---------------------------------------------------------------------------
@@ -236,9 +185,6 @@ pub(crate) enum OverlayKind {
 #[derive(Debug)]
 pub(crate) enum Action {
     // ── Lifecycle ──
-    Tick,
-    Render,
-    Resize(u16, u16),
     Quit,
 
     // ── Domain ──
@@ -246,10 +192,8 @@ pub(crate) enum Action {
     Chat(ChatAction),
     Overlay(OverlayAction),
     Theme(ThemeAction),
-    Launcher(LauncherAction),
     Search(SearchAction),
     Connect(ConnectAction),
-    Command(CommandAction),
 
     // ── Tool approval pipeline ──
     /// Result from a WorkspaceBoundaryDialog.
@@ -274,5 +218,4 @@ pub(crate) enum Action {
 
     // ── Internal ──
     Noop,
-    Error(String),
 }

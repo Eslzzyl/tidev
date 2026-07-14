@@ -475,7 +475,7 @@ impl Component for ModelPanel {
                 // Each selectable item renders as 1 row (+ N thinking sub-rows if expanded).
                 let selectable = selectable_indices(&self.items_cache);
                 let mut rendered_row = 0usize;
-                for (si, &item_idx) in selectable.iter().enumerate() {
+                for (_, &item_idx) in selectable.iter().enumerate() {
                     if rendered_row == first_row {
                         if let Some(t) = self.current_tab_mut() {
                             t.selected_index = item_idx;

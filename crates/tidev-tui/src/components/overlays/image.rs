@@ -12,7 +12,7 @@ use ratatui_image::{Image, protocol::Protocol};
 
 use crate::action::{Action, OverlayAction, OverlayKind};
 use crate::component::Component;
-use crate::context::{DrawContext, InitContext, UpdateContext};
+use crate::context::{DrawContext, InitContext};
 
 pub(crate) struct ImageViewer {
     dyn_img: image::DynamicImage,

@@ -1,7 +1,7 @@
 //! AgentsPanel component — lists available sub-agent types.
 
 use anyhow::Result;
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, MouseEvent, MouseEventKind};
 use ratatui::layout::{Constraint, Layout, Margin, Position, Rect};
 use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};

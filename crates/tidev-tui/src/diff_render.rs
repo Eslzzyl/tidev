@@ -44,11 +44,9 @@ struct DiffRow {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum RowKind {
-    Blank,
     Context,
     Removed,
     Added,
-    Modified,
 }
 
 const WIDE_LAYOUT_THRESHOLD: usize = 100;
@@ -152,8 +150,8 @@ fn render_diff_section(
 
 fn collect_rows(patch: &Patch<'_, str>, tab_width: usize) -> Vec<DiffRow> {
     let mut rows = Vec::new();
-    let mut old_line_number = 0usize;
-    let mut new_line_number = 0usize;
+    let mut old_line_number;
+    let mut new_line_number;
 
     for hunk in patch.hunks() {
         // Update line numbers from hunk header.
@@ -199,15 +197,6 @@ fn collect_rows(patch: &Patch<'_, str>, tab_width: usize) -> Vec<DiffRow> {
     rows
 }
 
-fn line_number_width_for_rows(rows: &[DiffRow]) -> usize {
-    let max_line_number = rows.iter().fold(0usize, |max, row| {
-        let left = row.left.as_ref().map(|cell| cell.line_number).unwrap_or(0);
-        let right = row.right.as_ref().map(|cell| cell.line_number).unwrap_or(0);
-        max.max(left.max(right))
-    });
-    line_number_width(max_line_number)
-}
-
 fn render_wide_rows(
     rows: &[DiffRow],
     width: usize,
@@ -225,7 +214,6 @@ fn render_wide_rows(
         let right_bg = row.right.as_ref().map(|cell| cell_bg(cell.kind, palette));
 
         match row.kind {
-            RowKind::Blank => out.push(Line::from(String::new())),
             RowKind::Context => {
                 let left = row
                     .left
@@ -283,29 +271,6 @@ fn render_wide_rows(
                     right_width,
                 ));
             }
-            RowKind::Modified => {
-                let left = row
-                    .left
-                    .as_ref()
-                    .map(|cell| {
-                        render_cell_lines(cell, left_width, line_number_width, syntax_path, palette)
-                    })
-                    .unwrap_or_else(|| vec![blank_cell_line(left_width, left_bg.flatten())]);
-                let right = row
-                    .right
-                    .as_ref()
-                    .map(|cell| {
-                        render_cell_lines(cell, right_width, line_number_width, syntax_path, palette)
-                    })
-                    .unwrap_or_else(|| vec![blank_cell_line(right_width, right_bg.flatten())]);
-                out.extend(merge_columns(
-                    left,
-                    right,
-                    separator.clone(),
-                    left_width,
-                    right_width,
-                ));
-            }
         }
     }
 
@@ -323,7 +288,6 @@ fn render_narrow_rows(
 
     for row in rows {
         match row.kind {
-            RowKind::Blank => out.push(Line::from(String::new())),
             RowKind::Context => {
                 if let Some(cell) = row.left.as_ref() {
                     out.extend(render_cell_lines(cell, width, line_number_width, syntax_path, palette));
@@ -335,14 +299,6 @@ fn render_narrow_rows(
                 }
             }
             RowKind::Added => {
-                if let Some(cell) = row.right.as_ref() {
-                    out.extend(render_cell_lines(cell, width, line_number_width, syntax_path, palette));
-                }
-            }
-            RowKind::Modified => {
-                if let Some(cell) = row.left.as_ref() {
-                    out.extend(render_cell_lines(cell, width, line_number_width, syntax_path, palette));
-                }
                 if let Some(cell) = row.right.as_ref() {
                     out.extend(render_cell_lines(cell, width, line_number_width, syntax_path, palette));
                 }
@@ -570,14 +526,6 @@ fn line_number_width(max_line_number: usize) -> usize {
 }
 
 impl DiffCell {
-    fn new(line_number: usize, text: &str, kind: DiffLineKind, tab_width: usize) -> Self {
-        Self {
-            line_number,
-            text: expand_tabs(text, tab_width),
-            kind,
-        }
-    }
-
     fn delete(line_number: usize, text: String, tab_width: usize) -> Self {
         Self {
             line_number,
@@ -599,16 +547,6 @@ impl DiffCell {
             line_number,
             text: expand_tabs(text, tab_width),
             kind: DiffLineKind::Context,
-        }
-    }
-}
-
-impl DiffRow {
-    fn blank() -> Self {
-        Self {
-            kind: RowKind::Blank,
-            left: None,
-            right: None,
         }
     }
 }

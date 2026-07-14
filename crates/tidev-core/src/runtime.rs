@@ -673,7 +673,6 @@ impl Runtime {
     pub async fn compact_session(
         &self,
         session_id: Uuid,
-        mode: SessionMode,
         stream_request_id: Option<u64>,
     ) -> Result<()> {
         use crate::agent_ctx::to_llm_provider_config;
@@ -700,7 +699,6 @@ impl Runtime {
                     &model_config,
                     &tools,
                     &messages,
-                    mode,
                     session_id,
                     Some(self.event_tx.clone()),
                 )

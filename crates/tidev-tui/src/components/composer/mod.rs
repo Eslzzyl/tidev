@@ -18,7 +18,7 @@ pub(crate) mod command_palette;
 pub(crate) mod render;
 pub(crate) mod snippet;
 
-use std::ops::Range;
+
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -29,11 +29,11 @@ use ratatui::Frame;
 use tidev_search::current_at_fragment;
 use unicode_width::UnicodeWidthChar;
 
-use base64::Engine as _;
+
 
 use crate::action::{Action, ChatAction};
 use crate::component::Component;
-use crate::context::{DrawContext, InitContext, UpdateContext};
+use crate::context::DrawContext;
 
 pub(crate) use at_mention::AtMentionState;
 pub(crate) use command_palette::{CommandPaletteState, CommandRegistry};
@@ -42,15 +42,6 @@ pub(crate) use snippet::SnippetState;
 // ---------------------------------------------------------------------------
 // InlineSpan
 // ---------------------------------------------------------------------------
-
-/// Kind of an atomic inline span rendered as a styled badge.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum InlineSpanKind {
-    /// @file/@dir reference accepted via autocomplete.
-    AtReference,
-    /// Image attachment placeholder (pasted from clipboard).
-    Image,
-}
 
 /// A byte-range in the composer text that renders as an atomic styled badge.
 ///
@@ -62,12 +53,6 @@ pub(crate) struct InlineSpan {
     pub start: usize,
     /// Byte end index in `text` (exclusive).
     pub end: usize,
-    /// Display text (identical to text content for @refs, badge text for images).
-    pub display: String,
-    /// Kind of span.
-    pub kind: InlineSpanKind,
-    /// Associated data URL for image spans (base64-encoded data URL).
-    pub data_url: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -75,31 +60,9 @@ pub(crate) struct InlineSpan {
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Copy, Debug)]
-struct VisualLine {
+pub(crate) struct VisualLine {
     start: usize,
     end: usize,
-    width: usize,
-}
-
-/// Cached visual line computation so we don't re-split on every draw call.
-struct VisualLineCache {
-    text_len: usize,
-    width: usize,
-    lines: Vec<VisualLine>,
-}
-
-impl VisualLineCache {
-    fn compute(text: &str, width: usize) -> Self {
-        Self {
-            text_len: text.len(),
-            width,
-            lines: compute_visual_lines(text, width),
-        }
-    }
-
-    fn is_valid(&self, text: &str, width: usize) -> bool {
-        self.text_len == text.len() && self.width == width
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -132,9 +95,6 @@ pub(crate) struct Composer {
 
     /// Atomic inline spans (@-refs, images).  Kept sorted by `start`.
     spans: Vec<InlineSpan>,
-
-    /// Visual line cache for the current (text, width) combination.
-    line_cache: Option<VisualLineCache>,
 
     /// Dirty flag.
     dirty: bool,
@@ -176,7 +136,6 @@ impl Composer {
             placeholder: placeholder.into(),
             selection_anchor: None,
             spans: Vec::new(),
-            line_cache: None,
             dirty: true,
             command_palette: CommandPaletteState::new(),
             commands: CommandRegistry::new(),
@@ -197,16 +156,8 @@ impl Composer {
         &self.text
     }
 
-    pub fn cursor(&self) -> usize {
-        self.cursor
-    }
-
     pub fn placeholder(&self) -> &str {
         &self.placeholder
-    }
-
-    pub fn set_placeholder(&mut self, placeholder: impl Into<String>) {
-        self.placeholder = placeholder.into();
     }
 
     pub fn is_empty(&self) -> bool {
@@ -232,15 +183,6 @@ impl Composer {
         })
     }
 
-    pub fn selected_text(&self) -> Option<&str> {
-        self.selection_range()
-            .map(|(start, end)| &self.text[start..end])
-    }
-
-    pub fn has_selection(&self) -> bool {
-        self.selection_anchor.is_some_and(|a| a != self.cursor)
-    }
-
     /// Replace the entire content (used by SetInput).
     pub fn set_text(&mut self, text: String) {
         self.text = text;
@@ -249,7 +191,6 @@ impl Composer {
         self.visual_line_hint = None;
         self.selection_anchor = None;
         self.spans.clear();
-        self.line_cache = None;
         self.command_palette.sync(&self.text, &self.commands);
         self.dirty = true;
     }
@@ -264,7 +205,6 @@ impl Composer {
         self.draft.clear();
         self.selection_anchor = None;
         self.spans.clear();
-        self.line_cache = None;
         self.command_palette.clear();
         self.at_mention.clear();
         self.snippet_state.clear();
@@ -313,19 +253,10 @@ impl Composer {
         &mut self,
         start: usize,
         end: usize,
-        display: String,
-        kind: InlineSpanKind,
-        data_url: Option<String>,
     ) {
         // Remove any existing span that overlaps the new range.
         self.spans.retain(|s| s.end <= start || s.start >= end);
-        self.spans.push(InlineSpan {
-            start,
-            end,
-            display,
-            kind,
-            data_url,
-        });
+        self.spans.push(InlineSpan { start, end });
         self.spans.sort_by_key(|s| s.start);
     }
 
@@ -466,7 +397,6 @@ impl Composer {
             _ => {}
         }
 
-        self.line_cache = None;
         self.dirty = true;
         None
     }
@@ -496,7 +426,6 @@ impl Composer {
         self.cursor = self.text.len();
         self.preferred_column = None;
         self.visual_line_hint = None;
-        self.line_cache = None;
         self.dirty = true;
     }
 
@@ -516,7 +445,6 @@ impl Composer {
         self.cursor = self.text.len();
         self.preferred_column = None;
         self.visual_line_hint = None;
-        self.line_cache = None;
         self.dirty = true;
     }
 
@@ -531,25 +459,6 @@ impl Composer {
         }
     }
 
-    pub fn clear_selection(&mut self) {
-        self.selection_anchor = None;
-    }
-
-    /// Set the selection anchor at the current cursor position.
-    /// Used when starting a mouse drag selection.
-    pub fn start_selection(&mut self) {
-        self.selection_anchor = Some(self.cursor);
-    }
-
-    pub fn set_selection(&mut self, start: usize, end: usize) {
-        let start = start.min(self.text.len());
-        let end = end.min(self.text.len()).max(start);
-        self.selection_anchor = Some(start);
-        self.cursor = end;
-        self.preferred_column = None;
-        self.visual_line_hint = None;
-    }
-
     // ── Visual line helpers ─────────────────────────────────────────────
 
     /// Return the number of visual lines the text occupies at a given width.
@@ -561,27 +470,12 @@ impl Composer {
         lines.len().max(1)
     }
 
-    /// Return cached visual lines, computing them if invalid (mutable path).
-    fn visual_lines_cached(&mut self, width: usize) -> &[VisualLine] {
-        if self.line_cache.as_ref().is_none_or(|c| !c.is_valid(&self.text, width)) {
-            self.line_cache = Some(VisualLineCache::compute(&self.text, width));
-        }
-        &self.line_cache.as_ref().unwrap().lines
-    }
-
     /// Compute visual lines without caching (read-only path).
     fn compute_visual_lines(&self, width: usize) -> Vec<VisualLine> {
         compute_visual_lines(&self.text, width)
     }
 
     /// Public accessor for render.rs — returns `Range<usize>` slices.
-    pub(crate) fn visual_line_ranges(&self, width: usize) -> Vec<Range<usize>> {
-        self.compute_visual_lines(width)
-            .into_iter()
-            .map(|l| l.start..l.end)
-            .collect()
-    }
-
     /// Return the (line_index, column) of the cursor at a given width.
     pub fn cursor_position(&self, width: u16) -> (u16, u16) {
         let width = width as usize;
@@ -640,40 +534,6 @@ impl Composer {
         self.cursor >= last.end && end_col == width
     }
 
-    /// Compute the text position from a visual position (for mouse clicks).
-    pub fn raw_text_position_at_visual(&self, width: u16, line: u16, column: u16) -> usize {
-        let width = width as usize;
-        if width == 0 {
-            return 0;
-        }
-        let lines = self.compute_visual_lines(width);
-        if lines.is_empty() {
-            return 0;
-        }
-        let line_index = line.min(lines.len().saturating_sub(1) as u16) as usize;
-        cursor_from_visual_position(&self.text, lines[line_index], column as usize)
-    }
-
-    pub fn set_cursor_at_visual_position(&mut self, width: u16, line: u16, column: u16) {
-        let width = width as usize;
-        if width == 0 {
-            return;
-        }
-        let lines = self.compute_visual_lines(width);
-        if lines.is_empty() {
-            self.cursor = 0;
-            self.preferred_column = Some(column as usize);
-            return;
-        }
-        let line_index = line.min(lines.len().saturating_sub(1) as u16) as usize;
-        let line = &lines[line_index];
-        let pos = cursor_from_visual_position(&self.text, *line, column as usize);
-        self.cursor = snap_to_span_edge_static(&self.spans, pos);
-        self.preferred_column = Some(column as usize);
-        self.selection_anchor = None;
-        self.dirty = true;
-    }
-
     /// Move the cursor up one visual line.
     pub fn move_up(&mut self, width: u16) {
         self.move_vertical(width as usize, -1);
@@ -707,7 +567,6 @@ impl Composer {
         self.preferred_column = Some(desired);
         self.visual_line_hint = Some(target);
         self.selection_anchor = None;
-        self.line_cache = None;
         self.dirty = true;
     }
 
@@ -851,21 +710,6 @@ impl Composer {
         self.history_cursor = None;
     }
 
-    fn delete_next_word(&mut self) {
-        if self.delete_selection() {
-            return;
-        }
-        if self.cursor >= self.text.len() {
-            return;
-        }
-        let end = find_word_boundary(&self.text, self.cursor, 1);
-        self.text.drain(self.cursor..end);
-        self.adjust_after_edit(self.cursor, end - self.cursor, 0);
-        self.preferred_column = None;
-        self.visual_line_hint = None;
-        self.history_cursor = None;
-    }
-
     fn delete_to_line_start(&mut self) {
         if self.delete_selection() {
             return;
@@ -955,10 +799,6 @@ impl Composer {
     }
 
     /// Return the span that contains the given byte position, if any.
-    fn span_containing(&self, pos: usize) -> Option<&InlineSpan> {
-        self.spans.iter().find(|s| s.start <= pos && pos < s.end)
-    }
-
     /// Find the span that ends exactly at `pos` (cursor is right after it).
     fn span_before(&self, pos: usize) -> Option<&InlineSpan> {
         self.spans.iter().find(|s| s.end == pos)
@@ -1076,9 +916,6 @@ impl Composer {
         self.register_span(
             start,
             span_end,
-            replacement,
-            InlineSpanKind::AtReference,
-            None,
         );
         self.at_mention.clear();
         self.sync_autocomplete();
@@ -1318,23 +1155,16 @@ impl Component for Composer {
             }
             // 2. Try image paste (if model supports it).
             if self.model_supports_images {
-                if let Some((filename, mime, data, file_size)) =
+                if let Some((filename, _mime, _data, file_size)) =
                     crate::utils::paste_image_from_clipboard()
                 {
                     let placeholder = format!("[Image: {}]", filename);
                     let insert_pos = self.cursor;
                     self.insert_str(&placeholder);
                     let end_pos = self.cursor;
-                    // Build data URL for the inline span.
-                    use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-                    let b64 = BASE64_STANDARD.encode(&data);
-                    let data_url = format!("data:{};base64,{}", mime, b64);
                     self.register_span(
                         insert_pos,
                         end_pos,
-                        placeholder,
-                        InlineSpanKind::Image,
-                        Some(data_url),
                     );
                     self.dirty = true;
                     log::info!("Pasted image: {} ({} bytes)", filename, file_size);
@@ -1376,13 +1206,6 @@ fn display_width(text: &str) -> usize {
         .sum()
 }
 
-fn display_line_count(text: &str, width: usize) -> usize {
-    if width == 0 {
-        return text.split('\n').count().max(1);
-    }
-    visual_lines_inner(text, width).len().max(1)
-}
-
 /// Compute visual lines for a text at a given width.
 pub(crate) fn compute_visual_lines(text: &str, width: usize) -> Vec<VisualLine> {
     visual_lines_inner(text, width)
@@ -1394,7 +1217,6 @@ fn visual_lines_inner(text: &str, width: usize) -> Vec<VisualLine> {
         return vec![VisualLine {
             start: 0,
             end: text.len(),
-            width: 0,
         }];
     }
 
@@ -1407,7 +1229,6 @@ fn visual_lines_inner(text: &str, width: usize) -> Vec<VisualLine> {
             lines.push(VisualLine {
                 start: line_start,
                 end: byte_index,
-                width: current_width,
             });
             line_start = byte_index + ch.len_utf8();
             current_width = 0;
@@ -1419,7 +1240,6 @@ fn visual_lines_inner(text: &str, width: usize) -> Vec<VisualLine> {
             lines.push(VisualLine {
                 start: line_start,
                 end: byte_index,
-                width: current_width,
             });
             line_start = byte_index;
             current_width = 0;
@@ -1431,7 +1251,6 @@ fn visual_lines_inner(text: &str, width: usize) -> Vec<VisualLine> {
     lines.push(VisualLine {
         start: line_start,
         end: text.len(),
-        width: current_width,
     });
 
     lines
@@ -1589,7 +1408,7 @@ mod tests {
     fn test_inline_span_snap() {
         let mut c = Composer::new(">");
         c.set_text("hello @file.txt world".to_string());
-        c.register_span(6, 15, "@file.txt".to_string(), InlineSpanKind::AtReference, None);
+        c.register_span(6, 15);
 
         // Cursor at 10 (inside span) should snap to 6.
         let snapped = c.snap_to_span_edge(10);

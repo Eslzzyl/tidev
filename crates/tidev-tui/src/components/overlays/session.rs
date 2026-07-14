@@ -200,10 +200,6 @@ impl SessionPanel {
         self.selected_indices.contains(&session_index)
     }
 
-    fn selected_count(&self) -> usize {
-        self.selected_indices.len()
-    }
-
     fn get_selected_session_ids(&self) -> Vec<Uuid> {
         if self.operation_mode == OperationMode::MultiSelect && !self.selected_indices.is_empty()
         {

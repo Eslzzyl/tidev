@@ -161,7 +161,6 @@ pub(crate) struct RenderContext<'a> {
     pub spinner: &'a str,
     pub workspace_root: &'a Path,
     pub expanded_tool_results: &'a HashSet<Uuid>,
-    pub expanded_tool_outputs: &'a HashMap<Uuid, String>,
     pub hovered_card: Option<Uuid>,
     pub model_display_name: &'a str,
     pub running_subagents: &'a [RunningSubagentInfo],
@@ -197,8 +196,6 @@ pub(crate) fn render_messages(
     scroll_offset: &mut usize,
     follow_tail: &mut bool,
     expanded_tool_results: &mut HashSet<Uuid>,
-    expanded_tool_outputs: &mut HashMap<Uuid, String>,
-    render_tick: &mut u64,
     running_subagents: &[RunningSubagentInfo],
     spinner_start: Instant,
     hovered_card: Option<Uuid>,
@@ -222,7 +219,6 @@ pub(crate) fn render_messages(
         spinner,
         workspace_root: Path::new(""),
         expanded_tool_results,
-        expanded_tool_outputs,
         hovered_card,
         model_display_name: &chat_context.model_display_name,
         running_subagents,
@@ -238,7 +234,6 @@ pub(crate) fn render_messages(
         *scroll_offset,
         area.height as usize,
         *follow_tail,
-        render_tick,
         retrying_hint,
     );
 
@@ -335,7 +330,6 @@ fn messages_text(
     scroll: usize,
     viewport: usize,
     follow_tail: bool,
-    render_tick: &mut u64,
     retrying_hint: &Option<(u32, u32, String, Instant)>,
 ) -> RenderOutput {
     let messages = chat_context.visible_messages();
@@ -361,7 +355,7 @@ fn messages_text(
     }
 
     // Update layout index — this renders all blocks and populates the cache
-    update_layout_index(index, cache, messages, width, body_width, ctx, render_tick);
+    update_layout_index(index, cache, messages, width, body_width, ctx);
 
     // Calculate visible range (clamp scroll and respect follow_tail)
     let mut total_overall_lines = header_line_count + index.total_lines;
@@ -464,7 +458,6 @@ fn update_layout_index(
     width: usize,
     body_width: usize,
     ctx: &RenderContext,
-    render_tick: &mut u64,
 ) {
     let needs_full = index.needs_full_rebuild(messages.len(), width);
 
@@ -485,8 +478,8 @@ fn update_layout_index(
                 let old_line_count = block.line_count;
 
                 let (_msg_count, new_line_count, _) = compute_and_cache_block(
-                    message, messages, start_idx, is_round_end, width, body_width,
-                    cache, ctx, render_tick,
+                    message, messages, start_idx, is_round_end, body_width,
+                    cache, ctx,
                 );
 
                 let diff = new_line_count as isize - old_line_count as isize;
@@ -546,10 +539,8 @@ fn compute_block_data(
     messages: &[Message],
     start_idx: usize,
     is_round_end: bool,
-    width: usize,
     body_width: usize,
     ctx: &RenderContext,
-    render_tick: u64,
 ) -> BlockComputation {
     let (message_count, line_count, cache_entries) = match message.role {
         MessageRole::Assistant => {
@@ -572,7 +563,6 @@ fn compute_block_data(
             };
             cache_entries.push((cards_key, MessageRenderCacheEntry {
                 value: MessageRenderCacheValue::Cards(cards.clone()),
-                last_used_tick: render_tick,
             }));
 
             for (_, card_lines) in &cards {
@@ -607,7 +597,6 @@ fn compute_block_data(
                 };
                 cache_entries.push((tool_key, MessageRenderCacheEntry {
                     value: MessageRenderCacheValue::ToolResult(tool_lines.clone(), tool_regions),
-                    last_used_tick: render_tick,
                 }));
 
                 // Adjust line count for running subagent cards
@@ -624,7 +613,7 @@ fn compute_block_data(
             (count, line_count, cache_entries)
         }
         MessageRole::User | MessageRole::System | MessageRole::Error | MessageRole::Shell => {
-            let cards = render_single_card(ctx, message, messages, body_width, is_round_end);
+            let cards = render_single_card(ctx, message, body_width, is_round_end);
             let mut line_count = 0;
             for (_, card_lines) in &cards {
                 line_count += card_lines.len();
@@ -640,7 +629,6 @@ fn compute_block_data(
             };
             let cache_entries = vec![(kind, MessageRenderCacheEntry {
                 value: MessageRenderCacheValue::Cards(cards),
-                last_used_tick: render_tick,
             })];
 
             (1, line_count, cache_entries)
@@ -659,7 +647,7 @@ fn compute_block_data(
             .map(|(start_idx, is_round_end)| {
                 compute_block_data(
                     &messages[*start_idx], messages, *start_idx, *is_round_end,
-                    width, body_width, ctx, *render_tick,
+                    body_width, ctx,
                 )
             })
             .collect()
@@ -669,7 +657,7 @@ fn compute_block_data(
             .map(|(start_idx, is_round_end)| {
                 compute_block_data(
                     &messages[*start_idx], messages, *start_idx, *is_round_end,
-                    width, body_width, ctx, *render_tick,
+                    body_width, ctx,
                 )
             })
             .collect()
@@ -706,11 +694,9 @@ fn compute_and_cache_block(
     messages: &[Message],
     start_idx: usize,
     is_round_end: bool,
-    width: usize,
     body_width: usize,
     cache: &mut lru::LruCache<MessageRenderCacheKey, MessageRenderCacheEntry>,
     ctx: &RenderContext,
-    render_tick: &mut u64,
 ) -> (usize, usize, usize) {
     match message.role {
         MessageRole::Assistant => {
@@ -735,7 +721,6 @@ fn compute_and_cache_block(
             };
             cache.put(cards_key, MessageRenderCacheEntry {
                 value: MessageRenderCacheValue::Cards(cards.clone()),
-                last_used_tick: *render_tick,
             });
 
             for (_, card_lines) in &cards {
@@ -771,7 +756,6 @@ fn compute_and_cache_block(
                 };
                 cache.put(tool_key, MessageRenderCacheEntry {
                     value: MessageRenderCacheValue::ToolResult(tool_lines.clone(), tool_regions),
-                    last_used_tick: *render_tick,
                 });
 
                 // Use the generic tool call line count by default, but adjust
@@ -789,7 +773,7 @@ fn compute_and_cache_block(
             (count, line_count, 0)
         }
         MessageRole::User | MessageRole::System | MessageRole::Error | MessageRole::Shell => {
-            let cards = render_single_card(ctx, message, messages, body_width, is_round_end);
+            let cards = render_single_card(ctx, message, body_width, is_round_end);
             let mut line_count = 0;
             for (_, card_lines) in &cards {
                 line_count += card_lines.len();
@@ -805,7 +789,6 @@ fn compute_and_cache_block(
             };
             cache.put(kind, MessageRenderCacheEntry {
                 value: MessageRenderCacheValue::Cards(cards),
-                last_used_tick: *render_tick,
             });
 
             (1, line_count, 0)
@@ -883,7 +866,7 @@ fn render_block_from_cache(
                 render_assistant_cards(ctx, msg, messages, body_width, is_round_end)
             }
             _ => {
-                render_single_card(ctx, msg, messages, body_width, is_round_end)
+                render_single_card(ctx, msg, body_width, is_round_end)
             }
         };
         for (bg, card_lines) in &cards {
@@ -1177,7 +1160,7 @@ fn render_assistant_body_lines(
         let mut parts: Vec<String> = Vec::new();
 
         // Model display name (resolve via config in old code — use model_id as fallback)
-        if let Some(ref model_id) = message.model_id {
+        if message.model_id.is_some() {
             parts.push(ctx.model_display_name.to_string());
         }
 
@@ -1325,7 +1308,6 @@ fn render_error_card(
 fn render_system_card(
     ctx: &RenderContext,
     message: &Message,
-    messages: &[Message],
     body_width: usize,
     is_round_end: bool,
 ) -> Vec<(Color, Vec<Line<'static>>)> {
@@ -1421,14 +1403,13 @@ fn render_system_card(
 fn render_single_card(
     ctx: &RenderContext,
     message: &Message,
-    messages: &[Message],
     body_width: usize,
     is_round_end: bool,
 ) -> Vec<(Color, Vec<Line<'static>>)> {
     match message.role {
         MessageRole::User | MessageRole::Shell => render_user_shell_card(ctx, message, body_width),
         MessageRole::Error => render_error_card(ctx, message, body_width),
-        MessageRole::System => render_system_card(ctx, message, messages, body_width, is_round_end),
+        MessageRole::System => render_system_card(ctx, message, body_width, is_round_end),
         _ => {
             let palette = ctx.palette;
             let content_lines = render_text_body_lines(ctx, &message.content, body_width);

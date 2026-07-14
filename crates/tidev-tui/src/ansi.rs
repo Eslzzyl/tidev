@@ -61,8 +61,7 @@ pub(crate) fn ansi_to_styled_line(text: &str, default_style: Style) -> Vec<Line<
                     .spans
                     .iter()
                     .map(|s| {
-                        let mut combined = default_style;
-                        combined.patch(s.style);
+                        let combined = default_style.patch(s.style);
                         Span::styled(s.content.clone(), combined)
                     })
                     .collect();

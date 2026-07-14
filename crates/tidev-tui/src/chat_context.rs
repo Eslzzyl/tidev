@@ -1,7 +1,6 @@
 //! Local chat context — provides the rendering code with the data it needs,
 //! replacing the old `tidev_session::session::Conversation` struct.
 
-use std::path::Path;
 use uuid::Uuid;
 
 use tidev_types::message::Message;
@@ -12,14 +11,11 @@ use tidev_types::message::Message;
 pub struct ChatContext {
     pub session_id: Uuid,
     pub title: String,
-    pub workspace_root: String,
     pub messages: Vec<Message>,
     /// When set, only messages up to (not including) this one are visible
     /// (undo revert point).
     pub revert_message_id: Option<Uuid>,
     pub parent_session_id: Option<Uuid>,
-    pub provider_id: String,
-    pub model_id: String,
     pub model_display_name: String,
     pub provider_display_name: String,
 }
@@ -28,23 +24,17 @@ impl ChatContext {
     pub fn new(
         session_id: Uuid,
         title: String,
-        workspace_root: String,
         messages: Vec<Message>,
         parent_session_id: Option<Uuid>,
-        provider_id: String,
-        model_id: String,
         model_display_name: String,
         provider_display_name: String,
     ) -> Self {
         Self {
             session_id,
             title,
-            workspace_root,
             messages,
             revert_message_id: None,
             parent_session_id,
-            provider_id,
-            model_id,
             model_display_name,
             provider_display_name,
         }
@@ -66,11 +56,6 @@ impl ChatContext {
 }
 
 impl ChatContext {
-    /// Normalised workspace root for display.
-    pub fn cwd(&self) -> &Path {
-        Path::new(&self.workspace_root)
-    }
-
     /// Push a message to the end of the context.
     pub fn push(&mut self, message: Message) {
         self.messages.push(message);
