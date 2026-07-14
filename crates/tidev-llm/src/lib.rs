@@ -108,11 +108,16 @@ impl LlmClient {
     /// Non-streaming completion — returns the full assistant text.
     pub async fn complete_with_messages(
         &self,
+        session_id: Uuid,
+        request_id: u64,
         model: LlmProviderConfig,
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
+        tx: Option<UnboundedSender<BackendEvent>>,
     ) -> Result<String> {
-        let result = self.complete_with_retry(model, messages, tools).await;
+        let result = self
+            .complete_with_retry(session_id, request_id, model, messages, tools, tx)
+            .await;
         result.context("LLM completion failed after retries")
     }
 
@@ -147,9 +152,8 @@ impl LlmClient {
                 Ok(()) => return Ok(()),
                 Err(e) => {
                     let network_err = classify_anyhow_error(e);
-                    let is_last = attempt == max;
 
-                    if !network_err.is_retryable() || is_last {
+                    if !network_err.is_retryable() {
                         return Err(anyhow::anyhow!("{}", network_err.message()));
                     }
 
@@ -162,6 +166,11 @@ impl LlmClient {
                         reason: network_err.message().to_string(),
                         retry_after_secs: Some(delay.as_secs() as u32),
                     });
+
+                    if attempt == max {
+                        return Err(anyhow::anyhow!("{}", network_err.message()));
+                    }
+
                     backoff_sleep(attempt + 1).await;
                 }
             }
@@ -172,9 +181,12 @@ impl LlmClient {
 
     async fn complete_with_retry(
         &self,
+        session_id: Uuid,
+        request_id: u64,
         model: LlmProviderConfig,
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
+        tx: Option<UnboundedSender<BackendEvent>>,
     ) -> Result<String> {
         for attempt in 1..=MAX_RETRIES {
             let result = match model.api_type {
@@ -236,21 +248,28 @@ impl LlmClient {
                 Ok(response) => return Ok(response),
                 Err(e) => {
                     let network_error = classify_anyhow_error(e);
-                    let is_last_attempt = attempt == MAX_RETRIES;
 
-                    if !network_error.is_retryable() || is_last_attempt {
+                    if !network_error.is_retryable() {
                         return Err(anyhow::anyhow!("{}", network_error.message()));
                     }
 
                     let delay_secs = backoff_delay(attempt).as_secs() as u32;
 
-                    eprintln!(
-                        "Completion failed (attempt {}/{}): {}, retrying in {}s...",
-                        attempt,
-                        MAX_RETRIES,
-                        network_error.message(),
-                        delay_secs
-                    );
+                    if let Some(tx) = &tx {
+                        let _ = tx.send(BackendEvent::Retrying {
+                            session_id,
+                            request_id,
+                            attempt: attempt as u32,
+                            max_attempts: MAX_RETRIES,
+                            reason: network_error.message().to_string(),
+                            retry_after_secs: Some(delay_secs),
+                        });
+                    }
+
+                    if attempt == MAX_RETRIES {
+                        return Err(anyhow::anyhow!("{}", network_error.message()));
+                    }
+
                     backoff_sleep(attempt).await;
                 }
             }

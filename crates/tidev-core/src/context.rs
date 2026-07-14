@@ -227,12 +227,15 @@ impl ContextManager {
         let llm_tools: Vec<tidev_llm::ToolDefinition> = tools.iter().map(to_llm_tool_def).collect();
 
         // 5. Call the LLM (streaming or non-streaming).
-        let summary = if let Some(tx) = event_tx {
-            self.compact_streaming(llm, model, &llm_tools, compact_msgs, session_id, tx)
-                .await?
-        } else {
-            self.compact_non_streaming(llm, model, &llm_tools, compact_msgs)
-                .await?
+        let summary = match &event_tx {
+            Some(tx) => {
+                self.compact_streaming(llm, model, &llm_tools, compact_msgs, session_id, tx.clone())
+                    .await?
+            }
+            None => {
+                self.compact_non_streaming(llm, model, &llm_tools, compact_msgs, session_id, None)
+                    .await?
+            }
         };
 
         // 6. Truncate to configured maximum.
@@ -297,8 +300,10 @@ impl ContextManager {
         model: &LlmProviderConfig,
         tools: &[tidev_llm::ToolDefinition],
         messages: Vec<Message>,
+        session_id: Uuid,
+        event_tx: Option<tokio::sync::mpsc::UnboundedSender<BackendEvent>>,
     ) -> Result<String> {
-        llm.complete_with_messages(model.clone(), messages, tools.to_vec())
+        llm.complete_with_messages(session_id, 0, model.clone(), messages, tools.to_vec(), event_tx)
             .await
     }
 

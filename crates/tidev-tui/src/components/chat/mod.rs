@@ -4,7 +4,7 @@
 //! tool call interaction state, subagent tracking, and streaming buffer.
 
 use std::collections::{HashMap, HashSet};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
@@ -104,6 +104,9 @@ pub(crate) struct MessageList {
     // ── Bash tool tracking (for ShellOutput streaming) ──
     bash_tool_call_id: Option<String>,
 
+    // ── Retrying hint (persistent inline display) ──
+    retrying_hint: Option<(u32, u32, String, Instant)>,
+
     // ── Dirty tracking ──
     pub(crate) dirty: bool,
 }
@@ -135,6 +138,7 @@ impl MessageList {
             hovered_inline_subagent: None,
             inline_subagent_card_bounds: Vec::new(),
             bash_tool_call_id: None,
+            retrying_hint: None,
             dirty: true,
         }
     }
@@ -163,6 +167,7 @@ impl MessageList {
             self.hovered_inline_subagent = None;
             self.inline_subagent_card_bounds.clear();
             self.bash_tool_call_id = None;
+            self.retrying_hint = None;
             self.rebuild_subagent_state();
             self.dirty = true;
             true
@@ -187,6 +192,7 @@ impl MessageList {
         self.hovered_inline_subagent = None;
         self.inline_subagent_card_bounds.clear();
         self.bash_tool_call_id = None;
+        self.retrying_hint = None;
         self.rebuild_subagent_state();
     }
 
@@ -511,7 +517,20 @@ impl MessageList {
                 }
                 self.dirty = true;
             }
+            BackendEvent::Retrying {
+                attempt,
+                max_attempts,
+                reason,
+                retry_after_secs,
+                ..
+            } => {
+                let deadline =
+                    Instant::now() + Duration::from_secs(retry_after_secs.unwrap_or(0) as u64);
+                self.retrying_hint = Some((*attempt, *max_attempts, reason.clone(), deadline));
+                self.dirty = true;
+            }
             BackendEvent::Finished { .. } => {
+                self.retrying_hint = None;
                 self.dirty = true;
             }
             BackendEvent::SubagentStatus {
@@ -598,6 +617,10 @@ impl MessageList {
                     self.layout_index.invalidate_all();
                     self.dirty = true;
                 }
+            }
+            BackendEvent::Failed { .. } => {
+                self.retrying_hint = None;
+                self.dirty = true;
             }
             _ => {}
         }
@@ -824,6 +847,7 @@ impl Component for MessageList {
             self.spinner_start,
             self.hovered_card,
             self.hovered_inline_subagent,
+            &self.retrying_hint,
             &mut self.card_bounds,
             &mut self.selectable_regions,
             &mut inline_running_card_ranges,

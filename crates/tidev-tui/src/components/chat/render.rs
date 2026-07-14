@@ -205,6 +205,7 @@ pub(crate) fn render_messages(
     spinner_start: Instant,
     hovered_card: Option<Uuid>,
     hovered_inline_subagent: Option<usize>,
+    retrying_hint: &Option<(u32, u32, String, Instant)>,
     out_card_bounds: &mut Vec<(Uuid, usize, usize)>,
     out_selectable_regions: &mut Vec<SelectableRegionRange>,
     out_inline_running_card_ranges: &mut Vec<InlineRunningCardRange>,
@@ -242,6 +243,7 @@ pub(crate) fn render_messages(
         *follow_tail,
         current_streaming_message_id,
         render_tick,
+        retrying_hint,
     );
 
     // Sync the effective scroll (updated inside messages_text for follow_tail
@@ -340,6 +342,7 @@ fn messages_text(
     follow_tail: bool,
     _current_streaming_message_id: Option<Uuid>,
     render_tick: &mut u64,
+    retrying_hint: &Option<(u32, u32, String, Instant)>,
 ) -> RenderOutput {
     let messages = chat_context.visible_messages();
     let width = width.max(1);
@@ -367,7 +370,7 @@ fn messages_text(
     update_layout_index(index, cache, messages, width, body_width, streaming, ctx, render_tick);
 
     // Calculate visible range (clamp scroll and respect follow_tail)
-    let total_overall_lines = header_line_count + index.total_lines;
+    let mut total_overall_lines = header_line_count + index.total_lines;
     let viewport = viewport.max(1);
     let max_scroll = total_overall_lines.saturating_sub(viewport);
     let scroll = if follow_tail { max_scroll } else { scroll.min(max_scroll) };
@@ -408,6 +411,49 @@ fn messages_text(
         );
         lines.extend(block_lines);
         current_line_offset = lines.len();
+    }
+
+    // Append retrying hint as a temporary card at the bottom of the chat area
+    if let Some((attempt, max_attempts, reason, deadline)) = retrying_hint.as_ref() {
+        let now = Instant::now();
+        let remaining = if *deadline > now {
+            deadline.duration_since(now).as_secs()
+        } else {
+            0
+        };
+
+        let retry_after_str = format!("Retrying in {remaining}s");
+        let msg = format!("Retrying ({}/{}): {}", attempt, max_attempts, reason);
+
+        let text_width = body_width.max(1);
+        let palette = ctx.palette;
+        let mut retry_lines = Vec::new();
+
+        // Wrap the retry message with word-wrap
+        let wrapped = wrap_text_lines(&msg, text_width, usize::MAX);
+        for (i, line) in wrapped.iter().enumerate() {
+            let prefix = if i == 0 { "⟳" } else { " " };
+            retry_lines.push(Line::from(vec![
+                Span::styled(prefix, Style::default().fg(palette.accent_soft)),
+                Span::styled(format!(" {line}"), Style::default().fg(palette.text)),
+            ]));
+        }
+
+        // Countdown line
+        retry_lines.push(Line::from(vec![
+            Span::styled("⟳", Style::default().fg(palette.accent_soft)),
+            Span::styled(format!(" {retry_after_str}"), Style::default().fg(palette.muted)),
+        ]));
+
+        // Wrap in card with padding (same style as error messages)
+        let mut card_lines = Vec::new();
+        card_lines.push(Line::from(""));
+        card_lines.extend(retry_lines);
+        card_lines.push(Line::from(""));
+
+        let decorated = decorate_card_lines(card_lines, palette.panel_light, 2, width);
+        total_overall_lines += decorated.len();
+        lines.extend(decorated);
     }
 
     RenderOutput { lines, total_lines: total_overall_lines, render_scroll, effective_scroll: scroll, selectable_regions, card_bounds, inline_running_card_ranges }
