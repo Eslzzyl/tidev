@@ -263,6 +263,7 @@ impl AgentContext for CoreContext {
         messages: &[Message],
         system_prompt: &str,
         thinking_level: &ThinkingLevelType,
+        request_id: u64,
     ) -> Result<AssistantTurn> {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let llm = self.llm.clone();
@@ -276,7 +277,7 @@ impl AgentContext for CoreContext {
 
         // Spawn the streaming LLM call.
         let handle = tokio::spawn(async move {
-            llm.stream_chat(sid, 0, model, msgs, llm_tools, tx, tl)
+            llm.stream_chat(sid, request_id, model, msgs, llm_tools, tx, tl)
                 .await;
         });
 
@@ -605,6 +606,8 @@ impl AgentContext for CoreContext {
                         SubagentConfig {
                             tool_call: tc.clone(),
                             child_session_id,
+                            parent_session_id: session_id,
+                            parent_request_id: request_id,
                             cancel_token: cancel,
                         },
                     )
@@ -804,6 +807,8 @@ struct SubagentSpawner {
 struct SubagentConfig {
     tool_call: ToolCall,
     child_session_id: Option<Uuid>,
+    parent_session_id: Uuid,
+    parent_request_id: u64,
     cancel_token: CancellationToken,
 }
 
@@ -893,10 +898,10 @@ async fn run_subagent_inner(
         .append_message(child_session_id, &user_msg)
         .context("failed to seed child session")?;
 
-    // 6. Emit SubagentStatus that the child has started.
+    // 6. Emit SubagentStatus that the child has started (parent session).
     let _ = spawner.event_tx.send(BackendEvent::SubagentStatus {
-        session_id: child_session_id,
-        request_id: 0,
+        session_id: config.parent_session_id,
+        request_id: config.parent_request_id,
         child_session_id,
         status_text: format!("Started {:?} subagent", agent_type),
         current_tool_call: None,
@@ -951,10 +956,10 @@ async fn run_subagent_inner(
             .cloned()
     };
 
-    // 10. Notify completion.
+    // 10. Notify completion (parent session).
     let _ = spawner.event_tx.send(BackendEvent::SubagentCompleted {
-        session_id: child_session_id,
-        request_id: 0,
+        session_id: config.parent_session_id,
+        request_id: config.parent_request_id,
         tool_call: config.tool_call.clone(),
         child_session_id,
         result: match &final_output {

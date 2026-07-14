@@ -117,11 +117,16 @@ pub trait AgentContext: Send + Sync {
     /// The implementation should forward streaming [`BackendEvent`]s (deltas,
     /// tool call updates, usage stats, etc.) through [`Self::event_tx`] in
     /// real time.
+    ///
+    /// `request_id` is the per-turn sequence number from the agent loop,
+    /// embedded in forwarded events so the frontend can reject stale events
+    /// after cancellation.
     async fn stream_turn(
         &self,
         messages: &[Message],
         system_prompt: &str,
         thinking_level: &ThinkingLevelType,
+        request_id: u64,
     ) -> Result<AssistantTurn>;
 
     /// Request frontend approval for a batch of tool calls.

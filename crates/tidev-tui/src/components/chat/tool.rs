@@ -329,6 +329,9 @@ fn render_subagent_task_preview(
         }
     }
 
+    // Bottom padding
+    lines.push(Line::from(""));
+
     lines
 }
 

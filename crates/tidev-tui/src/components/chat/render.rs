@@ -29,6 +29,7 @@ use crate::components::chat::render_cache::{
     SelectableRegionRange,
 };
 use crate::markdown;
+use crate::markdown::{WrapOptions, word_wrap_line};
 use crate::diff_render::render_unified_diff_text;
 
 use crate::components::chat::tool;
@@ -61,11 +62,84 @@ enum MessageBadgeKind {
 // ---------------------------------------------------------------------------
 
 pub(crate) struct RunningSubagentInfo {
+    pub request_id: u64,
     pub tool_call_id: String,
     pub description: String,
     pub subagent_type: String,
     pub status_text: String,
     pub child_session_id: Option<uuid::Uuid>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct InlineRunningCardRange {
+    pub execution_index: usize,
+    pub start_line: usize,
+    pub end_line: usize,
+}
+
+/// Render a running subagent inline card — 4+ lines with padding, word-wrapped
+/// header, and status line. This mirrors the old v0.6.x implementation.
+pub(crate) fn render_running_subagent_lines(
+    info: &RunningSubagentInfo,
+    body_width: usize,
+    palette: ThemePalette,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+
+    // Top padding
+    lines.push(Line::from(""));
+
+    // Header: @type subagent: description (word-wrapped)
+    let description = info.description.trim();
+    let header_line = Line::from(vec![
+        Span::styled(
+            format!("@{}", info.subagent_type),
+            Style::default().fg(palette.accent_soft),
+        ),
+        Span::styled(" subagent: ", Style::default().fg(palette.muted)),
+        Span::styled(
+            description.to_string(),
+            Style::default().fg(palette.text).add_modifier(Modifier::BOLD),
+        ),
+    ]);
+    lines.extend(
+        word_wrap_line(&header_line, WrapOptions::new(body_width).break_words(true))
+            .into_iter().map(|l| {
+                Line::from(l.spans.into_iter()
+                    .map(|s| Span::styled(s.content.to_string(), s.style))
+                    .collect::<Vec<_>>())
+            }),
+    );
+
+    // Status line with 2-space indent
+    lines.push(Line::from(vec![
+        Span::styled("  ", Style::default()),
+        Span::styled(info.status_text.clone(), Style::default().fg(palette.accent_soft)),
+    ]));
+
+    // Bottom padding
+    lines.push(Line::from(""));
+
+    lines
+}
+
+/// Count how many visual lines a running subagent card will occupy.
+/// Must stay in sync with render_running_subagent_lines.
+pub(crate) fn count_running_subagent_card_lines(
+    info: &RunningSubagentInfo,
+    body_width: usize,
+) -> usize {
+    let mut count = 0;
+    // Top padding
+    count += 1;
+    // Header line (word-wrapped)
+    let header_text = format!("@{} subagent: {}", info.subagent_type, info.description.trim());
+    count += word_wrap_line(&Line::from(header_text), WrapOptions::new(body_width).break_words(true)).len();
+    // Status line
+    count += 1;
+    // Bottom padding
+    count += 1;
+    count
 }
 
 // ---------------------------------------------------------------------------
@@ -89,6 +163,8 @@ pub(crate) struct RenderContext<'a> {
     pub expanded_tool_outputs: &'a HashMap<Uuid, String>,
     pub hovered_card: Option<Uuid>,
     pub model_display_name: &'a str,
+    pub running_subagents: &'a [RunningSubagentInfo],
+    pub hovered_inline_subagent: Option<usize>,
 }
 
 // ---------------------------------------------------------------------------
@@ -103,6 +179,7 @@ pub(crate) struct RenderOutput {
     pub effective_scroll: usize,
     pub selectable_regions: Vec<SelectableRegionRange>,
     pub card_bounds: Vec<(Uuid, usize, usize)>,
+    pub inline_running_card_ranges: Vec<InlineRunningCardRange>,
 }
 
 // ---------------------------------------------------------------------------
@@ -126,8 +203,10 @@ pub(crate) fn render_messages(
     running_subagents: &[RunningSubagentInfo],
     spinner_start: Instant,
     hovered_card: Option<Uuid>,
+    hovered_inline_subagent: Option<usize>,
     out_card_bounds: &mut Vec<(Uuid, usize, usize)>,
     out_selectable_regions: &mut Vec<SelectableRegionRange>,
+    out_inline_running_card_ranges: &mut Vec<InlineRunningCardRange>,
     out_render_content_area: &mut Rect,
     out_render_scroll: &mut usize,
 ) {
@@ -146,6 +225,8 @@ pub(crate) fn render_messages(
         expanded_tool_outputs,
         hovered_card,
         model_display_name: &chat_context.model_display_name,
+        running_subagents,
+        hovered_inline_subagent,
     };
 
     let output = messages_text(
@@ -170,42 +251,23 @@ pub(crate) fn render_messages(
     *out_card_bounds = output.card_bounds;
     // Export selectable regions for mouse selection clamping.
     *out_selectable_regions = output.selectable_regions;
+    // Export inline running card ranges for mouse interaction.
+    *out_inline_running_card_ranges = output.inline_running_card_ranges;
     // Export the rendered content area and render scroll for coordinate
     // conversion in selectable_region_rects().
     *out_render_content_area = content_area;
     *out_render_scroll = output.render_scroll;
 
-    // Render running subagent cards (at the end of the message area)
-    let total_with_subagents = {
-        let mut all_lines = output.lines;
-        let add_lines;
-        if !running_subagents.is_empty() {
-            add_lines = running_subagents.len() * 2;
-            for sa in running_subagents {
-                let style = Style::default().fg(palette.accent_soft).add_modifier(Modifier::BOLD);
-                all_lines.push(Line::from(vec![
-                    Span::styled(format!(" ▶ task [{}]", sa.subagent_type), style),
-                    Span::styled(format!(" {}", sa.status_text), Style::default().fg(palette.muted)),
-                ]));
-                all_lines.push(Line::from(Span::styled(
-                    format!("   {}", sa.description),
-                    Style::default().fg(palette.text),
-                )));
-            }
-        } else {
-            add_lines = 0;
-        }
-        let text = ratatui::text::Text::from(all_lines);
-        let paragraph = Paragraph::new(text)
-            .style(Style::default().bg(ctx.palette.background))
-            .scroll((output.render_scroll as u16, 0));
-        frame.render_widget(paragraph, content_area);
-        output.total_lines + add_lines
-    };
+    // Render the message text as a Paragraph widget
+    let text = ratatui::text::Text::from(output.lines);
+    let paragraph = Paragraph::new(text)
+        .style(Style::default().bg(ctx.palette.background))
+        .scroll((output.render_scroll as u16, 0));
+    frame.render_widget(paragraph, content_area);
 
-    // Scrollbar (using total_with_subagents as the adjusted total)
+    // Scrollbar
     if let Some(sb) = scrollbar_rect {
-        render_scrollbar(frame, sb, *scroll_offset, total_with_subagents, area.height as usize, ctx.palette);
+        render_scrollbar(frame, sb, *scroll_offset, output.total_lines, area.height as usize, ctx.palette);
     }
 }
 
@@ -285,6 +347,7 @@ fn messages_text(
     let mut lines: Vec<Line<'static>> = Vec::new();
     let mut selectable_regions: Vec<SelectableRegionRange> = Vec::new();
     let mut card_bounds: Vec<(Uuid, usize, usize)> = Vec::new();
+    let mut inline_running_card_ranges: Vec<InlineRunningCardRange> = Vec::new();
 
     // Header for sub-sessions
     let header_lines = build_header_lines(chat_context.parent_session_id.is_some(), ctx.palette);
@@ -296,7 +359,7 @@ fn messages_text(
         let empty_line = Line::from(Span::styled("No messages yet.", Style::default().fg(ctx.palette.muted)));
         lines.push(empty_line);
         let total = lines.len().max(1);
-        return RenderOutput { lines, total_lines: total, render_scroll: 0, effective_scroll: 0, selectable_regions, card_bounds };
+        return RenderOutput { lines, total_lines: total, render_scroll: 0, effective_scroll: 0, selectable_regions, card_bounds, inline_running_card_ranges };
     }
 
     // Update layout index — this renders all blocks and populates the cache
@@ -340,13 +403,13 @@ fn messages_text(
             || !matches!(messages[next_idx].role, MessageRole::Tool);
         let block_lines = render_block_from_cache(
             block, cache, width, is_round_end, &mut selectable_regions, ctx, &current_line_offset,
-            messages, &mut card_bounds,
+            messages, &mut card_bounds, &mut inline_running_card_ranges,
         );
         lines.extend(block_lines);
         current_line_offset = lines.len();
     }
 
-    RenderOutput { lines, total_lines: total_overall_lines, render_scroll, effective_scroll: scroll, selectable_regions, card_bounds }
+    RenderOutput { lines, total_lines: total_overall_lines, render_scroll, effective_scroll: scroll, selectable_regions, card_bounds, inline_running_card_ranges }
 }
 
 // ---------------------------------------------------------------------------
@@ -507,7 +570,14 @@ fn compute_block_data(
                     last_used_tick: render_tick,
                 }));
 
-                line_count += tool_lines.len();
+                // Adjust line count for running subagent cards
+                let mut tc_line_count = tool_lines.len();
+                if tc.name == "task" && tool_result.is_none() {
+                    if let Some(info) = ctx.running_subagents.iter().find(|s| s.tool_call_id == tc.id) {
+                        tc_line_count = count_running_subagent_card_lines(info, body_width);
+                    }
+                }
+                line_count += tc_line_count;
             }
 
             line_count += 1; // trailing empty line
@@ -664,7 +734,15 @@ fn compute_and_cache_block(
                     last_used_tick: *render_tick,
                 });
 
-                line_count += tool_lines.len();
+                // Use the generic tool call line count by default, but adjust
+                // for running subagent cards which are taller at render time.
+                let mut tc_line_count = tool_lines.len();
+                if tc.name == "task" && tool_result.is_none() {
+                    if let Some(info) = ctx.running_subagents.iter().find(|s| s.tool_call_id == tc.id) {
+                        tc_line_count = count_running_subagent_card_lines(info, body_width);
+                    }
+                }
+                line_count += tc_line_count;
             }
 
             line_count += 1; // trailing empty line
@@ -710,6 +788,7 @@ fn render_block_from_cache(
     current_line_offset: &usize,
     messages: &[Message],
     card_bounds: &mut Vec<(Uuid, usize, usize)>,
+    inline_running_card_ranges: &mut Vec<InlineRunningCardRange>,
 ) -> Vec<Line<'static>> {
     let body_width = width.saturating_sub(2).max(1);
     let cards_key = MessageRenderCacheKey {
@@ -759,49 +838,84 @@ fn render_block_from_cache(
     }
 
     // Render ToolResult entries (tool call output) for assistant blocks
-    if block.message_count > 1 {
-        let msg = &messages[block.message_start_idx];
-        if matches!(msg.role, MessageRole::Assistant) {
-            for tc in &msg.tool_calls {
-                let tool_key = MessageRenderCacheKey {
-                    session_id: Uuid::default(),
-                    message_id: block.message_id,
-                    width: body_width,
-                    is_round_end,
-                    kind: MessageRenderCacheKind::ToolCall(tc.id.clone()),
-                };
-                if let Some(entry) = cache.peek(&tool_key) {
-                    match &entry.value {
-                        MessageRenderCacheValue::ToolResult(tool_lines, tool_regions) => {
-                            if !tool_lines.is_empty() {
-                                let start_line = current_line_offset + lines.len();
-                                // Determine background: hover if a tool result in this block is hovered
-                                let tool_result_msg = messages[block.message_start_idx..block.message_start_idx + block.message_count]
-                                    .iter()
-                                    .find(|m| m.tool_call_id.as_deref() == Some(&tc.id));
-                                let bg = if tool_result_msg.is_some_and(|m| ctx.hovered_card == Some(m.id)) {
-                                    ctx.palette.hover_bg(ctx.palette.panel_light)
-                                } else {
-                                    ctx.palette.panel_light
-                                };
-                                lines.extend(decorate_card_lines(tool_lines.clone(), bg, 2, width));
-                                // Add selectable regions from tool result, offset by the current line
-                                for r in tool_regions {
-                                    selectable_regions.push(SelectableRegionRange {
-                                        start_line: current_line_offset + lines.len() + r.start_line,
-                                        end_line: current_line_offset + lines.len() + r.end_line,
-                                        min_x: r.min_x,
-                                        max_x: r.max_x,
-                                    });
-                                }
-                                let end_line = current_line_offset + lines.len();
-                                if let Some(tool_msg) = tool_result_msg {
-                                    card_bounds.push((tool_msg.id, start_line, end_line));
-                                }
+    let msg = &messages[block.message_start_idx];
+    if matches!(msg.role, MessageRole::Assistant) && !msg.tool_calls.is_empty() {
+        // Build tool_results_by_id for completion checks
+        let tool_results_by_id: HashMap<String, &Message> = {
+            let mut map = HashMap::new();
+            let mut j = block.message_start_idx + 1;
+            while j < messages.len() && j < block.message_start_idx + block.message_count {
+                if matches!(messages[j].role, MessageRole::Tool)
+                    && let Some(id) = &messages[j].tool_call_id
+                {
+                    map.insert(id.clone(), &messages[j]);
+                }
+                j += 1;
+            }
+            map
+        };
+
+        for tc in &msg.tool_calls {
+            // Check for running subagent (pending task tool call) — render inline card
+            if tc.name == "task" && tool_results_by_id.get(&tc.id).is_none() {
+                if let Some(exec_index) = ctx.running_subagents.iter().position(|s| s.tool_call_id == tc.id) {
+                    let info = &ctx.running_subagents[exec_index];
+                    let running_lines = render_running_subagent_lines(info, body_width, ctx.palette);
+                    let start_line = current_line_offset + lines.len();
+                    let mut card_bg = ctx.palette.panel;
+                    if ctx.hovered_inline_subagent == Some(exec_index) {
+                        card_bg = ctx.palette.hover_bg(card_bg);
+                    }
+                    let decorated = decorate_card_lines(running_lines, card_bg, 2, width);
+                    lines.extend(decorated);
+                    let end_line = current_line_offset + lines.len();
+                    inline_running_card_ranges.push(InlineRunningCardRange {
+                        execution_index: exec_index,
+                        start_line,
+                        end_line,
+                    });
+                    continue;
+                }
+            }
+
+            let tool_key = MessageRenderCacheKey {
+                session_id: Uuid::default(),
+                message_id: block.message_id,
+                width: body_width,
+                is_round_end,
+                kind: MessageRenderCacheKind::ToolCall(tc.id.clone()),
+            };
+            if let Some(entry) = cache.peek(&tool_key) {
+                match &entry.value {
+                    MessageRenderCacheValue::ToolResult(tool_lines, tool_regions) => {
+                        if !tool_lines.is_empty() {
+                            let start_line = current_line_offset + lines.len();
+                            // Determine background: hover if a tool result in this block is hovered
+                            let tool_result_msg = messages[block.message_start_idx..block.message_start_idx + block.message_count]
+                                .iter()
+                                .find(|m| m.tool_call_id.as_deref() == Some(&tc.id));
+                            let bg = if tool_result_msg.is_some_and(|m| ctx.hovered_card == Some(m.id)) {
+                                ctx.palette.hover_bg(ctx.palette.panel_light)
+                            } else {
+                                ctx.palette.panel_light
+                            };
+                            lines.extend(decorate_card_lines(tool_lines.clone(), bg, 2, width));
+                            // Add selectable regions from tool result, offset by the current line
+                            for r in tool_regions {
+                                selectable_regions.push(SelectableRegionRange {
+                                    start_line: current_line_offset + lines.len() + r.start_line,
+                                    end_line: current_line_offset + lines.len() + r.end_line,
+                                    min_x: r.min_x,
+                                    max_x: r.max_x,
+                                });
+                            }
+                            let end_line = current_line_offset + lines.len();
+                            if let Some(tool_msg) = tool_result_msg {
+                                card_bounds.push((tool_msg.id, start_line, end_line));
                             }
                         }
-                        _ => {}
                     }
+                    _ => {}
                 }
             }
         }
@@ -1344,7 +1458,7 @@ fn decorate_card_lines(
         if used_width < width {
             spans.push(Span::styled(" ".repeat(width.saturating_sub(used_width)), bg_style));
         }
-        Line::from(spans).style(bg_style)
+        Line::from(spans)
     }).collect()
 }
 

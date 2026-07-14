@@ -61,7 +61,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
 
         // ─── 4. Stream LLM turn ──────────────────────────────────────────
         let turn = match ctx
-            .stream_turn(&messages, &system_prompt, &config.thinking_level)
+            .stream_turn(&messages, &system_prompt, &config.thinking_level, request_id)
             .await
         {
             Ok(turn) => turn,

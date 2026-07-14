@@ -17,6 +17,7 @@ use uuid::Uuid;
 use tidev_types::message::BackendEvent;
 use tidev_types::prompts::SessionMode;
 
+use tidev_types::tools::canonical_tool_name;
 use crate::action::{Action, ChatAction, SessionAction};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
@@ -92,6 +93,8 @@ pub(crate) struct MessageList {
 
     // ── Subagent tracking ──
     running_subagents: Vec<render_mod::RunningSubagentInfo>,
+    hovered_inline_subagent: Option<usize>,
+    inline_subagent_card_bounds: Vec<(usize, Rect)>,
 
     // ── Bash tool tracking (for ShellOutput streaming) ──
     bash_tool_call_id: Option<String>,
@@ -122,6 +125,8 @@ impl MessageList {
             streaming_buffer: StreamingBuffer::new(),
             current_streaming_message_id: None,
             running_subagents: Vec::new(),
+            hovered_inline_subagent: None,
+            inline_subagent_card_bounds: Vec::new(),
             bash_tool_call_id: None,
             dirty: true,
         }
@@ -139,6 +144,8 @@ impl MessageList {
         self.current_streaming_message_id = None;
         self.selectable_regions.clear();
         self.running_subagents.clear();
+        self.hovered_inline_subagent = None;
+        self.inline_subagent_card_bounds.clear();
         self.bash_tool_call_id = None;
     }
 
@@ -216,6 +223,7 @@ impl MessageList {
         err_msg.completed_at = Some(Utc::now());
         chat_context.messages.push(err_msg);
 
+        self.render_cache.clear();
         self.dirty = true;
     }
 
@@ -226,6 +234,16 @@ impl MessageList {
         // Ignore events from other sessions (e.g. after switching sessions
         // while the old session's agent loop is still running).
         if event.session_id() != chat_context.session_id {
+            // Not our session — check if it belongs to a running subagent.
+            let child_sid = event.session_id();
+            if let Some(exec) = self.running_subagents.iter_mut().find(|e| e.child_session_id == Some(child_sid)) {
+                if let Some(text) = infer_subagent_status(event) {
+                    if exec.status_text != text {
+                        exec.status_text = text;
+                        self.dirty = true;
+                    }
+                }
+            }
             return;
         }
 
@@ -264,7 +282,7 @@ impl MessageList {
                 self.current_streaming_message_id = None;
                 self.dirty = true;
             }
-            BackendEvent::ToolCallUpdated { tool_call, .. } => {
+            BackendEvent::ToolCallUpdated { tool_call, request_id, .. } => {
                 if let Some(msg) = chat_context.messages.iter_mut().rev().find(|m| m.role == tidev_types::message::MessageRole::Assistant) {
                     msg.upsert_tool_call(tool_call.clone());
                     self.layout_index.mark_dirty(msg.id);
@@ -274,11 +292,22 @@ impl MessageList {
                     self.bash_tool_call_id = Some(tool_call.id.clone());
                 }
                 if tool_call.name == "task" {
+                    let desc = extract_task_description(&tool_call.arguments);
+                    let sub_type = extract_subagent_type(&tool_call.arguments);
                     let already_tracking = self.running_subagents.iter().any(|s| s.tool_call_id == tool_call.id);
-                    if !already_tracking {
-                        let desc = extract_task_description(&tool_call.arguments);
-                        let sub_type = extract_subagent_type(&tool_call.arguments);
+                    if already_tracking {
+                        if let Some(exec) = self.running_subagents.iter_mut().find(|s| s.tool_call_id == tool_call.id) {
+                            if exec.subagent_type.is_empty() && !sub_type.is_empty() {
+                                exec.subagent_type = sub_type;
+                            }
+                            if exec.description.is_empty() && !desc.is_empty() {
+                                exec.description = desc;
+                                self.dirty = true;
+                            }
+                        }
+                    } else {
                         self.running_subagents.push(render_mod::RunningSubagentInfo {
+                            request_id: *request_id,
                             tool_call_id: tool_call.id.clone(),
                             description: desc,
                             subagent_type: sub_type,
@@ -342,15 +371,19 @@ impl MessageList {
                 self.dirty = true;
             }
             BackendEvent::SubagentStatus {
+                request_id,
                 status_text,
-                current_tool_call: _,
                 assistant_message,
-                content_delta: _,
-                reasoning_delta: _,
                 child_session_id,
                 ..
             } => {
-                if let Some(exec) = self.running_subagents.last_mut() {
+                // Match by request_id (backend now sends parent_request_id).
+                let idx = self.running_subagents.iter().position(|e| e.request_id == *request_id);
+                if let Some(idx) = idx {
+                    let exec = &mut self.running_subagents[idx];
+                    exec.status_text = status_text.clone();
+                    exec.child_session_id = Some(*child_session_id);
+                } else if let Some(exec) = self.running_subagents.last_mut() {
                     exec.status_text = status_text.clone();
                     exec.child_session_id = Some(*child_session_id);
                 }
@@ -366,6 +399,7 @@ impl MessageList {
                         if !msg.tool_calls.is_empty() {
                             existing.tool_calls.clone_from(&msg.tool_calls);
                         }
+                        self.layout_index.mark_dirty(msg.id);
                     } else {
                         chat_context.messages.push(msg.clone());
                     }
@@ -429,31 +463,27 @@ impl MessageList {
         let y_u = y as usize;
         let absolute_line = scroll + y_u;
 
-        // Check subagent card bounds first.
-        if !self.running_subagents.is_empty() {
-            let msg_end_line = self.layout_index.total_lines;
-            let card_start = msg_end_line.saturating_sub(scroll);
-            for (i, sa) in self.running_subagents.iter().enumerate() {
+        // Check inline subagent card bounds first (Rect-based hit detection).
+        if let Some(hit) = self
+            .inline_subagent_card_bounds
+            .iter()
+            .find(|(_, rect)| rect.contains((x, y).into()))
+        {
+            let exec_idx = hit.0;
+            if let Some(sa) = self.running_subagents.get(exec_idx) {
                 if let Some(csid) = sa.child_session_id {
-                    let card_y = card_start + (i * 2);
-                    if y_u >= card_y && y_u < (card_y + 2) {
-                        return Some(Action::Session(SessionAction::Select(csid)));
-                    }
+                    return Some(Action::Session(SessionAction::Select(csid)));
                 }
             }
         }
 
         // Use the layout index to find which block was clicked.
-        // The index has accurate line counts from the rendering pipeline,
-        // so this is far more reliable than the old heuristic.
         let block_idx = self
             .layout_index
             .blocks
             .partition_point(|b| b.start_line + b.line_count <= absolute_line);
         if block_idx < self.layout_index.blocks.len() {
             let block = &self.layout_index.blocks[block_idx];
-            // Only toggle for assistant and user blocks (tool blocks are
-            // absorbed into their parent assistant block).
             if block.message_count > 0 {
                 if self.expanded_tool_results.contains(&block.message_id) {
                     self.expanded_tool_results.remove(&block.message_id);
@@ -616,8 +646,10 @@ impl Component for MessageList {
         self.card_bounds.clear();
         self.content_area = None;
         self.render_scroll = 0;
+        self.inline_subagent_card_bounds.clear();
         let mut render_content_area = Rect::default();
         let mut render_scroll = 0;
+        let mut inline_running_card_ranges = Vec::new();
         render_mod::render_messages(
             frame,
             rect,
@@ -635,13 +667,42 @@ impl Component for MessageList {
             &self.running_subagents,
             self.spinner_start,
             self.hovered_card,
+            self.hovered_inline_subagent,
             &mut self.card_bounds,
             &mut self.selectable_regions,
+            &mut inline_running_card_ranges,
             &mut render_content_area,
             &mut render_scroll,
         );
         self.content_area = Some(render_content_area);
         self.render_scroll = render_scroll;
+
+        // Convert inline running card ranges to screen rects for mouse interaction
+        let viewport = render_content_area.height as usize;
+        for card_range in &inline_running_card_ranges {
+            let abs_start = card_range.start_line;
+            let abs_end = card_range.end_line;
+
+            let screen_start = abs_start.saturating_sub(render_scroll);
+            let screen_end = abs_end.saturating_sub(render_scroll);
+
+            if screen_end == 0 || screen_start >= viewport {
+                continue;
+            }
+
+            let visible_start = screen_start as u16;
+            let visible_end = (screen_end.min(viewport)) as u16;
+
+            if visible_start < visible_end {
+                let card_rect = Rect {
+                    x: render_content_area.x,
+                    y: render_content_area.y.saturating_add(visible_start),
+                    width: render_content_area.width,
+                    height: visible_end.saturating_sub(visible_start),
+                };
+                self.inline_subagent_card_bounds.push((card_range.execution_index, card_rect));
+            }
+        }
 
         self.dirty = false;
     }
@@ -783,6 +844,17 @@ impl MessageList {
         if self.hovered_card != prev {
             self.dirty = true;
         }
+
+        // Update inline subagent card hover
+        let prev_inline = self.hovered_inline_subagent;
+        self.hovered_inline_subagent = self
+            .inline_subagent_card_bounds
+            .iter()
+            .find(|(_, rect)| rect.contains((x, y).into()))
+            .map(|(idx, _)| *idx);
+        if self.hovered_inline_subagent != prev_inline {
+            self.dirty = true;
+        }
     }
 }
 
@@ -804,4 +876,31 @@ fn extract_subagent_type(arguments: &str) -> String {
         .ok()
         .and_then(|v| v.get("subagent_type").and_then(|t| t.as_str().map(|s| s.to_string())))
         .unwrap_or_default()
+}
+
+/// Infer a human-readable subagent status from a child-session [BackendEvent].
+///
+/// This replaces the old backend-driven SubagentStatus relay.  Since the
+/// subagent's streaming events arrive on the shared event channel with
+/// the child session_id, the TUI can infer the equivalent status without
+/// any backend changes.
+fn infer_subagent_status(event: &BackendEvent) -> Option<String> {
+    match event {
+        BackendEvent::Delta { .. } => Some("Writing output".to_string()),
+        BackendEvent::ReasoningDelta { .. } => Some("Thinking".to_string()),
+        BackendEvent::ToolCallUpdated { tool_call, .. } => {
+            let name = canonical_tool_name(&tool_call.name)
+                .unwrap_or(&tool_call.name);
+            Some(format!("Tool: {name}"))
+        }
+        BackendEvent::ToolCompleted { tool_call, .. } => {
+            let name = canonical_tool_name(&tool_call.name)
+                .unwrap_or(&tool_call.name);
+            Some(format!("Completed: {name}"))
+        }
+        BackendEvent::Finished { .. }
+        | BackendEvent::StreamEnd { .. }
+        | BackendEvent::TurnStarting { .. } => Some("Thinking".to_string()),
+        _ => None,
+    }
 }
