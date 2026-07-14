@@ -65,6 +65,97 @@ impl ThinkParser {
 
 /// Returns the maximum suffix of `text` that could be a partial `<think>` or
 /// `</think>` tag.  This prevents splitting a multi-chunk tag boundary.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plain_text_passthrough() {
+        let mut p = ThinkParser::default();
+        let (v, r) = p.push("Hello, world!");
+        assert_eq!(v, "Hello, world!");
+        assert!(r.is_empty());
+        let (v, r) = p.finish();
+        assert!(v.is_empty());
+        assert!(r.is_empty());
+    }
+
+    #[test]
+    fn full_think_tag_in_one_chunk() {
+        let mut p = ThinkParser::default();
+        let (v, r) = p.push("before <think>thinking text</think> after");
+        assert_eq!(v, "before  after");
+        assert_eq!(r, "thinking text");
+    }
+
+    #[test]
+    fn think_tag_split_across_chunks() {
+        let mut p = ThinkParser::default();
+        // "<thin" is kept as pending prefix of "<think>", "before " flushes
+        let (v, r) = p.push("before <thin");
+        assert_eq!(v, "before ");
+        assert!(r.is_empty());
+
+        // completes "<think>", enters think mode, then "</thin" kept as pending
+        let (v, r) = p.push("k>thinking text</thin");
+        assert!(v.is_empty());
+        assert_eq!(r, "thinking text");
+
+        // completes "</think>", exits think mode, " after" flushes
+        let (v, r) = p.push("k> after");
+        assert_eq!(v, " after");
+        assert!(r.is_empty());
+    }
+
+    #[test]
+    fn finish_drains_remaining_think() {
+        let mut p = ThinkParser::default();
+        let (v, r) = p.push("hello <think>unclosed");
+        // "hello " flushed before <think>, "unclosed" flushed as reasoning
+        // (in think mode, residual text is reasoning even without close tag)
+        assert_eq!(v, "hello ");
+        assert_eq!(r, "unclosed");
+        let (v, r) = p.finish();
+        assert!(v.is_empty());
+        assert!(r.is_empty()); // already drained by push
+    }
+
+    #[test]
+    fn finish_drains_remaining_visible_no_think() {
+        let mut p = ThinkParser::default();
+        let (v, r) = p.push("just visible text");
+        assert_eq!(v, "just visible text");
+        assert!(r.is_empty());
+        let (v, r) = p.finish();
+        assert!(v.is_empty());
+        assert!(r.is_empty());
+    }
+
+    #[test]
+    fn empty_content() {
+        let mut p = ThinkParser::default();
+        let (v, r) = p.push("");
+        assert!(v.is_empty());
+        assert!(r.is_empty());
+    }
+
+    #[test]
+    fn multiple_think_tags() {
+        let mut p = ThinkParser::default();
+        let (v, r) = p.push("<think>first</think> visible <think>second</think> end");
+        assert_eq!(v, " visible  end");
+        assert_eq!(r, "firstsecond");
+    }
+
+    #[test]
+    fn close_without_open_is_visible() {
+        let mut p = ThinkParser::default();
+        let (v, r) = p.push("</think>");
+        assert_eq!(v, "</think>");
+        assert!(r.is_empty());
+    }
+}
+
 fn think_tag_suffix_len(text: &str) -> usize {
     const TAGS: [&str; 2] = ["</think>", "<think>"];
 

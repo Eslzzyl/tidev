@@ -55,3 +55,41 @@ pub(crate) fn finalize_turn(
         ..Default::default()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn finalize_plain_text() {
+        let mut tp = ThinkParser::default();
+        let turn = finalize_turn(
+            "Hello".into(),
+            String::new(),
+            Some("stop".into()),
+            &BTreeMap::new(),
+            &mut tp,
+        );
+        assert_eq!(turn.content, "Hello");
+        assert!(turn.reasoning.is_empty());
+        assert!(turn.tool_calls.is_empty());
+        assert_eq!(turn.finish_reason.as_deref(), Some("stop"));
+    }
+
+    #[test]
+    fn finalize_with_reasoning() {
+        let mut tp = ThinkParser::default();
+        // Simulate streaming: accumulate visible/reasoning from push, then finalize.
+        let (v, r) = tp.push("visible <think>reasoning text</think> after");
+        let turn = finalize_turn(v, r, None, &BTreeMap::new(), &mut tp);
+        assert_eq!(turn.content, "visible  after");
+        assert_eq!(turn.reasoning, "reasoning text");
+    }
+
+    #[test]
+    fn finalize_finish_reason_defaults_to_stop() {
+        let mut tp = ThinkParser::default();
+        let turn = finalize_turn("hi".into(), String::new(), None, &BTreeMap::new(), &mut tp);
+        assert_eq!(turn.finish_reason.as_deref(), Some("stop"));
+    }
+}

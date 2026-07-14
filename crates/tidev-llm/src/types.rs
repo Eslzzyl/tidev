@@ -162,3 +162,21 @@ pub struct ToolDefinition {
     pub description: String,
     pub parameters: Value,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn api_type_round_trip() {
+        for v in [ApiType::OpenAiChatCompletions, ApiType::Anthropic, ApiType::OpenAiResponses, ApiType::GoogleGemini] {
+            assert_eq!(ApiType::parse(v.as_str()), v, "round-trip failed for {v:?}");
+        }
+    }
+
+    #[test]
+    fn api_type_parse_default() {
+        assert_eq!(ApiType::parse("unknown"), ApiType::OpenAiChatCompletions);
+        assert_eq!(ApiType::parse(""), ApiType::OpenAiChatCompletions);
+    }
+}

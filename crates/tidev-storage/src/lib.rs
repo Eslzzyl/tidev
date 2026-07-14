@@ -1841,6 +1841,257 @@ impl SessionStore {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::database::Database;
+    use tempfile::TempDir;
+
+    fn test_store() -> (SessionStore, TempDir) {
+        let tmp = TempDir::new().unwrap();
+        let db = Database::open(tmp.path().join("test.db")).unwrap();
+        let store = db.create_store().unwrap();
+        (store, tmp)
+    }
+
+    fn create_test_session(store: &SessionStore, workspace: &str, title: &str) -> Uuid {
+        let id = Uuid::new_v4();
+        store
+            .create_session(id, workspace, "deepseek", "DeepSeek", "deepseek-v4-flash", "DeepSeek-V4-Flash", title, None)
+            .unwrap();
+        id
+    }
+
+    #[test]
+    fn session_create_and_load_round_trip() {
+        let (store, _tmp) = test_store();
+        let id = create_test_session(&store, "/workspace", "Test session");
+
+        let loaded = store.load_session(id).unwrap().expect("session should exist");
+        assert_eq!(loaded.title, "Test session");
+        assert_eq!(loaded.provider_id, "deepseek");
+        assert_eq!(loaded.model_id, "deepseek-v4-flash");
+        assert_eq!(loaded.workspace_root, "/workspace");
+        assert_eq!(loaded.status, "active");
+        assert!(loaded.parent_session_id.is_none());
+    }
+
+    #[test]
+    fn context_state_round_trip() {
+        let (store, _tmp) = test_store();
+        let id = create_test_session(&store, "/workspace", "ctx test");
+
+        store
+            .update_session(id, None, None, Some("Summary: refactored main.rs"), Some(7), None, None, None, None, None)
+            .unwrap();
+
+        let loaded = store.load_session(id).unwrap().unwrap();
+        assert_eq!(loaded.context_summary.as_deref(), Some("Summary: refactored main.rs"));
+        assert_eq!(loaded.context_retained_from, 7);
+    }
+
+    #[test]
+    fn parent_child_session_relationship() {
+        let (store, _tmp) = test_store();
+        let parent = create_test_session(&store, "/workspace", "Parent");
+        let child = Uuid::new_v4();
+        store
+            .create_session(child, "/workspace", "deepseek", "DeepSeek", "deepseek-v4-flash", "DeepSeek-V4-Flash", "Child", Some(parent))
+            .unwrap();
+
+        let loaded = store.load_session(child).unwrap().unwrap();
+        assert_eq!(loaded.parent_session_id, Some(parent));
+    }
+
+    #[test]
+    fn child_sessions_excluded_from_listing() {
+        let (store, _tmp) = test_store();
+        let parent = create_test_session(&store, "/workspace", "Parent");
+        let child = Uuid::new_v4();
+        store
+            .create_session(child, "/workspace", "deepseek", "DeepSeek", "deepseek-v4-flash", "DeepSeek-V4-Flash", "Child", Some(parent))
+            .unwrap();
+
+        let sessions = store.list_sessions(10, 0).unwrap();
+        let ids: Vec<Uuid> = sessions.iter().map(|s| s.session_id).collect();
+        assert!(ids.contains(&parent));
+        assert!(!ids.contains(&child));
+    }
+
+    #[test]
+    fn workspace_session_scoping() {
+        let (store, _tmp) = test_store();
+        let _a = create_test_session(&store, "/ws-a", "A");
+        let _b = create_test_session(&store, "/ws-b", "B");
+
+        let ws_a_sessions = store.list_sessions_for_workspace("/ws-a", 10, 0).unwrap();
+        assert_eq!(ws_a_sessions.len(), 1);
+        assert_eq!(ws_a_sessions[0].title, "A");
+
+        let ws_b_sessions = store.list_sessions_for_workspace("/ws-b", 10, 0).unwrap();
+        assert_eq!(ws_b_sessions.len(), 1);
+        assert_eq!(ws_b_sessions[0].title, "B");
+    }
+
+    #[test]
+    fn system_prompt_round_trip() {
+        let (store, _tmp) = test_store();
+        let id = create_test_session(&store, "/workspace", "prompt test");
+
+        let loaded = store.load_session(id).unwrap().unwrap();
+        assert_eq!(loaded.system_prompt, "");
+
+        store
+            .update_session(id, None, None, None, None, Some("You are a helpful AI."), None, None, None, None)
+            .unwrap();
+
+        let loaded = store.load_session(id).unwrap().unwrap();
+        assert_eq!(loaded.system_prompt, "You are a helpful AI.");
+    }
+
+    #[test]
+    fn message_append_and_load_round_trip() {
+        let (store, _tmp) = test_store();
+        let sid = create_test_session(&store, "/workspace", "msg test");
+
+        let msg = Message::new(MessageRole::User, "Hello, world!");
+        store.append_message(sid, &msg).unwrap();
+
+        let messages = store.load_messages(sid).unwrap();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].role, MessageRole::User);
+        assert_eq!(messages[0].content, "Hello, world!");
+    }
+
+    #[test]
+    fn message_streaming_update_content() {
+        let (store, _tmp) = test_store();
+        let sid = create_test_session(&store, "/workspace", "stream test");
+        let msg = Message::new(MessageRole::Assistant, "");
+        store.append_message(sid, &msg).unwrap();
+
+        store.update_message_content(sid, msg.id, "streamed content").unwrap();
+
+        let messages = store.load_messages(sid).unwrap();
+        assert_eq!(messages[0].content, "streamed content");
+    }
+
+    #[test]
+    fn message_streaming_update_tool_calls() {
+        let (store, _tmp) = test_store();
+        let sid = create_test_session(&store, "/workspace", "toolcall test");
+        let msg = Message::new(MessageRole::Assistant, "");
+        store.append_message(sid, &msg).unwrap();
+
+        let calls = vec![
+            tidev_types::message::ToolCall {
+                id: "tc-1".into(),
+                name: "bash".into(),
+                arguments: r#"{"command":"ls"}"#.into(),
+                thought_signature: None,
+            },
+        ];
+        store.update_message_tool_calls(sid, msg.id, &calls).unwrap();
+
+        let messages = store.load_messages(sid).unwrap();
+        assert_eq!(messages[0].tool_calls.len(), 1);
+        assert_eq!(messages[0].tool_calls[0].name, "bash");
+    }
+
+    #[test]
+    fn message_update_metadata() {
+        let (store, _tmp) = test_store();
+        let sid = create_test_session(&store, "/workspace", "meta test");
+        let msg = Message::new(MessageRole::User, "hello");
+        store.append_message(sid, &msg).unwrap();
+
+        let meta = tidev_types::message::ToolMetadata {
+            prior_summary: Some("old summary".into()),
+            prior_retained_from: Some(42),
+            ..Default::default()
+        };
+        store.update_message_metadata(sid, msg.id, &meta).unwrap();
+
+        let messages = store.load_messages(sid).unwrap();
+        assert_eq!(messages[0].metadata.prior_summary.as_deref(), Some("old summary"));
+        assert_eq!(messages[0].metadata.prior_retained_from, Some(42));
+    }
+
+    #[test]
+    fn tool_output_save_and_load() {
+        let (store, _tmp) = test_store();
+        let sid = create_test_session(&store, "/workspace", "toolout test");
+        let msg_id = Uuid::new_v4();
+        store.save_tool_output(sid, msg_id, "read", "file content here").unwrap();
+
+        let loaded = store.load_tool_output(msg_id).unwrap();
+        assert_eq!(loaded.as_deref(), Some("file content here"));
+    }
+
+    #[test]
+    fn todo_save_and_load() {
+        let (store, _tmp) = test_store();
+        let sid = create_test_session(&store, "/workspace", "todo test");
+        let todos = vec![
+            tidev_types::tools::TodoItem { content: "Fix bug".into(), status: "pending".into() },
+            tidev_types::tools::TodoItem { content: "Write tests".into(), status: "completed".into() },
+        ];
+        store.save_todos(sid, &todos).unwrap();
+
+        let loaded = store.load_todos(sid).unwrap();
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].content, "Fix bug");
+        assert_eq!(loaded[1].status, "completed");
+    }
+
+    #[test]
+    fn session_delete_removes_session() {
+        let (store, _tmp) = test_store();
+        let id = create_test_session(&store, "/workspace", "delete test");
+        assert!(store.load_session(id).unwrap().is_some());
+
+        store.delete_session(id).unwrap();
+        assert!(store.load_session(id).unwrap().is_none());
+    }
+
+    #[test]
+    fn session_update_title_and_status() {
+        let (store, _tmp) = test_store();
+        let id = create_test_session(&store, "/workspace", "original");
+        store.update_session(id, Some("updated"), Some("ended"), None, None, None, None, None, None, None).unwrap();
+
+        let loaded = store.load_session(id).unwrap().unwrap();
+        assert_eq!(loaded.title, "updated");
+        assert_eq!(loaded.status, "ended");
+    }
+
+    #[test]
+    fn session_token_stats() {
+        let (store, _tmp) = test_store();
+        let sid = create_test_session(&store, "/workspace", "token test");
+
+        let mut msg = Message::new(MessageRole::User, "hello");
+        msg.input_tokens = Some(10);
+        msg.output_tokens = Some(20);
+        store.append_message(sid, &msg).unwrap();
+
+        let stats = store.get_session_token_stats(sid).unwrap();
+        assert_eq!(stats.input_tokens, 10);
+        assert_eq!(stats.output_tokens, 20);
+    }
+
+    #[test]
+    fn session_search_by_title() {
+        let (store, _tmp) = test_store();
+        create_test_session(&store, "/ws", "Refactor database layer");
+        create_test_session(&store, "/ws", "Add unit tests");
+
+        let results = store.search_sessions("Refactor", 10).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "Refactor database layer");
+    }
+}
 // ---------------------------------------------------------------------------
 // Session revert support
 // ---------------------------------------------------------------------------

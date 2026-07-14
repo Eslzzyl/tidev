@@ -159,6 +159,32 @@ pub fn init(data_dir: &Path, config: &LogConfig) {
     let _ = log::set_logger(&LOGGER).map(|()| log::set_max_level(max_level));
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn level_to_filter_maps_correctly() {
+        assert_eq!(level_to_filter("ERROR"), LevelFilter::Error);
+        assert_eq!(level_to_filter("WARN"), LevelFilter::Warn);
+        assert_eq!(level_to_filter("INFO"), LevelFilter::Info);
+        assert_eq!(level_to_filter("DEBUG"), LevelFilter::Debug);
+    }
+
+    #[test]
+    fn level_to_filter_unknown_defaults_to_info() {
+        assert_eq!(level_to_filter("TRACE"), LevelFilter::Info);
+        assert_eq!(level_to_filter(""), LevelFilter::Info);
+        assert_eq!(level_to_filter("garbage"), LevelFilter::Info);
+    }
+
+    #[test]
+    fn level_to_filter_case_insensitive() {
+        assert_eq!(level_to_filter("error"), LevelFilter::Error);
+        assert_eq!(level_to_filter("Info"), LevelFilter::Info);
+    }
+}
+
 fn level_to_filter(level: &str) -> LevelFilter {
     match level.to_uppercase().as_str() {
         "ERROR" => LevelFilter::Error,

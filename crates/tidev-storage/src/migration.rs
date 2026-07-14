@@ -77,3 +77,43 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fresh_conn() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);").unwrap();
+        conn
+    }
+
+    #[test]
+    fn fresh_database_gets_initial_version() {
+        let conn = fresh_conn();
+        run_migrations(&conn).unwrap();
+
+        let version: String = conn
+            .query_row("SELECT value FROM meta WHERE key = 'schema_version'", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION.to_string());
+    }
+
+    #[test]
+    fn noop_when_already_at_latest() {
+        let conn = fresh_conn();
+        conn.execute("INSERT INTO meta (key, value) VALUES ('schema_version', ?1)", rusqlite::params![SCHEMA_VERSION.to_string()]).unwrap();
+        run_migrations(&conn).unwrap();
+    }
+
+    #[test]
+    fn error_when_db_is_newer() {
+        let conn = fresh_conn();
+        let newer = format!("{}", SCHEMA_VERSION + 1);
+        conn.execute("INSERT INTO meta (key, value) VALUES ('schema_version', ?1)", rusqlite::params![newer]).unwrap();
+
+        let err = run_migrations(&conn).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("newer"), "expected 'newer' error, got: {msg}");
+    }
+}

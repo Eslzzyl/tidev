@@ -348,3 +348,20 @@ pub fn mode_reminder(mode: tidev_types::prompts::SessionMode) -> &'static str {
         tidev_types::prompts::SessionMode::Build => build_mode_reminder(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tidev_types::agent_type::AgentType;
+
+    #[test]
+    fn test_all_agents_have_non_empty_prompts() {
+        for agent_type in AgentType::all() {
+            let prompt = system_prompt(*agent_type);
+            assert!(
+                !prompt.is_empty(),
+                "Agent {agent_type:?} has empty prompt"
+            );
+        }
+    }
+}
