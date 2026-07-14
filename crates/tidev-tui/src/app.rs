@@ -155,6 +155,10 @@ pub struct App {
 
     /// Spinner animation start time.
     spinner_start: Instant,
+    /// Last rendered spinner frame index (0-3 for the 4 ASCII frames).
+    /// Used to detect when the spinner has advanced so we can re-dirty
+    /// during the pending-request gap and keep the animation alive.
+    pub(crate) last_spinner_frame: u64,
 }
 
 /// A prompt queued for submission when the current request finishes.
@@ -207,6 +211,7 @@ impl App {
             pending_compact: false,
             screen: AppScreen::Welcome,
             spinner_start: Instant::now(),
+            last_spinner_frame: 0,
             message_list: None,
             sidebar: Sidebar::new(),
             mouse_selection: MouseSelection::default(),
@@ -257,8 +262,13 @@ impl App {
         self.toast = Some((msg, Instant::now() + duration));
     }
 
+    /// Accessor for `spinner_start` so tui.rs can compute spinner frame.
+    pub(crate) fn spinner_elapsed(&self) -> std::time::Duration {
+        self.spinner_start.elapsed()
+    }
+
     /// Whether the app currently has an active request (streaming or pending tool approval).
-    fn has_active_request(&self) -> bool {
+    pub(crate) fn has_active_request(&self) -> bool {
         // The Runtime is the single source of truth for agent-loop liveness.
         if self.runtime.is_busy() {
             return true;

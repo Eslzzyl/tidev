@@ -181,6 +181,19 @@ impl Tui {
             // of the message content area (mirrors old TUI behaviour).
             app.update_mouse_selection_auto_scroll();
 
+            // Spinner wake-up: during a pending request (active but not yet
+            // streaming), re-dirty the message list whenever the ASCII spinner
+            // frame advances so the footer keeps animating.  Mirrors the
+            // v0.6.x `pending_request + spinner_frame` approach.
+            if app.has_active_request() {
+                let frame = (app.spinner_elapsed().as_millis() / 100) as u64;
+                if frame != app.last_spinner_frame {
+                    if let Some(ml) = &mut app.message_list {
+                        ml.dirty = true;
+                    }
+                }
+            }
+
             // Render if:
             //   - we just handled input (immediate response), OR
             //   - the UI is dirty AND enough time has passed (FPS cap).
@@ -190,6 +203,7 @@ impl Tui {
                     .draw(|frame| app.draw(frame))
                     .context("failed to render frame")?;
                 app.mark_clean();
+                app.last_spinner_frame = (app.spinner_elapsed().as_millis() / 100) as u64;
                 last_render = now;
                 had_input = false;
             }
