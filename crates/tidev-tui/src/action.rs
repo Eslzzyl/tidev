@@ -151,7 +151,10 @@ pub(crate) enum PermissionDecision {
 /// Identifier for every overlay component.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum OverlayKind {
-    ImageViewer,
+    ImageViewer {
+        data: Vec<u8>,
+        filename: String,
+    },
     PanelLauncher,
     PermissionDialog,
     QuestionDialog,

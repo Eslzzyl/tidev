@@ -14,11 +14,11 @@ use anyhow::Result;
 use lru::LruCache;
 use crate::chat_context::ChatContext;
 use uuid::Uuid;
-use tidev_types::message::BackendEvent;
+use tidev_types::message::{BackendEvent, MessageAttachment};
 use tidev_types::prompts::SessionMode;
 
 use tidev_types::tools::canonical_tool_name;
-use crate::action::{Action, ChatAction, SessionAction};
+use crate::action::{Action, ChatAction, OverlayAction, OverlayKind, SessionAction};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
 use crate::components::chat::layout_index::MessageLayoutIndex;
@@ -105,6 +105,9 @@ pub(crate) struct MessageList {
     // ── Retrying hint (persistent inline display) ──
     retrying_hint: Option<(u32, u32, String, Instant)>,
 
+    // ── Image badge bounds for mouse hit-testing ──
+    image_badge_bounds: Vec<(Rect, Uuid, usize)>,
+
     // ── Dirty tracking ──
     pub(crate) dirty: bool,
 }
@@ -135,6 +138,7 @@ impl MessageList {
             inline_subagent_card_bounds: Vec::new(),
             bash_tool_call_id: None,
             retrying_hint: None,
+            image_badge_bounds: Vec::new(),
             dirty: true,
         }
     }
@@ -620,11 +624,31 @@ impl MessageList {
     /// and toggle tool result expansion for the associated block.
     /// Returns an Action if a subsession switch is requested.
     pub fn handle_mouse_click(&mut self, x: u16, y: u16) -> Option<Action> {
+        // Check image badge bounds first — click on an image badge opens ImageViewer.
+        if let Some((_, msg_id, att_idx)) = self
+            .image_badge_bounds
+            .iter()
+            .find(|(rect, _, _)| rect.contains((x, y).into()))
+        {
+            let session_id = self.active_session_id?;
+            let ctx = self.chat_contexts.get(&session_id)?;
+            let msg = ctx.visible_messages().iter().find(|m| m.id == *msg_id)?;
+            if let Some(MessageAttachment::Image { data, filename, .. }) = msg.attachments.get(*att_idx)
+            {
+                return Some(Action::Overlay(OverlayAction::Open(
+                    OverlayKind::ImageViewer {
+                        data: data.clone(),
+                        filename: filename.clone(),
+                    },
+                )));
+            }
+        }
+
         let scroll = self.scroll_offset;
         let y_u = y as usize;
         let absolute_line = scroll + y_u;
 
-        // Check inline subagent card bounds first (Rect-based hit detection).
+        // Check inline subagent card bounds next (Rect-based hit detection).
         if let Some(hit) = self
             .inline_subagent_card_bounds
             .iter()
@@ -788,9 +812,11 @@ impl Component for MessageList {
         self.content_area = None;
         self.render_scroll = 0;
         self.inline_subagent_card_bounds.clear();
+        self.image_badge_bounds.clear();
         let mut render_content_area = Rect::default();
         let mut render_scroll = 0;
         let mut inline_running_card_ranges = Vec::new();
+        let mut image_badge_infos = Vec::new();
         render_mod::render_messages(
             frame,
             rect,
@@ -809,6 +835,7 @@ impl Component for MessageList {
             &mut self.card_bounds,
             &mut self.selectable_regions,
             &mut inline_running_card_ranges,
+            &mut image_badge_infos,
             &mut render_content_area,
             &mut render_scroll,
         );
@@ -840,6 +867,22 @@ impl Component for MessageList {
                 };
                 self.inline_subagent_card_bounds.push((card_range.execution_index, card_rect));
             }
+        }
+
+        // Convert image badge infos to screen-space Rects for mouse hit-testing.
+        // Card lines have 2-space indent + "┃ " prefix before content.
+        let indent_col: u16 = 4;
+        for info in &image_badge_infos {
+            let abs_line = info.card_start_line + info.badge_line_offset;
+            let screen_line = abs_line.saturating_sub(render_scroll);
+            if screen_line >= viewport {
+                continue;
+            }
+            let screen_x = render_content_area.x + indent_col + info.badge_col as u16;
+            let screen_y = render_content_area.y + screen_line as u16;
+            let rect = Rect::new(screen_x, screen_y, info.badge_width as u16, 1);
+            self.image_badge_bounds
+                .push((rect, info.message_id, info.attachment_index));
         }
 
         self.dirty = false;

@@ -33,6 +33,7 @@ use crate::components::overlay_stack::OverlayStack;
 use crate::components::overlays::agents::AgentsPanel;
 use crate::components::overlays::connect::ConnectDialog;
 use crate::components::overlays::fork::ForkConfirmDialog;
+use crate::components::overlays::image::ImageViewer;
 
 use crate::components::overlays::message::{MessagePanel, MessagePanelMessage};
 use crate::components::overlays::model::ModelPanel;
@@ -2056,12 +2057,8 @@ impl App {
                     .unwrap_or_default();
                 Some(Box::new(RenameDialog::new(session_id, title)))
             }
-            OverlayKind::ImageViewer => {
-                // ImageViewer requires data from a chat message (data_url + filename).
-                // This is triggered by ChatAction::ToggleImage which will be routed
-                // once Chat/MessageList is migrated (Phase 6). For now return None
-                // so opening ImageViewer is a no-op until the Chat component provides data.
-                None
+            OverlayKind::ImageViewer { data, filename } => {
+                ImageViewer::from_raw(data, filename).map(|v| Box::new(v) as Box<dyn Component>)
             }
             OverlayKind::ConnectDialog => {
                 Some(Box::new(ConnectDialog::new()))

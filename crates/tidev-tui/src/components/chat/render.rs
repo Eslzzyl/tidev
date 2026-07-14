@@ -16,7 +16,7 @@ use ratatui::style::Color;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use rayon::prelude::*;
-use tidev_types::message::{Message, MessageRole, COMPACTION_MESSAGE_LABEL};
+use tidev_types::message::{Message, MessageAttachment, MessageRole, COMPACTION_MESSAGE_LABEL};
 use tidev_types::tools::canonical_tool_name;
 use crate::chat_context::ChatContext;
 use crate::theme::ThemePalette;
@@ -76,6 +76,24 @@ pub(crate) struct InlineRunningCardRange {
     pub execution_index: usize,
     pub start_line: usize,
     pub end_line: usize,
+}
+
+/// Information about an image badge found in a rendered user message card.
+/// Used for mouse hit-testing to open the ImageViewer overlay.
+#[derive(Clone, Debug)]
+pub(crate) struct ImageBadgeInfo {
+    /// Absolute line number where the card starts in the render output.
+    pub card_start_line: usize,
+    /// Line offset within the card (0-indexed).
+    pub badge_line_offset: usize,
+    /// Column offset of the badge within the line.
+    pub badge_col: usize,
+    /// Width of the badge text in columns.
+    pub badge_width: usize,
+    /// The message that contains the image attachment.
+    pub message_id: Uuid,
+    /// Index into the message's Image attachments.
+    pub attachment_index: usize,
 }
 
 /// Render a running subagent inline card — 4+ lines with padding, word-wrapped
@@ -180,6 +198,7 @@ pub(crate) struct RenderOutput {
     pub selectable_regions: Vec<SelectableRegionRange>,
     pub card_bounds: Vec<(Uuid, usize, usize)>,
     pub inline_running_card_ranges: Vec<InlineRunningCardRange>,
+    pub image_badge_infos: Vec<ImageBadgeInfo>,
 }
 
 // ---------------------------------------------------------------------------
@@ -204,6 +223,7 @@ pub(crate) fn render_messages(
     out_card_bounds: &mut Vec<(Uuid, usize, usize)>,
     out_selectable_regions: &mut Vec<SelectableRegionRange>,
     out_inline_running_card_ranges: &mut Vec<InlineRunningCardRange>,
+    out_image_badge_infos: &mut Vec<ImageBadgeInfo>,
     out_render_content_area: &mut Rect,
     out_render_scroll: &mut usize,
 ) {
@@ -247,6 +267,8 @@ pub(crate) fn render_messages(
     *out_selectable_regions = output.selectable_regions;
     // Export inline running card ranges for mouse interaction.
     *out_inline_running_card_ranges = output.inline_running_card_ranges;
+    // Export image badge infos for mouse hit-testing.
+    *out_image_badge_infos = output.image_badge_infos;
     // Export the rendered content area and render scroll for coordinate
     // conversion in selectable_region_rects().
     *out_render_content_area = content_area;
@@ -340,6 +362,7 @@ fn messages_text(
     let mut selectable_regions: Vec<SelectableRegionRange> = Vec::new();
     let mut card_bounds: Vec<(Uuid, usize, usize)> = Vec::new();
     let mut inline_running_card_ranges: Vec<InlineRunningCardRange> = Vec::new();
+    let mut image_badge_infos: Vec<ImageBadgeInfo> = Vec::new();
 
     // Header for sub-sessions
     let header_lines = build_header_lines(chat_context.parent_session_id.is_some(), ctx.palette);
@@ -351,7 +374,7 @@ fn messages_text(
         let empty_line = Line::from(Span::styled("No messages yet.", Style::default().fg(ctx.palette.muted)));
         lines.push(empty_line);
         let total = lines.len().max(1);
-        return RenderOutput { lines, total_lines: total, render_scroll: 0, effective_scroll: 0, selectable_regions, card_bounds, inline_running_card_ranges };
+        return RenderOutput { lines, total_lines: total, render_scroll: 0, effective_scroll: 0, selectable_regions, card_bounds, inline_running_card_ranges, image_badge_infos };
     }
 
     // Update layout index — this renders all blocks and populates the cache
@@ -395,7 +418,7 @@ fn messages_text(
             || !matches!(messages[next_idx].role, MessageRole::Tool);
         let block_lines = render_block_from_cache(
             block, cache, width, is_round_end, &mut selectable_regions, ctx, &current_line_offset,
-            messages, &mut card_bounds, &mut inline_running_card_ranges,
+            messages, &mut card_bounds, &mut inline_running_card_ranges, &mut image_badge_infos,
         );
         lines.extend(block_lines);
         current_line_offset = lines.len();
@@ -444,7 +467,7 @@ fn messages_text(
         lines.extend(decorated);
     }
 
-    RenderOutput { lines, total_lines: total_overall_lines, render_scroll, effective_scroll: scroll, selectable_regions, card_bounds, inline_running_card_ranges }
+    RenderOutput { lines, total_lines: total_overall_lines, render_scroll, effective_scroll: scroll, selectable_regions, card_bounds, inline_running_card_ranges, image_badge_infos }
 }
 
 // ---------------------------------------------------------------------------
@@ -798,6 +821,49 @@ fn compute_and_cache_block(
 }
 
 // ---------------------------------------------------------------------------
+// Image badge scanning
+// ---------------------------------------------------------------------------
+
+/// Scan card lines for image badge patterns and record their positions
+/// along with the associated message attachment index.
+fn scan_image_badges(
+    card_lines: &[Line<'static>],
+    msg: &Message,
+    card_start_line: usize,
+) -> Vec<ImageBadgeInfo> {
+    let image_attachments: Vec<&MessageAttachment> = msg.attachments.iter()
+        .filter(|a| matches!(a, MessageAttachment::Image { .. }))
+        .collect();
+    if image_attachments.is_empty() {
+        return Vec::new();
+    }
+
+    let mut infos = Vec::new();
+    let mut url_idx = 0;
+    for (line_offset, line) in card_lines.iter().enumerate() {
+        let line_text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        let mut search_start = 0;
+        while let Ok(Some(m)) = IMAGE_BADGE_RE.find(&line_text[search_start..]) {
+            let abs_start = search_start + m.start();
+            let abs_end = search_start + m.end();
+            if url_idx < image_attachments.len() {
+                infos.push(ImageBadgeInfo {
+                    card_start_line,
+                    badge_line_offset: line_offset,
+                    badge_col: abs_start,
+                    badge_width: abs_end - abs_start,
+                    message_id: msg.id,
+                    attachment_index: url_idx,
+                });
+            }
+            url_idx += 1;
+            search_start += m.end();
+        }
+    }
+    infos
+}
+
+// ---------------------------------------------------------------------------
 // Render block from cache
 // ---------------------------------------------------------------------------
 
@@ -812,6 +878,7 @@ fn render_block_from_cache(
     messages: &[Message],
     card_bounds: &mut Vec<(Uuid, usize, usize)>,
     inline_running_card_ranges: &mut Vec<InlineRunningCardRange>,
+    image_badge_infos: &mut Vec<ImageBadgeInfo>,
 ) -> Vec<Line<'static>> {
     let body_width = width.saturating_sub(2).max(1);
     let cards_key = MessageRenderCacheKey {
@@ -852,6 +919,8 @@ fn render_block_from_cache(
                         let end_line = current_line_offset + lines.len();
                         if !matches!(role, MessageRole::Assistant) {
                             card_bounds.push((block.message_id, start_line, end_line));
+                            let msg = &messages[block.message_start_idx];
+                            image_badge_infos.extend(scan_image_badges(card_lines, msg, start_line));
                         }
                     }
                 }
@@ -884,6 +953,7 @@ fn render_block_from_cache(
                 let end_line = current_line_offset + lines.len();
                 if !matches!(role, MessageRole::Assistant) {
                     card_bounds.push((block.message_id, start_line, end_line));
+                    image_badge_infos.extend(scan_image_badges(card_lines, msg, start_line));
                 }
             }
         }

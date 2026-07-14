@@ -3725,7 +3725,6 @@ version = "0.7.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "base64",
  "chrono",
  "diffy",
  "dirs",
@@ -3762,7 +3761,6 @@ dependencies = [
  "ansi-to-tui",
  "anyhow",
  "arboard",
- "base64",
  "blake3",
  "chrono",
  "crossterm 0.28.1",

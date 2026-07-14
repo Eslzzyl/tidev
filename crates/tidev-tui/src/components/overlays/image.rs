@@ -1,7 +1,6 @@
 //! ImageViewer — full-screen image viewer overlay.
 
 use anyhow::Result;
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use ratatui::layout::{Alignment, Rect};
 use ratatui::prelude::{Frame, Modifier, Style};
@@ -25,17 +24,13 @@ pub(crate) struct ImageViewer {
 }
 
 impl ImageViewer {
-    pub(crate) fn new(data_url: &str, filename: &str) -> Option<Self> {
-        let raw_bytes = decode_data_url(data_url)?;
-        let dyn_img = image::load_from_memory(&raw_bytes).ok()?;
+    pub(crate) fn from_raw(data: Vec<u8>, filename: String) -> Option<Self> {
+        let dyn_img = image::load_from_memory(&data).ok()?;
         let (width, height) = (dyn_img.width(), dyn_img.height());
-
-        // Create the picker once during construction.
         let picker = Picker::from_query_stdio().ok();
-
         Some(Self {
             dyn_img,
-            filename: filename.to_string(),
+            filename,
             width,
             height,
             picker,
@@ -57,7 +52,10 @@ impl Component for ImageViewer {
         }
         match key.code {
             KeyCode::Char(_) | KeyCode::Esc | KeyCode::Enter => {
-                Some(Action::Overlay(OverlayAction::Close(OverlayKind::ImageViewer)))
+                Some(Action::Overlay(OverlayAction::Close(OverlayKind::ImageViewer {
+                    data: Vec::new(),
+                    filename: String::new(),
+                })))
             }
             _ => None,
         }
@@ -173,9 +171,4 @@ impl Component for ImageViewer {
     }
 }
 
-/// Decode a `data:image/png;base64,AAAA...` URL into raw bytes.
-fn decode_data_url(data_url: &str) -> Option<Vec<u8>> {
-    let base64_part = data_url.find("base64,")?;
-    let encoded = &data_url[base64_part + 7..];
-    BASE64_STANDARD.decode(encoded).ok()
-}
+
