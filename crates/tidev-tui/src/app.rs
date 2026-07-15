@@ -80,6 +80,8 @@ pub struct App {
     should_quit: bool,
     /// Pending scroll target set by ChatAction::ScrollTo (consumed by Chat component).
     scroll_target: Option<uuid::Uuid>,
+    /// Text selected in the composer input area, pending clipboard copy in draw().
+    pending_input_copy: Option<String>,
     /// Current active session (set by SessionPanel when switching sessions).
     current_session_id: Option<uuid::Uuid>,
     /// Current session mode (Build / Plan).
@@ -201,6 +203,7 @@ impl App {
             current_palette,
             should_quit: false,
             scroll_target: None,
+            pending_input_copy: None,
             current_session_id: None,
             mode: SessionMode::Build,
             pending_mode: None,
@@ -580,6 +583,7 @@ impl App {
                             ctx.revert_message_id = Some(target_id);
                         }
                     }
+                    chat.follow_tail = true;
                     chat.invalidate_layout();
                 }
                 if let Some(ref mut composer) = self.composer {
@@ -1051,12 +1055,13 @@ impl App {
         // Sidebar scroll (scroll events in the sidebar area)
         if let Some(sidebar_area) = self.sidebar_area
             && sidebar_area.contains(position) {
+                let speed = self.runtime.config().ui.scroll_speed as usize;
                 match mouse.kind {
                     MouseEventKind::ScrollDown => {
-                        self.sidebar.scroll_down(3);
+                        self.sidebar.scroll_down(speed);
                     }
                     MouseEventKind::ScrollUp => {
-                        self.sidebar.scroll_up(3);
+                        self.sidebar.scroll_up(speed);
                     }
                     _ => {}
                 }
@@ -1087,6 +1092,16 @@ impl App {
                         self.process_action(action);
                         return;
                     }
+
+                // Composer input area: set cursor and start selection.
+                if let Some(ref mut composer) = self.composer {
+                    let text_area = composer.last_text_area;
+                    if text_area.contains(position) {
+                        composer.handle_mouse_down(position, text_area);
+                        self.mouse_selection.clear();
+                        return;
+                    }
+                }
 
                 // Start mouse selection if within message area (no interactive hit).
                 if msg_bounds.is_some_and(|b| b.contains(position)) {
@@ -1125,6 +1140,13 @@ impl App {
                         chat.continue_scrollbar_drag(position.y);
                         return;
                     }
+                // Composer input area drag (extends selection).
+                if let Some(ref mut composer) = self.composer
+                    && composer.is_input_dragging()
+                {
+                    composer.handle_mouse_drag(position, composer.last_text_area);
+                    return;
+                }
                 // Always update drag position (old TUI unconditional behaviour).
                 self.mouse_selection.drag(position);
             }
@@ -1132,6 +1154,12 @@ impl App {
                 if let Some(ref mut chat) = self.message_list {
                     chat.end_scrollbar_drag();
                 }
+
+                // Composer input area: finalize selection and queue clipboard copy.
+                if let Some(ref mut composer) = self.composer
+                    && let Some(selected) = composer.handle_mouse_up(position) {
+                        self.pending_input_copy = Some(selected);
+                    }
 
                 // Composer image badge click: open ImageViewer.
                 if !self.mouse_selection.is_dragging()
@@ -1176,15 +1204,33 @@ impl App {
                 // Clipboard copy is handled in draw() where we have access to the frame buffer.
             }
             MouseEventKind::ScrollDown => {
+                // Check composer input area first (mirrors old TUI behaviour).
+                if let Some(ref mut composer) = self.composer {
+                    let text_area = composer.last_text_area;
+                    if text_area.contains(position) {
+                        composer.handle_mouse_scroll_down(text_area.width, text_area.height);
+                        return;
+                    }
+                }
                 self.mouse_selection.clear();
+                let speed = self.runtime.config().ui.scroll_speed as isize;
                 if self.message_list.is_some() {
-                    self.process_action(Action::Chat(ChatAction::ScrollDelta(3)));
+                    self.process_action(Action::Chat(ChatAction::ScrollDelta(speed)));
                 }
             }
             MouseEventKind::ScrollUp => {
+                // Check composer input area first (mirrors old TUI behaviour).
+                if let Some(ref mut composer) = self.composer {
+                    let text_area = composer.last_text_area;
+                    if text_area.contains(position) {
+                        composer.handle_mouse_scroll_up();
+                        return;
+                    }
+                }
                 self.mouse_selection.clear();
+                let speed = self.runtime.config().ui.scroll_speed as isize;
                 if self.message_list.is_some() {
-                    self.process_action(Action::Chat(ChatAction::ScrollDelta(-3)));
+                    self.process_action(Action::Chat(ChatAction::ScrollDelta(-speed)));
                 }
             }
             _ => {}
@@ -1217,19 +1263,30 @@ impl App {
         let top_threshold = area.y.saturating_add(1);
         let bottom_threshold = area.y.saturating_add(area.height.saturating_sub(2));
 
+        let speed = self.runtime.config().ui.scroll_speed as usize;
         if pointer.y <= top_threshold {
             let chat = self.message_list.as_mut().unwrap();
-            let new_scroll = chat.scroll_offset.saturating_sub(1);
+            let new_scroll = chat.scroll_offset.saturating_sub(speed);
             chat.scroll_offset = new_scroll.min(chat.max_scroll());
             chat.follow_tail = false;
             chat.dirty = true;
         } else if pointer.y >= bottom_threshold {
             let chat = self.message_list.as_mut().unwrap();
-            let new_scroll = chat.scroll_offset.saturating_add(1);
+            let new_scroll = chat.scroll_offset.saturating_add(speed);
             chat.scroll_offset = new_scroll.min(chat.max_scroll());
             chat.follow_tail = chat.scroll_offset >= chat.max_scroll();
             chat.dirty = true;
         }
+    }
+
+    /// Per-frame auto-scroll while dragging a mouse selection in the
+    /// composer input area near the top/bottom edge.
+    pub fn update_input_area_auto_scroll(&mut self) {
+        let Some(ref mut composer) = self.composer else { return };
+        let text_area = composer.last_text_area;
+        if text_area.width == 0 || text_area.height == 0 { return; }
+        let Some(pointer) = self.mouse_selection.pointer() else { return; };
+        composer.update_drag_auto_scroll(pointer, text_area);
     }
 
     pub fn handle_resize(&mut self, _w: u16, _h: u16) {
@@ -1788,6 +1845,9 @@ impl App {
                             let rt = self.runtime.clone();
                             let text_for_title = text.clone();
                             self.set_notice("Sending...");
+                            if let Some(ref mut chat) = self.message_list {
+                                chat.follow_tail = true;
+                            }
                             tokio::spawn(async move {
                                 if let Err(e) = rt
                                     .submit_prompt_with_attachments(sid, mode, text, final_attachments, Some(thinking_level))
@@ -2560,6 +2620,19 @@ impl App {
                         }
                     }
                 }
+
+        // Handle pending clipboard copy from composer input area.
+        if let Some(text) = self.pending_input_copy.take()
+            && !text.is_empty() {
+                match copy_to_clipboard(&text) {
+                    Ok(()) => {
+                        self.set_toast("Selection copied to clipboard", std::time::Duration::from_secs(3));
+                    }
+                    Err(e) => {
+                        self.set_toast(format!("Copy failed: {e}"), std::time::Duration::from_secs(5));
+                    }
+                }
+            }
     }
 
     /// Render the welcome screen with logo, subtitle, and composer.

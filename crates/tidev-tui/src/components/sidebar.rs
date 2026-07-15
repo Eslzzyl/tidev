@@ -26,6 +26,9 @@ pub(crate) struct Sidebar {
 
     /// Cached total lines for scroll max computation.
     total_lines: usize,
+
+    /// Viewport height in lines (set during render, used for scroll max).
+    viewport_lines: usize,
 }
 
 impl Sidebar {
@@ -33,6 +36,7 @@ impl Sidebar {
         Self {
             scroll_offset: 0,
             total_lines: 0,
+            viewport_lines: 0,
         }
     }
 
@@ -41,7 +45,7 @@ impl Sidebar {
     }
 
     pub fn scroll_down(&mut self, lines: usize) {
-        let max_scroll = self.total_lines.saturating_sub(1);
+        let max_scroll = self.total_lines.saturating_sub(self.viewport_lines.max(1));
         self.scroll_offset = self.scroll_offset.saturating_add(lines).min(max_scroll);
     }
 
@@ -382,8 +386,8 @@ impl Sidebar {
             })
             .sum();
 
-        let viewport_lines = content_height as usize;
-        let max_scroll = self.total_lines.saturating_sub(viewport_lines);
+        self.viewport_lines = content_height as usize;
+        let max_scroll = self.total_lines.saturating_sub(self.viewport_lines.max(1));
         self.scroll_offset = self.scroll_offset.min(max_scroll);
 
         // Render scrollable content

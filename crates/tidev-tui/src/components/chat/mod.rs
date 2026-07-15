@@ -69,6 +69,7 @@ pub(crate) struct MessageList {
     pub follow_tail: bool,
     /// Pending scroll target set by ChatAction::ScrollTo.
     pub scroll_target: Option<Uuid>,
+    scroll_speed: usize,
 
     // ── Interaction state ──
     expanded_tool_results: HashSet<Uuid>,
@@ -122,6 +123,7 @@ impl MessageList {
             scroll_offset: 0,
             follow_tail: true,
             scroll_target: None,
+            scroll_speed: 3,
             expanded_tool_results: HashSet::new(),
 
             selectable_regions: Vec::new(),
@@ -369,7 +371,6 @@ impl MessageList {
         match event {
             BackendEvent::TurnStarting { .. } => {
                 let _message_id = self.streaming_buffer.begin_streaming(&mut chat_context.messages);
-                self.follow_tail = true;
                 self.dirty = true;
             }
             BackendEvent::Delta { content, .. } => {
@@ -593,6 +594,7 @@ impl MessageList {
             }
             BackendEvent::ContextCompacted { compacted, summary, model_id, completed_at, .. } => {
                 if *compacted {
+                    self.follow_tail = true;
                     if let Some(summary) = summary {
                         // The summary was already streamed via Delta events into
                         // the last streaming message.  If manual compaction found
@@ -728,7 +730,8 @@ impl MessageList {
 }
 
 impl Component for MessageList {
-    fn init(&mut self, _ctx: &InitContext) -> Result<()> {
+    fn init(&mut self, ctx: &InitContext) -> Result<()> {
+        self.scroll_speed = ctx.config.ui.scroll_speed as usize;
         Ok(())
     }
 
@@ -739,10 +742,10 @@ impl Component for MessageList {
 
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => {
-                Some(Action::Chat(ChatAction::ScrollDelta(-3)))
+                Some(Action::Chat(ChatAction::ScrollDelta(-(self.scroll_speed as isize))))
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                Some(Action::Chat(ChatAction::ScrollDelta(3)))
+                Some(Action::Chat(ChatAction::ScrollDelta(self.scroll_speed as isize)))
             }
             KeyCode::PageUp => {
                 let page = self.content_area.map(|r| (r.height as isize).max(1)).unwrap_or(10);
@@ -777,7 +780,8 @@ impl Component for MessageList {
                     let total = self.layout_index.total_lines;
                     let viewport = self.content_area.map(|r| r.height as usize).unwrap_or(20).max(1);
                     let max_scroll = total.saturating_sub(viewport);
-                    let new_scroll = (self.scroll_offset as isize + delta).max(0) as usize;
+                    let current = if self.follow_tail { max_scroll } else { self.scroll_offset.min(max_scroll) };
+                    let new_scroll = (current as isize + delta).max(0) as usize;
                     self.scroll_offset = new_scroll.min(max_scroll);
                     self.follow_tail = self.scroll_offset >= max_scroll;
                     self.dirty = true;
@@ -956,11 +960,21 @@ impl MessageList {
     }
 
     /// Start a scrollbar drag: call on mouse down on scrollbar.
+    /// Jumps to the clicked position first (click-to-jump), then starts drag tracking.
     pub fn start_scrollbar_drag(&mut self, mouse_y: u16) {
+        let Some(sb_area) = self.scrollbar_area() else { return };
         let max_scroll = self.max_scroll();
         if max_scroll == 0 {
             return;
         }
+        // Click-to-jump: map click position to scroll offset
+        let track_height = sb_area.height as usize;
+        let click_y = mouse_y.saturating_sub(sb_area.y) as f32;
+        let target_scroll = ((click_y / track_height.max(1) as f32) * max_scroll as f32).round() as usize;
+        self.scroll_offset = target_scroll.min(max_scroll);
+        self.follow_tail = self.scroll_offset >= max_scroll;
+        self.dirty = true;
+        // Start drag tracking for subsequent drag events
         self.scrollbar_drag = Some(ScrollbarDrag {
             start_scroll: self.scroll_offset,
             start_mouse_y: mouse_y,

@@ -24,7 +24,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use ratatui::layout::Rect;
+use ratatui::layout::{Position, Rect};
 use ratatui::Frame;
 use tidev_search::current_at_fragment;
 use unicode_width::UnicodeWidthChar;
@@ -127,8 +127,10 @@ pub(crate) struct Composer {
     /// Last visible line count in the input area (set during draw).
     last_visible_lines: usize,
     /// Screen rect of the text input area (set during draw, used for mouse
-    /// hit-testing on image badges).
+    /// hit-testing on image badges and mouse interaction).
     pub(crate) last_text_area: Rect,
+    /// Whether a mouse drag is in progress in the input area.
+    input_dragging: bool,
 }
 
 impl Composer {
@@ -156,6 +158,7 @@ impl Composer {
             last_input_width: 0,
             last_visible_lines: 0,
             last_text_area: Rect::default(),
+            input_dragging: false,
         }
     }
 
@@ -1005,6 +1008,101 @@ impl Composer {
         }
 
         self.input_scroll_offset = self.input_scroll_offset.min(max_scroll);
+    }
+
+    // ── Mouse interaction (mirrors old TUI behaviour) ─────────────────
+
+    /// Handle mouse down in the input text area.
+    pub(crate) fn handle_mouse_down(&mut self, position: Position, text_area: Rect) {
+        let scroll = self.input_scroll_offset as u16;
+        let local_y = position.y.saturating_sub(text_area.y);
+        let local_x = position.x.saturating_sub(text_area.x);
+        let target_line = scroll.saturating_add(local_y);
+        let raw_pos = self.raw_text_position_at_visual(text_area.width, target_line, local_x);
+        self.cursor = raw_pos;
+        self.selection_anchor = Some(raw_pos);
+        self.input_dragging = true;
+        self.dirty = true;
+    }
+
+    /// Handle mouse drag in the input text area (extends selection).
+    pub(crate) fn handle_mouse_drag(&mut self, position: Position, text_area: Rect) {
+        if !self.input_dragging {
+            return;
+        }
+        let scroll = self.input_scroll_offset as u16;
+        let local_y = position
+            .y
+            .clamp(text_area.y, text_area.y + text_area.height.saturating_sub(1))
+            .saturating_sub(text_area.y);
+        let local_x = position.x.saturating_sub(text_area.x);
+        let target_line = scroll.saturating_add(local_y);
+        let raw_pos = self.raw_text_position_at_visual(text_area.width, target_line, local_x);
+        self.cursor = raw_pos;
+        self.dirty = true;
+    }
+
+    /// Handle mouse up in the input text area.
+    /// Returns the selected text (for auto-copy), or None.
+    pub(crate) fn handle_mouse_up(&mut self, _position: Position) -> Option<String> {
+        if !self.input_dragging {
+            return None;
+        }
+        self.input_dragging = false;
+        let selected = self
+            .selection_range()
+            .map(|(start, end)| self.text[start..end].to_string())
+            .filter(|s| !s.is_empty());
+        self.dirty = true;
+        selected
+    }
+
+    /// Whether a mouse drag is active in the input area.
+    pub(crate) fn is_input_dragging(&self) -> bool {
+        self.input_dragging
+    }
+
+    /// Scroll input area up by one visual line (mouse wheel).
+    pub(crate) fn handle_mouse_scroll_up(&mut self) {
+        if self.input_scroll_offset > 0 {
+            self.input_scroll_offset -= 1;
+            self.dirty = true;
+        }
+    }
+
+    /// Scroll input area down by one visual line (mouse wheel).
+    pub(crate) fn handle_mouse_scroll_down(&mut self, width: u16, visible_lines: u16) {
+        let total_lines = self.display_line_count(width as usize);
+        let max_scroll = total_lines.saturating_sub(visible_lines as usize);
+        if self.input_scroll_offset < max_scroll {
+            self.input_scroll_offset += 1;
+            self.dirty = true;
+        }
+    }
+
+    /// Per-frame auto-scroll during mouse drag near top/bottom edges.
+    /// Returns true if auto-scroll was performed.
+    pub(crate) fn update_drag_auto_scroll(&mut self, pointer: Position, text_area: Rect) -> bool {
+        if !self.input_dragging {
+            return false;
+        }
+        let visible_lines = text_area.height as usize;
+        let total_lines = self.display_line_count(text_area.width as usize);
+        let max_scroll = total_lines.saturating_sub(visible_lines);
+
+        if pointer.y < text_area.y && self.input_scroll_offset > 0 {
+            self.input_scroll_offset -= 1;
+            self.dirty = true;
+            return true;
+        }
+        if pointer.y >= text_area.y.saturating_add(text_area.height.saturating_sub(1))
+            && self.input_scroll_offset < max_scroll
+        {
+            self.input_scroll_offset += 1;
+            self.dirty = true;
+            return true;
+        }
+        false
     }
 }
 

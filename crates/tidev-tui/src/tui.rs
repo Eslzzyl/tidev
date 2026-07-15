@@ -180,8 +180,9 @@ impl Tui {
             // ── Phase 2: Throttled render ─────────────────────────────
             //
             // Per-frame: auto-scroll when dragging a selection near the edge
-            // of the message content area (mirrors old TUI behaviour).
+            // of the message content area or composer input area (mirrors old TUI behaviour).
             app.update_mouse_selection_auto_scroll();
+            app.update_input_area_auto_scroll();
 
             // Spinner wake-up: during a pending request (active but not yet
             // streaming), re-dirty the message list whenever the ASCII spinner
