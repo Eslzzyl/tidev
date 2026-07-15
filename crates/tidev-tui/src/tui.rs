@@ -116,10 +116,10 @@ impl Tui {
                         match event {
                             Event::Key(key) => app.handle_key_event(key),
                             Event::Mouse(mouse) => app.handle_mouse_event(mouse),
+                            Event::Paste(text) => app.handle_paste(text),
                             Event::Resize(w, h) => app.handle_resize(w, h),
                             Event::FocusGained => app.handle_focus_event(true),
                             Event::FocusLost => app.handle_focus_event(false),
-                            _ => {}
                         }
                         cc_count += 1;
                         had_input = true;

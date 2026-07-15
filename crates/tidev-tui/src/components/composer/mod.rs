@@ -645,6 +645,32 @@ impl Composer {
         self.history_cursor = None;
     }
 
+    /// Handle text paste from bracketed paste mode (⌘V / Shift+Insert).
+    ///
+    /// Normalises line endings and attempts image fallback when the pasted
+    /// text is empty (clipboard contains only image data).
+    pub fn handle_paste(&mut self, text: &str) {
+        if !text.is_empty() {
+            let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+            self.insert_str(&normalized);
+            self.sync_autocomplete();
+            self.dirty = true;
+        } else if self.model_supports_images {
+            // Empty bracketed paste — clipboard may contain an image.
+            if let Some((filename, _mime, data, file_size)) =
+                crate::utils::paste_image_from_clipboard()
+            {
+                let placeholder = format!("[Image: {}]", filename);
+                let insert_pos = self.cursor;
+                self.insert_str(&placeholder);
+                let end_pos = self.cursor;
+                self.register_span(insert_pos, end_pos, Some(data), Some(filename));
+                self.dirty = true;
+                log::info!("Pasted image: {} bytes", file_size);
+            }
+        }
+    }
+
     pub fn replace_range(&mut self, start: usize, end: usize, replacement: &str) {
         let start = start.min(self.text.len());
         let end = end.min(self.text.len()).max(start);

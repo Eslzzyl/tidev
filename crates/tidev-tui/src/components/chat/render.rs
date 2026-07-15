@@ -382,8 +382,53 @@ fn messages_text(
     // Update layout index — this renders all blocks and populates the cache
     update_layout_index(index, cache, messages, width, body_width, ctx);
 
+    // Pre-compute retrying hint lines (if any) so we can include its height
+    // in the scroll calculation before determining which blocks are visible.
+    let mut precomputed_hint_lines: Vec<Line<'static>> = Vec::new();
+    if let Some((attempt, max_attempts, reason, deadline)) = retrying_hint.as_ref() {
+        let now = Instant::now();
+        let remaining = if *deadline > now {
+            deadline.duration_since(now).as_secs()
+        } else {
+            0
+        };
+
+        let retry_after_str = format!("Retrying in {remaining}s");
+        let msg = format!("Retrying ({}/{}): {}", attempt, max_attempts, reason);
+
+        let text_width = body_width.max(1);
+        let palette = ctx.palette;
+        let mut retry_lines = Vec::new();
+
+        // Wrap the retry message with word-wrap
+        let wrapped = wrap_text_lines(&msg, text_width, usize::MAX);
+        for (i, line) in wrapped.iter().enumerate() {
+            let prefix = if i == 0 { "⟳" } else { " " };
+            retry_lines.push(Line::from(vec![
+                Span::styled(prefix, Style::default().fg(palette.accent_soft)),
+                Span::styled(format!(" {line}"), Style::default().fg(palette.text)),
+            ]));
+        }
+
+        // Countdown line
+        retry_lines.push(Line::from(vec![
+            Span::styled("⟳", Style::default().fg(palette.accent_soft)),
+            Span::styled(format!(" {retry_after_str}"), Style::default().fg(palette.muted)),
+        ]));
+
+        // Wrap in card with padding (same style as error messages)
+        let mut card_lines = Vec::new();
+        card_lines.push(Line::from(""));
+        card_lines.extend(retry_lines);
+        card_lines.push(Line::from(""));
+
+        precomputed_hint_lines = decorate_card_lines(card_lines, palette.panel_light, 2, width);
+    }
+
+    let retry_hint_height = precomputed_hint_lines.len();
+
     // Calculate visible range (clamp scroll and respect follow_tail)
-    let mut total_overall_lines = header_line_count + index.total_lines;
+    let mut total_overall_lines = header_line_count + index.total_lines + retry_hint_height;
     let viewport = viewport.max(1);
     let max_scroll = total_overall_lines.saturating_sub(viewport);
     let scroll = if follow_tail { max_scroll } else { scroll.min(max_scroll) };
@@ -426,47 +471,10 @@ fn messages_text(
         current_line_offset = lines.len();
     }
 
-    // Append retrying hint as a temporary card at the bottom of the chat area
-    if let Some((attempt, max_attempts, reason, deadline)) = retrying_hint.as_ref() {
-        let now = Instant::now();
-        let remaining = if *deadline > now {
-            deadline.duration_since(now).as_secs()
-        } else {
-            0
-        };
-
-        let retry_after_str = format!("Retrying in {remaining}s");
-        let msg = format!("Retrying ({}/{}): {}", attempt, max_attempts, reason);
-
-        let text_width = body_width.max(1);
-        let palette = ctx.palette;
-        let mut retry_lines = Vec::new();
-
-        // Wrap the retry message with word-wrap
-        let wrapped = wrap_text_lines(&msg, text_width, usize::MAX);
-        for (i, line) in wrapped.iter().enumerate() {
-            let prefix = if i == 0 { "⟳" } else { " " };
-            retry_lines.push(Line::from(vec![
-                Span::styled(prefix, Style::default().fg(palette.accent_soft)),
-                Span::styled(format!(" {line}"), Style::default().fg(palette.text)),
-            ]));
-        }
-
-        // Countdown line
-        retry_lines.push(Line::from(vec![
-            Span::styled("⟳", Style::default().fg(palette.accent_soft)),
-            Span::styled(format!(" {retry_after_str}"), Style::default().fg(palette.muted)),
-        ]));
-
-        // Wrap in card with padding (same style as error messages)
-        let mut card_lines = Vec::new();
-        card_lines.push(Line::from(""));
-        card_lines.extend(retry_lines);
-        card_lines.push(Line::from(""));
-
-        let decorated = decorate_card_lines(card_lines, palette.panel_light, 2, width);
-        total_overall_lines += decorated.len();
-        lines.extend(decorated);
+    // Append the pre-computed retrying hint card at the bottom of the chat area
+    if !precomputed_hint_lines.is_empty() {
+        total_overall_lines += precomputed_hint_lines.len();
+        lines.extend(precomputed_hint_lines);
     }
 
     RenderOutput { lines, total_lines: total_overall_lines, render_scroll, effective_scroll: scroll, selectable_regions, card_bounds, inline_running_card_ranges, image_badge_infos }

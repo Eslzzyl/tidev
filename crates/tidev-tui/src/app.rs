@@ -954,6 +954,22 @@ impl App {
             }
     }
 
+    /// Handle bracketed paste text from the terminal (⌘V / Shift+Insert).
+    ///
+    /// Routes the pasted content to the composer when no overlay is active.
+    /// When the pasted text is empty (clipboard contains only image data),
+    /// falls back to direct clipboard reading for image paste.
+    pub(crate) fn handle_paste(&mut self, text: String) {
+        // If an overlay is open, defer paste — the overlay will handle
+        // paste via its own Ctrl+V + arboard logic for now.
+        if !self.overlays.is_empty() {
+            return;
+        }
+        if let Some(ref mut composer) = self.composer {
+            composer.handle_paste(&text);
+        }
+    }
+
     /// Handle Tab key for session mode switching.
     fn handle_tab_mode_switch(&mut self) {
         if self.pending_mode.is_some() {
