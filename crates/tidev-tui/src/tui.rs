@@ -189,11 +189,10 @@ impl Tui {
             // v0.6.x `pending_request + spinner_frame` approach.
             if app.has_active_request() {
                 let frame = (app.spinner_elapsed().as_millis() / 100) as u64;
-                if frame != app.last_spinner_frame {
-                    if let Some(ml) = &mut app.message_list {
+                if frame != app.last_spinner_frame
+                    && let Some(ml) = &mut app.message_list {
                         ml.dirty = true;
                     }
-                }
             }
 
             // Render if:
@@ -297,12 +296,11 @@ fn coalesce_or_flush(
     app: &mut App,
 ) {
     // Try to extend the existing coalesced slot.
-    if let Some(cd) = slot {
-        if cd.session_id == session_id && cd.request_id == request_id {
+    if let Some(cd) = slot
+        && cd.session_id == session_id && cd.request_id == request_id {
             cd.content.push_str(&content);
             return;
         }
-    }
 
     // Different request or empty slot: flush old, start new.
     if let Some(cd) = slot.take() {

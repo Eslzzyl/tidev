@@ -163,16 +163,12 @@ impl Component for MessagePanel {
                 }
             }
             KeyCode::Char('u') => {
-                if let Some(message) = self.selected_message() {
-                    Some(Action::Overlay(OverlayAction::Open(
+                self.selected_message().map(|message| Action::Overlay(OverlayAction::Open(
                         OverlayKind::UndoConfirmDialog {
                             message_id: message.message_id,
                             content: message.content.clone(),
                         },
                     )))
-                } else {
-                    None
-                }
             }
             KeyCode::Esc | KeyCode::Char('q') => {
                 Some(Action::Overlay(OverlayAction::Close(OverlayKind::MessagePanel)))

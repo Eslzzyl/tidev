@@ -240,11 +240,10 @@ fn apply_selection_style(
                                     cell.set_style(style);
                                 }
                             }
-                        } else if rstart == row_start {
-                            if let Some(cell) = buffer.cell_mut((rstart, y)) {
+                        } else if rstart == row_start
+                            && let Some(cell) = buffer.cell_mut((rstart, y)) {
                                 cell.set_style(style);
                             }
-                        }
                     }
                 }
             }
@@ -342,12 +341,11 @@ fn extract_selected_text(
             segments.sort();
             let mut merged: Vec<(u16, u16)> = Vec::new();
             for (s, e) in segments {
-                if let Some(last) = merged.last_mut() {
-                    if s <= last.1 + 1 {
+                if let Some(last) = merged.last_mut()
+                    && s <= last.1 + 1 {
                         last.1 = last.1.max(e);
                         continue;
                     }
-                }
                 merged.push((s, e));
             }
 
@@ -372,7 +370,7 @@ fn extract_selected_text(
     }
 
     // Remove trailing empty lines, but keep internal empty lines.
-    while lines.last().map_or(false, |l| l.is_empty()) {
+    while lines.last().is_some_and(|l| l.is_empty()) {
         lines.pop();
     }
 

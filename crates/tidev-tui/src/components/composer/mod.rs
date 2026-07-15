@@ -247,7 +247,7 @@ impl Composer {
             self.draft.clear();
             return;
         }
-        if self.history.last().map_or(true, |last| last != submission) {
+        if self.history.last().is_none_or(|last| last != submission) {
             self.history.push(submission.to_string());
         }
         self.preferred_column = None;
@@ -424,17 +424,15 @@ impl Composer {
             // Entering history: save draft
             self.draft = self.text.clone();
             self.history_cursor = self.history.len().checked_sub(1);
-        } else if let Some(index) = self.history_cursor {
-            if index > 0 {
+        } else if let Some(index) = self.history_cursor
+            && index > 0 {
                 self.history_cursor = Some(index - 1);
             }
-        }
 
-        if let Some(index) = self.history_cursor {
-            if index < self.history.len() {
+        if let Some(index) = self.history_cursor
+            && index < self.history.len() {
                 self.text = self.history[index].clone();
             }
-        }
         self.cursor = self.text.len();
         self.preferred_column = None;
         self.visual_line_hint = None;
@@ -1196,8 +1194,8 @@ impl Component for Composer {
                 return None;
             }
             // 2. Try image paste (if model supports it).
-            if self.model_supports_images {
-                if let Some((filename, _mime, data, file_size)) =
+            if self.model_supports_images
+                && let Some((filename, _mime, data, file_size)) =
                     crate::utils::paste_image_from_clipboard()
                 {
                     let placeholder = format!("[Image: {}]", filename);
@@ -1214,7 +1212,6 @@ impl Component for Composer {
                     log::info!("Pasted image: {} bytes", file_size);
                     return None;
                 }
-            }
             return None;
         }
 

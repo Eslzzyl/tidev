@@ -1167,8 +1167,8 @@ fn tool_output_is_error(output: &str) -> bool {
 
 fn parse_bash_exit_code(output: &str) -> (Option<i32>, &str) {
     // Try [exit N] format (new tool output)
-    if let Some(stripped) = output.strip_prefix("[exit ") {
-        if let Some(end_idx) = stripped.find(']') {
+    if let Some(stripped) = output.strip_prefix("[exit ")
+        && let Some(end_idx) = stripped.find(']') {
             let code_str = &stripped[..end_idx];
             if let Ok(code) = code_str.parse::<i32>() {
                 let remaining = &stripped[end_idx + 1..];
@@ -1176,7 +1176,6 @@ fn parse_bash_exit_code(output: &str) -> (Option<i32>, &str) {
                 return (Some(code), remaining);
             }
         }
-    }
     // Fallback: "Exit code: N" format (legacy)
     if let Some(pos) = output.rfind("Exit code: ") {
         let rest = &output[pos + "Exit code: ".len()..];
@@ -1246,11 +1245,10 @@ fn summarize_tool_arguments(tool_call: &ToolCall, max_width: usize) -> String {
 }
 
 fn count_lines_in_partial_json(args: &str, field: &str) -> usize {
-    if let Ok(val) = serde_json::from_str::<serde_json::Value>(args) {
-        if let Some(content) = val.get(field).and_then(|v| v.as_str()) {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(args)
+        && let Some(content) = val.get(field).and_then(|v| v.as_str()) {
             return content.lines().count().max(1);
         }
-    }
     0
 }
 

@@ -513,8 +513,8 @@ impl Component for SessionPanel {
                             {
                                 log::error!("Failed to cleanup workspace: {e}");
                             }
-                        } else if let Some(duration) = selected_duration {
-                            if let Err(e) = ctx
+                        } else if let Some(duration) = selected_duration
+                            && let Err(e) = ctx
                                 .runtime
                                 .session_manager()
                                 .store()
@@ -522,7 +522,6 @@ impl Component for SessionPanel {
                             {
                                 log::error!("Failed to cleanup sessions: {e}");
                             }
-                        }
                         vec![]
                     }
                     SessionPanelDialog::ExportConfirm {

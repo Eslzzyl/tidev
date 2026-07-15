@@ -198,7 +198,7 @@ impl App {
             current_session_id: None,
             mode: SessionMode::Build,
             pending_mode: None,
-            thinking_level: thinking_level,
+            thinking_level,
             last_notice: None,
             notifications: NotificationState::new(),
             desktop_notifications: NotificationManager::new(&notif_config),
@@ -241,8 +241,8 @@ impl App {
 
     /// Whether any component needs re-drawing.
     pub fn is_dirty(&self) -> bool {
-        self.message_list.as_ref().map_or(false, |c| c.is_dirty())
-            || self.composer.as_ref().map_or(false, |c| c.is_dirty())
+        self.message_list.as_ref().is_some_and(|c| c.is_dirty())
+            || self.composer.as_ref().is_some_and(|c| c.is_dirty())
     }
 
     /// Mark all components as clean after rendering.
@@ -542,22 +542,20 @@ impl App {
             }
             BackendEvent::UserMessageCreated { session_id, message } => {
                 if let Some(ref mut chat) = self.message_list {
-                    if let Some(ref mut ctx) = chat.active_chat_context_mut() {
-                        if ctx.session_id == session_id {
+                    if let Some(ref mut ctx) = chat.active_chat_context_mut()
+                        && ctx.session_id == session_id {
                             ctx.push(message);
                         }
-                    }
                     chat.invalidate_layout();
                 }
             }
             BackendEvent::MessagesTruncated { session_id, kept_count } => {
                 if let Some(ref mut chat) = self.message_list {
-                    if let Some(ref mut ctx) = chat.active_chat_context_mut() {
-                        if ctx.session_id == session_id {
+                    if let Some(ref mut ctx) = chat.active_chat_context_mut()
+                        && ctx.session_id == session_id {
                             ctx.messages.truncate(kept_count);
                             ctx.revert_message_id = None;
                         }
-                    }
                     chat.invalidate_layout();
                 }
             }
@@ -857,12 +855,11 @@ impl App {
 
         // 0. Ctrl+C: clear input (overrides quit — Ctrl+D is the quit shortcut).
         if key.code == KeyCode::Char('c') && key.modifiers == KeyModifiers::CONTROL {
-            if let Some(ref mut composer) = self.composer {
-                if !composer.is_empty() {
+            if let Some(ref mut composer) = self.composer
+                && !composer.is_empty() {
                     composer.clear();
                     self.set_notice("Input cleared");
                 }
-            }
             return;
         }
 
@@ -879,14 +876,12 @@ impl App {
         }
 
         // 1a. Message scrolling keys work even when overlays are open.
-        if matches!(key.code, KeyCode::PageUp | KeyCode::PageDown) {
-            if let Some(ref mut chat) = self.message_list {
-                if let Some(action) = chat.handle_key_event(key) {
+        if matches!(key.code, KeyCode::PageUp | KeyCode::PageDown)
+            && let Some(ref mut chat) = self.message_list
+                && let Some(action) = chat.handle_key_event(key) {
                     self.process_action(action);
                     return;
                 }
-            }
-        }
 
         // 2. OverlayStack top-first
         if let Some(action) = self.overlays.handle_key_event(key) {
@@ -895,9 +890,9 @@ impl App {
         }
 
         // 2a. Subsession navigation (when parent_session_id is set).
-        if let Some(ref chat) = self.message_list {
-            if let Some(ref ctx) = chat.active_chat_context() {
-                if ctx.parent_session_id.is_some() {
+        if let Some(ref chat) = self.message_list
+            && let Some(ctx) = chat.active_chat_context()
+                && ctx.parent_session_id.is_some() {
                     match key.code {
                         KeyCode::Up | KeyCode::Down | KeyCode::Left | KeyCode::Right => {
                             self.handle_subsession_navigation(key);
@@ -906,16 +901,13 @@ impl App {
                         _ => {}
                     }
                 }
-            }
-        }
 
         // 2b. Tab: session mode switch (only when no composer popup is active).
-        if key.code == KeyCode::Tab && key.modifiers.is_empty() {
-            if !self.composer.as_ref().is_some_and(|c| c.has_popup()) {
+        if key.code == KeyCode::Tab && key.modifiers.is_empty()
+            && !self.composer.as_ref().is_some_and(|c| c.has_popup()) {
                 self.handle_tab_mode_switch();
                 return;
             }
-        }
 
         // 2c. Shift+Tab / Ctrl+T: cycle thinking level.
         if (key.code == KeyCode::Tab && key.modifiers.contains(KeyModifiers::SHIFT))
@@ -926,19 +918,17 @@ impl App {
         }
 
         // 3. Composer (when no overlay consumed the event)
-        if let Some(ref mut composer) = self.composer {
-            if let Some(action) = composer.handle_key_event(key) {
+        if let Some(ref mut composer) = self.composer
+            && let Some(action) = composer.handle_key_event(key) {
                 self.process_action(action);
                 return;
             }
-        }
 
         // 4. MessageList (only when no overlay/composer consumed the event)
-        if let Some(ref mut chat) = self.message_list {
-            if let Some(action) = chat.handle_key_event(key) {
+        if let Some(ref mut chat) = self.message_list
+            && let Some(action) = chat.handle_key_event(key) {
                 self.process_action(action);
             }
-        }
     }
 
     /// Handle Tab key for session mode switching.
@@ -965,7 +955,7 @@ impl App {
     /// Navigate between subsessions.
     fn handle_subsession_navigation(&mut self, key: KeyEvent) {
         let Some(ref chat) = self.message_list else { return };
-        let Some(ref ctx) = chat.active_chat_context() else { return };
+        let Some(ctx) = chat.active_chat_context() else { return };
         let Some(parent_id) = ctx.parent_session_id else { return };
         let current_id = ctx.session_id;
 
@@ -984,15 +974,14 @@ impl App {
                 let children: Vec<_> = all.into_iter()
                     .filter(|s| s.parent_session_id == Some(parent_id))
                     .collect();
-                if let Some(target) = children.last() {
-                    if let Some(chat) = self.message_list.as_mut() {
+                if let Some(target) = children.last()
+                    && let Some(chat) = self.message_list.as_mut() {
                         if chat.switch_to_session(target.session_id) {
                             self.current_session_id = Some(target.session_id);
                         } else {
                             self.switch_to_session(target.session_id);
                         }
                     }
-                }
             }
             KeyCode::Left | KeyCode::Right => {
                 let step = if key.code == KeyCode::Left { -1isize } else { 1 };
@@ -1010,15 +999,14 @@ impl App {
                 } else {
                     (index as isize + step).rem_euclid(children.len() as isize) as usize
                 };
-                if let Some(target) = children.get(next_index) {
-                    if let Some(chat) = self.message_list.as_mut() {
+                if let Some(target) = children.get(next_index)
+                    && let Some(chat) = self.message_list.as_mut() {
                         if chat.switch_to_session(target.session_id) {
                             self.current_session_id = Some(target.session_id);
                         } else {
                             self.switch_to_session(target.session_id);
                         }
                     }
-                }
             }
             _ => {}
         }
@@ -1036,8 +1024,8 @@ impl App {
         let position = ratatui::layout::Position::new(mouse.column, mouse.row);
 
         // Sidebar scroll (scroll events in the sidebar area)
-        if let Some(sidebar_area) = self.sidebar_area {
-            if sidebar_area.contains(position) {
+        if let Some(sidebar_area) = self.sidebar_area
+            && sidebar_area.contains(position) {
                 match mouse.kind {
                     MouseEventKind::ScrollDown => {
                         self.sidebar.scroll_down(3);
@@ -1049,7 +1037,6 @@ impl App {
                 }
                 return;
             }
-        }
 
         // Determine the message content area bounds for selection clamping.
         let msg_bounds = self
@@ -1062,7 +1049,7 @@ impl App {
                 // Check scrollbar click first.
                 if let Some(ref mut chat) = self.message_list {
                     let sb_area = chat.scrollbar_area();
-                    if sb_area.map_or(false, |a| a.contains(position)) {
+                    if sb_area.is_some_and(|a| a.contains(position)) {
                         chat.start_scrollbar_drag(position.y);
                         return;
                     }
@@ -1070,15 +1057,14 @@ impl App {
 
                 // MessageList click-to-expand or subsession navigation (non-drag).
                 // Run BEFORE mouse selection so interactive elements get priority.
-                if let Some(ref mut chat) = self.message_list {
-                    if let Some(action) = chat.handle_mouse_click(mouse.column, mouse.row) {
+                if let Some(ref mut chat) = self.message_list
+                    && let Some(action) = chat.handle_mouse_click(mouse.column, mouse.row) {
                         self.process_action(action);
                         return;
                     }
-                }
 
                 // Start mouse selection if within message area (no interactive hit).
-                if msg_bounds.map_or(false, |b| b.contains(position)) {
+                if msg_bounds.is_some_and(|b| b.contains(position)) {
                     let scroll_offset = self
                         .message_list
                         .as_ref()
@@ -1098,7 +1084,6 @@ impl App {
                         });
 
                     self.mouse_selection.press(position, refined, scroll_offset);
-                    return;
                 }
             }
             MouseEventKind::Moved => {
@@ -1108,14 +1093,13 @@ impl App {
             }
             MouseEventKind::Drag(MouseButton::Left) => {
                 // Check scrollbar drag first.
-                if let Some(ref mut chat) = self.message_list {
-                    if chat.scrollbar_area().map_or(false, |a| a.contains(position))
-                        || chat.is_scrollbar_dragging()
+                if let Some(ref mut chat) = self.message_list
+                    && (chat.scrollbar_area().is_some_and(|a| a.contains(position))
+                        || chat.is_scrollbar_dragging())
                     {
                         chat.continue_scrollbar_drag(position.y);
                         return;
                     }
-                }
                 // Always update drag position (old TUI unconditional behaviour).
                 self.mouse_selection.drag(position);
             }
@@ -1125,8 +1109,8 @@ impl App {
                 }
 
                 // Composer image badge click: open ImageViewer.
-                if !self.mouse_selection.is_dragging() {
-                    if let Some(ref mut composer) = self.composer {
+                if !self.mouse_selection.is_dragging()
+                    && let Some(ref mut composer) = self.composer {
                         let text_area = composer.last_text_area;
                         if text_area.contains(position) {
                             let scroll = composer.input_scroll_offset as u16;
@@ -1157,7 +1141,6 @@ impl App {
                             }
                         }
                     }
-                }
 
                 let scroll_offset = self
                     .message_list
@@ -1267,12 +1250,11 @@ impl App {
                 Action::Overlay(OverlayAction::Close(kind)) => {
                     let is_model_panel = kind == OverlayKind::ModelPanel;
                     self.close_overlay(kind, &mut queue);
-                    if is_model_panel {
-                        if let Some(ref mut composer) = self.composer {
+                    if is_model_panel
+                        && let Some(ref mut composer) = self.composer {
                             let model = self.runtime.active_model();
                             composer.set_model_supports_images(model.supports_images);
                         }
-                    }
                 }
                 Action::Theme(ThemeAction::Preview(name)) => {
                     self.current_palette = ThemePalette::from_name(name.as_str());
@@ -1330,8 +1312,8 @@ impl App {
                             }
 
                             // Persist model to current session if one is active
-                            if let Some(session_id) = self.current_session_id {
-                                if self
+                            if let Some(session_id) = self.current_session_id
+                                && self
                                     .runtime
                                     .session_manager()
                                     .store()
@@ -1351,7 +1333,6 @@ impl App {
                                             &model.display_name,
                                         );
                                 }
-                            }
 
                             self.set_notice(format!(
                                 "Connected to {}",
@@ -1453,7 +1434,7 @@ impl App {
                     let mut ctx = UpdateContext {
                         runtime: &mut self.runtime,
                     };
-                    queue.extend(self.overlays.update_all(&action, &mut ctx));
+                    queue.extend(self.overlays.update_all(&action, &ctx));
                 }
                 Action::Session(SessionAction::Fork(message_id)) => {
                     let session_id = match self.current_session_id {
@@ -1536,14 +1517,12 @@ impl App {
                         new_message.id = new_id;
 
                         // Update tool_call_id references to new IDs
-                        if let Some(ref tool_call_id) = new_message.tool_call_id {
-                            if let Ok(old_id) = uuid::Uuid::parse_str(tool_call_id) {
-                                if let Some(&new_tool_call_id) = id_mapping.get(&old_id) {
+                        if let Some(ref tool_call_id) = new_message.tool_call_id
+                            && let Ok(old_id) = uuid::Uuid::parse_str(tool_call_id)
+                                && let Some(&new_tool_call_id) = id_mapping.get(&old_id) {
                                     new_message.tool_call_id =
                                         Some(new_tool_call_id.to_string());
                                 }
-                            }
-                        }
 
                         if let Err(e) = self
                             .runtime
@@ -1619,7 +1598,7 @@ impl App {
                     match self
                         .runtime
                         .session_manager()
-                        .update_session(session_id, Some(&final_title), None)
+                        .update_session(session_id, Some(final_title), None)
                     {
                         Ok(_) => {
                             self.set_notice("Session title updated");
@@ -1686,8 +1665,7 @@ impl App {
                             if let Some((name, args)) =
                                 crate::components::composer::command_palette::CommandRegistry::new()
                                     .parse_invocation(&text)
-                            {
-                                if let Some(spec) =
+                                && let Some(spec) =
                                     crate::components::composer::command_palette::CommandRegistry::new()
                                         .command(&name)
                                 {
@@ -1702,7 +1680,6 @@ impl App {
                                     return;
                                 }
                                 // Unknown command — fall through to submit as prompt.
-                            }
 
                             // Extract @-reference paths from the text (matching old
                             // `inline_file_references` behaviour).
@@ -1792,9 +1769,9 @@ impl App {
                             });
 
                             // Update session title from prompt (matching old behaviour).
-                            if let Some(ref mut chat) = self.message_list {
-                                if let Some(ref mut ctx) = chat.active_chat_context_mut() {
-                                    if ctx.title.is_empty() || ctx.title == "Untitled session" {
+                            if let Some(ref mut chat) = self.message_list
+                                && let Some(ref mut ctx) = chat.active_chat_context_mut()
+                                    && (ctx.title.is_empty() || ctx.title == "Untitled session") {
                                         let title = title_from_prompt(&text_for_title);
                                         ctx.title = title.clone();
                                         if let Err(e) = self.runtime
@@ -1804,8 +1781,6 @@ impl App {
                                             log::error!("Failed to update session title: {e}");
                                         }
                                     }
-                                }
-                            }
                         }
                         ChatAction::SetInput(text) => {
                             if let Some(ref mut composer) = self.composer {
@@ -1818,7 +1793,7 @@ impl App {
                                 let mut ctx = UpdateContext {
                                     runtime: &mut self.runtime,
                                 };
-                                queue.extend(chat.update(&Action::Chat(action), &mut ctx));
+                                queue.extend(chat.update(&Action::Chat(action), &ctx));
                             }
                         }
                     }
@@ -1876,9 +1851,9 @@ impl App {
                         let twv = &self.pending_tools[self.tool_index];
 
                         // Persist to DB if remember
-                        if remember {
-                            if let Some(session_id) = self.current_session_id {
-                                if let Err(e) = self
+                        if remember
+                            && let Some(session_id) = self.current_session_id
+                                && let Err(e) = self
                                     .runtime
                                     .session_manager()
                                     .store()
@@ -1890,8 +1865,6 @@ impl App {
                                 {
                                     log::warn!("Failed to remember tool permission: {e}");
                                 }
-                            }
-                        }
 
                         // Build the approved tool
                         let (rejection, allow_outside, sensitive_approved) = if allow {
@@ -1972,7 +1945,7 @@ impl App {
     fn open_overlay(&mut self, kind: OverlayKind) {
         let component: Option<Box<dyn Component>> = match kind {
             OverlayKind::ThemePanel => {
-                let current = ThemeName::parse(&self.current_palette.name.as_str())
+                let current = ThemeName::parse(self.current_palette.name.as_str())
                     .unwrap_or(ThemeName::Dark);
                 Some(Box::new(ThemePanel::new(current)))
             }
@@ -2142,7 +2115,7 @@ impl App {
             queue.extend(
                 overlay.update(
                     &Action::Overlay(OverlayAction::Close(kind)),
-                    &mut ctx,
+                    &ctx,
                 ),
             );
         }
@@ -2219,7 +2192,7 @@ impl App {
 
             let extra = match (queued_count, self.pending_compact) {
                 (0, false) => String::new(),
-                (1, false) => format!(" · queued 1"),
+                (1, false) => " · queued 1".to_string(),
                 (q, false) => format!(" · queued {q}"),
                 (0, true) => " · compact pending".to_string(),
                 (q, true) => format!(" · queued {q} · compact pending"),
@@ -2241,7 +2214,7 @@ impl App {
             } else if queued_count > 1 {
                 format!("{queued_count} queued messages{compact_part}")
             } else {
-                format!("compact pending")
+                "compact pending".to_string()
             };
             if let Some(ref t) = token_status {
                 return format!("{status} · {t}");
@@ -2255,11 +2228,10 @@ impl App {
         }
 
         // 6. Last notice
-        if let Some((msg, _)) = &self.last_notice {
-            if !msg.is_empty() {
+        if let Some((msg, _)) = &self.last_notice
+            && !msg.is_empty() {
                 return msg.clone();
             }
-        }
 
         // 7. Subsession navigation hint
         let is_subsession = self.message_list.as_ref()
@@ -2522,13 +2494,13 @@ impl App {
         }
 
         // Handle pending clipboard copy (set by mouse up in handle_mouse_event).
-        if self.mouse_selection.take_pending_copy(scroll_offset).is_some() {
-            if let Some(text) = self.mouse_selection.selected_text(
+        if self.mouse_selection.take_pending_copy(scroll_offset).is_some()
+            && let Some(text) = self.mouse_selection.selected_text(
                 frame.buffer_mut(),
                 scroll_offset,
                 &selectable_rects,
-            ) {
-                if !text.is_empty() {
+            )
+                && !text.is_empty() {
                     match copy_to_clipboard(&text) {
                         Ok(()) => {
                             self.mouse_selection.clear();
@@ -2540,8 +2512,6 @@ impl App {
                         }
                     }
                 }
-            }
-        }
     }
 
     /// Render the welcome screen with logo, subtitle, and composer.
@@ -2650,8 +2620,8 @@ impl App {
         );
 
         // Notice, if any, on the row directly above workspace path
-        if let Some((message, _)) = &self.last_notice {
-            if !message.is_empty() {
+        if let Some((message, _)) = &self.last_notice
+            && !message.is_empty() {
                 let notice_y = area.bottom().saturating_sub(2);
                 if notice_y < workspace_area.y {
                     frame.render_widget(
@@ -2663,7 +2633,6 @@ impl App {
                     );
                 }
             }
-        }
     }
 }
 

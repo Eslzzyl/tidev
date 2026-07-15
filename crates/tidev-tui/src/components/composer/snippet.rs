@@ -115,13 +115,12 @@ impl SnippetState {
             }
 
             let matched = self.candidates(&possible_query);
-            if !matched.is_empty() {
-                if possible_query.len() > best_query.len() {
+            if !matched.is_empty()
+                && possible_query.len() > best_query.len() {
                     self.query = possible_query.clone();
                     best_query = possible_query;
                     self.snippets = matched;
                 }
-            }
         }
 
         if best_query.is_empty() {

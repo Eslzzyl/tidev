@@ -197,9 +197,9 @@ impl Component for SkillsPanel {
                 vec![]
             }
             _ => {
-                if self.cached_preview.is_none() {
-                    if let Some(skill) = self.selected_skill() {
-                        if let Ok(content) = ctx
+                if self.cached_preview.is_none()
+                    && let Some(skill) = self.selected_skill()
+                        && let Ok(content) = ctx
                             .runtime
                             .tool_registry()
                             .skills()
@@ -209,8 +209,6 @@ impl Component for SkillsPanel {
                             let rendered = render_markdown_text_with_width_and_cwd(&content, Some(width), None);
                             self.cached_preview = Some((skill.name.clone(), rendered));
                         }
-                    }
-                }
                 vec![]
             }
         }

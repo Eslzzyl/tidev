@@ -624,11 +624,10 @@ fn compute_block_data(
 
                 // Adjust line count for running subagent cards
                 let mut tc_line_count = tool_lines.len();
-                if tc.name == "task" && tool_result.is_none() {
-                    if let Some(info) = ctx.running_subagents.iter().find(|s| s.tool_call_id == tc.id) {
+                if tc.name == "task" && tool_result.is_none()
+                    && let Some(info) = ctx.running_subagents.iter().find(|s| s.tool_call_id == tc.id) {
                         tc_line_count = count_running_subagent_card_lines(info, body_width);
                     }
-                }
                 line_count += tc_line_count;
             }
 
@@ -784,11 +783,10 @@ fn compute_and_cache_block(
                 // Use the generic tool call line count by default, but adjust
                 // for running subagent cards which are taller at render time.
                 let mut tc_line_count = tool_lines.len();
-                if tc.name == "task" && tool_result.is_none() {
-                    if let Some(info) = ctx.running_subagents.iter().find(|s| s.tool_call_id == tc.id) {
+                if tc.name == "task" && tool_result.is_none()
+                    && let Some(info) = ctx.running_subagents.iter().find(|s| s.tool_call_id == tc.id) {
                         tc_line_count = count_running_subagent_card_lines(info, body_width);
                     }
-                }
                 line_count += tc_line_count;
             }
 
@@ -902,30 +900,27 @@ fn render_block_from_cache(
 
     // Render Cards entry (assistant/user/shell card)
     if let Some(entry) = cache.peek(&cards_key) {
-        match &entry.value {
-            MessageRenderCacheValue::Cards(cards) => {
-                for (bg, card_lines) in cards {
-                    if !card_lines.is_empty() {
-                        let start_line = current_line_offset + lines.len();
-                        track_selectable_region(selectable_regions, card_lines, start_line);
-                        let show_hover = ctx.hovered_card == Some(block.message_id)
-                            && matches!(role, MessageRole::User | MessageRole::Shell);
-                        let adjusted_bg = if show_hover {
-                            ctx.palette.hover_bg(*bg)
-                        } else {
-                            *bg
-                        };
-                        lines.extend(decorate_card_lines(card_lines.clone(), adjusted_bg, 2, width));
-                        let end_line = current_line_offset + lines.len();
-                        if !matches!(role, MessageRole::Assistant) {
-                            card_bounds.push((block.message_id, start_line, end_line));
-                            let msg = &messages[block.message_start_idx];
-                            image_badge_infos.extend(scan_image_badges(card_lines, msg, start_line));
-                        }
+        if let MessageRenderCacheValue::Cards(cards) = &entry.value {
+            for (bg, card_lines) in cards {
+                if !card_lines.is_empty() {
+                    let start_line = current_line_offset + lines.len();
+                    track_selectable_region(selectable_regions, card_lines, start_line);
+                    let show_hover = ctx.hovered_card == Some(block.message_id)
+                        && matches!(role, MessageRole::User | MessageRole::Shell);
+                    let adjusted_bg = if show_hover {
+                        ctx.palette.hover_bg(*bg)
+                    } else {
+                        *bg
+                    };
+                    lines.extend(decorate_card_lines(card_lines.clone(), adjusted_bg, 2, width));
+                    let end_line = current_line_offset + lines.len();
+                    if !matches!(role, MessageRole::Assistant) {
+                        card_bounds.push((block.message_id, start_line, end_line));
+                        let msg = &messages[block.message_start_idx];
+                        image_badge_infos.extend(scan_image_badges(card_lines, msg, start_line));
                     }
                 }
             }
-            _ => {}
         }
     } else {
         // Cache miss — render directly instead of showing a placeholder.
@@ -979,8 +974,8 @@ fn render_block_from_cache(
 
         for tc in &msg.tool_calls {
             // Check for running subagent (pending task tool call) — render inline card
-            if tc.name == "task" && tool_results_by_id.get(&tc.id).is_none() {
-                if let Some(exec_index) = ctx.running_subagents.iter().position(|s| s.tool_call_id == tc.id) {
+            if tc.name == "task" && tool_results_by_id.get(&tc.id).is_none()
+                && let Some(exec_index) = ctx.running_subagents.iter().position(|s| s.tool_call_id == tc.id) {
                     let info = &ctx.running_subagents[exec_index];
                     let running_lines = render_running_subagent_lines(info, body_width, ctx.palette);
                     let start_line = current_line_offset + lines.len();
@@ -998,7 +993,6 @@ fn render_block_from_cache(
                     });
                     continue;
                 }
-            }
 
             let tool_key = MessageRenderCacheKey {
                 session_id: Uuid::default(),
@@ -1509,7 +1503,7 @@ fn render_text_body_lines(
             Some(body_width),
             Some(ctx.workspace_root),
         );
-        md.lines.iter().map(|l| l.clone()).collect()
+        md.lines.iter().cloned().collect()
     }
 }
 

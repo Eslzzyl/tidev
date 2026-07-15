@@ -475,13 +475,12 @@ impl Component for QuestionDialog {
             }
             KeyCode::Enter => {
                 let selected = self.selected_index();
-                if let Some(custom_idx) = self.custom_option_index() {
-                    if selected == custom_idx {
+                if let Some(custom_idx) = self.custom_option_index()
+                    && selected == custom_idx {
                         // Start editing custom answer
                         self.editing_custom = true;
                         return None;
                     }
-                }
                 if let Some(question) = self.current_question() {
                     if question.multiple.unwrap_or(false) {
                         // In multi-select mode, Enter toggles the option

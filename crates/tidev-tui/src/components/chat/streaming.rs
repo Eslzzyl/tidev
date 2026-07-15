@@ -61,11 +61,10 @@ impl StreamingBuffer {
     fn resolve_idx(&self, messages: &[Message]) -> Option<usize> {
         let mid = self.current_message_id?;
         // Fast path: cached index still points to the right message.
-        if let Some(idx) = self.current_message_idx {
-            if idx < messages.len() && messages[idx].id == mid {
+        if let Some(idx) = self.current_message_idx
+            && idx < messages.len() && messages[idx].id == mid {
                 return Some(idx);
             }
-        }
         // Slow path: find by id.
         messages.iter().position(|m| m.id == mid)
     }

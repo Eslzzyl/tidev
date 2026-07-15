@@ -198,7 +198,7 @@ impl MessageList {
             Some(id) => id,
             None => return,
         };
-        let Some(ref ctx) = self.chat_contexts.get(&session_id) else { return };
+        let Some(ctx) = self.chat_contexts.get(&session_id) else { return };
         let messages = ctx.visible_messages();
 
         self.running_subagents.clear();
@@ -213,8 +213,7 @@ impl MessageList {
         for msg in messages {
             if msg.role == tidev_types::message::MessageRole::Tool
                 && msg.tool_name.as_deref() == Some("task")
-            {
-                if let Some(csid) = msg.metadata.child_session_id {
+                && let Some(csid) = msg.metadata.child_session_id {
                     self.completed_subagent_sessions.insert(msg.id, csid);
                     // Also map by assistant message ID for click hit-testing.
                     let assistant_id = messages.iter()
@@ -225,12 +224,11 @@ impl MessageList {
                         self.completed_subagent_sessions.insert(aid, csid);
                     }
                 }
-            }
 
             if msg.role == tidev_types::message::MessageRole::Assistant {
                 let msg_csid = msg.metadata.child_session_id;
                 for tc in &msg.tool_calls {
-                    if canonical_tool_name(&tc.name).as_deref() == Some("task")
+                    if canonical_tool_name(&tc.name) == Some("task")
                         && !tool_result_ids.contains(tc.id.as_str())
                     {
                         self.running_subagents.push(render_mod::RunningSubagentInfo {
@@ -357,14 +355,12 @@ impl MessageList {
             Some(ctx) => ctx,
             None => {
                 // Unknown session — check if it belongs to a running subagent.
-                if let Some(exec) = self.running_subagents.iter_mut().find(|e| e.child_session_id == Some(session_id)) {
-                    if let Some(text) = infer_subagent_status(event) {
-                        if exec.status_text != text {
+                if let Some(exec) = self.running_subagents.iter_mut().find(|e| e.child_session_id == Some(session_id))
+                    && let Some(text) = infer_subagent_status(event)
+                        && exec.status_text != text {
                             exec.status_text = text;
                             self.dirty = true;
                         }
-                    }
-                }
                 return;
             }
         };
@@ -488,7 +484,7 @@ impl MessageList {
                             self.completed_subagent_sessions.insert(msg_id, csid);
                         }
                         self.running_subagents.retain(|s| s.tool_call_id != tool_call.id);
-                        if self.hovered_inline_subagent.map_or(false, |i| i >= self.running_subagents.len()) {
+                        if self.hovered_inline_subagent.is_some_and(|i| i >= self.running_subagents.len()) {
                             self.hovered_inline_subagent = None;
                         }
                     }
@@ -665,11 +661,10 @@ impl MessageList {
             .find(|(_, rect)| rect.contains((x, y).into()))
         {
             let exec_idx = hit.0;
-            if let Some(sa) = self.running_subagents.get(exec_idx) {
-                if let Some(csid) = sa.child_session_id {
+            if let Some(sa) = self.running_subagents.get(exec_idx)
+                && let Some(csid) = sa.child_session_id {
                     return Some(Action::Session(SessionAction::Select(csid)));
                 }
-            }
         }
 
         // Use the layout index to find which block was clicked.
@@ -804,19 +799,18 @@ impl Component for MessageList {
             Some(id) => id,
             None => return,
         };
-        let Some(ref chat_context) = self.chat_contexts.get(&session_id) else {
+        let Some(chat_context) = self.chat_contexts.get(&session_id) else {
             return;
         };
 
         self.selectable_regions.clear();
 
         // Resolve scroll target if set
-        if let Some(target_id) = self.scroll_target.take() {
-            if let Some(scroll) = self.resolve_scroll_to_message(&chat_context.messages, target_id) {
+        if let Some(target_id) = self.scroll_target.take()
+            && let Some(scroll) = self.resolve_scroll_to_message(&chat_context.messages, target_id) {
                 self.scroll_offset = scroll;
                 self.follow_tail = false;
             }
-        }
 
         self.card_bounds.clear();
         self.content_area = None;

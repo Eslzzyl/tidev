@@ -200,8 +200,8 @@ impl SettingsPanel {
 
     /// Increase value for Number type only.
     fn increase_selected(&mut self) {
-        if let Some(item) = self.items.get_mut(self.selected_index) {
-            if let SettingType::Number {
+        if let Some(item) = self.items.get_mut(self.selected_index)
+            && let SettingType::Number {
                 value,
                 min: _,
                 max,
@@ -210,13 +210,12 @@ impl SettingsPanel {
                 *value = (*value + 1.0).min(*max);
                 item.description = format!("Scroll speed multiplier: {:.1}", *value);
             }
-        }
     }
 
     /// Decrease value for Number type only.
     fn decrease_selected(&mut self) {
-        if let Some(item) = self.items.get_mut(self.selected_index) {
-            if let SettingType::Number {
+        if let Some(item) = self.items.get_mut(self.selected_index)
+            && let SettingType::Number {
                 value,
                 min,
                 max: _,
@@ -225,7 +224,6 @@ impl SettingsPanel {
                 *value = (*value - 1.0).max(*min);
                 item.description = format!("Scroll speed multiplier: {:.1}", *value);
             }
-        }
     }
 
     /// Apply current items to an AppConfig.
@@ -247,11 +245,9 @@ impl SettingsPanel {
                         ref options,
                         selected,
                     } = item.setting_type
-                    {
-                        if selected < options.len() {
+                        && selected < options.len() {
                             config.logging.level = options[selected].clone();
                         }
-                    }
                 }
                 SettingKey::SaveRequestBody => {
                     if let SettingType::Toggle(val) = item.setting_type {

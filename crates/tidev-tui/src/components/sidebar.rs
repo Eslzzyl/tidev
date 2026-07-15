@@ -118,14 +118,13 @@ impl Sidebar {
                     format!("Speed: {:.1} t/s (avg)", avg_tps),
                     Style::default().fg(palette.muted),
                 )]));
-            } else if let Some(usage) = context_usage {
-                if let Some(current_tps) = usage.tokens_per_second {
+            } else if let Some(usage) = context_usage
+                && let Some(current_tps) = usage.tokens_per_second {
                     lines.push(Line::from(vec![Span::styled(
                         format!("Speed: {:.1} t/s", current_tps),
                         Style::default().fg(palette.muted),
                     )]));
                 }
-            }
         }
 
         // Token statistics
@@ -190,8 +189,8 @@ impl Sidebar {
         let mut seen_files = HashSet::new();
         if let Some(ctx) = chat_context {
             for msg in ctx.visible_messages() {
-                if let Some(ref diffs_json) = msg.file_diffs {
-                    if let Ok(diffs) =
+                if let Some(ref diffs_json) = msg.file_diffs
+                    && let Ok(diffs) =
                         serde_json::from_str::<Vec<FileDiff>>(diffs_json)
                     {
                         for d in &diffs {
@@ -200,7 +199,6 @@ impl Sidebar {
                             }
                         }
                     }
-                }
             }
         }
 
@@ -315,15 +313,14 @@ impl Sidebar {
         }
 
         // Undo state
-        if let Some(ctx) = chat_context {
-            if ctx.is_reverted() {
+        if let Some(ctx) = chat_context
+            && ctx.is_reverted() {
                 lines.push(Line::from(""));
                 lines.push(Line::from(vec![Span::styled(
                     "⚠ Undo active",
                     Style::default().fg(palette.warning),
                 )]));
             }
-        }
 
         // ── Background ──
         frame.render_widget(

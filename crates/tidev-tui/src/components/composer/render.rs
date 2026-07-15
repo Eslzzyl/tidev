@@ -198,15 +198,14 @@ pub(crate) fn draw_composer(
         }
 
         // · [thinking level]
-        if let Some(level) = ctx.thinking_level {
-            if level.is_supported() {
+        if let Some(level) = ctx.thinking_level
+            && level.is_supported() {
                 meta_spans.push(Span::styled(" · ", Style::default().fg(palette.muted)));
                 meta_spans.push(Span::styled(
                     format!("[{}]", level.display_name()),
                     Style::default().fg(palette.accent_soft),
                 ));
             }
-        }
 
         // Render on the second row of metadata_area (first row is blank spacer)
         let meta_rect = Rect::new(metadata_area.x, metadata_area.y + 1, metadata_area.width, 1);

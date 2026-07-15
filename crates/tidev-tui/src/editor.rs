@@ -214,11 +214,10 @@ pub fn open_external_editor(
     resume_tui()?;
 
     // Report editor exit status if it failed.
-    if let Some(exit_code) = status.ok().and_then(|s| s.code()) {
-        if exit_code != 0 {
+    if let Some(exit_code) = status.ok().and_then(|s| s.code())
+        && exit_code != 0 {
             log::warn!("Editor {cmd} exited with code {exit_code}");
         }
-    }
 
     let edited = edit_file.read().context("Failed to read edited file")?;
     Ok(edited)

@@ -305,12 +305,11 @@ impl CommandPaletteState {
         }
 
         // Preserve selection if the previously selected command still exists.
-        if let Some(prev) = previous {
-            if let Some(index) = self.suggestions.iter().position(|item| item.spec.name == prev) {
+        if let Some(prev) = previous
+            && let Some(index) = self.suggestions.iter().position(|item| item.spec.name == prev) {
                 self.selected_index = index;
                 return;
             }
-        }
 
         self.selected_index = self.selected_index.min(self.suggestions.len().saturating_sub(1));
     }

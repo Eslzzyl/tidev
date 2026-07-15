@@ -475,7 +475,7 @@ impl Component for ModelPanel {
                 // Each selectable item renders as 1 row (+ N thinking sub-rows if expanded).
                 let selectable = selectable_indices(&self.items_cache);
                 let mut rendered_row = 0usize;
-                for (_, &item_idx) in selectable.iter().enumerate() {
+                for &item_idx in selectable.iter() {
                     if rendered_row == first_row {
                         if let Some(t) = self.current_tab_mut() {
                             t.selected_index = item_idx;
@@ -743,7 +743,7 @@ impl Component for ModelPanel {
                         // configured model for the active tab.
                         let is_active = self
                             .current_tab()
-                            .map_or(false, |tab| {
+                            .is_some_and(|tab| {
                                 if tab.agent_type_str == "general" {
                                     summary.provider_id == self.active_model.provider_id
                                         && summary.model_id == self.active_model.model_id
