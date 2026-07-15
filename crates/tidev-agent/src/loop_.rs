@@ -73,7 +73,13 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
                 });
                 return Ok(());
             }
-            Err(e) => return Err(e),
+            Err(e) => {
+                let _ = event_tx.send(BackendEvent::StreamEnd {
+                    session_id,
+                    request_id,
+                });
+                return Err(e);
+            }
         };
 
         // ─── 5. No tool calls → done ─────────────────────────────────────

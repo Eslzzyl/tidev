@@ -300,12 +300,16 @@ impl MessageList {
             None => return,
         };
         let Some(ref mut chat_context) = self.chat_contexts.get_mut(&session_id) else { return };
+        let msg_id = self.streaming_buffer.current_message_id;
         if let Some(msg) = chat_context.messages.iter_mut().rev().find(|m| m.streaming) {
             msg.role = tidev_types::message::MessageRole::Error;
-            msg.streaming = false;
             msg.content = format!("Request failed: {error}");
+            msg.completed_at = Some(Utc::now());
+            if let Some(mid) = msg_id {
+                self.layout_index.mark_dirty(mid);
+            }
         }
-        self.streaming_buffer.is_streaming = false;
+        self.streaming_buffer.finalise_message(&mut chat_context.messages);
         self.dirty = true;
     }
 
