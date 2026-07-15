@@ -343,7 +343,7 @@ mod tests {
 
         let mut state = SnippetState::new();
         state.load_snippets(&dir, &dir);
-        assert!(state.is_enabled());
+        assert!(!state.snippets_cache.is_empty());
         assert_eq!(state.snippets_cache.len(), 2);
 
         let _ = std::fs::remove_dir_all(&dir);

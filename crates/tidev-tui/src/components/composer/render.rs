@@ -232,7 +232,10 @@ pub(crate) fn draw_composer(
         let popup_height = cp.popup_height();
         if popup_height > 0 {
             let popup_x = area.x + 2;
-            let width = area.width.clamp(20, 72).min(frame.area().width.saturating_sub(popup_x));
+            let width = area
+                .width
+                .min(72)
+                .min(frame.area().width.saturating_sub(area.x));
             let popup_rect = Rect::new(
                 popup_x,
                 area.y.saturating_sub(popup_height),
@@ -283,13 +286,16 @@ pub(crate) fn draw_composer(
         }
     }
 
-    // ── @-mention popup ─────────────────────���──────────────────────
+    // ── @-mention popup ──────────────────────────────────────────────
     if composer.at_mention.visible && !composer.at_mention.suggestions.is_empty() {
         let am = &composer.at_mention;
         let popup_height = am.popup_height();
         if popup_height > 0 {
             let popup_x = area.x + 2;
-            let width = area.width.clamp(20, 56).min(frame.area().width.saturating_sub(popup_x));
+            let width = area
+                .width
+                .min(72)
+                .min(frame.area().width.saturating_sub(area.x));
             let popup_rect = Rect::new(
                 popup_x,
                 area.y.saturating_sub(popup_height),
@@ -301,22 +307,34 @@ pub(crate) fn draw_composer(
                 vertical: 1,
             });
 
+            let path_style = Style::default()
+                .fg(palette.accent)
+                .add_modifier(Modifier::BOLD);
+            let highlight_style = Style::default()
+                .fg(palette.accent_soft)
+                .add_modifier(Modifier::BOLD);
+            let muted = Style::default().fg(palette.muted);
+
             let items: Vec<ListItem> = am
                 .suggestions
                 .iter()
                 .map(|s| {
-                    let icon = match s.kind {
-                        super::at_mention::AtMentionKind::File => "📄",
-                        super::at_mention::AtMentionKind::Directory => "📁",
-                        super::at_mention::AtMentionKind::Image => "🖼",
-                    };
-                    ListItem::new(Line::from(vec![
-                        Span::raw(format!("{} ", icon)),
-                        Span::styled(
-                            &s.display,
-                            Style::default().fg(palette.text),
-                        ),
-                    ]))
+                    let mut spans = vec![Span::styled("@", path_style)];
+
+                    let matched: std::collections::HashSet<usize> =
+                        s.matched_indices.iter().copied().collect();
+                    for (i, c) in s.path.chars().enumerate() {
+                        if matched.contains(&i) {
+                            spans.push(Span::styled(c.to_string(), highlight_style));
+                        } else {
+                            spans.push(Span::styled(c.to_string(), path_style));
+                        }
+                    }
+
+                    spans.push(Span::raw("  "));
+                    spans.push(Span::styled(&s.display, muted));
+
+                    ListItem::new(Line::from(spans))
                 })
                 .collect();
 
@@ -345,7 +363,10 @@ pub(crate) fn draw_composer(
         let popup_height = sn.popup_height();
         if popup_height > 0 {
             let popup_x = area.x + 2;
-            let width = area.width.clamp(20, 56).min(frame.area().width.saturating_sub(popup_x));
+            let width = area
+                .width
+                .min(72)
+                .min(frame.area().width.saturating_sub(area.x));
             let popup_rect = Rect::new(
                 popup_x,
                 area.y.saturating_sub(popup_height),

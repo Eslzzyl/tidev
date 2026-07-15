@@ -386,31 +386,26 @@ impl FileSearchIndex {
     }
 
     pub fn search(&self, query: &str) -> Vec<FileSuggestion> {
-        let normalized = query.to_lowercase();
-
+        let normalized = query.trim().to_ascii_lowercase();
         if normalized.is_empty() {
-            return Vec::new();
-        }
-
-        {
+            let revision = self.revision.load(Ordering::Acquire);
             let mut cache = self.empty_cache.lock().unwrap();
-            if cache.0 == self.revision.load(Ordering::Acquire) {
+            if cache.0 == revision {
                 return cache.1.clone();
             }
-            cache.0 = self.revision.load(Ordering::Acquire);
-            cache.1.clear();
+            let entries = {
+                let snapshot = self.snapshot.lock().unwrap();
+                Arc::clone(&snapshot.flat_cache)
+            };
+            let result = rank_entries(entries.as_slice(), &normalized);
+            *cache = (revision, result.clone());
+            return result;
         }
 
         let entries = {
             let snapshot = self.snapshot.lock().unwrap();
             Arc::clone(&snapshot.flat_cache)
         };
-
-        if entries.is_empty() {
-            let mut cache = self.empty_cache.lock().unwrap();
-            cache.1.clear();
-            return cache.1.clone();
-        }
 
         rank_entries(entries.as_slice(), &normalized)
     }
@@ -464,11 +459,12 @@ where
     F: FnMut(IndexedEntry) -> bool,
 {
     let walker = WalkBuilder::new(workspace_root)
-        .add_custom_ignore_filename(".tidevignore")
         .hidden(false)
         .git_ignore(true)
         .git_global(true)
         .git_exclude(true)
+        .follow_links(true)
+        .require_git(true)
         .build();
 
     for result in walker {
@@ -476,18 +472,28 @@ where
             continue;
         };
 
-        let Some(ftype) = entry.file_type() else {
+        let Some(file_type) = entry.file_type() else {
             continue;
         };
+        if !file_type.is_dir() && !file_type.is_file() {
+            continue;
+        }
 
-        let is_dir = ftype.is_dir();
+        let path = entry.path();
+        let Ok(rel) = path.strip_prefix(workspace_root) else {
+            continue;
+        };
+        if rel.as_os_str().is_empty() {
+            continue;
+        }
 
-        let rel_path = entry
-            .path()
-            .strip_prefix(workspace_root)
-            .unwrap_or(entry.path());
+        // Skip .git/ internal entries — never useful as suggestions
+        let rel_str = rel.to_string_lossy();
+        if rel_str == ".git" || rel_str.starts_with(".git/") {
+            continue;
+        }
 
-        let Some(indexed_entry) = build_indexed_entry(rel_path, entry.path(), is_dir) else {
+        let Some(indexed_entry) = build_indexed_entry(rel, path, file_type.is_dir()) else {
             continue;
         };
 
@@ -939,7 +945,7 @@ mod tests {
     }
 
     #[test]
-    fn test_empty_search_returns_empty() {
+    fn test_empty_search_returns_empty_when_no_entries() {
         let index = FileSearchIndex::new();
         let results = index.search("");
         assert!(results.is_empty());

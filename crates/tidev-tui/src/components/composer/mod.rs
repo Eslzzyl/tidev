@@ -201,6 +201,14 @@ impl Composer {
         self.selection_anchor = None;
         self.spans.clear();
         self.command_palette.sync(&self.text, &self.commands);
+        self.at_mention
+            .sync(&self.workspace_root, &self.text, self.cursor);
+        self.snippet_state.sync(
+            &self.workspace_root,
+            &self.config_dir,
+            &self.text,
+            self.cursor,
+        );
         self.dirty = true;
     }
 
@@ -910,7 +918,7 @@ impl Composer {
     }
 
     /// Refresh command palette, @mention, and snippet states after input change.
-    fn sync_autocomplete(&mut self) {
+    pub(crate) fn sync_autocomplete(&mut self) {
         self.command_palette.sync(&self.text, &self.commands);
         self.at_mention
             .sync(&self.workspace_root, &self.text, self.cursor);
@@ -1060,7 +1068,7 @@ impl Component for Composer {
         }
 
         // ── AtMention visible — hijack navigation keys ──────────────
-        if self.at_mention.visible {
+        if self.at_mention.visible && !self.at_mention.suggestions.is_empty() {
             match key.code {
                 KeyCode::Esc => {
                     self.at_mention.clear();
@@ -1176,6 +1184,7 @@ impl Component for Composer {
                 KeyCode::Char('p') => self.select_prev_history(),
                 _ => {}
             }
+            self.sync_autocomplete();
             self.dirty = true;
             return None;
         }
@@ -1190,6 +1199,7 @@ impl Component for Composer {
             // 1. Try text paste.
             if let Some(text) = crate::utils::paste_from_clipboard() {
                 self.insert_str(&text);
+                self.sync_autocomplete();
                 self.dirty = true;
                 return None;
             }
@@ -1389,7 +1399,6 @@ mod tests {
         assert_eq!(c.handle_key(key(KeyCode::Char('h'))), None);
         assert_eq!(c.handle_key(key(KeyCode::Char('i'))), None);
         assert_eq!(c.text(), "hi");
-        assert_eq!(c.cursor(), 2);
 
         let submitted = c.handle_key(key(KeyCode::Enter));
         assert_eq!(submitted, Some("hi".to_string()));

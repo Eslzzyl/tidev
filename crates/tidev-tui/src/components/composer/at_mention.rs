@@ -34,6 +34,7 @@ pub(crate) struct AtMentionSuggestion {
     pub path: String,
     pub display: String,
     pub kind: AtMentionKind,
+    pub matched_indices: Vec<usize>,
 }
 
 impl From<FileSuggestion> for AtMentionSuggestion {
@@ -42,6 +43,7 @@ impl From<FileSuggestion> for AtMentionSuggestion {
             path: s.path,
             display: s.display,
             kind: s.kind.into(),
+            matched_indices: s.matched_indices,
         }
     }
 }
@@ -127,6 +129,11 @@ impl AtMentionState {
             .map(AtMentionSuggestion::from)
             .collect();
         self.last_index_revision = current_revision;
+        if self.suggestions.is_empty() {
+            self.selected_index = 0;
+            return;
+        }
+
         self.selected_index = self.selected_index.min(self.suggestions.len().saturating_sub(1));
     }
 

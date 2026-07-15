@@ -844,6 +844,17 @@ impl App {
     }
 
     pub fn handle_key_event(&mut self, key: KeyEvent) {
+        // 0. Esc: close any composer popup first (overrides abort confirmation).
+        if key.code == KeyCode::Esc
+            && self.composer.as_ref().is_some_and(|c| c.has_popup())
+            && self.overlays.is_empty()
+        {
+            if let Some(ref mut composer) = self.composer {
+                composer.handle_key_event(key);
+            }
+            return;
+        }
+
         // 0. Abort confirmation: double-Esc to cancel current request.
         if key.code == KeyCode::Esc
             && self.overlays.is_empty()
@@ -2407,6 +2418,9 @@ impl App {
                 content_rect,
             );
         } else if let Some(ref mut composer) = self.composer {
+            if composer.has_popup() {
+                composer.sync_autocomplete();
+            }
             let active_model = self.runtime.active_model();
             let draw_ctx = DrawContext {
                 palette,
@@ -2620,6 +2634,9 @@ impl App {
 
         // Composer input block — pass section area directly, exactly as old TUI
         if let Some(ref mut composer) = self.composer {
+            if composer.has_popup() {
+                composer.sync_autocomplete();
+            }
             let active_model = self.runtime.active_model();
             let draw_ctx = DrawContext {
                 palette,
