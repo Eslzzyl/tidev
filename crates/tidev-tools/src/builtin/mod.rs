@@ -1,5 +1,6 @@
-use anyhow::{Context, Result, bail};
+use anyhow::Result;
 use serde_json::Value;
+use std::any::Any;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::mpsc::UnboundedSender;
@@ -64,21 +65,93 @@ pub fn definitions(skill_description: String) -> Vec<ToolDefinition> {
     definitions
 }
 
+/// Run a blocking operation that returns `String`, with panic catching.
+///
+/// Panics inside the closure are caught via `catch_unwind`. Both
+/// `JoinError` from `spawn_blocking` and `Result::Err` from the closure
+/// are converted into a `ToolExecutionResult` with an error message so
+/// the agent loop never sees an error.
+async fn safe_spawn_blocking_str<F>(f: F) -> ToolExecutionResult
+where
+    F: FnOnce() -> Result<String> + Send + 'static,
+{
+    let result = tokio::task::spawn_blocking(move || {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f()))
+    })
+    .await;
+
+    match result {
+        Ok(Ok(Ok(output))) => ToolExecutionResult::new(output),
+        Ok(Ok(Err(e))) => ToolExecutionResult::new(format!("Error: {e:#}")),
+        Ok(Err(panic)) => {
+            ToolExecutionResult::new(format!("Error: tool panicked: {}", panic_msg(panic)))
+        }
+        Err(join_err) => {
+            ToolExecutionResult::new(format!("Error: tool aborted: {join_err}"))
+        }
+    }
+}
+
+/// Run a blocking operation that returns `ToolExecutionResult`, with panic
+/// catching — same as [`safe_spawn_blocking_str`] but for tools that already
+/// construct a `ToolExecutionResult` internally (e.g. file ops).
+async fn safe_spawn_blocking_result<F>(f: F) -> ToolExecutionResult
+where
+    F: FnOnce() -> Result<ToolExecutionResult> + Send + 'static,
+{
+    let result = tokio::task::spawn_blocking(move || {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f()))
+    })
+    .await;
+
+    match result {
+        Ok(Ok(Ok(r))) => r,
+        Ok(Ok(Err(e))) => ToolExecutionResult::new(format!("Error: {e:#}")),
+        Ok(Err(panic)) => {
+            ToolExecutionResult::new(format!("Error: tool panicked: {}", panic_msg(panic)))
+        }
+        Err(join_err) => {
+            ToolExecutionResult::new(format!("Error: tool aborted: {join_err}"))
+        }
+    }
+}
+
+fn panic_msg(panic: Box<dyn Any + Send>) -> String {
+    if let Some(s) = panic.downcast_ref::<String>() {
+        s.clone()
+    } else if let Some(s) = panic.downcast_ref::<&str>() {
+        s.to_string()
+    } else {
+        "unknown".to_string()
+    }
+}
+
 /// Execute a tool call with streaming output support.
 ///
 /// Bash emits [`BackendEvent::ShellOutput`] events when `event_tx` is `Some`.
 /// Other tools execute in [`tokio::task::spawn_blocking`] to avoid blocking the
 /// async runtime. The `cancel` token is used for cooperative cancellation of
 /// the bash tool.
+///
+/// This function never returns an error — every failure (parse error, tool
+/// error, panic) is converted into a `ToolExecutionResult` with an error
+/// message so the agent loop can continue and the model can react.
 pub async fn execute_tool_call(
     ctx: &ToolContext<'_>,
     call: &ToolCall,
     cancel: &CancellationToken,
-) -> Result<ToolExecutionResult> {
-    let arguments: Value = serde_json::from_str(&call.arguments)
-        .with_context(|| format!("failed to parse arguments for tool '{}'", call.name))?;
+) -> ToolExecutionResult {
+    let arguments: Value = match serde_json::from_str(&call.arguments) {
+        Ok(v) => v,
+        Err(e) => {
+            return ToolExecutionResult::new(format!(
+                "Error: failed to parse arguments for tool '{}': {}",
+                call.name, e
+            ));
+        }
+    };
 
-    let result = match canonical_tool_name(&call.name) {
+    match canonical_tool_name(&call.name) {
         // ── File operations ────────────────────────────────────────────
         Some("read") | Some("write") | Some("edit") | Some("apply_patch") => {
             let workspace_root = ctx.workspace_root.to_path_buf();
@@ -87,7 +160,7 @@ pub async fn execute_tool_call(
             let max_output_bytes = ctx.max_output_bytes;
             let allow_outside = ctx.allow_outside;
             let sensitive_file_approved = ctx.sensitive_file_approved;
-            tokio::task::spawn_blocking(move || {
+            safe_spawn_blocking_result(move || {
                 file::execute_tool_call(
                     &workspace_root,
                     &config_dir,
@@ -98,7 +171,7 @@ pub async fn execute_tool_call(
                     sensitive_file_approved,
                 )
             })
-            .await??
+            .await
         }
 
         // ── Search operations ──────────────────────────────────────────
@@ -107,7 +180,7 @@ pub async fn execute_tool_call(
             let call_name = call.name.clone();
             let max_output_bytes = ctx.max_output_bytes;
             let allow_outside = ctx.allow_outside;
-            let output = tokio::task::spawn_blocking(move || {
+            safe_spawn_blocking_str(move || {
                 search::execute_tool_call(
                     &workspace_root,
                     &call_name,
@@ -116,23 +189,38 @@ pub async fn execute_tool_call(
                     allow_outside,
                 )
             })
-            .await??;
-            ToolExecutionResult::new(output)
+            .await
         }
 
-        // ── Bash (truly async) ─────────────────────────────────────────
+        // ── Bash (async, panics caught via tokio::spawn) ───────────────
         Some("bash") => {
-            let result = exec::execute_tool_call_with_cancel_async(
-                ctx.workspace_root,
-                &call.name,
-                arguments,
-                ctx.max_output_bytes,
-                cancel,
-                ctx.session_id,
-                ctx.event_tx.clone(),
-            )
-            .await?;
-            ToolExecutionResult::new(result.output)
+            let workspace_root = ctx.workspace_root.to_path_buf();
+            let call_name = call.name.clone();
+            let max_output_bytes = ctx.max_output_bytes;
+            let cancel = cancel.clone();
+            let session_id = ctx.session_id;
+            let event_tx = ctx.event_tx.clone();
+            match tokio::task::spawn(async move {
+                exec::execute_tool_call_with_cancel_async(
+                    &workspace_root,
+                    &call_name,
+                    arguments,
+                    max_output_bytes,
+                    &cancel,
+                    session_id,
+                    event_tx,
+                )
+                .await
+                .map(|r| r.output)
+            })
+            .await
+            {
+                Ok(Ok(output)) => ToolExecutionResult::new(output),
+                Ok(Err(e)) => ToolExecutionResult::new(format!("Error: {e:#}")),
+                Err(join_err) => {
+                    ToolExecutionResult::new(format!("Error: tool panicked: {join_err}"))
+                }
+            }
         }
 
         // ── Sub-agent task ─────────────────────────────────────────────
@@ -142,7 +230,7 @@ pub async fn execute_tool_call(
             let session_id = ctx.session_id;
             let call_name = call.name.clone();
             let mode = ctx.mode;
-            let output = tokio::task::spawn_blocking(move || {
+            safe_spawn_blocking_str(move || {
                 task::execute_tool_call(
                     &workspace_root,
                     &*store,
@@ -152,8 +240,7 @@ pub async fn execute_tool_call(
                     mode,
                 )
             })
-            .await??;
-            ToolExecutionResult::new(output)
+            .await
         }
 
         // ── Todo persistence ───────────────────────────────────────────
@@ -162,7 +249,7 @@ pub async fn execute_tool_call(
             let store = ctx.todo.clone();
             let session_id = ctx.session_id;
             let call_name = call.name.clone();
-            let output = tokio::task::spawn_blocking(move || {
+            safe_spawn_blocking_str(move || {
                 todo::execute_tool_call(
                     &workspace_root,
                     &*store,
@@ -171,39 +258,49 @@ pub async fn execute_tool_call(
                     arguments,
                 )
             })
-            .await??;
-            ToolExecutionResult::new(output)
+            .await
         }
 
         // ── Skill rendering ────────────────────────────────────────────
         Some("skill") => {
-            let args = parse_arguments::<SkillArgs>(&call.name, arguments)?;
+            let args = match parse_arguments::<SkillArgs>(&call.name, arguments) {
+                Ok(a) => a,
+                Err(e) => {
+                    return ToolExecutionResult::new(format!("Error: {e:#}"));
+                }
+            };
             let skill_name = args.name.clone();
             let skills = ctx.skills.clone();
-            let output = tokio::task::spawn_blocking(move || {
-                skills.render_skill(&skill_name)
-            })
-            .await??;
-            ToolExecutionResult::new(output)
+            safe_spawn_blocking_str(move || skills.render_skill(&skill_name)).await
         }
 
-        // ── Web search / fetch ─────────────────────────────────────────
+        // ── Web search / fetch (async, panics caught via tokio::spawn) ─
         Some("websearch") | Some("webfetch") => {
-            let output = web::execute_tool_call_async(
-                &call.name,
-                arguments,
-                ctx.web_search_config,
-                ctx.auth_store,
-            )
-            .await?;
-            ToolExecutionResult::new(output)
+            let call_name = call.name.clone();
+            let web_search_config = ctx.web_search_config.clone();
+            let auth_store = ctx.auth_store.clone();
+            match tokio::task::spawn(async move {
+                web::execute_tool_call_async(
+                    &call_name,
+                    arguments,
+                    &web_search_config,
+                    &auth_store,
+                )
+                .await
+            })
+            .await
+            {
+                Ok(Ok(output)) => ToolExecutionResult::new(output),
+                Ok(Err(e)) => ToolExecutionResult::new(format!("Error: {e:#}")),
+                Err(join_err) => {
+                    ToolExecutionResult::new(format!("Error: tool panicked: {join_err}"))
+                }
+            }
         }
 
-        None => bail!("unknown tool '{}'", call.name),
-        Some(other) => bail!("unsupported tool '{}'", other),
-    };
-
-    Ok(result)
+        None => ToolExecutionResult::new(format!("Error: unknown tool '{}'", call.name)),
+        Some(other) => ToolExecutionResult::new(format!("Error: unsupported tool '{}'", other)),
+    }
 }
 
 /// Kill any remaining tracked child processes. Called during program exit

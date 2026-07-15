@@ -521,7 +521,7 @@ impl AgentContext for CoreContext {
                 let mode = self.mode;
                 let cancel = self.cancel.clone();
                 let handle = tokio::spawn(async move {
-                    reg.execute(
+                    let result = reg.execute(
                         &tc,
                         sid,
                         mode,
@@ -530,14 +530,14 @@ impl AgentContext for CoreContext {
                         &cancel,
                         None,
                     )
-                    .await
-                    .map(|result| (tc, result))
+                    .await;
+                    (tc, result)
                 });
                 handles.push(handle);
             }
             for handle in handles {
                 match handle.await {
-                    Ok(Ok((tc, result))) => {
+                    Ok((tc, result)) => {
                         self.emit(BackendEvent::ToolCompleted {
                             session_id,
                             request_id,
@@ -546,7 +546,6 @@ impl AgentContext for CoreContext {
                         });
                         results.push((tc, result));
                     }
-                    Ok(Err(e)) => return Err(e),
                     Err(join_err) => {
                         return Err(anyhow::anyhow!("Task join error: {join_err}"));
                     }
@@ -571,7 +570,7 @@ impl AgentContext for CoreContext {
                     &self.cancel,
                     Some(self.event_tx.clone()),
                 )
-                .await?;
+                .await;
 
             self.emit(BackendEvent::ToolCompleted {
                 session_id,

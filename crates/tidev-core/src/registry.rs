@@ -8,7 +8,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use anyhow::Result;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -76,7 +75,7 @@ impl ToolRegistry {
         sensitive_file_approved: bool,
         cancel: &CancellationToken,
         event_tx: Option<UnboundedSender<BackendEvent>>,
-    ) -> Result<ToolExecutionResult> {
+    ) -> ToolExecutionResult {
         let ctx = tidev_tools::ToolContext {
             workspace_root: &self.workspace_root,
             config_dir: &self.config_dir,
