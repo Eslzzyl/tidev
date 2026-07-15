@@ -318,9 +318,19 @@ impl MessageList {
         let Some(ref mut chat_context) = self.chat_contexts.get_mut(&session_id) else { return };
 
         // Finalise the streaming message, preserving content and reasoning.
-        if let Some(idx) = self.streaming_buffer.finalise_message(&mut chat_context.messages) {
-            chat_context.messages[idx].completed_at = Some(Utc::now());
-            self.layout_index.mark_dirty(chat_context.messages[idx].id);
+        let finalized_idx = self.streaming_buffer.finalise_message(&mut chat_context.messages);
+        if let Some(idx) = finalized_idx {
+            if chat_context.messages[idx].content.is_empty()
+                && chat_context.messages[idx].reasoning.trim().is_empty()
+                && chat_context.messages[idx].tool_calls.is_empty()
+            {
+                // Interrupted before any content was produced — drop the
+                // empty ghost instead of letting it render as "(empty)".
+                chat_context.messages.remove(idx);
+            } else {
+                chat_context.messages[idx].completed_at = Some(Utc::now());
+                self.layout_index.mark_dirty(chat_context.messages[idx].id);
+            }
         }
 
         // Clear hover state for the subagent card.
