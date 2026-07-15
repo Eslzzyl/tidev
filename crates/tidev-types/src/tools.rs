@@ -301,12 +301,14 @@ macro_rules! tool_field_schema {
         let mut schema = serde_json::Map::new();
         schema.insert("type".to_string(), Value::String("array".to_string()));
         schema.insert("description".to_string(), Value::String($desc.to_string()));
+        schema.insert("items".to_string(), <$item_ty as ToolArgs>::schema());
         (Value::Object(schema), true)
     }};
     (optional_array($item_ty:ty, $desc:literal)) => {{
         let mut schema = serde_json::Map::new();
         schema.insert("type".to_string(), Value::String("array".to_string()));
         schema.insert("description".to_string(), Value::String($desc.to_string()));
+        schema.insert("items".to_string(), <$item_ty as ToolArgs>::schema());
         (Value::Object(schema), false)
     }};
     (object($item_ty:ty, $desc:literal)) => {{
