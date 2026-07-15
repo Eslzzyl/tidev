@@ -60,7 +60,9 @@ pub fn mix_colors(fg: Color, bg: Color, weight: f32) -> Color {
 
 impl ThemePalette {
     pub fn from_name(value: &str) -> Self {
-        match ThemeName::parse(value).unwrap_or(ThemeName::Dark) {
+        let name = ThemeName::parse(value).unwrap_or(ThemeName::Dark);
+        crate::markdown::set_syntax_theme_by_name(name);
+        match name {
             ThemeName::Dark => Self::dark(),
             ThemeName::Light => Self::light(),
             ThemeName::Nord => Self::nord(),
