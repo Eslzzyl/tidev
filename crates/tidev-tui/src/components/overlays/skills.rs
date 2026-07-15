@@ -10,7 +10,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
-use crate::action::{Action, ChatAction, OverlayAction, OverlayKind};
+use crate::action::{Action, OverlayAction, OverlayKind};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
 use crate::markdown::render_markdown_text_with_width_and_cwd;
@@ -19,6 +19,8 @@ use crate::utils::{centered_rect, render_scrollbar};
 #[derive(Clone, Debug)]
 pub(crate) struct SkillItem {
     pub name: String,
+    pub content: String,
+    pub is_bundled: bool,
 }
 
 pub(crate) struct SkillsPanel {
@@ -30,6 +32,7 @@ pub(crate) struct SkillsPanel {
     preview_scroll: usize,
     query_active: bool,
     cached_preview: Option<(String, Arc<Text<'static>>)>,
+    preview_content_width: usize,
 }
 
 impl SkillsPanel {
@@ -44,6 +47,7 @@ impl SkillsPanel {
             preview_scroll: 0,
             query_active: false,
             cached_preview: None,
+            preview_content_width: 60,
         }
     }
 
@@ -52,10 +56,6 @@ impl SkillsPanel {
 
     fn selected_skill(&self) -> Option<&SkillItem> {
         self.filtered_indices.get(self.selected_index).and_then(|&idx| self.all_skills.get(idx))
-    }
-
-    fn selected_skill_name(&self) -> Option<&str> {
-        self.selected_skill().map(|s| s.name.as_str())
     }
 
     fn append_to_query(&mut self, ch: char) { self.query.push(ch); self.refilter(); }
@@ -78,6 +78,12 @@ impl SkillsPanel {
         self.cached_preview = None;
     }
 
+    fn ensure_list_scroll_visible(&mut self) {
+        if self.selected_index < self.list_scroll {
+            self.list_scroll = self.selected_index;
+        }
+    }
+
     fn move_up(&mut self, _step: usize) {
         if self.selected_index > 0 {
             self.selected_index -= 1;
@@ -85,8 +91,7 @@ impl SkillsPanel {
             self.selected_index = self.filtered_indices.len().saturating_sub(1);
         }
         self.preview_scroll = 0;
-        self.cached_preview = None;
-        if self.selected_index < self.list_scroll { self.list_scroll = self.selected_index; }
+        self.ensure_list_scroll_visible();
     }
 
     fn move_down(&mut self, _step: usize) {
@@ -96,19 +101,16 @@ impl SkillsPanel {
             self.selected_index = 0;
         }
         self.preview_scroll = 0;
-        self.cached_preview = None;
     }
 
     fn page_up(&mut self, step: usize) {
         for _ in 0..step { if self.selected_index > 0 { self.selected_index -= 1; } }
         self.preview_scroll = 0;
-        self.cached_preview = None;
     }
 
     fn page_down(&mut self, step: usize) {
         for _ in 0..step { if self.selected_index + 1 < self.filtered_indices.len() { self.selected_index += 1; } }
         self.preview_scroll = 0;
-        self.cached_preview = None;
     }
 
     fn scroll_preview_up(&mut self, lines: usize) { self.preview_scroll = self.preview_scroll.saturating_sub(lines); }
@@ -121,10 +123,6 @@ impl Component for SkillsPanel {
     fn handle_key_event(&mut self, key: KeyEvent) -> Option<Action> {
         if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) { return None; }
 
-        if matches!(key.code, KeyCode::Esc | KeyCode::Char('q')) {
-            return Some(Action::Overlay(OverlayAction::Close(OverlayKind::SkillsPanel)));
-        }
-
         if self.query_active {
             match key.code {
                 KeyCode::Esc | KeyCode::Enter => { self.query_active = false; }
@@ -135,19 +133,19 @@ impl Component for SkillsPanel {
             return None;
         }
 
+        if matches!(key.code, KeyCode::Esc | KeyCode::Char('q')) {
+            return Some(Action::Overlay(OverlayAction::Close(OverlayKind::SkillsPanel)));
+        }
+
         match key.code {
             KeyCode::Char('/') | KeyCode::Char('s') => { self.query_active = true; None }
-            KeyCode::Char('c') => {
-                self.selected_skill_name()
-                    .map(|name| Action::Chat(ChatAction::SetInput(format!("/skill {}", name))))
-            }
             KeyCode::Up | KeyCode::Char('k') => { self.move_up(10); None }
             KeyCode::Down | KeyCode::Char('j') => { self.move_down(10); None }
             KeyCode::PageUp => { self.page_up(10); None }
             KeyCode::PageDown => { self.page_down(10); None }
-            KeyCode::Home => { self.selected_index = 0; self.list_scroll = 0; self.cached_preview = None; None }
+            KeyCode::Home => { self.selected_index = 0; self.list_scroll = 0; None }
             KeyCode::End if !self.filtered_indices.is_empty() => {
-                self.selected_index = self.filtered_indices.len() - 1; self.cached_preview = None; None
+                self.selected_index = self.filtered_indices.len() - 1; None
             }
             KeyCode::Left => { self.scroll_preview_up(5); None }
             KeyCode::Right => { self.scroll_preview_down(5); None }
@@ -177,7 +175,7 @@ impl Component for SkillsPanel {
             }
             MouseEventKind::Down(MouseButton::Left) => {
                 if in_left {
-                    let header_rows = 3u16;
+                    let header_rows = 4u16;
                     let list_area = Rect::new(inner.x, inner.y, split_x, inner.height);
                     if position.y >= list_area.y + header_rows {
                         let row = (position.y - list_area.y - header_rows) as usize;
@@ -185,7 +183,6 @@ impl Component for SkillsPanel {
                         if idx < self.filtered_indices.len() {
                             self.selected_index = idx;
                             self.preview_scroll = 0;
-                            self.cached_preview = None;
                         }
                     }
                 }
@@ -195,27 +192,8 @@ impl Component for SkillsPanel {
         }
     }
 
-    fn update(&mut self, action: &Action, ctx: &UpdateContext) -> Vec<Action> {
-        match action {
-            Action::Overlay(OverlayAction::Close(OverlayKind::SkillsPanel)) => {
-                vec![]
-            }
-            _ => {
-                if self.cached_preview.is_none()
-                    && let Some(skill) = self.selected_skill()
-                        && let Ok(content) = ctx
-                            .runtime
-                            .tool_registry()
-                            .skills()
-                            .render_skill(&skill.name)
-                        {
-                            let width = 60;
-                            let rendered = render_markdown_text_with_width_and_cwd(&content, Some(width), None);
-                            self.cached_preview = Some((skill.name.clone(), rendered));
-                        }
-                vec![]
-            }
-        }
+    fn update(&mut self, _action: &Action, _ctx: &UpdateContext) -> Vec<Action> {
+        vec![]
     }
 
     fn draw(&mut self, frame: &mut Frame, rect: Rect, ctx: &DrawContext) {
@@ -269,6 +247,16 @@ impl Component for SkillsPanel {
         let left_area = layout[0];
         let right_area = layout[2];
 
+        // Vertical separator between panes
+        let sep_area = layout[1];
+        let sep_lines: Vec<Line> = (0..body.height).map(|_| {
+            Line::from(Span::styled("│", Style::default().fg(palette.border)))
+        }).collect();
+        frame.render_widget(
+            Paragraph::new(sep_lines).style(Style::default().bg(palette.panel_alt)),
+            sep_area,
+        );
+
         // ── Left Pane: List ──
         let filter_text = if self.query_active {
             format!("  Search: {}", self.query)
@@ -294,7 +282,27 @@ impl Component for SkillsPanel {
             ));
         }
 
-        let list_header_height = 1u16;
+        // Name column header
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![Span::styled(
+                "  Name",
+                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+            )]))
+            .style(Style::default().bg(palette.panel_alt)),
+            Rect::new(left_area.x, left_area.y + 1, left_area.width, 1),
+        );
+
+        // Separator
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                "─".repeat(left_area.width as usize),
+                Style::default().fg(palette.muted),
+            )))
+            .style(Style::default().bg(palette.panel_alt)),
+            Rect::new(left_area.x, left_area.y + 2, left_area.width, 1),
+        );
+
+        let list_header_height = 3u16;
         let list_content_y = left_area.y + list_header_height;
         let list_content_height = left_area.height.saturating_sub(list_header_height);
         let list_content_area = Rect::new(left_area.x, list_content_y, left_area.width, list_content_height);
@@ -320,14 +328,21 @@ impl Component for SkillsPanel {
             let idx = self.filtered_indices[i];
             let skill = &self.all_skills[idx];
             let is_selected = i == self.selected_index;
-            let icon = if is_selected { "▸ " } else { "  " };
+            let prefix = if skill.is_bundled {
+                Span::styled(" ", Style::default().fg(palette.muted))
+            } else {
+                Span::raw("  ")
+            };
             let name_style = if is_selected {
-                Style::default().fg(palette.selection_fg).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .bg(palette.selection_bg)
+                    .fg(palette.selection_fg)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(palette.text)
             };
             list_lines.push(Line::from(vec![
-                Span::styled(icon, name_style),
+                prefix,
                 Span::styled(&skill.name, name_style),
             ]));
         }
@@ -342,20 +357,23 @@ impl Component for SkillsPanel {
         );
 
         if let Some(sb_area) = list_scrollbar_area {
-            render_scrollbar(frame, sb_area, self.list_scroll, self.filtered_indices.len(), palette, false);
+            if self.filtered_indices.len() > list_content_height as usize {
+                render_scrollbar(frame, sb_area, self.list_scroll, self.filtered_indices.len(), palette, false);
+            }
         }
 
         // ── Right Pane: Preview ──
+        let preview_header_y = right_area.y + 1;
         frame.render_widget(
             Paragraph::new(vec![Line::from(vec![Span::styled(
                 "  Preview",
                 Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
             )])])
             .style(Style::default().bg(palette.panel_alt)),
-            Rect::new(right_area.x, right_area.y, right_area.width, 1),
+            Rect::new(right_area.x, preview_header_y, right_area.width, 1),
         );
 
-        let preview_divider_y = right_area.y + 1;
+        let preview_divider_y = preview_header_y + 1;
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 "─".repeat(right_area.width as usize),
@@ -366,8 +384,9 @@ impl Component for SkillsPanel {
         );
 
         let preview_content_y = preview_divider_y + 1;
-        let preview_content_height = right_area.height.saturating_sub(2);
+        let preview_content_height = right_area.height.saturating_sub(4);
         let preview_content_area = Rect::new(right_area.x, preview_content_y, right_area.width, preview_content_height);
+        self.preview_content_width = preview_content_area.width.saturating_sub(2) as usize;
         let (preview_content_area, preview_scrollbar_area) = if preview_content_area.width > 2 {
             let chunks = Layout::horizontal([
                 Constraint::Min(1), Constraint::Length(1), Constraint::Length(1),
@@ -382,8 +401,22 @@ impl Component for SkillsPanel {
             (preview_content_area, None)
         };
 
+        // Populate preview cache from SkillItem.content if it doesn't match the selected skill
+        let needs_render = match &self.cached_preview {
+            Some((name, _)) => self.selected_skill().map_or(true, |s| *name != s.name),
+            None => true,
+        };
+        if needs_render {
+            if let Some(skill) = self.selected_skill() {
+                let rendered = render_markdown_text_with_width_and_cwd(&skill.content, Some(self.preview_content_width), None);
+                self.cached_preview = Some((skill.name.clone(), rendered));
+            }
+        }
+
         if let Some((_, rendered)) = &self.cached_preview {
             let total_preview_lines = rendered.lines.len();
+            let max_scroll = total_preview_lines.saturating_sub(preview_content_height as usize);
+            self.preview_scroll = self.preview_scroll.min(max_scroll);
             let scroll = self.preview_scroll;
             let visible_lines: Vec<Line<'_>> = rendered.lines.iter()
                 .skip(scroll)
@@ -397,17 +430,17 @@ impl Component for SkillsPanel {
             );
 
             if let Some(sb_area) = preview_scrollbar_area {
-                render_scrollbar(frame, sb_area, self.preview_scroll, total_preview_lines, palette, false);
+                if total_preview_lines > preview_content_height as usize {
+                    render_scrollbar(frame, sb_area, self.preview_scroll, total_preview_lines, palette, false);
+                }
             }
-        } else if let Some(sb_area) = preview_scrollbar_area {
-            render_scrollbar(frame, sb_area, 0, 0, palette, false);
         }
 
         let footer_y = inner.y + inner.height - 1;
         let hints = if self.query_active {
             "Enter: confirm search  •  Esc: cancel"
         } else {
-            "↑/↓: navigate  •  ←/→: scroll preview  •  /: search  •  c: copy  •  Esc: close"
+            "↑/↓: navigate  •  ←/→: scroll preview  •  /: search  •  Esc: close"
         };
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(

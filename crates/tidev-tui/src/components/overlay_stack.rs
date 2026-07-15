@@ -1,6 +1,6 @@
 //! OverlayStack — a z-ordered stack of overlay components.
 
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyEvent, MouseEvent};
 use ratatui::layout::Rect;
 use ratatui::Frame;
 
@@ -21,6 +21,10 @@ impl OverlayStack {
 
     pub fn push(&mut self, component: Box<dyn Component>) {
         self.overlays.push(component);
+    }
+
+    pub fn last_mut(&mut self) -> Option<&mut Box<dyn Component>> {
+        self.overlays.last_mut()
     }
 
     pub fn pop(&mut self) -> Option<Box<dyn Component>> {
@@ -51,6 +55,19 @@ impl OverlayStack {
             follow_ups.extend(overlay.update(action, ctx));
         }
         follow_ups
+    }
+
+    /// Route a mouse event top-first.
+    pub fn handle_mouse_event(&mut self, mouse: MouseEvent, area: Rect) -> Option<Action> {
+        for overlay in self.overlays.iter_mut().rev() {
+            if let Some(action) = overlay.handle_mouse_event(mouse, area) {
+                return Some(action);
+            }
+            if overlay.blocks_input() {
+                return Some(Action::Noop);
+            }
+        }
+        None
     }
 
     /// Draw overlays bottom-up.

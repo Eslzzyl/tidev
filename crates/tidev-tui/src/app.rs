@@ -116,6 +116,9 @@ pub struct App {
     /// Cached sidebar area for mouse hit-testing.
     sidebar_area: Option<Rect>,
 
+    /// Cached terminal area for overlay mouse hit-testing.
+    terminal_area: Rect,
+
     /// Current session's todo items (loaded from store).
     todos: Vec<TodoItem>,
 
@@ -226,6 +229,7 @@ impl App {
             sidebar: Sidebar::new(),
             mouse_selection: MouseSelection::default(),
             sidebar_area: None,
+            terminal_area: Rect::new(0, 0, 0, 0),
             todos: Vec::new(),
             image_picker: Picker::from_query_stdio().ok(),
             composer: {
@@ -1026,6 +1030,12 @@ impl App {
         use crossterm::event::MouseButton;
 
         let position = ratatui::layout::Position::new(mouse.column, mouse.row);
+
+        // Route mouse events to overlays first (top overlay has priority)
+        if let Some(action) = self.overlays.handle_mouse_event(mouse, self.terminal_area) {
+            self.process_action(action);
+            return;
+        }
 
         // Sidebar scroll (scroll events in the sidebar area)
         if let Some(sidebar_area) = self.sidebar_area
@@ -1951,6 +1961,7 @@ impl App {
     }
 
     fn open_overlay(&mut self, kind: OverlayKind) {
+        let kind_for_update = kind.clone();
         let component: Option<Box<dyn Component>> = match kind {
             OverlayKind::ThemePanel => {
                 let current = ThemeName::parse(self.current_palette.name.as_str())
@@ -1965,6 +1976,8 @@ impl App {
                     .iter()
                     .map(|s| SkillItem {
                         name: s.name.clone(),
+                        content: catalog.render_skill(&s.name).unwrap_or_default(),
+                        is_bundled: s.directory.starts_with("__builtin__"),
                     })
                     .collect();
                 Some(Box::new(SkillsPanel::new(skills)))
@@ -2112,6 +2125,14 @@ impl App {
             };
             let _ = component.init(&init_ctx);
             self.overlays.push(component);
+
+            // Trigger initial lazy-load for the new overlay (e.g. populate preview cache)
+            if let Some(top) = self.overlays.last_mut() {
+                let ctx = UpdateContext {
+                    runtime: &mut self.runtime,
+                };
+                let _ = top.update(&Action::Overlay(OverlayAction::Open(kind_for_update)), &ctx);
+            }
         }
     }
 
@@ -2257,6 +2278,7 @@ impl App {
     pub fn draw(&mut self, frame: &mut Frame) {
         let palette = self.current_palette;
         let area = frame.area();
+        self.terminal_area = area;
 
         // Background
         frame.render_widget(
