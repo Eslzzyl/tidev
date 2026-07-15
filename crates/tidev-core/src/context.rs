@@ -213,8 +213,15 @@ impl ContextManager {
         session_id: Uuid,
         event_tx: Option<tokio::sync::mpsc::UnboundedSender<BackendEvent>>,
     ) -> Result<CompactionResult> {
-        // 1. Build prefix (same logic as normal request -> prefix cache hit).
-        let mut compact_msgs = self.build_request_messages_raw(messages);
+        // 1. Build prefix (same logic as build_request_messages -> prefix cache hit).
+        let mut compact_msgs = Vec::new();
+        if let Some(summary) = &self.summary {
+            compact_msgs.push(Message::new(
+                MessageRole::User,
+                format!("Earlier conversation summary:\n{summary}"),
+            ));
+        }
+        compact_msgs.extend(self.build_request_messages_raw(messages));
 
         // 2. Append summary instruction.
         compact_msgs.push(Message::new(MessageRole::User, SUMMARY_INSTRUCTION));

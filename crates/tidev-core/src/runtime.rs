@@ -687,6 +687,17 @@ impl Runtime {
             let active = self.active_model.read().unwrap();
             to_llm_provider_config(&active)
         };
+        // Match the session's system prompt used by normal requests.
+        let compact_model = {
+            let session = self.session_manager.load_session(session_id)?;
+            let mut m = model_config;
+            if let Some(s) = session
+                && !s.system_prompt.is_empty()
+            {
+                m.system_prompt = Some(s.system_prompt);
+            }
+            m
+        };
         let active_model = self.active_model.read().unwrap().clone();
         let tools = self.tool_registry.definitions_for_model(&active_model);
 
@@ -699,7 +710,7 @@ impl Runtime {
             let result = cm_lock
                 .compact(
                     &self.llm,
-                    &model_config,
+                    &compact_model,
                     &tools,
                     &messages,
                     session_id,

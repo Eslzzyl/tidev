@@ -752,10 +752,12 @@ impl AgentContext for CoreContext {
             };
             let tools = self.tool_registry.definitions_for_model(&self.active_model);
             let result = {
+                let mut compact_model = self.model_config.clone();
+                compact_model.system_prompt = Some(self.system_prompt.clone());
                 let cm = self.context_manager.lock().await;
                 cm.compact(
                     &self.llm,
-                    &self.model_config,
+                    &compact_model,
                     &tools,
                     &msgs_to_compact,
                     self.session_id,
