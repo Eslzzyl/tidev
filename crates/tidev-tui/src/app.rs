@@ -8,7 +8,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use chrono::Utc;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent};
 use ratatui::layout::{Alignment, Constraint, Layout, Margin, Rect};
 use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -967,6 +967,22 @@ impl App {
         }
         if let Some(ref mut composer) = self.composer {
             composer.handle_paste(&text);
+        }
+    }
+
+    /// Single dispatch point for all crossterm events.
+    ///
+    /// Both the batch drain (Phase 1a) and the idle wait (Phase 3) in the
+    /// event loop call this method so that every event variant is handled
+    /// in exactly one place.
+    pub(crate) fn handle_crossterm_event(&mut self, event: Event) {
+        match event {
+            Event::Key(key) => self.handle_key_event(key),
+            Event::Mouse(mouse) => self.handle_mouse_event(mouse),
+            Event::Paste(text) => self.handle_paste(text),
+            Event::Resize(w, h) => self.handle_resize(w, h),
+            Event::FocusGained => self.handle_focus_event(true),
+            Event::FocusLost => self.handle_focus_event(false),
         }
     }
 

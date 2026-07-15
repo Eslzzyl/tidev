@@ -113,14 +113,7 @@ impl Tui {
             while cc_count < MAX_CROSSTERM_EVENTS_PER_BATCH {
                 match crossterm_rx.try_recv() {
                     Ok(event) => {
-                        match event {
-                            Event::Key(key) => app.handle_key_event(key),
-                            Event::Mouse(mouse) => app.handle_mouse_event(mouse),
-                            Event::Paste(text) => app.handle_paste(text),
-                            Event::Resize(w, h) => app.handle_resize(w, h),
-                            Event::FocusGained => app.handle_focus_event(true),
-                            Event::FocusLost => app.handle_focus_event(false),
-                        }
+                        app.handle_crossterm_event(event);
                         cc_count += 1;
                         had_input = true;
                     }
@@ -219,14 +212,7 @@ impl Tui {
             if !had_input {
                 tokio::select! {
                     Some(event) = crossterm_rx.recv() => {
-                        match event {
-                            Event::Key(key) => app.handle_key_event(key),
-                            Event::Mouse(mouse) => app.handle_mouse_event(mouse),
-                            Event::Resize(w, h) => app.handle_resize(w, h),
-                            Event::FocusGained => app.handle_focus_event(true),
-                            Event::FocusLost => app.handle_focus_event(false),
-                            _ => {}
-                        }
+                        app.handle_crossterm_event(event);
                         had_input = true;
                     }
                     result = async {
