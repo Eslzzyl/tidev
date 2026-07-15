@@ -97,9 +97,11 @@ impl Tui {
         let mut request_rx = app.request_rx.take();
         let mut event_rx = app.event_rx.take();
 
-        // Initial render.
-        self.terminal.draw(|frame| app.draw(frame))?;
-        let mut last_render = Instant::now();
+        // No explicit initial render before the loop — matching v0.6.x
+        // behaviour.  The first frame renders naturally in the event loop
+        // so that any early key events are processed in the same pass,
+        // avoiding the cross-frame `Clear` → terminal-background flash.
+        let mut last_render = Instant::now() - FRAME_BUDGET;
 
         let mut had_input = false;
 
