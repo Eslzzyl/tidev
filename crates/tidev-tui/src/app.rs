@@ -88,6 +88,8 @@ pub struct App {
     pending_mode: Option<SessionMode>,
     /// Current thinking level for the active model.
     thinking_level: ThinkingLevelType,
+    /// Whether the subagent (task tool) is enabled.
+    subagent_enabled: bool,
     /// Status notice shown at the bottom of the screen (plain text, no timeout).
     last_notice: Option<(String, Instant)>,
     /// Transient popup notifications (auto-expire).
@@ -188,6 +190,7 @@ impl App {
         let supports_images = runtime.active_model().supports_images;
         let thinking_level = runtime.active_model().thinking_level.clone();
         let notif_config = runtime.config().notifications.clone();
+        let subagent_enabled = runtime.config().subagent.enabled;
 
         Self {
             runtime,
@@ -199,6 +202,7 @@ impl App {
             mode: SessionMode::Build,
             pending_mode: None,
             thinking_level,
+            subagent_enabled,
             last_notice: None,
             notifications: NotificationState::new(),
             desktop_notifications: NotificationManager::new(&notif_config),
@@ -1249,12 +1253,16 @@ impl App {
                 }
                 Action::Overlay(OverlayAction::Close(kind)) => {
                     let is_model_panel = kind == OverlayKind::ModelPanel;
+                    let is_settings_panel = kind == OverlayKind::SettingsPanel;
                     self.close_overlay(kind, &mut queue);
                     if is_model_panel
                         && let Some(ref mut composer) = self.composer {
                             let model = self.runtime.active_model();
                             composer.set_model_supports_images(model.supports_images);
                         }
+                    if is_settings_panel {
+                        self.subagent_enabled = self.runtime.config().subagent.enabled;
+                    }
                 }
                 Action::Theme(ThemeAction::Preview(name)) => {
                     self.current_palette = ThemePalette::from_name(name.as_str());
@@ -2267,6 +2275,7 @@ impl App {
                 model_display: None,
                 provider_display: None,
                 thinking_level: None,
+                subagent_disabled: !self.subagent_enabled,
             };
             self.overlays.draw(frame, area, &draw_ctx);
             return;
@@ -2337,6 +2346,7 @@ impl App {
                 model_display: None,
                 provider_display: None,
                 thinking_level: None,
+                subagent_disabled: !self.subagent_enabled,
             };
             chat.draw(frame, content_area, &draw_ctx);
         }
@@ -2384,6 +2394,7 @@ impl App {
                 model_display: Some(&active_model.display_name),
                 provider_display: Some(&active_model.provider_display_name),
                 thinking_level: Some(&active_model.thinking_level),
+                subagent_disabled: !self.subagent_enabled,
             };
             composer.draw(frame, bottom_area, &draw_ctx);
         }
@@ -2397,6 +2408,7 @@ impl App {
             model_display: None,
             provider_display: None,
             thinking_level: None,
+            subagent_disabled: !self.subagent_enabled,
         };
 
         // ── Sidebar ───────────────────────────────────────────────────
@@ -2595,6 +2607,7 @@ impl App {
                 model_display: Some(&active_model.display_name),
                 provider_display: Some(&active_model.provider_display_name),
                 thinking_level: Some(&active_model.thinking_level),
+                subagent_disabled: !self.subagent_enabled,
             };
             composer.draw(frame, sections[2], &draw_ctx);
         }

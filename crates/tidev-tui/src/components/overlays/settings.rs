@@ -44,6 +44,7 @@ pub(crate) enum SettingKey {
     ScrollSpeed,
     AllowSensitiveFileAccess,
     AllowOutsideWorkspaceAccess,
+    SubagentEnabled,
 }
 
 #[derive(Clone, Debug)]
@@ -148,6 +149,13 @@ impl SettingsPanel {
                     config.access_control.allow_outside_workspace_access,
                 ),
                 key: SettingKey::AllowOutsideWorkspaceAccess,
+                disabled: false,
+            },
+            SettingItem {
+                name: "Subagent".to_string(),
+                description: "Enable subagent (task tool)".to_string(),
+                setting_type: SettingType::Toggle(config.subagent.enabled),
+                key: SettingKey::SubagentEnabled,
                 disabled: false,
             },
         ];
@@ -274,6 +282,11 @@ impl SettingsPanel {
                         config.access_control.allow_outside_workspace_access = val;
                     }
                 }
+                SettingKey::SubagentEnabled => {
+                    if let SettingType::Toggle(val) = item.setting_type {
+                        config.subagent.enabled = val;
+                    }
+                }
             }
         }
     }
@@ -368,7 +381,7 @@ impl Component for SettingsPanel {
     fn draw(&mut self, frame: &mut Frame, rect: Rect, ctx: &DrawContext) {
         let palette = ctx.palette;
         // 8 items × ~2 lines each = 22 rows
-        let overlay = centered_rect(64, 22, rect);
+        let overlay = centered_rect(64, 24, rect);
         frame.render_widget(Clear, overlay);
 
         let panel_block = Block::default().style(Style::default().bg(palette.panel_alt));

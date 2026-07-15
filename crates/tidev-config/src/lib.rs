@@ -171,6 +171,22 @@ impl Default for NotificationConfig {
 }
 
 // ---------------------------------------------------------------------------
+// SubagentConfig
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SubagentConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+impl Default for SubagentConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // SnapshotConfig
 // ---------------------------------------------------------------------------
 
@@ -376,6 +392,8 @@ pub struct AppConfig {
     pub websearch: WebSearchConfig,
     #[serde(default)]
     pub snapshot: SnapshotConfig,
+    #[serde(default)]
+    pub subagent: SubagentConfig,
     #[serde(skip)]
     pub bundled_providers: BTreeMap<String, ProviderConfig>,
 }
@@ -403,6 +421,7 @@ impl Default for AppConfig {
             tmp: TmpConfig::default(),
             websearch: WebSearchConfig::default(),
             snapshot: SnapshotConfig::default(),
+            subagent: SubagentConfig::default(),
             bundled_providers: bundled_provider_catalog().unwrap_or_default(),
         }
     }
@@ -504,6 +523,9 @@ impl AppConfig {
         }
         if has("tmp") {
             self.tmp = overlay.tmp;
+        }
+        if has("subagent") {
+            self.subagent = overlay.subagent;
         }
     }
 

@@ -207,6 +207,17 @@ pub(crate) fn draw_composer(
                 ));
             }
 
+        // · Subagent strikethrough when disabled
+        if ctx.subagent_disabled {
+            meta_spans.push(Span::styled(" · ", Style::default().fg(palette.muted)));
+            meta_spans.push(Span::styled(
+                "Subagent",
+                Style::default()
+                    .fg(palette.muted)
+                    .add_modifier(Modifier::CROSSED_OUT),
+            ));
+        }
+
         // Render on the second row of metadata_area (first row is blank spacer)
         let meta_rect = Rect::new(metadata_area.x, metadata_area.y + 1, metadata_area.width, 1);
         frame.render_widget(

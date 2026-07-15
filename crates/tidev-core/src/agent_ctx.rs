@@ -17,7 +17,10 @@ use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use tidev_agent::{AgentContext, AgentLoopConfig, ApprovedTool, ToolCallWithViolations, TuiRequest, TuiRequestKind, TuiResponse};
+use tidev_agent::{
+    AgentContext, AgentLoopConfig, ApprovedTool, ToolCallWithViolations, TuiRequest,
+    TuiRequestKind, TuiResponse,
+};
 use tidev_config::auth::ActiveModel;
 use tidev_config::{AppConfig, AuthStore};
 use tidev_types::agent_type::{AgentDefinition, AgentType};
@@ -27,7 +30,9 @@ use tidev_types::message::{
 use tidev_types::prompts::SessionMode;
 use tidev_types::reasoning::ThinkingLevelType;
 use tidev_types::tools::ToolDefinition;
-use tidev_utils::path::{extract_boundary_violation_path, extract_sensitive_file_path, load_sensitive_patterns};
+use tidev_utils::path::{
+    extract_boundary_violation_path, extract_sensitive_file_path, load_sensitive_patterns,
+};
 
 use tidev_llm::{LlmClient, LlmProviderConfig};
 use tidev_snapshot::SnapshotService;
@@ -104,8 +109,7 @@ fn read_only_tool_names() -> HashSet<&'static str> {
 
 /// Whether a tool call is read-only (and may thus run in parallel with others).
 fn is_read_only(name: &str) -> bool {
-    read_only_tool_names()
-        .contains(tidev_types::tools::canonical_tool_name(name).unwrap_or(name))
+    read_only_tool_names().contains(tidev_types::tools::canonical_tool_name(name).unwrap_or(name))
 }
 
 // ---------------------------------------------------------------------------
@@ -239,7 +243,6 @@ impl CoreContext {
     fn emit(&self, event: BackendEvent) {
         let _ = self.event_tx.send(event);
     }
-
 }
 
 // ---------------------------------------------------------------------------
@@ -411,13 +414,9 @@ impl AgentContext for CoreContext {
             }
 
             // 3. Check workspace boundary & sensitive file violations.
-            let arguments: Value = serde_json::from_str(&tc.arguments)
-                .unwrap_or(Value::Null);
-            let boundary_violation = extract_boundary_violation_path(
-                &self.workspace_root,
-                &tc.name,
-                &arguments,
-            );
+            let arguments: Value = serde_json::from_str(&tc.arguments).unwrap_or(Value::Null);
+            let boundary_violation =
+                extract_boundary_violation_path(&self.workspace_root, &tc.name, &arguments);
             let sensitive_violation = extract_sensitive_file_path(
                 &self.workspace_root,
                 &tc.name,
@@ -561,16 +560,18 @@ impl AgentContext for CoreContext {
                 return Ok(results);
             }
 
-            let result = self.tool_registry.execute(
-                &tc,
-                session_id,
-                self.mode,
-                allow_outside,
-                sensitive_approved,
-                &self.cancel,
-                Some(self.event_tx.clone()),
-            )
-            .await?;
+            let result = self
+                .tool_registry
+                .execute(
+                    &tc,
+                    session_id,
+                    self.mode,
+                    allow_outside,
+                    sensitive_approved,
+                    &self.cancel,
+                    Some(self.event_tx.clone()),
+                )
+                .await?;
 
             self.emit(BackendEvent::ToolCompleted {
                 session_id,
@@ -582,6 +583,22 @@ impl AgentContext for CoreContext {
         }
 
         // --- Task tools (subagents): spawn each in its own task ---
+        // When subagent is disabled by config, return an error instead of spawning.
+        if !task_calls.is_empty() && !self.config.read().unwrap().subagent.enabled {
+            for (tc, _) in task_calls.drain(..) {
+                let result = ToolExecutionResult::new(
+                    "User has temporarily disabled the subagent (task) tool.",
+                );
+                self.emit(BackendEvent::ToolCompleted {
+                    session_id,
+                    request_id,
+                    tool_call: tc.clone(),
+                    result: result.clone(),
+                });
+                results.push((tc, result));
+            }
+        }
+
         if !task_calls.is_empty() {
             let mut handles = Vec::with_capacity(task_calls.len());
             for (tc, child_session_id) in task_calls {
@@ -720,7 +737,11 @@ impl AgentContext for CoreContext {
                 self.model_config.context_window,
                 self.model_config.max_output_tokens,
             );
-            let msgs = if needs { buf.load().to_vec() } else { Vec::new() };
+            let msgs = if needs {
+                buf.load().to_vec()
+            } else {
+                Vec::new()
+            };
             (needs, msgs)
         };
 
@@ -762,7 +783,8 @@ impl AgentContext for CoreContext {
                 marker.metadata.prior_summary = prior_summary;
                 marker.metadata.prior_retained_from = Some(prior_retained_from);
                 self.buffer.write().await.append(marker.clone());
-                self.session_manager.append_message(self.session_id, &marker)?;
+                self.session_manager
+                    .append_message(self.session_id, &marker)?;
             }
             let model_id = self.active_model.model_id.clone();
             self.emit(BackendEvent::ContextCompacted {
@@ -869,8 +891,7 @@ async fn execute_task_tool(
         let agent_type_name = agent_type.display_name();
         let cfg = spawner.config.read().unwrap();
         let auth = spawner.auth.read().unwrap();
-        match cfg.resolve_agent_active_model(&auth, agent_type_name)
-        {
+        match cfg.resolve_agent_active_model(&auth, agent_type_name) {
             Ok(Some(model)) => model,
             _ => {
                 let mut m = spawner.active_model.clone();
@@ -931,16 +952,21 @@ async fn execute_task_tool(
 
     // Persist child_session_id in the parent's assistant message metadata
     // so the TUI can recover it when switching sessions.
-    if let Ok(messages) = spawner.session_manager.load_messages(config.parent_session_id) {
+    if let Ok(messages) = spawner
+        .session_manager
+        .load_messages(config.parent_session_id)
+    {
         if let Some(msg) = messages.iter().find(|m| {
             m.role == MessageRole::Assistant
                 && m.tool_calls.iter().any(|tc| tc.id == config.tool_call.id)
         }) {
             let mut meta = msg.metadata.clone();
             meta.child_session_id = Some(child_session_id);
-            let _ = spawner
-                .session_manager
-                .update_message_metadata(config.parent_session_id, msg.id, &meta);
+            let _ = spawner.session_manager.update_message_metadata(
+                config.parent_session_id,
+                msg.id,
+                &meta,
+            );
         }
     }
 
@@ -1037,8 +1063,7 @@ fn filter_subagent_tools(
         .iter()
         .filter(|def| {
             let name = &def.name;
-            let canonical =
-                tidev_types::tools::canonical_tool_name(name).unwrap_or(name.as_str());
+            let canonical = tidev_types::tools::canonical_tool_name(name).unwrap_or(name.as_str());
 
             // Plan mode or read-only agent: only read tools.
             if mode == SessionMode::Plan || read_only {
@@ -1053,8 +1078,7 @@ fn filter_subagent_tools(
         })
         .filter(|def| {
             let name = &def.name;
-            let canonical =
-                tidev_types::tools::canonical_tool_name(name).unwrap_or(name.as_str());
+            let canonical = tidev_types::tools::canonical_tool_name(name).unwrap_or(name.as_str());
             // Extra safety: never include write tools for read-only agents.
             if read_only && is_write_tool(canonical) {
                 return false;

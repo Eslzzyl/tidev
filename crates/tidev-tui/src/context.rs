@@ -24,6 +24,8 @@ pub(crate) struct DrawContext<'a> {
     pub provider_display: Option<&'a str>,
     /// Active thinking level (shown in composer metadata).
     pub thinking_level: Option<&'a ThinkingLevelType>,
+    /// Whether the subagent (task tool) is currently disabled.
+    pub subagent_disabled: bool,
 }
 
 /// Mutable resources provided during action processing.
