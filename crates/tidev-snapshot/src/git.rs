@@ -39,7 +39,7 @@ pub fn init_snapshot_repo(gitdir: &Path) -> Result<()> {
 
     let status = Command::new("git")
         .args(["init", "--bare"])
-        .arg(&gitdir)
+        .arg(gitdir)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
@@ -235,7 +235,7 @@ pub async fn filter_large_files(
     }
 
     let workers = concurrency.max(1).min(files.len());
-    let chunk_size = (files.len() + workers - 1) / workers;
+    let chunk_size = files.len().div_ceil(workers);
     let mut set: JoinSet<Vec<String>> = JoinSet::new();
 
     for chunk in files.chunks(chunk_size) {

@@ -284,8 +284,10 @@ impl AgentContext for CoreContext {
                 .await;
         });
 
-        let mut turn = AssistantTurn::default();
-        turn.created_at = Some(Utc::now());
+        let mut turn = AssistantTurn {
+            created_at: Some(Utc::now()),
+            ..Default::default()
+        };
 
         // Race: cancel token vs LLM events.
         loop {
@@ -497,7 +499,7 @@ impl AgentContext for CoreContext {
 
             let tc = approved.tool_call.clone();
 
-            if tidev_types::tools::canonical_tool_name(&tc.name).as_deref() == Some("task") {
+            if tidev_types::tools::canonical_tool_name(&tc.name) == Some("task") {
                 task_calls.push((tc, approved.child_session_id));
             } else if is_read_only(&tc.name) {
                 read_only.push((tc, approved.allow_outside, approved.sensitive_file_approved));
@@ -668,12 +670,11 @@ impl AgentContext for CoreContext {
         let has_tool_calls = messages
             .iter()
             .any(|m| m.role == MessageRole::Assistant && !m.tool_calls.is_empty());
-        if has_tool_calls {
-            if let Some(ref snap) = self.snapshot {
-                if let Ok(Some(hash)) = snap.track() {
-                    *self.pre_round_hash.lock().await = Some(hash);
-                }
-            }
+        if has_tool_calls
+            && let Some(ref snap) = self.snapshot
+            && let Ok(Some(hash)) = snap.track()
+        {
+            *self.pre_round_hash.lock().await = Some(hash);
         }
 
         // When tool result messages are saved, the round has finished —
@@ -682,32 +683,30 @@ impl AgentContext for CoreContext {
         let mut enriched = messages.to_vec();
         if has_tool_results {
             let pre = { self.pre_round_hash.lock().await.clone() };
-            if let Some(ref pre) = pre {
-                if let Some(ref snap) = self.snapshot {
-                    if let Ok(Some(post_hash)) = snap.track() {
-                        if let Ok(diffs) = snap.diff_lightweight(pre, &post_hash).await {
-                            let files: Vec<String> = diffs
-                                .iter()
-                                .map(|d| {
-                                    self.workspace_root
-                                        .join(&d.file)
-                                        .to_string_lossy()
-                                        .replace('\\', "/")
-                                })
-                                .collect();
-                            if !files.is_empty() {
-                                *self.pre_round_hash.lock().await = None;
-                                let step_patch = serde_json::json!([{
-                                    "hash": pre,
-                                    "files": files,
-                                    "step": 1,
-                                }]);
-                                if let Some(last) = enriched.last_mut() {
-                                    last.snapshot_hash = Some(post_hash);
-                                    last.patch_files = Some(step_patch.to_string());
-                                }
-                            }
-                        }
+            if let Some(ref pre) = pre
+                && let Some(ref snap) = self.snapshot
+                && let Ok(Some(post_hash)) = snap.track()
+                && let Ok(diffs) = snap.diff_lightweight(pre, &post_hash).await
+            {
+                let files: Vec<String> = diffs
+                    .iter()
+                    .map(|d| {
+                        self.workspace_root
+                            .join(&d.file)
+                            .to_string_lossy()
+                            .replace('\\', "/")
+                    })
+                    .collect();
+                if !files.is_empty() {
+                    *self.pre_round_hash.lock().await = None;
+                    let step_patch = serde_json::json!([{
+                        "hash": pre,
+                        "files": files,
+                        "step": 1,
+                    }]);
+                    if let Some(last) = enriched.last_mut() {
+                        last.snapshot_hash = Some(post_hash);
+                        last.patch_files = Some(step_patch.to_string());
                     }
                 }
             }
@@ -954,19 +953,18 @@ async fn execute_task_tool(
     if let Ok(messages) = spawner
         .session_manager
         .load_messages(config.parent_session_id)
-    {
-        if let Some(msg) = messages.iter().find(|m| {
+        && let Some(msg) = messages.iter().find(|m| {
             m.role == MessageRole::Assistant
                 && m.tool_calls.iter().any(|tc| tc.id == config.tool_call.id)
-        }) {
-            let mut meta = msg.metadata.clone();
-            meta.child_session_id = Some(child_session_id);
-            let _ = spawner.session_manager.update_message_metadata(
-                config.parent_session_id,
-                msg.id,
-                &meta,
-            );
-        }
+        })
+    {
+        let mut meta = msg.metadata.clone();
+        meta.child_session_id = Some(child_session_id);
+        let _ = spawner.session_manager.update_message_metadata(
+            config.parent_session_id,
+            msg.id,
+            &meta,
+        );
     }
 
     // 7. Create child CoreContext.
@@ -1071,7 +1069,7 @@ fn filter_subagent_tools(
 
             // Agent type restrictions.
             match allowed {
-                Some(list) => list.iter().any(|a| *a == canonical),
+                Some(list) => list.contains(&canonical),
                 None => true,
             }
         })

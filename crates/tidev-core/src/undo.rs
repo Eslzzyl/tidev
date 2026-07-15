@@ -26,10 +26,10 @@ pub fn last_visible_user_message(messages: &[Message]) -> Option<Uuid> {
 pub fn prev_user_message_before(messages: &[Message], before_id: Uuid) -> Option<Uuid> {
     let mut found = false;
     for m in messages.iter().rev() {
-        if found {
-            if m.role == MessageRole::User && !m.streaming && m.content != COMPACTION_MESSAGE_LABEL {
-                return Some(m.id);
-            }
+        if found
+            && m.role == MessageRole::User && !m.streaming && m.content != COMPACTION_MESSAGE_LABEL
+        {
+            return Some(m.id);
         }
         if m.id == before_id {
             found = true;
@@ -42,10 +42,10 @@ pub fn prev_user_message_before(messages: &[Message], before_id: Uuid) -> Option
 pub fn next_user_message_after(messages: &[Message], after_id: Uuid) -> Option<Uuid> {
     let mut found = false;
     for m in messages {
-        if found {
-            if m.role == MessageRole::User && !m.streaming && m.content != COMPACTION_MESSAGE_LABEL {
-                return Some(m.id);
-            }
+        if found
+            && m.role == MessageRole::User && !m.streaming && m.content != COMPACTION_MESSAGE_LABEL
+        {
+            return Some(m.id);
         }
         if m.id == after_id {
             found = true;
@@ -81,12 +81,12 @@ pub fn restore_context_from_compaction(
         // Compaction markers store the state *before* that compaction.
         // The first compaction marker after target_id tells us what state
         // was current when target_id was active.
-        if m.content.starts_with(COMPACTION_MESSAGE_LABEL) {
-            if let Some((s, r)) = extract_compaction_prior_state(m) {
-                *summary = s;
-                *retained_from = r;
-                return true;
-            }
+        if m.content.starts_with(COMPACTION_MESSAGE_LABEL)
+            && let Some((s, r)) = extract_compaction_prior_state(m)
+        {
+            *summary = s;
+            *retained_from = r;
+            return true;
         }
     }
     false
@@ -176,13 +176,13 @@ fn extract_patches_from_message(message: &Message) -> Vec<Patch> {
         .filter_map(|v| v.as_str().map(|s| s.to_string()))
         .collect();
 
-    if !files.is_empty() {
-        if let Some(hash) = &message.snapshot_hash {
-            return vec![Patch {
-                hash: hash.clone(),
-                files,
-            }];
-        }
+    if !files.is_empty()
+        && let Some(hash) = &message.snapshot_hash
+    {
+        return vec![Patch {
+            hash: hash.clone(),
+            files,
+        }];
     }
 
     Vec::new()

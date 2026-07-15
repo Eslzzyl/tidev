@@ -58,7 +58,7 @@ struct TodoStore {
 
 impl tidev_tools::TodoPersistence for TodoStore {
     fn load_todos(&self, session_id: Uuid) -> anyhow::Result<Vec<TodoItem>> {
-        self.store.load_todos(session_id).map_err(Into::into)
+        self.store.load_todos(session_id)
     }
 
     fn replace_todos(
@@ -66,7 +66,7 @@ impl tidev_tools::TodoPersistence for TodoStore {
         session_id: Uuid,
         todos: &[TodoItem],
     ) -> anyhow::Result<()> {
-        self.store.save_todos(session_id, todos).map_err(Into::into)
+        self.store.save_todos(session_id, todos)
     }
 }
 
@@ -395,27 +395,27 @@ impl Runtime {
         user_msg.thinking_level = thinking_level;
 
         // 1. If undo revert is active, discard hidden messages first.
-        if let Ok(Some((revert_msg_id, _))) = self.session_manager.load_revert_state(session_id) {
-            if revert_msg_id != Uuid::nil() {
-                let buf = self.message_buffer(session_id).await;
-                let pos = {
-                    let mut write_buf = buf.write().await;
-                    let pos = write_buf.load().iter()
-                        .position(|m| m.id == revert_msg_id)
-                        .unwrap_or(write_buf.len());
-                    let to_remove: Vec<Uuid> = write_buf.load()[pos..].iter().map(|m| m.id).collect();
-                    write_buf.truncate(pos);
-                    if !to_remove.is_empty() {
-                        self.session_manager.delete_messages(session_id, &to_remove)?;
-                    };
-                    pos
+        if let Ok(Some((revert_msg_id, _))) = self.session_manager.load_revert_state(session_id)
+            && revert_msg_id != Uuid::nil()
+        {
+            let buf = self.message_buffer(session_id).await;
+            let pos = {
+                let mut write_buf = buf.write().await;
+                let pos = write_buf.load().iter()
+                    .position(|m| m.id == revert_msg_id)
+                    .unwrap_or(write_buf.len());
+                let to_remove: Vec<Uuid> = write_buf.load()[pos..].iter().map(|m| m.id).collect();
+                write_buf.truncate(pos);
+                if !to_remove.is_empty() {
+                    self.session_manager.delete_messages(session_id, &to_remove)?;
                 };
-                self.session_manager.save_revert_state(session_id, Uuid::nil(), None)?;
-                let _ = self.event_tx.send(BackendEvent::MessagesTruncated {
-                    session_id,
-                    kept_count: pos,
-                });
-            }
+                pos
+            };
+            self.session_manager.save_revert_state(session_id, Uuid::nil(), None)?;
+            let _ = self.event_tx.send(BackendEvent::MessagesTruncated {
+                session_id,
+                kept_count: pos,
+            });
         }
 
         // 2. Persist the user message.
@@ -780,10 +780,10 @@ impl Runtime {
 
         // 2. Collect patches after target, then revert to roll files back.
         let patches = crate::undo::collect_patches_after_message(messages, target_id);
-        if !patches.is_empty() {
-            if let Some(ref snap) = self.snapshot {
-                snap.revert(&patches).await?;
-            }
+        if !patches.is_empty()
+            && let Some(ref snap) = self.snapshot
+        {
+            snap.revert(&patches).await?;
         }
 
         // 3. Adjust context compaction state.
@@ -993,10 +993,10 @@ impl RuntimeBuilder {
         log::info!("startup: database opened in {:?}", _t_db.elapsed());
 
         // Delete expired tool outputs on startup (best-effort).
-        if let Ok(count) = store.delete_expired_tool_outputs(7) {
-            if count > 0 {
-                log::info!("Cleaned up {count} old tool output(s)");
-            }
+        if let Ok(count) = store.delete_expired_tool_outputs(7)
+            && count > 0
+        {
+            log::info!("Cleaned up {count} old tool output(s)");
         }
 
         // 7. LLM client + model resolution (with fallback).
@@ -1082,10 +1082,10 @@ impl RuntimeBuilder {
                 loop {
                     tokio::select! {
                         _ = tokio::time::sleep(interval) => {
-                            if let Ok(count) = cstore.delete_expired_tool_outputs(7) {
-                                if count > 0 {
-                                    log::info!("Cleaned up {count} old tool output(s)");
-                                }
+                            if let Ok(count) = cstore.delete_expired_tool_outputs(7)
+                                && count > 0
+                            {
+                                log::info!("Cleaned up {count} old tool output(s)");
                             }
                         }
                         _ = cancel.cancelled() => break,

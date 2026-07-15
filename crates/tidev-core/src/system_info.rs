@@ -95,7 +95,7 @@ fn detect_os_type() -> OsType {
 
     #[cfg(target_os = "macos")]
     {
-        return OsType::Macos;
+        OsType::Macos
     }
 
     #[cfg(target_os = "linux")]

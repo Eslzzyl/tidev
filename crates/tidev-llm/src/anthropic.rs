@@ -325,6 +325,7 @@ pub(crate) async fn stream_anthropic(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn complete_anthropic(
     http: &Client,
     model: LlmProviderConfig,

@@ -42,7 +42,7 @@ impl StreamingBuffer {
     }
 
     /// Append a content delta directly to the streaming message in `messages`.
-    pub fn push_delta(&mut self, delta: &str, messages: &mut Vec<Message>) {
+    pub fn push_delta(&mut self, delta: &str, messages: &mut [Message]) {
         let idx = self.resolve_idx(messages);
         if let Some(idx) = idx {
             messages[idx].content.push_str(delta);
@@ -50,7 +50,7 @@ impl StreamingBuffer {
     }
 
     /// Append a reasoning delta directly to the streaming message in `messages`.
-    pub fn push_reasoning_delta(&mut self, delta: &str, messages: &mut Vec<Message>) {
+    pub fn push_reasoning_delta(&mut self, delta: &str, messages: &mut [Message]) {
         let idx = self.resolve_idx(messages);
         if let Some(idx) = idx {
             messages[idx].reasoning.push_str(delta);
@@ -71,7 +71,7 @@ impl StreamingBuffer {
 
     /// Finalise the streaming message: set streaming=false.
     /// Returns the message's index.
-    pub fn finalise_message(&mut self, messages: &mut Vec<Message>) -> Option<usize> {
+    pub fn finalise_message(&mut self, messages: &mut [Message]) -> Option<usize> {
         let message_id = self.current_message_id.take()?;
         let idx = messages.iter().position(|m| m.id == message_id)?;
 

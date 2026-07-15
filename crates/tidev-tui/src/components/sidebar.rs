@@ -48,6 +48,7 @@ impl Sidebar {
 
 
     /// Render the sidebar into the given area.
+    #[allow(clippy::too_many_arguments)]
     pub fn draw(
         &mut self,
         frame: &mut Frame,

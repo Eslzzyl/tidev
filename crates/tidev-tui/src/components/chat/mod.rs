@@ -252,6 +252,7 @@ impl MessageList {
     }
 
     /// Update token fields on the last streaming assistant message.
+    #[allow(clippy::too_many_arguments)]
     pub fn set_last_message_tokens(
         &mut self,
         input_tokens: Option<u32>,

@@ -311,7 +311,7 @@ pub fn extract_boundary_violation_path(
     }
 
     let resolved = resolve_path_unchecked(workspace_root, &path_buf)
-        .unwrap_or_else(|_| path_buf);
+        .unwrap_or(path_buf);
 
     Some(canonicalize_for_comparison(&resolved))
 }
@@ -340,7 +340,7 @@ pub fn extract_sensitive_file_path(
     };
 
     let resolved = resolve_path_unchecked(workspace_root, &path_buf)
-        .unwrap_or_else(|_| path_buf);
+        .unwrap_or(path_buf);
 
     // Check against sensitive patterns using the existing logic.
     let resolved_str = resolved.to_string_lossy();

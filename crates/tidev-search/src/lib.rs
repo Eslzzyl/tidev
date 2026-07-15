@@ -5,7 +5,7 @@
 //! kept up-to-date via `notify` file-system watchers.
 
 use ignore::WalkBuilder;
-use log;
+
 use notify::{
     Config as NotifyConfig, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher,
     event::ModifyKind,

@@ -83,8 +83,7 @@ pub(crate) fn draw_composer(
 
         let mut rendered_lines: Vec<Line> = Vec::new();
         let end_idx = (scroll + visible_lines).min(lines.len());
-        for visual_idx in scroll..end_idx {
-            let vl = &lines[visual_idx];
+        for vl in lines[scroll..end_idx].iter() {
             let overlapping: Vec<&InlineSpan> = spans
                 .iter()
                 .filter(|s| s.start < vl.end && s.end > vl.start)
@@ -233,7 +232,7 @@ pub(crate) fn draw_composer(
         let popup_height = cp.popup_height();
         if popup_height > 0 {
             let popup_x = area.x + 2;
-            let width = area.width.min(72).max(20).min(frame.area().width.saturating_sub(popup_x));
+            let width = area.width.clamp(20, 72).min(frame.area().width.saturating_sub(popup_x));
             let popup_rect = Rect::new(
                 popup_x,
                 area.y.saturating_sub(popup_height),
@@ -290,7 +289,7 @@ pub(crate) fn draw_composer(
         let popup_height = am.popup_height();
         if popup_height > 0 {
             let popup_x = area.x + 2;
-            let width = area.width.min(56).max(20).min(frame.area().width.saturating_sub(popup_x));
+            let width = area.width.clamp(20, 56).min(frame.area().width.saturating_sub(popup_x));
             let popup_rect = Rect::new(
                 popup_x,
                 area.y.saturating_sub(popup_height),
@@ -346,7 +345,7 @@ pub(crate) fn draw_composer(
         let popup_height = sn.popup_height();
         if popup_height > 0 {
             let popup_x = area.x + 2;
-            let width = area.width.min(56).max(20).min(frame.area().width.saturating_sub(popup_x));
+            let width = area.width.clamp(20, 56).min(frame.area().width.saturating_sub(popup_x));
             let popup_rect = Rect::new(
                 popup_x,
                 area.y.saturating_sub(popup_height),

@@ -19,6 +19,7 @@ impl SessionManager {
     }
 
     /// Create a new session in the database.
+    #[allow(clippy::too_many_arguments)]
     pub fn create_session(
         &self,
         session_id: Uuid,

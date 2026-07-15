@@ -93,7 +93,7 @@ impl PanelLauncher {
                 })
                 .filter(|(_, s)| *s > 0)
                 .collect();
-            scored.sort_by(|a, b| b.1.cmp(&a.1));
+            scored.sort_by_key(|b| std::cmp::Reverse(b.1));
             self.filtered = scored.into_iter().map(|(e, _)| e).collect();
         }
         self.selected_index = self.selected_index.min(self.filtered.len().saturating_sub(1));

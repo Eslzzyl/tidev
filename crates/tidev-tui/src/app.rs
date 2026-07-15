@@ -808,7 +808,7 @@ impl App {
     }
 
     /// Record a workspace boundary decision in the in-memory cache.
-    fn record_boundary_decision(&mut self, path: &std::path::PathBuf, decision: &BoundaryDecision) {
+    fn record_boundary_decision(&mut self, path: &Path, decision: &BoundaryDecision) {
         match decision {
             BoundaryDecision::AllowOnce => {}
             BoundaryDecision::AllowUntilExit => {
@@ -824,7 +824,7 @@ impl App {
     }
 
     /// Record a sensitive file decision in the in-memory cache.
-    fn record_sensitive_decision(&mut self, path: &std::path::PathBuf, decision: &SensitiveFileDecision) {
+    fn record_sensitive_decision(&mut self, path: &Path, decision: &SensitiveFileDecision) {
         match decision {
             SensitiveFileDecision::AllowOnce => {}
             SensitiveFileDecision::AllowUntilExit => {
@@ -1439,7 +1439,7 @@ impl App {
                 }
                 Action::Session(SessionAction::Reload) => {
                     // Broadcast to overlays so SessionPanel reloads its list.
-                    let mut ctx = UpdateContext {
+                    let ctx = UpdateContext {
                         runtime: &mut self.runtime,
                     };
                     queue.extend(self.overlays.update_all(&action, &ctx));
@@ -1798,7 +1798,7 @@ impl App {
                         _ => {
                             // Forward other chat actions (scroll, stream, etc.) to MessageList.
                             if let Some(ref mut chat) = self.message_list {
-                                let mut ctx = UpdateContext {
+                                let ctx = UpdateContext {
                                     runtime: &mut self.runtime,
                                 };
                                 queue.extend(chat.update(&Action::Chat(action), &ctx));
@@ -2117,7 +2117,7 @@ impl App {
 
     fn close_overlay(&mut self, kind: OverlayKind, queue: &mut Vec<Action>) {
         if let Some(mut overlay) = self.overlays.pop() {
-            let mut ctx = UpdateContext {
+            let ctx = UpdateContext {
                 runtime: &mut self.runtime,
             };
             queue.extend(

@@ -1216,7 +1216,7 @@ fn summarize_tool_arguments(tool_call: &ToolCall, max_width: usize) -> String {
     match serde_json::from_str::<serde_json::Value>(&tool_call.arguments) {
         Ok(serde_json::Value::Object(map)) => {
             let parts: Vec<String> = map.iter()
-                .filter_map(|(k, v)| {
+                .map(|(k, v)| {
                     let val_str = match v {
                         serde_json::Value::String(s) => {
                             if s.len() > 40 {
@@ -1229,7 +1229,7 @@ fn summarize_tool_arguments(tool_call: &ToolCall, max_width: usize) -> String {
                         serde_json::Value::Bool(b) => b.to_string(),
                         _ => "...".to_string(),
                     };
-                    Some(format!("{}={}", k, val_str))
+                    format!("{}={}", k, val_str)
                 })
                 .collect();
             let joined = parts.join(", ");

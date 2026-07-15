@@ -3,9 +3,10 @@
 use serde::{Deserialize, Serialize};
 
 /// The API protocol used by a provider.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ApiType {
     #[serde(rename = "openai_chat_completions")]
+    #[default]
     OpenAiChatCompletions,
     #[serde(rename = "openai_responses")]
     OpenAiResponses,
@@ -25,12 +26,6 @@ impl ApiType {
             "google_gemini" | "gemini" | "google" => Self::GoogleGemini,
             _ => Self::OpenAiChatCompletions,
         }
-    }
-}
-
-impl Default for ApiType {
-    fn default() -> Self {
-        Self::OpenAiChatCompletions
     }
 }
 

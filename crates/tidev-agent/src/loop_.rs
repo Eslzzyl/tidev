@@ -35,15 +35,13 @@ const MAX_TURNS: u64 = 50;
 pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> Result<()> {
     let session_id = config.session_id;
     let event_tx = &config.event_tx;
-    let mut request_id: u64 = 1;
-
     // Notify frontend that a new turn is starting.
     let _ = event_tx.send(BackendEvent::TurnStarting {
         session_id,
-        request_id,
+        request_id: 1,
     });
 
-    for _turn_index in 0..MAX_TURNS {
+    for (request_id, _turn_index) in (1_u64..).zip(0..MAX_TURNS) {
         // ─── 0. Cancellation check ──────────────────────────────────────
         if config.cancel.is_cancelled() {
             log::info!("agent loop cancelled for session {session_id}");
@@ -156,7 +154,6 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
         }
 
         // ─── 10. Prepare for next turn ────────────────────────────────────
-        request_id += 1;
         let _ = event_tx.send(BackendEvent::TurnStarting {
             session_id,
             request_id,
@@ -185,7 +182,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
 async fn inject_mode_reminder(
     ctx: &dyn AgentContext,
     session_id: uuid::Uuid,
-    messages: &mut Vec<Message>,
+    messages: &mut [Message],
     current_mode: tidev_types::prompts::SessionMode,
 ) -> Result<()> {
     // Find the last user message index.

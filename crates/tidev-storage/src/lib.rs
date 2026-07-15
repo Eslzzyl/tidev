@@ -272,6 +272,7 @@ pub struct FileReadRecord {
 
 impl SessionStore {
     /// Create a new session.
+    #[allow(clippy::too_many_arguments)]
     pub fn create_session(
         &self,
         session_id: Uuid,
@@ -472,6 +473,7 @@ impl SessionStore {
     }
 
     /// Update session metadata.
+    #[allow(clippy::too_many_arguments)]
     pub fn update_session(
         &self,
         session_id: Uuid,
@@ -1159,6 +1161,7 @@ impl SessionStore {
     }
 
     /// Update message completion status.
+    #[allow(clippy::too_many_arguments)]
     pub fn update_message_completed(
         &self,
         session_id: Uuid,

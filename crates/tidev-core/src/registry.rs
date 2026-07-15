@@ -38,6 +38,7 @@ pub struct ToolRegistry {
 }
 
 impl ToolRegistry {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         workspace_root: PathBuf,
         config_dir: PathBuf,
@@ -66,6 +67,7 @@ impl ToolRegistry {
     /// process group is killed and partial output is returned. Other tools ignore it.
     /// When `event_tx` is `Some`, shell output is streamed as
     /// [`BackendEvent::ShellOutput`] events.
+    #[allow(clippy::too_many_arguments)]
     pub async fn execute(
         &self,
         call: &ToolCall,

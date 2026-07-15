@@ -76,7 +76,7 @@ where
     F: FnOnce() -> Result<String> + Send + 'static,
 {
     let result = tokio::task::spawn_blocking(move || {
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f()))
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(f))
     })
     .await;
 
@@ -100,7 +100,7 @@ where
     F: FnOnce() -> Result<ToolExecutionResult> + Send + 'static,
 {
     let result = tokio::task::spawn_blocking(move || {
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f()))
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(f))
     })
     .await;
 

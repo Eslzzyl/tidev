@@ -205,6 +205,7 @@ pub(crate) struct RenderOutput {
 // Entry point
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn render_messages(
     frame: &mut Frame,
     area: Rect,
@@ -343,6 +344,7 @@ fn render_scrollbar(frame: &mut Frame, sb: Rect, scroll_offset: usize, total_lin
 // messages_text — the core pipeline
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 fn messages_text(
     chat_context: &ChatContext,
     index: &mut MessageLayoutIndex,
@@ -865,6 +867,7 @@ fn scan_image_badges(
 // Render block from cache
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 fn render_block_from_cache(
     block: &MessageBlock,
     cache: &lru::LruCache<MessageRenderCacheKey, MessageRenderCacheEntry>,
@@ -974,7 +977,7 @@ fn render_block_from_cache(
 
         for tc in &msg.tool_calls {
             // Check for running subagent (pending task tool call) — render inline card
-            if tc.name == "task" && tool_results_by_id.get(&tc.id).is_none()
+            if tc.name == "task" && !tool_results_by_id.contains_key(&tc.id)
                 && let Some(exec_index) = ctx.running_subagents.iter().position(|s| s.tool_call_id == tc.id) {
                     let info = &ctx.running_subagents[exec_index];
                     let running_lines = render_running_subagent_lines(info, body_width, ctx.palette);
@@ -1503,7 +1506,7 @@ fn render_text_body_lines(
             Some(body_width),
             Some(ctx.workspace_root),
         );
-        md.lines.iter().cloned().collect()
+        md.lines.to_vec()
     }
 }
 

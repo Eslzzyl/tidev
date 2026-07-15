@@ -184,10 +184,10 @@ impl ContextManager {
         let (trigger_tokens, _) = self.compaction_budget(context_window, max_output_tokens);
 
         match last_tokens {
-            Some(tokens) => return tokens as usize >= trigger_tokens,
+            Some(tokens) => tokens as usize >= trigger_tokens,
             None => {
                 let owned: Vec<Message> = visible.iter().copied().cloned().collect();
-                return Self::estimate_tokens_for_messages(&owned) >= trigger_tokens;
+                Self::estimate_tokens_for_messages(&owned) >= trigger_tokens
             }
         }
     }
@@ -276,10 +276,10 @@ impl ContextManager {
                     out.push(sanitized);
                 }
                 MessageRole::Tool => {
-                    if let Some(tool_call_id) = &msg.tool_call_id {
-                        if pending_tool_calls.remove(tool_call_id).is_some() {
-                            out.push(msg.clone());
-                        }
+                    if let Some(tool_call_id) = &msg.tool_call_id
+                        && pending_tool_calls.remove(tool_call_id).is_some()
+                    {
+                        out.push(msg.clone());
                     }
                 }
             }
@@ -396,7 +396,7 @@ impl ContextManager {
         }
 
         // 2. Append remaining visible messages.
-        out.extend(self.build_request_messages_raw(&messages));
+        out.extend(self.build_request_messages_raw(messages));
         out
     }
 

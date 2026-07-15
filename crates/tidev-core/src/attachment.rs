@@ -152,11 +152,10 @@ fn truncate_file_content(content: &str) -> String {
     const MAX_BYTES: usize = 50 * 1024;
 
     let mut out = String::with_capacity(content.len().min(MAX_BYTES));
-    let mut lines = 0usize;
     let mut bytes = 0usize;
     let mut cut = false;
 
-    for line in content.lines() {
+    for (lines, line) in content.lines().enumerate() {
         if lines >= MAX_LINES {
             cut = true;
             break;
@@ -171,7 +170,6 @@ fn truncate_file_content(content: &str) -> String {
         }
         out.push_str(line);
         bytes += line.len();
-        lines += 1;
     }
 
     if cut {
