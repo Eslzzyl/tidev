@@ -171,12 +171,16 @@ impl SettingsPanel {
     fn move_up(&mut self) {
         if self.selected_index > 0 {
             self.selected_index -= 1;
+        } else {
+            self.selected_index = self.items.len().saturating_sub(1);
         }
     }
 
     fn move_down(&mut self) {
         if self.selected_index < self.items.len().saturating_sub(1) {
             self.selected_index += 1;
+        } else {
+            self.selected_index = 0;
         }
     }
 
