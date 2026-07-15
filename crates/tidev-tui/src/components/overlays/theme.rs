@@ -97,9 +97,10 @@ impl ThemePanel {
     }
 
     fn move_up(&mut self) {
+        let len = self.display_items.len();
         let mut idx = self.selected_index;
-        loop {
-            if idx == 0 { return; }
+        for _ in 0..len {
+            if idx == 0 { idx = len; }
             idx -= 1;
             if matches!(self.display_items[idx], DisplayItem::Theme(_)) {
                 self.selected_index = idx;
@@ -114,9 +115,8 @@ impl ThemePanel {
     fn move_down(&mut self) {
         let len = self.display_items.len();
         let mut idx = self.selected_index;
-        loop {
-            if idx + 1 >= len { return; }
-            idx += 1;
+        for _ in 0..len {
+            idx = (idx + 1) % len;
             if matches!(self.display_items[idx], DisplayItem::Theme(_)) {
                 self.selected_index = idx;
                 if let DisplayItem::Theme(t) = self.display_items[idx] {

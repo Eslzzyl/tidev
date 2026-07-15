@@ -81,18 +81,22 @@ impl SkillsPanel {
     fn move_up(&mut self, _step: usize) {
         if self.selected_index > 0 {
             self.selected_index -= 1;
-            self.preview_scroll = 0;
-            self.cached_preview = None;
-            if self.selected_index < self.list_scroll { self.list_scroll = self.selected_index; }
+        } else {
+            self.selected_index = self.filtered_indices.len().saturating_sub(1);
         }
+        self.preview_scroll = 0;
+        self.cached_preview = None;
+        if self.selected_index < self.list_scroll { self.list_scroll = self.selected_index; }
     }
 
     fn move_down(&mut self, _step: usize) {
         if self.selected_index + 1 < self.filtered_indices.len() {
             self.selected_index += 1;
-            self.preview_scroll = 0;
-            self.cached_preview = None;
+        } else {
+            self.selected_index = 0;
         }
+        self.preview_scroll = 0;
+        self.cached_preview = None;
     }
 
     fn page_up(&mut self, step: usize) {
