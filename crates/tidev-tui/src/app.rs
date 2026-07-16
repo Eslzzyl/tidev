@@ -1551,6 +1551,15 @@ impl App {
                         .load_messages(session_id)
                         .unwrap_or_default();
 
+                    // Resolve session mode from the last user message.
+                    self.mode = messages
+                        .iter()
+                        .rev()
+                        .find(|m| m.role == tidev_types::message::MessageRole::User)
+                        .and_then(|m| m.mode)
+                        .unwrap_or(SessionMode::Build);
+                    self.pending_mode = None;
+
                     // Refresh the Runtime's in-memory message buffer so the
                     // next submit_prompt picks up the latest data from the store.
                     let rt = self.runtime.clone();
