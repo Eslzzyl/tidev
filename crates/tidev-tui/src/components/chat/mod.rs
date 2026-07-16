@@ -472,6 +472,15 @@ impl MessageList {
                         );
                         chat_context.messages.push(tool_msg);
                     }
+                    // Remove from running_subagents for ANY completed task tool,
+                    // even if child_session_id is not set (e.g., rejected tools).
+                    if canonical_tool_name(&tool_call.name) == Some("task") {
+                        self.running_subagents.retain(|s| s.tool_call_id != tool_call.id);
+                        if self.hovered_inline_subagent.is_some_and(|i| i >= self.running_subagents.len()) {
+                            self.hovered_inline_subagent = None;
+                        }
+                    }
+
                     // Track child_session_id for subagent task results.
                     if let Some(csid) = result.metadata.child_session_id {
                         // Map by tool message ID.
@@ -488,10 +497,6 @@ impl MessageList {
                             .map(|m| m.id);
                         if let Some(msg_id) = assistant_msg_id {
                             self.completed_subagent_sessions.insert(msg_id, csid);
-                        }
-                        self.running_subagents.retain(|s| s.tool_call_id != tool_call.id);
-                        if self.hovered_inline_subagent.is_some_and(|i| i >= self.running_subagents.len()) {
-                            self.hovered_inline_subagent = None;
                         }
                     }
                     self.dirty = true;
@@ -1022,6 +1027,13 @@ impl MessageList {
     /// Number of running subagents.
     pub fn running_subagents_count(&self) -> usize {
         self.running_subagents.len()
+    }
+
+    /// Whether a given session_id is currently being run as a subagent.
+    pub fn is_subagent_running(&self, session_id: Uuid) -> bool {
+        self.running_subagents
+            .iter()
+            .any(|s| s.child_session_id == Some(session_id))
     }
 
     /// Update hovered card based on mouse position.

@@ -2311,7 +2311,19 @@ impl App {
                 .and_then(|ctx| ctx.parent_session_id);
 
             let status = if parent_session_id.is_some() {
-                format!("{spinner} Thinking...")
+                // Check if this subsession's own subagent is still running.
+                let session_id = self.message_list.as_ref()
+                    .and_then(|ml| ml.active_chat_context())
+                    .map(|ctx| ctx.session_id);
+                let subagent_running = session_id.is_some_and(|sid| {
+                    self.message_list.as_ref()
+                        .is_some_and(|ml| ml.is_subagent_running(sid))
+                });
+                if subagent_running {
+                    format!("{spinner} Thinking...")
+                } else {
+                    "Subsession active · Up: parent  Left/Right: switch subagent".to_string()
+                }
             } else if let Some(ref ml) = self.message_list {
                 let sub_count = ml.running_subagents_count();
                 if sub_count > 0 {
