@@ -119,8 +119,8 @@ pub(crate) fn draw_composer(
                             .fg(palette.accent)
                             .bg(palette.panel_alt)
                             .add_modifier(Modifier::BOLD);
-                        let badge_text = &composer.text()[span_start..span_end];
-                        segments.push(Span::styled(badge_text.to_string(), badge_style));
+                        let badge_text = &span.display;
+                        segments.push(Span::styled(badge_text.clone(), badge_style));
                     }
                     pos = span.end;
                 }
@@ -414,7 +414,12 @@ pub(crate) fn draw_composer(
     // ── Cursor positioning ───────────────────────────────────────────
     if ctx.focused && text_area.width > 0 && text_area.height > 0 {
         let (cursor_line, cursor_col) = composer.cursor_position(text_area.width);
-        let mut cursor_line = cursor_line.saturating_sub(composer.input_scroll_offset as u16);
+        let max_scroll = composer
+            .display_line_count(text_area.width as usize)
+            .saturating_sub(visible_lines);
+        let effective_scroll =
+            (composer.input_scroll_offset as u16).min(max_scroll as u16);
+        let mut cursor_line = cursor_line.saturating_sub(effective_scroll);
         let mut cursor_col = cursor_col;
 
         if composer.cursor_wraps_to_next_row(text_area.width as usize) {

@@ -22,14 +22,14 @@ pub(crate) mod snippet;
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::LazyLock;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use fancy_regex::Regex;
 use ratatui::layout::{Position, Rect};
 use ratatui::Frame;
 use tidev_search::current_at_fragment;
 use unicode_width::UnicodeWidthChar;
-
-
 
 use tidev_types::message::MessageAttachment;
 use crate::action::{Action, ChatAction};
@@ -40,6 +40,20 @@ pub(crate) use at_mention::AtMentionState;
 pub(crate) use command_palette::{CommandPaletteState, CommandRegistry};
 pub(crate) use snippet::SnippetState;
 
+/// Regex for detecting @ file/directory references in composer text.
+/// Look-behind ensures @ is not preceded by word chars or backticks.
+pub(crate) static AT_REF_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?<![\w`])@(\.?[^\s`.,]*(?:\.[^\s`.,]+)*)").unwrap()
+});
+
+/// Kind of an inline span in the composer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum InlineSpanKind {
+    /// @file/@dir reference accepted via autocomplete.
+    AtReference,
+    /// Image attachment placeholder (pasted from clipboard).
+    Image,
+}
 // ---------------------------------------------------------------------------
 // InlineSpan
 // ---------------------------------------------------------------------------
@@ -54,6 +68,10 @@ pub(crate) struct InlineSpan {
     pub start: usize,
     /// Byte end index in `text` (exclusive).
     pub end: usize,
+    /// Display text (identical to text content for @ refs, badge text for images).
+    pub display: String,
+    /// Kind of span.
+    pub kind: InlineSpanKind,
     /// Raw image bytes (None for non-image spans).
     pub image_data: Option<Vec<u8>>,
     /// Display filename for the image (None for non-image spans).
@@ -201,19 +219,10 @@ impl Composer {
         self.cursor = self.text.len();
         self.preferred_column = None;
         self.visual_line_hint = None;
+        self.history_cursor = None;
         self.selection_anchor = None;
         self.spans.clear();
-        self.command_palette.sync(&self.text, &self.commands);
-        self.at_mention
-            .sync(&self.workspace_root, &self.text, self.cursor);
-        self.snippet_state.sync(
-            &self.workspace_root,
-            &self.config_dir,
-            &self.text,
-            self.cursor,
-        );
-        self.dirty = true;
-        self.input_scroll_offset = 0;
+        self.detect_at_spans();
     }
 
     /// Empty the buffer.
@@ -226,11 +235,6 @@ impl Composer {
         self.draft.clear();
         self.selection_anchor = None;
         self.spans.clear();
-        self.command_palette.clear();
-        self.at_mention.clear();
-        self.snippet_state.clear();
-        self.input_scroll_offset = 0;
-        self.dirty = true;
     }
 
     /// Set the file search index for @mention autocomplete.
@@ -272,29 +276,71 @@ impl Composer {
 
     /// Register an inline span.  Spans must not overlap and are kept sorted.
     /// `image_data` and `image_filename` are `None` for non-image spans.
-    pub fn register_span(
+    pub(crate) fn register_span(
         &mut self,
         start: usize,
         end: usize,
+        display: String,
+        kind: InlineSpanKind,
         image_data: Option<Vec<u8>>,
         image_filename: Option<String>,
     ) {
-        // Remove any existing span that overlaps the new range.
-        self.spans.retain(|s| s.end <= start || s.start >= end);
-        self.spans.push(InlineSpan { start, end, image_data, image_filename });
-        self.spans.sort_by_key(|s| s.start);
+        let start = start.min(self.text.len());
+        let end = end.min(self.text.len()).max(start);
+        if start >= end {
+            return;
+        }
+        let span = InlineSpan { start, end, display, kind, image_data, image_filename };
+        // Insert sorted by start
+        let pos = self.spans.partition_point(|s| s.start < span.start);
+        self.spans.insert(pos, span);
+    }
+
+    /// Scan text for @file references and register them as inline spans.
+    pub(crate) fn detect_at_spans(&mut self) {
+        // Remove existing AtReference spans
+        self.spans.retain(|s| s.kind != InlineSpanKind::AtReference);
+
+        let text = self.text.clone();
+        let mut start = 0;
+        while let Some(caps) = AT_REF_RE.captures(&text[start..]).unwrap() {
+            if let Some(path_match) = caps.get(1) {
+                if path_match.as_str().is_empty() {
+                    break;
+                }
+                let abs_start = start + path_match.start() - 1; // include the '@'
+                let abs_end = start + path_match.end();
+                let display = text[abs_start..abs_end].to_string();
+                self.register_span(abs_start, abs_end, display, InlineSpanKind::AtReference, None, None);
+                start += path_match.end();
+            } else {
+                break;
+            }
+        }
     }
 
     // ── Key handling ────────────────────────────────────────────────────
 
     /// Handle a keyboard event.  Returns `Some(text)` when the user submits.
     pub fn handle_key(&mut self, key: KeyEvent) -> Option<String> {
+        self.handle_key_with_history(key, true)
+    }
+
+    /// Handle a keyboard event with history control.
+    /// `record_history` controls whether Ctrl+N navigates history and
+    /// whether submissions are recorded in history.
+    pub fn handle_key_with_history(
+        &mut self,
+        key: KeyEvent,
+        record_history: bool,
+    ) -> Option<String> {
+        let allow_history_navigation = record_history;
+
         if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
             return None;
         }
 
         match key.code {
-            // ── Ctrl-combos ─────────────────────────────────────────────
             KeyCode::Char(c) if key.modifiers.contains(KeyModifiers::CONTROL) => match c {
                 'a' => {
                     self.select_all();
@@ -321,16 +367,12 @@ impl Composer {
                     self.preferred_column = None;
                     self.selection_anchor = None;
                 }
-                'n' => {
+                'n' if allow_history_navigation => {
                     self.select_next_history();
-                }
-                'p' => {
-                    self.select_prev_history();
                 }
                 _ => {}
             },
 
-            // ── macOS Cmd-combos ────────────────────────────────────────
             KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::SUPER) => {
                 self.select_all();
             }
@@ -339,13 +381,9 @@ impl Composer {
                 self.preferred_column = None;
                 self.selection_anchor = None;
             }
-
-            // ── Regular character ───────────────────────────────────────
             KeyCode::Char(c) => {
                 self.insert_char(c);
             }
-
-            // ── Enter / Submit ──────────────────────────────────────────
             KeyCode::Enter => {
                 if key.modifiers.contains(KeyModifiers::SHIFT)
                     || key.modifiers.contains(KeyModifiers::ALT)
@@ -356,13 +394,14 @@ impl Composer {
                     if submission.is_empty() {
                         return None;
                     }
-                    self.remember_submission(&submission);
+
+                    if record_history {
+                        self.remember_submission(&submission);
+                    }
                     self.clear();
                     return Some(submission);
                 }
             }
-
-            // ── Backspace ───────────────────────────────────────────────
             KeyCode::Backspace => {
                 if key.modifiers.contains(KeyModifiers::SUPER) {
                     self.delete_to_line_start();
@@ -374,8 +413,6 @@ impl Composer {
                     self.delete_previous_char();
                 }
             }
-
-            // ── Delete ──────────────────────────────────────────────────
             KeyCode::Delete => {
                 if key.modifiers.contains(KeyModifiers::SUPER) {
                     self.delete_to_line_start();
@@ -387,19 +424,11 @@ impl Composer {
                     self.delete_next_char();
                 }
             }
-
-            // ── Navigation ──────────────────────────────────────────────
             KeyCode::Left => {
                 self.move_left();
             }
             KeyCode::Right => {
                 self.move_right();
-            }
-            KeyCode::Up => {
-                // Handled by Component::handle_key_event for history vs vertical.
-            }
-            KeyCode::Down => {
-                // Handled by Component::handle_key_event for history vs vertical.
             }
             KeyCode::Home => {
                 self.cursor = self.line_start(self.cursor);
@@ -413,16 +442,12 @@ impl Composer {
                 self.preferred_column = None;
                 self.selection_anchor = None;
             }
-
-            // ── Tab ─────────────────────────────────────────────────────
             KeyCode::Tab => {
                 self.insert_str("    ");
             }
-
             _ => {}
         }
 
-        self.dirty = true;
         None
     }
 
@@ -618,7 +643,6 @@ impl Composer {
         self.preferred_column = Some(desired);
         self.visual_line_hint = Some(target);
         self.selection_anchor = None;
-        self.dirty = true;
     }
 
     // ── Editing primitives ──────────────────────────────────────────────
@@ -666,7 +690,7 @@ impl Composer {
                 let insert_pos = self.cursor;
                 self.insert_str(&placeholder);
                 let end_pos = self.cursor;
-                self.register_span(insert_pos, end_pos, Some(data), Some(filename));
+                self.register_span(insert_pos, end_pos, placeholder, InlineSpanKind::Image, Some(data), Some(filename));
                 self.dirty = true;
                 log::info!("Pasted image: {} bytes", file_size);
             }
@@ -993,6 +1017,8 @@ impl Composer {
         self.register_span(
             start,
             span_end,
+            replacement,
+            InlineSpanKind::AtReference,
             None,
             None,
         );
@@ -1193,6 +1219,33 @@ impl Component for Composer {
             }
         }
 
+        // ── Snippet visible — hijack navigation keys ────────────────
+        if self.snippet_state.visible && !self.snippet_state.snippets.is_empty() {
+            match key.code {
+                KeyCode::Esc => {
+                    self.snippet_state.clear();
+                    self.dirty = true;
+                    return None;
+                }
+                KeyCode::Up => {
+                    self.snippet_state.move_selection(-1);
+                    self.dirty = true;
+                    return None;
+                }
+                KeyCode::Down => {
+                    self.snippet_state.move_selection(1);
+                    self.dirty = true;
+                    return None;
+                }
+                KeyCode::Tab => {
+                    self.accept_snippet();
+                    self.dirty = true;
+                    return None;
+                }
+                _ => {}
+            }
+        }
+
         // ── AtMention visible — hijack navigation keys ──────────────
         if self.at_mention.visible && !self.at_mention.suggestions.is_empty() {
             match key.code {
@@ -1220,34 +1273,7 @@ impl Component for Composer {
             }
         }
 
-        // ── Snippet visible — hijack navigation keys ────────────────
-        if self.snippet_state.visible && !self.snippet_state.snippets.is_empty() {
-            match key.code {
-                KeyCode::Esc => {
-                    self.snippet_state.clear();
-                    self.dirty = true;
-                    return None;
-                }
-                KeyCode::Up => {
-                    self.snippet_state.move_selection(-1);
-                    self.dirty = true;
-                    return None;
-                }
-                KeyCode::Down => {
-                    self.snippet_state.move_selection(1);
-                    self.dirty = true;
-                    return None;
-                }
-                KeyCode::Tab | KeyCode::Enter => {
-                    self.accept_snippet();
-                    self.dirty = true;
-                    return None;
-                }
-                _ => {}
-            }
-        }
-
-        // ── Up/Down: vertical scroll OR history navigation ─────────────
+        // ── Up/Down: scroll OR cursor movement (never history) ──────────
         if matches!(key.code, KeyCode::Up | KeyCode::Down)
             && key.modifiers.is_empty()
             && !self.command_palette.visible
@@ -1263,35 +1289,23 @@ impl Component for Composer {
 
             match key.code {
                 KeyCode::Up => {
-                    // History navigation when cursor at first visible line
-                    // and scroll is already at top.
                     if cursor_line == self.input_scroll_offset
-                        && self.input_scroll_offset == 0
+                        && self.input_scroll_offset > 0
                     {
-                        self.select_prev_history();
-                    } else if cursor_line == self.input_scroll_offset {
-                        // Scroll up one line.
                         self.input_scroll_offset =
                             self.input_scroll_offset.saturating_sub(1);
-                    } else {
-                        // Move cursor up one visual line.
-                        self.move_up(width);
                     }
+                    self.move_up(width);
                 }
                 KeyCode::Down => {
-                    if cursor_line + 1 >= (self.input_scroll_offset + visible_lines).min(total_lines)
-                        && self.input_scroll_offset >= max_scroll
+                    if cursor_line + 1
+                        >= (self.input_scroll_offset + visible_lines).min(total_lines)
+                        && self.input_scroll_offset < max_scroll
                     {
-                        // At bottom — history next.
-                        self.select_next_history();
-                    } else if cursor_line + 1 >= (self.input_scroll_offset + visible_lines).min(total_lines) {
-                        // Scroll down one line.
                         self.input_scroll_offset =
                             (self.input_scroll_offset + 1).min(max_scroll);
-                    } else {
-                        // Move cursor down one visual line.
-                        self.move_down(width);
                     }
+                    self.move_down(width);
                 }
                 _ => {}
             }
@@ -1342,6 +1356,8 @@ impl Component for Composer {
                     self.register_span(
                         insert_pos,
                         end_pos,
+                        placeholder.clone(),
+                        InlineSpanKind::Image,
                         Some(data),
                         Some(filename),
                     );
@@ -1598,7 +1614,7 @@ mod tests {
     fn test_inline_span_snap() {
         let mut c = Composer::new(">");
         c.set_text("hello @file.txt world".to_string());
-        c.register_span(6, 15, None, None);
+        c.register_span(6, 15, "@file.txt".to_string(), InlineSpanKind::AtReference, None, None);
 
         // Cursor at 10 (inside span) should snap to 6.
         let snapped = c.snap_to_span_edge(10);
