@@ -855,15 +855,31 @@ impl Runtime {
         let mut cm_lock = cm.lock().await;
         let mut summary = cm_lock.summary.clone();
         let mut retained_from = cm_lock.retained_from;
-        if !crate::undo::restore_context_from_compaction(
-            messages,
-            target_id,
-            &mut summary,
-            &mut retained_from,
-        ) {
-            summary = None;
-            retained_from = 0;
+
+        // Determine whether the target lies within the compacted range
+        // (index < retained_from) or the visible range (index >= retained_from).
+        let target_idx = messages.iter().position(|m| m.id == target_id);
+        let target_in_compacted = target_idx.map(|i| i < retained_from).unwrap_or(false);
+
+        if target_in_compacted {
+            // Target was covered by a previous compaction — restore the context
+            // state that was active when the target was created by walking forward
+            // to the first compaction marker after it.
+            if !crate::undo::restore_context_from_compaction(
+                messages,
+                target_id,
+                &mut summary,
+                &mut retained_from,
+            ) {
+                // No compaction marker found — target predates any compaction.
+                summary = None;
+                retained_from = 0;
+            }
         }
+        // Otherwise the target is in the visible (uncompacted) range and the
+        // current compaction state was already active when the target was
+        // created — keep it unchanged.
+
         cm_lock.summary = summary;
         cm_lock.retained_from = retained_from;
         drop(cm_lock);

@@ -226,11 +226,12 @@ async fn inject_mode_reminder(
         None => return Ok(()),
     };
 
-    // Find the mode of the most recent *previous* user message.
+    // Find the mode of the most recent *previous* real user message.
+    // Skip synthetic messages (e.g. compaction summaries) whose mode is None.
     let prev_mode = messages[..last_user_idx]
         .iter()
         .rev()
-        .find(|m| m.role == MessageRole::User)
+        .find(|m| m.role == MessageRole::User && m.mode.is_some())
         .and_then(|m| m.mode);
 
     let is_first_user = prev_mode.is_none();
