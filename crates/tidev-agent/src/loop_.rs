@@ -17,11 +17,7 @@ use tidev_types::message::{
 use crate::context::{AgentContext, AgentLoopConfig};
 use crate::prompts;
 
-/// Maximum number of LLM turns before the loop terminates (safety limit).
-const MAX_TURNS: u64 = 50;
-
-/// Run the full agent loop until the model produces a text-only response or
-/// the maximum number of turns is reached.
+/// Run the full agent loop until the model produces a text-only response.
 ///
 /// # Flow
 ///
@@ -41,7 +37,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
         request_id: 1,
     });
 
-    for (request_id, _turn_index) in (1_u64..).zip(0..MAX_TURNS) {
+    for request_id in 1_u64.. {
         // ─── 0. Cancellation check ──────────────────────────────────────
         if config.cancel.is_cancelled() {
             log::info!("agent loop cancelled for session {session_id}");
@@ -195,8 +191,6 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
         });
     }
 
-    // Safety limit reached — log and exit gracefully.
-    log::warn!("run_agent_loop: reached MAX_TURNS ({})", MAX_TURNS);
     Ok(())
 }
 
