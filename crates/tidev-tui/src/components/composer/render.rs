@@ -76,8 +76,9 @@ pub(crate) fn draw_composer(
             text_area,
         );
     } else {
-        let scroll = composer.input_scroll_offset;
         let lines = compute_visual_lines(composer.text(), width);
+        let max_scroll = lines.len().saturating_sub(visible_lines);
+        let scroll = composer.input_scroll_offset.min(max_scroll);
         let selection = composer.selection_range();
         let spans = composer.spans().to_vec();
 
