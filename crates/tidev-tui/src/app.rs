@@ -151,6 +151,8 @@ pub struct App {
 
     /// Token usage statistics from the last request (for status bar display).
     context_usage: Option<ContextUsage>,
+    /// Per-session cache of token usage, preserved across session switches.
+    context_usage_cache: HashMap<Uuid, ContextUsage>,
 
     /// Transient single-message toast popup (top-right corner, auto-expires).
     toast: Option<(String, Instant)>,
@@ -235,6 +237,7 @@ impl App {
             boundary_permissions: HashMap::new(),
             sensitive_permissions: HashMap::new(),
             context_usage: None,
+            context_usage_cache: HashMap::new(),
             toast: None,
             abort_confirmation_deadline: None,
             pending_prompt_queue: Vec::new(),
@@ -470,7 +473,7 @@ impl App {
                 ..
             } if Some(session_id) == self.current_session_id => {
                 // Store context usage for display in status bar.
-                self.context_usage = Some(ContextUsage {
+                let usage = ContextUsage {
                     input_tokens,
                     output_tokens,
                     tokens_per_second: if let Some(ms) = duration_ms {
@@ -482,7 +485,9 @@ impl App {
                     } else {
                         None
                     },
-                });
+                };
+                self.context_usage_cache.insert(session_id, usage.clone());
+                self.context_usage = Some(usage);
 
                 // Update the last message's token fields.
                 if let Some(ref mut chat) = self.message_list {
@@ -1062,6 +1067,11 @@ impl App {
         let Some(parent_id) = ctx.parent_session_id else { return };
         let current_id = ctx.session_id;
 
+        // Cache current session's context_usage before navigating away.
+        if let Some(usage) = &self.context_usage {
+            self.context_usage_cache.insert(current_id, usage.clone());
+        }
+
         match key.code {
             KeyCode::Up => {
                 // Switch to parent session in-memory (no DB load).
@@ -1069,6 +1079,8 @@ impl App {
                     chat.switch_to_session(parent_id);
                     self.current_session_id = Some(parent_id);
                 }
+                // Restore cached context_usage for parent session.
+                self.context_usage = self.context_usage_cache.remove(&parent_id);
             }
             KeyCode::Down => {
                 // Switch to the last (most recently delegated) child.
@@ -1077,14 +1089,22 @@ impl App {
                 let children: Vec<_> = all.into_iter()
                     .filter(|s| s.parent_session_id == Some(parent_id))
                     .collect();
-                if let Some(target) = children.last()
-                    && let Some(chat) = self.message_list.as_mut() {
-                        if chat.switch_to_session(target.session_id) {
-                            self.current_session_id = Some(target.session_id);
+                if let Some(target) = children.last() {
+                    let target_id = target.session_id;
+                    if let Some(chat) = self.message_list.as_mut() {
+                        if chat.switch_to_session(target_id) {
+                            self.current_session_id = Some(target_id);
                         } else {
-                            self.switch_to_session(target.session_id);
+                            self.switch_to_session(target_id);
+                            // switch_to_session goes through SessionAction::Select
+                            // which already handles context_usage_cache internally.
+                            // Skip the manual restore below.
+                            return;
                         }
                     }
+                    // Fast path succeeded — restore cached context_usage.
+                    self.context_usage = self.context_usage_cache.remove(&target_id);
+                }
             }
             KeyCode::Left | KeyCode::Right => {
                 let step = if key.code == KeyCode::Left { -1isize } else { 1 };
@@ -1102,14 +1122,21 @@ impl App {
                 } else {
                     (index as isize + step).rem_euclid(children.len() as isize) as usize
                 };
-                if let Some(target) = children.get(next_index)
-                    && let Some(chat) = self.message_list.as_mut() {
-                        if chat.switch_to_session(target.session_id) {
-                            self.current_session_id = Some(target.session_id);
+                if let Some(target) = children.get(next_index) {
+                    let target_id = target.session_id;
+                    if let Some(chat) = self.message_list.as_mut() {
+                        if chat.switch_to_session(target_id) {
+                            self.current_session_id = Some(target_id);
                         } else {
-                            self.switch_to_session(target.session_id);
+                            self.switch_to_session(target_id);
+                            // switch_to_session goes through SessionAction::Select
+                            // which already handles context_usage_cache internally.
+                            return;
                         }
                     }
+                    // Fast path succeeded — restore cached context_usage.
+                    self.context_usage = self.context_usage_cache.remove(&target_id);
+                }
             }
             _ => {}
         }
@@ -1539,6 +1566,13 @@ impl App {
                         return;
                     }
 
+                    // Cache current session's context_usage before switching away.
+                    if let Some(current_id) = self.current_session_id {
+                        if let Some(usage) = &self.context_usage {
+                            self.context_usage_cache.insert(current_id, usage.clone());
+                        }
+                    }
+
                     // Fast path: if the MessageList already has a chat_context for
                     // this session, use switch_to_session to preserve in-memory
                     // streaming state (avoiding DB reload that would lose content).
@@ -1547,6 +1581,9 @@ impl App {
                             self.current_session_id = Some(session_id);
                             self.scroll_target = None;
                             self.screen = AppScreen::Chat;
+
+                            // Restore cached context_usage for the target session.
+                            self.context_usage = self.context_usage_cache.remove(&session_id);
 
                             // Resolve session mode from the existing context.
                             if let Some(ctx) = chat.active_chat_context() {
@@ -1597,6 +1634,22 @@ impl App {
                         .and_then(|m| m.mode)
                         .unwrap_or(SessionMode::Build);
                     self.pending_mode = None;
+
+                    // Compute context_usage from stored messages (last assistant
+                    // message holds cumulative token counts).
+                    self.context_usage = messages
+                        .iter()
+                        .rev()
+                        .find(|m| m.role == MessageRole::Assistant)
+                        .and_then(|m| m.input_tokens.map(|input| ContextUsage {
+                            input_tokens: input,
+                            output_tokens: m.output_tokens.unwrap_or(0),
+                            tokens_per_second: m.tokens_per_second,
+                        }));
+                    // Cache it for fast-path restoration on subsequent switches.
+                    if let Some(usage) = &self.context_usage {
+                        self.context_usage_cache.insert(session_id, usage.clone());
+                    }
 
                     // Refresh the Runtime's in-memory message buffer so the
                     // next submit_prompt picks up the latest data from the store.
