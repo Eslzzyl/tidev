@@ -364,6 +364,12 @@ impl AgentContext for CoreContext {
         // Load sensitive-file patterns once (file read).
         let sensitive_patterns = load_sensitive_patterns(&self.workspace_root);
 
+        // Read access-control config — allows skipping boundary/sensitive dialogs.
+        let access_control = {
+            let cfg = self.config.read().unwrap();
+            cfg.access_control.clone()
+        };
+
         let mut approved: Vec<ApprovedTool> = Vec::with_capacity(tool_calls.len());
         let mut pending: Vec<ToolCallWithViolations> = Vec::new();
 
@@ -417,14 +423,21 @@ impl AgentContext for CoreContext {
 
             // 3. Check workspace boundary & sensitive file violations.
             let arguments: Value = serde_json::from_str(&tc.arguments).unwrap_or(Value::Null);
-            let boundary_violation =
-                extract_boundary_violation_path(&self.workspace_root, &tc.name, &arguments);
-            let sensitive_violation = extract_sensitive_file_path(
-                &self.workspace_root,
-                &tc.name,
-                &arguments,
-                &sensitive_patterns,
-            );
+            let boundary_violation = if access_control.allow_outside_workspace_access {
+                None
+            } else {
+                extract_boundary_violation_path(&self.workspace_root, &tc.name, &arguments)
+            };
+            let sensitive_violation = if access_control.allow_sensitive_file_access {
+                None
+            } else {
+                extract_sensitive_file_path(
+                    &self.workspace_root,
+                    &tc.name,
+                    &arguments,
+                    &sensitive_patterns,
+                )
+            };
 
             // 4. If no violations → auto-approve (fast path).
             if boundary_violation.is_none() && sensitive_violation.is_none() {
@@ -439,12 +452,18 @@ impl AgentContext for CoreContext {
             }
 
             // 5. Has violations → needs user input.
+            let needs_confirmation = self
+                .tool_registry
+                .definition_for(&tc.name)
+                .map(|def| def.permission.needs_confirmation())
+                .unwrap_or(false);
             pending.push(ToolCallWithViolations {
                 tool_call: tc.clone(),
                 workspace_boundary_violation: boundary_violation,
                 sensitive_file_violation: sensitive_violation,
                 permission_key,
                 permission_label: self.tool_registry.permission_label_for_call(tc),
+                needs_confirmation,
             });
         }
 

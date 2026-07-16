@@ -90,6 +90,21 @@ pub(crate) fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
     Rect::new(x, y, width, height)
 }
 
+/// Compute a bottom-centred rect of the given dimensions inside `area`.
+///
+/// Positions the rect at the bottom of `area` (centered horizontally),
+/// matching the old TUI behaviour where workspace-boundary, sensitive-file,
+/// and question dialogs appear in the composer area instead of screen-center.
+pub(crate) fn bottom_centered_rect(width: u16, height: u16, area: Rect) -> Rect {
+    let width = width.min(area.width.saturating_sub(2)).max(20);
+    let height = height.min(area.height.saturating_sub(2)).max(8);
+
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let y = area.y + area.height.saturating_sub(height).saturating_sub(1);
+
+    Rect::new(x, y, width, height)
+}
+
 /// Render a 1-column vertical scrollbar.
 pub(crate) fn render_scrollbar(
     frame: &mut Frame<'_>,

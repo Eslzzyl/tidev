@@ -647,7 +647,8 @@ impl App {
     fn process_next_tool(&mut self) {
         while self.tool_index < self.pending_tools.len() {
             // Clone data we need before borrowing self for mutations.
-            let (boundary_path, sensitive_path, is_question, args, perm_key, perm_label, tc)
+            let (boundary_path, sensitive_path, is_question, args, perm_key, perm_label,
+                  needs_confirmation, tc)
                 = {
                 let twv = &self.pending_tools[self.tool_index];
                 let tc = &twv.tool_call;
@@ -658,6 +659,7 @@ impl App {
                     tc.arguments.clone(),
                     twv.permission_key.clone(),
                     twv.permission_label.clone(),
+                    twv.needs_confirmation,
                     tc.clone(),
                 )
             };
@@ -766,25 +768,45 @@ impl App {
                 }
             }
 
-            // Step 4: PermissionDialog — final approve / reject
-            log::info!(
-                "Opening PermissionDialog for tool: {} ({}/{})",
-                perm_label,
-                current_index,
-                total
-            );
-            self.set_notice(format!(
-                "Approve tool call {} of {}: {}",
-                current_index, total, perm_label
-            ));
-            self.overlays.push(Box::new(PermissionDialog::new(
-                perm_key,
-                perm_label,
-                args,
-                current_index,
-                total,
-            )));
-            return;
+            // Step 4: PermissionDialog — only for tools that need confirmation
+            // (Write/Edit/Execute). Read-only tools (Read/Search/Session) that
+            // pass the boundary & sensitive file checks are auto-approved here.
+            if needs_confirmation {
+                log::info!(
+                    "Opening PermissionDialog for tool: {} ({}/{})",
+                    perm_label,
+                    current_index,
+                    total
+                );
+                self.set_notice(format!(
+                    "Approve tool call {} of {}: {}",
+                    current_index, total, perm_label
+                ));
+                self.overlays.push(Box::new(PermissionDialog::new(
+                    perm_key,
+                    perm_label,
+                    args,
+                    current_index,
+                    total,
+                )));
+                return;
+            } else {
+                log::info!(
+                    "Auto-approving tool {} (no confirmation needed) ({}/{})",
+                    perm_label,
+                    current_index,
+                    total
+                );
+                self.approved_tools.push(ApprovedTool {
+                    tool_call: tc,
+                    rejection: None,
+                    child_session_id: None,
+                    allow_outside: false,
+                    sensitive_file_approved: false,
+                });
+                self.tool_index += 1;
+                continue;
+            }
         }
 
         // All tools processed — send response

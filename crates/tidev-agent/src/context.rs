@@ -79,6 +79,9 @@ pub struct ToolCallWithViolations {
     pub permission_key: String,
     /// Human-readable label.
     pub permission_label: String,
+    /// Whether the tool's permission level requires explicit user confirmation
+    /// (true for Write/Edit/Execute; false for Read/Search/Session).
+    pub needs_confirmation: bool,
 }
 
 /// Request sent by the agent loop to the frontend, requiring user interaction.

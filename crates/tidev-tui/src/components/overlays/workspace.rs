@@ -13,7 +13,7 @@ use anyhow::Result;
 use crate::action::{Action, BoundaryDecision, OverlayAction, OverlayKind};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
-use crate::utils::centered_rect;
+use crate::utils::bottom_centered_rect;
 
 // ---------------------------------------------------------------------------
 // Phase
@@ -165,7 +165,7 @@ impl Component for WorkspaceBoundaryDialog {
 
     fn draw(&mut self, frame: &mut Frame, rect: Rect, ctx: &DrawContext) {
         let palette = ctx.palette;
-        let overlay = centered_rect(60, 10, rect);
+        let overlay = bottom_centered_rect(60, 10, rect);
         frame.render_widget(Clear, overlay);
 
         let block = Block::default().style(Style::default().bg(palette.panel_alt));

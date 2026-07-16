@@ -13,7 +13,7 @@ use tidev_types::tools::QuestionInfo;
 use crate::action::{Action, OverlayAction, OverlayKind};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
-use crate::utils::centered_rect;
+use crate::utils::bottom_centered_rect;
 
 // ---------------------------------------------------------------------------
 // Component
@@ -556,7 +556,7 @@ impl Component for QuestionDialog {
             .saturating_add(options_height)
             .saturating_add(input_h)
             .saturating_add(6); // title + footers + padding
-        let overlay = centered_rect(70, total_h.min(30), rect);
+        let overlay = bottom_centered_rect(70, total_h.min(30), rect);
         frame.render_widget(Clear, overlay);
 
         let block = Block::default().style(Style::default().bg(palette.panel_alt));
