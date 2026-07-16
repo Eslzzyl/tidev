@@ -341,6 +341,9 @@ impl MessageList {
         // Clear hover state for the subagent card.
         self.hovered_inline_subagent = None;
 
+        // Clear running subagents — ToolCompleted won't be emitted on cancel.
+        self.running_subagents.clear();
+
         // Append an error message to indicate the interruption.
         let mut err_msg = tidev_types::message::Message::new(
             tidev_types::message::MessageRole::Error,

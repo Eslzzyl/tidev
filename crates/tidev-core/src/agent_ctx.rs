@@ -621,7 +621,9 @@ impl AgentContext for CoreContext {
 
         if !task_calls.is_empty() {
             let mut handles = Vec::with_capacity(task_calls.len());
+            let mut cancelled_tcs: Vec<ToolCall> = Vec::with_capacity(task_calls.len());
             for (tc, child_session_id) in task_calls {
+                cancelled_tcs.push(tc.clone());
                 let cancel = self.cancel.child_token();
                 let spawner = SubagentSpawner {
                     session_manager: self.session_manager.clone(),
@@ -652,23 +654,36 @@ impl AgentContext for CoreContext {
                 });
                 handles.push(handle);
             }
-            for handle in handles {
+            for (i, handle) in handles.into_iter().enumerate() {
                 match handle.await {
                     Ok(Ok((tc, result))) => {
-                        if !self.cancel.is_cancelled() {
+                        if self.cancel.is_cancelled() {
+                            // User cancelled: push a synthetic result to prevent
+                            // orphan tool calls (a tool call with no matching result).
+                            results.push((
+                                tc,
+                                ToolExecutionResult::new("User cancelled the request"),
+                            ));
+                        } else {
                             self.emit(BackendEvent::ToolCompleted {
                                 session_id,
                                 request_id,
                                 tool_call: tc.clone(),
                                 result: result.clone(),
                             });
+                            results.push((tc, result));
                         }
-                        results.push((tc, result));
                     }
                     Ok(Err(e)) => {
                         if !self.cancel.is_cancelled() {
                             return Err(e);
                         }
+                        // Cancelled subagent with error: still push a synthetic
+                        // result so the parent session has no orphan tool calls.
+                        results.push((
+                            cancelled_tcs[i].clone(),
+                            ToolExecutionResult::new("User cancelled the request"),
+                        ));
                     }
                     Err(join_err) => {
                         return Err(anyhow::anyhow!("Subagent join error: {join_err}"));
