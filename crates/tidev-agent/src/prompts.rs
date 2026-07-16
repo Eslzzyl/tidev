@@ -242,9 +242,8 @@ fn designer_prompt() -> String {
          - Consider accessibility, responsiveness, and maintainability.\n\
          - When reviewing, provide specific, actionable feedback.\n\
          - Suggest concrete improvements with code examples.\n\n\
-         ## Delegation\n\
-         - You may delegate research questions to sub-agents (explorer, librarian, oracle).\n\
-         - Implementation work should be done by you directly.",
+         ## Constraints\n\
+         - NO delegation or spawning sub-agents. Handle all design and implementation work directly.",
         base_instruction()
     )
 }
@@ -273,7 +272,7 @@ fn fixer_prompt() -> String {
          - Clean up after yourself (remove debug code, temp files).\n\n\
          ## Constraints\n\
          - You have full tool access for implementation.\n\
-         - You may delegate research to sub-agents when needed.\n\
+         - NO delegation or spawning sub-agents. Use your own tools.\n\
          - Verify before declaring done.",
         base_instruction()
     )

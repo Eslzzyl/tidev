@@ -1084,6 +1084,12 @@ fn filter_subagent_tools(
             }
             true
         })
+        // Never include the task tool — subagents must not spawn further subagents.
+        .filter(|def| {
+            let canonical = tidev_types::tools::canonical_tool_name(&def.name)
+                .unwrap_or(&def.name);
+            canonical != "task"
+        })
         .cloned()
         .collect();
     Ok(filtered)
