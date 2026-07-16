@@ -443,19 +443,16 @@ impl Runtime {
             message: user_msg,
         });
 
-        // 4. Enqueue the message so the agent loop can discover it.
-        //    The loop pops from this queue one-at-a-time after each turn
-        //    without tool calls, continuing the loop instead of exiting.
-        self.queue_user_message(q_content, q_attachments, q_mode, q_thinking);
-
-        // 5. Check if a loop is already running.
+        // 4. Check if a loop is already running.
         if self.is_loop_running() {
-            // Loop running — it will pick up the queued message
-            // on its next turn (or after the current turn finishes).
+            // Enqueue the message so the running loop picks it up.
+            // The loop pops queued messages one-at-a-time after turns
+            // without tool calls, continuing the loop instead of exiting.
+            self.queue_user_message(q_content, q_attachments, q_mode, q_thinking);
             return Ok(());
         }
 
-        // 6. Build CoreContext + AgentLoopConfig and spawn the loop.
+        // 5. Build CoreContext + AgentLoopConfig and spawn the loop.
         self.start_agent_loop(session_id, mode).await
     }
 
