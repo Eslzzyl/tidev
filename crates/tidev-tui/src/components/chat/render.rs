@@ -1172,7 +1172,6 @@ fn render_assistant_cards(
     let body_lines = render_assistant_body_lines(ctx, message, messages, body_width, is_round_end);
 
     let mut lines_with_margin = Vec::new();
-    lines_with_margin.push(Line::from(""));
     lines_with_margin.extend(body_lines);
     lines_with_margin.push(Line::from(""));
 
@@ -1372,9 +1371,8 @@ fn render_error_card(
         ]));
     }
 
-    // 3. Wrap with leading/trailing empty lines, use panel_light background
+    // 3. Wrap with trailing empty lines, use panel_light background
     let mut card = Vec::new();
-    card.push(Line::from(""));
     card.extend(lines);
     card.push(Line::from(""));
     vec![(palette.panel_light, card)]
@@ -1409,7 +1407,6 @@ fn render_system_card(
     if content.starts_with(COMPACTION_MESSAGE_LABEL) {
         let summary = content.split_once("\n\n").map(|(_, s)| s).unwrap_or("").trim();
         let mut lines = Vec::new();
-        lines.push(Line::from(""));
         lines.push(render_compaction_divider_line(COMPACTION_MESSAGE_LABEL, body_width, palette));
         if !summary.is_empty() {
             lines.push(Line::from(""));
@@ -1466,10 +1463,9 @@ fn render_system_card(
         return vec![(palette.background, lines)];
     }
 
-    // Generic system message: render as markdown with margins
+    // Generic system message: render as markdown with trailing margin
     let content_lines = render_text_body_lines(ctx, content, body_width);
     let mut lines = Vec::new();
-    lines.push(Line::from(""));
     lines.extend(content_lines);
     lines.push(Line::from(""));
     vec![(palette.background, lines)]
