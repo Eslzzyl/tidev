@@ -1694,7 +1694,7 @@ fn shorten_by_width(s: &str, max_width: usize) -> String {
 /// Wrap `text` into at most `max_lines` lines of `max_width` columns each.
 /// Newlines are collapsed into spaces. Word boundaries are preferred for
 /// line breaks; hard-breaks are used when a single word exceeds max_width.
-fn wrap_text_lines(text: &str, max_width: usize, max_lines: usize) -> Vec<String> {
+pub(crate) fn wrap_text_lines(text: &str, max_width: usize, max_lines: usize) -> Vec<String> {
     if max_width == 0 || max_lines == 0 {
         return vec![];
     }

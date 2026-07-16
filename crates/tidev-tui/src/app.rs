@@ -50,6 +50,7 @@ use crate::components::overlays::theme::ThemePanel;
 use crate::components::overlays::undo::UndoConfirmDialog;
 use crate::components::overlays::workspace::WorkspaceBoundaryDialog;
 use crate::components::chat::MessageList;
+use crate::components::chat::render::wrap_text_lines;
 use crate::components::composer::Composer;
 use crate::components::sidebar::Sidebar;
 use crate::components::desktop_notification::NotificationManager;
@@ -72,6 +73,11 @@ pub(crate) enum AppScreen {
     Welcome,
     Chat,
 }
+
+/// Max queued prompt cards visible in the frozen area above the composer.
+const MAX_VISIBLE_QUEUED_PROMPTS: usize = 4;
+/// Max wrapped lines per queued prompt card.
+const MAX_QUEUED_PROMPT_LINES: usize = 3;
 
 pub struct App {
     pub(crate) runtime: tidev_core::Runtime,
@@ -155,6 +161,11 @@ pub struct App {
     /// Queue of prompts waiting to be sent (when a request is already in progress).
     pending_prompt_queue: Vec<QueuedPrompt>,
 
+    /// Cached bounds for queued prompt card mouse hit-testing.
+    queued_card_bounds: Vec<(usize, Rect)>,
+    /// Currently hovered queued prompt index.
+    hovered_queued_index: Option<usize>,
+
     /// Compact queued to run after the current request finishes.
     pending_compact: bool,
 
@@ -227,6 +238,8 @@ impl App {
             toast: None,
             abort_confirmation_deadline: None,
             pending_prompt_queue: Vec::new(),
+            queued_card_bounds: Vec::new(),
+            hovered_queued_index: None,
             pending_compact: false,
             is_compacting: false,
             screen: AppScreen::Welcome,
@@ -359,11 +372,6 @@ impl App {
             let text = queued.prompt.clone();
             let attachments = queued.attachments.clone();
             self.pending_prompt_queue.remove(0);
-
-            // Check if another request started while we were draining.
-            if self.has_active_request() {
-                break;
-            }
 
             let Some(session_id) = self.current_session_id else { continue };
 
@@ -1202,6 +1210,12 @@ impl App {
                 if let Some(ref mut chat) = self.message_list {
                     chat.set_hovered_card(mouse.column, mouse.row);
                 }
+                // Check queued prompt card hover.
+                let pos = ratatui::layout::Position::new(mouse.column, mouse.row);
+                self.hovered_queued_index = self.queued_card_bounds
+                    .iter()
+                    .find(|(_, rect)| rect.contains(pos))
+                    .map(|(i, _)| *i);
             }
             MouseEventKind::Drag(MouseButton::Left) => {
                 // Check scrollbar drag first.
@@ -2508,23 +2522,51 @@ impl App {
             }).unwrap_or(0)
         };
 
-        // Split: message area + bottom bar + notice line.
+        // Calculate queued prompts area height (frozen area above input box).
+        let queued_height = if !is_subsession {
+            let count = self.pending_prompt_queue.len();
+            if count > 0 {
+                let visible = count.min(MAX_VISIBLE_QUEUED_PROMPTS);
+                let text_width = main_area.width.saturating_sub(5).max(1) as usize;
+                let mut inner: usize = 0;
+                for (i, q) in self.pending_prompt_queue.iter().take(visible).enumerate() {
+                    let wrapped = wrap_text_lines(&q.prompt, text_width, MAX_QUEUED_PROMPT_LINES);
+                    inner += wrapped.len();
+                    // Separator between items (not after last)
+                    if i + 1 < visible {
+                        inner += 1;
+                    }
+                }
+                // +1 for "+N more" overflow, +2 for block top/bottom borders
+                let overflow = if count > MAX_VISIBLE_QUEUED_PROMPTS { 1 } else { 0 };
+                (inner + overflow + 2)
+                    .min(main_area.height.saturating_sub(6) as usize / 2)
+                    .min(15)
+            } else {
+                0
+            }
+        } else {
+            0
+        };
+
+        // Split: message area + queued area + bottom bar + notice line.
         let notice_height: u16 = 1;
-        let (content_area, bottom_area, notice_line) = if bottom_height > 0 {
+        let (content_area, queued_area, bottom_area, notice_line) = if bottom_height > 0 {
             let split = Layout::vertical([
                 Constraint::Min(1),
+                Constraint::Length(queued_height as u16),
                 Constraint::Length(bottom_height),
                 Constraint::Length(notice_height),
             ])
             .split(main_area);
-            (split[0], split[1], split[2])
+            (split[0], split[1], split[2], split[3])
         } else {
             let split = Layout::vertical([
                 Constraint::Min(1),
                 Constraint::Length(notice_height),
             ])
             .split(main_area);
-            (split[0], Rect::default(), split[1])
+            (split[0], Rect::default(), Rect::default(), split[1])
         };
 
         // Chat message area (when session is active)
@@ -2541,6 +2583,12 @@ impl App {
                 workspace_root: self.runtime.workspace_root(),
             };
             chat.draw(frame, content_area, &draw_ctx);
+        }
+
+        // Render queued prompts above the composer
+        self.queued_card_bounds.clear();
+        if queued_height > 0 {
+            self.render_queued_prompts(frame, queued_area);
         }
 
         // ── Bottom bar ───────────────────────────────────────────────
@@ -2860,6 +2908,151 @@ impl App {
                     );
                 }
             }
+    }
+
+    /// Render a frozen area above the composer showing queued (pending) prompts.
+    /// Each queued message is word-wrapped into up to [`MAX_QUEUED_PROMPT_LINES`] lines.
+    /// Cards are separated by a thin rule. Each card is independently hover-highlighted.
+    fn render_queued_prompts(&mut self, frame: &mut Frame<'_>, area: Rect) {
+        let palette = &self.current_palette;
+        let count = self.pending_prompt_queue.len();
+        let visible = count.min(MAX_VISIBLE_QUEUED_PROMPTS);
+
+        // Build title: " QUEUE " badge with background color + count
+        let title = Line::from(vec![
+            Span::styled(
+                " QUEUE ",
+                Style::default()
+                    .bg(palette.selection_bg)
+                    .fg(palette.selection_fg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(format!(" {} ", count), Style::default().fg(palette.muted)),
+        ]);
+
+        // Align with composer: left_inset=2 (bg) + inner_margin=2 (text)
+        let left_inset: u16 = 2;
+        let block_area = Rect {
+            x: area.x + left_inset,
+            y: area.y,
+            width: area.width.saturating_sub(left_inset),
+            height: area.height,
+        };
+
+        let block = Block::default()
+            .style(Style::default().bg(palette.panel))
+            .title(title)
+            .title_alignment(Alignment::Left);
+
+        // Inner content matches composer's text area (x+4, width-5).
+        // Offset y by 1 to leave room for the block's title on the first row.
+        let inner = Rect {
+            x: block_area.x + left_inset,
+            y: block_area.y + 1,
+            width: block_area.width.saturating_sub(left_inset + 1),
+            height: block_area.height.saturating_sub(1),
+        };
+        let inner_height = inner.height as usize;
+        let width = inner.width.max(1) as usize;
+
+        let mut y_offset: u16 = 0;
+
+        for (i, queued) in self.pending_prompt_queue.iter().take(visible).enumerate() {
+            if y_offset as usize >= inner_height {
+                break;
+            }
+
+            // Word-wrap the prompt into up to MAX_QUEUED_PROMPT_LINES lines
+            let wrapped_lines = wrap_text_lines(&queued.prompt, width, MAX_QUEUED_PROMPT_LINES);
+            let row_text_height = wrapped_lines.len();
+            let has_separator = i + 1 < visible;
+            let row_height = row_text_height + if has_separator { 1 } else { 0 };
+
+            // Clamp to available space
+            let available = inner_height.saturating_sub(y_offset as usize);
+            if available == 0 {
+                break;
+            }
+            let render_height = row_height.min(available);
+
+            // Record bounds for hover hit-testing
+            let row_rect = Rect::new(
+                inner.x,
+                inner.y + y_offset,
+                inner.width,
+                render_height as u16,
+            );
+            self.queued_card_bounds.push((i, row_rect));
+
+            // Apply hover highlight
+            let is_hovered = self.hovered_queued_index == Some(i);
+            if is_hovered {
+                let hover_bg = palette.hover_bg(palette.panel);
+                frame.render_widget(
+                    Block::default().style(Style::default().bg(hover_bg)),
+                    row_rect,
+                );
+            }
+
+            // Render each wrapped line of the prompt
+            let text_style = if is_hovered {
+                Style::default()
+                    .fg(palette.text)
+                    .add_modifier(Modifier::ITALIC)
+            } else {
+                Style::default()
+                    .fg(palette.muted)
+                    .add_modifier(Modifier::ITALIC)
+            };
+
+            for line_text in wrapped_lines.iter() {
+                if y_offset as usize >= inner_height {
+                    break;
+                }
+                frame.render_widget(
+                    Paragraph::new(Line::from(Span::styled(line_text.clone(), text_style)))
+                        .wrap(ratatui::widgets::Wrap { trim: false }),
+                    Rect::new(inner.x, inner.y + y_offset, inner.width, 1),
+                );
+                y_offset += 1;
+            }
+
+            // Separator line (not after last visible item)
+            if has_separator && (y_offset as usize) < inner_height {
+                let sep_width = width.saturating_sub(2);
+                let sep = "─".repeat(sep_width);
+                let sep_style = if is_hovered {
+                    Style::default().fg(palette.text)
+                } else {
+                    Style::default().fg(palette.border)
+                };
+                frame.render_widget(
+                    Paragraph::new(Line::from(Span::styled(sep, sep_style))),
+                    Rect::new(
+                        inner.x + 1,
+                        inner.y + y_offset,
+                        inner.width.saturating_sub(2),
+                        1,
+                    ),
+                );
+                y_offset += 1;
+            }
+        }
+
+        // Overflow indicator
+        if count > MAX_VISIBLE_QUEUED_PROMPTS && (y_offset as usize) < inner_height {
+            let more_text = format!("+{} more...", count - MAX_VISIBLE_QUEUED_PROMPTS);
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    more_text,
+                    Style::default().fg(palette.muted),
+                ))),
+                Rect::new(inner.x, inner.y + y_offset, inner.width, 1),
+            );
+        }
+
+        // Render block last so it draws borders on top
+        frame.render_widget(block, block_area);
     }
 }
 
