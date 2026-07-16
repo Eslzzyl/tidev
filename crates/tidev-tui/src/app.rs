@@ -2564,7 +2564,7 @@ impl App {
             SUBSESSION_NAV_HEIGHT
         } else {
             self.composer.as_ref().map(|c| {
-                let width = main_area.width.saturating_sub(4);
+                let width = main_area.width.saturating_sub(5);
                 c.preferred_height(width, 6).saturating_add(2).min(main_area.height.saturating_sub(2))
             }).unwrap_or(0)
         };
