@@ -1240,39 +1240,132 @@ fn summarize_tool_arguments(tool_call: &ToolCall, max_width: usize) -> String {
             }
         }
         Ok(other) => other.to_string(),
-        Err(_) => String::new(),
+        Err(_) => {
+            // Fallback for incomplete/partial JSON during streaming: show raw arguments
+            crate::utils::pretty_tool_arguments(&tool_call.arguments)
+        }
     }
 }
 
+/// Count lines in a partial JSON string field (works on incomplete JSON during streaming).
+///
+/// Searches for `"field":` and reads the string value, counting both JSON `\n` escapes
+/// and literal newlines. Handles escaped quotes correctly.
 fn count_lines_in_partial_json(args: &str, field: &str) -> usize {
-    if let Ok(val) = serde_json::from_str::<serde_json::Value>(args)
-        && let Some(content) = val.get(field).and_then(|v| v.as_str()) {
-            return content.lines().count().max(1);
+    let key = format!("\"{}\":", field);
+    if let Some(start) = args.find(&key) {
+        let after_colon = &args[start + key.len()..];
+        let value_start = after_colon.trim_start();
+        if !value_start.starts_with('"') {
+            return 0;
         }
-    0
+        let rest = &value_start[1..]; // skip opening quote
+
+        // Single pass: find closing quote while counting newlines
+        let mut i = 0usize;
+        let mut newlines = 0usize;
+        let bytes = rest.as_bytes();
+        while i < bytes.len() {
+            if bytes[i] == b'\\' {
+                // JSON escape: check for \n, then skip 2 bytes
+                if i + 1 < bytes.len() && bytes[i + 1] == b'n' {
+                    newlines += 1;
+                }
+                i += 2;
+            } else if bytes[i] == b'"' {
+                break; // unescaped quote = end of value
+            } else {
+                if bytes[i] == b'\n' {
+                    newlines += 1;
+                }
+                i += 1;
+            }
+        }
+        if i == 0 {
+            return 0;
+        }
+        newlines + 1
+    } else {
+        0
+    }
 }
 
+/// Count patch changes (additions, deletions, file operations) from a partial
+/// `patch_text` JSON field. Returns `(additions, deletions, file_ops)`.
+///
+/// This works on incomplete JSON during LLM streaming — it finds the string
+/// value for `"patch_text":` and counts `+` lines, `-` lines, and `***` file
+/// operation markers inside it.
 fn count_patch_changes(args: &str) -> (usize, usize, usize) {
-    if let Ok(val) = serde_json::from_str::<serde_json::Value>(args) {
-        let patch = val.get("patch_text").and_then(|v| v.as_str()).unwrap_or("");
-        let file_ops = val.get("files").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(1);
-        let (add, del) = count_diff_lines(patch);
-        return (add, del, file_ops);
+    let key = "\"patch_text\":";
+    let start = match args.find(key) {
+        Some(s) => s,
+        None => return (0, 0, 0),
+    };
+    let after_colon = &args[start + key.len()..];
+    let value_start = after_colon.trim_start();
+    if !value_start.starts_with('"') {
+        return (0, 0, 0);
     }
-    (0, 0, 0)
-}
+    let rest = &value_start[1..]; // skip opening quote
 
-fn count_diff_lines(diff: &str) -> (usize, usize) {
-    let mut add = 0;
-    let mut del = 0;
-    for line in diff.lines() {
-        if line.starts_with('+') && !line.starts_with("+++") {
-            add += 1;
-        } else if line.starts_with('-') && !line.starts_with("---") {
-            del += 1;
+    let mut i = 0usize;
+    let mut adds = 0usize;
+    let mut dels = 0usize;
+    let mut ops = 0usize;
+    let bytes = rest.as_bytes();
+    let mut line_start = true;
+    let mut was_cr = false; // track \r for \r\n sequences
+
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            // JSON escape: check for \n (which represents a literal newline
+            // in JSON), then process the decoded line.
+            if i + 1 < bytes.len() && bytes[i + 1] == b'n' {
+                line_start = true;
+            }
+            // Skip other escapes like \\, \", \t, etc.
+            i += 2;
+            continue;
         }
+        if bytes[i] == b'"' {
+            // Unescaped quote = end of value (or nested JSON — skip)
+            break;
+        }
+        if bytes[i] == b'\r' {
+            was_cr = true;
+            line_start = true;
+            i += 1;
+            continue;
+        }
+        if bytes[i] == b'\n' {
+            was_cr = false;
+            line_start = true;
+            i += 1;
+            continue;
+        }
+        if line_start && !was_cr {
+            match bytes[i] {
+                b'+' => adds += 1,
+                b'-' => dels += 1,
+                b'*'
+                    // Check if this starts a *** marker like *** Update File:
+                    if bytes[i..].starts_with(b"*** ") => {
+                        ops += 1;
+                    }
+                _ => {}
+            }
+        }
+        if bytes[i] == b'\n' || bytes[i] == b'\r' {
+            // handled above
+        } else {
+            line_start = false;
+        }
+        was_cr = false;
+        i += 1;
     }
-    (add, del)
+
+    (adds, dels, ops)
 }
 
 pub(crate) fn tool_call_arguments_are_complete(arguments: &str) -> bool {
