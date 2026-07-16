@@ -1,31 +1,28 @@
 //! Tui — terminal layer.
 //!
 //! Owns the `Terminal`, handles setup/teardown and event polling.
-//! Uses a blocking reader thread for crossterm events drained via
-//! `try_recv` batches, mirroring the synchronous polling of the old
-//! TUI to avoid mixing sync and async event readers.
+//! Uses `crossterm::event::EventStream` (async) as the sole event
+//! source, running entirely in one async task with no background
+//! reader thread.  This avoids the cross-thread access to crossterm's
+//! internal event reader that the previous architecture caused.
 
 use std::io;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use crossterm::cursor::{Show, self as cursor};
 use crossterm::event::{DisableBracketedPaste, DisableFocusChange, DisableMouseCapture,
-    EnableBracketedPaste, EnableFocusChange, EnableMouseCapture, Event};
+    EnableBracketedPaste, EnableFocusChange, EnableMouseCapture, EventStream};
 use crossterm::terminal::{DisableLineWrap, EnableLineWrap, EnterAlternateScreen,
     LeaveAlternateScreen, disable_raw_mode, enable_raw_mode};
 use crossterm::execute;
-use ratatui::{Terminal, backend::CrosstermBackend};
-use tokio::sync::mpsc;
+use futures::StreamExt;
+use ratatui::backend::{Backend, ClearType, CrosstermBackend};
+use ratatui::Terminal;
 use tidev_types::message::BackendEvent;
 use uuid::Uuid;
 
 use crate::app::App;
-
-/// Maximum crossterm events to process per render frame (mirrors old TUI's 32).
-const MAX_CROSSTERM_EVENTS_PER_BATCH: usize = 32;
 
 /// Maximum backend events to drain per frame (mirrors old TUI's 200).
 const MAX_BACKEND_EVENTS_PER_BATCH: usize = 200;
@@ -52,117 +49,98 @@ impl Tui {
         )?;
         let backend = CrosstermBackend::new(stdout);
         let mut terminal = Terminal::new(backend)?;
+
         // Clear the alternate screen and reset the internal double-
-        // buffer so the first `draw()` produces a full redraw (matching
-        // v0.6.x behaviour).
-        terminal.clear()?;
+        // buffer so the first `draw()` produces a full redraw.
+        //
+        // NOTE: we use `clear_region` + `swap_buffers` instead of
+        // `terminal.clear()` to avoid `cursor::position()` (which
+        // would initialise crossterm's global event reader before
+        // the EventStream is set up, violating the rule that the
+        // reader must only be used from one execution context).
+        terminal
+            .backend_mut()
+            .clear_region(ClearType::All)
+            .context("failed to clear terminal")?;
+        terminal.swap_buffers();
+
         Ok(Self { terminal })
     }
 
     pub async fn run(&mut self, app: &mut App) -> Result<()> {
-        // ── Synchronous pre-loop poll ─────────────────────────────
-        //
-        // Poll for a startup event synchronously in the main task
-        // BEFORE spawning the blocking reader thread.  This uses
-        // crossterm's internal event reader directly (lazy-initialised
-        // on first call) with zero spawn_blocking delay, so any
-        // keystroke that arrived before or during the poll is
-        // guaranteed to be caught before the first render.
-        //
-        // Mirroring v0.6.x which did a synchronous poll + read before
-        // the loop and then an initial render.
-        const INITIAL_POLL_TIMEOUT: Duration = Duration::from_millis(10);
-        let early_event = match crossterm::event::poll(INITIAL_POLL_TIMEOUT) {
-            Ok(true) => Some(crossterm::event::read()?),
-            _ => None,
-        };
-
-        // ── Dedicated crossterm reader thread ──────────────────────────
-        //
-        // Spawn a blocking thread that reads events synchronously and
-        // forwards them through a channel.  This avoids the race condition
-        // that would arise from mixing the async EventStream (which uses an
-        // internal blocking reader) with sync poll/read calls on the same
-        // event source.
-        let (crossterm_tx, mut crossterm_rx) = mpsc::unbounded_channel::<Event>();
-        let reader_tx = crossterm_tx.clone();
-        let reader_running = Arc::new(AtomicBool::new(true));
-        let reader_running_clone = reader_running.clone();
-        tokio::task::spawn_blocking(move || {
-            let poll_interval = Duration::from_millis(50);
-            while reader_running_clone.load(Ordering::SeqCst) {
-                match crossterm::event::poll(poll_interval) {
-                    Ok(true) => {
-                        match crossterm::event::read() {
-                            Ok(event) => {
-                                if reader_tx.send(event).is_err() {
-                                    break;
-                                }
-                            }
-                            Err(e) => {
-                                log::error!("crossterm read error: {e}");
-                                break;
-                            }
-                        }
-                    }
-                    Ok(false) => {}
-                    Err(e) => {
-                        log::error!("crossterm poll error: {e}");
-                        break;
-                    }
-                }
-            }
-        });
-
         // Take ownership of receivers so the borrow checker is happy.
         let mut request_rx = app.request_rx.take();
         let mut event_rx = app.event_rx.take();
 
-        // Process the early event (if any) BEFORE the first render.
-        if let Some(event) = early_event {
-            app.handle_crossterm_event(event);
-        }
+        // ── EventStream ──────────────────────────────────────────────
+        //
+        // The single crossterm event source.  Everything runs through
+        // `EventStream::next()` which uses crossterm's official async
+        // API.  No separate reader thread, no manual poll/read calls.
+        // This is the only code path that touches crossterm's global
+        // event reader, so there is no cross-thread contention.
+        let mut reader = EventStream::new();
 
-        // Non-blocking drain of backend / request events (they arrive
-        // through independent channels and are not affected by the
-        // reader thread startup delay).
-        if let Some(ref mut rx) = event_rx {
-            while let Ok(event) = rx.try_recv() {
-                app.handle_backend_event(event);
-            }
-        }
-        if let Some(ref mut rx) = request_rx {
-            while let Ok(request) = rx.try_recv() {
-                app.handle_tui_request(request);
-            }
-        }
-
-        // Initial render — state is now consistent and includes any
-        // early events that were processed above.
+        // ── Initial render ───────────────────────────────────────────
         self.terminal
             .draw(|frame| app.draw(frame))
             .context("failed to render initial frame")?;
         app.mark_clean();
         let mut last_render = Instant::now();
-        let mut had_input = false;
 
         loop {
-            // ── Phase 1: Drain all event sources (non-blocking) ────────
+            // ── Phase 1: Wait for and process the next event ─────────
 
-            // 1a. Crossterm events (batch up to 32).
-            let mut cc_count = 0;
-            while cc_count < MAX_CROSSTERM_EVENTS_PER_BATCH {
-                match crossterm_rx.try_recv() {
-                    Ok(event) => {
-                        app.handle_crossterm_event(event);
-                        cc_count += 1;
-                        had_input = true;
+            let mut processed = false;
+
+            tokio::select! {
+                result = reader.next() => {
+                    match result {
+                        Some(Ok(event)) => {
+                            app.handle_crossterm_event(event);
+                            processed = true;
+                        }
+                        Some(Err(e)) => {
+                            log::error!("crossterm event error: {e}");
+                        }
+                        None => {
+                            // Event stream ended (reader was dropped).
+                            break;
+                        }
                     }
-                    Err(_) => break,
                 }
+                result = async {
+                    match event_rx.as_mut() {
+                        Some(rx) => rx.recv().await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    if let Some(event) = result {
+                        app.handle_backend_event(event);
+                        processed = true;
+                    }
+                }
+                result = async {
+                    match request_rx.as_mut() {
+                        Some(rx) => rx.recv().await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    if let Some(request) = result {
+                        app.handle_tui_request(request);
+                        processed = true;
+                    }
+                }
+                _ = tokio::time::sleep(FRAME_BUDGET) => {}
             }
 
-            // 1b. Backend events (batch up to 200, coalesce deltas).
+            if app.should_quit() {
+                break;
+            }
+
+            // ── Phase 2: Drain remaining events (non-blocking) ───────
+
+            // 2a. Backend events (batch up to 200, coalesce deltas).
             //
             // Coalesce consecutive Delta and ReasoningDelta events from the
             // same request to reduce per-frame cache invalidation overhead
@@ -202,7 +180,7 @@ impl Tui {
             }
             flush_delta(&mut cd_delta, &mut cd_reasoning, app);
 
-            // 1c. Tool permission requests.
+            // 2b. Tool permission requests.
             if let Some(ref mut rx) = request_rx {
                 while let Ok(request) = rx.try_recv() {
                     app.handle_tui_request(request);
@@ -213,7 +191,7 @@ impl Tui {
                 break;
             }
 
-            // ── Phase 2: Throttled render ─────────────────────────────
+            // ── Phase 3: Throttled render ────────────────────────────
             //
             // Per-frame: auto-scroll when dragging a selection near the edge
             // of the message content area or composer input area (mirrors old TUI behaviour).
@@ -235,57 +213,15 @@ impl Tui {
             //   - we just handled input (immediate response), OR
             //   - the UI is dirty AND enough time has passed (FPS cap).
             let now = Instant::now();
-            if had_input || (app.is_dirty() && now - last_render >= FRAME_BUDGET) {
+            if processed || (app.is_dirty() && now - last_render >= FRAME_BUDGET) {
                 self.terminal
                     .draw(|frame| app.draw(frame))
                     .context("failed to render frame")?;
                 app.mark_clean();
                 app.last_spinner_frame = (app.spinner_elapsed().as_millis() / 100) as u64;
                 last_render = now;
-                had_input = false;
-            }
-
-            // ── Phase 3: Idle wait ────────────────────────────────────
-            //
-            // If nothing was processed this iteration, wait for the next
-            // event (or until the frame budget expires).
-            if !had_input {
-                tokio::select! {
-                    Some(event) = crossterm_rx.recv() => {
-                        app.handle_crossterm_event(event);
-                        had_input = true;
-                    }
-                    result = async {
-                        match event_rx.as_mut() {
-                            Some(rx) => rx.recv().await,
-                            None => std::future::pending().await,
-                        }
-                    } => {
-                        if let Some(event) = result {
-                            app.handle_backend_event(event);
-                            had_input = true;
-                        }
-                    }
-                    result = async {
-                        match request_rx.as_mut() {
-                            Some(rx) => rx.recv().await,
-                            None => std::future::pending().await,
-                        }
-                    } => {
-                        if let Some(request) = result {
-                            app.handle_tui_request(request);
-                            had_input = true;
-                        }
-                    }
-                    _ = tokio::time::sleep(FRAME_BUDGET) => {}
-                }
             }
         }
-
-        // Signal the blocking reader thread to stop so it doesn't prevent
-        // the tokio runtime from shutting down.
-        reader_running.store(false, Ordering::SeqCst);
-        drop(crossterm_tx);
 
         Ok(())
     }
