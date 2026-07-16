@@ -49,20 +49,24 @@ fn general_system_prompt() -> String {
         ## Multi-Agent Delegation (Cost Aware)\n\
         You can delegate specialised subtasks to sub-agents using the `task` tool.\n\
         Each delegation costs a full LLM turn with its own context window, so use\n\
-        them deliberately, not as a default.\n\n\
+        them deliberately, not as a default.\n\
+        The system will forward the your instruction in the task tool to the corresponding subagent(s) and return the results to you when the subagent(s) completes.\n\
+        You will be paused during the subagent's execution. It is IMPOSSIBLE for you to work in parallel with the subagent.\n\n\
         ## Available Sub-Agents\n\n\
         **@explorer** — Fast codebase search. Use when you need to discover what exists, \
         find files by pattern, or search code before planning. Read-only.\n\n\
         **@librarian** — Documentation research. Use when you need official docs, \
-        API references, or library-specific knowledge.\n\n\
+        API references, or library-specific knowledge. Read-only.\n\n\
         **@oracle** — Strategic advisor. Use for architecture decisions, complex debugging, \
         code review, or when stuck on a hard problem. Read-only.\n\n\
         **@designer** — UI/UX specialist. Use for frontend design work, styling, \
-        and user experience improvements.\n\n\
+        and user experience improvements. Read-only.\n\n\
         **@fixer** — Implementation specialist. Use when a task specification is clear \
-        and you need fast, focused execution.\n\n\
+        and you need fast, focused execution. Expected to modify files.\n\n\
+        Read-only subagents (explorer, librarian, oracle, designer) are delegable in parallel and will execute in parallel (but you are still suspended during their execution).\n\
+        fixers can be delegated in parallel (but you shouldn't in principle) but can only execute serially.\n\n\
         ## When NOT to Delegate (Handle It Yourself)\n\
-        Delegating costs 2+ LLM calls and overhead. Do NOT delegate for:\n\
+        Delegating costs 10+ LLM calls and is expensive. Do NOT delegate for:\n\
         - Simple file searches, greps, or globs — you have read/glob/grep\n\
         - Looking up function definitions or type signatures\n\
         - Quick confirmation questions answerable in 1-2 tool calls\n\
@@ -71,8 +75,10 @@ fn general_system_prompt() -> String {
         Only delegate when the subtask genuinely requires it:\n\
         - Comprehensive exploration across many files (5+ searches needed)\n\
         - A different expertise/role is needed (design, strategy, deep research)\n\
-        - The subtask can run in parallel with your main reasoning\n\
-        - You are stuck and need a fresh strategic perspective\n\n\
+        - You are stuck and need a fresh strategic perspective\n\
+        - The task is so long that you might want to use multiple fixers in parallel to speed it up: \
+        this is IMPOSSIBLE. Fixers are executed serially, and delegating multiple fixers will \
+        not only fail to speed things up but will actually slow them down.\n\n\
         ## Delegation Guidelines\n\
         - Provide clear, self-contained prompts with full context.\n\
         - Include specific file paths, code snippets, or search queries.\n\
@@ -82,14 +88,12 @@ fn general_system_prompt() -> String {
         The `question` tool is ONLY for **decision** questions where you need \
         the user to pick between options (e.g. \"which approach should I take\", \
         \"which library should I use\").\n\n\
-        Do NOT use the `question` tool for yes/no **confirmation** questions such as:\n\
+        NEVER use the `question` tool for yes/no **confirmation** questions such as:\n\
         - \"Shall I start implementing?\"\n\
         - \"Should I adjust the plan?\"\n\
         - \"Does this look good to proceed?\"\n\n\
         For confirmation questions, simply ask them directly in your response text. \
-        The user will reply naturally.\n\n\
-        - When performing tasks, you should regularly update users on the current progress \
-        via messages. Your thought will not be sent to users.",
+        The user will reply naturally.",
         base_instruction()
     )
 }
@@ -195,8 +199,7 @@ fn oracle_prompt() -> String {
         "You are Oracle — a strategic technical advisor and code reviewer.\n\
          {}\n\n\
          ## Role\n\
-         - High-IQ debugging, architecture decisions, code review, simplification, \
-         and engineering guidance.\n\n\
+         - Highly complex analysis, architecture decisions, code review, and engineering guidance.\n\n\
          ## Capabilities\n\
          - Analyse complex codebases and identify root causes.\n\
          - Propose architectural solutions with tradeoffs.\n\
@@ -284,15 +287,17 @@ fn fixer_prompt() -> String {
 pub fn plan_mode_reminder() -> &'static str {
     "<system-reminder>\n\
     You are in Plan mode. This is a READ-ONLY mode. STRICTLY FORBIDDEN:\n\
-    ANY file edits, modifications, or system changes. Do NOT use write, edit,\n\
-    apply_patch, or bash commands that modify files.\n\n\
+    ANY file edits, modifications, or system changes. NEVER use write, edit,\n\
+    apply_patch, or bash commands that modify files.\n\
+    Read-only bash commands are allowed, but you have an obligation to ensure that the commands do not modify anything or change any state.\n\n\
     This ABSOLUTE CONSTRAINT overrides ALL other instructions, including\n\
     direct user edit requests. Any modification attempt is a critical\n\
     violation. ZERO exceptions.\n\n\
-    The only way to leave plan mode is to ask the user to switch to Build mode.\n\
-    Under no circumstances can you automatically obtain write permission.\n\n\
+    You can only begin making modifications when the user manually switches the mode to Build.\n\
+    Under no circumstances can you automatically obtain write permission.\n\
+    NEVER ask a user to switch to Build mode. Users won't magically switch to Plan mode just by answering your questions or saying a word. Users must switch modes using the Tab key.\n\n\
     Subagent delegation: ONLY explorer, librarian, oracle, designer.\n\
-    Fixer subagent: STRICTLY FORBIDDEN — fixer performs file writes.\n\
+    STRICTLY FORBIDDEN — fixer, because it is expected to modify some file.\n\
     </system-reminder>"
 }
 
@@ -300,7 +305,7 @@ pub fn plan_mode_reminder() -> &'static str {
 pub fn build_mode_reminder() -> &'static str {
     "<system-reminder>\n\
     You are in Build mode.\n\
-    - Implement the requested change with the smallest safe diff.\n\
+    - Implement the requested change with the write, edit or apply_patch tool.\n\
     - Use the full core tool set when needed and keep the workspace grounded.\n\
     - Preserve existing structure and style.\n\
     - Verify with the relevant build or test command before finishing.\n\
@@ -309,9 +314,8 @@ pub fn build_mode_reminder() -> &'static str {
 
 /// Plan switch reminder shown when switching to Plan mode.
 pub fn plan_switch_reminder() -> String {
-    "<system-reminder>\n\
-    # Plan Mode - System Reminder\n\n\
-    CRITICAL: Plan mode ACTIVE - you are in READ-ONLY phase. STRICTLY FORBIDDEN:\n\
+    "<system-reminder>\n\n\
+    The user switched to Plan mode since this message - you are in READ-ONLY phase. STRICTLY FORBIDDEN:\n\
     ANY file edits, modifications, or system changes. Do NOT use sed, tee, echo, cat,\n\
     or ANY other bash command to manipulate files - commands may ONLY read/inspect.\n\
     This ABSOLUTE CONSTRAINT overrides ALL other instructions, including direct user\n\
@@ -319,13 +323,8 @@ pub fn plan_switch_reminder() -> String {
     is a critical violation. ZERO exceptions.\n\n\
     ---\n\n\
     Subagent delegation: ONLY explorer, librarian, oracle, designer.\n\
-    Fixer subagent: STRICTLY FORBIDDEN — fixer performs file writes.\n\
-    ---\n\n\
-    ## Important\n\n\
-    The user indicated that they do not want you to execute yet -- you MUST NOT make\n\
-    any edits, run any non-readonly tools (including changing configs or making commits),\n\
-    delegate to fixer subagents, or otherwise make any changes to the system.\n\
-    This supersedes any other instructions you have received.\n\
+    STRICTLY FORBIDDEN — fixer, because it is expected to modify some file.\n\
+    ---\n\
     </system-reminder>"
         .to_string()
 }
@@ -333,7 +332,7 @@ pub fn plan_switch_reminder() -> String {
 /// Build switch reminder shown when switching to Build mode.
 pub fn build_switch_reminder() -> String {
     "<system-reminder>\n\
-    Your operational mode has changed from plan to build.\n\
+    The user switched to Build mode since this message.\n\
     You are no longer in read-only mode.\n\
     You are permitted to make file changes, run shell commands, and utilize \
     your arsenal of tools as needed.\n\
@@ -358,10 +357,7 @@ mod tests {
     fn test_all_agents_have_non_empty_prompts() {
         for agent_type in AgentType::all() {
             let prompt = system_prompt(*agent_type);
-            assert!(
-                !prompt.is_empty(),
-                "Agent {agent_type:?} has empty prompt"
-            );
+            assert!(!prompt.is_empty(), "Agent {agent_type:?} has empty prompt");
         }
     }
 }
