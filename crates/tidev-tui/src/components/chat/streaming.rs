@@ -80,4 +80,30 @@ impl StreamingBuffer {
         self.is_streaming = false;
         Some(idx)
     }
+
+    /// Recover from a missed TurnStarting event (e.g. after a session switch).
+    ///
+    /// If there's already a streaming Assistant message (from a prior
+    /// `begin_streaming` that survived the switch), pick it up. Otherwise
+    /// create a new placeholder. Returns the message ID.
+    pub fn recover_or_begin_streaming(&mut self, messages: &mut Vec<Message>) -> Uuid {
+        if self.is_streaming {
+            // Already streaming — nothing to do.
+            return self.current_message_id.unwrap_or_else(Uuid::new_v4);
+        }
+
+        // Look for an existing streaming Assistant message.
+        if let Some(msg) = messages.iter_mut().rev().find(|m| {
+            m.streaming && m.role == MessageRole::Assistant
+        }) {
+            let id = msg.id;
+            self.current_message_id = Some(id);
+            self.current_message_idx = messages.iter().position(|m| m.id == id);
+            self.is_streaming = true;
+            return id;
+        }
+
+        // No existing streaming message — begin a new stream.
+        self.begin_streaming(messages)
+    }
 }

@@ -162,6 +162,9 @@ impl MessageList {
             self.scroll_offset = 0;
             self.follow_tail = true;
             self.layout_index = MessageLayoutIndex::new();
+            // Clear render cache on session switch to avoid serving stale
+            // entries from a previous session's incomplete rendering pass.
+            self.render_cache.clear();
             self.streaming_buffer = StreamingBuffer::new();
             self.selectable_regions.clear();
             self.hovered_inline_subagent = None;
@@ -169,6 +172,16 @@ impl MessageList {
             self.bash_tool_call_id = None;
             self.retrying_hint = None;
             self.rebuild_subagent_state();
+
+            // Pick up any streaming Assistant message in the target context.
+            if let Some(ctx) = self.chat_contexts.get(&session_id) {
+                if ctx.messages.iter().any(|m| m.streaming && m.role == tidev_types::message::MessageRole::Assistant) {
+                    self.streaming_buffer.recover_or_begin_streaming(
+                        &mut self.chat_contexts.get_mut(&session_id).unwrap().messages,
+                    );
+                }
+            }
+
             self.dirty = true;
             true
         } else {
@@ -185,6 +198,7 @@ impl MessageList {
         self.scroll_offset = 0;
         self.follow_tail = true;
         self.layout_index = MessageLayoutIndex::new();
+        self.render_cache.clear();
         self.streaming_buffer = StreamingBuffer::new();
         self.selectable_regions.clear();
         self.hovered_inline_subagent = None;
@@ -192,9 +206,22 @@ impl MessageList {
         self.bash_tool_call_id = None;
         self.retrying_hint = None;
         self.rebuild_subagent_state();
+
+        // Pick up any streaming Assistant message in the new context
+        // (unlikely for DB-loaded contexts, but harmless).
+        if let Some(ctx) = self.chat_contexts.get(&session_id) {
+            if ctx.messages.iter().any(|m| m.streaming && m.role == tidev_types::message::MessageRole::Assistant) {
+                self.streaming_buffer.recover_or_begin_streaming(
+                    &mut self.chat_contexts.get_mut(&session_id).unwrap().messages,
+                );
+            }
+        }
     }
 
     /// Rebuild subagent state from the current chat_context messages.
+    ///
+    /// Preserves existing `running_subagents` status_text so ongoing status
+    /// updates (via `infer_subagent_status`) survive session switches.
     fn rebuild_subagent_state(&mut self) {
         let session_id = match self.active_session_id {
             Some(id) => id,
@@ -202,6 +229,11 @@ impl MessageList {
         };
         let Some(ctx) = self.chat_contexts.get(&session_id) else { return };
         let messages = ctx.visible_messages();
+
+        // Preserve existing status_text so rebuild doesn't reset it to "Thinking".
+        let old_status: std::collections::HashMap<String, String> = self.running_subagents.iter()
+            .map(|s| (s.tool_call_id.clone(), s.status_text.clone()))
+            .collect();
 
         self.running_subagents.clear();
         self.completed_subagent_sessions.clear();
@@ -233,12 +265,16 @@ impl MessageList {
                     if canonical_tool_name(&tc.name) == Some("task")
                         && !tool_result_ids.contains(tc.id.as_str())
                     {
+                        let status = old_status
+                            .get(tc.id.as_str())
+                            .cloned()
+                            .unwrap_or_else(|| "Thinking".to_string());
                         self.running_subagents.push(render_mod::RunningSubagentInfo {
                             request_id: 0,
                             tool_call_id: tc.id.clone(),
                             description: extract_task_description(&tc.arguments),
                             subagent_type: extract_subagent_type(&tc.arguments),
-                            status_text: "Thinking".to_string(),
+                            status_text: status,
                             child_session_id: msg_csid,
                         });
                     }
@@ -358,19 +394,30 @@ impl MessageList {
 
     /// Handle a backend event for streaming or tool results.
     pub fn handle_backend_event(&mut self, event: &BackendEvent) {
-        // Route events to the correct chat context by session_id.
-        // Known contexts stay live in chat_contexts even when not displayed.
+        // ── 0. Update running subagent card status ─────────────────────
+        // Run this BEFORE the chat_context routing so that events update
+        // the inline card regardless of whether the chat_context exists.
         let session_id = event.session_id();
+        if let Some(text) = infer_subagent_status(event) {
+            if let Some(exec) = self.running_subagents.iter_mut()
+                .find(|e| e.child_session_id == Some(session_id))
+            {
+                if exec.status_text != text {
+                    exec.status_text = text;
+                    self.dirty = true;
+                }
+            }
+        }
+
+        // ── 1. Route to chat_context ───────────────────────────────────
         let chat_context = match self.chat_contexts.get_mut(&session_id) {
             Some(ctx) => ctx,
             None => {
-                // Unknown session — check if it belongs to a running subagent.
-                if let Some(exec) = self.running_subagents.iter_mut().find(|e| e.child_session_id == Some(session_id))
-                    && let Some(text) = infer_subagent_status(event)
-                        && exec.status_text != text {
-                            exec.status_text = text;
-                            self.dirty = true;
-                        }
+                // Unknown session — check if it belongs to a running subagent
+                // so that the inline card gets its child_session_id synced.
+                if self.running_subagents.iter().any(|e| e.child_session_id == Some(session_id)) {
+                    self.dirty = true;
+                }
                 return;
             }
         };
@@ -391,26 +438,74 @@ impl MessageList {
                 }) {
                     msg.content.push_str(content);
                     self.layout_index.mark_dirty(msg.id);
+                } else {
+                    // Recovery path: TurnStarting was missed because the
+                    // chat_context didn't exist yet (e.g. user entered the
+                    // session mid-stream).  Create a streaming placeholder
+                    // and push the delta into it.
+                    let mid = self.streaming_buffer.recover_or_begin_streaming(&mut chat_context.messages);
+                    self.streaming_buffer.push_delta(content, &mut chat_context.messages);
+                    self.layout_index.mark_dirty(mid);
                 }
                 self.dirty = true;
             }
             BackendEvent::ReasoningDelta { content, .. } => {
-                self.streaming_buffer.push_reasoning_delta(content, &mut chat_context.messages);
-                if let Some(msg_id) = self.streaming_buffer.current_message_id {
-                    self.layout_index.mark_dirty(msg_id);
+                if self.streaming_buffer.is_streaming {
+                    self.streaming_buffer.push_reasoning_delta(content, &mut chat_context.messages);
+                    if let Some(msg_id) = self.streaming_buffer.current_message_id {
+                        self.layout_index.mark_dirty(msg_id);
+                    }
+                } else {
+                    // Recovery path: same as Delta — TurnStarting was missed.
+                    self.streaming_buffer.recover_or_begin_streaming(&mut chat_context.messages);
+                    self.streaming_buffer.push_reasoning_delta(content, &mut chat_context.messages);
+                    if let Some(msg_id) = self.streaming_buffer.current_message_id {
+                        self.layout_index.mark_dirty(msg_id);
+                    }
                 }
                 self.dirty = true;
             }
             BackendEvent::StreamEnd { .. } => {
                 let msg_id = self.streaming_buffer.current_message_id;
-                self.streaming_buffer.finalise_message(&mut chat_context.messages);
-                if let Some(mid) = msg_id {
-                    self.layout_index.mark_dirty(mid);
+                if msg_id.is_some() {
+                    self.streaming_buffer.finalise_message(&mut chat_context.messages);
+                    if let Some(mid) = msg_id {
+                        self.layout_index.mark_dirty(mid);
+                    }
+                } else {
+                    // Recovery path: TurnStarting was missed — finalise any
+                    // streaming Assistant message that Delta/ToolCallUpdated
+                    // recovery created.
+                    if let Some(idx) = chat_context.messages.iter().rposition(|m| {
+                        m.streaming && m.role == tidev_types::message::MessageRole::Assistant
+                    }) {
+                        chat_context.messages[idx].streaming = false;
+                        self.layout_index.mark_dirty(chat_context.messages[idx].id);
+                    }
                 }
                 self.dirty = true;
             }
             BackendEvent::ToolCallUpdated { tool_call, request_id, .. } => {
-                if let Some(msg) = chat_context.messages.iter_mut().rev().find(|m| m.role == tidev_types::message::MessageRole::Assistant) {
+                // Recovery path: if TurnStarting was missed but a streaming
+                // Assistant message exists (created by Delta recovery), pick
+                // it up so we add the tool call to the right message.
+                if !self.streaming_buffer.is_streaming
+                    && chat_context.messages.iter().any(|m| m.streaming && m.role == tidev_types::message::MessageRole::Assistant)
+                {
+                    self.streaming_buffer.recover_or_begin_streaming(&mut chat_context.messages);
+                }
+
+                // Prefer the currently-streaming message so tool calls from
+                // the current turn land on the right assistant message, even
+                // if earlier turns have assistant messages in the context.
+                let target_id = self.streaming_buffer.current_message_id;
+                let target = if let Some(mid) = target_id {
+                    chat_context.messages.iter_mut().rev().find(|m| m.id == mid)
+                } else {
+                    chat_context.messages.iter_mut().rev()
+                        .find(|m| m.role == tidev_types::message::MessageRole::Assistant)
+                };
+                if let Some(msg) = target {
                     msg.upsert_tool_call(tool_call.clone());
                     self.layout_index.mark_dirty(msg.id);
                     self.dirty = true;

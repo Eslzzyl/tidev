@@ -16,7 +16,7 @@ use ratatui::widgets::{Block, Clear, Paragraph};
 use tidev_core::{ApprovedTool, ToolCallWithViolations};
 use tidev_core::TuiResponse;
 use tidev_types::agent_type::AgentType;
-use tidev_types::message::{BackendEvent, Message, MessageAttachment, ToolExecutionResult, COMPACTION_MESSAGE_LABEL};
+use tidev_types::message::{BackendEvent, Message, MessageAttachment, MessageRole, ToolExecutionResult, COMPACTION_MESSAGE_LABEL};
 use tidev_types::tools::QuestionArgs;
 use unicode_width::UnicodeWidthStr;
 use crate::theme::{ThemeName, ThemePalette};
@@ -1539,7 +1539,45 @@ impl App {
                         return;
                     }
 
-                    // Switch to the selected session
+                    // Fast path: if the MessageList already has a chat_context for
+                    // this session, use switch_to_session to preserve in-memory
+                    // streaming state (avoiding DB reload that would lose content).
+                    if let Some(ref mut chat) = self.message_list {
+                        if chat.switch_to_session(session_id) {
+                            self.current_session_id = Some(session_id);
+                            self.scroll_target = None;
+                            self.screen = AppScreen::Chat;
+
+                            // Resolve session mode from the existing context.
+                            if let Some(ctx) = chat.active_chat_context() {
+                                self.mode = ctx
+                                    .messages
+                                    .iter()
+                                    .rev()
+                                    .find(|m| m.role == MessageRole::User)
+                                    .and_then(|m| m.mode)
+                                    .unwrap_or(SessionMode::Build);
+                                self.pending_mode = None;
+                            }
+
+                            // Refresh the Runtime's in-memory message buffer.
+                            let rt = self.runtime.clone();
+                            let sid = session_id;
+                            tokio::spawn(async move {
+                                rt.reload_message_buffer(sid).await;
+                            });
+
+                            log::info!("Switching to session: existing context (fast path)");
+
+                            // Close the session panel overlay.
+                            queue.push(Action::Overlay(OverlayAction::Close(
+                                OverlayKind::SessionPanel,
+                            )));
+                            return;
+                        }
+                    }
+
+                    // Slow path: first time entering this session — load from DB.
                     self.current_session_id = Some(session_id);
                     self.scroll_target = None;
                     self.screen = AppScreen::Chat;
