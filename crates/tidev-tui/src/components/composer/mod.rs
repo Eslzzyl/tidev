@@ -213,6 +213,7 @@ impl Composer {
             self.cursor,
         );
         self.dirty = true;
+        self.input_scroll_offset = 0;
     }
 
     /// Empty the buffer.
@@ -228,6 +229,7 @@ impl Composer {
         self.command_palette.clear();
         self.at_mention.clear();
         self.snippet_state.clear();
+        self.input_scroll_offset = 0;
         self.dirty = true;
     }
 
@@ -1324,6 +1326,7 @@ impl Component for Composer {
             if let Some(text) = crate::utils::paste_from_clipboard() {
                 self.insert_str(&text);
                 self.sync_autocomplete();
+                self.ensure_input_cursor_visible();
                 self.dirty = true;
                 return None;
             }
@@ -1343,6 +1346,7 @@ impl Component for Composer {
                         Some(filename),
                     );
                     self.dirty = true;
+                    self.ensure_input_cursor_visible();
                     log::info!("Pasted image: {} bytes", file_size);
                     return None;
                 }
@@ -1352,8 +1356,9 @@ impl Component for Composer {
         // ── Delegate to internal key handler ──────────────────────────
         let submitted = self.handle_key(key);
 
-        // After any key, refresh autocomplete states.
+        // After any key, refresh autocomplete states and ensure cursor visibility.
         self.sync_autocomplete();
+        self.ensure_input_cursor_visible();
         self.dirty = true;
 
         if let Some(text) = submitted {
