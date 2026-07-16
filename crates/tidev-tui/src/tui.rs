@@ -97,12 +97,69 @@ impl Tui {
         let mut request_rx = app.request_rx.take();
         let mut event_rx = app.event_rx.take();
 
-        // No explicit initial render before the loop — matching v0.6.x
-        // behaviour.  The first frame renders naturally in the event loop
-        // so that any early key events are processed in the same pass,
-        // avoiding the cross-frame `Clear` → terminal-background flash.
-        let mut last_render = Instant::now() - FRAME_BUDGET;
+        // ── Pre-loop: drain early events before the first render ─────
+        //
+        // Wait up to 5 ms for an initial event so that any immediate
+        // keypress (e.g. typing `/` to open the command palette) is
+        // processed *before* the first `terminal.draw()`.  This prevents
+        // the race where the welcome screen gets rendered alone (frame 1)
+        // and the command palette follows in frame 2 — the cross-frame
+        // diff can corrupt the terminal state when the two frames are
+        // emitted back-to-back.
+        //
+        // Mirroring v0.6.x which did a synchronous poll + read before
+        // the loop and then an initial render.
+        const INITIAL_WAIT: Duration = Duration::from_millis(5);
 
+        tokio::select! {
+            Some(event) = crossterm_rx.recv() => {
+                app.handle_crossterm_event(event);
+            }
+            result = async {
+                match event_rx.as_mut() {
+                    Some(rx) => rx.recv().await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                if let Some(event) = result {
+                    app.handle_backend_event(event);
+                }
+            }
+            result = async {
+                match request_rx.as_mut() {
+                    Some(rx) => rx.recv().await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                if let Some(request) = result {
+                    app.handle_tui_request(request);
+                }
+            }
+            _ = tokio::time::sleep(INITIAL_WAIT) => {}
+        }
+
+        // Non-blocking drain of any remaining events on all channels.
+        while let Ok(event) = crossterm_rx.try_recv() {
+            app.handle_crossterm_event(event);
+        }
+        if let Some(ref mut rx) = event_rx {
+            while let Ok(event) = rx.try_recv() {
+                app.handle_backend_event(event);
+            }
+        }
+        if let Some(ref mut rx) = request_rx {
+            while let Ok(request) = rx.try_recv() {
+                app.handle_tui_request(request);
+            }
+        }
+
+        // Initial render (state is now consistent — includes any early
+        // events that were processed above).
+        self.terminal
+            .draw(|frame| app.draw(frame))
+            .context("failed to render initial frame")?;
+        app.mark_clean();
+        let mut last_render = Instant::now();
         let mut had_input = false;
 
         loop {

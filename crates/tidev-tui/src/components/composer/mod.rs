@@ -1354,6 +1354,7 @@ impl Component for Composer {
 
         // After any key, refresh autocomplete states.
         self.sync_autocomplete();
+        self.dirty = true;
 
         if let Some(text) = submitted {
             let attachments: Vec<MessageAttachment> = self.spans.iter()
