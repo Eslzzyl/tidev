@@ -675,17 +675,18 @@ impl Composer {
     ///
     /// Normalises line endings and attempts image fallback when the pasted
     /// text is empty (clipboard contains only image data).
-    pub fn handle_paste(&mut self, text: &str) {
+    /// Returns `Some(Action)` if a notice needs to be shown to the user.
+    pub fn handle_paste(&mut self, text: &str) -> Option<Action> {
         if !text.is_empty() {
             let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
             self.insert_str(&normalized);
             self.sync_autocomplete();
             self.dirty = true;
-        } else if self.model_supports_images {
-            // Empty bracketed paste — clipboard may contain an image.
-            if let Some((filename, _mime, data, file_size)) =
-                crate::utils::paste_image_from_clipboard()
-            {
+            None
+        } else if let Some((filename, _mime, data, file_size)) =
+            crate::utils::paste_image_from_clipboard()
+        {
+            if self.model_supports_images {
                 let placeholder = format!("[Image: {}]", filename);
                 let insert_pos = self.cursor;
                 self.insert_str(&placeholder);
@@ -693,7 +694,14 @@ impl Composer {
                 self.register_span(insert_pos, end_pos, placeholder, InlineSpanKind::Image, Some(data), Some(filename));
                 self.dirty = true;
                 log::info!("Pasted image: {} bytes", file_size);
+                None
+            } else {
+                Some(Action::Notice(
+                    "This model does not support image attachments".to_string(),
+                ))
             }
+        } else {
+            None
         }
     }
 
@@ -1344,11 +1352,11 @@ impl Component for Composer {
                 self.dirty = true;
                 return None;
             }
-            // 2. Try image paste (if model supports it).
-            if self.model_supports_images
-                && let Some((filename, _mime, data, file_size)) =
-                    crate::utils::paste_image_from_clipboard()
-                {
+            // 2. Try image paste (detect regardless of model support).
+            if let Some((filename, _mime, data, file_size)) =
+                crate::utils::paste_image_from_clipboard()
+            {
+                if self.model_supports_images {
                     let placeholder = format!("[Image: {}]", filename);
                     let insert_pos = self.cursor;
                     self.insert_str(&placeholder);
@@ -1364,8 +1372,12 @@ impl Component for Composer {
                     self.dirty = true;
                     self.ensure_input_cursor_visible();
                     log::info!("Pasted image: {} bytes", file_size);
-                    return None;
+                } else {
+                    return Some(Action::Notice(
+                        "This model does not support image attachments".to_string(),
+                    ));
                 }
+            }
             return None;
         }
 

@@ -220,5 +220,7 @@ pub(crate) enum Action {
     },
 
     // ── Internal ──
+    /// Show a one-line status notice at the bottom of the screen.
+    Notice(String),
     Noop,
 }

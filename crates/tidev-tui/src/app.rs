@@ -982,7 +982,9 @@ impl App {
             return;
         }
         if let Some(ref mut composer) = self.composer {
-            composer.handle_paste(&text);
+            if let Some(action) = composer.handle_paste(&text) {
+                self.process_action(action);
+            }
         }
     }
 
@@ -1934,6 +1936,9 @@ impl App {
                             }
                         }
                     }
+                }
+                Action::Notice(msg) => {
+                    self.set_notice(msg);
                 }
                 Action::Noop => {}
                 // ── Tool approval pipeline ──
