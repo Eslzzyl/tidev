@@ -1,6 +1,7 @@
 //! Component context types.
 
 use crate::theme::ThemePalette;
+use std::path::Path;
 use tidev_types::prompts::SessionMode;
 use tidev_types::reasoning::ThinkingLevelType;
 
@@ -26,6 +27,8 @@ pub(crate) struct DrawContext<'a> {
     pub thinking_level: Option<&'a ThinkingLevelType>,
     /// Whether the subagent (task tool) is currently disabled.
     pub subagent_disabled: bool,
+    /// Workspace root path, used for path clipping in tool renders.
+    pub workspace_root: &'a Path,
 }
 
 /// Mutable resources provided during action processing.

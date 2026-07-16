@@ -209,6 +209,7 @@ pub(crate) struct RenderOutput {
 pub(crate) fn render_messages(
     frame: &mut Frame,
     area: Rect,
+    workspace_root: &Path,
     layout_index: &mut MessageLayoutIndex,
     render_cache: &mut lru::LruCache<MessageRenderCacheKey, MessageRenderCacheEntry>,
     chat_context: &ChatContext,
@@ -238,7 +239,7 @@ pub(crate) fn render_messages(
     let ctx = RenderContext {
         palette,
         spinner,
-        workspace_root: Path::new(""),
+        workspace_root,
         expanded_tool_results,
         hovered_card,
         model_display_name: &chat_context.model_display_name,

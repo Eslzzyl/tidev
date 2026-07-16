@@ -2401,6 +2401,7 @@ impl App {
                 provider_display: None,
                 thinking_level: None,
                 subagent_disabled: !self.subagent_enabled,
+                workspace_root: self.runtime.workspace_root(),
             };
             self.overlays.draw(frame, area, &draw_ctx);
             return;
@@ -2472,6 +2473,7 @@ impl App {
                 provider_display: None,
                 thinking_level: None,
                 subagent_disabled: !self.subagent_enabled,
+                workspace_root: self.runtime.workspace_root(),
             };
             chat.draw(frame, content_area, &draw_ctx);
         }
@@ -2523,6 +2525,7 @@ impl App {
                 provider_display: Some(&active_model.provider_display_name),
                 thinking_level: Some(&active_model.thinking_level),
                 subagent_disabled: !self.subagent_enabled,
+                workspace_root: self.runtime.workspace_root(),
             };
             composer.draw(frame, bottom_area, &draw_ctx);
         }
@@ -2537,6 +2540,7 @@ impl App {
             provider_display: None,
             thinking_level: None,
             subagent_disabled: !self.subagent_enabled,
+            workspace_root: self.runtime.workspace_root(),
         };
 
         // ── Sidebar ───────────────────────────────────────────────────
@@ -2752,6 +2756,7 @@ impl App {
                 provider_display: Some(&active_model.provider_display_name),
                 thinking_level: Some(&active_model.thinking_level),
                 subagent_disabled: !self.subagent_enabled,
+                workspace_root: self.runtime.workspace_root(),
             };
             composer.draw(frame, sections[2], &draw_ctx);
         }
