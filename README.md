@@ -19,7 +19,7 @@ AI coding agent built in Rust. tidev reimplements the interaction model of [Open
 
 - **Multi-Provider LLM Support** -- Anthropic (Claude), OpenAI Chat Completions, and OpenAI Responses. Configurable presets with fallback providers and models.
 
-- **Specialized Sub-Agents** -- Six agent roles for delegating tasks: General (default), Explorer (code search), Librarian (documentation), Oracle (architecture review), Designer (UI/UX), and Fixer (fast implementation). Each agent has a tailored system prompt and tool set.
+- **Specialized Sub-Agents** -- Five agent roles for delegating tasks: General (default), Explorer (code search), Librarian (documentation), Oracle (architecture review), and Fixer (fast implementation). Each agent has a tailored system prompt and tool set.
 
 - **Built-in Tool Set**
   - File operations: `read`, `write`, `edit`, `apply_patch`

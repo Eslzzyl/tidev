@@ -413,7 +413,7 @@ fixer = "deepseek:High"
 | `default_subagent_provider` | `""` | Default provider for sub-agents. If empty, uses the global default provider |
 | `max_depth` | `3` | Maximum delegation chain depth (orchestrator can delegate to a sub-agent, which can delegate further) |
 | `max_sessions_per_agent` | `5` | Maximum concurrent sub-agent tasks per parent session |
-| `models` | `{}` | Per-agent model overrides. Keyed by agent type name (`explorer`, `oracle`, `fixer`, `designer`, `librarian`). Value can be a plain model ID or `"provider/model_id"` format |
+| `models` | `{}` | Per-agent model overrides. Keyed by agent type name (`explorer`, `oracle`, `fixer`, `librarian`). Value can be a plain model ID or `"provider/model_id"` format |
 | `thinking_levels` | `{}` | Per-agent thinking level overrides. Value format matches the thinking level string representation, e.g. `"deepseek:Off"`, `"deepseek:High"`, `"qwen:On"`, `"glm:On"`. Overrides the auto-detected thinking level for the agent's model |
 
 ## Reasoning and thinking

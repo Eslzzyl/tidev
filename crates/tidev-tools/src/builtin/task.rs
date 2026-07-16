@@ -12,10 +12,9 @@ use crate::todo_persistence::TodoPersistence;
 pub fn definitions() -> Vec<ToolDefinition> {
     vec![ToolDefinition::new::<TaskArgs>(
         "task",
-        "Run a subagent task. Use `subagent_type` to delegate to a specialist: \
-         explorer (code search), librarian (docs), oracle (strategy), \
-         designer (UI/UX), fixer (implementation).",
-        ToolPermission::Session,
+         "Run a subagent task. Use `subagent_type` to delegate to a specialist: \
+          explorer (code search), librarian (docs), oracle (strategy), \
+          fixer (implementation).",        ToolPermission::Session,
     )]
 }
 
@@ -38,19 +37,19 @@ pub fn execute_tool_call(
     let subagent_type_str = args.subagent_type.trim();
     ensure!(
         !subagent_type_str.is_empty(),
-        "subagent_type is required: specify one of explorer, librarian, oracle, designer, fixer"
+        "subagent_type is required: specify one of explorer, librarian, oracle, fixer"
     );
 
     let agent_type = AgentType::parse(subagent_type_str)
         .ok_or_else(|| anyhow::anyhow!(
-            "unknown subagent type '{subagent_type_str}': expected one of explorer, librarian, oracle, designer, fixer"
+            "unknown subagent type '{subagent_type_str}': expected one of explorer, librarian, oracle, fixer"
         ))?;
 
     // In plan mode, reject delegation to fixer subagents (they perform writes)
     if mode == SessionMode::Plan && agent_type == AgentType::Fixer {
         bail!(
             "Task delegation to fixer subagent rejected: Plan mode is read-only and does not allow write operations. \
-            You may delegate to read-only subagents (explorer, librarian, oracle, designer) in plan mode. \
+            You may delegate to read-only subagents (explorer, librarian, oracle) in plan mode. \
             Switch to build mode to use the fixer subagent."
         );
     }

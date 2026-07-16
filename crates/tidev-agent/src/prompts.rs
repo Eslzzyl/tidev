@@ -12,7 +12,6 @@ pub fn system_prompt(agent_type: AgentType) -> String {
         AgentType::Explorer => explorer_prompt(),
         AgentType::Librarian => librarian_prompt(),
         AgentType::Oracle => oracle_prompt(),
-        AgentType::Designer => designer_prompt(),
         AgentType::Fixer => fixer_prompt(),
     }
 }
@@ -59,11 +58,9 @@ fn general_system_prompt() -> String {
         API references, or library-specific knowledge. Read-only.\n\n\
         **@oracle** — Strategic advisor. Use for architecture decisions, complex debugging, \
         code review, or when stuck on a hard problem. Read-only.\n\n\
-        **@designer** — UI/UX specialist. Use for frontend design work, styling, \
-        and user experience improvements. Read-only.\n\n\
         **@fixer** — Implementation specialist. Use when a task specification is clear \
         and you need fast, focused execution. Expected to modify files.\n\n\
-        Read-only subagents (explorer, librarian, oracle, designer) are delegable in parallel and will execute in parallel (but you are still suspended during their execution).\n\
+        Read-only subagents (explorer, librarian, oracle) are delegable in parallel and will execute in parallel (but you are still suspended during their execution).\n\
         fixers can be delegated in parallel (but you shouldn't in principle) but can only execute serially.\n\n\
         ## When NOT to Delegate (Handle It Yourself)\n\
         Delegating costs 10+ LLM calls and is expensive. Do NOT delegate for:\n\
@@ -222,33 +219,6 @@ fn oracle_prompt() -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Designer
-// ---------------------------------------------------------------------------
-
-fn designer_prompt() -> String {
-    format!(
-        "You are Designer — a UI/UX specialist for frontend development.\n\
-         {}\n\n\
-         ## Role\n\
-         - Frontend design review, styling improvements, user experience analysis.\n\
-         - HTML/CSS/JS/TS, React/Vue/Svelte component design.\n\
-         - Accessibility, responsive design, design system consistency.\n\n\
-         ## Tool Usage\n\
-         - You have access to `write`, `edit`, and `apply_patch` for implementing design changes.\n\
-         - Use `bash` to run the dev server or build tooling to preview changes.\n\
-         - Use `websearch`/`webfetch` for design reference and documentation.\n\n\
-         ## Behaviour\n\
-         - Explain design rationale before making changes.\n\
-         - Consider accessibility, responsiveness, and maintainability.\n\
-         - When reviewing, provide specific, actionable feedback.\n\
-         - Suggest concrete improvements with code examples.\n\n\
-         ## Constraints\n\
-         - NO delegation or spawning sub-agents. Handle all design and implementation work directly.",
-        base_instruction()
-    )
-}
-
-// ---------------------------------------------------------------------------
 // Fixer
 // ---------------------------------------------------------------------------
 
@@ -295,7 +265,7 @@ pub fn plan_mode_reminder() -> &'static str {
     You can only begin making modifications when the user manually switches the mode to Build.\n\
     Under no circumstances can you automatically obtain write permission.\n\
     NEVER ask a user to switch to Build mode. Users won't magically switch to Plan mode just by answering your questions or saying a word. Users must switch modes using the Tab key.\n\n\
-    Subagent delegation: ONLY explorer, librarian, oracle, designer.\n\
+    Subagent delegation: ONLY explorer, librarian, oracle.\n\
     STRICTLY FORBIDDEN — fixer, because it is expected to modify some file.\n\
     </system-reminder>"
 }
@@ -321,7 +291,7 @@ pub fn plan_switch_reminder() -> String {
     edit requests. You may ONLY observe, analyze, and plan. Any modification attempt\n\
     is a critical violation. ZERO exceptions.\n\n\
     ---\n\n\
-    Subagent delegation: ONLY explorer, librarian, oracle, designer.\n\
+    Subagent delegation: ONLY explorer, librarian, oracle.\n\
     STRICTLY FORBIDDEN — fixer, because it is expected to modify some file.\n\
     ---\n\
     </system-reminder>"

@@ -22,8 +22,6 @@ pub enum AgentType {
     Librarian,
     /// Strategic advisor — architecture decisions, code review, debugging.
     Oracle,
-    /// UI/UX design specialist.
-    Designer,
     /// Fast implementation specialist — executes changes with full context.
     Fixer,
 }
@@ -36,7 +34,6 @@ impl AgentType {
             Self::Explorer,
             Self::Librarian,
             Self::Oracle,
-            Self::Designer,
             Self::Fixer,
         ]
     }
@@ -48,7 +45,6 @@ impl AgentType {
             Self::Explorer => "explorer",
             Self::Librarian => "librarian",
             Self::Oracle => "oracle",
-            Self::Designer => "designer",
             Self::Fixer => "fixer",
         }
     }
@@ -67,9 +63,6 @@ impl AgentType {
             }
             Self::Oracle => {
                 "Strategic technical advisor: architecture decisions, code review, complex debugging"
-            }
-            Self::Designer => {
-                "UI/UX design specialist: frontend design, styling, user experience"
             }
             Self::Fixer => {
                 "Implementation specialist: executes code changes efficiently with full context"
@@ -97,10 +90,6 @@ impl AgentType {
             Self::Oracle => Some(&[
                 "read", "glob", "grep", "websearch", "webfetch", "question",
             ]),
-            Self::Designer => Some(&[
-                "read", "glob", "grep", "write", "edit", "bash",
-                "websearch", "webfetch", "question", "apply_patch",
-            ]),
             Self::Fixer => None,
         }
     }
@@ -110,7 +99,6 @@ impl AgentType {
         match self {
             Self::Explorer | Self::Librarian | Self::Oracle => 0.1,
             Self::Fixer => 0.2,
-            Self::Designer => 0.7,
             Self::General => 0.3,
         }
     }
@@ -123,7 +111,6 @@ impl AgentType {
             "explorer" => Some(Self::Explorer),
             "librarian" => Some(Self::Librarian),
             "oracle" => Some(Self::Oracle),
-            "designer" => Some(Self::Designer),
             "fixer" => Some(Self::Fixer),
             _ => None,
         }
@@ -198,11 +185,8 @@ mod tests {
     #[test]
     fn test_agent_type_read_only() {
         assert!(AgentType::Explorer.is_read_only());
-        assert!(AgentType::Librarian.is_read_only());
-        assert!(AgentType::Oracle.is_read_only());
         assert!(!AgentType::Fixer.is_read_only());
         assert!(!AgentType::General.is_read_only());
-        assert!(!AgentType::Designer.is_read_only());
     }
 
     #[test]

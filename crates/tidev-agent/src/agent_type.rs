@@ -60,7 +60,6 @@ pub fn create_sub_agents() -> Vec<AgentDefinition> {
         AgentType::Explorer,
         AgentType::Librarian,
         AgentType::Oracle,
-        AgentType::Designer,
         AgentType::Fixer,
     ]
     .iter()
