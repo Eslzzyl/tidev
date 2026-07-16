@@ -86,6 +86,7 @@ pub(crate) struct InlineSpan {
 pub(crate) struct VisualLine {
     start: usize,
     end: usize,
+    width: usize,
 }
 
 // ---------------------------------------------------------------------------
@@ -223,6 +224,7 @@ impl Composer {
         self.selection_anchor = None;
         self.spans.clear();
         self.detect_at_spans();
+        self.dirty = true;
     }
 
     /// Empty the buffer.
@@ -235,6 +237,7 @@ impl Composer {
         self.draft.clear();
         self.selection_anchor = None;
         self.spans.clear();
+        self.dirty = true;
     }
 
     /// Set the file search index for @mention autocomplete.
@@ -598,16 +601,13 @@ impl Composer {
     /// Whether the cursor visually wraps to a new empty row (blinking on a
     /// blank line below all content).
     pub fn cursor_wraps_to_next_row(&self, width: usize) -> bool {
-        if self.text.is_empty() || width == 0 {
+        if width == 0 || self.cursor != self.text.len() {
             return false;
         }
-        let lines = self.compute_visual_lines(width);
-        if lines.is_empty() {
-            return false;
-        }
-        let last = &lines[lines.len() - 1];
-        let end_col = display_width(&self.text[last.start..last.end]);
-        self.cursor >= last.end && end_col == width
+
+        self.compute_visual_lines(width)
+            .last()
+            .is_some_and(|line| line.width == width)
     }
 
     /// Move the cursor up one visual line.
@@ -1436,6 +1436,7 @@ fn visual_lines_inner(text: &str, width: usize) -> Vec<VisualLine> {
         return vec![VisualLine {
             start: 0,
             end: text.len(),
+            width: 0,
         }];
     }
 
@@ -1448,6 +1449,7 @@ fn visual_lines_inner(text: &str, width: usize) -> Vec<VisualLine> {
             lines.push(VisualLine {
                 start: line_start,
                 end: byte_index,
+                width: current_width,
             });
             line_start = byte_index + ch.len_utf8();
             current_width = 0;
@@ -1459,6 +1461,7 @@ fn visual_lines_inner(text: &str, width: usize) -> Vec<VisualLine> {
             lines.push(VisualLine {
                 start: line_start,
                 end: byte_index,
+                width: current_width,
             });
             line_start = byte_index;
             current_width = 0;
@@ -1470,6 +1473,7 @@ fn visual_lines_inner(text: &str, width: usize) -> Vec<VisualLine> {
     lines.push(VisualLine {
         start: line_start,
         end: text.len(),
+        width: current_width,
     });
 
     lines
