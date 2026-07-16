@@ -82,10 +82,39 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
             }
         };
 
-        // ─── 5. No tool calls → done ─────────────────────────────────────
+        // ─── 5. No tool calls → check for queued messages ────────────────
         if turn.tool_calls.is_empty() {
             let msg = build_assistant_message(&turn);
             ctx.save_messages(session_id, &[msg]).await?;
+
+            // Check for user messages queued while this turn was running.
+            // The messages themselves are already persisted in the buffer
+            // by submit_prompt_with_attachments — the queue entries serve
+            // as a signal: "there's new work, keep the loop alive".
+            //
+            // We drain ALL queued entries at once since load_messages()
+            // will include every persisted message regardless.  A single
+            // extra iteration suffices.
+            let has_queued = {
+                let mut queue = config.queued_messages.lock().unwrap();
+                if queue.is_empty() {
+                    false
+                } else {
+                    queue.clear();
+                    true
+                }
+            };
+
+            if has_queued {
+                // Signal a new turn so the UI can update its state (spinner,
+                // progress indicators, etc.).  The next iteration's
+                // load_messages() will include the queued user message.
+                let _ = event_tx.send(BackendEvent::TurnStarting {
+                    session_id,
+                    request_id: request_id + 1,
+                });
+                continue;
+            }
 
             let _ = event_tx.send(BackendEvent::StreamEnd {
                 session_id,

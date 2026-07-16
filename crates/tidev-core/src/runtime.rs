@@ -34,7 +34,7 @@ use tidev_config::{paths::ConfigPaths, AppConfig, AuthStore};
 use tidev_config::auth::ActiveModel;
 use tidev_search::FileSearchIndex;
 use tidev_storage::SessionStore;
-use tidev_types::message::{BackendEvent, Message, MessageAttachment, MessageRole};
+use tidev_types::message::{BackendEvent, Message, MessageAttachment, MessageRole, QueuedUserMessage};
 use tidev_types::prompts::SessionMode;
 use tidev_types::reasoning::ThinkingLevelType;
 use tidev_types::tools::TodoItem;
@@ -119,6 +119,12 @@ pub struct Runtime {
     run_loop_handle: Arc<StdMutex<Option<tokio::task::JoinHandle<()>>>>,
     /// Synchronous busy flag (avoids awaiting the Mutex in async-free contexts).
     loop_busy: Arc<AtomicBool>,
+
+    /// Queue of user messages waiting to be picked up by the agent loop.
+    /// Populated by `submit_prompt_with_attachments` when the loop is running;
+    /// drained by the agent loop one-at-a-time so each queued message
+    /// triggers a new LLM turn.
+    queued_messages: Arc<std::sync::Mutex<std::collections::VecDeque<QueuedUserMessage>>>,
 
     /// Cancellation token for background cleanup tasks.
     cleanup_cancel: CancellationToken,
@@ -425,20 +431,53 @@ impl Runtime {
         }
         self.session_manager.append_message(session_id, &user_msg)?;
 
+        // Capture values needed for the queue before user_msg is moved.
+        let q_content = user_msg.content.clone();
+        let q_attachments = user_msg.attachments.clone();
+        let q_mode = mode;
+        let q_thinking = user_msg.thinking_level.clone();
+
         // 3. Notify the TUI so it can display the message.
         let _ = self.event_tx.send(BackendEvent::UserMessageCreated {
             session_id,
             message: user_msg,
         });
 
-        // 4. Check if a loop is already running.
+        // 4. Enqueue the message so the agent loop can discover it.
+        //    The loop pops from this queue one-at-a-time after each turn
+        //    without tool calls, continuing the loop instead of exiting.
+        self.queue_user_message(q_content, q_attachments, q_mode, q_thinking);
+
+        // 5. Check if a loop is already running.
         if self.is_loop_running() {
-            // Loop running — new message will be picked up on next turn.
+            // Loop running — it will pick up the queued message
+            // on its next turn (or after the current turn finishes).
             return Ok(());
         }
 
-        // 5. Build CoreContext + AgentLoopConfig and spawn the loop.
+        // 6. Build CoreContext + AgentLoopConfig and spawn the loop.
         self.start_agent_loop(session_id, mode).await
+    }
+
+    /// Enqueue a user message for the agent loop to process.
+    ///
+    /// The agent loop pops queued messages one-at-a-time after turns
+    /// without tool calls, continuing the loop instead of exiting.
+    /// This ensures each queued message triggers a new LLM turn.
+    fn queue_user_message(
+        &self,
+        content: String,
+        attachments: Vec<MessageAttachment>,
+        mode: SessionMode,
+        thinking_level: Option<ThinkingLevelType>,
+    ) {
+        let mut queue = self.queued_messages.lock().unwrap();
+        queue.push_back(QueuedUserMessage {
+            content,
+            attachments,
+            mode,
+            thinking_level,
+        });
     }
 
     /// Continue an existing session without adding a new user message.
@@ -565,6 +604,7 @@ impl Runtime {
             thinking_level: active_model.thinking_level.clone(),
             event_tx: self.event_tx.clone(),
             cancel,
+            queued_messages: self.queued_messages.clone(),
         };
 
         self.loop_busy.store(true, Ordering::SeqCst);
@@ -1143,6 +1183,7 @@ impl RuntimeBuilder {
             _request_rx: Arc::new(Mutex::new(Some(request_rx))),
             run_loop_handle: Arc::new(StdMutex::new(None)),
             loop_busy: Arc::new(AtomicBool::new(false)),
+            queued_messages: Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
             cleanup_cancel,
             workspace_root,
             file_search_index: OnceLock::new(),

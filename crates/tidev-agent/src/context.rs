@@ -3,7 +3,9 @@
 //!
 //! tidev-agent defines the loop skeleton; tidev-core implements [`AgentContext`].
 
+use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -11,7 +13,7 @@ use tokio::sync::{mpsc::UnboundedSender, oneshot};
 use tokio_util::sync::CancellationToken;
 
 use tidev_types::message::{
-    AssistantTurn, BackendEvent, Message, ToolCall, ToolExecutionResult,
+    AssistantTurn, BackendEvent, Message, QueuedUserMessage, ToolCall, ToolExecutionResult,
 };
 use tidev_types::prompts::SessionMode;
 use tidev_types::reasoning::ThinkingLevelType;
@@ -35,6 +37,12 @@ pub struct AgentLoopConfig {
     pub event_tx: UnboundedSender<BackendEvent>,
     /// Cancellation token for cooperative termination.
     pub cancel: CancellationToken,
+    /// Queue of user messages that arrived while the loop was busy.
+    ///
+    /// Populated by [`Runtime::submit_prompt_with_attachments`] when the loop
+    /// is running; checked by [`run_agent_loop`] after turns without tool
+    /// calls. Each queued message triggers one additional loop iteration.
+    pub queued_messages: Arc<Mutex<VecDeque<QueuedUserMessage>>>,
 }
 
 // ---------------------------------------------------------------------------

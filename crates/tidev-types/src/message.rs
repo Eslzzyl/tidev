@@ -623,6 +623,22 @@ pub enum BackendEvent {
     },
 }
 
+// ---------------------------------------------------------------------------
+// QueuedUserMessage
+// ---------------------------------------------------------------------------
+
+/// A user message queued while the agent loop is busy.
+///
+/// When the agent loop finishes its current turn and finds queued messages,
+/// it processes them one at a time, continuing the loop instead of exiting.
+#[derive(Clone, Debug)]
+pub struct QueuedUserMessage {
+    pub content: String,
+    pub attachments: Vec<MessageAttachment>,
+    pub mode: crate::prompts::SessionMode,
+    pub thinking_level: Option<crate::reasoning::ThinkingLevelType>,
+}
+
 impl BackendEvent {
     pub fn session_id(&self) -> Uuid {
         match self {

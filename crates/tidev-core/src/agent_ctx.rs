@@ -1000,6 +1000,11 @@ async fn execute_task_tool(
         thinking_level: child_thinking_level,
         event_tx: spawner.event_tx.clone(),
         cancel: config.cancel_token.clone(),
+        // Subagents run in isolation — they don't process main-session
+        // user messages, so give them a fresh empty queue.
+        queued_messages: Arc::new(std::sync::Mutex::new(
+            std::collections::VecDeque::new(),
+        )),
     };
 
     // 8. Run the inner loop.
