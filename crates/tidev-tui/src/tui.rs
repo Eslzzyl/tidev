@@ -237,10 +237,9 @@ impl Tui {
             app.update_input_area_auto_scroll();
 
             // Spinner wake-up: during a pending request (active but not yet
-            // streaming), re-dirty the message list whenever the ASCII spinner
-            // frame advances so the footer keeps animating.  Mirrors the
-            // v0.6.x `pending_request + spinner_frame` approach.
-            if app.has_active_request() {
+            // streaming) or compaction, re-dirty the message list whenever the
+            // ASCII spinner frame advances so the footer keeps animating.
+            if app.has_active_request() || app.is_compacting() {
                 let frame = (app.spinner_elapsed().as_millis() / 100) as u64;
                 if frame != app.last_spinner_frame
                     && let Some(ml) = &mut app.message_list {

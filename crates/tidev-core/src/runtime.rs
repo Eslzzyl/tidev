@@ -716,7 +716,20 @@ impl Runtime {
                     session_id,
                     Some(self.event_tx.clone()),
                 )
-                .await?;
+                .await
+                .map_err(|e| {
+                    let _ = self.event_tx.send(BackendEvent::ContextCompacted {
+                        session_id,
+                        compacted: false,
+                        manual: stream_request_id.is_some(),
+                        summary: None,
+                        retained_from: 0,
+                        model_id: None,
+                        completed_at: Some(Utc::now()),
+                        error: Some(e.to_string()),
+                    });
+                    e
+                })?;
             (result, prior_summary, prior_retained_from)
         };
 

@@ -158,6 +158,9 @@ pub struct App {
     /// Compact queued to run after the current request finishes.
     pending_compact: bool,
 
+    /// Compaction is currently in progress.
+    is_compacting: bool,
+
     /// Current screen state.
     screen: AppScreen,
 
@@ -225,6 +228,7 @@ impl App {
             abort_confirmation_deadline: None,
             pending_prompt_queue: Vec::new(),
             pending_compact: false,
+            is_compacting: false,
             screen: AppScreen::Welcome,
             spinner_start: Instant::now(),
             last_spinner_frame: 0,
@@ -290,6 +294,11 @@ impl App {
         self.spinner_start.elapsed()
     }
 
+    /// Whether a compaction is currently in progress.
+    pub(crate) fn is_compacting(&self) -> bool {
+        self.is_compacting
+    }
+
     /// Whether the app currently has an active request (streaming or pending tool approval).
     pub(crate) fn has_active_request(&self) -> bool {
         // The Runtime is the single source of truth for agent-loop liveness.
@@ -336,6 +345,7 @@ impl App {
         self.approved_tools.clear();
         self.pending_prompt_queue.clear();
         self.pending_compact = false;
+        self.is_compacting = false;
 
         // Reset abort state.
         self.abort_confirmation_deadline = None;
@@ -390,6 +400,7 @@ impl App {
             chat.invalidate_layout();
         }
         self.set_notice("Compacting session context...");
+        self.is_compacting = true;
         let rt = self.runtime.clone();
         tokio::spawn(async move {
             if let Err(e) = rt.compact_session(session_id, None).await {
@@ -548,7 +559,12 @@ impl App {
                     self.execute_compact();
                 }
             }
-            BackendEvent::ContextCompacted { .. } => {
+            BackendEvent::ContextCompacted { error: Some(ref msg), .. } => {
+                self.is_compacting = false;
+                self.set_notice(format!("Compaction failed: {msg}"));
+            }
+            BackendEvent::ContextCompacted { error: None, .. } => {
+                self.is_compacting = false;
                 self.set_notice("Context compacted");
             }
             BackendEvent::UserMessageCreated { session_id, message } => {
@@ -2331,6 +2347,16 @@ impl App {
             };
             let status = format!("{status}{extra}");
 
+            if let Some(ref t) = token_status {
+                return format!("{status} · {t}");
+            }
+            return status;
+        }
+
+        // 3b. Compacting in progress — show spinner + status
+        if self.is_compacting {
+            let spinner = self.loading_spinner();
+            let status = format!("{spinner} Compacting...");
             if let Some(ref t) = token_status {
                 return format!("{status} · {t}");
             }
