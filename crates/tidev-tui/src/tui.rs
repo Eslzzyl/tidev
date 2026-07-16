@@ -1,25 +1,29 @@
 //! Tui — terminal layer.
 //!
 //! Owns the `Terminal`, handles setup/teardown and event polling.
-//! Uses `crossterm::event::EventStream` (async) as the sole event
-//! source, running entirely in one async task with no background
-//! reader thread.  This avoids the cross-thread access to crossterm's
-//! internal event reader that the previous architecture caused.
+//! Uses a dedicated OS thread for `crossterm::event::poll` + `read`
+//! that forwards events through a `tokio::sync::mpsc` channel.  This
+//! mirrors the proven architecture of the v0.6.x TUI (synchronous
+//! event reading in a single execution context) while keeping the
+//! main event loop async for multiplexing with backend/request events.
 
 use std::io;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use crossterm::cursor::{Show, self as cursor};
 use crossterm::event::{DisableBracketedPaste, DisableFocusChange, DisableMouseCapture,
-    EnableBracketedPaste, EnableFocusChange, EnableMouseCapture, EventStream};
+    EnableBracketedPaste, EnableFocusChange, EnableMouseCapture, Event, KeyEventKind};
 use crossterm::terminal::{DisableLineWrap, EnableLineWrap, EnterAlternateScreen,
     LeaveAlternateScreen, disable_raw_mode, enable_raw_mode};
 use crossterm::execute;
-use futures::StreamExt;
 use ratatui::backend::{Backend, ClearType, CrosstermBackend};
 use ratatui::Terminal;
 use tidev_types::message::BackendEvent;
+use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::app::App;
@@ -55,9 +59,8 @@ impl Tui {
         //
         // NOTE: we use `clear_region` + `swap_buffers` instead of
         // `terminal.clear()` to avoid `cursor::position()` (which
-        // would initialise crossterm's global event reader before
-        // the EventStream is set up, violating the rule that the
-        // reader must only be used from one execution context).
+        // involves a blocking DSR query-response round-trip that
+        // can hang on slow terminals or piped input).
         terminal
             .backend_mut()
             .clear_region(ClearType::All)
@@ -72,14 +75,67 @@ impl Tui {
         let mut request_rx = app.request_rx.take();
         let mut event_rx = app.event_rx.take();
 
-        // ── EventStream ──────────────────────────────────────────────
+        // ── Dedicated crossterm reader thread ─────────────────────────
         //
-        // The single crossterm event source.  Everything runs through
-        // `EventStream::next()` which uses crossterm's official async
-        // API.  No separate reader thread, no manual poll/read calls.
-        // This is the only code path that touches crossterm's global
-        // event reader, so there is no cross-thread contention.
-        let mut reader = EventStream::new();
+        // A single OS thread that synchronously calls `poll()` + `read()`
+        // and forwards every event through an mpsc channel.  This mirrors
+        // the v0.6.x architecture (one thread, one event source, no async
+        // wrappers) and avoids the cross-thread / cross-task contention
+        // that plagued earlier async-based approaches.
+        //
+        // The thread is started *before* the initial render so that any
+        // keystroke arriving during startup is guaranteed to be captured
+        // (the kernel buffers stdin, and the reader thread begins polling
+        // immediately).
+        let reader_running = Arc::new(AtomicBool::new(true));
+        let (crossterm_tx, mut crossterm_rx) = mpsc::unbounded_channel::<Event>();
+
+        let running = reader_running.clone();
+        let tx = crossterm_tx.clone();
+        let reader_handle = thread::Builder::new()
+            .name("crossterm-reader".into())
+            .spawn(move || {
+                // The poll interval balances responsiveness against
+                // CPU usage.  50 ms matches the v0.6.x behaviour.
+                let poll_interval = Duration::from_millis(50);
+
+                while running.load(Ordering::SeqCst) {
+                    match crossterm::event::poll(poll_interval) {
+                        Ok(true) => {
+                            let event = match crossterm::event::read() {
+                                Ok(event) => event,
+                                Err(e) => {
+                                    log::error!("crossterm read error: {e}");
+                                    break;
+                                }
+                            };
+
+                            // Mirror v0.6.x: only forward Press/Repeat
+                            // key events.  Release events are filtered
+                            // out at the source.
+                            let should_send = match &event {
+                                Event::Key(key) => matches!(
+                                    key.kind,
+                                    KeyEventKind::Press | KeyEventKind::Repeat
+                                ),
+                                _ => true,
+                            };
+
+                            if should_send && tx.send(event).is_err() {
+                                break;
+                            }
+                        }
+                        Ok(false) => {}
+                        Err(e) => {
+                            log::error!("crossterm poll error: {e}");
+                            break;
+                        }
+                    }
+                }
+
+                log::info!("crossterm reader thread exited");
+            })
+            .context("failed to spawn crossterm reader thread")?;
 
         // ── Initial render ───────────────────────────────────────────
         self.terminal
@@ -94,17 +150,14 @@ impl Tui {
             let mut processed = false;
 
             tokio::select! {
-                result = reader.next() => {
+                result = crossterm_rx.recv() => {
                     match result {
-                        Some(Ok(event)) => {
+                        Some(event) => {
                             app.handle_crossterm_event(event);
                             processed = true;
                         }
-                        Some(Err(e)) => {
-                            log::error!("crossterm event error: {e}");
-                        }
                         None => {
-                            // Event stream ended (reader was dropped).
+                            // Reader thread exited (channel closed).
                             break;
                         }
                     }
@@ -221,6 +274,24 @@ impl Tui {
                 app.last_spinner_frame = (app.spinner_elapsed().as_millis() / 100) as u64;
                 last_render = now;
             }
+        }
+
+        // ── Cleanup ──────────────────────────────────────────────
+        //
+        // Signal the reader thread to stop.  It will notice the flag
+        // within the next poll interval (≤ 50 ms) and exit.
+        reader_running.store(false, Ordering::SeqCst);
+        let handle = reader_handle;
+        // Join the thread in a blocking task so we don't leave a
+        // dangling thread during shutdown.
+        if let Err(e) = tokio::task::spawn_blocking(move || {
+            if let Err(e) = handle.join() {
+                log::error!("crossterm reader thread panicked: {e:?}");
+            }
+        })
+        .await
+        {
+            log::error!("failed to join crossterm reader thread: {e}");
         }
 
         Ok(())
