@@ -398,10 +398,55 @@ impl MessageList {
 
     /// Handle a backend event for streaming or tool results.
     pub fn handle_backend_event(&mut self, event: &BackendEvent) {
-        // ── 0. Update running subagent card status ─────────────────────
+        // ── 0. Track task subagents regardless of chat_context ──────────
+        // These must run before routing so that nested subagents (e.g. B
+        // creating D and E) are tracked even if the intermediate session
+        // hasn't been visited yet and its chat_context doesn't exist.
+        let session_id = event.session_id();
+        match event {
+            BackendEvent::ToolCallUpdated { tool_call, request_id, .. } => {
+                if tool_call.name == "task" {
+                    let desc = extract_task_description(&tool_call.arguments);
+                    let sub_type = extract_subagent_type(&tool_call.arguments);
+                    let already_tracking = self.running_subagents.iter().any(|s| s.tool_call_id == tool_call.id);
+                    if already_tracking {
+                        if let Some(exec) = self.running_subagents.iter_mut().find(|s| s.tool_call_id == tool_call.id) {
+                            if exec.subagent_type.is_empty() && !sub_type.is_empty() {
+                                exec.subagent_type = sub_type;
+                            }
+                            if exec.description.is_empty() && !desc.is_empty() {
+                                exec.description = desc;
+                                self.dirty = true;
+                            }
+                        }
+                    } else if tool_call_arguments_are_complete(&tool_call.arguments) {
+                        self.running_subagents.push(render_mod::RunningSubagentInfo {
+                            request_id: *request_id,
+                            tool_call_id: tool_call.id.clone(),
+                            description: desc,
+                            subagent_type: sub_type,
+                            status_text: "Thinking".to_string(),
+                            child_session_id: None,
+                        });
+                    }
+                }
+            }
+            BackendEvent::ToolCompleted { tool_call, .. } => {
+                // Remove from running_subagents for ANY completed task tool,
+                // even if child_session_id is not set (e.g., rejected tools).
+                if canonical_tool_name(&tool_call.name) == Some("task") {
+                    self.running_subagents.retain(|s| s.tool_call_id != tool_call.id);
+                    if self.hovered_inline_subagent.is_some_and(|i| i >= self.running_subagents.len()) {
+                        self.hovered_inline_subagent = None;
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        // ── 1. Update running subagent card status ─────────────────────
         // Run this BEFORE the chat_context routing so that events update
         // the inline card regardless of whether the chat_context exists.
-        let session_id = event.session_id();
         if let Some(text) = infer_subagent_status(event) {
             if let Some(exec) = self.running_subagents.iter_mut()
                 .find(|e| e.child_session_id == Some(session_id))
@@ -413,15 +458,11 @@ impl MessageList {
             }
         }
 
-        // ── 1. Route to chat_context ───────────────────────────────────
+        // ── 2. Route to chat_context ───────────────────────────────────
         let chat_context = match self.chat_contexts.get_mut(&session_id) {
             Some(ctx) => ctx,
             None => {
-                // Unknown session — check if it belongs to a running subagent
-                // so that the inline card gets its child_session_id synced.
-                if self.running_subagents.iter().any(|e| e.child_session_id == Some(session_id)) {
-                    self.dirty = true;
-                }
+                // Unknown session — nothing more to do.
                 return;
             }
         };
@@ -489,7 +530,7 @@ impl MessageList {
                 }
                 self.dirty = true;
             }
-            BackendEvent::ToolCallUpdated { tool_call, request_id, .. } => {
+            BackendEvent::ToolCallUpdated { tool_call, request_id: _, .. } => {
                 // Recovery path: if TurnStarting was missed but a streaming
                 // Assistant message exists (created by Delta recovery), pick
                 // it up so we add the tool call to the right message.
@@ -517,31 +558,10 @@ impl MessageList {
                 if tool_call.name == "bash" {
                     self.bash_tool_call_id = Some(tool_call.id.clone());
                 }
-                if tool_call.name == "task" {
-                    let desc = extract_task_description(&tool_call.arguments);
-                    let sub_type = extract_subagent_type(&tool_call.arguments);
-                    let already_tracking = self.running_subagents.iter().any(|s| s.tool_call_id == tool_call.id);
-                    if already_tracking {
-                        if let Some(exec) = self.running_subagents.iter_mut().find(|s| s.tool_call_id == tool_call.id) {
-                            if exec.subagent_type.is_empty() && !sub_type.is_empty() {
-                                exec.subagent_type = sub_type;
-                            }
-                            if exec.description.is_empty() && !desc.is_empty() {
-                                exec.description = desc;
-                                self.dirty = true;
-                            }
-                        }
-                    } else if tool_call_arguments_are_complete(&tool_call.arguments) {
-                        self.running_subagents.push(render_mod::RunningSubagentInfo {
-                            request_id: *request_id,
-                            tool_call_id: tool_call.id.clone(),
-                            description: desc,
-                            subagent_type: sub_type,
-                            status_text: "Thinking".to_string(),
-                            child_session_id: None,
-                        });
-                    }
-                }
+                // Note: task tool tracking (RunningSubagentInfo) is handled
+                // in Step 0 above, before chat_context routing, so that
+                // nested subagents are tracked even when this session's
+                // chat_context hasn't been created yet.
             }
             BackendEvent::ToolCompleted { tool_call, result, .. } => {
                 if tool_call.name == "bash" {
@@ -574,14 +594,9 @@ impl MessageList {
                         );
                         chat_context.messages.push(tool_msg);
                     }
-                    // Remove from running_subagents for ANY completed task tool,
-                    // even if child_session_id is not set (e.g., rejected tools).
-                    if canonical_tool_name(&tool_call.name) == Some("task") {
-                        self.running_subagents.retain(|s| s.tool_call_id != tool_call.id);
-                        if self.hovered_inline_subagent.is_some_and(|i| i >= self.running_subagents.len()) {
-                            self.hovered_inline_subagent = None;
-                        }
-                    }
+                    // Note: running_subagents cleanup for completed task
+                    // tools is handled in Step 0 above, before chat_context
+                    // routing.
 
                     // Track child_session_id for subagent task results.
                     if let Some(csid) = result.metadata.child_session_id {
