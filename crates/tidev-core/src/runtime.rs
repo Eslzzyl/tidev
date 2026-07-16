@@ -146,8 +146,10 @@ struct AgentLoopGuard {
 
 impl Drop for AgentLoopGuard {
     fn drop(&mut self) {
-        self.busy.store(false, Ordering::SeqCst);
+        // Clear handle first, then busy — so is_loop_running() and is_busy()
+        // never disagree about whether the loop is alive.
         *self.handle.lock().unwrap() = None;
+        self.busy.store(false, Ordering::SeqCst);
     }
 }
 
@@ -519,7 +521,7 @@ impl Runtime {
 
     /// Check whether an agent loop is currently running.
     fn is_loop_running(&self) -> bool {
-        self.run_loop_handle.lock().unwrap().is_some()
+        self.loop_busy.load(Ordering::SeqCst)
     }
 
     /// Reload the in-memory [`MessageBuffer`] for a session from the store.
@@ -604,8 +606,6 @@ impl Runtime {
             queued_messages: self.queued_messages.clone(),
         };
 
-        self.loop_busy.store(true, Ordering::SeqCst);
-
         let busy_flag = self.loop_busy.clone();
         let handle_slot = self.run_loop_handle.clone();
         let join = tokio::spawn(async move {
@@ -615,10 +615,13 @@ impl Runtime {
             }
         });
 
+        // Store handle first, then set busy — so is_loop_running() and
+        // is_busy() never disagree about whether the loop is alive.
         {
             let mut handle = self.run_loop_handle.lock().unwrap();
             *handle = Some(join);
         }
+        self.loop_busy.store(true, Ordering::SeqCst);
 
         Ok(())
     }
