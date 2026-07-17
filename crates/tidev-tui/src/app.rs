@@ -804,18 +804,41 @@ impl App {
                 )));
                 return;
             } else {
+                // Resolve allow_outside / sensitive_approved from the
+                // in-memory caches: if the user already allowed a boundary
+                // or sensitive-file violation (via a dialog earlier in this
+                // pipeline), propagate those flags so the backend doesn't
+                // reject the tool a second time.
+                let boundary_str = boundary_path
+                    .as_ref()
+                    .map(|p| p.to_string_lossy().to_string());
+                let sensitive_str = sensitive_path
+                    .as_ref()
+                    .map(|p| p.to_string_lossy().to_string());
+                let allow_outside = boundary_str
+                    .as_deref()
+                    .and_then(|p| Self::is_path_allowed(&self.boundary_permissions, p))
+                    .unwrap_or(false);
+                let sensitive_approved = sensitive_str
+                    .as_deref()
+                    .and_then(|p| Self::is_path_allowed(&self.sensitive_permissions, p))
+                    .unwrap_or(false);
+
                 log::info!(
-                    "Auto-approving tool {} (no confirmation needed) ({}/{})",
+                    "Auto-approving tool {} (no confirmation needed) ({}/{}) \
+                     allow_outside={} sensitive_approved={}",
                     perm_label,
                     current_index,
-                    total
+                    total,
+                    allow_outside,
+                    sensitive_approved,
                 );
                 self.approved_tools.push(ApprovedTool {
                     tool_call: tc,
                     rejection: None,
                     child_session_id: None,
-                    allow_outside: false,
-                    sensitive_file_approved: false,
+                    allow_outside,
+                    sensitive_file_approved: sensitive_approved,
                 });
                 self.tool_index += 1;
                 continue;

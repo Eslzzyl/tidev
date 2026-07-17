@@ -440,13 +440,19 @@ impl AgentContext for CoreContext {
             };
 
             // 4. If no violations → auto-approve (fast path).
+            //
+            // When the user has enabled `allow_outside_workspace_access` or
+            // `allow_sensitive_file_access` in settings, the corresponding
+            // violation is suppressed (None) above.  We must propagate those
+            // config values here so the backend doesn't reject the tool call
+            // a second time.
             if boundary_violation.is_none() && sensitive_violation.is_none() {
                 approved.push(ApprovedTool {
                     tool_call: tc.clone(),
                     rejection: None,
                     child_session_id: None,
-                    allow_outside: false,
-                    sensitive_file_approved: false,
+                    allow_outside: access_control.allow_outside_workspace_access,
+                    sensitive_file_approved: access_control.allow_sensitive_file_access,
                 });
                 continue;
             }
