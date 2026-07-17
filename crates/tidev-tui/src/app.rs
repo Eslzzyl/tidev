@@ -630,6 +630,12 @@ impl App {
                 }
                 self.set_notice("Undo complete");
             }
+            BackendEvent::ToolCompleted { session_id, ref tool_call, .. } if Some(session_id) == self.current_session_id && tool_call.name == "todowrite" => {
+                // Reload todos from database after todowrite completion.
+                if let Ok(todos) = self.runtime.session_manager().store().load_todos(session_id) {
+                    self.todos = todos;
+                }
+            }
             _ => {
                 // Events already forwarded to MessageList above:
                 //   Delta, ReasoningDelta, ToolCallUpdated, Finished, ToolCompleted,
