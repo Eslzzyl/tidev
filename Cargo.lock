@@ -3397,11 +3397,13 @@ name = "tidev"
 version = "0.7.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "clap",
  "tidev-config",
  "tidev-core",
  "tidev-storage",
  "tidev-tui",
+ "tidev-utils",
  "tokio",
  "uuid",
 ]

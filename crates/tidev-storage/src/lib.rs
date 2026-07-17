@@ -1579,6 +1579,320 @@ impl SessionStore {
         tx.commit()?;
         Ok(())
     }
+
+    /// Import sessions from an uncompressed SQLite file created by
+    /// [`export_to_sqlite`].
+    ///
+    /// Returns the list of session UUIDs that were imported.
+    ///
+    /// * `import_path` — path to the export SQLite file.
+    /// * `session_ids` — if `Some`, only import these sessions from the file;
+    ///   if `None`, import all sessions found.
+    /// * `replace` — if `true`, overwrite existing sessions with the same UUID;
+    ///   if `false`, skip sessions that already exist.
+    pub fn import_from_sqlite(
+        &self,
+        import_path: &Path,
+        session_ids: Option<&[Uuid]>,
+        replace: bool,
+    ) -> Result<Vec<Uuid>> {
+        let import_conn = Connection::open(import_path)
+            .with_context(|| format!("failed to open import file {}", import_path.display()))?;
+
+        // Determine which sessions to import.
+        let sid_strs: Vec<String> = if let Some(ids) = session_ids {
+            ids.iter().map(|id| id.to_string()).collect()
+        } else {
+            let rows = import_conn
+                .prepare("SELECT id FROM sessions")?
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            rows
+        };
+        if sid_strs.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let placeholder = sid_strs.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sid_params: Vec<&dyn rusqlite::types::ToSql> =
+            sid_strs.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+
+        // Filter out sessions that already exist (unless replace).
+        let existing: Vec<String> = if replace {
+            Vec::new()
+        } else {
+            let sql = format!("SELECT id FROM sessions WHERE id IN ({placeholder})");
+            self.read_query(&sql, sid_params.as_slice(), |row| {
+                row.get::<_, String>(0)
+            })?
+        };
+
+        let to_import: Vec<&str> = sid_strs
+            .iter()
+            .map(|s| s.as_str())
+            .filter(|s| !existing.contains(&s.to_string()))
+            .collect();
+
+        if to_import.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let imp_placeholder = to_import.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let imp_params: Vec<&dyn rusqlite::types::ToSql> =
+            to_import.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+
+        // ── 1. sessions ───────────────────────────────────────────────────
+        {
+            let sql = format!(
+                "SELECT id, parent_session_id, provider_id, provider_display_name, \
+                        model_id, model_display_name, title, created_at, updated_at, \
+                        status, ended_at, context_summary, context_retained_from, system_prompt \
+                 FROM sessions WHERE id IN ({imp_placeholder})"
+            );
+            let mut stmt = import_conn.prepare(&sql)?;
+            let rows = stmt.query_map(imp_params.as_slice(), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, String>(7)?,
+                    row.get::<_, String>(8)?,
+                    row.get::<_, String>(9)?,
+                    row.get::<_, Option<String>>(10)?,
+                    row.get::<_, String>(11)?,
+                    row.get::<_, i64>(12)?,
+                    row.get::<_, String>(13)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+
+            let conn = self.write_conn.lock().unwrap();
+            for r in &rows {
+                conn.execute(
+                    "INSERT OR REPLACE INTO sessions \
+                     (id, parent_session_id, provider_id, provider_display_name, model_id, \
+                      model_display_name, title, created_at, updated_at, status, ended_at, \
+                      context_summary, context_retained_from, system_prompt) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                    params![
+                        r.0, r.1, r.2, r.3, r.4, r.5, r.6, r.7, r.8, r.9, r.10,
+                        r.11, r.12, r.13,
+                    ],
+                )?;
+            }
+        }
+
+        // ── 2. session_workspaces ─────────────────────────────────────────
+        {
+            let sql = format!(
+                "SELECT session_id, workspace_root FROM session_workspaces \
+                 WHERE session_id IN ({imp_placeholder})"
+            );
+            let mut stmt = import_conn.prepare(&sql)?;
+            let rows = stmt
+                .query_map(imp_params.as_slice(), |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+
+            let conn = self.write_conn.lock().unwrap();
+            for (sid, root) in &rows {
+                conn.execute(
+                    "INSERT OR REPLACE INTO session_workspaces (session_id, workspace_root) \
+                     VALUES (?1, ?2)",
+                    params![sid, root],
+                )?;
+            }
+        }
+
+        // ── 3. session_instruction_sources ────────────────────────────────
+        {
+            let sql = format!(
+                "SELECT session_id, source FROM session_instruction_sources \
+                 WHERE session_id IN ({imp_placeholder})"
+            );
+            let mut stmt = import_conn.prepare(&sql)?;
+            let rows = stmt
+                .query_map(imp_params.as_slice(), |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+
+            let conn = self.write_conn.lock().unwrap();
+            for (sid, source) in &rows {
+                conn.execute(
+                    "INSERT OR REPLACE INTO session_instruction_sources \
+                     (session_id, source) VALUES (?1, ?2)",
+                    params![sid, source],
+                )?;
+            }
+        }
+
+        // ── 4. session_reverts ────────────────────────────────────────────
+        {
+            let sql = format!(
+                "SELECT session_id, message_id, redo_snapshot, created_at \
+                 FROM session_reverts WHERE session_id IN ({imp_placeholder})"
+            );
+            let mut stmt = import_conn.prepare(&sql)?;
+            let rows = stmt
+                .query_map(imp_params.as_slice(), |row| {
+                    let redo_text: Option<String> = row.get(2)?;
+                    // redo_snapshot is TEXT in export, stored as BLOB in main DB.
+                    // We keep it as raw bytes (no zstd here, it's already decompressed
+                    // at export time and saved as JSON text).
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        redo_text,
+                        row.get::<_, String>(3)?,
+                    ))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+
+            let conn = self.write_conn.lock().unwrap();
+            for (sid, mid, redo, created) in &rows {
+                conn.execute(
+                    "INSERT OR REPLACE INTO session_reverts \
+                     (session_id, message_id, redo_snapshot, created_at) \
+                     VALUES (?1, ?2, ?3, ?4)",
+                    params![sid, mid, redo.as_deref(), created],
+                )?;
+            }
+        }
+
+        // ── 5. messages ── compress TEXT columns → BLOB ───────────────────
+        {
+            let sql = format!(
+                "SELECT id, session_id, role, content, attachments, reasoning, tool_calls, \
+                        tool_call_id, tool_name, metadata, created_at, completed_at, streaming, \
+                        input_tokens, output_tokens, total_tokens, cache_read_tokens, \
+                        cache_write_tokens, model_id, tokens_per_second, snapshot_hash, \
+                        patch_files, file_diffs, mode, thinking_level \
+                 FROM messages WHERE session_id IN ({imp_placeholder})"
+            );
+            let mut stmt = import_conn.prepare(&sql)?;
+            let rows = stmt
+                .query_map(imp_params.as_slice(), |row| {
+                    let content: String = row.get(3)?;
+                    let reasoning: Option<String> = row.get(5)?;
+                    let tool_calls: String = row.get(6)?;
+                    let metadata: String = row.get(9)?;
+                    let patch_files: Option<String> = row.get(21)?;
+                    let file_diffs: Option<String> = row.get(22)?;
+                    Ok((
+                        row.get::<_, String>(0)?, // id
+                        row.get::<_, String>(1)?, // session_id
+                        row.get::<_, String>(2)?, // role
+                        compress_text(&content),
+                        row.get::<_, String>(4)?, // attachments (JSON, stored as TEXT in both)
+                        reasoning.map(|r| compress_text(&r)),
+                        compress_text(&tool_calls),
+                        row.get::<_, Option<String>>(7)?,  // tool_call_id
+                        row.get::<_, Option<String>>(8)?,  // tool_name
+                        compress_text(&metadata),
+                        row.get::<_, String>(10)?, // created_at
+                        row.get::<_, Option<String>>(11)?, // completed_at
+                        row.get::<_, i64>(12)?,    // streaming
+                        row.get::<_, Option<i64>>(13)?,
+                        row.get::<_, Option<i64>>(14)?,
+                        row.get::<_, Option<i64>>(15)?,
+                        row.get::<_, Option<i64>>(16)?,
+                        row.get::<_, Option<i64>>(17)?,
+                        row.get::<_, Option<String>>(18)?, // model_id
+                        row.get::<_, Option<f64>>(19)?,    // tokens_per_second
+                        row.get::<_, Option<String>>(20)?, // snapshot_hash
+                        patch_files.map(|p| compress_text(&p)),
+                        file_diffs.map(|d| compress_text(&d)),
+                        row.get::<_, Option<String>>(23)?, // mode
+                        row.get::<_, Option<String>>(24)?, // thinking_level
+                    ))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+
+            let conn = self.write_conn.lock().unwrap();
+            for r in &rows {
+                conn.execute(
+                    "INSERT OR REPLACE INTO messages \
+                     (id, session_id, role, content, attachments, reasoning, tool_calls, \
+                      tool_call_id, tool_name, metadata, created_at, completed_at, streaming, \
+                      input_tokens, output_tokens, total_tokens, cache_read_tokens, \
+                      cache_write_tokens, model_id, tokens_per_second, snapshot_hash, \
+                      patch_files, file_diffs, mode, thinking_level) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, \
+                             ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
+                    params![
+                        r.0, r.1, r.2, r.3, r.4, r.5, r.6, r.7, r.8, r.9,
+                        r.10, r.11, r.12, r.13, r.14, r.15, r.16, r.17, r.18, r.19,
+                        r.20, r.21, r.22, r.23, r.24,
+                    ],
+                )?;
+            }
+        }
+
+        // ── 6. todos ──────────────────────────────────────────────────────
+        {
+            let sql = format!(
+                "SELECT session_id, position, content, status FROM todos \
+                 WHERE session_id IN ({imp_placeholder})"
+            );
+            let mut stmt = import_conn.prepare(&sql)?;
+            let rows = stmt
+                .query_map(imp_params.as_slice(), |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                    ))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+
+            let conn = self.write_conn.lock().unwrap();
+            for (sid, pos, content, status) in &rows {
+                conn.execute(
+                    "INSERT OR REPLACE INTO todos (session_id, position, content, status) \
+                     VALUES (?1, ?2, ?3, ?4)",
+                    params![sid, pos, content, status],
+                )?;
+            }
+        }
+
+        // ── 7. tool_permissions ───────────────────────────────────────────
+        {
+            let sql = format!(
+                "SELECT session_id, tool_name, allowed, created_at FROM tool_permissions \
+                 WHERE session_id IN ({imp_placeholder})"
+            );
+            let mut stmt = import_conn.prepare(&sql)?;
+            let rows = stmt
+                .query_map(imp_params.as_slice(), |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, String>(3)?,
+                    ))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+
+            let conn = self.write_conn.lock().unwrap();
+            for (sid, name, allowed, created) in &rows {
+                conn.execute(
+                    "INSERT OR REPLACE INTO tool_permissions \
+                     (session_id, tool_name, allowed, created_at) VALUES (?1, ?2, ?3, ?4)",
+                    params![sid, name, allowed, created],
+                )?;
+            }
+        }
+
+        let imported = to_import.iter().filter_map(|s| Uuid::parse_str(s).ok()).collect();
+        Ok(imported)
+    }
 }
 
 // ── Export helpers ───────────────────────────────────────────────────

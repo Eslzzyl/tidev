@@ -43,12 +43,14 @@ include = ["/src", "/README.md", "/LICENSE"]
 
 [dependencies]
 anyhow = "1"
+chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 tidev-core = { path = "crates/tidev-core" }
 tidev-config = { path = "crates/tidev-config" }
 tidev-storage = { path = "crates/tidev-storage" }
 tidev-tui = { path = "crates/tidev-tui" }
+tidev-utils = { path = "crates/tidev-utils" }
 uuid = { version = "1", features = ["v4"] }
 
 [profile.dev]
