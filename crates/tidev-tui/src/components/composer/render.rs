@@ -197,12 +197,12 @@ pub(crate) fn draw_composer(
             ));
         }
 
-        // · [thinking level]
+        // · thinking level
         if let Some(level) = ctx.thinking_level
             && level.is_supported() {
                 meta_spans.push(Span::styled(" · ", Style::default().fg(palette.muted)));
                 meta_spans.push(Span::styled(
-                    format!("[{}]", level.display_name()),
+                    format!("{}", level.display_name()),
                     Style::default().fg(palette.accent_soft),
                 ));
             }
