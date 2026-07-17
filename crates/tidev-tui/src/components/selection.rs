@@ -10,6 +10,7 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Position, Rect};
 use ratatui::prelude::Style;
+use unicode_width::UnicodeWidthStr;
 
 
 /// State tracking an active (or recently-finished) mouse selection.
@@ -229,7 +230,9 @@ fn apply_selection_style(
                             if let Some(cell) = buffer.cell((x, y)) {
                                 let sym = cell.symbol();
                                 if sym != " " && !sym.is_empty() {
-                                    actual_end = Some(x);
+                                    // Cover all cells occupied by this wide character.
+                                    let w = UnicodeWidthStr::width(sym).max(1) as u16;
+                                    actual_end = Some((x + w - 1).min(rend));
                                     break;
                                 }
                             }
@@ -253,7 +256,9 @@ fn apply_selection_style(
                 if let Some(cell) = buffer.cell((x, y)) {
                     let sym = cell.symbol();
                     if sym != " " && !sym.is_empty() {
-                        actual_end = Some(x);
+                        // Cover all cells occupied by this wide character.
+                        let w = UnicodeWidthStr::width(sym).max(1) as u16;
+                        actual_end = Some((x + w - 1).min(row_end));
                         break;
                     }
                 }
@@ -276,6 +281,31 @@ fn apply_selection_style(
 // ---------------------------------------------------------------------------
 // extract_selected_text
 // ---------------------------------------------------------------------------
+
+/// Helper: extract text from a horizontal range of cells, correctly skipping
+/// trailing cells of wide characters (CJK, emoji, etc.).
+///
+/// ratatui stores wide characters across 2+ cells. The first cell holds the
+/// symbol, while trailing cells have `symbol = None` — but `Cell::symbol()`
+/// returns `" "` for `None`, which would insert spurious spaces.  We use
+/// `UnicodeWidthStr::width()` to skip trailing cells.
+fn extract_row_text(buffer: &Buffer, y: u16, start_x: u16, end_x: u16) -> String {
+    let mut text = String::new();
+    let mut x = start_x;
+    while x <= end_x {
+        let Some(cell) = buffer.cell((x, y)) else {
+            break;
+        };
+        let symbol = cell.symbol();
+        text.push_str(symbol);
+        let width = UnicodeWidthStr::width(symbol).max(1) as u16;
+        x = x.saturating_add(width);
+        if x == 0 {
+            break;
+        }
+    }
+    text
+}
 
 /// Extract the text content of the selected cell range from the buffer.
 fn extract_selected_text(
@@ -351,20 +381,11 @@ fn extract_selected_text(
 
             let mut line_text = String::new();
             for (seg_start, seg_end) in &merged {
-                for x in *seg_start..=*seg_end {
-                    if let Some(cell) = buffer.cell((x, y)) {
-                        line_text.push_str(cell.symbol());
-                    }
-                }
+                line_text.push_str(&extract_row_text(buffer, y, *seg_start, *seg_end));
             }
             lines.push(line_text);
         } else {
-            let mut line_text = String::new();
-            for x in row_start..=row_end {
-                if let Some(cell) = buffer.cell((x, y)) {
-                    line_text.push_str(cell.symbol());
-                }
-            }
+            let line_text = extract_row_text(buffer, y, row_start, row_end);
             lines.push(line_text);
         }
     }
