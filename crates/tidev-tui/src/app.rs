@@ -260,7 +260,12 @@ impl App {
             sidebar_area: None,
             terminal_area: Rect::new(0, 0, 0, 0),
             todos: Vec::new(),
-            image_picker: Picker::from_query_stdio().ok(),
+            image_picker: {
+                log::info!("[img] from_query_stdio START");
+                let r = Picker::from_query_stdio();
+                log::info!("[img] from_query_stdio END: {:?}", r.as_ref().map(|p| (p.protocol_type(), p.font_size(), p.capabilities())));
+                r.ok()
+            },
             composer: {
                 let mut c = Composer::new("Ask tidev about your code, task, or question...");
                 c.set_file_search_index(file_index);
