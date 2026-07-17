@@ -8,6 +8,7 @@ use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
 use anyhow::Result;
 use textwrap::wrap;
+use unicode_width::UnicodeWidthStr;
 use tidev_types::tools::QuestionInfo;
 
 use crate::action::{Action, OverlayAction, OverlayKind};
@@ -556,7 +557,7 @@ impl Component for QuestionDialog {
             .saturating_add(options_height)
             .saturating_add(input_h)
             .saturating_add(6); // title + footers + padding
-        let overlay = bottom_centered_rect(70, total_h.min(30), rect);
+        let overlay = bottom_centered_rect(rect.width, total_h.min(30), rect);
         frame.render_widget(Clear, overlay);
 
         let block = Block::default().style(Style::default().bg(palette.panel_alt));
@@ -630,14 +631,17 @@ impl Component for QuestionDialog {
             frame.render_widget(
                 Paragraph::new(self.current_custom_input())
                     .style(input_style)
-                    .block(
-                        Block::default()
-                            .style(Style::default().bg(palette.background))
-                            .borders(ratatui::widgets::Borders::ALL)
-                            .border_style(Style::default().fg(palette.border)),
-                    ),
+                    .wrap(Wrap { trim: false }),
                 sections[3],
             );
+            let input = self.current_custom_input();
+            let text_w = UnicodeWidthStr::width(input) as u16;
+            let col = text_w % sections[3].width;
+            let row = text_w / sections[3].width;
+            frame.set_cursor_position((
+                sections[3].x + col,
+                sections[3].y + row,
+            ));
         }
 
         // Footer

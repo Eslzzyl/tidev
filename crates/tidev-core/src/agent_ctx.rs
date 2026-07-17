@@ -442,6 +442,25 @@ impl AgentContext for CoreContext {
                 )
             };
 
+            // The question tool must always be routed to the TUI for user
+            // interaction — it is never executed on the backend.
+            if tidev_types::tools::canonical_tool_name(&tc.name) == Some("question") {
+                let needs_confirmation = self
+                    .tool_registry
+                    .definition_for(&tc.name)
+                    .map(|def| def.permission.needs_confirmation())
+                    .unwrap_or(false);
+                pending.push(ToolCallWithViolations {
+                    tool_call: tc.clone(),
+                    workspace_boundary_violation: None,
+                    sensitive_file_violation: None,
+                    permission_key,
+                    permission_label: self.tool_registry.permission_label_for_call(tc),
+                    needs_confirmation,
+                });
+                continue;
+            }
+
             // 4. If no violations → auto-approve (fast path).
             //
             // When the user has enabled `allow_outside_workspace_access` or
