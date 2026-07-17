@@ -4,7 +4,6 @@
 //! results, pending/waiting states during streaming, and specialised
 //! formatting for read/write/edit/bash/websearch/webfetch/task/question/todowrite tools.
 
-use std::collections::HashMap;
 use std::path::Path;
 
 use ratatui::prelude::{Modifier, Style};
@@ -1000,6 +999,7 @@ fn compute_tool_result_suffix(
                     " → error".to_string()
                 }
             } else if has_image_attachment(attachments) {
+                // Enriched image suffix: " → TYPE, SIZE"
                 let image = attachments.iter().find_map(|a| {
                     if let MessageAttachment::Image { mime, file_size, .. } = a {
                         Some((mime.as_str(), *file_size))
@@ -1014,12 +1014,19 @@ fn compute_tool_result_suffix(
                     " → image".to_string()
                 }
             } else if has_directory_attachment(attachments) {
+                // Count files and subdirectories from list_dir output
                 let mut files = 0u64;
                 let mut dirs = 0u64;
                 for line in output.lines().skip(1) {
                     let trimmed = line.trim();
-                    if trimmed.is_empty() { continue; }
-                    if trimmed.ends_with('/') { dirs += 1; } else { files += 1; }
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+                    if trimmed.ends_with('/') {
+                        dirs += 1;
+                    } else {
+                        files += 1;
+                    }
                 }
                 let total = files + dirs;
                 if total == 0 {
@@ -1032,23 +1039,98 @@ fn compute_tool_result_suffix(
                     format!(" → {} items ({} files, {} dirs)", total, files, dirs)
                 }
             } else {
-                let (metadata, _) = parse_read_content_metadata(output);
+                let metadata = parse_read_content_metadata(output);
+                let is_size_truncated = output.contains("Output capped at 50 KB");
+
                 match metadata {
-                    Some(info) if !info.is_empty() => {
-                        if let Some(lines_count) = info.get("lines") {
-                            format!(" → {} lines", lines_count)
+                    Some(((start, end), requested_range, total, truncated_by)) => {
+                        // Check if this is a full file read (start==1 && end==total)
+                        let is_full_file = start == 1 && end == total;
+                        let has_requested_range = requested_range.is_some();
+
+                        if is_size_truncated {
+                            // 50KB truncation
+                            if has_requested_range {
+                                let (req_start, req_end) = requested_range.unwrap();
+                                if is_full_file {
+                                    format!(
+                                        " → All {} lines (requested {}-{}, truncated due to 50KB cap)",
+                                        total, req_start, req_end
+                                    )
+                                } else {
+                                    format!(
+                                        " → Line {}-{} of {} (requested {}-{}, truncated due to 50KB cap)",
+                                        start, end, total, req_start, req_end
+                                    )
+                                }
+                            } else if is_full_file {
+                                format!(
+                                    " → All {} lines (requested all lines, truncated due to 50KB cap)",
+                                    total
+                                )
+                            } else {
+                                format!(
+                                    " → Line {}-{} of {} (requested all lines, truncated due to 50KB cap)",
+                                    start, end, total
+                                )
+                            }
+                        } else if truncated_by.as_deref() == Some("lines") {
+                            // 2000-line cap (more flag, but no 50KB cutoff)
+                            if has_requested_range {
+                                let (req_start, req_end) = requested_range.unwrap();
+                                if is_full_file {
+                                    format!(
+                                        " → All {} lines (requested {}-{}, truncated due to 2000 lines cap)",
+                                        total, req_start, req_end
+                                    )
+                                } else {
+                                    format!(
+                                        " → Line {}-{} of {} (requested {}-{}, truncated due to 2000 lines cap)",
+                                        start, end, total, req_start, req_end
+                                    )
+                                }
+                            } else if is_full_file {
+                                format!(
+                                    " → All {} lines (requested all lines, truncated due to 2000 lines cap)",
+                                    total
+                                )
+                            } else {
+                                format!(
+                                    " → Line {}-{} of {} (requested all lines, truncated due to 2000 lines cap)",
+                                    start, end, total
+                                )
+                            }
+                        } else if is_full_file {
+                            // Complete file read without truncation
+                            format!(" → All {} lines", total)
                         } else {
-                            String::new()
+                            // Partial read without truncation
+                            format!(" → Line {}-{} of {}", start, end, total)
                         }
                     }
-                    _ => {
-                        let total_lines = output.lines().count();
-                        if total_lines == 0 {
-                            " → empty".to_string()
-                        } else if tool_output_is_truncated(output) {
-                            format!(" → {} lines (truncated)", total_lines)
-                        } else {
-                            format!(" → {} lines", total_lines)
+                    None => {
+                        // Fallback: try old format parsing
+                        let line_range = parse_line_range_from_read_output(output);
+                        let truncated = tool_output_is_truncated(output);
+
+                        match line_range {
+                            Some((start, end)) => {
+                                if truncated && output.contains("Output capped at 50 KB") {
+                                    format!(" → Line {}-{} (truncated)", start, end)
+                                } else {
+                                    format!(" → Line {}-{}", start, end)
+                                }
+                            }
+                            None => {
+                                let total_lines = output.lines().count();
+                                if total_lines == 0 {
+                                    " → empty".to_string()
+                                } else if truncated {
+                                    format!(" → {} lines (truncated)", total_lines)
+                                } else {
+                                    format!(" → {} lines", total_lines)
+                                }
+                            }
                         }
                     }
                 }
@@ -1390,26 +1472,99 @@ fn preparing_text_for_tool(canonical_name: &str) -> &'static str {
     }
 }
 
-fn parse_read_content_metadata(output: &str) -> (Option<HashMap<String, String>>, &str) {
-    let first_line = output.lines().next().unwrap_or("");
-    let mut metadata = HashMap::new();
+// ---------------------------------------------------------------------------
+// Read tool metadata helpers
+// ---------------------------------------------------------------------------
 
-    let body = output.trim_start_matches(first_line).trim_start();
+/// Parsed metadata from a read tool output's XML-style metadata block.
+type ReadContentMetadata = Option<(
+    (i64, i64),           // line_range (start, end)
+    Option<(i64, i64)>,   // requested_range (None if model didn't specify)
+    i64,                  // file_total
+    Option<String>,       // truncated_by: None | "size" | "lines"
+)>;
 
-    if let Some(pos) = first_line.find("lines") {
-        let before = &first_line[..pos].trim();
-        if let Some(num_start) = before.rfind(' ') {
-            let num_str = before[num_start + 1..].trim_end_matches('(').trim();
-            if let Ok(n) = num_str.parse::<usize>() {
-                metadata.insert("lines".to_string(), n.to_string());
+/// Parse range string "start-end" into (start, end).
+fn parse_range(s: &str) -> Option<(i64, i64)> {
+    let parts: Vec<_> = s.split('-').collect();
+    if parts.len() == 2 {
+        let start = parts[0].trim().parse().ok()?;
+        let end = parts[1].trim().parse().ok()?;
+        Some((start, end))
+    } else {
+        None
+    }
+}
+
+/// Parse line range from read tool output (e.g., "Showing lines 10-50 of 100")
+fn parse_line_range_from_read_output(output: &str) -> Option<(i64, i64)> {
+    // Match patterns like "Showing lines 10-50 of 100" or "Showing lines 10-50"
+    if let Some(start) = output.find("Showing lines ") {
+        let after_prefix = &output[start + 14..];
+        // Parse start number
+        let mut end_idx = 0;
+        let mut start_num = 0i64;
+        for (i, c) in after_prefix.chars().enumerate() {
+            if c.is_ascii_digit() {
+                start_num = start_num * 10 + (c as i64 - '0' as i64);
+                end_idx = i;
+            } else {
+                break;
+            }
+        }
+        // Look for "-{end}" after "Showing lines {start}-"
+        let after_start = &after_prefix[end_idx + 1..];
+        if let Some(stripped) = after_start.strip_prefix('-') {
+            let mut end_num = 0i64;
+            for c in stripped.chars() {
+                if c.is_ascii_digit() {
+                    end_num = end_num * 10 + (c as i64 - '0' as i64);
+                } else {
+                    break;
+                }
+            }
+            if end_num > start_num {
+                return Some((start_num, end_num));
             }
         }
     }
+    None
+}
 
-    if metadata.is_empty() {
-        (None, output)
-    } else {
-        (Some(metadata), if body.is_empty() { output } else { body })
+/// Parse XML-style metadata from read tool output.
+///
+/// Reads `<line_range>`, `<requested_range>`, `<file_total>`, and
+/// `<truncated_by>` tags from the output to build structured metadata.
+fn parse_read_content_metadata(content: &str) -> ReadContentMetadata {
+    let mut line_range = None;
+    let mut requested_range = None;
+    let mut file_total = None;
+    let mut truncated_by = None;
+
+    for line in content.lines() {
+        if let Some(val) = line.strip_prefix("<line_range>") {
+            if let Some(end) = val.strip_suffix("</line_range>") {
+                line_range = parse_range(end);
+            }
+        } else if let Some(val) = line.strip_prefix("<requested_range>") {
+            if let Some(end) = val.strip_suffix("</requested_range>") {
+                requested_range = parse_range(end);
+            }
+        } else if let Some(val) = line.strip_prefix("<file_total>") {
+            if let Some(end) = val.strip_suffix("</file_total>") {
+                file_total = end.trim().parse().ok();
+            }
+        } else if let Some(val) = line.strip_prefix("<truncated_by>")
+            && let Some(end) = val.strip_suffix("</truncated_by>")
+            && matches!(end.trim(), "size" | "lines")
+        {
+            truncated_by = Some(end.trim().to_string());
+        }
+    }
+
+    match (line_range, file_total) {
+        (Some(lr), Some(ft)) => Some((lr, requested_range, ft, truncated_by)),
+        _ => None,
     }
 }
 
