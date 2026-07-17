@@ -2859,7 +2859,7 @@ impl App {
         }
 
         // Draw overlays (on top of everything, including sidebar)
-        self.overlays.draw(frame, area, &draw_ctx);
+        self.overlays.draw(frame, main_area, &draw_ctx);
 
         // ── Footer status line (right-aligned, matching v0.6.x) ──
         let status_text = self.footer_status_text();

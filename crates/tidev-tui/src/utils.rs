@@ -90,16 +90,17 @@ pub(crate) fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
     Rect::new(x, y, width, height)
 }
 
-/// Compute a bottom-centred rect of the given dimensions inside `area`.
+/// Compute a bottom-aligned rect inside `area`.
 ///
-/// Positions the rect at the bottom of `area` (centered horizontally),
-/// matching the old TUI behaviour where workspace-boundary, sensitive-file,
-/// and question dialogs appear in the composer area instead of screen-center.
+/// The rect fills the full width of `area` (no horizontal centering) and is
+/// anchored to the bottom.  This matches the old TUI behaviour where
+/// workspace-boundary, sensitive-file, and question dialogs fill the composer
+/// area width instead of being centred.
 pub(crate) fn bottom_centered_rect(width: u16, height: u16, area: Rect) -> Rect {
     let width = width.min(area.width.saturating_sub(2)).max(20);
     let height = height.min(area.height.saturating_sub(2)).max(8);
 
-    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let x = area.x + 2;
     let y = area.y + area.height.saturating_sub(height).saturating_sub(1);
 
     Rect::new(x, y, width, height)
