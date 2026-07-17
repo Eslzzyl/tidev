@@ -87,6 +87,12 @@ pub(crate) struct MessageList {
     /// Scrollbar drag state (None = not dragging).
     scrollbar_drag: Option<ScrollbarDrag>,
 
+    /// Actual on-screen scrollbar rect (for mouse hit-testing).
+    scrollbar_rect: Option<Rect>,
+
+    /// Whether the mouse is hovering over the scrollbar area.
+    scrollbar_hovered: bool,
+
     // ── Spinner animation ──
     spinner_start: Instant,
 
@@ -132,6 +138,8 @@ impl MessageList {
             content_area: None,
             render_scroll: 0,
             scrollbar_drag: None,
+            scrollbar_rect: None,
+            scrollbar_hovered: false,
             spinner_start: Instant::now(),
             streaming_buffer: StreamingBuffer::new(),
             running_subagents: Vec::new(),
@@ -974,9 +982,12 @@ impl Component for MessageList {
             &mut image_badge_infos,
             &mut render_content_area,
             &mut render_scroll,
+            self.scrollbar_hovered,
         );
         self.content_area = Some(render_content_area);
         self.render_scroll = render_scroll;
+        // Store the actual scrollbar rect for mouse hit-testing.
+        self.scrollbar_rect = compute_scrollbar_rect(rect);
 
         // Convert inline running card ranges to screen rects for mouse interaction
         let viewport = render_content_area.height as usize;
@@ -1067,18 +1078,17 @@ impl MessageList {
             .collect()
     }
 
-    /// Return the scrollbar area (rightmost column of content_area), if visible.
+    /// Return the scrollbar area, if visible.
     pub fn scrollbar_area(&self) -> Option<Rect> {
-        let area = self.content_area?;
-        if area.width < 3 {
-            return None;
+        self.scrollbar_rect
+    }
+
+    /// Set whether the mouse is hovering over the scrollbar.
+    pub fn set_scrollbar_hovered(&mut self, hovered: bool) {
+        if self.scrollbar_hovered != hovered {
+            self.scrollbar_hovered = hovered;
+            self.dirty = true;
         }
-        Some(Rect {
-            x: area.x + area.width.saturating_sub(1),
-            y: area.y,
-            width: 1,
-            height: area.height,
-        })
     }
 
     /// Maximum scroll offset.
@@ -1227,4 +1237,18 @@ fn infer_subagent_status(event: &BackendEvent) -> Option<String> {
         | BackendEvent::TurnStarting { .. } => Some("Thinking".to_string()),
         _ => None,
     }
+}
+
+/// Compute the scrollbar rect from the full chat area.
+/// Mirrors the scrollbar positioning logic in `render::compute_content_layout`.
+fn compute_scrollbar_rect(rect: Rect) -> Option<Rect> {
+    if rect.width <= render_mod::LEFT_MARGIN + render_mod::SCROLLBAR_WIDTH {
+        return None;
+    }
+    Some(Rect {
+        x: rect.x + rect.width - render_mod::SCROLLBAR_WIDTH,
+        y: rect.y,
+        width: render_mod::SCROLLBAR_WIDTH,
+        height: rect.height,
+    })
 }

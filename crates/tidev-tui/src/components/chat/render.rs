@@ -165,8 +165,8 @@ pub(crate) fn count_running_subagent_card_lines(
 // Constants
 // ---------------------------------------------------------------------------
 
-const LEFT_MARGIN: u16 = 2;
-const SCROLLBAR_WIDTH: u16 = 1;
+pub(crate) const LEFT_MARGIN: u16 = 2;
+pub(crate) const SCROLLBAR_WIDTH: u16 = 1;
 const GAP: u16 = 1;
 
 // ---------------------------------------------------------------------------
@@ -228,6 +228,7 @@ pub(crate) fn render_messages(
     out_image_badge_infos: &mut Vec<ImageBadgeInfo>,
     out_render_content_area: &mut Rect,
     out_render_scroll: &mut usize,
+    scrollbar_hovered: bool,
 ) {
     if area.width == 0 || area.height == 0 {
         return;
@@ -285,7 +286,7 @@ pub(crate) fn render_messages(
 
     // Scrollbar
     if let Some(sb) = scrollbar_rect {
-        render_scrollbar(frame, sb, *scroll_offset, output.total_lines, area.height as usize, ctx.palette);
+        render_scrollbar(frame, sb, *scroll_offset, output.total_lines, area.height as usize, ctx.palette, scrollbar_hovered);
     }
 }
 
@@ -309,8 +310,12 @@ fn compute_content_layout(area: Rect) -> (Rect, Option<Rect>) {
     }
 }
 
-fn render_scrollbar(frame: &mut Frame, sb: Rect, scroll_offset: usize, total_lines: usize, viewport: usize, palette: ThemePalette) {
-    let bg = palette.background;
+fn render_scrollbar(frame: &mut Frame, sb: Rect, scroll_offset: usize, total_lines: usize, viewport: usize, palette: ThemePalette, hovered: bool) {
+    let bg = if hovered {
+        palette.hover_bg(palette.background)
+    } else {
+        palette.background
+    };
     let height = sb.height as usize;
 
     if total_lines <= viewport || height == 0 {
@@ -331,14 +336,16 @@ fn render_scrollbar(frame: &mut Frame, sb: Rect, scroll_offset: usize, total_lin
         (scrolled * track_span as f32).round() as u16
     };
 
+    let track_style = Style::default().bg(bg).fg(palette.border);
+    let thumb_style = Style::default().bg(bg).fg(palette.accent);
     let lines: Vec<Line> = (0..sb.height).map(|row| {
         if row >= thumb_pos && row < thumb_pos + thumb_height {
-            Line::from(Span::styled("█", Style::default().fg(palette.accent)))
+            Line::from(Span::styled("█", thumb_style))
         } else {
-            Line::from(Span::styled("░", Style::default().fg(palette.border)))
+            Line::from(Span::styled("░", track_style))
         }
     }).collect();
-    frame.render_widget(Paragraph::new(lines), sb);
+    frame.render_widget(Paragraph::new(lines).style(Style::default().bg(bg)), sb);
 }
 
 // ---------------------------------------------------------------------------

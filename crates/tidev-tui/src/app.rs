@@ -1206,6 +1206,10 @@ impl App {
 
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
+                // Clear scrollbar hover on any click (will be re-set on Moved).
+                if let Some(ref mut chat) = self.message_list {
+                    chat.set_scrollbar_hovered(false);
+                }
                 // Check scrollbar click first.
                 if let Some(ref mut chat) = self.message_list {
                     let sb_area = chat.scrollbar_area();
@@ -1259,6 +1263,10 @@ impl App {
             MouseEventKind::Moved => {
                 if let Some(ref mut chat) = self.message_list {
                     chat.set_hovered_card(mouse.column, mouse.row);
+                    // Update scrollbar hover state
+                    let sb_area = chat.scrollbar_area();
+                    let hovered = sb_area.is_some_and(|a| a.contains(position));
+                    chat.set_scrollbar_hovered(hovered);
                 }
                 // Check queued prompt card hover.
                 let pos = ratatui::layout::Position::new(mouse.column, mouse.row);
@@ -1289,6 +1297,7 @@ impl App {
             MouseEventKind::Up(MouseButton::Left) => {
                 if let Some(ref mut chat) = self.message_list {
                     chat.end_scrollbar_drag();
+                    chat.set_scrollbar_hovered(false);
                 }
 
                 // Composer input area: finalize selection and queue clipboard copy.
