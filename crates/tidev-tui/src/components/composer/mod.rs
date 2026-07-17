@@ -1015,7 +1015,8 @@ impl Composer {
 
         let replacement = match selection.kind {
             at_mention::AtMentionKind::Directory => {
-                format!("@{}/", selection.path.trim_end_matches('/'))
+                let separator = std::path::MAIN_SEPARATOR;
+                format!("@{}{}", selection.path.trim_end_matches(['/', '\\']), separator)
             }
             _ => format!("@{}", selection.path),
         };
