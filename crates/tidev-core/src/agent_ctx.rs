@@ -751,6 +751,16 @@ impl AgentContext for CoreContext {
                     if let Some(last) = enriched.last_mut() {
                         last.snapshot_hash = Some(post_hash);
                         last.patch_files = Some(step_patch.to_string());
+                        // Serialize lightweight diffs for sidebar display.
+                        if let Ok(diffs_json) = serde_json::to_string(&diffs) {
+                            last.file_diffs = Some(diffs_json.clone());
+                            self.emit(BackendEvent::SidebarSnapshotReady {
+                                session_id,
+                                request_id: 0,
+                                message_id: last.id,
+                                file_diffs_json: diffs_json,
+                            });
+                        }
                     }
                 }
             }
