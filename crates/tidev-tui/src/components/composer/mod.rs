@@ -517,13 +517,14 @@ impl Composer {
         if width == 0 {
             return self.text.split('\n').count().max(1);
         }
-        let lines = compute_visual_lines(&self.text, width);
+        let lines = compute_visual_lines_with_spans(&self.text, width, &self.spans);
         lines.len().max(1)
     }
 
-    /// Compute visual lines without caching (read-only path).
+    /// Compute visual lines (read-only path).  Respects span boundaries so
+    /// that inline spans are never split across visual lines.
     fn compute_visual_lines(&self, width: usize) -> Vec<VisualLine> {
-        compute_visual_lines(&self.text, width)
+        compute_visual_lines_with_spans(&self.text, width, &self.spans)
     }
 
     /// Public accessor for render.rs — returns `Range<usize>` slices.
@@ -1426,13 +1427,21 @@ fn display_width(text: &str) -> usize {
         .sum()
 }
 
-/// Compute visual lines for a text at a given width.
-pub(crate) fn compute_visual_lines(text: &str, width: usize) -> Vec<VisualLine> {
-    visual_lines_inner(text, width)
+/// Compute visual lines with span awareness.
+pub(crate) fn compute_visual_lines_with_spans(
+    text: &str,
+    width: usize,
+    spans: &[InlineSpan],
+) -> Vec<VisualLine> {
+    visual_lines_inner(text, width, spans)
 }
 
 /// Compute visual lines for a text at a given width.
-fn visual_lines_inner(text: &str, width: usize) -> Vec<VisualLine> {
+///
+/// When `spans` contains entries, inline span boundaries are treated as atomic:
+/// the algorithm will not wrap inside a span's byte range, ensuring that badge
+/// content always stays on a single visual line.
+fn visual_lines_inner(text: &str, width: usize, spans: &[InlineSpan]) -> Vec<VisualLine> {
     if width == 0 {
         return vec![VisualLine {
             start: 0,
@@ -1444,31 +1453,60 @@ fn visual_lines_inner(text: &str, width: usize) -> Vec<VisualLine> {
     let mut lines = Vec::new();
     let mut line_start = 0usize;
     let mut current_width = 0usize;
+    let mut pos = 0usize;
 
-    for (byte_index, ch) in text.char_indices() {
+    while pos < text.len() {
+        // ── Check if we are at the start of an inline span ───────────
+        if let Some(span) = spans.iter().find(|s| s.start == pos) {
+            let span_width = display_width(&span.display);
+
+            // If the span doesn't fit on the current line and the line already
+            // has content, wrap BEFORE the span to keep it atomic on one line.
+            if current_width > 0 && current_width + span_width > width {
+                lines.push(VisualLine {
+                    start: line_start,
+                    end: pos,
+                    width: current_width,
+                });
+                line_start = pos;
+                current_width = span_width;
+            } else {
+                current_width += span_width;
+            }
+            pos = span.end;
+            continue;
+        }
+
+        // ── Regular character ────────────────────────────────────────
+        let ch = text[pos..].chars().next().unwrap();
+
         if ch == '\n' {
             lines.push(VisualLine {
                 start: line_start,
-                end: byte_index,
+                end: pos,
                 width: current_width,
             });
-            line_start = byte_index + ch.len_utf8();
+            line_start = pos + ch.len_utf8();
             current_width = 0;
+            pos = line_start;
             continue;
         }
 
         let char_width = UnicodeWidthChar::width(ch).unwrap_or(0);
+
         if current_width > 0 && current_width + char_width > width {
             lines.push(VisualLine {
                 start: line_start,
-                end: byte_index,
+                end: pos,
                 width: current_width,
             });
-            line_start = byte_index;
+            line_start = pos;
             current_width = 0;
+            continue; // reconsider this character on the new line
         }
 
         current_width += char_width;
+        pos += ch.len_utf8();
     }
 
     lines.push(VisualLine {
@@ -1645,15 +1683,44 @@ mod tests {
 
     #[test]
     fn test_visual_lines_simple() {
-        let lines = compute_visual_lines("hello", 10);
+        let lines = compute_visual_lines_with_spans("hello", 10, &[]);
         assert_eq!(lines.len(), 1);
         assert_eq!(&lines[0].start, &0);
     }
 
     #[test]
     fn test_visual_lines_wrap() {
-        let lines = compute_visual_lines("hello world", 5);
+        let lines = compute_visual_lines_with_spans("hello world", 5, &[]);
         assert!(lines.len() > 1);
+    }
+
+    #[test]
+    fn test_visual_lines_span_atomic() {
+        // A span covering "@long/path" (10 chars) should never be split.
+        let spans = [InlineSpan {
+            start: 4,
+            end: 14,
+            display: "@long/path".to_string(),
+            kind: InlineSpanKind::AtReference,
+            image_data: None,
+            image_filename: None,
+        }];
+        // Width 12 forces a wrap inside the span text if naive.
+        let lines = compute_visual_lines_with_spans("abc @long/path xyz", 12, &spans);
+        assert!(lines.len() >= 2);
+        // The span should be entirely on one visual line.
+        for vl in &lines {
+            let inside = spans[0].start < vl.end && spans[0].end > vl.start;
+            if inside {
+                // The span must not be truncated: either fully contained or not at all.
+                assert!(
+                    vl.start <= spans[0].start && vl.end >= spans[0].end,
+                    "span must not be split across visual lines\nspan: {:?}\nline: {:?}",
+                    spans[0],
+                    vl
+                );
+            }
+        }
     }
 
     #[test]

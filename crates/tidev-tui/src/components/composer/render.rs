@@ -13,7 +13,7 @@ use ratatui::prelude::{Color, Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, List, ListItem, ListState, Paragraph};
 
-use super::{Composer, InlineSpan, compute_visual_lines};
+use super::{Composer, InlineSpan, compute_visual_lines_with_spans};
 use crate::context::DrawContext;
 
 /// Draw the composer component.
@@ -76,11 +76,11 @@ pub(crate) fn draw_composer(
             text_area,
         );
     } else {
-        let lines = compute_visual_lines(composer.text(), width);
+        let spans = composer.spans().to_vec();
+        let lines = compute_visual_lines_with_spans(composer.text(), width, &spans);
         let max_scroll = lines.len().saturating_sub(visible_lines);
         let scroll = composer.input_scroll_offset.min(max_scroll);
         let selection = composer.selection_range();
-        let spans = composer.spans().to_vec();
 
         let mut rendered_lines: Vec<Line> = Vec::new();
         let end_idx = (scroll + visible_lines).min(lines.len());
