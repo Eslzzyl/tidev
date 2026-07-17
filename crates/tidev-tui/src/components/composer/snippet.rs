@@ -135,10 +135,7 @@ impl SnippetState {
     /// Apply the currently selected completion.
     /// Returns the replacement text or `None`.
     pub fn apply_completion(&self) -> Option<String> {
-        self.snippets.get(self.selected_index).map(|s| {
-            let rest = &s.text[self.query.len()..];
-            rest.to_string()
-        })
+        self.snippets.get(self.selected_index).map(|s| s.text.clone())
     }
 
     /// Move the selection by `delta`.
