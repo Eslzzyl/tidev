@@ -1174,6 +1174,25 @@ impl RuntimeBuilder {
             });
         }
 
+        // 13b. Start background snapshot GC (hourly, with initial 60s delay).
+        if let Some(ref svc) = snapshot {
+            let cancel = cleanup_cancel.clone();
+            let svc = svc.clone();
+            tokio::spawn(async move {
+                // Wait a bit before first GC so startup isn't slowed down.
+                tokio::time::sleep(Duration::from_secs(60)).await;
+                loop {
+                    if let Err(e) = svc.cleanup().await {
+                        log::warn!("snapshot cleanup failed: {e}");
+                    }
+                    tokio::select! {
+                        _ = tokio::time::sleep(Duration::from_secs(3600)) => {},
+                        _ = cancel.cancelled() => break,
+                    }
+                }
+            });
+        }
+
         // 14. Channels.
         let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
         let (request_tx, request_rx) = tokio::sync::mpsc::unbounded_channel::<TuiRequest>();
