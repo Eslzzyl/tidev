@@ -742,7 +742,7 @@ impl AgentContext for CoreContext {
                     })
                     .collect();
                 if !files.is_empty() {
-                    *self.pre_round_hash.lock().await = None;
+                    *self.pre_round_hash.lock().await = Some(post_hash.clone());
                     let step_patch = serde_json::json!([{
                         "hash": pre,
                         "files": files,
@@ -757,7 +757,7 @@ impl AgentContext for CoreContext {
                             self.emit(BackendEvent::SidebarSnapshotReady {
                                 session_id,
                                 request_id: 0,
-                                message_id: last.id,
+                                tool_call_id: last.tool_call_id.clone().unwrap_or_default(),
                                 file_diffs_json: diffs_json,
                             });
                         }

@@ -719,10 +719,10 @@ impl MessageList {
                 }
                 self.dirty = true;
             }
-            BackendEvent::SidebarSnapshotReady { message_id, file_diffs_json, .. } => {
-                if let Some(msg) = chat_context.messages.iter_mut().find(|m| m.id == *message_id) {
+            BackendEvent::SidebarSnapshotReady { tool_call_id, file_diffs_json, .. } => {
+                if let Some(msg) = chat_context.messages.iter_mut().find(|m| m.tool_call_id.as_deref() == Some(tool_call_id)) {
                     msg.file_diffs = Some(file_diffs_json.clone());
-                    self.layout_index.mark_dirty(*message_id);
+                    self.layout_index.mark_dirty(msg.id);
                     self.dirty = true;
                 }
             }

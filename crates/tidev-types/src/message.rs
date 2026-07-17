@@ -600,7 +600,7 @@ pub enum BackendEvent {
     SidebarSnapshotReady {
         session_id: Uuid,
         request_id: u64,
-        message_id: Uuid,
+        tool_call_id: String,
         file_diffs_json: String,
     },
     ShellOutput {
