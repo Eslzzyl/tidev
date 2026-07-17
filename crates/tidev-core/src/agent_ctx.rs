@@ -386,6 +386,7 @@ impl AgentContext for CoreContext {
                     child_session_id: None,
                     allow_outside: false,
                     sensitive_file_approved: false,
+                    user_reason: None,
                 });
                 continue;
             }
@@ -405,6 +406,7 @@ impl AgentContext for CoreContext {
                         child_session_id: None,
                         allow_outside: false,
                         sensitive_file_approved: false,
+                        user_reason: None,
                     });
                 } else {
                     approved.push(ApprovedTool {
@@ -416,6 +418,7 @@ impl AgentContext for CoreContext {
                         child_session_id: None,
                         allow_outside: false,
                         sensitive_file_approved: false,
+                        user_reason: None,
                     });
                 }
                 continue;
@@ -453,6 +456,7 @@ impl AgentContext for CoreContext {
                     child_session_id: None,
                     allow_outside: access_control.allow_outside_workspace_access,
                     sensitive_file_approved: access_control.allow_sensitive_file_access,
+                    user_reason: None,
                 });
                 continue;
             }

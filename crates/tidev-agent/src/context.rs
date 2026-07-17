@@ -65,6 +65,10 @@ pub struct ApprovedTool {
     pub allow_outside: bool,
     /// Whether this tool call is allowed to read sensitive files.
     pub sensitive_file_approved: bool,
+    /// An optional user-supplied reason attached during permission approval.
+    /// When set, the reason is incorporated into the rejection output or
+    /// passed along as context for why the tool was approved/rejected.
+    pub user_reason: Option<String>,
 }
 
 /// A tool call augmented with pre-computed violation info for the UI.

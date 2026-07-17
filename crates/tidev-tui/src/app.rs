@@ -146,8 +146,12 @@ pub struct App {
     /// allowlist for workspace boundary (canonical path → allowed).
     /// Uses prefix matching so allowing a directory allows all files under it.
     boundary_permissions: HashMap<String, bool>,
+    /// User-supplied reason for workspace boundary denials (path → reason).
+    boundary_reasons: HashMap<String, String>,
     /// allowlist for sensitive file access (canonical path → allowed).
     sensitive_permissions: HashMap<String, bool>,
+    /// User-supplied reason for sensitive file denials (path → reason).
+    sensitive_reasons: HashMap<String, String>,
 
     /// Token usage statistics from the last request (for status bar display).
     context_usage: Option<ContextUsage>,
@@ -235,7 +239,9 @@ impl App {
             tool_index: 0,
             approved_tools: Vec::new(),
             boundary_permissions: HashMap::new(),
+            boundary_reasons: HashMap::new(),
             sensitive_permissions: HashMap::new(),
+            sensitive_reasons: HashMap::new(),
             context_usage: None,
             context_usage_cache: HashMap::new(),
             toast: None,
@@ -688,15 +694,19 @@ impl App {
                     }
                     Some(false) => {
                         log::info!("Boundary path previously denied: {path_str}");
+                        let reason = self.boundary_reasons.remove(&path_str);
+                        let msg = if let Some(ref r) = reason {
+                            format!("Path '{}' was denied. Reason: {}", path_str, r)
+                        } else {
+                            format!("Path '{}' was denied by remembered boundary permission.", path_str)
+                        };
                         self.approved_tools.push(ApprovedTool {
                             tool_call: tc,
-                            rejection: Some(ToolExecutionResult::new(format!(
-                                "Path '{}' was denied by remembered boundary permission.",
-                                path_str
-                            ))),
+                            rejection: Some(ToolExecutionResult::new(msg)),
                             child_session_id: None,
                             allow_outside: false,
                             sensitive_file_approved: false,
+                            user_reason: None,
                         });
                         self.tool_index += 1;
                         continue;
@@ -726,15 +736,19 @@ impl App {
                     }
                     Some(false) => {
                         log::info!("Sensitive path previously denied: {path_str}");
+                        let reason = self.sensitive_reasons.remove(&path_str);
+                        let msg = if let Some(ref r) = reason {
+                            format!("Sensitive file '{}' was denied. Reason: {}", path_str, r)
+                        } else {
+                            format!("Sensitive file '{}' was denied by remembered permission.", path_str)
+                        };
                         self.approved_tools.push(ApprovedTool {
                             tool_call: tc,
-                            rejection: Some(ToolExecutionResult::new(format!(
-                                "Sensitive file '{}' was denied by remembered permission.",
-                                path_str
-                            ))),
+                            rejection: Some(ToolExecutionResult::new(msg)),
                             child_session_id: None,
                             allow_outside: false,
                             sensitive_file_approved: false,
+                            user_reason: None,
                         });
                         self.tool_index += 1;
                         continue;
@@ -774,6 +788,7 @@ impl App {
                             child_session_id: None,
                             allow_outside: false,
                             sensitive_file_approved: false,
+                            user_reason: None,
                         });
                         self.tool_index += 1;
                         continue;
@@ -839,6 +854,7 @@ impl App {
                     child_session_id: None,
                     allow_outside,
                     sensitive_file_approved: sensitive_approved,
+                    user_reason: None,
                 });
                 self.tool_index += 1;
                 continue;
@@ -2110,7 +2126,7 @@ impl App {
                 }
                 Action::Noop => {}
                 // ── Tool approval pipeline ──
-                Action::WorkspaceBoundaryResponse { path, decision } => {
+                Action::WorkspaceBoundaryResponse { path, decision, reason } => {
                     self.record_boundary_decision(&path, &decision);
 
                     // Resolve the tool's boundary flag based on decision
@@ -2118,35 +2134,53 @@ impl App {
                         decision,
                         BoundaryDecision::AllowOnce | BoundaryDecision::AllowUntilExit
                     );
+                    let path_str = path.to_string_lossy().to_string();
 
                     if self.tool_index < self.pending_tools.len() {
                         // Record the boundary approval in the tool's pending entry
                         // so process_next_tool can skip this check.
                         self.boundary_permissions.insert(
-                            path.to_string_lossy().to_string(),
+                            path_str.clone(),
                             allowed,
                         );
                     }
 
-                    self.process_next_tool();
-                }
-                Action::SensitiveFileResponse { path, decision } => {
-                    self.record_sensitive_decision(&path, &decision);
-
-                    if self.tool_index < self.pending_tools.len() {
-                        self.sensitive_permissions.insert(
-                            path.to_string_lossy().to_string(),
-                            matches!(
-                                decision,
-                                SensitiveFileDecision::AllowOnce
-                                    | SensitiveFileDecision::AllowUntilExit
-                            ),
-                        );
+                    // Store the reason for use in process_next_tool rejection message.
+                    if let Some(r) = reason {
+                        if !r.is_empty() {
+                            self.boundary_reasons.insert(path_str, r);
+                        }
                     }
 
                     self.process_next_tool();
                 }
-                Action::PermissionResponse { decision } => {
+                Action::SensitiveFileResponse { path, decision, reason } => {
+                    self.record_sensitive_decision(&path, &decision);
+
+                    let allowed = matches!(
+                        decision,
+                        SensitiveFileDecision::AllowOnce
+                            | SensitiveFileDecision::AllowUntilExit
+                    );
+                    let path_str = path.to_string_lossy().to_string();
+
+                    if self.tool_index < self.pending_tools.len() {
+                        self.sensitive_permissions.insert(
+                            path_str.clone(),
+                            allowed,
+                        );
+                    }
+
+                    // Store the reason for use in process_next_tool rejection message.
+                    if let Some(r) = reason {
+                        if !r.is_empty() {
+                            self.sensitive_reasons.insert(path_str, r);
+                        }
+                    }
+
+                    self.process_next_tool();
+                }
+                Action::PermissionResponse { decision, reason } => {
                     let allow = matches!(
                         decision,
                         PermissionDecision::Allow | PermissionDecision::AllowAndRemember
@@ -2196,10 +2230,15 @@ impl App {
                                     .unwrap_or(false),
                             )
                         } else {
-                            let msg = if remember {
+                            let base = if remember {
                                 format!("Tool '{}' was denied and remembered", twv.permission_label)
                             } else {
                                 format!("Tool '{}' was denied", twv.permission_label)
+                            };
+                            let msg = if let Some(ref r) = reason {
+                                format!("{}. Reason: {}", base, r)
+                            } else {
+                                base
                             };
                             (
                                 Some(ToolExecutionResult::new(msg)),
@@ -2220,6 +2259,7 @@ impl App {
                             child_session_id,
                             allow_outside,
                             sensitive_file_approved: sensitive_approved,
+                            user_reason: reason.clone(),
                         });
                     }
 
@@ -2242,6 +2282,7 @@ impl App {
                             child_session_id: None,
                             allow_outside: false,
                             sensitive_file_approved: false,
+                            user_reason: None,
                         });
                     }
 

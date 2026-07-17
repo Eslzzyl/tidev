@@ -1,23 +1,52 @@
 //! PermissionDialog — final approve / reject prompt for tool execution.
+//!
+//! Two-phase interaction:
+//! 1. **Select** — user chooses Allow/Deny (Y/N/R/X/Esc).
+//! 2. **Input** — if Deny was chosen, an optional reason may be typed.
+//!    Enter submits (reason may be empty), Esc returns to Select.
 
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
 use anyhow::Result;
 
+use unicode_width::UnicodeWidthStr;
+
 use crate::action::{Action, OverlayAction, OverlayKind, PermissionDecision};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
 use crate::utils::{centered_rect, pretty_tool_arguments};
+
+// ---------------------------------------------------------------------------
+// Phase
+// ---------------------------------------------------------------------------
+
+enum Phase {
+    /// Initial mode — user presses a decision key.
+    Select,
+    /// Reason input mode — user types a reason after pressing N/X.
+    Input {
+        reason: String,
+        /// The decision that triggered input (Deny or DenyAndRemember).
+        base_decision: PermissionDecision,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
 
 pub(crate) struct PermissionDialog {
     display_name: String,
     arguments: String,
     current_index: usize,
     total: usize,
+    phase: Phase,
+    /// Final decision + optional reason, set before Close.
     decision: Option<PermissionDecision>,
+    reason: Option<String>,
 }
 
 impl PermissionDialog {
@@ -33,7 +62,9 @@ impl PermissionDialog {
             arguments,
             current_index,
             total,
+            phase: Phase::Select,
             decision: None,
+            reason: None,
         }
     }
 
@@ -55,32 +86,104 @@ impl Component for PermissionDialog {
             return None;
         }
 
-        match key.code {
-            KeyCode::Char('y' | 'Y') => {
-                self.decision = Some(PermissionDecision::Allow);
-                Some(Action::Overlay(OverlayAction::Close(
-                    OverlayKind::PermissionDialog,
-                )))
+        match &self.phase {
+            Phase::Select => match key.code {
+                // Allow — no reason needed, close immediately.
+                KeyCode::Char('y' | 'Y') => {
+                    self.decision = Some(PermissionDecision::Allow);
+                    self.reason = None;
+                    Some(Action::Overlay(OverlayAction::Close(
+                        OverlayKind::PermissionDialog,
+                    )))
+                }
+                KeyCode::Char('r' | 'R') => {
+                    self.decision = Some(PermissionDecision::AllowAndRemember);
+                    self.reason = None;
+                    Some(Action::Overlay(OverlayAction::Close(
+                        OverlayKind::PermissionDialog,
+                    )))
+                }
+                // Deny — transition to reason input.
+                KeyCode::Char('n' | 'N') => {
+                    self.phase = Phase::Input {
+                        reason: String::new(),
+                        base_decision: PermissionDecision::Deny,
+                    };
+                    None
+                }
+                KeyCode::Char('x' | 'X') => {
+                    self.phase = Phase::Input {
+                        reason: String::new(),
+                        base_decision: PermissionDecision::DenyAndRemember,
+                    };
+                    None
+                }
+                // Esc in select mode → deny without reason.
+                KeyCode::Esc => {
+                    self.decision = Some(PermissionDecision::Deny);
+                    self.reason = None;
+                    Some(Action::Overlay(OverlayAction::Close(
+                        OverlayKind::PermissionDialog,
+                    )))
+                }
+                _ => None,
+            },
+            Phase::Input { reason, .. } => {
+                let mut reason = reason.clone();
+                match key.code {
+                    KeyCode::Enter
+                        if !key.modifiers.contains(KeyModifiers::SHIFT)
+                            && !key.modifiers.contains(KeyModifiers::ALT) =>
+                    {
+                        // Submit: use the base decision + reason.
+                        match &self.phase {
+                            Phase::Input { base_decision, .. } => {
+                                let final_reason = reason.trim().to_string();
+                                self.decision = Some(base_decision.clone());
+                                self.reason = if final_reason.is_empty() {
+                                    None
+                                } else {
+                                    Some(final_reason)
+                                };
+                            }
+                            _ => unreachable!(),
+                        }
+                        Some(Action::Overlay(OverlayAction::Close(
+                            OverlayKind::PermissionDialog,
+                        )))
+                    }
+                    KeyCode::Esc => {
+                        // Cancel: return to select mode, discard typed reason.
+                        self.phase = Phase::Select;
+                        self.decision = None;
+                        self.reason = None;
+                        None
+                    }
+                    KeyCode::Backspace => {
+                        reason.pop();
+                        self.phase = Phase::Input {
+                            reason,
+                            base_decision: match &self.phase {
+                                Phase::Input { base_decision, .. } => base_decision.clone(),
+                                _ => unreachable!(),
+                            },
+                        };
+                        None
+                    }
+                    KeyCode::Char(c) => {
+                        reason.push(c);
+                        self.phase = Phase::Input {
+                            reason,
+                            base_decision: match &self.phase {
+                                Phase::Input { base_decision, .. } => base_decision.clone(),
+                                _ => unreachable!(),
+                            },
+                        };
+                        None
+                    }
+                    _ => None,
+                }
             }
-            KeyCode::Char('r' | 'R') => {
-                self.decision = Some(PermissionDecision::AllowAndRemember);
-                Some(Action::Overlay(OverlayAction::Close(
-                    OverlayKind::PermissionDialog,
-                )))
-            }
-            KeyCode::Char('n' | 'N') | KeyCode::Esc => {
-                self.decision = Some(PermissionDecision::Deny);
-                Some(Action::Overlay(OverlayAction::Close(
-                    OverlayKind::PermissionDialog,
-                )))
-            }
-            KeyCode::Char('x' | 'X') => {
-                self.decision = Some(PermissionDecision::DenyAndRemember);
-                Some(Action::Overlay(OverlayAction::Close(
-                    OverlayKind::PermissionDialog,
-                )))
-            }
-            _ => None,
         }
     }
 
@@ -88,7 +191,8 @@ impl Component for PermissionDialog {
         match action {
             Action::Overlay(OverlayAction::Close(OverlayKind::PermissionDialog)) => {
                 if let Some(decision) = self.decision.take() {
-                    vec![Action::PermissionResponse { decision }]
+                    let reason = self.reason.take();
+                    vec![Action::PermissionResponse { decision, reason }]
                 } else {
                     vec![]
                 }
@@ -101,82 +205,171 @@ impl Component for PermissionDialog {
         let palette = ctx.palette;
         let preview = pretty_tool_arguments(&self.arguments);
         let preview_height = preview.lines().count().min(8) as u16;
-        let overlay = centered_rect(rect.width.min(96), preview_height.saturating_add(10), rect);
-        frame.render_widget(Clear, overlay);
 
-        let block = Block::default().style(Style::default().bg(palette.panel_alt));
-        frame.render_widget(block, overlay);
+        match &self.phase {
+            Phase::Select => {
+                let overlay = centered_rect(
+                    rect.width,
+                    preview_height.saturating_add(10),
+                    rect,
+                );
+                frame.render_widget(Clear, overlay);
 
-        let inner = overlay.inner(Margin {
-            horizontal: 1,
-            vertical: 1,
-        });
+                let block = Block::default().style(Style::default().bg(palette.panel_alt));
+                frame.render_widget(block, overlay);
 
-        let sections = Layout::vertical([
-            Constraint::Length(1),
-            Constraint::Length(2),
-            Constraint::Length(2),
-            Constraint::Min(4),
-            Constraint::Length(2),
-        ])
-        .split(inner);
+                let inner = overlay.inner(Margin {
+                    horizontal: 1,
+                    vertical: 1,
+                });
 
-        // Title bar
-        frame.render_widget(
-            Paragraph::new(Line::from(vec![Span::styled(
-                " Tool approval ",
-                Style::default()
-                    .fg(palette.accent)
-                    .add_modifier(Modifier::BOLD),
-            )]))
-            .style(Style::default().bg(palette.panel_alt)),
-            sections[0],
-        );
+                let sections = Layout::vertical([
+                    Constraint::Length(1),
+                    Constraint::Length(2),
+                    Constraint::Length(2),
+                    Constraint::Min(4),
+                    Constraint::Length(2),
+                ])
+                .split(inner);
 
-        // Title
-        frame.render_widget(
-            Paragraph::new(self.title())
-                .alignment(ratatui::layout::Alignment::Center)
-                .style(
-                    Style::default()
-                        .bg(palette.panel_alt)
-                        .fg(palette.text)
-                        .add_modifier(Modifier::BOLD),
-                ),
-            sections[1],
-        );
+                // Title bar
+                frame.render_widget(
+                    Paragraph::new(Line::from(vec![Span::styled(
+                        " Tool approval ",
+                        Style::default()
+                            .fg(palette.accent)
+                            .add_modifier(Modifier::BOLD),
+                    )]))
+                    .style(Style::default().bg(palette.panel_alt)),
+                    sections[0],
+                );
 
-        // Warning text
-        frame.render_widget(
-            Paragraph::new(
-                "This tool can change state. Review the arguments and choose whether to allow it.",
-            )
-            .alignment(ratatui::layout::Alignment::Center)
-            .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
-            sections[2],
-        );
+                // Title
+                frame.render_widget(
+                    Paragraph::new(self.title())
+                        .alignment(ratatui::layout::Alignment::Center)
+                        .style(
+                            Style::default()
+                                .bg(palette.panel_alt)
+                                .fg(palette.text)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    sections[1],
+                );
 
-        // Tool arguments preview
-        frame.render_widget(
-            Paragraph::new(preview)
-                .style(Style::default().bg(palette.panel_alt).fg(palette.text))
-                .wrap(Wrap { trim: false }),
-            sections[3],
-        );
+                // Warning text
+                frame.render_widget(
+                    Paragraph::new(
+                        "This tool can change state. Review the arguments and choose whether to allow it.",
+                    )
+                    .alignment(ratatui::layout::Alignment::Center)
+                    .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
+                    sections[2],
+                );
 
-        // Help / action hints
-        frame.render_widget(
-            Paragraph::new(
-                "Y allow · N deny · R allow and remember · X deny and remember · Esc deny",
-            )
-            .alignment(ratatui::layout::Alignment::Center)
-            .style(
-                Style::default()
-                    .bg(palette.panel_alt)
-                    .fg(palette.accent_soft),
-            ),
-            sections[4],
-        );
+                // Tool arguments preview
+                frame.render_widget(
+                    Paragraph::new(preview)
+                        .style(Style::default().bg(palette.panel_alt).fg(palette.text))
+                        .wrap(Wrap { trim: false }),
+                    sections[3],
+                );
+
+                // Help / action hints
+                frame.render_widget(
+                    Paragraph::new(
+                        "Y allow · N deny (with reason) · R allow and remember · X deny and remember · Esc",
+                    )
+                    .alignment(ratatui::layout::Alignment::Center)
+                    .style(
+                        Style::default()
+                            .bg(palette.panel_alt)
+                            .fg(palette.accent_soft),
+                    ),
+                    sections[4],
+                );
+            }
+            Phase::Input { reason, .. } => {
+                let overlay = centered_rect(
+                    rect.width,
+                    preview_height.saturating_add(10),
+                    rect,
+                );
+                frame.render_widget(Clear, overlay);
+
+                let block = Block::default().style(Style::default().bg(palette.panel_alt));
+                frame.render_widget(block, overlay);
+
+                let inner = overlay.inner(Margin {
+                    horizontal: 1,
+                    vertical: 1,
+                });
+
+                let sections = Layout::vertical([
+                    Constraint::Length(1),
+                    Constraint::Length(2),
+                    Constraint::Length(1),
+                    Constraint::Length(3),
+                    Constraint::Length(2),
+                ])
+                .split(inner);
+
+                // Title bar
+                frame.render_widget(
+                    Paragraph::new(Line::from(vec![Span::styled(
+                        " Reason (optional) ",
+                        Style::default()
+                            .fg(palette.accent)
+                            .add_modifier(Modifier::BOLD),
+                    )]))
+                    .style(Style::default().bg(palette.panel_alt)),
+                    sections[0],
+                );
+
+                // Title
+                frame.render_widget(
+                    Paragraph::new(self.title())
+                        .alignment(ratatui::layout::Alignment::Center)
+                        .style(
+                            Style::default()
+                                .bg(palette.panel_alt)
+                                .fg(palette.text)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    sections[1],
+                );
+
+                // Input field
+                let input_style = Style::default()
+                    .bg(palette.background)
+                    .fg(palette.text);
+                frame.render_widget(
+                    Paragraph::new(reason.clone())
+                        .style(input_style)
+                        .wrap(Wrap { trim: false }),
+                    sections[3],
+                );
+                let text_w = UnicodeWidthStr::width(reason.as_str()) as u16;
+                let col = text_w % sections[3].width;
+                let row = text_w / sections[3].width;
+                frame.set_cursor_position((
+                    sections[3].x + col,
+                    sections[3].y + row,
+                ));
+
+                // Help
+                frame.render_widget(
+                    Paragraph::new("Enter confirm · Esc cancel")
+                        .alignment(ratatui::layout::Alignment::Center)
+                        .style(
+                            Style::default()
+                                .bg(palette.panel_alt)
+                                .fg(palette.accent_soft),
+                        ),
+                    sections[4],
+                );
+            }
+        }
     }
 
     fn is_overlay(&self) -> bool {

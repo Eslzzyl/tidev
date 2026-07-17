@@ -200,18 +200,24 @@ pub(crate) enum Action {
 
     // ── Tool approval pipeline ──
     /// Result from a WorkspaceBoundaryDialog.
+    /// `reason` is an optional user-supplied text attached when denying.
     WorkspaceBoundaryResponse {
         path: PathBuf,
         decision: BoundaryDecision,
+        reason: Option<String>,
     },
     /// Result from a SensitiveFileDialog.
+    /// `reason` is an optional user-supplied text attached when denying.
     SensitiveFileResponse {
         path: PathBuf,
         decision: SensitiveFileDecision,
+        reason: Option<String>,
     },
     /// Result from a PermissionDialog (final approve / reject).
+    /// `reason` is an optional user-supplied text attached when denying.
     PermissionResponse {
         decision: PermissionDecision,
+        reason: Option<String>,
     },
     /// Result from a QuestionDialog.
     /// `None` means the dialog was dismissed (rejected).
