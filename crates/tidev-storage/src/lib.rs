@@ -10,6 +10,7 @@ pub mod schema;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Duration, Utc};
+use rayon::prelude::*;
 use rusqlite::{Connection, OptionalExtension, named_params, params, params_from_iter, types::Type};
 use std::{
     fs,
@@ -59,6 +60,107 @@ impl Clone for SessionStore {
 
 fn parse_datetime(value: &str) -> std::result::Result<DateTime<Utc>, chrono::ParseError> {
     Ok(DateTime::parse_from_rfc3339(value)?.with_timezone(&Utc))
+}
+
+/// Raw per-row data from the messages table, collected before
+/// any CPU-intensive decompression or JSON parsing.
+///
+/// Phase 1 of [`SessionStore::load_messages`] populates this from SQLite;
+/// Phase 2 processes rows in parallel via rayon.
+struct RawMessageRow {
+    id: String,
+    role: String,
+    content: Vec<u8>,
+    attachments: String,
+    reasoning: Vec<u8>,
+    tool_calls: Vec<u8>,
+    tool_call_id: Option<String>,
+    tool_name: Option<String>,
+    metadata: Vec<u8>,
+    created_at: String,
+    completed_at: Option<String>,
+    streaming: bool,
+    input_tokens: Option<i64>,
+    output_tokens: Option<i64>,
+    total_tokens: Option<i64>,
+    cache_read_tokens: Option<i64>,
+    cache_write_tokens: Option<i64>,
+    model_id: Option<String>,
+    tokens_per_second: Option<f64>,
+    snapshot_hash: Option<String>,
+    patch_files: Vec<u8>,
+    file_diffs: Vec<u8>,
+    mode: Option<String>,
+    thinking_level: Option<String>,
+}
+
+impl RawMessageRow {
+    /// Decompress zstd blobs, parse JSON, and build a [`Message`].
+    fn decompress_and_parse(self) -> Message {
+        // If role is empty, return a default message
+        // (mirrors original early-return for corrupt rows).
+        if self.role.is_empty() {
+            return Message::new(MessageRole::User, "");
+        }
+
+        let metadata: tidev_types::message::ToolMetadata =
+            serde_json::from_str(&decompress_text(&self.metadata)).unwrap_or_default();
+
+        let content = decompress_text(&self.content);
+
+        let attachments: Vec<tidev_types::message::MessageAttachment> =
+            serde_json::from_str(&self.attachments).unwrap_or_default();
+
+        let reasoning = decompress_text(&self.reasoning);
+
+        let tool_calls: Vec<tidev_types::message::ToolCall> =
+            serde_json::from_str(&decompress_text(&self.tool_calls)).unwrap_or_default();
+
+        let patch_files = (!self.patch_files.is_empty())
+            .then(|| decompress_text(&self.patch_files));
+
+        let file_diffs = (!self.file_diffs.is_empty())
+            .then(|| decompress_text(&self.file_diffs));
+
+        let mode = self.mode.and_then(|m| serde_json::from_str(&m).ok());
+
+        let thinking_level = self
+            .thinking_level
+            .and_then(|t| serde_json::from_str(&t).ok());
+
+        Message {
+            id: Uuid::parse_str(&self.id).unwrap_or_default(),
+            role: MessageRole::from_db_value(&self.role),
+            content,
+            attachments,
+            reasoning,
+            tool_calls,
+            tool_call_id: self.tool_call_id,
+            tool_name: self.tool_name,
+            metadata,
+            created_at: DateTime::parse_from_rfc3339(&self.created_at)
+                .map(|dt| dt.with_timezone(&Utc))
+                .unwrap_or_default(),
+            completed_at: self.completed_at.and_then(|s| {
+                DateTime::parse_from_rfc3339(&s)
+                    .ok()
+                    .map(|dt| dt.with_timezone(&Utc))
+            }),
+            streaming: self.streaming,
+            input_tokens: self.input_tokens.map(|v| v as u32),
+            output_tokens: self.output_tokens.map(|v| v as u32),
+            total_tokens: self.total_tokens.map(|v| v as u32),
+            cache_read_tokens: self.cache_read_tokens.map(|v| v as u32),
+            cache_write_tokens: self.cache_write_tokens.map(|v| v as u32),
+            model_id: self.model_id,
+            tokens_per_second: self.tokens_per_second.map(|v| v as f32),
+            snapshot_hash: self.snapshot_hash,
+            patch_files,
+            file_diffs,
+            mode,
+            thinking_level,
+        }
+    }
 }
 
 impl SessionStore {
@@ -1002,6 +1104,10 @@ impl SessionStore {
     }
 
     /// Load all messages for a session, ordered by creation time.
+    ///
+    /// **Phase 1** — collect raw column data from SQLite (fast, serial).
+    /// **Phase 2** — decompress zstd blobs and parse JSON in parallel via
+    /// rayon, utilising all available CPU cores for these CPU-bound steps.
     pub fn load_messages(&self, session_id: Uuid) -> Result<Vec<Message>> {
         self.read(|conn| {
             let mut stmt = conn.prepare(
@@ -1011,92 +1117,50 @@ impl SessionStore {
              tokens_per_second, snapshot_hash, patch_files, file_diffs, mode, thinking_level \
              FROM messages WHERE session_id = ?1 ORDER BY created_at ASC",
             )?;
-            let rows = stmt.query_map(params![session_id.to_string()], |row| {
-                let role_str: String = match row.get(1) {
-                    Ok(s) => s,
-                    Err(_) => return Ok(Message::new(MessageRole::User, "")),
-                };
-                let metadata_raw: Vec<u8> = row.get(8).unwrap_or_default();
-                let metadata: tidev_types::message::ToolMetadata =
-                    serde_json::from_str(&decompress_text(&metadata_raw)).unwrap_or_default();
 
-                let content = row
-                    .get::<_, Vec<u8>>(2)
-                    .map(|b| decompress_text(&b))
-                    .unwrap_or_else(|_| row.get::<_, String>(2).unwrap_or_default());
+            // ── Phase 1: collect raw rows (no decompression) ──────────
+            let raw_rows: Vec<RawMessageRow> = {
+                let rows = stmt.query_map(params![session_id.to_string()], |row| {
+                    Ok(RawMessageRow {
+                        id: row.get::<_, String>(0).unwrap_or_default(),
+                        role: row.get::<_, String>(1).unwrap_or_default(),
+                        content: row.get::<_, Vec<u8>>(2).unwrap_or_default(),
+                        attachments: row.get::<_, String>(3).unwrap_or_default(),
+                        reasoning: row.get::<_, Vec<u8>>(4).unwrap_or_default(),
+                        tool_calls: row.get::<_, Vec<u8>>(5).unwrap_or_default(),
+                        tool_call_id: row.get(6).ok().flatten(),
+                        tool_name: row.get(7).ok().flatten(),
+                        metadata: row.get::<_, Vec<u8>>(8).unwrap_or_default(),
+                        created_at: row.get::<_, String>(9).unwrap_or_default(),
+                        completed_at: row.get(10).ok().flatten(),
+                        streaming: row.get::<_, i64>(11).unwrap_or(0) != 0,
+                        input_tokens: row.get(12).ok().flatten(),
+                        output_tokens: row.get(13).ok().flatten(),
+                        total_tokens: row.get(14).ok().flatten(),
+                        cache_read_tokens: row.get(15).ok().flatten(),
+                        cache_write_tokens: row.get(16).ok().flatten(),
+                        model_id: row.get(17).ok().flatten(),
+                        tokens_per_second: row.get(18).ok().flatten(),
+                        snapshot_hash: row.get(19).ok().flatten(),
+                        patch_files: row.get::<_, Vec<u8>>(20).unwrap_or_default(),
+                        file_diffs: row.get::<_, Vec<u8>>(21).unwrap_or_default(),
+                        mode: row.get(22).ok().flatten(),
+                        thinking_level: row.get(23).ok().flatten(),
+                    })
+                })?;
+                let mut raw = Vec::new();
+                for row in rows {
+                    raw.push(row?);
+                }
+                raw
+            };
 
-                let attachments_raw: String = row.get(3).unwrap_or_default();
-                let attachments: Vec<tidev_types::message::MessageAttachment> =
-                    serde_json::from_str(&attachments_raw).unwrap_or_default();
+            // ── Phase 2: parallel decompress and parse ───────────────
+            let messages: Vec<Message> = raw_rows
+                .into_par_iter()
+                .map(|raw| raw.decompress_and_parse())
+                .collect();
 
-                let completed_at: Option<String> = row.get(10).ok().flatten();
-                let streaming: bool = row.get::<_, i64>(11).unwrap_or(0) != 0;
-
-                let reasoning = row
-                    .get::<_, Vec<u8>>(4)
-                    .map(|b| decompress_text(&b))
-                    .unwrap_or_default();
-
-                let tool_calls_json = row
-                    .get::<_, Vec<u8>>(5)
-                    .map(|b| decompress_text(&b))
-                    .unwrap_or_else(|_| "[]".to_string());
-
-                let patch_files = row
-                    .get::<_, Vec<u8>>(20)
-                    .ok()
-                    .filter(|b| !b.is_empty())
-                    .map(|b| decompress_text(&b));
-
-                let file_diffs = row
-                    .get::<_, Vec<u8>>(21)
-                    .ok()
-                    .filter(|b| !b.is_empty())
-                    .map(|b| decompress_text(&b));
-
-                let mode: Option<String> = row.get(22).ok().flatten();
-                let thinking_level: Option<String> = row.get(23).ok().flatten();
-
-                Ok(Message {
-                    id: Uuid::parse_str(&row.get::<_, String>(0).unwrap_or_default())
-                        .unwrap_or_default(),
-                    role: MessageRole::from_db_value(&role_str),
-                    content,
-                    attachments,
-                    reasoning,
-                    tool_calls: serde_json::from_str(&tool_calls_json).unwrap_or_default(),
-                    tool_call_id: row.get(6).ok().flatten(),
-                    tool_name: row.get(7).ok().flatten(),
-                    metadata,
-                    created_at: DateTime::parse_from_rfc3339(
-                        &row.get::<_, String>(9).unwrap_or_default(),
-                    )
-                    .map(|dt| dt.with_timezone(&Utc))
-                    .unwrap_or_default(),
-                    completed_at: completed_at.and_then(|s| {
-                        DateTime::parse_from_rfc3339(&s)
-                            .ok()
-                            .map(|dt| dt.with_timezone(&Utc))
-                    }),
-                    streaming,
-                    input_tokens: row.get(12).ok().flatten(),
-                    output_tokens: row.get(13).ok().flatten(),
-                    total_tokens: row.get(14).ok().flatten(),
-                    cache_read_tokens: row.get(15).ok().flatten(),
-                    cache_write_tokens: row.get(16).ok().flatten(),
-                    model_id: row.get(17).ok().flatten(),
-                    tokens_per_second: row.get(18).ok().flatten(),
-                    snapshot_hash: row.get(19).ok().flatten(),
-                    patch_files,
-                    file_diffs,
-                    mode: mode.and_then(|m| serde_json::from_str(&m).ok()),
-                    thinking_level: thinking_level.and_then(|t| serde_json::from_str(&t).ok()),
-                })
-            })?;
-            let mut messages = Vec::new();
-            for row in rows {
-                messages.push(row?);
-            }
             Ok(messages)
         })
     }

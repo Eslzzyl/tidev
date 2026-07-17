@@ -532,6 +532,20 @@ impl Runtime {
         }
     }
 
+    /// Set the in-memory [`MessageBuffer`] for a session with pre-loaded messages.
+    ///
+    /// Avoids a redundant DB read when the caller already has the messages
+    /// in hand (e.g., after loading them for the UI).
+    pub async fn set_message_buffer(&self, session_id: Uuid, messages: Vec<Message>) {
+        let mut bufs = self.buffers.lock().await;
+        if let Some(buf) = bufs.get(&session_id) {
+            buf.write().await.replace_all(messages);
+        } else {
+            let buf = Arc::new(RwLock::new(MessageBuffer::new(messages)));
+            bufs.insert(session_id, buf);
+        }
+    }
+
     /// Build [`CoreContext`] + [`AgentLoopConfig`] and spawn the agent loop.
     async fn start_agent_loop(&self, session_id: Uuid, mode: SessionMode) -> Result<()> {
         // Create a fresh cancellation token for this loop — retired on cancel().

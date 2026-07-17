@@ -1646,11 +1646,14 @@ impl App {
                             }
 
                             // Refresh the Runtime's in-memory message buffer.
-                            let rt = self.runtime.clone();
-                            let sid = session_id;
-                            tokio::spawn(async move {
-                                rt.reload_message_buffer(sid).await;
-                            });
+                            // Use the already-cached messages to avoid a redundant DB read.
+                            if let Some(ctx) = chat.active_chat_context() {
+                                let buf_messages = ctx.messages.clone();
+                                let rt = self.runtime.clone();
+                                tokio::spawn(async move {
+                                    rt.set_message_buffer(session_id, buf_messages).await;
+                                });
+                            }
 
                             log::info!("Switching to session: existing context (fast path)");
 
@@ -1701,10 +1704,12 @@ impl App {
 
                     // Refresh the Runtime's in-memory message buffer so the
                     // next submit_prompt picks up the latest data from the store.
+                    // Use the already-loaded messages to avoid a redundant DB read.
                     let rt = self.runtime.clone();
                     let sid = session_id;
+                    let buf_messages = messages.clone();
                     tokio::spawn(async move {
-                        rt.reload_message_buffer(sid).await;
+                        rt.set_message_buffer(sid, buf_messages).await;
                     });
 
                     let chat_context = {
