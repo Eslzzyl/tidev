@@ -57,6 +57,9 @@ pub(crate) struct MessagePanel {
     selected_index: usize,
     messages: Vec<MessagePanelMessage>,
     query: String,
+    /// When set, closing the panel will also emit a ScrollTo for this message.
+    /// Set by Enter / mouse-click, NOT by Esc.
+    pending_scroll_id: Option<Uuid>,
 }
 
 impl MessagePanel {
@@ -65,6 +68,7 @@ impl MessagePanel {
             selected_index: 0,
             messages,
             query: String::new(),
+            pending_scroll_id: None,
         }
     }
 
@@ -137,13 +141,9 @@ impl Component for MessagePanel {
                 None
             }
             KeyCode::Enter => {
-                if let Some(_message) = self.selected_message() {
+                if let Some(message) = self.selected_message() {
+                    self.pending_scroll_id = Some(message.message_id);
                     let close = Action::Overlay(OverlayAction::Close(OverlayKind::MessagePanel));
-                    // Return Close first so it's popped; ScrollTo will be processed
-                    // after Close (stack order: Close then ScrollTo for queue pop).
-                    // But we can only return ONE action from handle_key_event.
-                    // Use Close action; App's close_overlay will call our update()
-                    // which returns the ScrollTo action.
                     Some(close)
                 } else {
                     None
@@ -171,6 +171,7 @@ impl Component for MessagePanel {
                     )))
             }
             KeyCode::Esc | KeyCode::Char('q') => {
+                self.pending_scroll_id = None;
                 Some(Action::Overlay(OverlayAction::Close(OverlayKind::MessagePanel)))
             }
             KeyCode::Backspace => {
@@ -226,7 +227,8 @@ impl Component for MessagePanel {
                 if row < matches.len() {
                     self.selected_index = row;
                     // Same as Enter on selected message
-                    if self.selected_message().is_some() {
+                    if let Some(message) = self.selected_message() {
+                        self.pending_scroll_id = Some(message.message_id);
                         let close =
                             Action::Overlay(OverlayAction::Close(OverlayKind::MessagePanel));
                         return Some(close);
@@ -240,13 +242,12 @@ impl Component for MessagePanel {
 
     fn update(&mut self, action: &Action, _ctx: &UpdateContext) -> Vec<Action> {
         match action {
-            // When Enter closes the panel, also emit ScrollTo to jump to the message
+            // When Enter / mouse-click closes the panel, also emit ScrollTo to jump
+            // to the message. Esc closes without scrolling (pending_scroll_id is None).
             Action::Overlay(OverlayAction::Close(OverlayKind::MessagePanel)) => {
-                if let Some(message) = self.selected_message() {
-                    vec![Action::Chat(ChatAction::ScrollTo(message.message_id))]
-                } else {
-                    vec![]
-                }
+                let scroll = self.pending_scroll_id.take()
+                    .map(|id| Action::Chat(ChatAction::ScrollTo(id)));
+                scroll.into_iter().collect()
             }
             _ => vec![],
         }

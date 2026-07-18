@@ -830,36 +830,12 @@ impl MessageList {
     }
 
     /// Calculate the scroll offset that brings a specific message into view.
+    ///
+    /// Uses the layout index (which has accurate line counts from the actual
+    /// rendering pipeline) instead of computing a simplified line-count formula
+    /// that would be wrong for word-wrapped / tool-call-heavy content.
     fn resolve_scroll_to_message(&self, messages: &[tidev_types::message::Message], target_id: uuid::Uuid) -> Option<usize> {
-        let mut offset = 0usize;
-        let mut i = 0;
-        while i < messages.len() {
-            if messages[i].id == target_id {
-                return Some(offset);
-            }
-            let count = if messages[i].role == tidev_types::message::MessageRole::Assistant {
-                let mut c = 1;
-                while i + c < messages.len()
-                    && messages[i + c].role == tidev_types::message::MessageRole::Tool
-                {
-                    c += 1;
-                }
-                c
-            } else {
-                1
-            };
-            let line_count = match messages[i].role {
-                tidev_types::message::MessageRole::Tool => 0,
-                _ => {
-                    let content_lines = messages[i].content.lines().count().max(1);
-                    let tool_lines = messages[i].tool_calls.len().saturating_mul(3);
-                    2 + content_lines + tool_lines
-                }
-            };
-            offset += line_count;
-            i += count;
-        }
-        None
+        self.layout_index.find_scroll_offset(messages, target_id)
     }
 }
 

@@ -6,6 +6,7 @@
 //! 2. Incremental updates when only the last few messages change
 //! 3. Accurate scroll position calculations
 
+use tidev_types::message::Message;
 use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
@@ -115,6 +116,23 @@ impl MessageLayoutIndex {
         if !self.dirty_messages.contains(&message_id) {
             self.dirty_messages.push(message_id);
         }
+    }
+
+    /// Find the scroll offset (start_line) for the block containing the given message.
+    ///
+    /// Uses the messages slice to correctly handle Assistant+Tool blocks where the
+    /// target might be a Tool message rather than the primary (Assistant) message.
+    /// Returns `None` if the message is not found or the index is empty.
+    pub fn find_scroll_offset(&self, messages: &[Message], target_id: Uuid) -> Option<usize> {
+        for block in &self.blocks {
+            let end_idx = block.message_start_idx + block.message_count;
+            for msg in messages[block.message_start_idx..end_idx].iter() {
+                if msg.id == target_id {
+                    return Some(block.start_line);
+                }
+            }
+        }
+        None
     }
 
     /// Find message blocks that intersect with the visible viewport.
