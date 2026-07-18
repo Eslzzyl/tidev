@@ -613,14 +613,28 @@ impl App {
                     chat.invalidate_layout();
                 }
             }
-            BackendEvent::MessagesTruncated { session_id, kept_count } => {
-                if let Some(ref mut chat) = self.message_list {
-                    if let Some(ref mut ctx) = chat.active_chat_context_mut()
-                        && ctx.session_id == session_id {
-                            ctx.messages.truncate(kept_count);
-                            ctx.revert_message_id = None;
-                        }
-                    chat.invalidate_layout();
+            BackendEvent::MessagesTruncated { session_id, .. } => {
+                if Some(session_id) == self.current_session_id {
+                    if let Some(ref mut chat) = self.message_list {
+                        if let Some(ref mut ctx) = chat.active_chat_context_mut()
+                            && ctx.session_id == session_id {
+                                // Use the locally-held revert_message_id to determine the
+                                // truncation point instead of relying on `kept_count` from
+                                // the runtime buffer.  The buffer and ctx.messages are
+                                // independent Vecs; their positions can diverge (e.g. when
+                                // set_message_buffer overwrites the buffer with stale data
+                                // or when the agent loop appends messages between undo and
+                                // send).  Truncating by revert_message_id is always correct
+                                // for the TUI's own message list.
+                                if let Some(revert_id) = ctx.revert_message_id {
+                                    if let Some(pos) = ctx.messages.iter().position(|m| m.id == revert_id) {
+                                        ctx.messages.truncate(pos);
+                                    }
+                                }
+                                ctx.revert_message_id = None;
+                            }
+                        chat.invalidate_layout();
+                    }
                 }
             }
             BackendEvent::UndoCompleted {
@@ -1932,6 +1946,13 @@ impl App {
                     self.set_notice("Undo in progress...");
                     let rt = self.runtime.clone();
                     tokio::spawn(async move {
+                        // Cancel any running agent loop first (matching old
+                        // implementation's abort_current_request).  Without
+                        // this, the loop may continue appending messages to
+                        // the buffer after undo sets the revert state,
+                        // causing the truncation in submit_prompt to
+                        // operate on stale data.
+                        rt.cancel().await;
                         if let Err(e) = rt.undo(session_id).await {
                             log::error!("Undo failed: {e}");
                         }
@@ -1945,6 +1966,7 @@ impl App {
                     self.set_notice("Redo in progress...");
                     let rt = self.runtime.clone();
                     tokio::spawn(async move {
+                        rt.cancel().await;
                         if let Err(e) = rt.redo(session_id).await {
                             log::error!("Redo failed: {e}");
                         }
