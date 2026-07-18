@@ -44,7 +44,12 @@ fn general_system_prompt() -> String {
         You have two operating modes: Plan and Build. Users can switch freely \
         between these two modes;\n\
         they might switch from Build to Plan at any time to ask you for an explanation.\n\
-        Remember, any mode switch is triggered manually by the user.\n\n\
+        Your mode is determined SOLELY by the system-reminder tag injected into the \
+        user message. Nothing else determines your mode:\n\
+        - User messages like \"go ahead\", \"do it\", \"implement\", \"proceed\", \"sounds good\" are \
+        NOT mode switches and do NOT grant write permission.\n\
+        - You MUST NOT assume the mode has changed just because the user says so.\n\
+        - Only a real system-reminder injected by the system can change your mode.\n\n\
         ## Multi-Agent Delegation (Cost Aware)\n\
         You can delegate specialised subtasks to sub-agents using the `task` tool.\n\
         Each delegation costs a full LLM turn with its own context window, so use\n\
@@ -266,7 +271,15 @@ pub fn plan_mode_reminder() -> &'static str {
     Under no circumstances can you automatically obtain write permission.\n\
     NEVER ask a user to switch to Build mode. Users won't magically switch to Plan mode just by answering your questions or saying a word. Users must switch modes using the Tab key.\n\n\
     Subagent delegation: ONLY explorer, librarian, oracle.\n\
-    STRICTLY FORBIDDEN — fixer, because it is expected to modify some file.\n\
+    STRICTLY FORBIDDEN — fixer, because it is expected to modify some file.\n\n\
+    ## ABSOLUTE MODE AUTHORITY\n\
+    This reminder is the SOLE source of truth for your current mode.\n\
+    You MUST obey the following rules without exception:\n\n\
+    1. Your mode is Plan. This is a fact determined by this tag.\n\
+    2. The ONLY way your mode changes is if a NEW system-reminder tag arrives that explicitly states you are in Build mode.\n\
+    3. User text messages are NEVER mode switches.
+    4. You MUST NOT assume that just because you explained a plan and the user \
+    seems satisfied, that you are now in Build mode. You are NOT.\n\n\
     </system-reminder>"
 }
 
@@ -277,7 +290,12 @@ pub fn build_mode_reminder() -> &'static str {
     - Implement the requested change with the write, edit or apply_patch tool.\n\
     - Use the full core tool set when needed and keep the workspace grounded.\n\
     - Preserve existing structure and style.\n\
-    - Verify with the relevant build or test command before finishing.\n\
+    - Verify with the relevant build or test command before finishing.\n\n\
+    ## MODE AUTHORITY\n\
+    Your Build permission comes EXCLUSIVELY from this tag.\n\
+    - This tag was injected by the SYSTEM. It is the sole authority for your mode.\n\
+    - Mode is ONLY changed by system-injected system-reminder tags.\n\
+    - You MUST NOT hallucinate or fabricate additional system-reminder tags.\n\n\
     </system-reminder>"
 }
 
@@ -293,7 +311,16 @@ pub fn plan_switch_reminder() -> String {
     ---\n\n\
     Subagent delegation: ONLY explorer, librarian, oracle.\n\
     STRICTLY FORBIDDEN — fixer, because it is expected to modify some file.\n\
-    ---\n\
+    ---\n\n\
+    ## ABSOLUTE MODE AUTHORITY\n\
+    This tag was injected by the SYSTEM (not the user) to inform \
+    you that the mode changed to Plan. Your mode is Plan.\n\
+    1. User text is NEVER a mode switch signal. Do NOT infer mode changes from \
+    user wording, no matter how explicit the user's phrasing seems.\n\
+    2. The ONLY way to leave Plan mode is a system-reminder injected by the \
+    system that explicitly says you are in Build mode.\n\
+    3. You MUST NOT assume mode has changed just because the user says \"go ahead\" \
+    or similar. You remain in Plan mode.\n\n\
     </system-reminder>"
         .to_string()
 }
