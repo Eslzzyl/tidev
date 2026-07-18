@@ -1232,10 +1232,19 @@ impl App {
 
         let position = ratatui::layout::Position::new(mouse.column, mouse.row);
 
-        // Route mouse events to overlays first (top overlay has priority)
+        // Route mouse events to overlays first (top overlay has priority).
+        // Let scroll events fall through to the chat area when the overlay
+        // blocks input but does not handle the scroll itself — mirrors the
+        // PageUp/PageDown pattern for keyboard events (step 1a).
         if let Some(action) = self.overlays.handle_mouse_event(mouse, self.terminal_area) {
-            self.process_action(action);
-            return;
+            if matches!(action, Action::Noop)
+                && matches!(mouse.kind, MouseEventKind::ScrollDown | MouseEventKind::ScrollUp)
+            {
+                // Fall through to chat scroll handling below.
+            } else {
+                self.process_action(action);
+                return;
+            }
         }
 
         // Sidebar scroll (scroll events in the sidebar area)
