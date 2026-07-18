@@ -233,11 +233,20 @@ impl Tui {
             }
             flush_delta(&mut cd_delta, &mut cd_reasoning, app);
 
-            // 2b. Tool permission requests.
+            // 2c. Tool permission requests.
             if let Some(ref mut rx) = request_rx {
                 while let Ok(request) = rx.try_recv() {
                     app.handle_tui_request(request);
                 }
+            }
+
+            // ── Phase 2.5: Fallback flush for pending prompts ─────────
+            //
+            // If the agent loop stopped without sending StreamEnd (e.g.
+            // cancelled via Esc), loop_busy becomes false but no event
+            // triggers flush_pending_prompt_queue.  Check every frame.
+            if app.has_pending_prompts() && !app.runtime.is_busy() {
+                app.flush_pending_prompt_queue();
             }
 
             if app.should_quit() {

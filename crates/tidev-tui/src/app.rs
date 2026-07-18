@@ -380,8 +380,24 @@ impl App {
         self.set_notice("Request cancelled");
     }
 
+    pub(crate) fn has_pending_prompts(&self) -> bool {
+        !self.pending_prompt_queue.is_empty()
+    }
+
     /// Submit queued prompts now that the current request has finished.
-    fn flush_pending_prompt_queue(&mut self) {
+    ///
+    /// Only actually submits when the agent loop is not running — if the loop
+    /// is still busy (e.g. executing tools for the current turn), the message
+    /// would get queued in the runtime and never picked up because the loop
+    /// is about to exit.
+    pub(crate) fn flush_pending_prompt_queue(&mut self) {
+        // Don't flush if the agent loop is still running — the message would
+        // end up in the runtime's queued_messages without a running loop to
+        // consume it, effectively lost.
+        if self.runtime.is_busy() {
+            return;
+        }
+
         while let Some(queued) = self.pending_prompt_queue.first() {
             let text = queued.prompt.clone();
             let attachments = queued.attachments.clone();
@@ -574,9 +590,6 @@ impl App {
                     self.desktop_notifications.notify("Response complete");
                 }
 
-                // Process any queued prompts now that the request finished.
-                self.flush_pending_prompt_queue();
-
                 // If a compact was queued and no request is active, run it now.
                 if self.pending_compact && !self.has_active_request() {
                     self.pending_compact = false;
@@ -641,11 +654,27 @@ impl App {
                     self.todos = todos;
                 }
             }
+            BackendEvent::StreamEnd {
+                session_id,
+                ..
+            } if Some(session_id) == self.current_session_id => {
+                // A turn has fully ended — now it's safe to flush queued
+                // prompts.  At this point the agent loop has sent StreamEnd
+                // and is about to return (or has already returned), so
+                // loop_busy will be false by the time we actually submit.
+                self.flush_pending_prompt_queue();
+
+                // If a compact was queued and no request is active, run it now.
+                if self.pending_compact && !self.has_active_request() {
+                    self.pending_compact = false;
+                    self.execute_compact();
+                }
+            }
             _ => {
                 // Events already forwarded to MessageList above:
                 //   Delta, ReasoningDelta, ToolCallUpdated, Finished, ToolCompleted,
-                //   SubagentStatus, TurnStarting, StreamEnd,
-                //   SidebarSnapshotReady, ShellOutput, ContextCompacted
+                //   SubagentStatus, TurnStarting, SidebarSnapshotReady,
+                //   ShellOutput, ContextCompacted
             }
         }
     }
