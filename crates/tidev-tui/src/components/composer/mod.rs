@@ -682,6 +682,7 @@ impl Composer {
             let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
             self.insert_str(&normalized);
             self.sync_autocomplete();
+            self.ensure_input_cursor_visible();
             self.dirty = true;
             None
         } else if let Some((filename, _mime, data, file_size)) =
@@ -693,6 +694,7 @@ impl Composer {
                 self.insert_str(&placeholder);
                 let end_pos = self.cursor;
                 self.register_span(insert_pos, end_pos, placeholder, InlineSpanKind::Image, Some(data), Some(filename));
+                self.ensure_input_cursor_visible();
                 self.dirty = true;
                 log::info!("Pasted image: {} bytes", file_size);
                 None

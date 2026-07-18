@@ -1363,6 +1363,10 @@ impl App {
                         chat.continue_scrollbar_drag(position.y);
                         return;
                     }
+                // Always update pointer position for auto-scroll (must happen
+                // before the composer check so that update_input_area_auto_scroll
+                // can read the latest pointer position).
+                self.mouse_selection.drag(position);
                 // Composer input area drag (extends selection).
                 if let Some(ref mut composer) = self.composer
                     && composer.is_input_dragging()
@@ -1370,8 +1374,6 @@ impl App {
                     composer.handle_mouse_drag(position, composer.last_text_area);
                     return;
                 }
-                // Always update drag position (old TUI unconditional behaviour).
-                self.mouse_selection.drag(position);
             }
             MouseEventKind::Up(MouseButton::Left) => {
                 if let Some(ref mut chat) = self.message_list {
