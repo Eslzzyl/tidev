@@ -641,27 +641,34 @@ impl Runtime {
     }
 
     /// Cancel the current operation.
+    ///
+    /// This performs a two-phase shutdown:
+    /// 1. Fire the cancellation token (cooperative signal for loops at await
+    ///    points).
+    /// 2. Force-abort the agent loop task, which cascades through JoinSet
+    ///    drops to abort every spawned tool task — including subagents and
+    ///    their nested tools at any depth.
+    /// 3. Kill any remaining child processes (bash).
     pub async fn cancel(&self) {
-        // Cancel only the active loop's token — subsequent submit_prompt calls
-        // will create a fresh token and work normally.
+        // 1. Signal cooperative cancellation.
         if let Some(token) = self.active_loop_cancel.lock().await.take() {
             token.cancel();
         }
 
         self.loop_busy.store(false, Ordering::SeqCst);
 
-        // Give cooperative exit a brief window, then force-abort.
+        // 2. Force-abort the agent loop task.
+        //    abort() interrupts the task at its next .await point. The task
+        //    future is dropped, which drops the JoinSet inside execute_tools,
+        //    which aborts all spawned tool tasks (including subagents) and
+        //    closes any in-flight HTTP connections.
         let handle = self.run_loop_handle.lock().unwrap().take();
         if let Some(h) = handle {
-            tokio::select! {
-                _ = h => {},
-                _ = tokio::time::sleep(Duration::from_millis(100)) => {
-                    // Already aborted via Drop.
-                }
-            }
+            h.abort();
+            let _ = tokio::time::timeout(Duration::from_millis(200), h).await;
         }
 
-        // Force-kill any lingering child processes.
+        // 3. Force-kill any lingering child processes (bash).
         tidev_tools::kill_all_children();
     }
 

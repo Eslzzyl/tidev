@@ -19,7 +19,7 @@ tidev-search = { path = "../tidev-search" }
 tidev-utils = { path = "../tidev-utils" }
 tidev-types = { path = "../tidev-types" }
 anyhow = "1"
-tokio = { version = "1", features = ["sync"] }
+tokio = { version = "1", features = ["sync", "rt"] }
 tokio-util = "0.7"
 log = "0.4"
 uuid = { version = "1", features = ["v4", "serde"] }

@@ -558,80 +558,136 @@ impl AgentContext for CoreContext {
 
         let mut results: Vec<(ToolCall, ToolExecutionResult)> = Vec::new();
 
-        // --- Read-only tools: parallel execution ---
+        // --- Read-only tools: parallel execution with immediate cancellation ---
+        //
+        // Uses JoinSet so that on cancellation every spawned tool task is
+        // aborted (dropping in-flight HTTP connections, blocking reads, etc.)
+        // and a synthetic "User cancelled" result is emitted for each.
         if !read_only.is_empty() {
-            // Don't start new tools if cancelled — let running ones finish.
             if self.cancel.is_cancelled() {
+                for (tc, _, _) in &read_only {
+                    self.emit(BackendEvent::ToolCompleted {
+                        session_id,
+                        request_id,
+                        tool_call: tc.clone(),
+                        result: ToolExecutionResult::new("User cancelled the request"),
+                    });
+                    results.push((
+                        tc.clone(),
+                        ToolExecutionResult::new("User cancelled the request"),
+                    ));
+                }
                 return Ok(results);
             }
-            let mut handles = Vec::with_capacity(read_only.len());
+
+            let mut pending_tcs: Vec<ToolCall> =
+                read_only.iter().map(|(tc, _, _)| tc.clone()).collect();
+            let mut join_set = tokio::task::JoinSet::new();
             for (tc, allow_outside, sensitive_approved) in read_only {
                 let reg = self.tool_registry.clone();
                 let sid = session_id;
                 let mode = self.mode;
                 let cancel = self.cancel.clone();
-                let handle = tokio::spawn(async move {
-                    let result = reg.execute(
-                        &tc,
-                        sid,
-                        mode,
-                        allow_outside,
-                        sensitive_approved,
-                        &cancel,
-                        None,
-                    )
-                    .await;
+                join_set.spawn(async move {
+                    let result = reg
+                        .execute(&tc, sid, mode, allow_outside, sensitive_approved, &cancel, None)
+                        .await;
                     (tc, result)
                 });
-                handles.push(handle);
             }
-            for handle in handles {
-                match handle.await {
-                    Ok((tc, result)) => {
-                        self.emit(BackendEvent::ToolCompleted {
-                            session_id,
-                            request_id,
-                            tool_call: tc.clone(),
-                            result: result.clone(),
-                        });
-                        results.push((tc, result));
+
+            loop {
+                tokio::select! {
+                    _ = self.cancel.cancelled() => {
+                        // Abort every in-flight tool task immediately.
+                        join_set.abort_all();
+                        for tc in pending_tcs {
+                            self.emit(BackendEvent::ToolCompleted {
+                                session_id,
+                                request_id,
+                                tool_call: tc.clone(),
+                                result: ToolExecutionResult::new("User cancelled the request"),
+                            });
+                            results.push((
+                                tc,
+                                ToolExecutionResult::new("User cancelled the request"),
+                            ));
+                        }
+                        return Ok(results);
                     }
-                    Err(join_err) => {
-                        return Err(anyhow::anyhow!("Task join error: {join_err}"));
+                    result = join_set.join_next() => {
+                        match result {
+                            Some(Ok((tc, result))) => {
+                                pending_tcs.retain(|t| t.id != tc.id);
+                                self.emit(BackendEvent::ToolCompleted {
+                                    session_id,
+                                    request_id,
+                                    tool_call: tc.clone(),
+                                    result: result.clone(),
+                                });
+                                results.push((tc, result));
+                            }
+                            Some(Err(join_err)) => {
+                                return Err(anyhow::anyhow!("Task join error: {join_err}"));
+                            }
+                            None => break,
+                        }
                     }
                 }
             }
         }
 
-        // --- Write tools: serial execution (preserve ordering for side effects) ---
+        // --- Write tools: serial execution with immediate cancellation ---
         for (tc, allow_outside, sensitive_approved) in write {
             if self.cancel.is_cancelled() {
-                return Ok(results);
+                self.emit(BackendEvent::ToolCompleted {
+                    session_id,
+                    request_id,
+                    tool_call: tc.clone(),
+                    result: ToolExecutionResult::new("User cancelled the request"),
+                });
+                results.push((tc, ToolExecutionResult::new("User cancelled the request")));
+                continue;
             }
 
-            let result = self
-                .tool_registry
-                .execute(
-                    &tc,
-                    session_id,
-                    self.mode,
-                    allow_outside,
-                    sensitive_approved,
-                    &self.cancel,
-                    Some(self.event_tx.clone()),
-                )
-                .await;
-
-            self.emit(BackendEvent::ToolCompleted {
+            let tool_fut = self.tool_registry.execute(
+                &tc,
                 session_id,
-                request_id,
-                tool_call: tc.clone(),
-                result: result.clone(),
-            });
-            results.push((tc, result));
+                self.mode,
+                allow_outside,
+                sensitive_approved,
+                &self.cancel,
+                Some(self.event_tx.clone()),
+            );
+
+            tokio::select! {
+                _ = self.cancel.cancelled() => {
+                    // The in-flight tool future is dropped here, aborting
+                    // any blocking I/O or network request inside.
+                    self.emit(BackendEvent::ToolCompleted {
+                        session_id,
+                        request_id,
+                        tool_call: tc.clone(),
+                        result: ToolExecutionResult::new("User cancelled the request"),
+                    });
+                    results.push((
+                        tc,
+                        ToolExecutionResult::new("User cancelled the request"),
+                    ));
+                }
+                result = tool_fut => {
+                    self.emit(BackendEvent::ToolCompleted {
+                        session_id,
+                        request_id,
+                        tool_call: tc.clone(),
+                        result: result.clone(),
+                    });
+                    results.push((tc, result));
+                }
+            }
         }
 
-        // --- Task tools (subagents): spawn each in its own task ---
+        // --- Task tools (subagents): parallel with immediate cancellation ---
         // When subagent is disabled by config, return an error instead of spawning.
         if !task_calls.is_empty() && !self.config.read().unwrap().subagent.enabled {
             for (tc, _) in task_calls.drain(..) {
@@ -649,10 +705,10 @@ impl AgentContext for CoreContext {
         }
 
         if !task_calls.is_empty() {
-            let mut handles = Vec::with_capacity(task_calls.len());
-            let mut cancelled_tcs: Vec<ToolCall> = Vec::with_capacity(task_calls.len());
+            let mut pending_tcs: Vec<ToolCall> =
+                task_calls.iter().map(|(tc, _)| tc.clone()).collect();
+            let mut join_set = tokio::task::JoinSet::new();
             for (tc, child_session_id) in task_calls {
-                cancelled_tcs.push(tc.clone());
                 let cancel = self.cancel.child_token();
                 let spawner = SubagentSpawner {
                     session_manager: self.session_manager.clone(),
@@ -667,7 +723,7 @@ impl AgentContext for CoreContext {
                     config: self.config.clone(),
                     auth: self.auth.clone(),
                 };
-                let handle = tokio::spawn(async move {
+                join_set.spawn(async move {
                     execute_task_tool(
                         spawner,
                         SubagentConfig {
@@ -681,41 +737,82 @@ impl AgentContext for CoreContext {
                     .await
                     .map(|result| (tc, result))
                 });
-                handles.push(handle);
             }
-            for (i, handle) in handles.into_iter().enumerate() {
-                match handle.await {
-                    Ok(Ok((tc, result))) => {
-                        if self.cancel.is_cancelled() {
-                            // User cancelled: push a synthetic result to prevent
-                            // orphan tool calls (a tool call with no matching result).
-                            results.push((
-                                tc,
-                                ToolExecutionResult::new("User cancelled the request"),
-                            ));
-                        } else {
+
+            loop {
+                tokio::select! {
+                    _ = self.cancel.cancelled() => {
+                        // Abort every subagent task. Because JoinSet owns the
+                        // tasks, dropping it cascades: the subagent future is
+                        // dropped, which drops the child agent loop, which
+                        // drops the child JoinSet, which aborts the child's
+                        // tools — recursively to any depth.
+                        join_set.abort_all();
+                        for tc in pending_tcs {
                             self.emit(BackendEvent::ToolCompleted {
                                 session_id,
                                 request_id,
                                 tool_call: tc.clone(),
-                                result: result.clone(),
+                                result: ToolExecutionResult::new("User cancelled the request"),
                             });
-                            results.push((tc, result));
+                            results.push((
+                                tc,
+                                ToolExecutionResult::new("User cancelled the request"),
+                            ));
                         }
+                        return Ok(results);
                     }
-                    Ok(Err(e)) => {
-                        if !self.cancel.is_cancelled() {
-                            return Err(e);
+                    result = join_set.join_next() => {
+                        match result {
+                            Some(Ok(Ok((tc, result)))) => {
+                                pending_tcs.retain(|t| t.id != tc.id);
+                                if self.cancel.is_cancelled() {
+                                    // Already cancelled — push synthetic result.
+                                    results.push((
+                                        tc,
+                                        ToolExecutionResult::new("User cancelled the request"),
+                                    ));
+                                } else {
+                                    self.emit(BackendEvent::ToolCompleted {
+                                        session_id,
+                                        request_id,
+                                        tool_call: tc.clone(),
+                                        result: result.clone(),
+                                    });
+                                    results.push((tc, result));
+                                }
+                            }
+                            Some(Ok(Err(e))) => {
+                                if self.cancel.is_cancelled() {
+                                    // Cancelled subagent with error: push
+                                    // synthetic results for all remaining.
+                                    join_set.abort_all();
+                                    for tc in pending_tcs {
+                                        self.emit(BackendEvent::ToolCompleted {
+                                            session_id,
+                                            request_id,
+                                            tool_call: tc.clone(),
+                                            result: ToolExecutionResult::new(
+                                                "User cancelled the request",
+                                            ),
+                                        });
+                                        results.push((
+                                            tc,
+                                            ToolExecutionResult::new("User cancelled the request"),
+                                        ));
+                                    }
+                                    return Ok(results);
+                                } else {
+                                    return Err(e);
+                                }
+                            }
+                            Some(Err(join_err)) => {
+                                return Err(anyhow::anyhow!(
+                                    "Subagent join error: {join_err}"
+                                ));
+                            }
+                            None => break,
                         }
-                        // Cancelled subagent with error: still push a synthetic
-                        // result so the parent session has no orphan tool calls.
-                        results.push((
-                            cancelled_tcs[i].clone(),
-                            ToolExecutionResult::new("User cancelled the request"),
-                        ));
-                    }
-                    Err(join_err) => {
-                        return Err(anyhow::anyhow!("Subagent join error: {join_err}"));
                     }
                 }
             }

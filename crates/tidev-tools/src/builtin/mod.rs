@@ -274,27 +274,24 @@ pub async fn execute_tool_call(
             safe_spawn_blocking_str(move || skills.render_skill(&skill_name)).await
         }
 
-        // ── Web search / fetch (async, panics caught via tokio::spawn) ─
+        // ── Web search / fetch (async, runs inline for abort support) ──
         Some("websearch") | Some("webfetch") => {
             let call_name = call.name.clone();
             let web_search_config = ctx.web_search_config.clone();
             let auth_store = ctx.auth_store.clone();
-            match tokio::task::spawn(async move {
-                web::execute_tool_call_async(
-                    &call_name,
-                    arguments,
-                    &web_search_config,
-                    &auth_store,
-                )
-                .await
-            })
+            // Run inline (no tokio::task::spawn) so that when the caller
+            // aborts this task via JoinSet, the HTTP future is dropped
+            // directly, closing the connection immediately.
+            match web::execute_tool_call_async(
+                &call_name,
+                arguments,
+                &web_search_config,
+                &auth_store,
+            )
             .await
             {
-                Ok(Ok(output)) => ToolExecutionResult::new(output),
-                Ok(Err(e)) => ToolExecutionResult::new(format!("Error: {e:#}")),
-                Err(join_err) => {
-                    ToolExecutionResult::new(format!("Error: tool panicked: {join_err}"))
-                }
+                Ok(output) => ToolExecutionResult::new(output),
+                Err(e) => ToolExecutionResult::new(format!("Error: {e:#}")),
             }
         }
 
