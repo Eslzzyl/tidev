@@ -114,13 +114,20 @@ impl SnippetState {
                 break;
             }
 
-            let matched = self.candidates(&possible_query);
-            if !matched.is_empty()
-                && possible_query.len() > best_query.len() {
+            // Only trigger if the query is a prefix of at least one snippet.
+            let query_lower = possible_query.to_lowercase();
+            let is_prefix = self.snippets_cache.iter().any(|snippet| {
+                snippet.to_lowercase().starts_with(&query_lower)
+            });
+
+            if is_prefix && possible_query.len() > best_query.len() {
+                let matched = self.candidates(&possible_query);
+                if !matched.is_empty() {
                     self.query = possible_query.clone();
                     best_query = possible_query;
                     self.snippets = matched;
                 }
+            }
         }
 
         if best_query.is_empty() {
