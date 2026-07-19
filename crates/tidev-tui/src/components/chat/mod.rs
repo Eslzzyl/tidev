@@ -1125,9 +1125,9 @@ impl MessageList {
         self.streaming_buffer.is_streaming
     }
 
-    /// Number of running subagents.
+    /// Number of running subagents (excludes interrupted/cancelled ones).
     pub fn running_subagents_count(&self) -> usize {
-        self.running_subagents.len()
+        self.running_subagents.iter().filter(|s| !s.interrupted).count()
     }
 
     /// Whether a given session_id is currently being run as a subagent.
