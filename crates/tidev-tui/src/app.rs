@@ -1065,10 +1065,23 @@ impl App {
                             self.handle_subsession_navigation(key);
                             return;
                         }
-                        _ => {}
-                    }
-                }
+            _ => {}
+        }
 
+        // Resolve mode from the target session after navigation.
+        if let Some(chat) = self.message_list.as_ref() {
+            if let Some(ctx) = chat.active_chat_context() {
+                self.mode = ctx
+                    .messages
+                    .iter()
+                    .rev()
+                    .find(|m| m.role == MessageRole::User)
+                    .and_then(|m| m.mode)
+                    .unwrap_or(SessionMode::Build);
+                self.pending_mode = None;
+            }
+        }
+    }
         // 2b. Tab: session mode switch (only when no composer popup is active).
         if key.code == KeyCode::Tab && key.modifiers.is_empty()
             && !self.composer.as_ref().is_some_and(|c| c.has_popup()) {
