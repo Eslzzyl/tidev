@@ -63,12 +63,12 @@ enum MessageBadgeKind {
 // ---------------------------------------------------------------------------
 
 pub(crate) struct RunningSubagentInfo {
-    pub request_id: u64,
     pub tool_call_id: String,
     pub description: String,
     pub subagent_type: String,
     pub status_text: String,
     pub child_session_id: Option<uuid::Uuid>,
+    pub interrupted: bool,
 }
 
 #[derive(Clone, Debug)]

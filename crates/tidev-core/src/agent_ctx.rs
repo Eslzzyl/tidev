@@ -1112,6 +1112,7 @@ async fn execute_task_tool(
     let _ = spawner.event_tx.send(BackendEvent::SubagentStatus {
         session_id: config.parent_session_id,
         request_id: config.parent_request_id,
+        tool_call_id: config.tool_call.id.clone(),
         child_session_id,
         status_text: format!("Started {:?} subagent", agent_type),
         current_tool_call: None,

@@ -278,12 +278,12 @@ impl MessageList {
                             .cloned()
                             .unwrap_or_else(|| "Thinking".to_string());
                         self.running_subagents.push(render_mod::RunningSubagentInfo {
-                            request_id: 0,
                             tool_call_id: tc.id.clone(),
                             description: extract_task_description(&tc.arguments),
                             subagent_type: extract_subagent_type(&tc.arguments),
                             status_text: status,
                             child_session_id: msg_csid,
+                            interrupted: false,
                         });
                     }
                 }
@@ -390,6 +390,7 @@ impl MessageList {
         // to the child subsession conversation.
         for exec in &mut self.running_subagents {
             exec.status_text = "Interrupted".to_string();
+            exec.interrupted = true;
         }
 
         // Append an error message to indicate the interruption.
@@ -412,7 +413,7 @@ impl MessageList {
         // hasn't been visited yet and its chat_context doesn't exist.
         let session_id = event.session_id();
         match event {
-            BackendEvent::ToolCallUpdated { tool_call, request_id, .. } => {
+            BackendEvent::ToolCallUpdated { tool_call, request_id: _, .. } => {
                 if tool_call.name == "task" {
                     let desc = extract_task_description(&tool_call.arguments);
                     let sub_type = extract_subagent_type(&tool_call.arguments);
@@ -429,12 +430,12 @@ impl MessageList {
                         }
                     } else if tool_call_arguments_are_complete(&tool_call.arguments) {
                         self.running_subagents.push(render_mod::RunningSubagentInfo {
-                            request_id: *request_id,
                             tool_call_id: tool_call.id.clone(),
                             description: desc,
                             subagent_type: sub_type,
                             status_text: "Thinking".to_string(),
                             child_session_id: None,
+                            interrupted: false,
                         });
                     }
                 }
@@ -449,6 +450,21 @@ impl MessageList {
                     }
                 }
             }
+            BackendEvent::SubagentStatus {
+                tool_call_id,
+                status_text,
+                child_session_id,
+                ..
+            } => {
+                // Track child session — run before routing so nested subagents
+                // are linked even when the intermediate chat_context doesn't exist.
+                if let Some(exec) = self.running_subagents.iter_mut()
+                    .find(|e| e.tool_call_id == *tool_call_id && !e.interrupted)
+                {
+                    exec.status_text = status_text.clone();
+                    exec.child_session_id = Some(*child_session_id);
+                }
+            }
             _ => {}
         }
 
@@ -457,7 +473,7 @@ impl MessageList {
         // the inline card regardless of whether the chat_context exists.
         if let Some(text) = infer_subagent_status(event) {
             if let Some(exec) = self.running_subagents.iter_mut()
-                .find(|e| e.child_session_id == Some(session_id))
+                .find(|e| e.child_session_id == Some(session_id) && !e.interrupted)
             {
                 if exec.status_text != text {
                     exec.status_text = text;
@@ -670,33 +686,21 @@ impl MessageList {
                 self.dirty = true;
             }
             BackendEvent::SubagentStatus {
-                request_id,
-                status_text,
+                tool_call_id,
                 assistant_message,
                 child_session_id,
                 ..
             } => {
-                // Match by request_id (backend now sends parent_request_id).
-                let tool_call_id = {
-                    let idx = self.running_subagents.iter().position(|e| e.request_id == *request_id);
-                    if let Some(idx) = idx {
-                        let exec = &mut self.running_subagents[idx];
-                        exec.status_text = status_text.clone();
-                        exec.child_session_id = Some(*child_session_id);
-                        exec.tool_call_id.clone()
-                    } else if let Some(exec) = self.running_subagents.last_mut() {
-                        exec.status_text = status_text.clone();
-                        exec.child_session_id = Some(*child_session_id);
-                        exec.tool_call_id.clone()
-                    } else {
-                        String::new()
-                    }
-                };
+                // running_subagents update (child_session_id + status_text) is
+                // handled in stage 0, before chat_context routing, so that
+                // nested subagents are linked even when this chat_context
+                // hasn't been visited yet.  Here we only sync the metadata
+                // and assistant message which require the chat_context.
                 // Sync child_session_id into the assistant message's metadata
                 // so rebuild_subagent_state() can recover it from messages.
                 if let Some(msg) = chat_context.messages.iter_mut().rev().find(|m| {
                     m.role == tidev_types::message::MessageRole::Assistant
-                        && m.tool_calls.iter().any(|tc| tc.id == tool_call_id)
+                        && m.tool_calls.iter().any(|tc| tc.id == *tool_call_id)
                 }) {
                     msg.metadata.child_session_id = Some(*child_session_id);
                 }

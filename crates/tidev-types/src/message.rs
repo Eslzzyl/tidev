@@ -553,6 +553,7 @@ pub enum BackendEvent {
     SubagentStatus {
         session_id: Uuid,
         request_id: u64,
+        tool_call_id: String,
         child_session_id: Uuid,
         status_text: String,
         current_tool_call: Option<ToolCall>,
