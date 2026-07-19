@@ -1065,24 +1065,10 @@ impl App {
                             self.handle_subsession_navigation(key);
                             return;
                         }
-            _ => {}
-        }
-
-        // Resolve mode from the target session after navigation.
-        if let Some(chat) = self.message_list.as_ref() {
-            if let Some(ctx) = chat.active_chat_context() {
-                self.mode = ctx
-                    .messages
-                    .iter()
-                    .rev()
-                    .find(|m| m.role == MessageRole::User)
-                    .and_then(|m| m.mode)
-                    .unwrap_or(SessionMode::Build);
-                self.pending_mode = None;
-            }
-        }
-    }
-        // 2b. Tab: session mode switch (only when no composer popup is active).
+                        _ => {}
+                    }
+                }
+                // 2b. Tab: session mode switch (only when no composer popup is active).
         if key.code == KeyCode::Tab && key.modifiers.is_empty()
             && !self.composer.as_ref().is_some_and(|c| c.has_popup()) {
                 self.handle_tab_mode_switch();
@@ -1716,6 +1702,8 @@ impl App {
                             self.context_usage = self.context_usage_cache.remove(&session_id);
 
                             // Resolve session mode from the existing context.
+                            // Keep pending_mode intact so a deferred mode switch
+                            // survives session navigation.
                             if let Some(ctx) = chat.active_chat_context() {
                                 self.mode = ctx
                                     .messages
@@ -1724,7 +1712,6 @@ impl App {
                                     .find(|m| m.role == MessageRole::User)
                                     .and_then(|m| m.mode)
                                     .unwrap_or(SessionMode::Build);
-                                self.pending_mode = None;
                             }
 
                             // Refresh the Runtime's in-memory message buffer.
@@ -1760,13 +1747,14 @@ impl App {
                         .unwrap_or_default();
 
                     // Resolve session mode from the last user message.
+                    // Keep pending_mode intact so a deferred mode switch
+                    // survives session navigation.
                     self.mode = messages
                         .iter()
                         .rev()
                         .find(|m| m.role == tidev_types::message::MessageRole::User)
                         .and_then(|m| m.mode)
                         .unwrap_or(SessionMode::Build);
-                    self.pending_mode = None;
 
                     // Compute context_usage from stored messages (last assistant
                     // message holds cumulative token counts).
