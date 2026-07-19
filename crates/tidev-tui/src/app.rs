@@ -197,6 +197,7 @@ pub struct App {
 struct QueuedPrompt {
     prompt: String,
     attachments: Vec<MessageAttachment>,
+    session_id: Uuid,
 }
 
 impl App {
@@ -401,9 +402,8 @@ impl App {
         while let Some(queued) = self.pending_prompt_queue.first() {
             let text = queued.prompt.clone();
             let attachments = queued.attachments.clone();
+            let session_id = queued.session_id;
             self.pending_prompt_queue.remove(0);
-
-            let Some(session_id) = self.current_session_id else { continue };
 
             let mode = self.mode;
             let thinking_level = self.thinking_level.clone();
@@ -2101,9 +2101,11 @@ impl App {
 
                             // If there's already an active request, queue the prompt.
                             if self.has_active_request() {
+                                let sid = self.current_session_id.unwrap_or(uuid::Uuid::nil());
                                 self.pending_prompt_queue.push(QueuedPrompt {
                                     prompt: text.clone(),
                                     attachments: final_attachments.clone(),
+                                    session_id: sid,
                                 });
                                 let queued_count = self.pending_prompt_queue.len();
                                 self.set_notice(format!(
