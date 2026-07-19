@@ -146,6 +146,44 @@ pub fn to_llm_provider_config(model: &ActiveModel) -> LlmProviderConfig {
 }
 
 // ---------------------------------------------------------------------------
+// CancelPersistGuard
+// ---------------------------------------------------------------------------
+
+/// Ensures "User cancelled" tool results are persisted even when the agent
+/// loop task is force-aborted via [`JoinHandle::abort`].
+///
+/// When the task is aborted, all local variables are destroyed by running
+/// their destructors. This guard's [`Drop`] implementation persists synthetic
+/// cancellation results to the database and in-memory buffer, guaranteeing
+/// the parent agent sees the cancellation signal on the next turn.
+struct CancelPersistGuard {
+    session_manager: SessionManager,
+    buffer: Arc<RwLock<MessageBuffer>>,
+    session_id: Uuid,
+    /// The tool calls that were pending when the guard was created.
+    tool_calls: Vec<ToolCall>,
+    /// When `true`, [`Drop`] skips persistence (normal path handled it).
+    disarmed: bool,
+}
+
+impl Drop for CancelPersistGuard {
+    fn drop(&mut self) {
+        if self.disarmed {
+            return;
+        }
+        // Task was aborted — persist "User cancelled" for every task tool call.
+        for tc in &self.tool_calls {
+            let result = ToolExecutionResult::new("User cancelled the request");
+            let msg = Message::tool_result(&tc.id, &tc.name, result);
+            let _ = self.session_manager.append_message(self.session_id, &msg);
+            if let Ok(mut buf) = self.buffer.try_write() {
+                buf.append(msg);
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // CoreContext
 // ---------------------------------------------------------------------------
 
@@ -707,6 +745,14 @@ impl AgentContext for CoreContext {
         if !task_calls.is_empty() {
             let mut pending_tcs: Vec<ToolCall> =
                 task_calls.iter().map(|(tc, _)| tc.clone()).collect();
+            // Drop guard persists "User cancelled" if h.abort() kills this task.
+            let mut cancel_guard = CancelPersistGuard {
+                session_manager: self.session_manager.clone(),
+                buffer: self.buffer.clone(),
+                session_id,
+                tool_calls: pending_tcs.clone(),
+                disarmed: false,
+            };
             let mut join_set = tokio::task::JoinSet::new();
             for (tc, child_session_id) in task_calls {
                 let cancel = self.cancel.child_token();
@@ -760,6 +806,7 @@ impl AgentContext for CoreContext {
                                 ToolExecutionResult::new("User cancelled the request"),
                             ));
                         }
+                        cancel_guard.disarmed = true;
                         return Ok(results);
                     }
                     result = join_set.join_next() => {
@@ -801,12 +848,15 @@ impl AgentContext for CoreContext {
                                             ToolExecutionResult::new("User cancelled the request"),
                                         ));
                                     }
+                                    cancel_guard.disarmed = true;
                                     return Ok(results);
                                 } else {
+                                    cancel_guard.disarmed = true;
                                     return Err(e);
                                 }
                             }
                             Some(Err(join_err)) => {
+                                cancel_guard.disarmed = true;
                                 return Err(anyhow::anyhow!(
                                     "Subagent join error: {join_err}"
                                 ));
@@ -816,6 +866,7 @@ impl AgentContext for CoreContext {
                     }
                 }
             }
+            cancel_guard.disarmed = true;
         }
 
         Ok(results)
