@@ -855,12 +855,6 @@ impl Component for MessageList {
         }
 
         match key.code {
-            KeyCode::Up | KeyCode::Char('k') => {
-                Some(Action::Chat(ChatAction::ScrollDelta(-(self.scroll_speed as isize))))
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                Some(Action::Chat(ChatAction::ScrollDelta(self.scroll_speed as isize)))
-            }
             KeyCode::PageUp => {
                 let page = self.content_area.map(|r| (r.height as isize).max(1)).unwrap_or(10);
                 Some(Action::Chat(ChatAction::ScrollDelta(-page)))

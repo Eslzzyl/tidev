@@ -1085,11 +1085,15 @@ impl App {
         }
 
         // 3. Composer (when no overlay consumed the event)
-        if let Some(ref mut composer) = self.composer
-            && let Some(action) = composer.handle_key_event(key) {
+        // Composer always consumes the key when present, even if no action
+        // is produced (e.g., typing a character, moving cursor). This prevents
+        // keys from leaking to the message list below.
+        if let Some(ref mut composer) = self.composer {
+            if let Some(action) = composer.handle_key_event(key) {
                 self.process_action(action);
-                return;
             }
+            return;
+        }
 
         // 4. MessageList (only when no overlay/composer consumed the event)
         if let Some(ref mut chat) = self.message_list
