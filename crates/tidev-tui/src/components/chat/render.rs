@@ -210,6 +210,10 @@ pub(crate) struct RenderContext<'a> {
     pub model_display_name: &'a str,
     pub running_subagents: &'a [RunningSubagentInfo],
     pub hovered_inline_subagent: Option<usize>,
+    /// Messages whose thinking/reasoning fold state has been manually toggled.
+    pub thinking_collapsed_overrides: &'a HashSet<Uuid>,
+    /// Default collapse state for thinking content (from config).
+    pub default_collapse_thinking: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -226,6 +230,8 @@ pub(crate) struct RenderOutput {
     pub card_bounds: Vec<(Uuid, usize, usize)>,
     pub inline_running_card_ranges: Vec<InlineRunningCardRange>,
     pub image_badge_infos: Vec<ImageBadgeInfo>,
+    /// Absolute line numbers of thinking headers (message_id, line).
+    pub thinking_header_infos: Vec<(Uuid, usize)>,
 }
 
 // ---------------------------------------------------------------------------
@@ -249,10 +255,13 @@ pub(crate) fn render_messages(
     hovered_card: Option<Uuid>,
     hovered_inline_subagent: Option<usize>,
     retrying_hint: &Option<(u32, u32, String, Instant)>,
+    thinking_collapsed_overrides: &HashSet<Uuid>,
+    default_collapse_thinking: bool,
     out_card_bounds: &mut Vec<(Uuid, usize, usize)>,
     out_selectable_regions: &mut Vec<SelectableRegionRange>,
     out_inline_running_card_ranges: &mut Vec<InlineRunningCardRange>,
     out_image_badge_infos: &mut Vec<ImageBadgeInfo>,
+    out_thinking_header_infos: &mut Vec<(Uuid, usize)>,
     out_render_content_area: &mut Rect,
     out_render_scroll: &mut usize,
     scrollbar_hovered: bool,
@@ -273,6 +282,8 @@ pub(crate) fn render_messages(
         model_display_name: &chat_context.model_display_name,
         running_subagents,
         hovered_inline_subagent,
+        thinking_collapsed_overrides,
+        default_collapse_thinking,
     };
 
     let output = messages_text(
@@ -299,6 +310,8 @@ pub(crate) fn render_messages(
     *out_inline_running_card_ranges = output.inline_running_card_ranges;
     // Export image badge infos for mouse hit-testing.
     *out_image_badge_infos = output.image_badge_infos;
+    // Export thinking header infos for mouse hit-testing.
+    *out_thinking_header_infos = output.thinking_header_infos;
     // Export the rendered content area and render scroll for coordinate
     // conversion in selectable_region_rects().
     *out_render_content_area = content_area;
@@ -399,6 +412,7 @@ fn messages_text(
     let mut card_bounds: Vec<(Uuid, usize, usize)> = Vec::new();
     let mut inline_running_card_ranges: Vec<InlineRunningCardRange> = Vec::new();
     let mut image_badge_infos: Vec<ImageBadgeInfo> = Vec::new();
+    let mut thinking_header_infos: Vec<(Uuid, usize)> = Vec::new();
 
     // Header for sub-sessions
     let header_lines = build_header_lines(chat_context.parent_session_id.is_some(), ctx.palette);
@@ -410,7 +424,7 @@ fn messages_text(
         let empty_line = Line::from(Span::styled("No messages yet.", Style::default().fg(ctx.palette.muted)));
         lines.push(empty_line);
         let total = lines.len().max(1);
-        return RenderOutput { lines, total_lines: total, render_scroll: 0, effective_scroll: 0, selectable_regions, card_bounds, inline_running_card_ranges, image_badge_infos };
+        return RenderOutput { lines, total_lines: total, render_scroll: 0, effective_scroll: 0, selectable_regions, card_bounds, inline_running_card_ranges, image_badge_infos, thinking_header_infos: Vec::new() };
     }
 
     // Update layout index — this renders all blocks and populates the cache
@@ -500,6 +514,7 @@ fn messages_text(
         let block_lines = render_block_from_cache(
             block, cache, &geom, is_round_end, &mut selectable_regions, ctx, &current_line_offset,
             messages, &mut card_bounds, &mut inline_running_card_ranges, &mut image_badge_infos,
+            &mut thinking_header_infos,
         );
         lines.extend(block_lines);
         current_line_offset = lines.len();
@@ -511,7 +526,7 @@ fn messages_text(
         lines.extend(precomputed_hint_lines);
     }
 
-    RenderOutput { lines, total_lines: total_overall_lines, render_scroll, effective_scroll: scroll, selectable_regions, card_bounds, inline_running_card_ranges, image_badge_infos }
+    RenderOutput { lines, total_lines: total_overall_lines, render_scroll, effective_scroll: scroll, selectable_regions, card_bounds, inline_running_card_ranges, image_badge_infos, thinking_header_infos }
 }
 
 // ---------------------------------------------------------------------------
@@ -922,6 +937,7 @@ fn render_block_from_cache(
     card_bounds: &mut Vec<(Uuid, usize, usize)>,
     inline_running_card_ranges: &mut Vec<InlineRunningCardRange>,
     image_badge_infos: &mut Vec<ImageBadgeInfo>,
+    thinking_header_infos: &mut Vec<(Uuid, usize)>,
 ) -> Vec<Line<'static>> {
     let content_width = geom.content();
     let cards_key = MessageRenderCacheKey {
@@ -949,6 +965,13 @@ fn render_block_from_cache(
             for (bg, card_lines) in cards {
                 if !card_lines.is_empty() {
                     let start_line = current_line_offset + lines.len();
+                    // Track thinking header position for assistant messages with reasoning.
+                    if matches!(role, MessageRole::Assistant) {
+                        let msg = &messages[block.message_start_idx];
+                        if !msg.reasoning.trim().is_empty() {
+                            thinking_header_infos.push((msg.id, start_line));
+                        }
+                    }
                     track_selectable_region(selectable_regions, card_lines, start_line);
                     let show_hover = ctx.hovered_card == Some(block.message_id)
                         && matches!(role, MessageRole::User | MessageRole::Shell);
@@ -1111,13 +1134,49 @@ fn render_block_from_cache(
 // Reasoning rendering (ported from v0.6.x utils.rs)
 // ---------------------------------------------------------------------------
 
+/// Compute the thinking duration string for display.
+fn thinking_duration_str(message: &Message) -> Option<String> {
+    let started = message.reasoning_started_at?;
+    let ended = message.completed_at.unwrap_or_else(chrono::Utc::now);
+    if message.reasoning.trim().is_empty() {
+        return None;
+    }
+    let elapsed = ended - started;
+    let total_secs = elapsed.num_seconds().max(0) as u64;
+    let total_millis = elapsed.num_milliseconds().max(0) as u64;
+    if total_secs > 0 {
+        Some(format!("{}s", total_secs))
+    } else {
+        Some(format!("{}ms", total_millis))
+    }
+}
+
+/// Determine whether a message's reasoning content should be collapsed.
+fn is_reasoning_collapsed(
+    msg_id: &Uuid,
+    overrides: &HashSet<Uuid>,
+    default_collapse: bool,
+) -> bool {
+    let toggled = overrides.contains(msg_id);
+    // Default: if `default_collapse` is true → collapsed.
+    // If user toggled, invert the default.
+    if toggled {
+        !default_collapse
+    } else {
+        default_collapse
+    }
+}
+
 /// Render reasoning content with ┃ prefix, dimmed colours, and the
 /// Thinking:/Thought: label.  Matches the old implementation exactly.
+/// When `collapsed` is true, only the header line is rendered.
 fn render_reasoning_lines(
     ctx: &RenderContext,
     reasoning: &str,
     content_width: usize,
     is_streaming: bool,
+    collapsed: bool,
+    duration: Option<&str>,
 ) -> Vec<Line<'static>> {
     let palette = ctx.palette;
     let mut lines = Vec::new();
@@ -1125,19 +1184,40 @@ fn render_reasoning_lines(
     let dimmed_color = crate::theme::mix_colors(palette.muted, palette.background, 0.5);
     let label_style = Style::default().fg(dimmed_color);
     let label_italic_style = Style::default().fg(dimmed_color).add_modifier(Modifier::ITALIC);
-    let body_style = Style::default().fg(dimmed_color);
 
-    // Label line: ┃ Thinking: or ┃ Thought:
+    // Label: ┃ Thinking: or ┃ Thought:
     let label = if is_streaming { "Thinking:" } else { "Thought:" };
-    lines.push(Line::from(vec![
-        Span::styled("┃ ", label_style),
-        Span::styled(label, label_italic_style),
-    ]));
 
-    if reasoning.trim().is_empty() {
+    // Build header with duration and fold indicator
+    let mut header_spans = vec![Span::styled("┃ ", label_style)];
+
+    // Duration suffix
+    let duration_suffix = duration
+        .filter(|_| !is_streaming)
+        .map(|d| format!(" ({})", d))
+        .unwrap_or_default();
+
+    // Fold indicator: ▶ when collapsed, ▼ when expanded
+    let fold_indicator = if collapsed {
+        "  ▶"
+    } else if !reasoning.trim().is_empty() {
+        "  ▼"
+    } else {
+        ""
+    };
+
+    header_spans.push(Span::styled(
+        format!("{}{}{}", label, duration_suffix, fold_indicator),
+        label_italic_style,
+    ));
+    lines.push(Line::from(header_spans));
+
+    // If collapsed or empty, stop here
+    if collapsed || reasoning.trim().is_empty() {
         return lines;
     }
 
+    let body_style = Style::default().fg(dimmed_color);
     let effective = content_width.saturating_sub(2).max(1); // 2 for ┃ prefix
     let rendered = markdown::render_markdown_text_with_width_and_cwd(
         reasoning,
@@ -1225,10 +1305,21 @@ fn render_assistant_body_lines(
 
     // 1. Reasoning (with ┃ prefix, dimmed colours, exactly like old code)
     if !message.reasoning.trim().is_empty() {
-        lines.extend(render_reasoning_lines(ctx, &message.reasoning, content_width, message.streaming));
-        if !message.content.trim().is_empty() {
-            lines.push(Line::from(""));
-        }
+        let collapsed = is_reasoning_collapsed(
+            &message.id,
+             ctx.thinking_collapsed_overrides,
+             ctx.default_collapse_thinking,
+		);
+		let duration = thinking_duration_str(message);
+		lines.extend(render_reasoning_lines(
+			ctx,
+			&message.reasoning,
+			content_width,
+			message.streaming,
+			collapsed,
+			duration.as_deref(),
+		));
+		if !message.content.trim().is_empty() {            lines.push(Line::from(""));        }
     }
 
     // 2. Content — try unified diff first, fall back to markdown
@@ -1367,8 +1458,20 @@ fn render_error_card(
 
     // 1. Reasoning (if any)
     if !message.reasoning.trim().is_empty() {
-        lines.extend(render_reasoning_lines(ctx, &message.reasoning, content_width, message.streaming));
-        lines.push(Line::from(""));
+        let collapsed = is_reasoning_collapsed(
+            &message.id,
+            ctx.thinking_collapsed_overrides,
+            ctx.default_collapse_thinking,
+		);
+		let duration = thinking_duration_str(message);
+		lines.extend(render_reasoning_lines(
+			ctx,
+			&message.reasoning,
+			content_width,
+			message.streaming,
+			collapsed,
+			duration.as_deref(),
+		));        lines.push(Line::from(""));
     }
 
     // 2. Error text

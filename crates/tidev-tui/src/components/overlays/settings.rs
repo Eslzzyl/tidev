@@ -45,6 +45,7 @@ pub(crate) enum SettingKey {
     AllowSensitiveFileAccess,
     AllowOutsideWorkspaceAccess,
     SubagentEnabled,
+    CollapseThinking,
 }
 
 #[derive(Clone, Debug)]
@@ -156,6 +157,14 @@ impl SettingsPanel {
                 description: "Enable subagent (task tool)".to_string(),
                 setting_type: SettingType::Toggle(config.subagent.enabled),
                 key: SettingKey::SubagentEnabled,
+                disabled: false,
+            },
+            SettingItem {
+                name: "Collapse Thinking".to_string(),
+                description: "Collapse thinking content by default. Click header to toggle."
+                    .to_string(),
+                setting_type: SettingType::Toggle(config.ui.collapse_thinking),
+                key: SettingKey::CollapseThinking,
                 disabled: false,
             },
         ];
@@ -289,6 +298,11 @@ impl SettingsPanel {
                 SettingKey::SubagentEnabled => {
                     if let SettingType::Toggle(val) = item.setting_type {
                         config.subagent.enabled = val;
+                    }
+                }
+                SettingKey::CollapseThinking => {
+                    if let SettingType::Toggle(val) = item.setting_type {
+                        config.ui.collapse_thinking = val;
                     }
                 }
             }

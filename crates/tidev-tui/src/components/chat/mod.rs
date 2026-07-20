@@ -73,6 +73,11 @@ pub(crate) struct MessageList {
 
     // ── Interaction state ──
     expanded_tool_results: HashSet<Uuid>,
+    /// Messages whose thinking/reasoning fold state has been manually toggled.
+    thinking_collapsed_overrides: HashSet<Uuid>,
+
+    /// Screen-space rects for thinking headers (for mouse hit-testing).
+    thinking_header_bounds: Vec<(Rect, Uuid)>,
 
     selectable_regions: Vec<SelectableRegionRange>,
     hovered_card: Option<Uuid>,
@@ -128,6 +133,8 @@ impl MessageList {
             scroll_target: None,
             scroll_speed: 3,
             expanded_tool_results: HashSet::new(),
+            thinking_collapsed_overrides: HashSet::new(),
+            thinking_header_bounds: Vec::new(),
 
             selectable_regions: Vec::new(),
             hovered_card: None,
@@ -540,7 +547,7 @@ impl MessageList {
                 }
                 self.dirty = true;
             }
-            BackendEvent::StreamEnd { .. } => {
+            BackendEvent::StreamEnd { reasoning_started_at, .. } => {
                 let is_active_session = self.active_session_id == Some(session_id);
                 let msg_id = if is_active_session {
                     self.streaming_buffer.current_message_id
@@ -550,6 +557,9 @@ impl MessageList {
                 if msg_id.is_some() {
                     self.streaming_buffer.finalise_message(&mut chat_context.messages);
                     if let Some(mid) = msg_id {
+                        if let Some(msg) = chat_context.messages.iter_mut().find(|m| m.id == mid) {
+                            msg.reasoning_started_at = *reasoning_started_at;
+                        }
                         self.layout_index.mark_dirty(mid);
                     }
                 } else {
@@ -558,6 +568,7 @@ impl MessageList {
                         m.streaming && m.role == tidev_types::message::MessageRole::Assistant
                     }) {
                         chat_context.messages[idx].streaming = false;
+                        chat_context.messages[idx].reasoning_started_at = *reasoning_started_at;
                         self.layout_index.mark_dirty(chat_context.messages[idx].id);
                     }
                 }
@@ -809,6 +820,22 @@ impl MessageList {
                 }
         }
 
+        // Check thinking header bounds (Rect-based hit detection).
+        if let Some((_, msg_id)) = self
+            .thinking_header_bounds
+            .iter()
+            .find(|(rect, _)| rect.contains((x, y).into()))
+        {
+            if self.thinking_collapsed_overrides.contains(msg_id) {
+                self.thinking_collapsed_overrides.remove(msg_id);
+            } else {
+                self.thinking_collapsed_overrides.insert(*msg_id);
+            }
+            self.layout_index.mark_dirty(*msg_id);
+            self.dirty = true;
+            return Some(Action::Noop);
+        }
+
         // Use the layout index to find which block was clicked.
         let block_idx = self
             .layout_index
@@ -817,10 +844,6 @@ impl MessageList {
         if block_idx < self.layout_index.blocks.len() {
             let block = &self.layout_index.blocks[block_idx];
             if block.message_count > 0 {
-                // Completed subagent result: navigate to subsession.
-                if let Some(&child_sid) = self.completed_subagent_sessions.get(&block.message_id) {
-                    return Some(Action::Session(SessionAction::Select(child_sid)));
-                }
                 if self.expanded_tool_results.contains(&block.message_id) {
                     self.expanded_tool_results.remove(&block.message_id);
                 } else {
@@ -931,10 +954,12 @@ impl Component for MessageList {
         self.render_scroll = 0;
         self.inline_subagent_card_bounds.clear();
         self.image_badge_bounds.clear();
+        self.thinking_header_bounds.clear();
         let mut render_content_area = Rect::default();
         let mut render_scroll = 0;
         let mut inline_running_card_ranges = Vec::new();
         let mut image_badge_infos = Vec::new();
+        let mut thinking_header_infos = Vec::new();
         render_mod::render_messages(
             frame,
             rect,
@@ -951,10 +976,13 @@ impl Component for MessageList {
             self.hovered_card,
             self.hovered_inline_subagent,
             &self.retrying_hint,
+            &self.thinking_collapsed_overrides,
+            ctx.collapse_thinking,
             &mut self.card_bounds,
             &mut self.selectable_regions,
             &mut inline_running_card_ranges,
             &mut image_badge_infos,
+            &mut thinking_header_infos,
             &mut render_content_area,
             &mut render_scroll,
             self.scrollbar_hovered,
@@ -1005,6 +1033,21 @@ impl Component for MessageList {
             let rect = Rect::new(screen_x, screen_y, info.badge_width as u16, 1);
             self.image_badge_bounds
                 .push((rect, info.message_id, info.attachment_index));
+        }
+
+        // Convert thinking header infos to screen-space Rects for mouse hit-testing.
+        // The thinking header is the first line of the assistant card, with 2-space indent.
+        for &(msg_id, abs_line) in &thinking_header_infos {
+            let screen_line = abs_line.saturating_sub(render_scroll);
+            if screen_line >= viewport {
+                continue;
+            }
+            let screen_y = render_content_area.y + screen_line as u16;
+            let rect = Rect::new(
+                render_content_area.x, screen_y,
+                render_content_area.width, 1,
+            );
+            self.thinking_header_bounds.push((rect, msg_id));
         }
 
         self.dirty = false;

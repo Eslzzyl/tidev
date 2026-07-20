@@ -27,6 +27,8 @@ pub(crate) struct DrawContext<'a> {
     pub thinking_level: Option<&'a ThinkingLevelType>,
     /// Whether the subagent (task tool) is currently disabled.
     pub subagent_disabled: bool,
+    /// Whether thinking content is collapsed by default (from config).
+    pub collapse_thinking: bool,
     /// Workspace root path, used for path clipping in tool renders.
     pub workspace_root: &'a Path,
 }

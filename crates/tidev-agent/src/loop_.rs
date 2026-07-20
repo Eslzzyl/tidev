@@ -66,6 +66,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
                 let _ = event_tx.send(BackendEvent::StreamEnd {
                     session_id,
                     request_id,
+                    reasoning_started_at: None,
                 });
                 return Ok(());
             }
@@ -73,6 +74,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
                 let _ = event_tx.send(BackendEvent::StreamEnd {
                     session_id,
                     request_id,
+                    reasoning_started_at: None,
                 });
                 return Err(e);
             }
@@ -102,6 +104,12 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
             };
 
             if has_queued {
+                // Finalise the current turn before starting a new one.
+                let _ = event_tx.send(BackendEvent::StreamEnd {
+                    session_id,
+                    request_id,
+                    reasoning_started_at: turn.reasoning_started_at,
+                });
                 // Signal a new turn so the UI can update its state (spinner,
                 // progress indicators, etc.).  The next iteration's
                 // load_messages() will include the queued user message.
@@ -115,6 +123,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
             let _ = event_tx.send(BackendEvent::StreamEnd {
                 session_id,
                 request_id,
+                reasoning_started_at: turn.reasoning_started_at,
             });
             return Ok(());
         }
@@ -185,6 +194,11 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
         }
 
         // ─── 10. Prepare for next turn ────────────────────────────────────
+        let _ = event_tx.send(BackendEvent::StreamEnd {
+            session_id,
+            request_id,
+            reasoning_started_at: turn.reasoning_started_at,
+        });
         let _ = event_tx.send(BackendEvent::TurnStarting {
             session_id,
             request_id,
@@ -293,5 +307,6 @@ fn build_assistant_message(turn: &AssistantTurn) -> Message {
     msg.cache_write_tokens = turn.cache_write_tokens;
     msg.model_id = turn.model_id.clone();
     msg.tokens_per_second = turn.tokens_per_second;
+    msg.reasoning_started_at = turn.reasoning_started_at;
     msg
 }

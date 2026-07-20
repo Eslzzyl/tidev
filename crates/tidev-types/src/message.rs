@@ -285,6 +285,8 @@ pub struct AssistantTurn {
     pub created_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub completed_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub reasoning_started_at: Option<DateTime<Utc>>,
 }
 
 impl AssistantTurn {
@@ -327,6 +329,8 @@ pub struct Message {
     pub created_at: DateTime<Utc>,
     pub completed_at: Option<DateTime<Utc>>,
     pub streaming: bool,
+    #[serde(default)]
+    pub reasoning_started_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub input_tokens: Option<u32>,
     #[serde(default)]
@@ -380,6 +384,7 @@ impl Message {
             file_diffs: None,
             mode: None,
             thinking_level: None,
+            reasoning_started_at: None,
         }
     }
 
@@ -417,6 +422,7 @@ impl Message {
             file_diffs: None,
             mode: None,
             thinking_level: None,
+            reasoning_started_at: None,
         }
     }
 
@@ -452,6 +458,7 @@ impl Message {
             file_diffs: None,
             mode: None,
             thinking_level: None,
+            reasoning_started_at: None,
         }
     }
 
@@ -485,6 +492,7 @@ impl Message {
             file_diffs: None,
             mode: None,
             thinking_level: None,
+            reasoning_started_at: None,
         }
     }
 
@@ -618,6 +626,7 @@ pub enum BackendEvent {
     StreamEnd {
         session_id: Uuid,
         request_id: u64,
+        reasoning_started_at: Option<DateTime<Utc>>,
     },
     MessagesTruncated {
         session_id: Uuid,

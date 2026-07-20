@@ -2801,12 +2801,14 @@ impl App {
                 model_display: None,
                 provider_display: None,
                 thinking_level: None,
-                subagent_disabled: !self.subagent_enabled,
-                workspace_root: self.runtime.workspace_root(),
-            };
-            self.overlays.draw(frame, area, &draw_ctx);
-            return;
-        }
+                 subagent_disabled: !self.subagent_enabled,
+                 collapse_thinking: self.runtime.config().ui.collapse_thinking,
+                 workspace_root: self.runtime.workspace_root(),
+             };
+             self.overlays.draw(frame, area, &draw_ctx);
+             return;
+         }
+
 
         // Determine sidebar visibility and split the layout.
         // Use the same threshold as the old TUI.
@@ -2903,10 +2905,12 @@ impl App {
                 provider_display: None,
                 thinking_level: None,
                 subagent_disabled: !self.subagent_enabled,
+                collapse_thinking: self.runtime.config().ui.collapse_thinking,
                 workspace_root: self.runtime.workspace_root(),
             };
             chat.draw(frame, content_area, &draw_ctx);
         }
+
 
         // Render queued prompts above the composer
         self.queued_card_bounds.clear();
@@ -2961,26 +2965,28 @@ impl App {
                 model_display: Some(&active_model.display_name),
                 provider_display: Some(&active_model.provider_display_name),
                 thinking_level: Some(&active_model.thinking_level),
-                subagent_disabled: !self.subagent_enabled,
-                workspace_root: self.runtime.workspace_root(),
-            };
-            composer.draw(frame, bottom_area, &draw_ctx);
-        }
+                 subagent_disabled: !self.subagent_enabled,
+                 collapse_thinking: self.runtime.config().ui.collapse_thinking,
+                 workspace_root: self.runtime.workspace_root(),
+             };
+             composer.draw(frame, bottom_area, &draw_ctx);
+         }
 
-        // Build DrawContext for overlays
-        let draw_ctx = DrawContext {
-            palette,
-            focused: true,
-            mode: self.mode,
-            pending_mode: self.current_session_id
-                .and_then(|sid| self.pending_modes.get(&sid).copied()),
-            model_display: None,
-            provider_display: None,
-            thinking_level: None,
-            subagent_disabled: !self.subagent_enabled,
-            workspace_root: self.runtime.workspace_root(),
-        };
 
+         // Build DrawContext for overlays
+         let draw_ctx = DrawContext {
+             palette,
+             focused: true,
+             mode: self.mode,
+             pending_mode: self.current_session_id
+                 .and_then(|sid| self.pending_modes.get(&sid).copied()),
+             model_display: None,
+             provider_display: None,
+             thinking_level: None,
+             subagent_disabled: !self.subagent_enabled,
+             collapse_thinking: self.runtime.config().ui.collapse_thinking,
+             workspace_root: self.runtime.workspace_root(),
+         };
         // ── Sidebar ───────────────────────────────────────────────────
         if let Some(sidebar_area) = sidebar_area {
             self.sidebar_area = Some(sidebar_area);
@@ -3195,9 +3201,9 @@ impl App {
                 model_display: Some(&active_model.display_name),
                 provider_display: Some(&active_model.provider_display_name),
                 thinking_level: Some(&active_model.thinking_level),
-                subagent_disabled: !self.subagent_enabled,
-                workspace_root: self.runtime.workspace_root(),
-            };
+                 subagent_disabled: !self.subagent_enabled,
+                 collapse_thinking: self.runtime.config().ui.collapse_thinking,
+                 workspace_root: self.runtime.workspace_root(),            };
             composer.draw(frame, sections[2], &draw_ctx);
         }
 

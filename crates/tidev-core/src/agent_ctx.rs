@@ -341,6 +341,7 @@ impl AgentContext for CoreContext {
                     self.emit(BackendEvent::StreamEnd {
                         session_id: self.session_id,
                         request_id: 0,
+                        reasoning_started_at: None,
                     });
                     return Err(anyhow::anyhow!("Stream cancelled by user"));
                 }
@@ -354,6 +355,9 @@ impl AgentContext for CoreContext {
                                     turn.content.push_str(&content);
                                 }
                                 BackendEvent::ReasoningDelta { content, .. } => {
+                                    if turn.reasoning_started_at.is_none() {
+                                        turn.reasoning_started_at = Some(Utc::now());
+                                    }
                                     turn.reasoning.push_str(&content);
                                 }
                                 BackendEvent::ToolCallUpdated { tool_call, .. } => {

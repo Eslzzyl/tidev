@@ -330,6 +330,8 @@ pub struct UiConfig {
     pub external_editor: Option<String>,
     #[serde(default = "default_tab_width")]
     pub tab_width: usize,
+    #[serde(default)]
+    pub collapse_thinking: bool,
 }
 
 fn default_scroll_speed() -> f32 {
@@ -348,6 +350,7 @@ impl Default for UiConfig {
             scroll_speed: 3.0,
             external_editor: None,
             tab_width: 4,
+            collapse_thinking: false,
         }
     }
 }
