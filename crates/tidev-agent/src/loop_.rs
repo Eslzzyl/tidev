@@ -67,6 +67,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
                     session_id,
                     request_id,
                     reasoning_started_at: None,
+                    reasoning_completed_at: None,
                 });
                 return Ok(());
             }
@@ -75,6 +76,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
                     session_id,
                     request_id,
                     reasoning_started_at: None,
+                    reasoning_completed_at: None,
                 });
                 return Err(e);
             }
@@ -109,6 +111,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
                     session_id,
                     request_id,
                     reasoning_started_at: turn.reasoning_started_at,
+                    reasoning_completed_at: turn.reasoning_completed_at,
                 });
                 // Signal a new turn so the UI can update its state (spinner,
                 // progress indicators, etc.).  The next iteration's
@@ -124,6 +127,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
                 session_id,
                 request_id,
                 reasoning_started_at: turn.reasoning_started_at,
+                reasoning_completed_at: turn.reasoning_completed_at,
             });
             return Ok(());
         }
@@ -198,6 +202,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
             session_id,
             request_id,
             reasoning_started_at: turn.reasoning_started_at,
+            reasoning_completed_at: turn.reasoning_completed_at,
         });
         let _ = event_tx.send(BackendEvent::TurnStarting {
             session_id,

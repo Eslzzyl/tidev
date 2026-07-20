@@ -635,6 +635,7 @@ pub enum BackendEvent {
         session_id: Uuid,
         request_id: u64,
         reasoning_started_at: Option<DateTime<Utc>>,
+        reasoning_completed_at: Option<DateTime<Utc>>,
     },
     MessagesTruncated {
         session_id: Uuid,

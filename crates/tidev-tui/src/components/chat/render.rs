@@ -1191,9 +1191,9 @@ fn render_reasoning_lines(
     // Build header with duration and fold indicator
     let mut header_spans = vec![Span::styled("┃ ", label_style)];
 
-    // Duration suffix
+    // Duration suffix — shown during streaming once reasoning started,
+    // and after the turn is complete.
     let duration_suffix = duration
-        .filter(|_| !is_streaming)
         .map(|d| format!(" ({})", d))
         .unwrap_or_default();
 

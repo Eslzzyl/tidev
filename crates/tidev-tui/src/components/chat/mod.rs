@@ -509,6 +509,13 @@ impl MessageList {
                 if is_active_session && self.streaming_buffer.is_streaming {
                     self.streaming_buffer.push_delta(content, &mut chat_context.messages);
                     if let Some(msg_id) = self.streaming_buffer.current_message_id {
+                        if let Some(msg) = chat_context.messages.iter_mut().find(|m| m.id == msg_id) {
+                            if msg.reasoning_started_at.is_some()
+                                && msg.reasoning_completed_at.is_none()
+                            {
+                                msg.reasoning_completed_at = Some(Utc::now());
+                            }
+                        }
                         self.layout_index.mark_dirty(msg_id);
                     }
                 } else if let Some(msg) = chat_context.messages.iter_mut().rev().find(|m| {
@@ -517,11 +524,23 @@ impl MessageList {
                     // Background session or inactive streaming_buffer:
                     // find the streaming message directly in the context.
                     msg.content.push_str(content);
+                    if msg.reasoning_started_at.is_some()
+                        && msg.reasoning_completed_at.is_none()
+                    {
+                        msg.reasoning_completed_at = Some(Utc::now());
+                    }
                     self.layout_index.mark_dirty(msg.id);
                 } else if is_active_session {
                     // Recovery path for active session: TurnStarting was missed.
                     let mid = self.streaming_buffer.recover_or_begin_streaming(&mut chat_context.messages);
                     self.streaming_buffer.push_delta(content, &mut chat_context.messages);
+                    if let Some(msg) = chat_context.messages.iter_mut().find(|m| m.id == mid) {
+                        if msg.reasoning_started_at.is_some()
+                            && msg.reasoning_completed_at.is_none()
+                        {
+                            msg.reasoning_completed_at = Some(Utc::now());
+                        }
+                    }
                     self.layout_index.mark_dirty(mid);
                 }
                 self.dirty = true;
@@ -531,23 +550,36 @@ impl MessageList {
                 if is_active_session && self.streaming_buffer.is_streaming {
                     self.streaming_buffer.push_reasoning_delta(content, &mut chat_context.messages);
                     if let Some(msg_id) = self.streaming_buffer.current_message_id {
+                        if let Some(msg) = chat_context.messages.iter_mut().find(|m| m.id == msg_id) {
+                            if msg.reasoning_started_at.is_none() {
+                                msg.reasoning_started_at = Some(Utc::now());
+                            }
+                        }
                         self.layout_index.mark_dirty(msg_id);
                     }
                 } else if let Some(msg) = chat_context.messages.iter_mut().rev().find(|m| {
                     m.streaming
                 }) {
                     msg.reasoning.push_str(content);
+                    if msg.reasoning_started_at.is_none() {
+                        msg.reasoning_started_at = Some(Utc::now());
+                    }
                     self.layout_index.mark_dirty(msg.id);
                 } else if is_active_session {
                     self.streaming_buffer.recover_or_begin_streaming(&mut chat_context.messages);
                     self.streaming_buffer.push_reasoning_delta(content, &mut chat_context.messages);
                     if let Some(msg_id) = self.streaming_buffer.current_message_id {
+                        if let Some(msg) = chat_context.messages.iter_mut().find(|m| m.id == msg_id) {
+                            if msg.reasoning_started_at.is_none() {
+                                msg.reasoning_started_at = Some(Utc::now());
+                            }
+                        }
                         self.layout_index.mark_dirty(msg_id);
                     }
                 }
                 self.dirty = true;
             }
-            BackendEvent::StreamEnd { reasoning_started_at, .. } => {
+            BackendEvent::StreamEnd { reasoning_started_at, reasoning_completed_at, .. } => {
                 let is_active_session = self.active_session_id == Some(session_id);
                 let msg_id = if is_active_session {
                     self.streaming_buffer.current_message_id
@@ -559,6 +591,7 @@ impl MessageList {
                     if let Some(mid) = msg_id {
                         if let Some(msg) = chat_context.messages.iter_mut().find(|m| m.id == mid) {
                             msg.reasoning_started_at = *reasoning_started_at;
+                            msg.reasoning_completed_at = *reasoning_completed_at;
                         }
                         self.layout_index.mark_dirty(mid);
                     }
@@ -569,6 +602,7 @@ impl MessageList {
                     }) {
                         chat_context.messages[idx].streaming = false;
                         chat_context.messages[idx].reasoning_started_at = *reasoning_started_at;
+                        chat_context.messages[idx].reasoning_completed_at = *reasoning_completed_at;
                         self.layout_index.mark_dirty(chat_context.messages[idx].id);
                     }
                 }
@@ -596,6 +630,11 @@ impl MessageList {
                 };
                 if let Some(msg) = target {
                     msg.upsert_tool_call(tool_call.clone());
+                    if msg.reasoning_started_at.is_some()
+                        && msg.reasoning_completed_at.is_none()
+                    {
+                        msg.reasoning_completed_at = Some(Utc::now());
+                    }
                     self.layout_index.mark_dirty(msg.id);
                     self.dirty = true;
                 }

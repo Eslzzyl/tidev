@@ -342,6 +342,7 @@ impl AgentContext for CoreContext {
                         session_id: self.session_id,
                         request_id: 0,
                         reasoning_started_at: None,
+                        reasoning_completed_at: None,
                     });
                     return Err(anyhow::anyhow!("Stream cancelled by user"));
                 }
