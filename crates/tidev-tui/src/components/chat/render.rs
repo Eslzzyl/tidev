@@ -100,7 +100,7 @@ pub(crate) struct ImageBadgeInfo {
 /// header, and status line. This mirrors the old v0.6.x implementation.
 pub(crate) fn render_running_subagent_lines(
     info: &RunningSubagentInfo,
-    body_width: usize,
+    content_width: usize,
     palette: ThemePalette,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
@@ -122,7 +122,7 @@ pub(crate) fn render_running_subagent_lines(
         ),
     ]);
     lines.extend(
-        word_wrap_line(&header_line, WrapOptions::new(body_width).break_words(true))
+        word_wrap_line(&header_line, WrapOptions::new(content_width).break_words(true))
             .into_iter().map(|l| {
                 Line::from(l.spans.into_iter()
                     .map(|s| Span::styled(s.content.to_string(), s.style))
@@ -146,14 +146,14 @@ pub(crate) fn render_running_subagent_lines(
 /// Must stay in sync with render_running_subagent_lines.
 pub(crate) fn count_running_subagent_card_lines(
     info: &RunningSubagentInfo,
-    body_width: usize,
+    content_width: usize,
 ) -> usize {
     let mut count = 0;
     // Top padding
     count += 1;
     // Header line (word-wrapped)
     let header_text = format!("@{} subagent: {}", info.subagent_type, info.description.trim());
-    count += word_wrap_line(&Line::from(header_text), WrapOptions::new(body_width).break_words(true)).len();
+    count += word_wrap_line(&Line::from(header_text), WrapOptions::new(content_width).break_words(true)).len();
     // Status line
     count += 1;
     // Bottom padding
@@ -168,6 +168,33 @@ pub(crate) fn count_running_subagent_card_lines(
 pub(crate) const LEFT_MARGIN: u16 = 2;
 pub(crate) const SCROLLBAR_WIDTH: u16 = 1;
 const GAP: u16 = 1;
+
+// ---------------------------------------------------------------------------
+// CardGeom — describes a card's horizontal geometry
+// ---------------------------------------------------------------------------
+
+/// Describes a card's horizontal layout: total width, left padding, right padding.
+/// Content width = total - left - right.
+/// All card rendering functions receive `content_width` (the usable width).
+/// `decorate_card_lines` uses the full `CardGeom` to lay out left/right padding.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct CardGeom {
+    pub total: usize,
+    pub left: usize,
+    pub right: usize,
+}
+
+impl CardGeom {
+    /// Build a card geometry that fills the given total width with symmetric padding.
+    pub fn new(total: usize) -> Self {
+        Self { total, left: 2, right: 2 }
+    }
+
+    /// The usable content width inside the padding.
+    pub fn content(&self) -> usize {
+        self.total.saturating_sub(self.left + self.right)
+    }
+}
 
 // ---------------------------------------------------------------------------
 // RenderContext
@@ -253,7 +280,7 @@ pub(crate) fn render_messages(
         layout_index,
         render_cache,
         &ctx,
-        content_area.width as usize,
+        CardGeom::new(content_area.width as usize),
         *scroll_offset,
         area.height as usize,
         *follow_tail,
@@ -358,15 +385,14 @@ fn messages_text(
     index: &mut MessageLayoutIndex,
     cache: &mut lru::LruCache<MessageRenderCacheKey, MessageRenderCacheEntry>,
     ctx: &RenderContext,
-    width: usize,
+    geom: CardGeom,
     scroll: usize,
     viewport: usize,
     follow_tail: bool,
     retrying_hint: &Option<(u32, u32, String, Instant)>,
 ) -> RenderOutput {
     let messages = chat_context.visible_messages();
-    let width = width.max(1);
-    let body_width = width.saturating_sub(2).max(1);
+    let content_width = geom.content();
 
     let mut lines: Vec<Line<'static>> = Vec::new();
     let mut selectable_regions: Vec<SelectableRegionRange> = Vec::new();
@@ -388,7 +414,7 @@ fn messages_text(
     }
 
     // Update layout index — this renders all blocks and populates the cache
-    update_layout_index(index, cache, messages, width, body_width, ctx);
+    update_layout_index(index, cache, messages, &geom, ctx);
 
     // Pre-compute retrying hint lines (if any) so we can include its height
     // in the scroll calculation before determining which blocks are visible.
@@ -404,7 +430,7 @@ fn messages_text(
         let retry_after_str = format!("Retrying in {remaining}s");
         let msg = format!("Retrying ({}/{}): {}", attempt, max_attempts, reason);
 
-        let text_width = body_width.max(1);
+        let text_width = content_width.max(1);
         let palette = ctx.palette;
         let mut retry_lines = Vec::new();
 
@@ -430,7 +456,7 @@ fn messages_text(
         card_lines.extend(retry_lines);
         card_lines.push(Line::from(""));
 
-        precomputed_hint_lines = decorate_card_lines(card_lines, palette.panel_light, 2, width);
+        precomputed_hint_lines = decorate_card_lines(card_lines, palette.panel_light, &geom);
     }
 
     let retry_hint_height = precomputed_hint_lines.len();
@@ -472,7 +498,7 @@ fn messages_text(
         let is_round_end = next_idx >= messages.len()
             || !matches!(messages[next_idx].role, MessageRole::Tool);
         let block_lines = render_block_from_cache(
-            block, cache, width, is_round_end, &mut selectable_regions, ctx, &current_line_offset,
+            block, cache, &geom, is_round_end, &mut selectable_regions, ctx, &current_line_offset,
             messages, &mut card_bounds, &mut inline_running_card_ranges, &mut image_badge_infos,
         );
         lines.extend(block_lines);
@@ -496,11 +522,11 @@ fn update_layout_index(
     index: &mut MessageLayoutIndex,
     cache: &mut lru::LruCache<MessageRenderCacheKey, MessageRenderCacheEntry>,
     messages: &[Message],
-    width: usize,
-    body_width: usize,
+    geom: &CardGeom,
     ctx: &RenderContext,
 ) {
-    let needs_full = index.needs_full_rebuild(messages.len(), width);
+    let content_width = geom.content();
+    let needs_full = index.needs_full_rebuild(messages.len(), geom.total);
 
     if !needs_full {
         // Incremental update: only recompute dirty blocks
@@ -519,7 +545,7 @@ fn update_layout_index(
                 let old_line_count = block.line_count;
 
                 let (_msg_count, new_line_count, _) = compute_and_cache_block(
-                    message, messages, start_idx, is_round_end, body_width,
+                    message, messages, start_idx, is_round_end, content_width,
                     cache, ctx,
                 );
 
@@ -539,7 +565,7 @@ fn update_layout_index(
     }
 
     // Full rebuild
-    index.reset(width);
+    index.reset(geom.total);
 
     if messages.is_empty() {
         return;
@@ -580,7 +606,7 @@ fn compute_block_data(
     messages: &[Message],
     start_idx: usize,
     is_round_end: bool,
-    body_width: usize,
+    content_width: usize,
     ctx: &RenderContext,
 ) -> BlockComputation {
     let (message_count, line_count, cache_entries) = match message.role {
@@ -591,14 +617,14 @@ fn compute_block_data(
             {
                 count += 1;
             }
-            let cards = render_assistant_cards(ctx, message, messages, body_width, is_round_end);
+            let cards = render_assistant_cards(ctx, message, messages, content_width, is_round_end);
             let mut line_count = 0;
             let mut cache_entries = Vec::new();
 
             let cards_key = MessageRenderCacheKey {
                 session_id: Uuid::default(),
                 message_id: message.id,
-                width: body_width,
+                width: content_width,
                 is_round_end,
                 kind: MessageRenderCacheKind::Cards,
             };
@@ -626,13 +652,13 @@ fn compute_block_data(
                 let tool_result = tool_results_by_id.get(&tc.id).copied();
                 let is_expanded = ctx.expanded_tool_results.contains(&message.id);
                 let (tool_lines, tool_regions) = tool::render_tool_call_with_result(
-                    tc, tool_result, body_width, message.streaming, ctx, is_expanded,
+                    tc, tool_result, content_width, message.streaming, ctx, is_expanded,
                 );
 
                 let tool_key = MessageRenderCacheKey {
                     session_id: Uuid::default(),
                     message_id: message.id,
-                    width: body_width,
+                    width: content_width,
                     is_round_end,
                     kind: MessageRenderCacheKind::ToolCall(tc.id.clone()),
                 };
@@ -644,7 +670,7 @@ fn compute_block_data(
                 let mut tc_line_count = tool_lines.len();
                 if tc.name == "task" && tool_result.is_none()
                     && let Some(info) = ctx.running_subagents.iter().find(|s| s.tool_call_id == tc.id) {
-                        tc_line_count = count_running_subagent_card_lines(info, body_width);
+                        tc_line_count = count_running_subagent_card_lines(info, content_width);
                     }
                 line_count += tc_line_count;
             }
@@ -653,7 +679,7 @@ fn compute_block_data(
             (count, line_count, cache_entries)
         }
         MessageRole::User | MessageRole::System | MessageRole::Error | MessageRole::Shell => {
-            let cards = render_single_card(ctx, message, body_width, is_round_end);
+            let cards = render_single_card(ctx, message, content_width, is_round_end);
             let mut line_count = 0;
             for (_, card_lines) in &cards {
                 line_count += card_lines.len();
@@ -663,7 +689,7 @@ fn compute_block_data(
             let kind = MessageRenderCacheKey {
                 session_id: Uuid::default(),
                 message_id: message.id,
-                width: body_width,
+                width: content_width,
                 is_round_end,
                 kind: MessageRenderCacheKind::Cards,
             };
@@ -687,7 +713,7 @@ fn compute_block_data(
             .map(|(start_idx, is_round_end)| {
                 compute_block_data(
                     &messages[*start_idx], messages, *start_idx, *is_round_end,
-                    body_width, ctx,
+                    content_width, ctx,
                 )
             })
             .collect()
@@ -697,7 +723,7 @@ fn compute_block_data(
             .map(|(start_idx, is_round_end)| {
                 compute_block_data(
                     &messages[*start_idx], messages, *start_idx, *is_round_end,
-                    body_width, ctx,
+                    content_width, ctx,
                 )
             })
             .collect()
@@ -734,7 +760,7 @@ fn compute_and_cache_block(
     messages: &[Message],
     start_idx: usize,
     is_round_end: bool,
-    body_width: usize,
+    content_width: usize,
     cache: &mut lru::LruCache<MessageRenderCacheKey, MessageRenderCacheEntry>,
     ctx: &RenderContext,
 ) -> (usize, usize, usize) {
@@ -748,14 +774,14 @@ fn compute_and_cache_block(
             }
 
             // Render card
-            let cards = render_assistant_cards(ctx, message, messages, body_width, is_round_end);
+            let cards = render_assistant_cards(ctx, message, messages, content_width, is_round_end);
             let mut line_count = 0;
 
             // Store card cache
             let cards_key = MessageRenderCacheKey {
                 session_id: Uuid::default(),
                 message_id: message.id,
-                width: body_width,
+                width: content_width,
                 is_round_end,
                 kind: MessageRenderCacheKind::Cards,
             };
@@ -784,13 +810,13 @@ fn compute_and_cache_block(
                 let tool_result = tool_results_by_id.get(&tc.id).copied();
                 let is_expanded = ctx.expanded_tool_results.contains(&message.id);
                 let (tool_lines, tool_regions) = tool::render_tool_call_with_result(
-                    tc, tool_result, body_width, message.streaming, ctx, is_expanded,
+                    tc, tool_result, content_width, message.streaming, ctx, is_expanded,
                 );
 
                 let tool_key = MessageRenderCacheKey {
                     session_id: Uuid::default(),
                     message_id: message.id,
-                    width: body_width,
+                    width: content_width,
                     is_round_end,
                     kind: MessageRenderCacheKind::ToolCall(tc.id.clone()),
                 };
@@ -803,7 +829,7 @@ fn compute_and_cache_block(
                 let mut tc_line_count = tool_lines.len();
                 if tc.name == "task" && tool_result.is_none()
                     && let Some(info) = ctx.running_subagents.iter().find(|s| s.tool_call_id == tc.id) {
-                        tc_line_count = count_running_subagent_card_lines(info, body_width);
+                        tc_line_count = count_running_subagent_card_lines(info, content_width);
                     }
                 line_count += tc_line_count;
             }
@@ -812,7 +838,7 @@ fn compute_and_cache_block(
             (count, line_count, 0)
         }
         MessageRole::User | MessageRole::System | MessageRole::Error | MessageRole::Shell => {
-            let cards = render_single_card(ctx, message, body_width, is_round_end);
+            let cards = render_single_card(ctx, message, content_width, is_round_end);
             let mut line_count = 0;
             for (_, card_lines) in &cards {
                 line_count += card_lines.len();
@@ -822,7 +848,7 @@ fn compute_and_cache_block(
             let kind = MessageRenderCacheKey {
                 session_id: Uuid::default(),
                 message_id: message.id,
-                width: body_width,
+                width: content_width,
                 is_round_end,
                 kind: MessageRenderCacheKind::Cards,
             };
@@ -887,7 +913,7 @@ fn scan_image_badges(
 fn render_block_from_cache(
     block: &MessageBlock,
     cache: &lru::LruCache<MessageRenderCacheKey, MessageRenderCacheEntry>,
-    width: usize,
+    geom: &CardGeom,
     is_round_end: bool,
     selectable_regions: &mut Vec<SelectableRegionRange>,
     ctx: &RenderContext,
@@ -897,11 +923,11 @@ fn render_block_from_cache(
     inline_running_card_ranges: &mut Vec<InlineRunningCardRange>,
     image_badge_infos: &mut Vec<ImageBadgeInfo>,
 ) -> Vec<Line<'static>> {
-    let body_width = width.saturating_sub(2).max(1);
+    let content_width = geom.content();
     let cards_key = MessageRenderCacheKey {
         session_id: Uuid::default(),
         message_id: block.message_id,
-        width: body_width,
+        width: content_width,
         is_round_end,
         kind: MessageRenderCacheKind::Cards,
     };
@@ -931,7 +957,7 @@ fn render_block_from_cache(
                     } else {
                         *bg
                     };
-                    lines.extend(decorate_card_lines(card_lines.clone(), adjusted_bg, 2, width));
+                    lines.extend(decorate_card_lines(card_lines.clone(), adjusted_bg, geom));
                     let end_line = current_line_offset + lines.len();
                     if !matches!(role, MessageRole::Assistant) {
                         card_bounds.push((block.message_id, start_line, end_line));
@@ -946,10 +972,10 @@ fn render_block_from_cache(
         let msg = &messages[block.message_start_idx];
         let cards = match msg.role {
             MessageRole::Assistant => {
-                render_assistant_cards(ctx, msg, messages, body_width, is_round_end)
+                render_assistant_cards(ctx, msg, messages, content_width, is_round_end)
             }
             _ => {
-                render_single_card(ctx, msg, body_width, is_round_end)
+                render_single_card(ctx, msg, content_width, is_round_end)
             }
         };
         for (bg, card_lines) in &cards {
@@ -963,7 +989,7 @@ fn render_block_from_cache(
                 } else {
                     *bg
                 };
-                lines.extend(decorate_card_lines(card_lines.clone(), adjusted_bg, 2, width));
+                lines.extend(decorate_card_lines(card_lines.clone(), adjusted_bg, geom));
                 let end_line = current_line_offset + lines.len();
                 if !matches!(role, MessageRole::Assistant) {
                     card_bounds.push((block.message_id, start_line, end_line));
@@ -996,13 +1022,13 @@ fn render_block_from_cache(
             if tc.name == "task" && !tool_results_by_id.contains_key(&tc.id)
                 && let Some(exec_index) = ctx.running_subagents.iter().position(|s| s.tool_call_id == tc.id) {
                     let info = &ctx.running_subagents[exec_index];
-                    let running_lines = render_running_subagent_lines(info, body_width, ctx.palette);
+                    let running_lines = render_running_subagent_lines(info, content_width, ctx.palette);
                     let start_line = current_line_offset + lines.len();
                     let mut card_bg = ctx.palette.panel;
                     if ctx.hovered_inline_subagent == Some(exec_index) {
                         card_bg = ctx.palette.hover_bg(card_bg);
                     }
-                    let decorated = decorate_card_lines(running_lines, card_bg, 2, width);
+                    let decorated = decorate_card_lines(running_lines, card_bg, geom);
                     lines.extend(decorated);
                     let end_line = current_line_offset + lines.len();
                     inline_running_card_ranges.push(InlineRunningCardRange {
@@ -1016,7 +1042,7 @@ fn render_block_from_cache(
             let tool_key = MessageRenderCacheKey {
                 session_id: Uuid::default(),
                 message_id: block.message_id,
-                width: body_width,
+                width: content_width,
                 is_round_end,
                 kind: MessageRenderCacheKind::ToolCall(tc.id.clone()),
             };
@@ -1033,7 +1059,7 @@ fn render_block_from_cache(
                     let tool_result = tool_results_by_id.get(&tc.id).copied();
                     let is_expanded = ctx.expanded_tool_results.contains(&block.message_id);
                     tool::render_tool_call_with_result(
-                        tc, tool_result, body_width, msg.streaming, ctx, is_expanded,
+                        tc, tool_result, content_width, msg.streaming, ctx, is_expanded,
                     )
                 };
             if !tool_lines.is_empty() {
@@ -1060,7 +1086,7 @@ fn render_block_from_cache(
                 } else {
                     ctx.palette.panel_light
                 };
-                lines.extend(decorate_card_lines(tool_lines, bg, 2, width));
+                lines.extend(decorate_card_lines(tool_lines, bg, geom));
                 for r in &tool_regions {
                     selectable_regions.push(SelectableRegionRange {
                         start_line: current_line_offset + lines.len() + r.start_line,
@@ -1090,7 +1116,7 @@ fn render_block_from_cache(
 fn render_reasoning_lines(
     ctx: &RenderContext,
     reasoning: &str,
-    body_width: usize,
+    content_width: usize,
     is_streaming: bool,
 ) -> Vec<Line<'static>> {
     let palette = ctx.palette;
@@ -1112,10 +1138,10 @@ fn render_reasoning_lines(
         return lines;
     }
 
-    let content_width = body_width.saturating_sub(2).max(1);
+    let effective = content_width.saturating_sub(2).max(1); // 2 for ┃ prefix
     let rendered = markdown::render_markdown_text_with_width_and_cwd(
         reasoning,
-        Some(content_width),
+        Some(effective),
         Some(ctx.workspace_root),
     );
 
@@ -1172,11 +1198,11 @@ fn render_assistant_cards(
     ctx: &RenderContext,
     message: &Message,
     messages: &[Message],
-    body_width: usize,
+    content_width: usize,
     is_round_end: bool,
 ) -> Vec<(Color, Vec<Line<'static>>)> {
     let palette = ctx.palette;
-    let body_lines = render_assistant_body_lines(ctx, message, messages, body_width, is_round_end);
+    let body_lines = render_assistant_body_lines(ctx, message, messages, content_width, is_round_end);
 
     let mut lines_with_margin = Vec::new();
     lines_with_margin.extend(body_lines);
@@ -1191,7 +1217,7 @@ fn render_assistant_body_lines(
     ctx: &RenderContext,
     message: &Message,
     messages: &[Message],
-    body_width: usize,
+    content_width: usize,
     is_round_end: bool,
 ) -> Vec<Line<'static>> {
     let palette = ctx.palette;
@@ -1199,7 +1225,7 @@ fn render_assistant_body_lines(
 
     // 1. Reasoning (with ┃ prefix, dimmed colours, exactly like old code)
     if !message.reasoning.trim().is_empty() {
-        lines.extend(render_reasoning_lines(ctx, &message.reasoning, body_width, message.streaming));
+        lines.extend(render_reasoning_lines(ctx, &message.reasoning, content_width, message.streaming));
         if !message.content.trim().is_empty() {
             lines.push(Line::from(""));
         }
@@ -1208,7 +1234,7 @@ fn render_assistant_body_lines(
     // 2. Content — try unified diff first, fall back to markdown
     if !message.content.is_empty() {
         if let Some((diff_lines, _)) =
-            render_unified_diff_text(&message.content, body_width, palette, 4)
+            render_unified_diff_text(&message.content, content_width, palette, 4)
         {
             for dl in &diff_lines {
                 lines.push(dl.clone());
@@ -1216,7 +1242,7 @@ fn render_assistant_body_lines(
         } else {
             let md = markdown::render_markdown_text_with_width_and_cwd(
                 &message.content,
-                Some(body_width),
+                Some(content_width),
                 Some(ctx.workspace_root),
             );
             for md_line in md.lines.iter() {
@@ -1288,7 +1314,7 @@ fn render_assistant_body_lines(
         if !parts.is_empty() {
             let suffix = parts.join(" · ");
             let text_width = UnicodeWidthStr::width(suffix.as_str());
-            let padding = body_width.saturating_sub(text_width);
+            let padding = content_width.saturating_sub(text_width);
             lines.push(Line::from(Span::styled(
                 format!("{}{}", " ".repeat(padding), suffix),
                 Style::default().fg(palette.accent_soft),
@@ -1303,12 +1329,12 @@ fn render_assistant_body_lines(
 fn render_user_shell_card(
     ctx: &RenderContext,
     message: &Message,
-    body_width: usize,
+    content_width: usize,
 ) -> Vec<(Color, Vec<Line<'static>>)> {
     let palette = ctx.palette;
 
     let display_content = strip_system_reminder_tags(&message.content);
-    let mut content_lines = render_text_body_lines(ctx, &display_content, body_width.saturating_sub(2));
+    let mut content_lines = render_text_body_lines(ctx, &display_content, content_width.saturating_sub(2)); // 2 for ┃ prefix
     apply_badge_styling(&mut content_lines, palette);
 
     let mode_color = message.mode.map_or(palette.accent, |m| match m {
@@ -1334,14 +1360,14 @@ fn render_user_shell_card(
 fn render_error_card(
     ctx: &RenderContext,
     message: &Message,
-    body_width: usize,
+    content_width: usize,
 ) -> Vec<(Color, Vec<Line<'static>>)> {
     let palette = ctx.palette;
     let mut lines = Vec::new();
 
     // 1. Reasoning (if any)
     if !message.reasoning.trim().is_empty() {
-        lines.extend(render_reasoning_lines(ctx, &message.reasoning, body_width, message.streaming));
+        lines.extend(render_reasoning_lines(ctx, &message.reasoning, content_width, message.streaming));
         lines.push(Line::from(""));
     }
 
@@ -1354,7 +1380,7 @@ fn render_error_card(
 
     let error_style = Style::default().fg(palette.error);
     let prefix_style = Style::default().fg(palette.error).add_modifier(Modifier::BOLD);
-    let text_width = body_width.saturating_sub(2).max(1);
+    let text_width = content_width.saturating_sub(2).max(1); // 2 for ! prefix
 
     for line_text in error_text.lines() {
         if line_text.is_empty() {
@@ -1389,7 +1415,7 @@ fn render_error_card(
 fn render_system_card(
     ctx: &RenderContext,
     message: &Message,
-    body_width: usize,
+    content_width: usize,
     is_round_end: bool,
 ) -> Vec<(Color, Vec<Line<'static>>)> {
     let palette = ctx.palette;
@@ -1414,12 +1440,12 @@ fn render_system_card(
     if content.starts_with(COMPACTION_MESSAGE_LABEL) {
         let summary = content.split_once("\n\n").map(|(_, s)| s).unwrap_or("").trim();
         let mut lines = Vec::new();
-        lines.push(render_compaction_divider_line(COMPACTION_MESSAGE_LABEL, body_width, palette));
+        lines.push(render_compaction_divider_line(COMPACTION_MESSAGE_LABEL, content_width, palette));
         if !summary.is_empty() {
             lines.push(Line::from(""));
             let md = markdown::render_markdown_text_with_width_and_cwd(
                 summary,
-                Some(body_width),
+                Some(content_width),
                 Some(ctx.workspace_root),
             );
             for md_line in md.lines.iter() {
@@ -1459,7 +1485,7 @@ fn render_system_card(
             if !parts.is_empty() {
                 let suffix = parts.join(" · ");
                 let text_width = UnicodeWidthStr::width(suffix.as_str());
-                let padding = body_width.saturating_sub(text_width);
+                let padding = content_width.saturating_sub(text_width);
                 lines.push(Line::from(Span::styled(
                     format!("{}{}", " ".repeat(padding), suffix),
                     Style::default().fg(palette.accent_soft),
@@ -1471,7 +1497,7 @@ fn render_system_card(
     }
 
     // Generic system message: render as markdown with trailing margin
-    let content_lines = render_text_body_lines(ctx, content, body_width);
+    let content_lines = render_text_body_lines(ctx, content, content_width);
     let mut lines = Vec::new();
     lines.extend(content_lines);
     lines.push(Line::from(""));
@@ -1482,16 +1508,16 @@ fn render_system_card(
 fn render_single_card(
     ctx: &RenderContext,
     message: &Message,
-    body_width: usize,
+    content_width: usize,
     is_round_end: bool,
 ) -> Vec<(Color, Vec<Line<'static>>)> {
     match message.role {
-        MessageRole::User | MessageRole::Shell => render_user_shell_card(ctx, message, body_width),
-        MessageRole::Error => render_error_card(ctx, message, body_width),
-        MessageRole::System => render_system_card(ctx, message, body_width, is_round_end),
+        MessageRole::User | MessageRole::Shell => render_user_shell_card(ctx, message, content_width),
+        MessageRole::Error => render_error_card(ctx, message, content_width),
+        MessageRole::System => render_system_card(ctx, message, content_width, is_round_end),
         _ => {
             let palette = ctx.palette;
-            let content_lines = render_text_body_lines(ctx, &message.content, body_width);
+            let content_lines = render_text_body_lines(ctx, &message.content, content_width);
             vec![(palette.background, content_lines)]
         }
     }
@@ -1505,7 +1531,7 @@ fn render_single_card(
 fn render_text_body_lines(
     ctx: &RenderContext,
     text: &str,
-    body_width: usize,
+    content_width: usize,
 ) -> Vec<Line<'static>> {
     if text.trim().is_empty() {
         vec![Line::from(Span::styled(
@@ -1515,7 +1541,7 @@ fn render_text_body_lines(
     } else {
         let md = markdown::render_markdown_text_with_width_and_cwd(
             text,
-            Some(body_width),
+            Some(content_width),
             Some(ctx.workspace_root),
         );
         md.lines.to_vec()
@@ -1586,17 +1612,16 @@ fn build_header_lines(is_subsession: bool, palette: ThemePalette) -> Vec<Line<'s
 fn decorate_card_lines(
     lines: Vec<Line<'static>>,
     bg: Color,
-    indent: usize,
-    width: usize,
+    geom: &CardGeom,
 ) -> Vec<Line<'static>> {
     let bg_style = Style::default().bg(bg);
-    let prefix = " ".repeat(indent);
+    let left_prefix = " ".repeat(geom.left);
     lines.into_iter().map(|line| {
         let has_visual_prefix = line.spans.first().is_some_and(|s| s.content == "┃ ");
         let mut spans = if has_visual_prefix {
             Vec::with_capacity(line.spans.len() + 1)
         } else {
-            vec![Span::styled(prefix.clone(), bg_style)]
+            vec![Span::styled(left_prefix.clone(), bg_style)]
         };
         for mut span in line.spans {
             if span.style.bg.is_none() {
@@ -1604,9 +1629,11 @@ fn decorate_card_lines(
             }
             spans.push(span);
         }
-        let used_width: usize = spans.iter().map(|s| UnicodeWidthStr::width(s.content.as_ref())).sum();
-        if used_width < width {
-            spans.push(Span::styled(" ".repeat(width.saturating_sub(used_width)), bg_style));
+        // Explicit right padding
+        let used: usize = spans.iter().map(|s| UnicodeWidthStr::width(s.content.as_ref())).sum();
+        let remaining = geom.total.saturating_sub(used);
+        if remaining > 0 {
+            spans.push(Span::styled(" ".repeat(remaining), bg_style));
         }
         Line::from(spans)
     }).collect()

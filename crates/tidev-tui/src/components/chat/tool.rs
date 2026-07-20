@@ -37,7 +37,7 @@ pub(crate) const TOOL_OUTPUT_PREVIEW_LINES: usize = 5;
 pub(crate) fn render_tool_call_with_result(
     tool_call: &ToolCall,
     tool_result: Option<&Message>,
-    body_width: usize,
+    content_width: usize,
     is_streaming: bool,
     ctx: &RenderContext,
     is_expanded: bool,
@@ -88,7 +88,7 @@ pub(crate) fn render_tool_call_with_result(
     // Summary-only tools (read/glob/grep/skill)
     if matches!(canonical_name, "grep" | "glob" | "read" | "skill") {
         return (
-            render_tool_call_summary_line_inner(tool_call, tool_result, body_width, palette, ctx),
+            render_tool_call_summary_line_inner(tool_call, tool_result, content_width, palette, ctx),
             Vec::new(),
         );
     }
@@ -100,14 +100,14 @@ pub(crate) fn render_tool_call_with_result(
     {
         let output = tool_result.map(|m| m.content.as_str()).unwrap_or("");
         let lines = render_subagent_task_preview(
-            output, body_width, palette, is_expanded, &task_args.description, task_args.subagent_type.as_str(),
+            output, content_width, palette, is_expanded, &task_args.description, task_args.subagent_type.as_str(),
         );
         return (lines, Vec::new());
     }
 
     // Get result lines and exit code (for bash)
     let (result_lines, exit_code, mut regions) = if let Some(result_msg) = tool_result {
-        render_tool_result_detail_lines(result_msg, body_width, ctx, is_expanded)
+        render_tool_result_detail_lines(result_msg, content_width, ctx, is_expanded)
     } else {
         (Vec::new(), None, vec![])
     };
@@ -138,7 +138,7 @@ pub(crate) fn render_tool_call_with_result(
         // Arguments complete or write/edit with live progress: show header
         let call_lines = render_tool_call_lines(
             tool_call,
-            body_width,
+            content_width,
             palette,
             exit_code,
             ctx.workspace_root,
@@ -206,7 +206,7 @@ pub(crate) fn render_tool_call_with_result(
 fn render_tool_call_summary_line_inner(
     tool_call: &ToolCall,
     tool_result: Option<&Message>,
-    body_width: usize,
+    content_width: usize,
     palette: ThemePalette,
     ctx: &RenderContext,
 ) -> Vec<Line<'static>> {
@@ -242,7 +242,7 @@ fn render_tool_call_summary_line_inner(
             ("Loaded skill", name)
         }
         _ => {
-            let summary = summarize_tool_call(tool_call, body_width);
+            let summary = summarize_tool_call(tool_call, content_width);
             return vec![Line::from(vec![Span::styled(
                 summary,
                 Style::default().fg(palette.text).add_modifier(Modifier::BOLD),
@@ -263,12 +263,12 @@ fn render_tool_call_summary_line_inner(
         Span::styled(result_suffix, Style::default().fg(palette.muted)),
     ]);
 
-    // Wrap the line if it exceeds body_width
+    // Wrap the line if it exceeds content_width
     let indent_width = UnicodeWidthStr::width(action_label) + 1;
     let indent = Line::from(" ".repeat(indent_width));
     let wrapped = word_wrap_line(
         &line,
-        WrapOptions::new(body_width)
+        WrapOptions::new(content_width)
             .subsequent_indent(indent)
             .break_words(true),
     );
@@ -283,7 +283,7 @@ fn render_tool_call_summary_line_inner(
 
 fn render_subagent_task_preview(
     output: &str,
-    body_width: usize,
+    content_width: usize,
     palette: ThemePalette,
     is_expanded: bool,
     description: &str,
@@ -306,7 +306,7 @@ fn render_subagent_task_preview(
         Span::styled(description.to_string(), Style::default().fg(palette.text).add_modifier(Modifier::BOLD)),
     ]);
     lines.extend(
-        word_wrap_line(&header_line, WrapOptions::new(body_width).break_words(true))
+        word_wrap_line(&header_line, WrapOptions::new(content_width).break_words(true))
             .into_iter().map(|l| {
                 Line::from(l.spans.into_iter().map(|s| Span::styled(s.content.to_string(), s.style)).collect::<Vec<_>>())
             }),
@@ -314,7 +314,7 @@ fn render_subagent_task_preview(
     lines.push(Line::from(""));
 
     // Render output as markdown
-    let rendered = render_markdown_text_with_width_and_cwd(output, Some(body_width.saturating_sub(2)), None);
+    let rendered = render_markdown_text_with_width_and_cwd(output, Some(content_width), None);
     let md_lines: Vec<Line<'static>> = rendered.lines.clone();
 
     if is_expanded {
@@ -345,7 +345,7 @@ fn render_subagent_task_preview(
 
 fn render_tool_call_lines(
     tool_call: &ToolCall,
-    body_width: usize,
+    content_width: usize,
     palette: ThemePalette,
     exit_code: Option<i32>,
     workspace_root: &Path,
@@ -380,13 +380,13 @@ fn render_tool_call_lines(
                     title_spans.push(Span::styled(format!("  ✗ {}", code), Style::default().fg(palette.error)));
                 }
             }
-            lines.extend(wrap_tool_title(Line::from(title_spans), body_width, "      "));
+            lines.extend(wrap_tool_title(Line::from(title_spans), content_width, "      "));
 
             for cmd_line in command.lines() {
                 let owned_line = Line::from(cmd_line.to_string());
                 let wrapped = word_wrap_line(
                     &owned_line,
-                    WrapOptions::new(body_width.saturating_sub(4)).break_words(true),
+                    WrapOptions::new(content_width.saturating_sub(4)).break_words(true),
                 );
                 for (i, wl) in wrapped.iter().enumerate() {
                     let mut spans = Vec::new();
@@ -410,7 +410,7 @@ fn render_tool_call_lines(
                     Span::styled("Write ", Style::default().fg(palette.muted)),
                     Span::styled(rel, Style::default().fg(palette.text).add_modifier(Modifier::BOLD)),
                 ]),
-                body_width, "      ",
+                content_width, "      ",
             ));
         }
         "edit" => {
@@ -421,7 +421,7 @@ fn render_tool_call_lines(
                     Span::styled("Edit ", Style::default().fg(palette.muted)),
                     Span::styled(rel, Style::default().fg(palette.text).add_modifier(Modifier::BOLD)),
                 ]),
-                body_width, "      ",
+                content_width, "      ",
             ));
         }
         "websearch" => {
@@ -446,7 +446,7 @@ fn render_tool_call_lines(
                     Style::default().fg(palette.muted),
                 ));
             }
-            lines.extend(wrap_tool_title(Line::from(title_spans), body_width, "               "));
+            lines.extend(wrap_tool_title(Line::from(title_spans), content_width, "               "));
         }
         "webfetch" => {
             let url = string_field("url").unwrap_or_default();
@@ -470,7 +470,7 @@ fn render_tool_call_lines(
                     Style::default().fg(palette.muted),
                 ));
             }
-            lines.extend(wrap_tool_title(Line::from(title_spans), body_width, "                    "));
+            lines.extend(wrap_tool_title(Line::from(title_spans), content_width, "                    "));
         }
         "apply_patch" => {
             let patch_text = string_field("patch_text").unwrap_or_default();
@@ -492,7 +492,7 @@ fn render_tool_call_lines(
             };
             lines.extend(wrap_tool_title(
                 Line::from(vec![Span::styled(title, Style::default().fg(palette.text).add_modifier(Modifier::BOLD))]),
-                body_width, "               ",
+                content_width, "               ",
             ));
         }
         "question" => {
@@ -508,20 +508,20 @@ fn render_tool_call_lines(
             };
             lines.extend(wrap_tool_title(
                 Line::from(vec![Span::styled(title, Style::default().fg(palette.text).add_modifier(Modifier::BOLD))]),
-                body_width, "   ",
+                content_width, "   ",
             ));
         }
         "todowrite" => {
             lines.extend(wrap_tool_title(
                 Line::from(vec![Span::styled("Update todo list", Style::default().fg(palette.text).add_modifier(Modifier::BOLD))]),
-                body_width, "   ",
+                content_width, "   ",
             ));
         }
         _ => {
-            let summary = summarize_tool_call(tool_call, body_width);
+            let summary = summarize_tool_call(tool_call, content_width);
             lines.extend(wrap_tool_title(
                 Line::from(vec![Span::styled(summary, Style::default().fg(palette.text).add_modifier(Modifier::BOLD))]),
-                body_width, "  ",
+                content_width, "  ",
             ));
         }
     }
@@ -535,7 +535,7 @@ fn render_tool_call_lines(
 
 fn render_tool_result_detail_lines(
     message: &Message,
-    body_width: usize,
+    content_width: usize,
     ctx: &RenderContext,
     is_expanded: bool,
 ) -> (Vec<Line<'static>>, Option<i32>, Vec<SelectableRegionRange>) {
@@ -556,7 +556,7 @@ fn render_tool_result_detail_lines(
     // Question tool results: render Q&A pairs
     if canonical_name == "question" {
         return (
-            render_question_result_pairs(effective_output, body_width, palette),
+            render_question_result_pairs(effective_output, content_width, palette),
             None,
             vec![],
         );
@@ -587,7 +587,7 @@ fn render_tool_result_detail_lines(
 
             if let Some(diff) = &change.diff
                 && let Some((diff_lines, diff_regions)) =
-                    render_unified_diff_text(diff, body_width.saturating_sub(2), palette, 4)
+                    render_unified_diff_text(diff, content_width, palette, 4)
             {
                 let n_diff = diff_lines.len();
                 for mut r in diff_regions {
@@ -611,7 +611,7 @@ fn render_tool_result_detail_lines(
         && matches!(canonical_name, "edit" | "write" | "apply_patch")
         && let Some(diff) = message.metadata.diff.as_ref()
         && let Some((diff_lines, regions)) =
-            render_unified_diff_text(diff, body_width.saturating_sub(2), palette, 4)
+            render_unified_diff_text(diff, content_width, palette, 4)
     {
         return (diff_lines, None, regions);
     }
@@ -620,7 +620,7 @@ fn render_tool_result_detail_lines(
     if !is_error
         && matches!(canonical_name, "edit" | "write" | "apply_patch")
         && let Some((diff_lines, regions)) =
-            render_unified_diff_text(effective_output, body_width.saturating_sub(2), palette, 4)
+            render_unified_diff_text(effective_output, content_width, palette, 4)
     {
         return (diff_lines, None, regions);
     }
@@ -651,7 +651,7 @@ fn render_tool_result_detail_lines(
                 })
                 .collect();
             return (
-                render_todos_checkbox_list(&todos, body_width, palette),
+                render_todos_checkbox_list(&todos, content_width, palette),
                 None,
                 vec![],
             );
@@ -661,7 +661,7 @@ fn render_tool_result_detail_lines(
     // Web search results: styled markdown with header
     if canonical_name == "websearch" {
         return (
-            render_websearch_result_lines(effective_output, body_width, palette, is_expanded, is_error),
+            render_websearch_result_lines(effective_output, content_width, palette, is_expanded, is_error),
             None,
             vec![],
         );
@@ -670,7 +670,7 @@ fn render_tool_result_detail_lines(
     // Web fetch results: styled markdown with header
     if canonical_name == "webfetch" {
         return (
-            render_webfetch_result_lines(effective_output, body_width, palette, is_expanded, is_error),
+            render_webfetch_result_lines(effective_output, content_width, palette, is_expanded, is_error),
             None,
             vec![],
         );
@@ -678,7 +678,7 @@ fn render_tool_result_detail_lines(
 
     // Fallback: standard output preview
     (
-        render_output_preview_lines(effective_output, body_width, palette, is_expanded, is_error),
+        render_output_preview_lines(effective_output, content_width, palette, is_expanded, is_error),
         exit_code,
         vec![],
     )
@@ -690,7 +690,7 @@ fn render_tool_result_detail_lines(
 
 fn render_websearch_result_lines(
     output: &str,
-    body_width: usize,
+    content_width: usize,
     palette: ThemePalette,
     is_expanded: bool,
     is_error: bool,
@@ -703,7 +703,7 @@ fn render_websearch_result_lines(
     }
 
     if is_error {
-        return render_output_preview_lines(output, body_width, palette, is_expanded, true);
+        return render_output_preview_lines(output, content_width, palette, is_expanded, true);
     }
 
     lines.push(Line::from(vec![Span::styled(
@@ -713,7 +713,7 @@ fn render_websearch_result_lines(
     lines.push(Line::from(""));
 
     let rendered = render_markdown_text_with_width_and_cwd(
-        output, Some(body_width.saturating_sub(2)), None,
+        output, Some(content_width), None,
     );
     let md_lines: Vec<Line<'static>> = rendered.lines.clone();
 
@@ -749,7 +749,7 @@ fn render_websearch_result_lines(
 
 fn render_webfetch_result_lines(
     output: &str,
-    body_width: usize,
+    content_width: usize,
     palette: ThemePalette,
     is_expanded: bool,
     is_error: bool,
@@ -762,7 +762,7 @@ fn render_webfetch_result_lines(
     }
 
     if is_error {
-        return render_output_preview_lines(output, body_width, palette, is_expanded, true);
+        return render_output_preview_lines(output, content_width, palette, is_expanded, true);
     }
 
     lines.push(Line::from(vec![Span::styled(
@@ -772,7 +772,7 @@ fn render_webfetch_result_lines(
     lines.push(Line::from(""));
 
     let rendered = render_markdown_text_with_width_and_cwd(
-        output, Some(body_width.saturating_sub(2)), None,
+        output, Some(content_width), None,
     );
     let md_lines: Vec<Line<'static>> = rendered.lines.clone();
 
@@ -808,7 +808,7 @@ fn render_webfetch_result_lines(
 
 fn render_question_result_pairs(
     output: &str,
-    body_width: usize,
+    content_width: usize,
     palette: ThemePalette,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
@@ -843,7 +843,7 @@ fn render_question_result_pairs(
         let q_line_owned = Line::from(question_text.clone());
         let q_wrapped = word_wrap_line(
             &q_line_owned,
-            WrapOptions::new(body_width)
+            WrapOptions::new(content_width)
                 .initial_indent(Line::from(vec![Span::styled(
                     "  Q: ",
                     Style::default().fg(palette.accent_soft).add_modifier(Modifier::BOLD),
@@ -868,7 +868,7 @@ fn render_question_result_pairs(
         let a_line_owned = Line::from(answer_text.clone());
         let a_wrapped = word_wrap_line(
             &a_line_owned,
-            WrapOptions::new(body_width)
+            WrapOptions::new(content_width)
                 .initial_indent(Line::from(vec![Span::styled(
                     "  → ",
                     Style::default().fg(palette.success),
@@ -907,7 +907,7 @@ struct TodoItem {
 
 fn render_todos_checkbox_list(
     todos: &[TodoItem],
-    body_width: usize,
+    content_width: usize,
     palette: ThemePalette,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
@@ -937,7 +937,7 @@ fn render_todos_checkbox_list(
         let content_line = Line::from(todo.content.clone());
         let wrapped = word_wrap_line(
             &content_line,
-            WrapOptions::new(body_width.saturating_sub(2))
+            WrapOptions::new(content_width)
                 .initial_indent(Line::from(vec![Span::styled(checkbox_prefix, style)]))
                 .subsequent_indent(Line::from(vec![Span::styled(indent, Style::default())])),
         );
@@ -1165,7 +1165,7 @@ fn has_image_attachment(attachments: &[MessageAttachment]) -> bool {
 
 pub(crate) fn render_output_preview_lines(
     output: &str,
-    body_width: usize,
+    content_width: usize,
     palette: ThemePalette,
     is_expanded: bool,
     is_error: bool,
@@ -1184,7 +1184,7 @@ pub(crate) fn render_output_preview_lines(
 
     let fg = if is_error { palette.error } else { palette.text };
     let default_style = Style::default().fg(fg);
-    let wrap_width = body_width.saturating_sub(2);
+    let wrap_width = content_width;
 
     for line_text in output.lines().take(max_lines) {
         let expanded = expand_tabs(line_text, 4);
@@ -1593,16 +1593,16 @@ fn pluralize(n: usize, singular: &str, plural: &str) -> String {
     }
 }
 
-/// Wrap a tool title Line at body_width, indenting continuation lines.
+/// Wrap a tool title Line at content_width, indenting continuation lines.
 fn wrap_tool_title(
     title: Line<'static>,
-    body_width: usize,
+    content_width: usize,
     subsequent_indent: &str,
 ) -> Vec<Line<'static>> {
     let indent = Line::from(subsequent_indent.to_string());
     let wrapped = word_wrap_line(
         &title,
-        WrapOptions::new(body_width)
+        WrapOptions::new(content_width)
             .subsequent_indent(indent)
             .break_words(true),
     );
