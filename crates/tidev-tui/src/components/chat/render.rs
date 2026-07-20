@@ -1137,7 +1137,7 @@ fn render_block_from_cache(
 /// Compute the thinking duration string for display.
 fn thinking_duration_str(message: &Message) -> Option<String> {
     let started = message.reasoning_started_at?;
-    let ended = message.completed_at.unwrap_or_else(chrono::Utc::now);
+    let ended = message.reasoning_completed_at.unwrap_or_else(chrono::Utc::now);
     if message.reasoning.trim().is_empty() {
         return None;
     }

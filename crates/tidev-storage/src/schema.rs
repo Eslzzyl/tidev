@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-pub const SCHEMA_VERSION: i64 = 38;
+pub const SCHEMA_VERSION: i64 = 39;
 
 pub const SESSION_SELECT_COLUMNS: &str = "s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, s.status, s.ended_at, s.context_summary, s.context_retained_from, s.system_prompt, COALESCE(sw.workspace_root, ''), s.snapshot_start_hash";
 
@@ -75,7 +75,8 @@ CREATE TABLE IF NOT EXISTS messages (
     file_diffs BLOB,
     mode TEXT,
     thinking_level TEXT,
-    reasoning_started_at TEXT
+    reasoning_started_at TEXT,
+    reasoning_completed_at TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_session_created_at
@@ -229,7 +230,9 @@ CREATE TABLE IF NOT EXISTS messages (
     patch_files TEXT,
     file_diffs TEXT,
     mode TEXT,
-    thinking_level TEXT
+    thinking_level TEXT,
+    reasoning_started_at TEXT,
+    reasoning_completed_at TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_session_created_at

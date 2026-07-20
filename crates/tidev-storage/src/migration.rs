@@ -29,6 +29,11 @@ pub const MIGRATIONS: &[Migration] = &[
         description: "Add reasoning_started_at to messages",
         sql: "ALTER TABLE messages ADD COLUMN reasoning_started_at TEXT",
     },
+    Migration {
+        version: 39,
+        description: "Add reasoning_completed_at to messages",
+        sql: "ALTER TABLE messages ADD COLUMN reasoning_completed_at TEXT",
+    },
 ];
 
 /// Run all pending migrations on the given connection.

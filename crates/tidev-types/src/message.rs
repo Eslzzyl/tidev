@@ -287,6 +287,8 @@ pub struct AssistantTurn {
     pub completed_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub reasoning_started_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub reasoning_completed_at: Option<DateTime<Utc>>,
 }
 
 impl AssistantTurn {
@@ -331,6 +333,8 @@ pub struct Message {
     pub streaming: bool,
     #[serde(default)]
     pub reasoning_started_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub reasoning_completed_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub input_tokens: Option<u32>,
     #[serde(default)]
@@ -385,6 +389,7 @@ impl Message {
             mode: None,
             thinking_level: None,
             reasoning_started_at: None,
+            reasoning_completed_at: None,
         }
     }
 
@@ -423,6 +428,7 @@ impl Message {
             mode: None,
             thinking_level: None,
             reasoning_started_at: None,
+            reasoning_completed_at: None,
         }
     }
 
@@ -459,6 +465,7 @@ impl Message {
             mode: None,
             thinking_level: None,
             reasoning_started_at: None,
+            reasoning_completed_at: None,
         }
     }
 
@@ -493,6 +500,7 @@ impl Message {
             mode: None,
             thinking_level: None,
             reasoning_started_at: None,
+            reasoning_completed_at: None,
         }
     }
 

@@ -353,6 +353,12 @@ impl AgentContext for CoreContext {
                             match ev {
                                 BackendEvent::Delta { content, .. } => {
                                     turn.content.push_str(&content);
+                                    // reasoning → content transition
+                                    if turn.reasoning_started_at.is_some()
+                                        && turn.reasoning_completed_at.is_none()
+                                    {
+                                        turn.reasoning_completed_at = Some(Utc::now());
+                                    }
                                 }
                                 BackendEvent::ReasoningDelta { content, .. } => {
                                     if turn.reasoning_started_at.is_none() {
@@ -362,6 +368,12 @@ impl AgentContext for CoreContext {
                                 }
                                 BackendEvent::ToolCallUpdated { tool_call, .. } => {
                                     turn.upsert_tool_call(tool_call);
+                                    // reasoning → tool-call transition
+                                    if turn.reasoning_started_at.is_some()
+                                        && turn.reasoning_completed_at.is_none()
+                                    {
+                                        turn.reasoning_completed_at = Some(Utc::now());
+                                    }
                                 }
                                 BackendEvent::UsageStats {
                                     input_tokens,
@@ -385,6 +397,12 @@ impl AgentContext for CoreContext {
                                     }
                                 }
                                 BackendEvent::Finished { .. } | BackendEvent::StreamEnd { .. } => {
+                                    // reasoning → turn-end transition
+                                    if turn.reasoning_started_at.is_some()
+                                        && turn.reasoning_completed_at.is_none()
+                                    {
+                                        turn.reasoning_completed_at = Some(Utc::now());
+                                    }
                                     break;
                                 }
                                 BackendEvent::Failed { error, .. } => {

@@ -308,5 +308,6 @@ fn build_assistant_message(turn: &AssistantTurn) -> Message {
     msg.model_id = turn.model_id.clone();
     msg.tokens_per_second = turn.tokens_per_second;
     msg.reasoning_started_at = turn.reasoning_started_at;
+    msg.reasoning_completed_at = turn.reasoning_completed_at;
     msg
 }

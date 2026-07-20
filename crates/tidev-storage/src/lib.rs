@@ -93,6 +93,7 @@ struct RawMessageRow {
     mode: Option<String>,
     thinking_level: Option<String>,
     reasoning_started_at: Option<String>,
+    reasoning_completed_at: Option<String>,
 }
 
 impl RawMessageRow {
@@ -161,6 +162,11 @@ impl RawMessageRow {
             mode,
             thinking_level,
             reasoning_started_at: self.reasoning_started_at.and_then(|s| {
+                DateTime::parse_from_rfc3339(&s)
+                    .ok()
+                    .map(|dt| dt.with_timezone(&Utc))
+            }),
+            reasoning_completed_at: self.reasoning_completed_at.and_then(|s| {
                 DateTime::parse_from_rfc3339(&s)
                     .ok()
                     .map(|dt| dt.with_timezone(&Utc))
@@ -1064,9 +1070,9 @@ impl SessionStore {
              tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, \
              streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, \
              cache_write_tokens, model_id, tokens_per_second, snapshot_hash, patch_files, \
-             file_diffs, mode, thinking_level, reasoning_started_at) \
+             file_diffs, mode, thinking_level, reasoning_started_at, reasoning_completed_at) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, \
-             ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
+             ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27)",
             params![
                 msg.id.to_string(),
                 session_id.to_string(),
@@ -1102,6 +1108,8 @@ impl SessionStore {
                     .as_ref()
                     .map(|t| serde_json::to_string(t).unwrap_or_default()),
                 msg.reasoning_started_at
+                    .map(|t| t.to_rfc3339()),
+                msg.reasoning_completed_at
                     .map(|t| t.to_rfc3339()),
             ],
         )?;
@@ -1145,7 +1153,7 @@ impl SessionStore {
              tool_name, metadata, created_at, completed_at, streaming, input_tokens, \
              output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, \
              tokens_per_second, snapshot_hash, patch_files, file_diffs, mode, thinking_level, \
-             reasoning_started_at \
+             reasoning_started_at, reasoning_completed_at \
              FROM messages WHERE session_id = ?1 ORDER BY created_at ASC",
             )?;
 
@@ -1178,6 +1186,7 @@ impl SessionStore {
                         mode: row.get(22).ok().flatten(),
                         thinking_level: row.get(23).ok().flatten(),
                         reasoning_started_at: row.get(24).ok().flatten(),
+                        reasoning_completed_at: row.get(25).ok().flatten(),
                     })
                 })?;
                 let mut raw = Vec::new();
@@ -1327,7 +1336,7 @@ impl SessionStore {
                  tool_name, metadata, created_at, completed_at, streaming, input_tokens, \
                  output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, \
                  tokens_per_second, snapshot_hash, patch_files, file_diffs, mode, thinking_level, \
-                 reasoning_started_at \
+                 reasoning_started_at, reasoning_completed_at \
                  FROM messages WHERE session_id = ?1 ORDER BY created_at DESC LIMIT 1",
             )?;
             let mut rows = stmt.query_map(params![session_id.to_string()], |row| {
@@ -1381,6 +1390,7 @@ impl SessionStore {
         let mode: Option<String> = row.get(22).ok().flatten();
         let thinking_level: Option<String> = row.get(23).ok().flatten();
         let reasoning_started_at: Option<String> = row.get(24).ok().flatten();
+        let reasoning_completed_at: Option<String> = row.get(25).ok().flatten();
 
         Message {
             id: Uuid::parse_str(&row.get::<_, String>(0).unwrap_or_default()).unwrap_or_default(),
@@ -1414,6 +1424,11 @@ impl SessionStore {
             mode: mode.and_then(|m| serde_json::from_str(&m).ok()),
             thinking_level: thinking_level.and_then(|t| serde_json::from_str(&t).ok()),
             reasoning_started_at: reasoning_started_at.and_then(|s| {
+                DateTime::parse_from_rfc3339(&s)
+                    .ok()
+                    .map(|dt| dt.with_timezone(&Utc))
+            }),
+            reasoning_completed_at: reasoning_completed_at.and_then(|s| {
                 DateTime::parse_from_rfc3339(&s)
                     .ok()
                     .map(|dt| dt.with_timezone(&Utc))
