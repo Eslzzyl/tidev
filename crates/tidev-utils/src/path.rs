@@ -515,4 +515,134 @@ mod tests {
         let result = display_workspace_relative(&ws_symlink, &real.join("sub/file.txt"));
         assert_eq!(result, "sub/file.txt");
     }
+
+    // ─── Windows-specific tests ──────────────────────────────────────
+    //
+    // These tests validate path resolution, boundary checking, and
+    // canonicalization on Windows (drive letters, backslash separators,
+    // `\\?\` prefixes, different-drive boundary detection).  They are
+    // `#[cfg(windows)]` because the Rust `Path::components()` parsing
+    // differs across platforms.
+
+    #[cfg(windows)]
+    #[test]
+    fn test_resolve_path_unchecked_windows_abs_same_drive() {
+        let ws = PathBuf::from("C:\\Users\\test\\project");
+        let candidate = Path::new("C:\\Users\\test\\project\\sub\\file.txt");
+        let result = resolve_path_unchecked(&ws, candidate).unwrap();
+        assert_eq!(result, PathBuf::from("C:\\Users\\test\\project\\sub\\file.txt"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_resolve_path_unchecked_windows_abs_different_drive() {
+        let ws = PathBuf::from("C:\\Users\\test\\project");
+        let candidate = Path::new("D:\\outside\\file.txt");
+        let result = resolve_path_unchecked(&ws, candidate).unwrap();
+        assert_eq!(result, PathBuf::from("D:\\outside\\file.txt"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_resolve_path_unchecked_windows_parent_dir() {
+        let ws = PathBuf::from("C:\\Users\\test\\project");
+        let candidate = Path::new("..\\other\\file.txt");
+        let result = resolve_path_unchecked(&ws, candidate).unwrap();
+        assert_eq!(result, PathBuf::from("C:\\Users\\test\\other\\file.txt"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_resolve_path_unchecked_windows_multi_parent() {
+        let ws = PathBuf::from("C:\\Users\\test\\project\\sub");
+        let candidate = Path::new("..\\..\\outside.txt");
+        let result = resolve_path_unchecked(&ws, candidate).unwrap();
+        assert_eq!(result, PathBuf::from("C:\\Users\\test\\outside.txt"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_resolve_path_unchecked_windows_forward_slash() {
+        let ws = PathBuf::from("C:\\Users\\test\\project");
+        let candidate = Path::new("C:/Users/test/other/file.txt");
+        let result = resolve_path_unchecked(&ws, candidate).unwrap();
+        assert_eq!(result, PathBuf::from("C:\\Users\\test\\other\\file.txt"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_resolve_path_unchecked_windows_relative_dot() {
+        let ws = PathBuf::from("C:\\Users\\test\\project");
+        let candidate = Path::new(".\\sub\\file.txt");
+        let result = resolve_path_unchecked(&ws, candidate).unwrap();
+        assert_eq!(result, PathBuf::from("C:\\Users\\test\\project\\sub\\file.txt"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_resolve_workspace_path_windows_outside_different_drive_rejected() {
+        let dir = tempdir().unwrap();
+        // Use the temp dir as workspace — it lives on the system drive.
+        let result = resolve_workspace_path(dir.path(), Path::new("Z:\\totally\\fake\\path"), false);
+        assert!(
+            result.is_err(),
+            "different-drive absolute path should be rejected when allow_outside=false"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_resolve_workspace_path_windows_outside_different_drive_allowed() {
+        let dir = tempdir().unwrap();
+        let result = resolve_workspace_path(dir.path(), Path::new("Z:\\totally\\fake\\path"), true);
+        assert!(
+            result.is_ok(),
+            "different-drive absolute path should be accepted when allow_outside=true"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_is_path_outside_workspace_windows_different_drive() {
+        let dir = tempdir().unwrap();
+        let outside = is_path_outside_workspace(dir.path(), &PathBuf::from("Z:\\outside.txt"));
+        assert!(outside, "path on a different drive should be outside");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_is_path_outside_workspace_windows_same_drive_inside() {
+        let dir = tempdir().unwrap();
+        let inside = dir.path().join("inside.txt");
+        // File doesn't exist yet — is_path_outside should check boundaries
+        // even for non-existent paths (via parent-walk canonicalization).
+        let outside = is_path_outside_workspace(dir.path(), &inside);
+        assert!(!outside, "path under workspace root should be inside");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_canonicalize_for_comparison_windows_non_existent_deep() {
+        let dir = tempdir().unwrap();
+        let nested = dir.path().join("a\\b\\c\\new.rs");
+        let result = canonicalize_for_comparison(&nested);
+        assert!(
+            result.ends_with("a\\b\\c\\new.rs") || result.ends_with("a/b/c/new.rs"),
+            "non-existent tail should be preserved; got: {}",
+            result.display()
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_display_workspace_relative_windows_outside_different_drive() {
+        let dir = tempdir().unwrap();
+        let outside = PathBuf::from("Z:\\outside\\file.txt");
+        let result = display_workspace_relative(dir.path(), &outside);
+        // Should return the full path because it can't be made relative
+        assert!(
+            result == "Z:\\outside\\file.txt" || result == "Z:/outside/file.txt",
+            "outside path on different drive should be displayed as-is; got: {result}"
+        );
+    }
 }

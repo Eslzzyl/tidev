@@ -447,8 +447,8 @@ impl AgentContext for CoreContext {
                         tool_call: tc.clone(),
                         rejection: None,
                         child_session_id: None,
-                        allow_outside: false,
-                        sensitive_file_approved: false,
+                        allow_outside: access_control.allow_outside_workspace_access,
+                        sensitive_file_approved: access_control.allow_sensitive_file_access,
                         user_reason: None,
                     });
                 } else {
@@ -459,8 +459,8 @@ impl AgentContext for CoreContext {
                             tc.name,
                         ))),
                         child_session_id: None,
-                        allow_outside: false,
-                        sensitive_file_approved: false,
+                        allow_outside: access_control.allow_outside_workspace_access,
+                        sensitive_file_approved: access_control.allow_sensitive_file_access,
                         user_reason: None,
                     });
                 }
