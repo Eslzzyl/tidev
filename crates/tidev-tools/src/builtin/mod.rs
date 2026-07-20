@@ -34,6 +34,7 @@ pub struct ToolContext<'a> {
 }
 
 pub mod apply_patch;
+pub mod classify;
 pub mod exec;
 pub mod file;
 pub mod search;
@@ -197,6 +198,7 @@ pub async fn execute_tool_call(
             let workspace_root = ctx.workspace_root.to_path_buf();
             let call_name = call.name.clone();
             let max_output_bytes = ctx.max_output_bytes;
+            let mode = ctx.mode;
             let cancel = cancel.clone();
             let session_id = ctx.session_id;
             let event_tx = ctx.event_tx.clone();
@@ -208,6 +210,7 @@ pub async fn execute_tool_call(
                     arguments,
                     max_output_bytes,
                     &cancel,
+                    mode,
                     session_id,
                     event_tx,
                     &tool_call_id,

@@ -18,8 +18,10 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use super::utils::truncate_in_place;
+use crate::builtin::classify::{Classifier, Safety};
 use crate::builtin::utils::decode_tool_args;
 use tidev_types::message::BackendEvent;
+use tidev_types::prompts::SessionMode;
 use tidev_types::tools::{BashArgs, ToolDefinition, ToolPermission};
 use tidev_utils::encoding::decode_command_output;
 use tidev_utils::encoding::prepare_command_for_shell;
@@ -119,6 +121,7 @@ pub fn execute_tool_call(
     tool_name: &str,
     arguments: Value,
     max_output_bytes: usize,
+    mode: SessionMode,
     session_id: Uuid,
     event_tx: Option<UnboundedSender<BackendEvent>>,
 ) -> Result<BashExecutionResult> {
@@ -131,6 +134,7 @@ pub fn execute_tool_call(
         None,
         timeout,
         event_tx,
+        mode,
         session_id,
         "",
     )
@@ -143,6 +147,7 @@ pub fn execute_tool_call_with_cancel(
     arguments: Value,
     max_output_bytes: usize,
     cancel: &CancellationToken,
+    mode: SessionMode,
     session_id: Uuid,
     event_tx: Option<UnboundedSender<BackendEvent>>,
 ) -> Result<BashExecutionResult> {
@@ -155,6 +160,7 @@ pub fn execute_tool_call_with_cancel(
         Some(cancel),
         timeout,
         event_tx,
+        mode,
         session_id,
         "",
     )
@@ -172,6 +178,7 @@ pub async fn execute_tool_call_with_cancel_async(
     arguments: Value,
     max_output_bytes: usize,
     cancel: &CancellationToken,
+    mode: SessionMode,
     session_id: Uuid,
     event_tx: Option<UnboundedSender<BackendEvent>>,
     tool_call_id: &str,
@@ -185,6 +192,7 @@ pub async fn execute_tool_call_with_cancel_async(
         cancel,
         timeout,
         event_tx,
+        mode,
         session_id,
         tool_call_id,
     )
@@ -203,10 +211,43 @@ async fn run_shell_streaming(
     cancel: &CancellationToken,
     timeout_ms: u64,
     event_tx: Option<UnboundedSender<BackendEvent>>,
+    mode: SessionMode,
     session_id: Uuid,
     tool_call_id: &str,
 ) -> Result<BashExecutionResult> {
     let mut actual_command = command.to_string();
+
+    // ── Layer 0: Plan mode command classification ────────────────────
+    if mode == SessionMode::Plan {
+        if Classifier::global().classify(command) >= Safety::WriteOperation {
+            log::info!(
+                "plan mode blocked write command: {}",
+                command.lines().next().unwrap_or(command)
+            );
+
+            // Emit ShellOutput so the TUI creates a streaming message
+            // that ToolCompleted can finalize; otherwise the result is lost
+            // because bash results rely on ShellOutput for display.
+            if let Some(ref tx) = event_tx {
+                let _ = tx.send(BackendEvent::ShellOutput {
+                    session_id,
+                    tool_call_id: tool_call_id.to_string(),
+                    content: "Error: Command blocked in Plan mode — this command appears \
+                              to modify files."
+                        .to_string(),
+                    finished: true,
+                    exit_code: Some(1),
+                });
+            }
+
+            return Ok(BashExecutionResult {
+                output: format!(
+                    "[exit 1]\nError: Command blocked in Plan mode — this command appears \
+                     to modify files."
+                ),
+            });
+        }
+    }
 
     // ── Layer 1: Privilege escalation handling (sudo/doas/pkexec) ──────
     let mut sudo_guard: Option<super::sudo::AskpassGuard> = None;
@@ -430,10 +471,43 @@ fn run_shell_inner(
     cancel: Option<&CancellationToken>,
     timeout_ms: u64,
     event_tx: Option<UnboundedSender<BackendEvent>>,
+    mode: SessionMode,
     session_id: Uuid,
     tool_call_id: &str,
 ) -> Result<BashExecutionResult> {
     let mut actual_command = command.to_string();
+
+    // ── Layer 0: Plan mode command classification ────────────────────
+    if mode == SessionMode::Plan {
+        if Classifier::global().classify(command) >= Safety::WriteOperation {
+            log::info!(
+                "plan mode blocked write command: {}",
+                command.lines().next().unwrap_or(command)
+            );
+
+            // Emit ShellOutput so the TUI creates a streaming message
+            // that ToolCompleted can finalize; otherwise the result is lost
+            // because bash results rely on ShellOutput for display.
+            if let Some(ref tx) = event_tx {
+                let _ = tx.send(BackendEvent::ShellOutput {
+                    session_id,
+                    tool_call_id: tool_call_id.to_string(),
+                    content: "Error: Command blocked in Plan mode — this command appears \
+                              to modify files."
+                        .to_string(),
+                    finished: true,
+                    exit_code: Some(1),
+                });
+            }
+
+            return Ok(BashExecutionResult {
+                output: format!(
+                    "[exit 1]\nError: Command blocked in Plan mode — this command appears \
+                     to modify files."
+                ),
+            });
+        }
+    }
 
     // ── Layer 1: Privilege escalation handling (sudo/doas/pkexec) ──────
     let mut sudo_guard: Option<super::sudo::AskpassGuard> = None;
