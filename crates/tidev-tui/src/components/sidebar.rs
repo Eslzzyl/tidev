@@ -3,7 +3,7 @@
 //!
 //! Mirrors the old `tidev_tui::render::chat_render::render_sidebar` behaviour.
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::path::Path;
 
 use ratatui::layout::{Margin, Rect};
@@ -191,20 +191,20 @@ impl Sidebar {
         // Changed Files section
         lines.push(Line::from(""));
         let mut all_diffs: Vec<FileDiff> = Vec::new();
-        let mut seen_files = HashSet::new();
         if let Some(ctx) = chat_context {
+            // Use HashMap last-wins to merge diffs across messages.
+            let mut file_map: HashMap<String, FileDiff> = HashMap::new();
             for msg in ctx.visible_messages() {
                 if let Some(ref diffs_json) = msg.file_diffs
                     && let Ok(diffs) =
                         serde_json::from_str::<Vec<FileDiff>>(diffs_json)
                     {
-                        for d in &diffs {
-                            if seen_files.insert(d.file.clone()) {
-                                all_diffs.push(d.clone());
-                            }
+                        for d in diffs {
+                            file_map.insert(d.file.clone(), d);
                         }
                     }
             }
+            all_diffs = file_map.into_values().collect();
         }
 
         lines.push(Line::from(vec![

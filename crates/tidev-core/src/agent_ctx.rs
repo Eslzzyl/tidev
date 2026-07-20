@@ -225,6 +225,10 @@ pub struct CoreContext {
     /// tool calls is saved. Consumed when tool results are saved, to compute
     /// the diff of files changed in this round.
     pre_round_hash: Arc<Mutex<Option<String>>>,
+    /// Session-start snapshot hash, captured on the very first snapshot
+    /// of the session. Never updated afterwards. Used to compute cumulative
+    /// sidebar diffs that match `git diff` from session start.
+    session_start_hash: Arc<Mutex<Option<String>>>,
     /// Application config (shared, hot-reloadable).
     config: Arc<StdRwLock<AppConfig>>,
     /// Auth store (shared, hot-reloadable).
@@ -272,6 +276,7 @@ impl CoreContext {
             active_model,
             snapshot,
             pre_round_hash: Arc::new(Mutex::new(None)),
+            session_start_hash: Arc::new(Mutex::new(None)),
             config,
             auth,
         }
@@ -886,7 +891,12 @@ impl AgentContext for CoreContext {
             && let Some(ref snap) = self.snapshot
             && let Ok(Some(hash)) = snap.track()
         {
-            *self.pre_round_hash.lock().await = Some(hash);
+            *self.pre_round_hash.lock().await = Some(hash.clone());
+            // Initialize session_start_hash on the very first snapshot.
+            let mut ssh = self.session_start_hash.lock().await;
+            if ssh.is_none() {
+                *ssh = Some(hash);
+            }
         }
 
         // When tool result messages are saved, the round has finished —
@@ -917,10 +927,18 @@ impl AgentContext for CoreContext {
                         "step": 1,
                     }]);
                     if let Some(last) = enriched.last_mut() {
-                        last.snapshot_hash = Some(post_hash);
+                        last.snapshot_hash = Some(post_hash.clone());
                         last.patch_files = Some(step_patch.to_string());
                         // Serialize lightweight diffs for sidebar display.
-                        if let Ok(diffs_json) = serde_json::to_string(&diffs) {
+                        // Use session_start_hash as baseline so the diff
+                        // matches `git diff` from session start.
+                        let start = { self.session_start_hash.lock().await.clone() };
+                        let baseline = start.as_ref().unwrap_or(&pre);
+                        if let Ok(cumulative_diffs) =
+                            snap.diff_lightweight(baseline, &post_hash).await
+                            && let Ok(diffs_json) =
+                                serde_json::to_string(&cumulative_diffs)
+                        {
                             last.file_diffs = Some(diffs_json.clone());
                             self.emit(BackendEvent::SidebarSnapshotReady {
                                 session_id,
