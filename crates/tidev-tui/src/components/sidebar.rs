@@ -226,12 +226,22 @@ impl Sidebar {
                 Style::default().fg(palette.muted),
             )]));
         } else {
-            // Sort: modified first, then added, then deleted
-            all_diffs.sort_by_key(|d| match d.status.as_deref() {
-                Some("modified") => 0,
-                Some("added") => 1,
-                Some("deleted") => 2,
-                _ => 3,
+            // Sort: modified first, then added, then deleted;
+            // within each group, stable by filename to prevent visual jumping.
+            all_diffs.sort_by(|a, b| {
+                let a_key = match a.status.as_deref() {
+                    Some("modified") => 0,
+                    Some("added") => 1,
+                    Some("deleted") => 2,
+                    _ => 3,
+                };
+                let b_key = match b.status.as_deref() {
+                    Some("modified") => 0,
+                    Some("added") => 1,
+                    Some("deleted") => 2,
+                    _ => 3,
+                };
+                a_key.cmp(&b_key).then_with(|| a.file.cmp(&b.file))
             });
 
             let content_width = sidebar_content_width;
