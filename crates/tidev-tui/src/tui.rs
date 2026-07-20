@@ -242,12 +242,15 @@ impl Tui {
 
             // ── Phase 2.5: Fallback flush for pending prompts ─────────
             //
-            // If the agent loop stopped without sending StreamEnd (e.g.
-            // cancelled via Esc), loop_busy becomes false but no event
-            // triggers flush_pending_prompt_queue.  Check every frame.
-            if app.has_pending_prompts() && !app.runtime.is_busy() {
+            // Per-frame: flush queued prompts for any session whose loop
+            // has finished since the last frame.
+            if app.has_pending_prompts() {
                 app.flush_pending_prompt_queue();
             }
+
+            // ── Phase 2.6: Refresh active-session list for the UI ──────
+            let active = app.runtime.active_sessions();
+            app.set_active_sessions(active);
 
             if app.should_quit() {
                 break;

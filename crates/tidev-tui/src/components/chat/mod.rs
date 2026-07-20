@@ -14,7 +14,7 @@ use anyhow::Result;
 use lru::LruCache;
 use crate::chat_context::ChatContext;
 use uuid::Uuid;
-use tidev_types::message::{BackendEvent, MessageAttachment};
+use tidev_types::message::{BackendEvent, Message, MessageAttachment};
 use tidev_types::prompts::SessionMode;
 
 use tidev_types::tools::canonical_tool_name;
@@ -107,7 +107,8 @@ pub(crate) struct MessageList {
     inline_subagent_card_bounds: Vec<(usize, Rect)>,
 
     // ── Bash tool tracking (for ShellOutput streaming) ──
-    bash_tool_call_id: Option<String>,
+    /// Per-session bash tool call IDs for routing ShellOutput events.
+    bash_tool_call_ids: HashMap<Uuid, String>,
 
     // ── Retrying hint (persistent inline display) ──
     retrying_hint: Option<(u32, u32, String, Instant)>,
@@ -146,7 +147,7 @@ impl MessageList {
             completed_subagent_sessions: HashMap::new(),
             hovered_inline_subagent: None,
             inline_subagent_card_bounds: Vec::new(),
-            bash_tool_call_id: None,
+            bash_tool_call_ids: HashMap::new(),
             retrying_hint: None,
             image_badge_bounds: Vec::new(),
             dirty: true,
@@ -177,7 +178,6 @@ impl MessageList {
             self.selectable_regions.clear();
             self.hovered_inline_subagent = None;
             self.inline_subagent_card_bounds.clear();
-            self.bash_tool_call_id = None;
             self.retrying_hint = None;
             self.rebuild_subagent_state();
 
@@ -211,7 +211,6 @@ impl MessageList {
         self.selectable_regions.clear();
         self.hovered_inline_subagent = None;
         self.inline_subagent_card_bounds.clear();
-        self.bash_tool_call_id = None;
         self.retrying_hint = None;
         self.rebuild_subagent_state();
 
@@ -407,65 +406,62 @@ impl MessageList {
 
     /// Handle a backend event for streaming or tool results.
     pub fn handle_backend_event(&mut self, event: &BackendEvent) {
-        // ── 0. Track task subagents regardless of chat_context ──────────
-        // These must run before routing so that nested subagents (e.g. B
-        // creating D and E) are tracked even if the intermediate session
-        // hasn't been visited yet and its chat_context doesn't exist.
+        // ── 0. Track task subagents only for the currently-active session ─
+        // Events for background sessions skip this; rebuild_subagent_state()
+        // handles them on session switch.
         let session_id = event.session_id();
-        match event {
-            BackendEvent::ToolCallUpdated { tool_call, request_id: _, .. } => {
-                if tool_call.name == "task" {
-                    let desc = extract_task_description(&tool_call.arguments);
-                    let sub_type = extract_subagent_type(&tool_call.arguments);
-                    let already_tracking = self.running_subagents.iter().any(|s| s.tool_call_id == tool_call.id);
-                    if already_tracking {
-                        if let Some(exec) = self.running_subagents.iter_mut().find(|s| s.tool_call_id == tool_call.id) {
-                            if exec.subagent_type.is_empty() && !sub_type.is_empty() {
-                                exec.subagent_type = sub_type;
+        if self.active_session_id == Some(session_id) {
+            match event {
+                BackendEvent::ToolCallUpdated { tool_call, request_id: _, .. } => {
+                    if tool_call.name == "task" {
+                        let desc = extract_task_description(&tool_call.arguments);
+                        let sub_type = extract_subagent_type(&tool_call.arguments);
+                        let already_tracking = self.running_subagents.iter().any(|s| s.tool_call_id == tool_call.id);
+                        if already_tracking {
+                            if let Some(exec) = self.running_subagents.iter_mut().find(|s| s.tool_call_id == tool_call.id) {
+                                if exec.subagent_type.is_empty() && !sub_type.is_empty() {
+                                    exec.subagent_type = sub_type;
+                                }
+                                if exec.description.is_empty() && !desc.is_empty() {
+                                    exec.description = desc;
+                                    self.dirty = true;
+                                }
                             }
-                            if exec.description.is_empty() && !desc.is_empty() {
-                                exec.description = desc;
-                                self.dirty = true;
-                            }
+                        } else if tool_call_arguments_are_complete(&tool_call.arguments) {
+                            self.running_subagents.push(render_mod::RunningSubagentInfo {
+                                tool_call_id: tool_call.id.clone(),
+                                description: desc,
+                                subagent_type: sub_type,
+                                status_text: "Thinking".to_string(),
+                                child_session_id: None,
+                                interrupted: false,
+                            });
                         }
-                    } else if tool_call_arguments_are_complete(&tool_call.arguments) {
-                        self.running_subagents.push(render_mod::RunningSubagentInfo {
-                            tool_call_id: tool_call.id.clone(),
-                            description: desc,
-                            subagent_type: sub_type,
-                            status_text: "Thinking".to_string(),
-                            child_session_id: None,
-                            interrupted: false,
-                        });
                     }
                 }
-            }
-            BackendEvent::ToolCompleted { tool_call, .. } => {
-                // Remove from running_subagents for ANY completed task tool,
-                // even if child_session_id is not set (e.g., rejected tools).
-                if canonical_tool_name(&tool_call.name) == Some("task") {
-                    self.running_subagents.retain(|s| s.tool_call_id != tool_call.id);
-                    if self.hovered_inline_subagent.is_some_and(|i| i >= self.running_subagents.len()) {
-                        self.hovered_inline_subagent = None;
+                BackendEvent::ToolCompleted { tool_call, .. } => {
+                    if canonical_tool_name(&tool_call.name) == Some("task") {
+                        self.running_subagents.retain(|s| s.tool_call_id != tool_call.id);
+                        if self.hovered_inline_subagent.is_some_and(|i| i >= self.running_subagents.len()) {
+                            self.hovered_inline_subagent = None;
+                        }
                     }
                 }
-            }
-            BackendEvent::SubagentStatus {
-                tool_call_id,
-                status_text,
-                child_session_id,
-                ..
-            } => {
-                // Track child session — run before routing so nested subagents
-                // are linked even when the intermediate chat_context doesn't exist.
-                if let Some(exec) = self.running_subagents.iter_mut()
-                    .find(|e| e.tool_call_id == *tool_call_id && !e.interrupted)
-                {
-                    exec.status_text = status_text.clone();
-                    exec.child_session_id = Some(*child_session_id);
+                BackendEvent::SubagentStatus {
+                    tool_call_id,
+                    status_text,
+                    child_session_id,
+                    ..
+                } => {
+                    if let Some(exec) = self.running_subagents.iter_mut()
+                        .find(|e| e.tool_call_id == *tool_call_id && !e.interrupted)
+                    {
+                        exec.status_text = status_text.clone();
+                        exec.child_session_id = Some(*child_session_id);
+                    }
                 }
+                _ => {}
             }
-            _ => {}
         }
 
         // ── 1. Update running subagent card status ─────────────────────
@@ -493,25 +489,35 @@ impl MessageList {
 
         match event {
             BackendEvent::TurnStarting { .. } => {
-                let _message_id = self.streaming_buffer.begin_streaming(&mut chat_context.messages);
+                if self.active_session_id == Some(session_id) {
+                    self.streaming_buffer.begin_streaming(&mut chat_context.messages);
+                } else {
+                    // Background session: just push a streaming placeholder.
+                    // The streaming_buffer is reserved for the active session.
+                    let msg = Message::streaming(
+                        tidev_types::message::MessageRole::Assistant,
+                        String::new(),
+                    );
+                    chat_context.messages.push(msg);
+                }
                 self.dirty = true;
             }
             BackendEvent::Delta { content, .. } => {
-                if self.streaming_buffer.is_streaming {
+                let is_active_session = self.active_session_id == Some(session_id);
+                if is_active_session && self.streaming_buffer.is_streaming {
                     self.streaming_buffer.push_delta(content, &mut chat_context.messages);
                     if let Some(msg_id) = self.streaming_buffer.current_message_id {
                         self.layout_index.mark_dirty(msg_id);
                     }
                 } else if let Some(msg) = chat_context.messages.iter_mut().rev().find(|m| {
-                    m.streaming && m.role == tidev_types::message::MessageRole::System
+                    m.streaming
                 }) {
+                    // Background session or inactive streaming_buffer:
+                    // find the streaming message directly in the context.
                     msg.content.push_str(content);
                     self.layout_index.mark_dirty(msg.id);
-                } else {
-                    // Recovery path: TurnStarting was missed because the
-                    // chat_context didn't exist yet (e.g. user entered the
-                    // session mid-stream).  Create a streaming placeholder
-                    // and push the delta into it.
+                } else if is_active_session {
+                    // Recovery path for active session: TurnStarting was missed.
                     let mid = self.streaming_buffer.recover_or_begin_streaming(&mut chat_context.messages);
                     self.streaming_buffer.push_delta(content, &mut chat_context.messages);
                     self.layout_index.mark_dirty(mid);
@@ -519,13 +525,18 @@ impl MessageList {
                 self.dirty = true;
             }
             BackendEvent::ReasoningDelta { content, .. } => {
-                if self.streaming_buffer.is_streaming {
+                let is_active_session = self.active_session_id == Some(session_id);
+                if is_active_session && self.streaming_buffer.is_streaming {
                     self.streaming_buffer.push_reasoning_delta(content, &mut chat_context.messages);
                     if let Some(msg_id) = self.streaming_buffer.current_message_id {
                         self.layout_index.mark_dirty(msg_id);
                     }
-                } else {
-                    // Recovery path: same as Delta — TurnStarting was missed.
+                } else if let Some(msg) = chat_context.messages.iter_mut().rev().find(|m| {
+                    m.streaming
+                }) {
+                    msg.reasoning.push_str(content);
+                    self.layout_index.mark_dirty(msg.id);
+                } else if is_active_session {
                     self.streaming_buffer.recover_or_begin_streaming(&mut chat_context.messages);
                     self.streaming_buffer.push_reasoning_delta(content, &mut chat_context.messages);
                     if let Some(msg_id) = self.streaming_buffer.current_message_id {
@@ -535,16 +546,19 @@ impl MessageList {
                 self.dirty = true;
             }
             BackendEvent::StreamEnd { .. } => {
-                let msg_id = self.streaming_buffer.current_message_id;
+                let is_active_session = self.active_session_id == Some(session_id);
+                let msg_id = if is_active_session {
+                    self.streaming_buffer.current_message_id
+                } else {
+                    None
+                };
                 if msg_id.is_some() {
                     self.streaming_buffer.finalise_message(&mut chat_context.messages);
                     if let Some(mid) = msg_id {
                         self.layout_index.mark_dirty(mid);
                     }
                 } else {
-                    // Recovery path: TurnStarting was missed — finalise any
-                    // streaming Assistant message that Delta/ToolCallUpdated
-                    // recovery created.
+                    // Recovery path: find any streaming Assistant message.
                     if let Some(idx) = chat_context.messages.iter().rposition(|m| {
                         m.streaming && m.role == tidev_types::message::MessageRole::Assistant
                     }) {
@@ -580,7 +594,7 @@ impl MessageList {
                     self.dirty = true;
                 }
                 if tool_call.name == "bash" {
-                    self.bash_tool_call_id = Some(tool_call.id.clone());
+                    self.bash_tool_call_ids.insert(session_id, tool_call.id.clone());
                 }
                 // Note: task tool tracking (RunningSubagentInfo) is handled
                 // in Step 0 above, before chat_context routing, so that
@@ -600,7 +614,7 @@ impl MessageList {
                         chat_context.messages[idx].streaming = false;
                         self.dirty = true;
                     }
-                    self.bash_tool_call_id = None;
+                    self.bash_tool_call_ids.remove(&session_id);
                 } else {
                     // Dedup: if a message for this tool_call_id already exists,
                     // update its content instead of pushing a duplicate.
@@ -643,8 +657,8 @@ impl MessageList {
                     self.dirty = true;
                 }
             }
-            BackendEvent::ShellOutput { content, finished, .. } => {
-                let bash_id = match &self.bash_tool_call_id {
+            BackendEvent::ShellOutput { session_id, content, finished, .. } => {
+                let bash_id = match self.bash_tool_call_ids.get(&session_id) {
                     Some(id) => id.clone(),
                     None => return,
                 };

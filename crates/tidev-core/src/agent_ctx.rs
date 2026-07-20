@@ -544,6 +544,7 @@ impl AgentContext for CoreContext {
 
         self.request_tx
             .send(TuiRequest {
+                session_id: self.session_id,
                 kind: TuiRequestKind::ToolApproval(pending),
                 response_tx,
             })

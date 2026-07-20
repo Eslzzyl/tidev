@@ -94,6 +94,8 @@ pub struct ToolCallWithViolations {
 /// `response_tx`. If the sender is dropped without sending, the agent loop
 /// treats it as a rejection of all pending tools.
 pub struct TuiRequest {
+    /// The session that originated this request.
+    pub session_id: uuid::Uuid,
     pub kind: TuiRequestKind,
     pub response_tx: oneshot::Sender<TuiResponse>,
 }

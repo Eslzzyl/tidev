@@ -4,6 +4,7 @@
 //! Mirrors the old `tidev_tui::ui::session_panel` and associated
 //! render/input modules with a self-contained Component implementation.
 
+use std::collections::HashSet;
 use std::path::Path;
 
 use anyhow::Result;
@@ -97,6 +98,8 @@ pub(crate) struct SessionPanel {
     query: String,
     /// Session ID of the currently active session (for marking in the list).
     current_session_id: Uuid,
+    /// Session IDs with active agent loops.
+    active_sessions: HashSet<Uuid>,
 }
 
 impl SessionPanel {
@@ -104,6 +107,7 @@ impl SessionPanel {
         sessions: Vec<SessionRecord>,
         view_mode: SessionViewMode,
         current_session_id: Uuid,
+        active_sessions: HashSet<Uuid>,
     ) -> Self {
         Self {
             selected_index: 0,
@@ -114,6 +118,7 @@ impl SessionPanel {
             dialog: SessionPanelDialog::None,
             query: String::new(),
             current_session_id,
+            active_sessions,
         }
     }
 
@@ -750,6 +755,13 @@ impl Component for SessionPanel {
                     right_spans.push(Span::styled(
                         "child",
                         Style::default().fg(palette.accent_soft),
+                    ));
+                }
+                if self.active_sessions.contains(&session.session_id) {
+                    right_spans.push(Span::raw("  "));
+                    right_spans.push(Span::styled(
+                        "active",
+                        Style::default().fg(palette.warning),
                     ));
                 }
 

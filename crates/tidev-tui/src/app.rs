@@ -3,7 +3,7 @@
 //! Owns the Runtime, manages the component tree via OverlayStack,
 //! routes Actions, and dispatches async commands.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -68,6 +68,14 @@ pub(crate) struct ContextUsage {
     pub tokens_per_second: Option<f32>,
 }
 
+/// Per-session pending tool approval state.
+struct PendingApproval {
+    response_tx: tokio::sync::oneshot::Sender<TuiResponse>,
+    tools: Vec<ToolCallWithViolations>,
+    tool_index: usize,
+    approved_tools: Vec<ApprovedTool>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AppScreen {
     Welcome,
@@ -92,8 +100,8 @@ pub struct App {
     current_session_id: Option<uuid::Uuid>,
     /// Current session mode (Build / Plan).
     mode: SessionMode,
-    /// Pending mode switch (applied on next Finished with no tool calls).
-    pending_mode: Option<SessionMode>,
+    /// Per-session pending mode switch (applied on next Finished with no tool calls).
+    pending_modes: HashMap<Uuid, SessionMode>,
     /// Current thinking level for the active model.
     thinking_level: ThinkingLevelType,
     /// Whether the subagent (task tool) is enabled.
@@ -130,16 +138,12 @@ pub struct App {
     /// Current session's todo items (loaded from store).
     todos: Vec<TodoItem>,
 
-    // ── Tool approval pipeline ──
+    // ── Tool approval pipeline (per-session) ──
 
-    /// Oneshot sender for responding to a pending TuiRequest.
-    pending_response_tx: Option<tokio::sync::oneshot::Sender<TuiResponse>>,
-    /// Tools still awaiting user decisions.
-    pending_tools: Vec<ToolCallWithViolations>,
-    /// Current index into pending_tools.
-    tool_index: usize,
-    /// Accumulated approved/rejected tools.
-    approved_tools: Vec<ApprovedTool>,
+    /// Per-session pending tool approval states.
+    pending_approvals: HashMap<Uuid, PendingApproval>,
+    /// Which session's approval dialog is currently active.
+    active_approval_session: Option<Uuid>,
 
     // ── In-memory permission caches ──
 
@@ -172,11 +176,17 @@ pub struct App {
     /// Currently hovered queued prompt index.
     hovered_queued_index: Option<usize>,
 
-    /// Compact queued to run after the current request finishes.
-    pending_compact: bool,
+    /// Per-session compaction queue flag (compact after current request finishes).
+    pending_compacts: HashSet<Uuid>,
 
-    /// Compaction is currently in progress.
-    is_compacting: bool,
+    /// Per-session compaction in progress.
+    compacting_sessions: HashSet<Uuid>,
+
+    /// Text saved per-session in the composer for restoring on session switch.
+    composer_texts: HashMap<Uuid, String>,
+
+    /// Session IDs with active agent loops (from Runtime, refreshed each frame).
+    active_sessions: HashSet<Uuid>,
 
     /// Current screen state.
     screen: AppScreen,
@@ -227,7 +237,7 @@ impl App {
             pending_input_copy: None,
             current_session_id: None,
             mode: SessionMode::Build,
-            pending_mode: None,
+            pending_modes: HashMap::new(),
             thinking_level,
             subagent_enabled,
             last_notice: None,
@@ -235,10 +245,8 @@ impl App {
             desktop_notifications: NotificationManager::new(&notif_config),
             request_rx,
             event_rx,
-            pending_response_tx: None,
-            pending_tools: Vec::new(),
-            tool_index: 0,
-            approved_tools: Vec::new(),
+            pending_approvals: HashMap::new(),
+            active_approval_session: None,
             boundary_permissions: HashMap::new(),
             boundary_reasons: HashMap::new(),
             sensitive_permissions: HashMap::new(),
@@ -250,8 +258,10 @@ impl App {
             pending_prompt_queue: Vec::new(),
             queued_card_bounds: Vec::new(),
             hovered_queued_index: None,
-            pending_compact: false,
-            is_compacting: false,
+            pending_compacts: HashSet::new(),
+            compacting_sessions: HashSet::new(),
+            composer_texts: HashMap::new(),
+            active_sessions: HashSet::new(),
             screen: AppScreen::Welcome,
             spinner_start: Instant::now(),
             last_spinner_frame: 0,
@@ -322,22 +332,29 @@ impl App {
         self.spinner_start.elapsed()
     }
 
-    /// Whether a compaction is currently in progress.
+    /// Whether a compaction is currently in progress for the current session.
     pub(crate) fn is_compacting(&self) -> bool {
-        self.is_compacting
+        self.current_session_id
+            .is_some_and(|sid| self.compacting_sessions.contains(&sid))
     }
 
-    /// Whether the app currently has an active request (streaming or pending tool approval).
+    /// Update the set of sessions with active agent loops.
+    pub(crate) fn set_active_sessions(&mut self, sessions: Vec<Uuid>) {
+        self.active_sessions = sessions.into_iter().collect();
+    }
+
+    /// Whether the app currently has an active request (streaming or pending tool approval)
+    /// for the current session.
     pub(crate) fn has_active_request(&self) -> bool {
-        // The Runtime is the single source of truth for agent-loop liveness.
-        if self.runtime.is_busy() {
-            return true;
-        }
-        // Local UI supplement — pending tool approval dialogs.  The Runtime
-        // will also be blocked waiting for approval, but there's a tiny
-        // window between receiving the request and blocking the loop.
-        if !self.pending_tools.is_empty() {
-            return true;
+        // Check if the *current session* has an active agent loop.
+        if let Some(sid) = self.current_session_id {
+            if self.runtime.is_session_busy(sid) {
+                return true;
+            }
+            // Local UI supplement — pending tool approval dialogs for this session.
+            if self.pending_approvals.contains_key(&sid) {
+                return true;
+            }
         }
         false
     }
@@ -350,30 +367,36 @@ impl App {
         FRAMES[frame_index % FRAMES.len()]
     }
 
-    /// Abort the current request: cancel the agent loop, drop pending approvals,
-    /// and clear all pending state.
+    /// Abort the current request: cancel the current session's agent loop,
+    /// drop pending approvals, and clear all pending state.
     fn abort_current_request(&mut self) {
-        // Cancel the agent loop.
-        let runtime = self.runtime.clone();
-        tokio::spawn(async move {
-            runtime.cancel().await;
-        });
+        let session_id = self.current_session_id;
+
+        // Cancel only the current session's agent loop.
+        if let Some(sid) = session_id {
+            let rt = self.runtime.clone();
+            tokio::spawn(async move {
+                rt.cancel_session(sid).await;
+            });
+        }
 
         // Finalise streaming message and append an error notice.
         if let Some(ref mut chat) = self.message_list {
             chat.append_interrupted_message();
         }
 
-        // Drop the pending response channel so the agent loop unblocks.
-        self.pending_response_tx = None;
+        // Drop pending approvals for the current session.
+        if let Some(sid) = session_id {
+            self.pending_approvals.remove(&sid);
+            if self.active_approval_session == Some(sid) {
+                self.active_approval_session = None;
+            }
+            self.pending_compacts.remove(&sid);
+            self.compacting_sessions.remove(&sid);
+        }
 
-        // Clear pending tools, queued prompts, and queued compact.
-        self.pending_tools.clear();
-        self.tool_index = 0;
-        self.approved_tools.clear();
+        // Clear queued prompts (all — they were for the user's current intent).
         self.pending_prompt_queue.clear();
-        self.pending_compact = false;
-        self.is_compacting = false;
 
         // Reset abort state.
         self.abort_confirmation_deadline = None;
@@ -385,26 +408,21 @@ impl App {
         !self.pending_prompt_queue.is_empty()
     }
 
-    /// Submit queued prompts now that the current request has finished.
+    /// Submit queued prompts now that their session's request has finished.
     ///
-    /// Only actually submits when the agent loop is not running — if the loop
-    /// is still busy (e.g. executing tools for the current turn), the message
-    /// would get queued in the runtime and never picked up because the loop
-    /// is about to exit.
+    /// Only submits prompts for sessions that are not currently busy.
+    /// Other sessions' prompts remain queued.
     pub(crate) fn flush_pending_prompt_queue(&mut self) {
-        // Don't flush if the agent loop is still running — the message would
-        // end up in the runtime's queued_messages without a running loop to
-        // consume it, effectively lost.
-        if self.runtime.is_busy() {
-            return;
-        }
-
-        while let Some(queued) = self.pending_prompt_queue.first() {
-            let text = queued.prompt.clone();
-            let attachments = queued.attachments.clone();
-            let session_id = queued.session_id;
-            self.pending_prompt_queue.remove(0);
-
+        let mut i = 0;
+        while i < self.pending_prompt_queue.len() {
+            let session_id = self.pending_prompt_queue[i].session_id;
+            if self.runtime.is_session_busy(session_id) {
+                i += 1;
+                continue;
+            }
+            let queued = self.pending_prompt_queue.remove(i);
+            let text = queued.prompt;
+            let attachments = queued.attachments;
             let mode = self.mode;
             let thinking_level = self.thinking_level.clone();
             let rt = self.runtime.clone();
@@ -438,7 +456,7 @@ impl App {
             chat.invalidate_layout();
         }
         self.set_notice("Compacting session context...");
-        self.is_compacting = true;
+        self.compacting_sessions.insert(session_id);
         let rt = self.runtime.clone();
         tokio::spawn(async move {
             if let Err(e) = rt.compact_session(session_id, None).await {
@@ -546,62 +564,71 @@ impl App {
                 max_attempts,
                 reason,
                 ..
-            } if Some(session_id) == self.current_session_id => {
+            } => {
                 log::info!("Retrying (attempt {attempt}/{max_attempts}): {reason}");
-                self.set_toast(
-                    format!("Retry {attempt}/{max_attempts}: {reason}"),
-                    std::time::Duration::from_secs(5),
-                );
+                if Some(session_id) == self.current_session_id {
+                    self.set_toast(
+                        format!("Retry {attempt}/{max_attempts}: {reason}"),
+                        std::time::Duration::from_secs(5),
+                    );
+                }
             }
             BackendEvent::Failed {
                 session_id,
                 error,
                 ..
-            } if Some(session_id) == self.current_session_id => {
-                log::error!("Request failed: {error}");
-                // Clean up pending state (mirrors old behaviour).
-                self.pending_tools.clear();
-                self.tool_index = 0;
-                self.approved_tools.clear();
-                self.pending_response_tx = None;
+            } => {
+                log::error!("Request failed for session {session_id}: {error}");
+                // Clean up pending state for this session.
+                self.pending_approvals.remove(&session_id);
+                if self.active_approval_session == Some(session_id) {
+                    self.active_approval_session = None;
+                }
 
                 // Mark the last streaming message as error.
                 if let Some(ref mut chat) = self.message_list {
                     chat.mark_streaming_as_error(&error);
                 }
 
-                self.set_toast(
-                    format!("Request failed: {error}"),
-                    std::time::Duration::from_secs(8),
-                );
+                if Some(session_id) == self.current_session_id {
+                    self.set_toast(
+                        format!("Request failed: {error}"),
+                        std::time::Duration::from_secs(8),
+                    );
+                }
                 self.desktop_notifications.notify(&format!("Request failed: {error}"));
             }
             BackendEvent::Finished {
                 session_id,
                 turn,
                 ..
-            } if Some(session_id) == self.current_session_id => {
+            } => {
                 // Apply pending mode switch on final turn (no tool calls).
                 if turn.tool_calls.is_empty() {
-                    if let Some(new_mode) = self.pending_mode.take() {
-                        self.mode = new_mode;
-                        self.set_notice(format!("Mode switched to {}", self.mode.title()));
+                    if let Some(new_mode) = self.pending_modes.remove(&session_id) {
+                        if Some(session_id) == self.current_session_id {
+                            self.mode = new_mode;
+                            self.set_notice(format!("Mode switched to {}", self.mode.title()));
+                        }
                     }
-                    self.desktop_notifications.notify("Response complete");
+                    if Some(session_id) == self.current_session_id {
+                        self.desktop_notifications.notify("Response complete");
+                    }
                 }
 
                 // If a compact was queued and no request is active, run it now.
-                if self.pending_compact && !self.has_active_request() {
-                    self.pending_compact = false;
-                    self.execute_compact();
+                if self.pending_compacts.remove(&session_id) {
+                    if Some(session_id) == self.current_session_id && !self.has_active_request() {
+                        self.execute_compact();
+                    }
                 }
             }
-            BackendEvent::ContextCompacted { error: Some(ref msg), .. } => {
-                self.is_compacting = false;
+            BackendEvent::ContextCompacted { session_id, error: Some(ref msg), .. } => {
+                self.compacting_sessions.remove(&session_id);
                 self.set_notice(format!("Compaction failed: {msg}"));
             }
-            BackendEvent::ContextCompacted { error: None, .. } => {
-                self.is_compacting = false;
+            BackendEvent::ContextCompacted { session_id, error: None, .. } => {
+                self.compacting_sessions.remove(&session_id);
                 self.set_notice("Context compacted");
             }
             BackendEvent::UserMessageCreated { session_id, message } => {
@@ -662,7 +689,7 @@ impl App {
                 }
                 self.set_notice("Undo complete");
             }
-            BackendEvent::ToolCompleted { session_id, ref tool_call, .. } if Some(session_id) == self.current_session_id && tool_call.name == "todowrite" => {
+            BackendEvent::ToolCompleted { session_id, ref tool_call, .. } if tool_call.name == "todowrite" => {
                 // Reload todos from database after todowrite completion.
                 if let Ok(todos) = self.runtime.session_manager().store().load_todos(session_id) {
                     self.todos = todos;
@@ -671,17 +698,15 @@ impl App {
             BackendEvent::StreamEnd {
                 session_id,
                 ..
-            } if Some(session_id) == self.current_session_id => {
-                // A turn has fully ended — now it's safe to flush queued
-                // prompts.  At this point the agent loop has sent StreamEnd
-                // and is about to return (or has already returned), so
-                // loop_busy will be false by the time we actually submit.
+            } => {
+                // Flush queued prompts for sessions that are no longer busy.
                 self.flush_pending_prompt_queue();
 
                 // If a compact was queued and no request is active, run it now.
-                if self.pending_compact && !self.has_active_request() {
-                    self.pending_compact = false;
-                    self.execute_compact();
+                if self.pending_compacts.remove(&session_id) {
+                    if !self.has_active_request() {
+                        self.execute_compact();
+                    }
                 }
             }
             _ => {
@@ -694,36 +719,52 @@ impl App {
     }
 
     /// Handle a pending tool approval request from the agent loop.
+    /// Stores the request per-session.
     pub(crate) fn handle_tui_request(
         &mut self,
         request: tidev_core::TuiRequest,
     ) {
+        let session_id = request.session_id;
         match request.kind {
             tidev_core::TuiRequestKind::ToolApproval(tools_with_violations) => {
                 log::info!(
-                    "handle_tui_request: {} tool(s) pending approval",
+                    "handle_tui_request: session {session_id}, {} tool(s) pending approval",
                     tools_with_violations.len()
                 );
-                self.pending_response_tx = Some(request.response_tx);
-                self.pending_tools = tools_with_violations;
-                self.tool_index = 0;
-                self.approved_tools = Vec::new();
-                self.process_next_tool();
+                self.pending_approvals.insert(session_id, PendingApproval {
+                    response_tx: request.response_tx,
+                    tools: tools_with_violations,
+                    tool_index: 0,
+                    approved_tools: Vec::new(),
+                });
+                // If no approval dialog is currently active, activate this one.
+                if self.active_approval_session.is_none() {
+                    self.active_approval_session = Some(session_id);
+                    self.process_next_tool();
+                }
             }
         }
     }
 
-    /// Process the next pending tool in the approval pipeline.
+    /// Run the approval pipeline for the currently active session.
     /// Opens the appropriate dialog (workspace boundary, sensitive file,
     /// question, or permission) for the tool at `tool_index`. When all tools
     /// are processed, sends the approval response back to the runtime.
     fn process_next_tool(&mut self) {
-        while self.tool_index < self.pending_tools.len() {
-            // Clone data we need before borrowing self for mutations.
+        let session_id = match self.active_approval_session {
+            Some(sid) => sid,
+            None => return,
+        };
+        let Some(approval) = self.pending_approvals.get_mut(&session_id) else {
+            self.active_approval_session = None;
+            return;
+        };
+
+        while approval.tool_index < approval.tools.len() {
             let (boundary_path, sensitive_path, is_question, args, perm_key, perm_label,
                   needs_confirmation, tc)
                 = {
-                let twv = &self.pending_tools[self.tool_index];
+                let twv = &approval.tools[approval.tool_index];
                 let tc = &twv.tool_call;
                 (
                     twv.workspace_boundary_violation.clone(),
@@ -736,8 +777,8 @@ impl App {
                     tc.clone(),
                 )
             };
-            let current_index = self.tool_index + 1;
-            let total = self.pending_tools.len();
+            let current_index = approval.tool_index + 1;
+            let total = approval.tools.len();
 
             // Step 1: Workspace boundary violation check
             if let Some(ref path) = boundary_path {
@@ -754,7 +795,7 @@ impl App {
                         } else {
                             format!("Path '{}' was denied by remembered boundary permission.", path_str)
                         };
-                        self.approved_tools.push(ApprovedTool {
+                        approval.approved_tools.push(ApprovedTool {
                             tool_call: tc,
                             rejection: Some(ToolExecutionResult::new(msg)),
                             child_session_id: None,
@@ -762,7 +803,7 @@ impl App {
                             sensitive_file_approved: false,
                             user_reason: None,
                         });
-                        self.tool_index += 1;
+                        approval.tool_index += 1;
                         continue;
                     }
                     None => {
@@ -786,17 +827,17 @@ impl App {
                 let path_str = path.to_string_lossy().to_string();
                 match Self::is_path_allowed(&self.sensitive_permissions, &path_str) {
                     Some(true) => {
-                        log::info!("Sensitive path already allowed: {path_str}");
+                        log::info!("Sensitive file already allowed: {path_str}");
                     }
                     Some(false) => {
-                        log::info!("Sensitive path previously denied: {path_str}");
+                        log::info!("Sensitive file previously denied: {path_str}");
                         let reason = self.sensitive_reasons.remove(&path_str);
                         let msg = if let Some(ref r) = reason {
                             format!("Sensitive file '{}' was denied. Reason: {}", path_str, r)
                         } else {
-                            format!("Sensitive file '{}' was denied by remembered permission.", path_str)
+                            format!("Sensitive file '{}' was denied by remembered sensitive file permission.", path_str)
                         };
-                        self.approved_tools.push(ApprovedTool {
+                        approval.approved_tools.push(ApprovedTool {
                             tool_call: tc,
                             rejection: Some(ToolExecutionResult::new(msg)),
                             child_session_id: None,
@@ -804,7 +845,7 @@ impl App {
                             sensitive_file_approved: false,
                             user_reason: None,
                         });
-                        self.tool_index += 1;
+                        approval.tool_index += 1;
                         continue;
                     }
                     None => {
@@ -823,121 +864,113 @@ impl App {
                 }
             }
 
-            // Step 3: Question tool?
+            // Step 3: 'question' tool — always show approval dialog
             if is_question {
-                match serde_json::from_str::<QuestionArgs>(&args) {
-                    Ok(qa) if !qa.questions.is_empty() => {
-                        log::info!("Opening QuestionDialog ({} questions)", qa.questions.len());
-                        self.set_notice("LLM has questions — please provide answers");
-                        self.overlays.push(Box::new(QuestionDialog::new(qa.questions)));
-                        return;
-                    }
-                    _ => {
-                        log::warn!("Invalid or empty question tool call arguments");
-                        self.approved_tools.push(ApprovedTool {
-                            tool_call: tc,
-                            rejection: Some(ToolExecutionResult::new(
-                                "Tool 'question' was rejected: invalid or empty arguments.",
-                            )),
-                            child_session_id: None,
-                            allow_outside: false,
-                            sensitive_file_approved: false,
-                            user_reason: None,
-                        });
-                        self.tool_index += 1;
-                        continue;
-                    }
+                if let Ok(qa) = serde_json::from_str::<QuestionArgs>(&args) {
+                    log::info!("Opening QuestionDialog ({} questions)", qa.questions.len());
+                    self.set_notice("LLM has questions — please provide answers");
+                    self.overlays.push(Box::new(QuestionDialog::new(qa.questions)));
+                    return;
+                } else {
+                    log::warn!("Invalid or empty question tool call arguments");
+                    approval.approved_tools.push(ApprovedTool {
+                        tool_call: tc,
+                        rejection: Some(ToolExecutionResult::new(
+                            "Tool 'question' was rejected: invalid or empty arguments.",
+                        )),
+                        child_session_id: None,
+                        allow_outside: false,
+                        sensitive_file_approved: false,
+                        user_reason: None,
+                    });
+                    approval.tool_index += 1;
+                    continue;
                 }
             }
 
-            // Step 4: PermissionDialog — only for tools that need confirmation
-            // (Write/Edit/Execute). Read-only tools (Read/Search/Session) that
-            // pass the boundary & sensitive file checks are auto-approved here.
-            if needs_confirmation {
-                log::info!(
-                    "Opening PermissionDialog for tool: {} ({}/{})",
-                    perm_label,
-                    current_index,
-                    total
-                );
-                self.set_notice(format!(
-                    "Approve tool call {} of {}: {}",
-                    current_index, total, perm_label
-                ));
-                self.overlays.push(Box::new(PermissionDialog::new(
-                    perm_key,
-                    perm_label,
-                    args,
-                    current_index,
-                    total,
-                )));
-                return;
-            } else {
-                // Resolve allow_outside / sensitive_approved from the
-                // in-memory caches: if the user already allowed a boundary
-                // or sensitive-file violation (via a dialog earlier in this
-                // pipeline), propagate those flags so the backend doesn't
-                // reject the tool a second time.
-                let boundary_str = boundary_path
-                    .as_ref()
-                    .map(|p| p.to_string_lossy().to_string());
-                let sensitive_str = sensitive_path
-                    .as_ref()
-                    .map(|p| p.to_string_lossy().to_string());
-                let allow_outside = boundary_str
-                    .as_deref()
-                    .and_then(|p| Self::is_path_allowed(&self.boundary_permissions, p))
-                    .unwrap_or(false);
-                let sensitive_approved = sensitive_str
-                    .as_deref()
-                    .and_then(|p| Self::is_path_allowed(&self.sensitive_permissions, p))
-                    .unwrap_or(false);
+            // Step 4: Check permission level
+            match needs_confirmation {
+                true => {
+                    log::info!(
+                        "Opening PermissionDialog ({current_index}/{total}) for {perm_label}"
+                    );
+                    self.overlays.push(Box::new(PermissionDialog::new(
+                        perm_key,
+                        perm_label,
+                        args,
+                        current_index,
+                        total,
+                    )));
+                    return;
+                }
+                false => {
+                    // Auto-approve (relying on earlier boundary/sensitive checks)
+                    let boundary_str = boundary_path
+                        .as_ref()
+                        .map(|p| p.to_string_lossy().to_string());
+                    let sensitive_str = sensitive_path
+                        .as_ref()
+                        .map(|p| p.to_string_lossy().to_string());
+                    let allow_outside = boundary_str
+                        .as_deref()
+                        .and_then(|p| Self::is_path_allowed(&self.boundary_permissions, p))
+                        .unwrap_or(false);
+                    let sensitive_approved = sensitive_str
+                        .as_deref()
+                        .and_then(|p| Self::is_path_allowed(&self.sensitive_permissions, p))
+                        .unwrap_or(false);
 
-                log::info!(
-                    "Auto-approving tool {} (no confirmation needed) ({}/{}) \
-                     allow_outside={} sensitive_approved={}",
-                    perm_label,
-                    current_index,
-                    total,
-                    allow_outside,
-                    sensitive_approved,
-                );
-                self.approved_tools.push(ApprovedTool {
-                    tool_call: tc,
-                    rejection: None,
-                    child_session_id: None,
-                    allow_outside,
-                    sensitive_file_approved: sensitive_approved,
-                    user_reason: None,
-                });
-                self.tool_index += 1;
-                continue;
+                    log::info!(
+                        "Auto-approving tool {} (no confirmation needed) ({}/{}) \
+                         allow_outside={} sensitive_approved={}",
+                        perm_label,
+                        current_index,
+                        total,
+                        allow_outside,
+                        sensitive_approved,
+                    );
+                    approval.approved_tools.push(ApprovedTool {
+                        tool_call: tc,
+                        rejection: None,
+                        child_session_id: None,
+                        allow_outside,
+                        sensitive_file_approved: sensitive_approved,
+                        user_reason: None,
+                    });
+                    approval.tool_index += 1;
+                    continue;
+                }
             }
         }
 
         // All tools processed — send response
-        self.send_approval_response();
+        self.send_approval_response(session_id);
     }
 
-    /// Send the accumulated approval response back to the runtime.
-    fn send_approval_response(&mut self) {
-        let response_tx = match self.pending_response_tx.take() {
-            Some(tx) => tx,
-            None => {
-                log::warn!("send_approval_response: no pending response_tx");
-                return;
-            }
+    /// Send the accumulated approval response back to the runtime for a session.
+    fn send_approval_response(&mut self, session_id: Uuid) {
+        let Some(approval) = self.pending_approvals.remove(&session_id) else {
+            log::warn!("send_approval_response: no pending approval for session {session_id}");
+            return;
         };
 
-        let tools = std::mem::take(&mut self.approved_tools);
+        let tools = approval.approved_tools;
         log::info!(
-            "send_approval_response: {} tool(s) approved/rejected",
+            "send_approval_response: session {session_id}, {} tool(s) approved/rejected",
             tools.len()
         );
 
-        let _ = response_tx.send(TuiResponse::ToolApproval(tools));
-        self.pending_tools.clear();
-        self.tool_index = 0;
+        let _ = approval.response_tx.send(TuiResponse::ToolApproval(tools));
+
+        // Clear active approval if this was the active session.
+        if self.active_approval_session == Some(session_id) {
+            self.active_approval_session = None;
+            // Check if any other session has pending approvals.
+            if let Some(&next_sid) = self.pending_approvals.keys().next() {
+                self.active_approval_session = Some(next_sid);
+                self.process_next_tool();
+            }
+        }
     }
 
     /// Check whether a path is in an allowlist, using prefix matching so that
@@ -1137,20 +1170,30 @@ impl App {
 
     /// Handle Tab key for session mode switching.
     fn handle_tab_mode_switch(&mut self) {
-        if self.pending_mode.is_some() {
+        // Mode switching works even without a current session (welcome page).
+        // Per-session pending modes only apply when there IS a session.
+        if let Some(sid) = self.current_session_id
+            && self.pending_modes.contains_key(&sid)
+        {
             // Cancel pending mode switch.
-            self.pending_mode = None;
+            self.pending_modes.remove(&sid);
             self.set_notice("Mode switch cancelled");
-        } else if self.has_active_request() || !self.pending_prompt_queue.is_empty() {
+            return;
+        }
+
+        let is_busy = self.current_session_id.is_some_and(|sid|
+            self.runtime.is_session_busy(sid) || self.pending_approvals.contains_key(&sid)
+        );
+
+        if is_busy || !self.pending_prompt_queue.is_empty() {
             // Request in progress: defer mode switch until request completes.
             let new_mode = self.mode.toggle();
-            self.pending_mode = Some(new_mode);
-            self.set_notice(format!(
-                "Mode will switch to {} on next message",
-                new_mode.title()
-            ));
+            if let Some(sid) = self.current_session_id {
+                self.pending_modes.insert(sid, new_mode);
+            }
+            self.set_notice(format!("Mode will switch to {} on completion", new_mode.title()));
         } else {
-            // Idle: switch mode immediately.
+            // Apply immediately.
             self.mode = self.mode.toggle();
             self.set_notice(format!("Mode switched to {}", self.mode.title()));
         }
@@ -1687,6 +1730,20 @@ impl App {
                         if let Some(usage) = &self.context_usage {
                             self.context_usage_cache.insert(current_id, usage.clone());
                         }
+                        // Save composer text for the session we're leaving.
+                        if let Some(ref composer) = self.composer {
+                            let text = composer.text().to_string();
+                            self.composer_texts.insert(current_id, text);
+                        }
+                    }
+
+                    // Restore composer text for the session we're switching to.
+                    if let Some(ref mut composer) = self.composer {
+                        if let Some(saved) = self.composer_texts.remove(&session_id) {
+                            composer.set_text(saved);
+                        } else {
+                            composer.clear();
+                        }
                     }
 
                     // Fast path: if the MessageList already has a chat_context for
@@ -1712,6 +1769,15 @@ impl App {
                                     .find(|m| m.role == MessageRole::User)
                                     .and_then(|m| m.mode)
                                     .unwrap_or(SessionMode::Build);
+                            }
+
+                            // Clear stale interaction state on session switch.
+                            self.mouse_selection.clear();
+                            self.abort_confirmation_deadline = None;
+
+                            // Reload todos for the target session.
+                            if let Ok(todos) = self.runtime.session_manager().store().load_todos(session_id) {
+                                self.todos = todos;
                             }
 
                             // Refresh the Runtime's in-memory message buffer.
@@ -1816,6 +1882,11 @@ impl App {
                     // Create or update MessageList
                     self.message_list.get_or_insert_with(MessageList::new)
                         .set_chat_context(chat_context);
+
+                    // Reload todos for the target session.
+                    if let Ok(todos) = self.runtime.session_manager().store().load_todos(session_id) {
+                        self.todos = todos;
+                    }
 
                     log::info!("Switching to session: {} ({})", session_title, session_id);
 
@@ -1953,13 +2024,8 @@ impl App {
                     self.set_notice("Undo in progress...");
                     let rt = self.runtime.clone();
                     tokio::spawn(async move {
-                        // Cancel any running agent loop first (matching old
-                        // implementation's abort_current_request).  Without
-                        // this, the loop may continue appending messages to
-                        // the buffer after undo sets the revert state,
-                        // causing the truncation in submit_prompt to
-                        // operate on stale data.
-                        rt.cancel().await;
+                        // Cancel this session's running loop first.
+                        rt.cancel_session(session_id).await;
                         if let Err(e) = rt.undo(session_id).await {
                             log::error!("Undo failed: {e}");
                         }
@@ -1973,20 +2039,17 @@ impl App {
                     self.set_notice("Redo in progress...");
                     let rt = self.runtime.clone();
                     tokio::spawn(async move {
-                        rt.cancel().await;
+                        rt.cancel_session(session_id).await;
                         if let Err(e) = rt.redo(session_id).await {
                             log::error!("Redo failed: {e}");
                         }
                     });
                 }
                 Action::Session(SessionAction::Compact) => {
-                    // Guard: no session.
-                    if self.current_session_id.is_none() {
-                        return;
-                    }
+                    let Some(sid) = self.current_session_id else { return };
                     // If a request is in progress, queue the compact.
                     if self.has_active_request() {
-                        self.pending_compact = true;
+                        self.pending_compacts.insert(sid);
                         self.set_notice("Compaction queued");
                         return;
                     }
@@ -2049,14 +2112,13 @@ impl App {
                         composer.clear();
                     }
 
-                    self.pending_tools.clear();
-                    self.tool_index = 0;
-                    self.approved_tools.clear();
-                    self.pending_response_tx = None;
+                    self.pending_approvals.clear();
+                    self.active_approval_session = None;
                     self.abort_confirmation_deadline = None;
                     self.context_usage = None;
                     self.pending_prompt_queue.clear();
-                    self.pending_compact = false;
+                    self.pending_compacts.clear();
+                    self.compacting_sessions.clear();
                 }
                 Action::Chat(action) => {
                     match &action {
@@ -2214,23 +2276,15 @@ impl App {
                 Action::WorkspaceBoundaryResponse { path, decision, reason } => {
                     self.record_boundary_decision(&path, &decision);
 
-                    // Resolve the tool's boundary flag based on decision
                     let allowed = matches!(
                         decision,
                         BoundaryDecision::AllowOnce | BoundaryDecision::AllowUntilExit
                     );
                     let path_str = path.to_string_lossy().to_string();
 
-                    if self.tool_index < self.pending_tools.len() {
-                        // Record the boundary approval in the tool's pending entry
-                        // so process_next_tool can skip this check.
-                        self.boundary_permissions.insert(
-                            path_str.clone(),
-                            allowed,
-                        );
-                    }
+                    // Record in cache regardless of which session.
+                    self.boundary_permissions.insert(path_str.clone(), allowed);
 
-                    // Store the reason for use in process_next_tool rejection message.
                     if let Some(r) = reason {
                         if !r.is_empty() {
                             self.boundary_reasons.insert(path_str, r);
@@ -2249,14 +2303,8 @@ impl App {
                     );
                     let path_str = path.to_string_lossy().to_string();
 
-                    if self.tool_index < self.pending_tools.len() {
-                        self.sensitive_permissions.insert(
-                            path_str.clone(),
-                            allowed,
-                        );
-                    }
+                    self.sensitive_permissions.insert(path_str.clone(), allowed);
 
-                    // Store the reason for use in process_next_tool rejection message.
                     if let Some(r) = reason {
                         if !r.is_empty() {
                             self.sensitive_reasons.insert(path_str, r);
@@ -2276,102 +2324,104 @@ impl App {
                             | PermissionDecision::DenyAndRemember
                     );
 
-                    if self.tool_index < self.pending_tools.len() {
-                        let twv = &self.pending_tools[self.tool_index];
+                    let Some(session_id) = self.active_approval_session else { break };
+                    let Some(approval) = self.pending_approvals.get_mut(&session_id) else { break };
+                    if approval.tool_index >= approval.tools.len() { break; }
+                    let twv = &approval.tools[approval.tool_index];
 
-                        // Persist to DB if remember
-                        if remember
-                            && let Some(session_id) = self.current_session_id
-                                && let Err(e) = self
-                                    .runtime
-                                    .session_manager()
-                                    .store()
-                                    .remember_tool_permission(
-                                        session_id,
-                                        &twv.permission_key,
-                                        allow,
-                                    )
-                                {
-                                    log::warn!("Failed to remember tool permission: {e}");
-                                }
-
-                        // Build the approved tool
-                        let (rejection, allow_outside, sensitive_approved) = if allow {
-                            let path_str = twv
-                                .workspace_boundary_violation
-                                .as_ref()
-                                .map(|p| p.to_string_lossy().to_string());
-                            let sensitive_str = twv
-                                .sensitive_file_violation
-                                .as_ref()
-                                .map(|p| p.to_string_lossy().to_string());
-                            (
-                                None,
-                                path_str
-                                    .and_then(|p| Self::is_path_allowed(&self.boundary_permissions, &p))
-                                    .unwrap_or(false),
-                                sensitive_str
-                                    .and_then(|p| Self::is_path_allowed(&self.sensitive_permissions, &p))
-                                    .unwrap_or(false),
+                    // Persist to DB if remember
+                    if remember
+                        && let Err(e) = self
+                            .runtime
+                            .session_manager()
+                            .store()
+                            .remember_tool_permission(
+                                session_id,
+                                &twv.permission_key,
+                                allow,
                             )
+                        {
+                            log::warn!("Failed to remember tool permission: {e}");
+                        }
+
+                    // Build the approved tool
+                    let (rejection, allow_outside, sensitive_approved) = if allow {
+                        let path_str = twv
+                            .workspace_boundary_violation
+                            .as_ref()
+                            .map(|p| p.to_string_lossy().to_string());
+                        let sensitive_str = twv
+                            .sensitive_file_violation
+                            .as_ref()
+                            .map(|p| p.to_string_lossy().to_string());
+                        (
+                            None,
+                            path_str
+                                .and_then(|p| Self::is_path_allowed(&self.boundary_permissions, &p))
+                                .unwrap_or(false),
+                            sensitive_str
+                                .and_then(|p| Self::is_path_allowed(&self.sensitive_permissions, &p))
+                                .unwrap_or(false),
+                        )
+                    } else {
+                        let base = if remember {
+                            format!("Tool '{}' was denied and remembered", twv.permission_label)
                         } else {
-                            let base = if remember {
-                                format!("Tool '{}' was denied and remembered", twv.permission_label)
-                            } else {
-                                format!("Tool '{}' was denied", twv.permission_label)
-                            };
-                            let msg = if let Some(ref r) = reason {
-                                format!("{}. Reason: {}", base, r)
-                            } else {
-                                base
-                            };
-                            (
-                                Some(ToolExecutionResult::new(msg)),
-                                false,
-                                false,
-                            )
+                            format!("Tool '{}' was denied", twv.permission_label)
                         };
-
-                        let child_session_id = if twv.tool_call.name == "task" {
-                            Some(Uuid::new_v4())
+                        let msg = if let Some(ref r) = reason {
+                            format!("{}. Reason: {}", base, r)
                         } else {
-                            None
+                            base
                         };
+                        (
+                            Some(ToolExecutionResult::new(msg)),
+                            false,
+                            false,
+                        )
+                    };
 
-                        self.approved_tools.push(ApprovedTool {
-                            tool_call: twv.tool_call.clone(),
-                            rejection,
-                            child_session_id,
-                            allow_outside,
-                            sensitive_file_approved: sensitive_approved,
-                            user_reason: reason.clone(),
-                        });
-                    }
+                    let child_session_id = if twv.tool_call.name == "task" {
+                        Some(Uuid::new_v4())
+                    } else {
+                        None
+                    };
 
-                    self.tool_index += 1;
+                    approval.approved_tools.push(ApprovedTool {
+                        tool_call: twv.tool_call.clone(),
+                        rejection,
+                        child_session_id,
+                        allow_outside,
+                        sensitive_file_approved: sensitive_approved,
+                        user_reason: reason.clone(),
+                    });
+
+                    approval.tool_index += 1;
                     self.process_next_tool();
                 }
                 Action::QuestionResponse { output } => {
-                    if self.tool_index < self.pending_tools.len() {
-                        let twv = &self.pending_tools[self.tool_index];
-                        let result = match output {
-                            Some(answers) => ToolExecutionResult::new(answers),
-                            None => ToolExecutionResult::new(
-                                "Tool 'question' was dismissed by user",
-                            ),
-                        };
+                    let Some(session_id) = self.active_approval_session else { break };
+                    let Some(approval) = self.pending_approvals.get_mut(&session_id) else { break };
+                    if approval.tool_index >= approval.tools.len() { break; }
+                    let twv = &approval.tools[approval.tool_index];
 
-                        self.approved_tools.push(ApprovedTool {
-                            tool_call: twv.tool_call.clone(),
-                            rejection: Some(result),
-                            child_session_id: None,
-                            allow_outside: false,
-                            sensitive_file_approved: false,
-                            user_reason: None,
-                        });
-                    }
+                    let result = match output {
+                        Some(answers) => ToolExecutionResult::new(answers),
+                        None => ToolExecutionResult::new(
+                            "Tool 'question' was dismissed by user",
+                        ),
+                    };
 
-                    self.tool_index += 1;
+                    approval.approved_tools.push(ApprovedTool {
+                        tool_call: twv.tool_call.clone(),
+                        rejection: Some(result),
+                        child_session_id: None,
+                        allow_outside: false,
+                        sensitive_file_approved: false,
+                        user_reason: None,
+                    });
+
+                    approval.tool_index += 1;
                     self.process_next_tool();
                 }
             }
@@ -2495,6 +2545,7 @@ impl App {
                     sessions,
                     SessionViewMode::CurrentWorkspace,
                     current_session_id,
+                    self.active_sessions.clone(),
                 )))
             }
             OverlayKind::ForkConfirmDialog {
@@ -2624,16 +2675,20 @@ impl App {
                     let label = if sub_count == 1 { "subagent" } else { "subagents" };
                     format!("{spinner} Waiting for {sub_count} {label}")
                 } else if ml.is_streaming() {
-                    match self.pending_mode.as_ref() {
+                    let pending_mode = self.current_session_id
+                        .and_then(|sid| self.pending_modes.get(&sid));
+                    match pending_mode {
                         Some(pending) => {
                             format!("{spinner} {} → {} (on completion)", self.mode.title(), pending.title())
                         }
                         None => format!("{spinner} {}", self.mode.title()),
                     }
-                } else if !self.pending_tools.is_empty() {
+                } else if self.current_session_id.is_some_and(|sid| self.pending_approvals.contains_key(&sid)) {
                     format!("{spinner} Running tools")
                 } else {
-                    match self.pending_mode.as_ref() {
+                    let pending_mode = self.current_session_id
+                        .and_then(|sid| self.pending_modes.get(&sid));
+                    match pending_mode {
                         Some(pending) => {
                             format!("{spinner} {} → {} (on completion)", self.mode.title(), pending.title())
                         }
@@ -2641,7 +2696,9 @@ impl App {
                     }
                 }
             } else {
-                match self.pending_mode.as_ref() {
+                let pending_mode = self.current_session_id
+                    .and_then(|sid| self.pending_modes.get(&sid));
+                match pending_mode {
                     Some(pending) => {
                         format!("{spinner} {} → {} (on completion)", self.mode.title(), pending.title())
                     }
@@ -2649,7 +2706,9 @@ impl App {
                 }
             };
 
-            let extra = match (queued_count, self.pending_compact) {
+            let is_pending_compact = self.current_session_id
+                .is_some_and(|sid| self.pending_compacts.contains(&sid));
+            let extra = match (queued_count, is_pending_compact) {
                 (0, false) => String::new(),
                 (1, false) => " · queued 1".to_string(),
                 (q, false) => format!(" · queued {q}"),
@@ -2665,7 +2724,7 @@ impl App {
         }
 
         // 3b. Compacting in progress — show spinner + status
-        if self.is_compacting {
+        if self.is_compacting() {
             let spinner = self.loading_spinner();
             let status = format!("{spinner} Compacting...");
             if let Some(ref t) = token_status {
@@ -2675,9 +2734,12 @@ impl App {
         }
 
         // 4. Queued messages or compact pending (not streaming)
-        let has_pending = queued_count > 0 || self.pending_compact;
+        let has_pending = queued_count > 0
+            || self.current_session_id.is_some_and(|sid| self.pending_compacts.contains(&sid));
         if has_pending {
-            let compact_part = if self.pending_compact { " · compact pending" } else { "" };
+            let is_pending_compact = self.current_session_id
+                .is_some_and(|sid| self.pending_compacts.contains(&sid));
+            let compact_part = if is_pending_compact { " · compact pending" } else { "" };
             let status = if queued_count == 1 {
                 format!("1 queued message{compact_part}")
             } else if queued_count > 1 {
@@ -2733,7 +2795,8 @@ impl App {
                 palette,
                 focused: true,
                 mode: self.mode,
-                pending_mode: self.pending_mode,
+                pending_mode: self.current_session_id
+                    .and_then(|sid| self.pending_modes.get(&sid).copied()),
                 model_display: None,
                 provider_display: None,
                 thinking_level: None,
@@ -2833,7 +2896,8 @@ impl App {
                 palette,
                 focused: self.overlays.is_empty(),
                 mode: self.mode,
-                pending_mode: self.pending_mode,
+                pending_mode: self.current_session_id
+                    .and_then(|sid| self.pending_modes.get(&sid).copied()),
                 model_display: None,
                 provider_display: None,
                 thinking_level: None,
@@ -2891,7 +2955,8 @@ impl App {
                 palette,
                 focused: self.overlays.is_empty(),
                 mode: self.mode,
-                pending_mode: self.pending_mode,
+                pending_mode: self.current_session_id
+                    .and_then(|sid| self.pending_modes.get(&sid).copied()),
                 model_display: Some(&active_model.display_name),
                 provider_display: Some(&active_model.provider_display_name),
                 thinking_level: Some(&active_model.thinking_level),
@@ -2906,7 +2971,8 @@ impl App {
             palette,
             focused: true,
             mode: self.mode,
-            pending_mode: self.pending_mode,
+            pending_mode: self.current_session_id
+                .and_then(|sid| self.pending_modes.get(&sid).copied()),
             model_display: None,
             provider_display: None,
             thinking_level: None,
@@ -3122,7 +3188,8 @@ impl App {
                 palette,
                 focused: true,
                 mode: self.mode,
-                pending_mode: self.pending_mode,
+                pending_mode: self.current_session_id
+                    .and_then(|sid| self.pending_modes.get(&sid).copied()),
                 model_display: Some(&active_model.display_name),
                 provider_display: Some(&active_model.provider_display_name),
                 thinking_level: Some(&active_model.thinking_level),
@@ -3313,6 +3380,7 @@ impl App {
         frame.render_widget(block, block_area);
     }
 }
+
 
 // ── Inline @-reference extraction ───────────────────────────────────────
 

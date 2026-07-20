@@ -17,10 +17,9 @@
 //! while let Some(event) = rt.event_rx().recv().await { ... }
 //! ```
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex as StdMutex, OnceLock, RwLock as StdRwLock};
+use std::sync::{Arc, OnceLock, RwLock as StdRwLock};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -97,9 +96,8 @@ pub struct Runtime {
     /// Resolved model (for loop construction). Behind RwLock so the TUI can
     /// update it when the user switches providers.
     active_model: Arc<StdRwLock<tidev_config::auth::ActiveModel>>,
-    /// Co-operative cancellation token for the currently active agent loop.
-    /// Replaced on each `submit_prompt` so cancellation is one-shot per loop.
-    active_loop_cancel: Arc<Mutex<Option<CancellationToken>>>,
+    /// Per-session cancellation tokens for active agent loops.
+    active_loop_cancels: Arc<std::sync::Mutex<HashMap<Uuid, CancellationToken>>>,
     /// Snapshot service for undo/redo (optional).
     snapshot: Option<tidev_snapshot::SnapshotService>,
 
@@ -115,16 +113,21 @@ pub struct Runtime {
     request_tx: UnboundedSender<TuiRequest>,
     _request_rx: Arc<Mutex<Option<UnboundedReceiver<TuiRequest>>>>,
 
-    /// Currently running agent loop handle.
-    run_loop_handle: Arc<StdMutex<Option<tokio::task::JoinHandle<()>>>>,
-    /// Synchronous busy flag (avoids awaiting the Mutex in async-free contexts).
-    loop_busy: Arc<AtomicBool>,
+    /// Currently running agent loop handles, keyed by session ID.
+    run_loop_handles: Arc<std::sync::Mutex<HashMap<Uuid, tokio::task::JoinHandle<()>>>>,
+    /// Set of session IDs with active agent loops.
+    busy_sessions: Arc<std::sync::Mutex<HashSet<Uuid>>>,
 
-    /// Queue of user messages waiting to be picked up by the agent loop.
-    /// Populated by `submit_prompt_with_attachments` when the loop is running;
-    /// drained by the agent loop one-at-a-time so each queued message
-    /// triggers a new LLM turn.
-    queued_messages: Arc<std::sync::Mutex<std::collections::VecDeque<QueuedUserMessage>>>,
+    /// Per-session queues of user messages waiting to be picked up by
+    /// the agent loop. Populated when the loop is running; drained by
+    /// the agent loop one-at-a-time so each queued message triggers a
+    /// new LLM turn.
+    queued_messages: Arc<std::sync::Mutex<HashMap<Uuid, VecDeque<QueuedUserMessage>>>>,
+
+    /// Guards the check-and-start sequence in submit_prompt / continue_session
+    /// to prevent a TOCTOU race where two tasks both see is_session_busy=false
+    /// and both call start_agent_loop for the same session.
+    session_start_lock: Arc<std::sync::Mutex<()>>,
 
     /// Cancellation token for background cleanup tasks.
     cleanup_cancel: CancellationToken,
@@ -137,19 +140,20 @@ pub struct Runtime {
     file_search_index: OnceLock<Arc<FileSearchIndex>>,
 }
 
-/// RAII guard that clears `loop_busy` and `run_loop_handle` on drop
-/// (including on task panic).
-struct AgentLoopGuard {
-    busy: Arc<AtomicBool>,
-    handle: Arc<StdMutex<Option<tokio::task::JoinHandle<()>>>>,
+/// RAII guard that removes a session from `busy_sessions` and
+/// `run_loop_handles` on drop (including on task panic).
+struct SessionLoopGuard {
+    session_id: Uuid,
+    busy_sessions: Arc<std::sync::Mutex<HashSet<Uuid>>>,
+    handles: Arc<std::sync::Mutex<HashMap<Uuid, tokio::task::JoinHandle<()>>>>,
+    cancels: Arc<std::sync::Mutex<HashMap<Uuid, CancellationToken>>>,
 }
 
-impl Drop for AgentLoopGuard {
+impl Drop for SessionLoopGuard {
     fn drop(&mut self) {
-        // Clear handle first, then busy — so is_loop_running() and is_busy()
-        // never disagree about whether the loop is alive.
-        *self.handle.lock().unwrap() = None;
-        self.busy.store(false, Ordering::SeqCst);
+        self.handles.lock().unwrap().remove(&self.session_id);
+        self.cancels.lock().unwrap().remove(&self.session_id);
+        self.busy_sessions.lock().unwrap().remove(&self.session_id);
     }
 }
 
@@ -445,16 +449,16 @@ impl Runtime {
             message: user_msg,
         });
 
-        // 4. Check if a loop is already running.
-        if self.is_loop_running() {
-            // Enqueue the message so the running loop picks it up.
-            // The loop pops queued messages one-at-a-time after turns
-            // without tool calls, continuing the loop instead of exiting.
-            self.queue_user_message(q_content, q_attachments, q_mode, q_thinking);
+        // 4. Check if this session already has a loop running.
+        // Fast path: avoid queue_user_message when possible.
+        // The atomic check-and-start in start_agent_loop prevents TOCTOU.
+        if self.is_session_busy(session_id) {
+            self.queue_user_message(session_id, q_content, q_attachments, q_mode, q_thinking);
             return Ok(());
         }
 
         // 5. Build CoreContext + AgentLoopConfig and spawn the loop.
+        // start_agent_loop re-checks busy under a mutex for atomicity.
         self.start_agent_loop(session_id, mode).await
     }
 
@@ -465,13 +469,14 @@ impl Runtime {
     /// This ensures each queued message triggers a new LLM turn.
     fn queue_user_message(
         &self,
+        session_id: Uuid,
         content: String,
         attachments: Vec<MessageAttachment>,
         mode: SessionMode,
         thinking_level: Option<ThinkingLevelType>,
     ) {
         let mut queue = self.queued_messages.lock().unwrap();
-        queue.push_back(QueuedUserMessage {
+        queue.entry(session_id).or_default().push_back(QueuedUserMessage {
             content,
             attachments,
             mode,
@@ -488,8 +493,9 @@ impl Runtime {
     /// `mode` should be the session's current mode; it is read from the last
     /// user message's `mode` field if `None` is passed.
     pub async fn continue_session(&self, session_id: Uuid, mode: Option<SessionMode>) -> Result<()> {
-        if self.is_loop_running() {
-            // Already running — new data will be picked up on next turn.
+        // Fast path: avoid DB reload if the session is already running.
+        // The atomic check in start_agent_loop prevents TOCTOU.
+        if self.is_session_busy(session_id) {
             return Ok(());
         }
 
@@ -514,14 +520,19 @@ impl Runtime {
         self.start_agent_loop(session_id, mode).await
     }
 
-    /// Quick synchronous check — is the agent loop active?
+    /// Quick synchronous check — is any session's agent loop active?
     pub fn is_busy(&self) -> bool {
-        self.loop_busy.load(Ordering::SeqCst)
+        !self.busy_sessions.lock().unwrap().is_empty()
     }
 
-    /// Check whether an agent loop is currently running.
-    fn is_loop_running(&self) -> bool {
-        self.loop_busy.load(Ordering::SeqCst)
+    /// Check whether a specific session has an agent loop running.
+    pub fn is_session_busy(&self, session_id: Uuid) -> bool {
+        self.busy_sessions.lock().unwrap().contains(&session_id)
+    }
+
+    /// List all session IDs with active agent loops.
+    pub fn active_sessions(&self) -> Vec<Uuid> {
+        self.busy_sessions.lock().unwrap().iter().copied().collect()
     }
 
     /// Reload the in-memory [`MessageBuffer`] for a session from the store.
@@ -547,10 +558,28 @@ impl Runtime {
     }
 
     /// Build [`CoreContext`] + [`AgentLoopConfig`] and spawn the agent loop.
+    ///
+    /// Uses `session_start_lock` to prevent a TOCTOU race: only one task
+    /// per session gets past the busy check and marks the session as busy.
     async fn start_agent_loop(&self, session_id: Uuid, mode: SessionMode) -> Result<()> {
-        // Create a fresh cancellation token for this loop — retired on cancel().
+        // ── Check-and-claim: atomic under session_start_lock ──────────
+        {
+            let _lock = self.session_start_lock.lock().unwrap();
+            if self.is_session_busy(session_id) {
+                // Another task already started a loop for this session.
+                // The caller's message was already persisted; it will be
+                // picked up by the running loop's next turn.
+                return Ok(());
+            }
+            // Mark busy immediately so no other concurrent submit_prompt
+            // or continue_session can also start a loop.
+            self.busy_sessions.lock().unwrap().insert(session_id);
+        }
+        // lock released — remaining work is async but no longer racy.
+
+        // Create a fresh cancellation token for this loop.
         let cancel = CancellationToken::new();
-        *self.active_loop_cancel.lock().await = Some(cancel.clone());
+        self.active_loop_cancels.lock().unwrap().insert(session_id, cancel.clone());
         let buffer = self.message_buffer(session_id).await;
         let context_manager = self.context_manager(session_id).await;
 
@@ -610,32 +639,53 @@ impl Runtime {
             self.auth.clone(),
         );
 
+        // Extract a per-session queue for this loop to drain.
+        let per_session_queue: Arc<std::sync::Mutex<VecDeque<QueuedUserMessage>>> = {
+            let mut qmap = self.queued_messages.lock().unwrap();
+            Arc::new(std::sync::Mutex::new(qmap.remove(&session_id).unwrap_or_default()))
+        };
+
         let loop_config = tidev_agent::AgentLoopConfig {
             session_id,
             definition: agent_def,
             mode,
             thinking_level: active_model.thinking_level.clone(),
             event_tx: self.event_tx.clone(),
-            cancel,
-            queued_messages: self.queued_messages.clone(),
+            cancel: cancel.clone(),
+            queued_messages: per_session_queue.clone(),
         };
 
-        let busy_flag = self.loop_busy.clone();
-        let handle_slot = self.run_loop_handle.clone();
+        // Clone Arcs for the guard before they move into the spawn.
+        let busy_sessions = self.busy_sessions.clone();
+        let handles = self.run_loop_handles.clone();
+        let cancels = self.active_loop_cancels.clone();
+        let qmap_restore = self.queued_messages.clone();
+
         let join = tokio::spawn(async move {
-            let _guard = AgentLoopGuard { busy: busy_flag, handle: handle_slot };
+            let _guard = SessionLoopGuard {
+                session_id,
+                busy_sessions: busy_sessions.clone(),
+                handles: handles.clone(),
+                cancels: cancels.clone(),
+            };
             if let Err(e) = tidev_agent::run_agent_loop(&ctx, loop_config).await {
                 log::error!("agent loop for session {session_id} exited with error: {e}");
             }
+            // On normal exit, restore any remaining queued messages back
+            // to the per-session map so they aren't lost.
+            let remaining: Vec<QueuedUserMessage> = per_session_queue.lock().unwrap().drain(..).collect();
+            if !remaining.is_empty() {
+                let mut map = qmap_restore.lock().unwrap();
+                let q = map.entry(session_id).or_default();
+                for msg in remaining {
+                    q.push_back(msg);
+                }
+            }
         });
 
-        // Store handle first, then set busy — so is_loop_running() and
-        // is_busy() never disagree about whether the loop is alive.
-        {
-            let mut handle = self.run_loop_handle.lock().unwrap();
-            *handle = Some(join);
-        }
-        self.loop_busy.store(true, Ordering::SeqCst);
+        // Store handle, then mark session busy.
+        self.run_loop_handles.lock().unwrap().insert(session_id, join);
+        self.busy_sessions.lock().unwrap().insert(session_id);
 
         Ok(())
     }
@@ -650,26 +700,55 @@ impl Runtime {
     ///    their nested tools at any depth.
     /// 3. Kill any remaining child processes (bash).
     pub async fn cancel(&self) {
-        // 1. Signal cooperative cancellation.
-        if let Some(token) = self.active_loop_cancel.lock().await.take() {
+        // 1. Signal cooperative cancellation for ALL sessions.
+        let tokens: Vec<CancellationToken> = self.active_loop_cancels
+            .lock().unwrap()
+            .drain()
+            .map(|(_, t)| t)
+            .collect();
+        for token in tokens {
             token.cancel();
         }
 
-        self.loop_busy.store(false, Ordering::SeqCst);
+        self.busy_sessions.lock().unwrap().clear();
 
-        // 2. Force-abort the agent loop task.
-        //    abort() interrupts the task at its next .await point. The task
-        //    future is dropped, which drops the JoinSet inside execute_tools,
-        //    which aborts all spawned tool tasks (including subagents) and
-        //    closes any in-flight HTTP connections.
-        let handle = self.run_loop_handle.lock().unwrap().take();
-        if let Some(h) = handle {
+        // 2. Force-abort ALL agent loop tasks.
+        let handles: Vec<tokio::task::JoinHandle<()>> = self.run_loop_handles
+            .lock().unwrap()
+            .drain()
+            .map(|(_, h)| h)
+            .collect();
+        for h in handles {
             h.abort();
             let _ = tokio::time::timeout(Duration::from_millis(200), h).await;
         }
 
         // 3. Force-kill any lingering child processes (bash).
         tidev_tools::kill_all_children();
+    }
+
+    /// Cancel a specific session's agent loop.
+    ///
+    /// Like [`cancel`] but only affects the given session. Other sessions'
+    /// loops continue running undisturbed.
+    pub async fn cancel_session(&self, session_id: Uuid) {
+        // 1. Signal cooperative cancellation for this session.
+        if let Some(token) = self.active_loop_cancels.lock().unwrap().remove(&session_id) {
+            token.cancel();
+        }
+
+        self.busy_sessions.lock().unwrap().remove(&session_id);
+
+        // 2. Force-abort this session's agent loop task.
+        let handle = self.run_loop_handles.lock().unwrap().remove(&session_id);
+        if let Some(h) = handle {
+            h.abort();
+            let _ = tokio::time::timeout(Duration::from_millis(200), h).await;
+        }
+        // Note: child processes for THIS session are handled by the
+        // CancellationToken chain inside the bash tool. We don't call
+        // kill_all_children() here because that would kill other sessions'
+        // processes too.
     }
 
     /// Gracefully shut down background tasks.
@@ -1229,7 +1308,7 @@ impl RuntimeBuilder {
             tool_registry,
             skills,
             active_model,
-            active_loop_cancel: Arc::new(Mutex::new(None)),
+            active_loop_cancels: Arc::new(std::sync::Mutex::new(HashMap::new())),
             snapshot,
             buffers: Arc::new(Mutex::new(HashMap::new())),
             context_managers: Arc::new(Mutex::new(HashMap::new())),
@@ -1237,9 +1316,10 @@ impl RuntimeBuilder {
             _event_rx: Arc::new(Mutex::new(Some(event_rx))),
             request_tx,
             _request_rx: Arc::new(Mutex::new(Some(request_rx))),
-            run_loop_handle: Arc::new(StdMutex::new(None)),
-            loop_busy: Arc::new(AtomicBool::new(false)),
-            queued_messages: Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
+            run_loop_handles: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            busy_sessions: Arc::new(std::sync::Mutex::new(HashSet::new())),
+            queued_messages: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            session_start_lock: Arc::new(std::sync::Mutex::new(())),
             cleanup_cancel,
             workspace_root,
             file_search_index: OnceLock::new(),
