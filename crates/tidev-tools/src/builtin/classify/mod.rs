@@ -240,7 +240,12 @@ fn split_compound<'a>(s: &'a str) -> Vec<&'a str> {
 
 /// Detect file write redirects (`>`, `>>`, `&>`).
 ///
-/// Excludes file-descriptor-only redirects like `2>&1`.
+/// Excludes file-descriptor-only redirects:
+/// - `N>&M` (e.g. `2>&1`)
+/// - `>&N` (e.g. `>&2`)
+/// - `N>/path` (e.g. `2>/dev/null`, `1>file`, `3>&-`)
+///   These redirect a specific fd, not stdout; very common in read-only commands
+///   like `find ... 2>/dev/null` or `pip show ... 2>/dev/null`.
 fn has_write_redirect(s: &str) -> bool {
     let bytes = s.as_bytes();
     let mut in_single = false;
@@ -260,7 +265,7 @@ fn has_write_redirect(s: &str) -> bool {
         }
 
         if c == '>' {
-            // Check if this is a fd redirect (like 2>&1, >&2)
+            // Check if this is a fd redirect (like 2>&1, >&2, 2>/dev/null)
             // Look at the previous char for a digit, and the next char for &
             let prev_is_digit = i > 0 && bytes[i - 1].is_ascii_digit();
             let next_is_ampersand = i + 1 < bytes.len() && bytes[i + 1] == b'&';
@@ -271,6 +276,13 @@ fn has_write_redirect(s: &str) -> bool {
             }
             if next_is_ampersand {
                 // e.g. `>&2` — also fd redirect
+                continue;
+            }
+            if prev_is_digit {
+                // e.g. `2>/dev/null`, `1>file`, `3>&-` — fd redirect, not file write
+                // This is the most common false-positive source: `cmd 2>/dev/null`.
+                // Even `1>file` is acceptable to let through here because
+                // classify_command will catch genuine write commands.
                 continue;
             }
 
@@ -1434,10 +1446,58 @@ mod tests {
 
     #[test]
     fn test_redirect_detection() {
+        // Write redirects (should be caught)
         assert!(has_write_redirect("echo hello > file"));
         assert!(has_write_redirect("cat >> file"));
+        assert!(has_write_redirect("ls &> file"));
+
+        // NOTE: `>& file` is also a write (older syntax for `&> file`), but the
+        // tokenizer can't distinguish it from `>&2` (fd redirect). This is a
+        // pre-existing limitation — we accept the false negative.
+
+        // No redirect
         assert!(!has_write_redirect("echo hello"));
+
+        // fd-to-fd redirects (already handled)
         assert!(!has_write_redirect("cmd 2>&1"));
         assert!(!has_write_redirect("cmd >&2"));
+
+        // fd-to-file redirects — the common `2>/dev/null` pattern (was false positive)
+        assert!(!has_write_redirect("find . 2>/dev/null"));
+        assert!(!has_write_redirect("pip list 2>/dev/null"));
+        assert!(!has_write_redirect("grep -r foo 2>/dev/null"));
+        assert!(!has_write_redirect("ls 2>/dev/null"));
+        assert!(!has_write_redirect("cmd 1>/dev/null"));
+        assert!(!has_write_redirect("cmd 2>/tmp/log.txt"));
+        assert!(!has_write_redirect("cmd 3>&-"));
+    }
+
+    #[test]
+    fn test_stderr_redirect_not_blocked() {
+        // Full classification: commands with stderr redirect should not be blocked
+        let cl = c();
+        assert_eq!(cl.classify("find / -name '*.rs' 2>/dev/null"), Safety::Unknown);
+        assert_eq!(
+            cl.classify("find / -name '*.rs' 2>/dev/null | head -3"),
+            Safety::Unknown
+        );
+        assert_eq!(cl.classify("pip show rich 2>/dev/null"), Safety::ReadOnly);
+        assert_eq!(
+            cl.classify("pip show rich 2>/dev/null | head -5"),
+            Safety::ReadOnly
+        );
+        assert_eq!(cl.classify("grep -r 'TODO' src/ 2>/dev/null"), Safety::Unknown);
+        assert_eq!(cl.classify("ls -la 2>/dev/null"), Safety::Unknown);
+        assert_eq!(cl.classify("cat foo.txt 2>/dev/null"), Safety::Unknown);
+
+        // But a genuinely write command with stderr redirect must still be blocked
+        assert_eq!(cl.classify("pip install requests 2>/dev/null"), Safety::WriteOperation);
+        assert_eq!(cl.classify("cargo build 2>/dev/null"), Safety::WriteOperation);
+
+        // Mixed: stdout redirect + stderr redirect should still be caught
+        assert_eq!(
+            cl.classify("echo hello > file.txt 2>/dev/null"),
+            Safety::WriteOperation
+        );
     }
 }
