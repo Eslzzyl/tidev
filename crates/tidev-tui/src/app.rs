@@ -1959,6 +1959,7 @@ impl App {
                         &active_model.display_name,
                         &format!("Fork of {}", session_title),
                         None,
+                        None,
                     ) {
                         log::error!("Failed to create fork session: {e}");
                         return;

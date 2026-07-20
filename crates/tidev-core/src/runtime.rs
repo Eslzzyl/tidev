@@ -351,6 +351,7 @@ impl Runtime {
             &model.display_name,
             title,
             None,
+            None,
         )?;
         Ok(session_id)
     }
@@ -584,10 +585,11 @@ impl Runtime {
         let context_manager = self.context_manager(session_id).await;
 
         // Compose or load the system prompt (mode-agnostic — see inject_mode_reminder).
-        let system_prompt = {
+        let (system_prompt, session_start_hash) = {
             let session = self.session_manager.load_session(session_id)?;
+            let ssh = session.as_ref().and_then(|s| s.snapshot_start_hash.clone());
             match session {
-                Some(s) if !s.system_prompt.is_empty() => s.system_prompt,
+                Some(s) if !s.system_prompt.is_empty() => (s.system_prompt, ssh),
                 _ => {
                     let instructions = self.config.read().unwrap().instructions.clone();
                     let sp = crate::agent_ctx::compose_system_prompt(
@@ -599,7 +601,7 @@ impl Runtime {
                     // Persist system prompt to the session record.
                     self.session_manager
                         .update_system_prompt(session_id, &sp)?;
-                    sp
+                    (sp, ssh)
                 }
             }
         };
@@ -637,6 +639,7 @@ impl Runtime {
             self.snapshot.clone(),
             self.config.clone(),
             self.auth.clone(),
+            session_start_hash,
         );
 
         // Extract a per-session queue for this loop to drain.

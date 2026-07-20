@@ -30,6 +30,7 @@ impl SessionManager {
         model_display_name: &str,
         title: &str,
         parent_session_id: Option<Uuid>,
+        snapshot_start_hash: Option<&str>,
     ) -> Result<()> {
         self.store.create_session(
             session_id,
@@ -40,6 +41,7 @@ impl SessionManager {
             model_display_name,
             title,
             parent_session_id,
+            snapshot_start_hash,
         )
     }
 
@@ -184,5 +186,14 @@ impl SessionManager {
         session_id: Uuid,
     ) -> Result<Option<(Uuid, Option<Vec<u8>>)>> {
         self.store.load_revert_state(session_id)
+    }
+
+    /// Persist the snapshot start hash for a session.
+    pub fn update_session_start_hash(
+        &self,
+        session_id: Uuid,
+        snapshot_start_hash: &str,
+    ) -> Result<()> {
+        self.store.update_session_start_hash(session_id, snapshot_start_hash)
     }
 }

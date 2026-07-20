@@ -257,6 +257,7 @@ impl CoreContext {
         snapshot: Option<SnapshotService>,
         config: Arc<StdRwLock<AppConfig>>,
         auth: Arc<StdRwLock<AuthStore>>,
+        session_start_hash: Option<String>,
     ) -> Self {
         Self {
             llm,
@@ -276,7 +277,7 @@ impl CoreContext {
             active_model,
             snapshot,
             pre_round_hash: Arc::new(Mutex::new(None)),
-            session_start_hash: Arc::new(Mutex::new(None)),
+            session_start_hash: Arc::new(Mutex::new(session_start_hash)),
             config,
             auth,
         }
@@ -774,6 +775,7 @@ impl AgentContext for CoreContext {
                     snapshot: self.snapshot.clone(),
                     config: self.config.clone(),
                     auth: self.auth.clone(),
+                    session_start_hash: self.session_start_hash.lock().await.clone(),
                 };
                 join_set.spawn(async move {
                     execute_task_tool(
@@ -895,7 +897,11 @@ impl AgentContext for CoreContext {
             // Initialize session_start_hash on the very first snapshot.
             let mut ssh = self.session_start_hash.lock().await;
             if ssh.is_none() {
+                let persist_hash = hash.clone();
                 *ssh = Some(hash);
+                // Persist to DB so restored sessions retain the correct baseline.
+                let _ = self.session_manager
+                    .update_session_start_hash(session_id, &persist_hash);
             }
         }
 
@@ -1081,6 +1087,7 @@ struct SubagentSpawner {
     snapshot: Option<SnapshotService>,
     config: Arc<StdRwLock<AppConfig>>,
     auth: Arc<StdRwLock<AuthStore>>,
+    session_start_hash: Option<String>,
 }
 
 /// Parameters describing a subagent invocation.
@@ -1163,6 +1170,7 @@ async fn execute_task_tool(
                     &child_model.display_name,
                     &format!("subagent:{:?} {}", agent_type, description),
                     Some(config.parent_session_id),
+                    None,
                 )
                 .context("failed to create child session")?;
             child_session_id
@@ -1232,6 +1240,7 @@ async fn execute_task_tool(
         spawner.snapshot,
         spawner.config,
         spawner.auth,
+        spawner.session_start_hash,
     );
 
     let loop_config = AgentLoopConfig {

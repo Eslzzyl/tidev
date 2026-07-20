@@ -292,6 +292,7 @@ impl SessionStore {
             },
             context_retained_from,
             system_prompt,
+            snapshot_start_hash: None,
         })
     }
 
@@ -345,6 +346,7 @@ pub struct SessionRecord {
     pub context_summary: Option<String>,
     pub context_retained_from: usize,
     pub system_prompt: String,
+    pub snapshot_start_hash: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -385,12 +387,13 @@ impl SessionStore {
         model_display_name: &str,
         title: &str,
         parent_session_id: Option<Uuid>,
+        snapshot_start_hash: Option<&str>,
     ) -> Result<()> {
         let now = Utc::now().to_rfc3339();
         let conn = self.write_conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO sessions (id, parent_session_id, provider_id, provider_display_name, model_id, model_display_name, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            params![session_id.to_string(), parent_session_id.map(|id| id.to_string()), provider_id, provider_display_name, model_id, model_display_name, title, now, now],
+            "INSERT INTO sessions (id, parent_session_id, provider_id, provider_display_name, model_id, model_display_name, title, created_at, updated_at, snapshot_start_hash) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![session_id.to_string(), parent_session_id.map(|id| id.to_string()), provider_id, provider_display_name, model_id, model_display_name, title, now, now, snapshot_start_hash],
         )?;
         conn.execute(
             "INSERT OR REPLACE INTO session_workspaces (session_id, workspace_root) VALUES (?1, ?2)",
@@ -424,6 +427,7 @@ impl SessionStore {
                     context_summary: 11 => row.get::<_, Option<String>>(11)?,
                     context_retained_from: 12 => row.get::<_, i64>(12)? as usize,
                     system_prompt: 13 => row.get::<_, String>(13)?,
+                    snapshot_start_hash: 15 => row.get::<_, Option<String>>(15)?,
                 ))
             })
             .optional()
@@ -482,6 +486,7 @@ impl SessionStore {
                 context_summary: 11 => row.get::<_, Option<String>>(11)?,
                 context_retained_from: 12 => row.get::<_, i64>(12)? as usize,
                 system_prompt: 13 => row.get::<_, String>(13)?,
+                    snapshot_start_hash: 15 => row.get::<_, Option<String>>(15)?,
             ))
         })?;
         let mut sessions = Vec::new();
@@ -519,6 +524,7 @@ impl SessionStore {
                 context_summary: 11 => row.get::<_, Option<String>>(11)?,
                 context_retained_from: 12 => row.get::<_, i64>(12)? as usize,
                 system_prompt: 13 => row.get::<_, String>(13)?,
+                    snapshot_start_hash: 15 => row.get::<_, Option<String>>(15)?,
             ))
         })?;
         let mut sessions = Vec::new();
@@ -563,6 +569,7 @@ impl SessionStore {
                         context_summary: 11 => row.get::<_, Option<String>>(11)?,
                         context_retained_from: 12 => row.get::<_, i64>(12)? as usize,
                         system_prompt: 13 => row.get::<_, String>(13)?,
+                    snapshot_start_hash: 15 => row.get::<_, Option<String>>(15)?,
                     ))
                 },
             )?;
@@ -648,6 +655,20 @@ impl SessionStore {
         let param_refs: Vec<&dyn rusqlite::types::ToSql> =
             params.iter().map(|p| p.as_ref()).collect();
         stmt.execute(param_refs.as_slice())?;
+        Ok(())
+    }
+
+    /// Persist the snapshot start hash for a session.
+    pub fn update_session_start_hash(
+        &self,
+        session_id: Uuid,
+        snapshot_start_hash: &str,
+    ) -> Result<()> {
+        let conn = self.write_conn.lock().unwrap();
+        conn.execute(
+            "UPDATE sessions SET snapshot_start_hash = ?1, updated_at = ?2 WHERE id = ?3",
+            params![snapshot_start_hash, Utc::now().to_rfc3339(), session_id.to_string()],
+        )?;
         Ok(())
     }
 
@@ -994,6 +1015,7 @@ impl SessionStore {
                 context_summary: 11 => row.get::<_, Option<String>>(11)?,
                 context_retained_from: 12 => row.get::<_, i64>(12)? as usize,
                 system_prompt: 13 => row.get::<_, String>(13)?,
+                    snapshot_start_hash: 15 => row.get::<_, Option<String>>(15)?,
             ))
         })?;
         let mut sessions = Vec::new();
@@ -2239,7 +2261,7 @@ mod tests {
     fn create_test_session(store: &SessionStore, workspace: &str, title: &str) -> Uuid {
         let id = Uuid::new_v4();
         store
-            .create_session(id, workspace, "deepseek", "DeepSeek", "deepseek-v4-flash", "DeepSeek-V4-Flash", title, None)
+            .create_session(id, workspace, "deepseek", "DeepSeek", "deepseek-v4-flash", "DeepSeek-V4-Flash", title, None, None)
             .unwrap();
         id
     }
@@ -2278,7 +2300,7 @@ mod tests {
         let parent = create_test_session(&store, "/workspace", "Parent");
         let child = Uuid::new_v4();
         store
-            .create_session(child, "/workspace", "deepseek", "DeepSeek", "deepseek-v4-flash", "DeepSeek-V4-Flash", "Child", Some(parent))
+            .create_session(child, "/workspace", "deepseek", "DeepSeek", "deepseek-v4-flash", "DeepSeek-V4-Flash", "Child", Some(parent), None)
             .unwrap();
 
         let loaded = store.load_session(child).unwrap().unwrap();
@@ -2291,7 +2313,7 @@ mod tests {
         let parent = create_test_session(&store, "/workspace", "Parent");
         let child = Uuid::new_v4();
         store
-            .create_session(child, "/workspace", "deepseek", "DeepSeek", "deepseek-v4-flash", "DeepSeek-V4-Flash", "Child", Some(parent))
+            .create_session(child, "/workspace", "deepseek", "DeepSeek", "deepseek-v4-flash", "DeepSeek-V4-Flash", "Child", Some(parent), None)
             .unwrap();
 
         let sessions = store.list_sessions(10, 0).unwrap();

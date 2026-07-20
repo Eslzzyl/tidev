@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 pub const SCHEMA_VERSION: i64 = 37;
 
-pub const SESSION_SELECT_COLUMNS: &str = "s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, s.status, s.ended_at, s.context_summary, s.context_retained_from, s.system_prompt, COALESCE(sw.workspace_root, '')";
+pub const SESSION_SELECT_COLUMNS: &str = "s.id, s.parent_session_id, s.provider_id, s.provider_display_name, s.model_id, s.model_display_name, s.title, s.created_at, s.updated_at, s.status, s.ended_at, s.context_summary, s.context_retained_from, s.system_prompt, COALESCE(sw.workspace_root, ''), s.snapshot_start_hash";
 
 pub const SCHEMA_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS meta (
@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     ended_at TEXT,
     context_summary TEXT NOT NULL DEFAULT '',
     context_retained_from INTEGER NOT NULL DEFAULT 0,
-    system_prompt TEXT NOT NULL DEFAULT ''
+    system_prompt TEXT NOT NULL DEFAULT '',
+    snapshot_start_hash TEXT
 );
 
 CREATE TABLE IF NOT EXISTS session_workspaces (
@@ -177,7 +178,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     ended_at TEXT,
     context_summary TEXT NOT NULL DEFAULT '',
     context_retained_from INTEGER NOT NULL DEFAULT 0,
-    system_prompt TEXT NOT NULL DEFAULT ''
+    system_prompt TEXT NOT NULL DEFAULT '',
+    snapshot_start_hash TEXT
 );
 
 CREATE TABLE IF NOT EXISTS session_workspaces (
