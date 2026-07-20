@@ -6,25 +6,47 @@
 //! are worse than false negatives (letting a write command through), so when in doubt
 //! we return [`Safety::Unknown`] which lets the command execute.
 
+mod apt;
+mod brew;
 mod build_tool;
 mod cargo;
+mod deno;
 mod docker;
 mod editor;
+mod gem;
 mod git;
 mod go;
+mod helm;
+mod kubectl;
+mod nix;
 mod npm;
+mod pip;
+mod systemctl;
 mod tar;
+mod terraform;
 
+use apt::classify_apt;
+use brew::classify_brew;
 use build_tool::classify_build_tool;
 use cargo::classify_cargo;
+use deno::classify_deno;
 use docker::classify_docker;
 use editor::classify_editor;
+use gem::classify_gem;
 use git::classify_git;
 use go::classify_go;
+use helm::classify_helm;
+use kubectl::classify_kubectl;
+use nix::classify_nix;
+use nix::classify_nix_env;
+use nix::classify_nix_shell;
 use npm::classify_npm;
+use pip::classify_pip;
 use std::sync::LazyLock;
 use std::sync::OnceLock;
+use systemctl::classify_systemctl;
 use tar::classify_tar;
+use terraform::classify_terraform;
 
 // ---------------------------------------------------------------------------
 // Safety
@@ -274,17 +296,28 @@ fn classify_command(cmd: &str, args: &[&str]) -> Safety {
         "rustc" | "rustup" => Safety::WriteOperation,
 
         // ── Build tools ──────────────────────────────────────────────
-        "make" | "cmake" | "ninja" | "meson" => classify_build_tool(args),
+        "make" | "cmake" | "ninja" | "meson" | "just" | "task" => classify_build_tool(args),
         "gcc" | "g++" | "clang" | "clang++" | "cc" | "c++" | "ld" => Safety::WriteOperation,
+        "bazel" | "blaze" => {
+            // `bazel query` / `bazel cquery` / `bazel aquery` / `bazel info` are read-only
+            let Some(sub) = args.first().copied() else {
+                return Safety::WriteOperation;
+            };
+            match sub {
+                "query" | "cquery" | "aquery" | "info" | "help" | "version" => Safety::ReadOnly,
+                _ => Safety::WriteOperation,
+            }
+        }
 
         // ── Text editors with in-place flag ──────────────────────────
         "sed" => classify_editor(args, &["-i"]),
         "perl" => classify_editor(args, &["-i"]),
         "awk" => Safety::Unknown, // awk without -i (which doesn't exist) is read-only
+        "sd" => classify_editor(args, &["-i"]), // sed alternative
 
         // ── Deterministic write commands ─────────────────────────────
-        "rm" | "rmdir" | "unlink" | "del" | "erase" => {
-            // `rm --help` or `rm --version` is read-only
+        "rm" | "rmdir" | "unlink" | "del" | "erase" | "shred" => {
+            // `--help` / `--version` is read-only
             if args.iter().any(|a| *a == "--help" || *a == "--version") {
                 Safety::ReadOnly
             } else {
@@ -292,10 +325,10 @@ fn classify_command(cmd: &str, args: &[&str]) -> Safety {
             }
         }
         "mv" | "cp" | "chmod" | "chown" | "chattr" | "mkdir" | "touch" | "truncate" | "dd"
-        | "ln" | "install" | "mkfs" | "mount" | "umount"
+        | "ln" | "install" | "mkfs" | "mount" | "umount" | "fallocate" | "mktemp" | "mkfifo"
+        | "mknod" | "setfacl" | "wipefs" | "swapon" | "swapoff" | "losetup"
         | "copy" | "move" | "ren" | "rename" | "md" | "rd" => Safety::WriteOperation,
-        "tee" => {
-            // `tee --help` is read-only, otherwise write
+        "tee" | "patch" => {
             if args.iter().any(|a| *a == "--help" || *a == "--version") {
                 Safety::ReadOnly
             } else {
@@ -304,7 +337,40 @@ fn classify_command(cmd: &str, args: &[&str]) -> Safety {
         }
 
         // ── Containers ───────────────────────────────────────────────
-        "docker" | "docker-compose" => classify_docker(args),
+        "docker" | "docker-compose" => {
+            // Handle `docker compose` (space-separated) — strip "compose" prefix
+            if cmd == "docker" && args.first() == Some(&"compose") {
+                if args.len() < 2 {
+                    Safety::Unknown
+                } else {
+                    classify_docker(&args[1..])
+                }
+            } else {
+                classify_docker(args)
+            }
+        }
+        "podman" | "podman-compose" => {
+            // Handle `podman compose` — strip "compose" prefix
+            if cmd == "podman" && args.first() == Some(&"compose") {
+                if args.len() < 2 {
+                    Safety::Unknown
+                } else {
+                    classify_docker(&args[1..])
+                }
+            } else {
+                classify_docker(args)
+            }
+        }
+        "singularity" | "apptainer" => {
+            // Container tools — primarily write operations
+            let Some(sub) = args.first().copied() else {
+                return Safety::Unknown;
+            };
+            match sub {
+                "help" | "version" | "info" => Safety::ReadOnly,
+                _ => Safety::WriteOperation,
+            }
+        }
 
         // ── Go ───────────────────────────────────────────────────────
         "go" => classify_go(args),
@@ -312,13 +378,22 @@ fn classify_command(cmd: &str, args: &[&str]) -> Safety {
         // ── Archives ─────────────────────────────────────────────────
         "tar" => classify_tar(args),
         "unzip" | "zip" | "gzip" | "gunzip" | "bzip2" | "bunzip2" | "xz" | "unxz" | "zcat"
-        | "zstd" | "unzstd" => Safety::WriteOperation,
+        | "zstd" | "unzstd" | "7z" | "7za" | "7zr" | "rar" | "unrar" | "ar" | "deb"
+        | "arj" | "cabextract" => Safety::WriteOperation,
+
+        // ── Media / conversion (write files) ─────────────────────────
+        "ffmpeg" | "avconv" => Safety::WriteOperation,
+        "ffprobe" | "avprobe" | "mediainfo" | "exiftool" => Safety::ReadOnly,
+        "convert" | "mogrify" | "magick" | "sox" => Safety::WriteOperation, // ImageMagick / SoX
 
         // ── Network downloads (write files) ──────────────────────────
-        "curl" | "wget" | "scp" | "rsync" => Safety::WriteOperation,
+        "curl" | "wget" | "scp" | "rsync" | "aria2c" => Safety::WriteOperation,
 
         // ── Process management ───────────────────────────────────────
-        "kill" | "pkill" | "killall" => Safety::WriteOperation,
+        "kill" | "pkill" | "killall" | "timeout" | "skill" | "snice" | "renice" => {
+            Safety::WriteOperation
+        }
+        "nohup" | "disown" | "bg" | "fg" => Safety::WriteOperation, // job control
 
         // ── Windows / PowerShell ─────────────────────────────────────
         "ri" | "rni" | "ni"                                    // PowerShell aliases
@@ -330,11 +405,167 @@ fn classify_command(cmd: &str, args: &[&str]) -> Safety {
         | "Out-File"
         | "Invoke-WebRequest" | "Invoke-RestMethod"
         => Safety::WriteOperation,
+        "sc" | "schtasks" | "reg" | "regedit" => Safety::WriteOperation, // Windows system
 
         // ── Package managers ─────────────────────────────────────────
         "npm" | "npx" | "yarn" | "pnpm" | "bun" => classify_npm(args),
-        "pip" | "pip3" | "gem" | "bundle" | "composer" | "apt" | "apt-get" | "brew" | "port"
-        | "cargo-install" => Safety::WriteOperation,
+        "pip" | "pip3" => classify_pip(args),
+        "apt" | "apt-get" | "aptitude" => classify_apt(args),
+        "brew" => classify_brew(args),
+        "gem" => classify_gem(args),
+        "bundle" | "composer" | "port" => Safety::WriteOperation,
+        "cargo-install" => Safety::WriteOperation,
+        "uv" => classify_pip(args), // uv is a fast Python package manager, same subcommands
+
+        // ── Kubernetes / orchestration ───────────────────────────────
+        "kubectl" | "oc" => classify_kubectl(args),
+        "helm" => classify_helm(args),
+        "kustomize" => {
+            let Some(sub) = args.first().copied() else {
+                return Safety::Unknown;
+            };
+            match sub {
+                "build" | "version" | "help" => Safety::ReadOnly,
+                _ => Safety::WriteOperation,
+            }
+        }
+
+        // ── Infrastructure as Code ───────────────────────────────────
+        "terraform" | "tofu" => classify_terraform(args),
+        "pulumi" => {
+            let Some(sub) = args.first().copied() else {
+                return Safety::Unknown;
+            };
+            match sub {
+                "preview" | "stack" | "config" | "version" | "help" => {
+                    // `pulumi stack ls` / `pulumi config` / `pulumi config get` are read
+                    // `pulumi stack init` / `pulumi config set` are write — handled below
+                    // For simplicity, only preview is guaranteed read
+                    if sub == "preview" {
+                        Safety::ReadOnly
+                    } else {
+                        Safety::Unknown
+                    }
+                }
+                _ => Safety::WriteOperation,
+            }
+        }
+        "ansible" | "ansible-playbook" | "ansible-galaxy" | "ansible-vault" => {
+            Safety::WriteOperation
+        }
+        "vagrant" => {
+            let Some(sub) = args.first().copied() else {
+                return Safety::Unknown;
+            };
+            match sub {
+                "status" | "global-status" | "version" | "help" => Safety::ReadOnly,
+                _ => Safety::WriteOperation,
+            }
+        }
+
+        // ── Systemd / system services ────────────────────────────────
+        "systemctl" | "journalctl" => {
+            if cmd == "journalctl" {
+                // journalctl is read-only (just queries the journal)
+                Safety::ReadOnly
+            } else {
+                classify_systemctl(args)
+            }
+        }
+
+        // ── Deno ─────────────────────────────────────────────────────
+        "deno" => classify_deno(args),
+
+        // ── Nix ──────────────────────────────────────────────────────
+        "nix" => classify_nix(args),
+        "nix-env" => classify_nix_env(args),
+        "nix-shell" => classify_nix_shell(args),
+        "nix-build" | "nix-collect-garbage" | "nix-store" | "nix-channel" => {
+            Safety::WriteOperation
+        }
+
+        // ── OpenSSL ──────────────────────────────────────────────────
+        "openssl" => {
+            let Some(sub) = args.first().copied() else {
+                return Safety::Unknown;
+            };
+            match sub {
+                // Key/cert generation — write
+                "genrsa" | "gendsa" | "genpkey" | "req" | "ca" | "x509" | "pkcs12"
+                | "enc" | "dgst" | "speed" | "rand" => Safety::WriteOperation,
+                // Read-only operations
+                "version" | "help" | "ciphers" | "list" => Safety::ReadOnly,
+                // Unknown — let through
+                _ => Safety::Unknown,
+            }
+        }
+
+        // ── SSH ──────────────────────────────────────────────────────
+        "ssh-keygen" | "ssh-copy-id" | "ssh-add" => Safety::WriteOperation,
+        "ssh" | "ssh-keyscan" | "ssh-keysign" => Safety::Unknown, // interactive, let through
+
+        // ── Network config ───────────────────────────────────────────
+        "ip" | "ifconfig" | "iwconfig" | "nmcli" | "nmtui" | "firewall-cmd"
+        | "ufw" | "iptables" | "nft" | "tc" => Safety::WriteOperation,
+        "ping" | "traceroute" | "mtr" | "dig" | "nslookup" | "host" | "nmap"
+        | "netstat" | "ss" | "lsof" | "tcpdump" | "whois" => Safety::ReadOnly,
+
+        // ── SELinux / security ───────────────────────────────────────
+        "setenforce" | "restorecon" | "chcon" | "semodule" | "semanage" => Safety::WriteOperation,
+        "getenforce" | "sestatus" | "sesearch" => Safety::ReadOnly,
+
+        // ── System info (read-only) ──────────────────────────────────
+        "uname" | "hostname" | "arch" | "nproc" | "free" | "df" | "du" | "lsblk"
+        | "lscpu" | "lspci" | "lsusb" | "lshw" | "dmidecode" | "lsmod" | "uptime"
+        | "dmesg" | "sysctl" => {
+            // For `sysctl`, `-w` or `--write` is a write operation
+            if cmd == "sysctl" && (args.contains(&"-w") || args.contains(&"--write")) {
+                Safety::WriteOperation
+            } else {
+                Safety::ReadOnly
+            }
+        }
+
+        // ── Date/time (write to system clock) ────────────────────────
+        "timedatectl" | "date" | "hwclock" => Safety::WriteOperation,
+
+        // ── User / group management (write) ──────────────────────────
+        "useradd" | "userdel" | "usermod" | "groupadd" | "groupdel" | "groupmod"
+        | "passwd" | "chage" | "chsh" | "chfn" | "gpasswd" | "newgrp" | "sudo" => {
+            Safety::WriteOperation
+        }
+
+        // ── crontab / system scheduling ──────────────────────────────
+        "crontab" | "at" | "atq" | "atrm" | "batch" => {
+            // `crontab -l` is read-only, `crontab -e` / `crontab file` is write
+            if cmd == "crontab" {
+                if args.contains(&"-l") || args.contains(&"--list") {
+                    return Safety::ReadOnly;
+                }
+            }
+            Safety::WriteOperation
+        }
+
+        // ── Flatpak / Snap ───────────────────────────────────────────
+        "flatpak" => {
+            let Some(sub) = args.first().copied() else {
+                return Safety::Unknown;
+            };
+            match sub {
+                "list" | "info" | "search" | "history" | "help" | "version" => Safety::ReadOnly,
+                _ => Safety::WriteOperation, // install, uninstall, update, override, etc.
+            }
+        }
+        "snap" => {
+            let Some(sub) = args.first().copied() else {
+                return Safety::Unknown;
+            };
+            match sub {
+                "list" | "info" | "search" | "help" | "version" | "changes" | "tasks"
+                | "services" => Safety::ReadOnly,
+                _ => Safety::WriteOperation, // install, uninstall, refresh, revert, etc.
+            }
+        }
 
         // ── Everything else → let through ────────────────────────────
         _ => Safety::Unknown,
@@ -536,6 +767,609 @@ mod tests {
             cl.classify("env RUST_LOG=debug cargo check"),
             Safety::ReadOnly
         );
+    }
+
+    // ── Docker compose (space-separated) ───────────────────────────────────
+
+    #[test]
+    fn docker_compose_space_read() {
+        let cl = c();
+        assert_eq!(cl.classify("docker compose ps"), Safety::ReadOnly);
+        assert_eq!(cl.classify("docker compose logs nginx"), Safety::ReadOnly);
+        assert_eq!(cl.classify("docker compose images"), Safety::ReadOnly);
+    }
+
+    #[test]
+    fn docker_compose_space_write() {
+        let cl = c();
+        assert_eq!(cl.classify("docker compose up"), Safety::WriteOperation);
+        assert_eq!(cl.classify("docker compose down"), Safety::WriteOperation);
+        assert_eq!(cl.classify("docker compose build"), Safety::WriteOperation);
+    }
+
+    // ── Podman ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn podman_read_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("podman ps"), Safety::ReadOnly);
+        assert_eq!(cl.classify("podman images"), Safety::ReadOnly);
+        assert_eq!(cl.classify("podman inspect nginx"), Safety::ReadOnly);
+    }
+
+    #[test]
+    fn podman_write_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("podman run nginx"), Safety::WriteOperation);
+        assert_eq!(cl.classify("podman build ."), Safety::WriteOperation);
+        assert_eq!(cl.classify("podman push image"), Safety::WriteOperation);
+    }
+
+    // ── Just (build tool) ──────────────────────────────────────────────────
+
+    #[test]
+    fn just_read_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("just --list"), Safety::ReadOnly);
+        assert_eq!(cl.classify("just --dry-run"), Safety::ReadOnly);
+        assert_eq!(cl.classify("just --help"), Safety::ReadOnly);
+    }
+
+    #[test]
+    fn just_write_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("just build"), Safety::WriteOperation);
+        assert_eq!(cl.classify("just test"), Safety::WriteOperation);
+    }
+
+    // ── Pip ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn pip_read_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("pip list"), Safety::ReadOnly);
+        assert_eq!(cl.classify("pip show requests"), Safety::ReadOnly);
+        assert_eq!(cl.classify("pip freeze"), Safety::ReadOnly);
+        assert_eq!(cl.classify("pip check"), Safety::ReadOnly);
+        assert_eq!(cl.classify("pip3 list"), Safety::ReadOnly);
+    }
+
+    #[test]
+    fn pip_write_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("pip install requests"), Safety::WriteOperation);
+        assert_eq!(cl.classify("pip uninstall requests"), Safety::WriteOperation);
+        assert_eq!(cl.classify("pip download requests"), Safety::WriteOperation);
+        assert_eq!(cl.classify("pip3 install requests"), Safety::WriteOperation);
+    }
+
+    // ── uv ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn uv_read_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("uv list"), Safety::ReadOnly);
+        assert_eq!(cl.classify("uv show requests"), Safety::ReadOnly);
+    }
+
+    #[test]
+    fn uv_write_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("uv install requests"), Safety::WriteOperation);
+        assert_eq!(cl.classify("uv uninstall requests"), Safety::WriteOperation);
+    }
+
+    // ── Apt ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn apt_read_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("apt list --installed"), Safety::ReadOnly);
+        assert_eq!(cl.classify("apt show bash"), Safety::ReadOnly);
+        assert_eq!(cl.classify("apt search package"), Safety::ReadOnly);
+        assert_eq!(cl.classify("apt policy bash"), Safety::ReadOnly);
+        assert_eq!(cl.classify("apt cache show bash"), Safety::ReadOnly);
+        assert_eq!(cl.classify("apt-get list --installed"), Safety::ReadOnly);
+    }
+
+    #[test]
+    fn apt_write_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("apt install bash"), Safety::WriteOperation);
+        assert_eq!(cl.classify("apt remove bash"), Safety::WriteOperation);
+        assert_eq!(cl.classify("apt update"), Safety::WriteOperation);
+        assert_eq!(cl.classify("apt upgrade"), Safety::WriteOperation);
+        assert_eq!(cl.classify("apt autoremove"), Safety::WriteOperation);
+        assert_eq!(cl.classify("apt-get install bash"), Safety::WriteOperation);
+    }
+
+    // ── Brew ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn brew_read_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("brew list"), Safety::ReadOnly);
+        assert_eq!(cl.classify("brew info bash"), Safety::ReadOnly);
+        assert_eq!(cl.classify("brew search package"), Safety::ReadOnly);
+        assert_eq!(cl.classify("brew doctor"), Safety::ReadOnly);
+        assert_eq!(cl.classify("brew outdated"), Safety::ReadOnly);
+        assert_eq!(cl.classify("brew services list"), Safety::ReadOnly);
+    }
+
+    #[test]
+    fn brew_write_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("brew install bash"), Safety::WriteOperation);
+        assert_eq!(cl.classify("brew uninstall bash"), Safety::WriteOperation);
+        assert_eq!(cl.classify("brew upgrade"), Safety::WriteOperation);
+        assert_eq!(cl.classify("brew update"), Safety::WriteOperation);
+        assert_eq!(cl.classify("brew services start nginx"), Safety::WriteOperation);
+        assert_eq!(cl.classify("brew tap homebrew/core"), Safety::WriteOperation);
+    }
+
+    // ── Gem ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn gem_read_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("gem list"), Safety::ReadOnly);
+        assert_eq!(cl.classify("gem which rake"), Safety::ReadOnly);
+        assert_eq!(cl.classify("gem environment"), Safety::ReadOnly);
+        assert_eq!(cl.classify("gem outdated"), Safety::ReadOnly);
+    }
+
+    #[test]
+    fn gem_write_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("gem install rails"), Safety::WriteOperation);
+        assert_eq!(cl.classify("gem uninstall rails"), Safety::WriteOperation);
+        assert_eq!(cl.classify("gem build mygem.gemspec"), Safety::WriteOperation);
+        assert_eq!(cl.classify("gem push mygem-1.0.gem"), Safety::WriteOperation);
+    }
+
+    // ── Kubectl ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn kubectl_read_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("kubectl get pods"), Safety::ReadOnly);
+        assert_eq!(cl.classify("kubectl describe pod nginx"), Safety::ReadOnly);
+        assert_eq!(cl.classify("kubectl logs nginx"), Safety::ReadOnly);
+        assert_eq!(cl.classify("kubectl top pod"), Safety::ReadOnly);
+        assert_eq!(cl.classify("kubectl version"), Safety::ReadOnly);
+        assert_eq!(cl.classify("kubectl config view"), Safety::ReadOnly);
+        assert_eq!(cl.classify("kubectl config current-context"), Safety::ReadOnly);
+    }
+
+    #[test]
+    fn kubectl_write_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("kubectl apply -f file.yaml"), Safety::WriteOperation);
+        assert_eq!(cl.classify("kubectl delete pod nginx"), Safety::WriteOperation);
+        assert_eq!(cl.classify("kubectl create deployment nginx"), Safety::WriteOperation);
+        assert_eq!(cl.classify("kubectl exec -it pod -- bash"), Safety::WriteOperation);
+        assert_eq!(cl.classify("kubectl config set-context prod"), Safety::WriteOperation);
+    }
+
+    // ── Systemctl ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn systemctl_read_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("systemctl status nginx"), Safety::ReadOnly);
+        assert_eq!(cl.classify("systemctl show nginx"), Safety::ReadOnly);
+        assert_eq!(cl.classify("systemctl list-units"), Safety::ReadOnly);
+        assert_eq!(cl.classify("systemctl is-active nginx"), Safety::ReadOnly);
+        assert_eq!(cl.classify("systemctl daemon-reload"), Safety::ReadOnly);
+    }
+
+    #[test]
+    fn systemctl_write_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("systemctl start nginx"), Safety::WriteOperation);
+        assert_eq!(cl.classify("systemctl stop nginx"), Safety::WriteOperation);
+        assert_eq!(cl.classify("systemctl enable nginx"), Safety::WriteOperation);
+        assert_eq!(cl.classify("systemctl mask nginx"), Safety::WriteOperation);
+        assert_eq!(cl.classify("systemctl set-default multi-user.target"), Safety::WriteOperation);
+    }
+
+    // ── Journalctl ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn journalctl_is_read_only() {
+        let cl = c();
+        assert_eq!(cl.classify("journalctl -u nginx"), Safety::ReadOnly);
+        assert_eq!(cl.classify("journalctl --since yesterday"), Safety::ReadOnly);
+    }
+
+    // ── Deno ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn deno_read_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("deno check main.ts"), Safety::ReadOnly);
+        assert_eq!(cl.classify("deno doc main.ts"), Safety::ReadOnly);
+        assert_eq!(cl.classify("deno info"), Safety::ReadOnly);
+        assert_eq!(cl.classify("deno lint"), Safety::ReadOnly);
+        assert_eq!(cl.classify("deno fmt --check"), Safety::ReadOnly);
+    }
+
+    #[test]
+    fn deno_write_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("deno run main.ts"), Safety::WriteOperation);
+        assert_eq!(cl.classify("deno compile main.ts"), Safety::WriteOperation);
+        assert_eq!(cl.classify("deno cache deps.ts"), Safety::WriteOperation);
+        assert_eq!(cl.classify("deno fmt"), Safety::WriteOperation);
+        assert_eq!(cl.classify("deno lint --fix"), Safety::WriteOperation);
+        assert_eq!(cl.classify("deno task build"), Safety::WriteOperation);
+    }
+
+    // ── Terraform / Tofu ──────────────────────────────────────────────────
+
+    #[test]
+    fn terraform_read_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("terraform plan"), Safety::ReadOnly);
+        assert_eq!(cl.classify("terraform show"), Safety::ReadOnly);
+        assert_eq!(cl.classify("terraform output"), Safety::ReadOnly);
+        assert_eq!(cl.classify("terraform state list"), Safety::ReadOnly);
+        assert_eq!(cl.classify("terraform workspace list"), Safety::ReadOnly);
+        assert_eq!(cl.classify("terraform fmt -check"), Safety::ReadOnly);
+    }
+
+    #[test]
+    fn terraform_write_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("terraform apply"), Safety::WriteOperation);
+        assert_eq!(cl.classify("terraform destroy"), Safety::WriteOperation);
+        assert_eq!(cl.classify("terraform init"), Safety::WriteOperation);
+        assert_eq!(cl.classify("terraform fmt"), Safety::WriteOperation);
+        assert_eq!(cl.classify("terraform state mv old new"), Safety::WriteOperation);
+    }
+
+    #[test]
+    fn tofu_read_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("tofu plan"), Safety::ReadOnly);
+        assert_eq!(cl.classify("tofu state list"), Safety::ReadOnly);
+    }
+
+    #[test]
+    fn tofu_write_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("tofu apply"), Safety::WriteOperation);
+        assert_eq!(cl.classify("tofu init"), Safety::WriteOperation);
+    }
+
+    // ── Helm ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn helm_read_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("helm list"), Safety::ReadOnly);
+        assert_eq!(cl.classify("helm status release"), Safety::ReadOnly);
+        assert_eq!(cl.classify("helm history release"), Safety::ReadOnly);
+        assert_eq!(cl.classify("helm show chart ./chart"), Safety::ReadOnly);
+        assert_eq!(cl.classify("helm repo list"), Safety::ReadOnly);
+        assert_eq!(cl.classify("helm dependency list"), Safety::ReadOnly);
+    }
+
+    #[test]
+    fn helm_write_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("helm install release ./chart"), Safety::WriteOperation);
+        assert_eq!(cl.classify("helm upgrade release ./chart"), Safety::WriteOperation);
+        assert_eq!(cl.classify("helm uninstall release"), Safety::WriteOperation);
+        assert_eq!(cl.classify("helm repo add stable url"), Safety::WriteOperation);
+        assert_eq!(cl.classify("helm dependency build"), Safety::WriteOperation);
+    }
+
+    // ── Nix ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn nix_read_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("nix show config"), Safety::ReadOnly);
+        assert_eq!(cl.classify("nix search nixpkgs hello"), Safety::ReadOnly);
+        assert_eq!(cl.classify("nix eval -f default.nix name"), Safety::ReadOnly);
+        assert_eq!(cl.classify("nix flake show ."), Safety::ReadOnly);
+        assert_eq!(cl.classify("nix registry list"), Safety::ReadOnly);
+        assert_eq!(cl.classify("nix profile list"), Safety::ReadOnly);
+        assert_eq!(cl.classify("nix path-info pkg"), Safety::ReadOnly);
+    }
+
+    #[test]
+    fn nix_write_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("nix build .#hello"), Safety::WriteOperation);
+        assert_eq!(cl.classify("nix run .#app"), Safety::WriteOperation);
+        assert_eq!(cl.classify("nix develop .#devShell"), Safety::WriteOperation);
+        assert_eq!(cl.classify("nix flake update"), Safety::WriteOperation);
+        assert_eq!(cl.classify("nix profile install nixpkgs#hello"), Safety::WriteOperation);
+    }
+
+    // ── Nix-env / Nix-shell ────────────────────────────────────────────────
+
+    #[test]
+    fn nix_env_read_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("nix-env -q"), Safety::ReadOnly);
+        assert_eq!(cl.classify("nix-env --query"), Safety::ReadOnly);
+    }
+
+    #[test]
+    fn nix_env_write_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("nix-env -i hello"), Safety::WriteOperation);
+        assert_eq!(cl.classify("nix-env -e hello"), Safety::WriteOperation);
+    }
+
+    #[test]
+    fn nix_shell_is_write() {
+        let cl = c();
+        assert_eq!(cl.classify("nix-shell -p hello"), Safety::WriteOperation);
+        assert_eq!(cl.classify("nix-shell --command 'echo hi'"), Safety::WriteOperation);
+    }
+
+    // ── Additional deterministic writes ────────────────────────────────────
+
+    #[test]
+    fn new_deterministic_write_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("shred file"), Safety::WriteOperation);
+        assert_eq!(cl.classify("fallocate -l 1M file"), Safety::WriteOperation);
+        assert_eq!(cl.classify("mktemp"), Safety::WriteOperation);
+        assert_eq!(cl.classify("mkfifo mypipe"), Safety::WriteOperation);
+        assert_eq!(cl.classify("setfacl -m u:user:rwx file"), Safety::WriteOperation);
+        assert_eq!(cl.classify("wipefs /dev/sda1"), Safety::WriteOperation);
+        assert_eq!(cl.classify("swapon /dev/sda2"), Safety::WriteOperation);
+        assert_eq!(cl.classify("patch < diff.patch"), Safety::WriteOperation);
+    }
+
+    #[test]
+    fn media_write_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("ffmpeg -i input.mp4 output.avi"), Safety::WriteOperation);
+        assert_eq!(cl.classify("convert input.png output.jpg"), Safety::WriteOperation);
+        assert_eq!(cl.classify("mogrify -resize 50% *.jpg"), Safety::WriteOperation);
+    }
+
+    #[test]
+    fn media_read_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("ffprobe input.mp4"), Safety::ReadOnly);
+        assert_eq!(cl.classify("mediainfo input.mp4"), Safety::ReadOnly);
+        assert_eq!(cl.classify("exiftool image.jpg"), Safety::ReadOnly);
+    }
+
+    // ── OpenSSL ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn openssl_write_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("openssl genrsa -out key.pem 2048"), Safety::WriteOperation);
+        assert_eq!(cl.classify("openssl req -new -key key.pem -out csr.pem"), Safety::WriteOperation);
+        assert_eq!(cl.classify("openssl enc -aes-256-cbc -in file -out file.enc"), Safety::WriteOperation);
+    }
+
+    #[test]
+    fn openssl_read_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("openssl version"), Safety::ReadOnly);
+        assert_eq!(cl.classify("openssl help"), Safety::ReadOnly);
+    }
+
+    // ── SSH keygen ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn ssh_keygen_is_write() {
+        let cl = c();
+        assert_eq!(cl.classify("ssh-keygen -t rsa -b 4096"), Safety::WriteOperation);
+        assert_eq!(cl.classify("ssh-copy-id user@host"), Safety::WriteOperation);
+    }
+
+    // ── Network config (write) ─────────────────────────────────────────────
+
+    #[test]
+    fn network_config_is_write() {
+        let cl = c();
+        assert_eq!(cl.classify("ip link set eth0 up"), Safety::WriteOperation);
+        assert_eq!(cl.classify("ifconfig eth0 up"), Safety::WriteOperation);
+        assert_eq!(cl.classify("firewall-cmd --add-port=80/tcp"), Safety::WriteOperation);
+        assert_eq!(cl.classify("ufw enable"), Safety::WriteOperation);
+        assert_eq!(cl.classify("iptables -A INPUT -p tcp --dport 80 -j ACCEPT"), Safety::WriteOperation);
+    }
+
+    #[test]
+    fn network_diagnostics_is_read() {
+        let cl = c();
+        assert_eq!(cl.classify("ping 8.8.8.8"), Safety::ReadOnly);
+        assert_eq!(cl.classify("traceroute 8.8.8.8"), Safety::ReadOnly);
+        assert_eq!(cl.classify("dig example.com"), Safety::ReadOnly);
+        assert_eq!(cl.classify("nslookup example.com"), Safety::ReadOnly);
+        assert_eq!(cl.classify("netstat -tulpn"), Safety::ReadOnly);
+        assert_eq!(cl.classify("ss -tulpn"), Safety::ReadOnly);
+        assert_eq!(cl.classify("lsof -i :8080"), Safety::ReadOnly);
+    }
+
+    // ── System info (read-only) ────────────────────────────────────────────
+
+    #[test]
+    fn system_info_is_read() {
+        let cl = c();
+        assert_eq!(cl.classify("uname -a"), Safety::ReadOnly);
+        assert_eq!(cl.classify("free -h"), Safety::ReadOnly);
+        assert_eq!(cl.classify("df -h"), Safety::ReadOnly);
+        assert_eq!(cl.classify("du -sh ."), Safety::ReadOnly);
+        assert_eq!(cl.classify("lscpu"), Safety::ReadOnly);
+        assert_eq!(cl.classify("lsblk"), Safety::ReadOnly);
+        assert_eq!(cl.classify("uptime"), Safety::ReadOnly);
+        assert_eq!(cl.classify("dmesg | tail"), Safety::ReadOnly);
+    }
+
+    #[test]
+    fn sysctl_read_write() {
+        let cl = c();
+        assert_eq!(cl.classify("sysctl -a"), Safety::ReadOnly);
+        assert_eq!(cl.classify("sysctl net.ipv4.ip_forward"), Safety::ReadOnly);
+        assert_eq!(cl.classify("sysctl -w net.ipv4.ip_forward=1"), Safety::WriteOperation);
+        assert_eq!(cl.classify("sysctl --write net.ipv4.ip_forward=1"), Safety::WriteOperation);
+    }
+
+    // ── SELinux ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn selinux_read_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("getenforce"), Safety::ReadOnly);
+        assert_eq!(cl.classify("sestatus"), Safety::ReadOnly);
+    }
+
+    #[test]
+    fn selinux_write_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("setenforce 1"), Safety::WriteOperation);
+        assert_eq!(cl.classify("restorecon -Rv /var/www"), Safety::WriteOperation);
+    }
+
+    // ── Date/time ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn datetime_is_write() {
+        let cl = c();
+        assert_eq!(cl.classify("timedatectl set-time '2024-01-01 12:00:00'"), Safety::WriteOperation);
+        assert_eq!(cl.classify("date -s '2024-01-01'"), Safety::WriteOperation);
+        assert_eq!(cl.classify("hwclock --set --date '2024-01-01'"), Safety::WriteOperation);
+    }
+
+    // ── User management ────────────────────────────────────────────────────
+
+    #[test]
+    fn user_management_is_write() {
+        let cl = c();
+        assert_eq!(cl.classify("useradd bob"), Safety::WriteOperation);
+        assert_eq!(cl.classify("userdel bob"), Safety::WriteOperation);
+        assert_eq!(cl.classify("passwd bob"), Safety::WriteOperation);
+        assert_eq!(cl.classify("groupadd devs"), Safety::WriteOperation);
+    }
+
+    // ── Crontab ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn crontab_read_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("crontab -l"), Safety::ReadOnly);
+        assert_eq!(cl.classify("crontab --list"), Safety::ReadOnly);
+    }
+
+    #[test]
+    fn crontab_write_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("crontab -e"), Safety::WriteOperation);
+        assert_eq!(cl.classify("crontab myfile"), Safety::WriteOperation);
+    }
+
+    // ── Flatpak ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn flatpak_read_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("flatpak list"), Safety::ReadOnly);
+        assert_eq!(cl.classify("flatpak info org.gnome.Epiphany"), Safety::ReadOnly);
+        assert_eq!(cl.classify("flatpak search browser"), Safety::ReadOnly);
+    }
+
+    #[test]
+    fn flatpak_write_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("flatpak install org.gnome.Epiphany"), Safety::WriteOperation);
+        assert_eq!(cl.classify("flatpak uninstall org.gnome.Epiphany"), Safety::WriteOperation);
+        assert_eq!(cl.classify("flatpak update"), Safety::WriteOperation);
+    }
+
+    // ── Snap ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn snap_read_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("snap list"), Safety::ReadOnly);
+        assert_eq!(cl.classify("snap info hello"), Safety::ReadOnly);
+        assert_eq!(cl.classify("snap search hello"), Safety::ReadOnly);
+    }
+
+    #[test]
+    fn snap_write_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("snap install hello"), Safety::WriteOperation);
+        assert_eq!(cl.classify("snap uninstall hello"), Safety::WriteOperation);
+        assert_eq!(cl.classify("snap refresh"), Safety::WriteOperation);
+    }
+
+    // ── Bazel ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn bazel_read_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("bazel query //..."), Safety::ReadOnly);
+        assert_eq!(cl.classify("bazel info"), Safety::ReadOnly);
+    }
+
+    #[test]
+    fn bazel_write_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("bazel build //..."), Safety::WriteOperation);
+        assert_eq!(cl.classify("bazel test //..."), Safety::WriteOperation);
+    }
+
+    // ── Vagrant ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn vagrant_read_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("vagrant status"), Safety::ReadOnly);
+        assert_eq!(cl.classify("vagrant global-status"), Safety::ReadOnly);
+    }
+
+    #[test]
+    fn vagrant_write_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("vagrant up"), Safety::WriteOperation);
+        assert_eq!(cl.classify("vagrant destroy"), Safety::WriteOperation);
+        assert_eq!(cl.classify("vagrant ssh"), Safety::WriteOperation);
+    }
+
+    // ── Kustomize ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn kustomize_read_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("kustomize build ./overlays/prod"), Safety::ReadOnly);
+    }
+
+    #[test]
+    fn kustomize_write_commands() {
+        let cl = c();
+        assert_eq!(cl.classify("kustomize edit set image nginx:latest"), Safety::WriteOperation);
+    }
+
+    // ── Ansible ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn ansible_is_write() {
+        let cl = c();
+        assert_eq!(cl.classify("ansible all -m ping"), Safety::WriteOperation);
+        assert_eq!(cl.classify("ansible-playbook deploy.yml"), Safety::WriteOperation);
+        assert_eq!(cl.classify("ansible-galaxy install role"), Safety::WriteOperation);
+    }
+
+    // ── Windows system ─────────────────────────────────────────────────────
+
+    #[test]
+    fn windows_system_write() {
+        let cl = c();
+        assert_eq!(cl.classify("sc create MyService"), Safety::WriteOperation);
+        assert_eq!(cl.classify("reg add HKLM\\Software\\MyApp"), Safety::WriteOperation);
     }
 
     // ── Empty / edge cases ───────────────────────────────────────────────
