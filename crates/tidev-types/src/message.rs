@@ -606,6 +606,7 @@ pub enum BackendEvent {
     },
     ShellOutput {
         session_id: Uuid,
+        tool_call_id: String,
         content: String,
         finished: bool,
         exit_code: Option<i32>,

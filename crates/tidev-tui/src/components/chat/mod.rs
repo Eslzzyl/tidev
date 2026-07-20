@@ -106,10 +106,6 @@ pub(crate) struct MessageList {
     hovered_inline_subagent: Option<usize>,
     inline_subagent_card_bounds: Vec<(usize, Rect)>,
 
-    // ── Bash tool tracking (for ShellOutput streaming) ──
-    /// Per-session bash tool call IDs for routing ShellOutput events.
-    bash_tool_call_ids: HashMap<Uuid, String>,
-
     // ── Retrying hint (persistent inline display) ──
     retrying_hint: Option<(u32, u32, String, Instant)>,
 
@@ -147,7 +143,6 @@ impl MessageList {
             completed_subagent_sessions: HashMap::new(),
             hovered_inline_subagent: None,
             inline_subagent_card_bounds: Vec::new(),
-            bash_tool_call_ids: HashMap::new(),
             retrying_hint: None,
             image_badge_bounds: Vec::new(),
             dirty: true,
@@ -593,9 +588,6 @@ impl MessageList {
                     self.layout_index.mark_dirty(msg.id);
                     self.dirty = true;
                 }
-                if tool_call.name == "bash" {
-                    self.bash_tool_call_ids.insert(session_id, tool_call.id.clone());
-                }
                 // Note: task tool tracking (RunningSubagentInfo) is handled
                 // in Step 0 above, before chat_context routing, so that
                 // nested subagents are tracked even when this session's
@@ -614,7 +606,6 @@ impl MessageList {
                         chat_context.messages[idx].streaming = false;
                         self.dirty = true;
                     }
-                    self.bash_tool_call_ids.remove(&session_id);
                 } else {
                     // Dedup: if a message for this tool_call_id already exists,
                     // update its content instead of pushing a duplicate.
@@ -657,14 +648,10 @@ impl MessageList {
                     self.dirty = true;
                 }
             }
-            BackendEvent::ShellOutput { session_id, content, finished, .. } => {
-                let bash_id = match self.bash_tool_call_ids.get(&session_id) {
-                    Some(id) => id.clone(),
-                    None => return,
-                };
+            BackendEvent::ShellOutput { session_id: _, tool_call_id, content, finished, .. } => {
                 let existing = chat_context.messages.iter_mut().rev().find(|m| {
                     m.role == tidev_types::message::MessageRole::Tool
-                        && m.tool_call_id.as_deref() == Some(&bash_id)
+                        && m.tool_call_id.as_deref() == Some(tool_call_id)
                 });
                 if let Some(msg) = existing {
                     msg.content = content.clone();
@@ -676,7 +663,7 @@ impl MessageList {
                         tidev_types::message::MessageRole::Tool,
                         content.clone(),
                     );
-                    msg.tool_call_id = Some(bash_id);
+                    msg.tool_call_id = Some(tool_call_id.clone());
                     msg.tool_name = Some("bash".to_string());
                     msg.streaming = !*finished;
                     chat_context.messages.push(msg);

@@ -200,6 +200,7 @@ pub async fn execute_tool_call(
             let cancel = cancel.clone();
             let session_id = ctx.session_id;
             let event_tx = ctx.event_tx.clone();
+            let tool_call_id = call.id.clone();
             match tokio::task::spawn(async move {
                 exec::execute_tool_call_with_cancel_async(
                     &workspace_root,
@@ -209,6 +210,7 @@ pub async fn execute_tool_call(
                     &cancel,
                     session_id,
                     event_tx,
+                    &tool_call_id,
                 )
                 .await
                 .map(|r| r.output)

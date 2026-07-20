@@ -132,6 +132,7 @@ pub fn execute_tool_call(
         timeout,
         event_tx,
         session_id,
+        "",
     )
 }
 
@@ -155,6 +156,7 @@ pub fn execute_tool_call_with_cancel(
         timeout,
         event_tx,
         session_id,
+        "",
     )
 }
 
@@ -172,6 +174,7 @@ pub async fn execute_tool_call_with_cancel_async(
     cancel: &CancellationToken,
     session_id: Uuid,
     event_tx: Option<UnboundedSender<BackendEvent>>,
+    tool_call_id: &str,
 ) -> Result<BashExecutionResult> {
     let args = decode_tool_args::<BashArgs>(tool_name, arguments)?;
     let timeout = args.timeout.unwrap_or(120_000) as u64;
@@ -183,6 +186,7 @@ pub async fn execute_tool_call_with_cancel_async(
         timeout,
         event_tx,
         session_id,
+        tool_call_id,
     )
     .await
 }
@@ -200,6 +204,7 @@ async fn run_shell_streaming(
     timeout_ms: u64,
     event_tx: Option<UnboundedSender<BackendEvent>>,
     session_id: Uuid,
+    tool_call_id: &str,
 ) -> Result<BashExecutionResult> {
     let mut actual_command = command.to_string();
 
@@ -294,6 +299,7 @@ async fn run_shell_streaming(
                 if let Some(ref tx) = event_tx {
                     let _ = tx.send(BackendEvent::ShellOutput {
                         session_id,
+                        tool_call_id: tool_call_id.to_string(),
                         content: output_buf.clone(),
                         finished: true,
                         exit_code: None,
@@ -314,6 +320,7 @@ async fn run_shell_streaming(
                 if let Some(ref tx) = event_tx {
                     let _ = tx.send(BackendEvent::ShellOutput {
                         session_id,
+                        tool_call_id: tool_call_id.to_string(),
                         content: output_buf.clone(),
                         finished: true,
                         exit_code: None,
@@ -354,6 +361,7 @@ async fn run_shell_streaming(
                         if let Some(ref tx) = event_tx {
                             let _ = tx.send(BackendEvent::ShellOutput {
                                 session_id,
+                                tool_call_id: tool_call_id.to_string(),
                                 content: output_buf.clone(),
                                 finished: false,
                                 exit_code: None,
@@ -401,6 +409,7 @@ async fn run_shell_streaming(
     if let Some(ref tx) = event_tx {
         let _ = tx.send(BackendEvent::ShellOutput {
             session_id,
+            tool_call_id: tool_call_id.to_string(),
             content: combined.clone(),
             finished: true,
             exit_code,
@@ -422,6 +431,7 @@ fn run_shell_inner(
     timeout_ms: u64,
     event_tx: Option<UnboundedSender<BackendEvent>>,
     session_id: Uuid,
+    tool_call_id: &str,
 ) -> Result<BashExecutionResult> {
     let mut actual_command = command.to_string();
 
@@ -550,6 +560,7 @@ fn run_shell_inner(
             if let Some(ref tx) = event_tx {
                 let _ = tx.send(BackendEvent::ShellOutput {
                     session_id,
+                    tool_call_id: tool_call_id.to_string(),
                     content: output_buf.clone(),
                     finished: true,
                     exit_code: None,
@@ -571,6 +582,7 @@ fn run_shell_inner(
             if let Some(ref tx) = event_tx {
                 let _ = tx.send(BackendEvent::ShellOutput {
                     session_id,
+                    tool_call_id: tool_call_id.to_string(),
                     content: output_buf.clone(),
                     finished: true,
                     exit_code: None,
@@ -614,6 +626,7 @@ fn run_shell_inner(
                 if let Some(ref tx) = event_tx {
                     let _ = tx.send(BackendEvent::ShellOutput {
                         session_id,
+                        tool_call_id: tool_call_id.to_string(),
                         content: output_buf.clone(),
                         finished: false,
                         exit_code: None,
@@ -650,6 +663,7 @@ fn run_shell_inner(
     if let Some(ref tx) = event_tx {
         let _ = tx.send(BackendEvent::ShellOutput {
             session_id,
+            tool_call_id: tool_call_id.to_string(),
             content: combined.clone(),
             finished: true,
             exit_code,
