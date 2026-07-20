@@ -114,7 +114,16 @@ impl Classifier {
                 continue;
             }
 
-            // ── 3. Strip privilege-escalation / env wrappers ────────
+            // ── 3. Strip redirect tokens uniformly (fd-prefixed, fused,  ──
+            //    null-device, etc.) so command classifiers only see
+            //    semantic arguments (e.g. `git branch -a 2>/dev/null`
+            //    becomes `git branch -a`).
+            let parts = strip_redirects(&parts);
+            if parts.is_empty() {
+                continue;
+            }
+
+            // ── 4. Strip privilege-escalation / env wrappers ────────
             let cmd_index = find_cmd_index(&parts);
             let Some(cmd) = parts.get(cmd_index).copied() else {
                 continue;
@@ -238,14 +247,94 @@ fn split_compound<'a>(s: &'a str) -> Vec<&'a str> {
     segments
 }
 
-/// Detect file write redirects (`>`, `>>`, `&>`).
+/// Strip all shell redirect tokens from a tokenized command, so they don't
+/// interfere with command classifiers (e.g. `git branch -a 2>/dev/null`
+/// where `"2>/dev/null"` would be mistaken for a positional argument).
 ///
-/// Excludes file-descriptor-only redirects:
-/// - `N>&M` (e.g. `2>&1`)
-/// - `>&N` (e.g. `>&2`)
-/// - `N>/path` (e.g. `2>/dev/null`, `1>file`, `3>&-`)
-///   These redirect a specific fd, not stdout; very common in read-only commands
-///   like `find ... 2>/dev/null` or `pip show ... 2>/dev/null`.
+/// This is the token-level complement to [`has_write_redirect`] (string level).
+/// Together they ensure no redirect token reaches a command classifier:
+///
+/// - `has_write_redirect` catches bare `> real_file` early (fast path).
+/// - `strip_redirects` strips all remaining redirect tokens (fd-prefixed,
+///   fused, null-device, etc.) before classification.
+///
+/// Handles three forms:
+/// - Independent redirect operators that consume a separate target token:
+///   `>`, `>>`, `&>`, `>&`, `<>`, `>|`
+/// - Fused redirect tokens that include the target: `>file`, `2>/dev/null`,
+///   `&>file`, `>&2`, `>>file`, `<>file`, `>|file`, `2>&1`
+/// - Simple fd-closing: `>&-`, `2>&-`
+fn strip_redirects<'a>(tokens: &[&'a str]) -> Vec<&'a str> {
+    // Quick check: if no token contains a redirect char, skip allocation.
+    let has_redirect = tokens.iter().any(|t| {
+        let bytes = t.as_bytes();
+        bytes.contains(&b'>') || bytes.contains(&b'<')
+    });
+    if !has_redirect {
+        return tokens.to_vec();
+    }
+
+    let mut result = Vec::with_capacity(tokens.len());
+    let mut i = 0;
+    while i < tokens.len() {
+        let token = tokens[i];
+
+        // Independent redirect operators: `>`, `>>`, `&>`, `>&`, `<>`, `>|`
+        if matches!(token, ">" | ">>" | "&>" | ">&" | "<>" | ">|") {
+            i += 2; // skip operator AND the target (file path / fd number)
+            continue;
+        }
+
+        // Fused redirect: `>file`, `2>/dev/null`, `&>file`, `>&2`, `>>file`, `2>&1`, etc.
+        if is_fused_redirect(token) {
+            i += 1; // skip the single fused token
+            continue;
+        }
+
+        result.push(token);
+        i += 1;
+    }
+
+    result
+}
+
+/// Check if a single token is a fused shell redirect (operator + target combined
+/// in one word, e.g. `2>/dev/null`, `>file`, `&>file`, `>&2`, `>>file`, `<>file`).
+fn is_fused_redirect(token: &str) -> bool {
+    let bytes = token.as_bytes();
+    if bytes.is_empty() {
+        return false;
+    }
+
+    let mut pos = 0;
+
+    // Optional file-descriptor prefix: `2>/dev/null`, `1>file`
+    if pos < bytes.len() && bytes[pos].is_ascii_digit() {
+        pos += 1;
+    }
+
+    if pos >= bytes.len() {
+        return false;
+    }
+
+    match bytes[pos] {
+        // `>` variants: `>file`, `>>file`, `>&2`, `>|file`
+        b'>' => true,
+        // `<>` — read-write redirect (single token like `<>file`)
+        b'<' if pos + 1 < bytes.len() && bytes[pos + 1] == b'>' => true,
+        // `&>` — both stdout+stderr (fused like `&>file`)
+        b'&' if pos + 1 < bytes.len() && bytes[pos + 1] == b'>' => true,
+        _ => false,
+    }
+}
+
+/// Detect stdout write redirects (`>`, `>>`, `&>`) to real (non-null) files.
+///
+/// This is a **fast path** that catches clear write cases early without needing
+/// to tokenize the command. It only catches bare stdout redirects — fd-prefixed
+/// redirects to real files (e.g. `2>/tmp/log`) are also caught, but fd-to-fd
+/// redirects (`2>&1`, `>&2`) are exempted since they duplicate an fd rather
+/// than opening a file. Redirects to `/dev/null`/`nul` are always exempted.
 fn has_write_redirect(s: &str) -> bool {
     let bytes = s.as_bytes();
     let mut in_single = false;
@@ -265,24 +354,24 @@ fn has_write_redirect(s: &str) -> bool {
         }
 
         if c == '>' {
-            // Check if this is a fd redirect (like 2>&1, >&2, 2>/dev/null)
-            // Look at the previous char for a digit, and the next char for &
-            let prev_is_digit = i > 0 && bytes[i - 1].is_ascii_digit();
-            let next_is_ampersand = i + 1 < bytes.len() && bytes[i + 1] == b'&';
+            // Skip past '>' (or '>>' or '>|') to find the target
+            let mut j = i + 1;
+            while j < bytes.len() && (bytes[j] == b'>' || bytes[j] == b'|') {
+                j += 1;
+            }
 
-            if prev_is_digit && next_is_ampersand {
-                // e.g. `2>&1` — fd redirect, not file write
+            // fd-to-fd redirect (e.g. 2>&1, >&2) — not a file write
+            if j < bytes.len() && bytes[j] == b'&' {
                 continue;
             }
-            if next_is_ampersand {
-                // e.g. `>&2` — also fd redirect
-                continue;
+
+            // Skip whitespace to find the target path
+            while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                j += 1;
             }
-            if prev_is_digit {
-                // e.g. `2>/dev/null`, `1>file`, `3>&-` — fd redirect, not file write
-                // This is the most common false-positive source: `cmd 2>/dev/null`.
-                // Even `1>file` is acceptable to let through here because
-                // classify_command will catch genuine write commands.
+
+            // If target is /dev/null or nul, not a real write
+            if j < bytes.len() && is_dev_null(&bytes[j..]) {
                 continue;
             }
 
@@ -291,6 +380,31 @@ fn has_write_redirect(s: &str) -> bool {
     }
 
     false
+}
+
+/// Check if the byte slice (starting at a potential target path) matches
+/// `/dev/null` (Unix) or `nul` (Windows), with a word boundary after.
+fn is_dev_null(tail: &[u8]) -> bool {
+    // Check /dev/null (Unix)
+    if tail.starts_with(b"/dev/null") {
+        let end = b"/dev/null".len();
+        return end >= tail.len() || is_boundary_char(tail[end]);
+    }
+
+    // Check nul (Windows) — case-insensitive
+    if tail.len() >= 3 && tail[..3].eq_ignore_ascii_case(b"nul") {
+        let end = 3;
+        return end >= tail.len() || is_boundary_char(tail[end]);
+    }
+
+    false
+}
+
+/// Characters that can follow a redirect target path without it being part
+/// of a longer name (e.g. `/dev/null2` should NOT match `/dev/null`).
+fn is_boundary_char(b: u8) -> bool {
+    b.is_ascii_whitespace()
+        || matches!(b, b'&' | b'|' | b'>' | b';' | b'<' | b'(' | b')')
 }
 
 // ---------------------------------------------------------------------------
@@ -1468,7 +1582,9 @@ mod tests {
         assert!(!has_write_redirect("grep -r foo 2>/dev/null"));
         assert!(!has_write_redirect("ls 2>/dev/null"));
         assert!(!has_write_redirect("cmd 1>/dev/null"));
-        assert!(!has_write_redirect("cmd 2>/tmp/log.txt"));
+        // fd-to-real-file redirect — correctly detected as write
+        assert!(has_write_redirect("cmd 2>/tmp/log.txt"));
+        // fd-closing redirect — not a file write
         assert!(!has_write_redirect("cmd 3>&-"));
     }
 
@@ -1498,6 +1614,171 @@ mod tests {
         assert_eq!(
             cl.classify("echo hello > file.txt 2>/dev/null"),
             Safety::WriteOperation
+        );
+    }
+
+    // ── strip_redirects ─────────────────────────────────────────
+
+    #[test]
+    fn test_filter_redirect_simple_fused() {
+        // Basic fused redirect tokens are stripped
+        assert_eq!(
+            strip_redirects(&["git", "branch", "-a", "2>/dev/null"]),
+            vec!["git", "branch", "-a"]
+        );
+        assert_eq!(
+            strip_redirects(&["cmd", ">file"]),
+            vec!["cmd"]
+        );
+        assert_eq!(
+            strip_redirects(&["cmd", ">>file"]),
+            vec!["cmd"]
+        );
+        assert_eq!(
+            strip_redirects(&["cmd", "&>file"]),
+            vec!["cmd"]
+        );
+    }
+
+    #[test]
+    fn test_filter_redirect_independent_operator() {
+        // Independent redirect operator skips operator AND target
+        assert_eq!(
+            strip_redirects(&["echo", "hello", ">", "file"]),
+            vec!["echo", "hello"]
+        );
+        assert_eq!(
+            strip_redirects(&["cat", ">>", "file"]),
+            vec!["cat"]
+        );
+        assert_eq!(
+            strip_redirects(&["ls", "&>", "file"]),
+            vec!["ls"]
+        );
+    }
+
+    #[test]
+    fn test_filter_redirect_fd_close() {
+        assert_eq!(
+            strip_redirects(&["cmd", "2>&-"]),
+            vec!["cmd"]
+        );
+        assert_eq!(
+            strip_redirects(&["cmd", "3>&-"]),
+            vec!["cmd"]
+        );
+    }
+
+    #[test]
+    fn test_filter_redirect_no_redirect() {
+        // No redirect tokens → unchanged
+        assert_eq!(
+            strip_redirects(&["git", "branch", "-a"]),
+            vec!["git", "branch", "-a"]
+        );
+        assert_eq!(
+            strip_redirects(&["echo", "hello"]),
+            vec!["echo", "hello"]
+        );
+        // Empty input
+        let empty: Vec<&str> = vec![];
+        assert_eq!(strip_redirects(&empty), empty);
+    }
+
+    #[test]
+    fn test_filter_redirect_mixed_independent_and_fused() {
+        // The `> /dev/null` is independent operator + target; `2>&1` is fused
+        assert_eq!(
+            strip_redirects(&["cmd", ">", "/dev/null", "2>&1"]),
+            vec!["cmd"]
+        );
+    }
+
+    #[test]
+    fn test_filter_redirect_compound_command() {
+        // After split_compound, the second segment's tokens get filtered
+        let cl = c();
+        // This is the exact bug: git branch -a with stderr redirect
+        assert_eq!(
+            cl.classify("cd /tmp && git branch -a 2>/dev/null"),
+            Safety::ReadOnly
+        );
+        // git branch -a with different redirect forms
+        assert_eq!(
+            cl.classify("git branch -a 2>/dev/null"),
+            Safety::ReadOnly
+        );
+        assert_eq!(
+            cl.classify("git branch -a 2>&1 | head -5"),
+            Safety::ReadOnly
+        );
+        // `git branch -a > /dev/null` — stdout to null device, not a real write
+        assert_eq!(
+            cl.classify("git branch -a > /dev/null"),
+            Safety::ReadOnly
+        );
+    }
+
+    #[test]
+    fn test_filter_redirect_git_tag_list_with_redirect() {
+        let cl = c();
+        // git tag -l with stderr redirect should be read-only
+        assert_eq!(
+            cl.classify("git tag -l 2>/dev/null"),
+            Safety::ReadOnly
+        );
+        // git tag (without flags) with stderr redirect
+        assert_eq!(
+            cl.classify("git tag 2>/dev/null"),
+            Safety::ReadOnly
+        );
+    }
+
+    #[test]
+    fn test_filter_redirect_git_branch_create_with_redirect() {
+        let cl = c();
+        // Creating a branch with a redirect should still be classified as write
+        assert_eq!(
+            cl.classify("git branch new-feature 2>/dev/null"),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            cl.classify("git branch -d old-branch 2>/dev/null"),
+            Safety::WriteOperation
+        );
+    }
+
+    #[test]
+    fn test_filter_redirect_write_redirect_still_caught() {
+        let cl = c();
+        // Real write redirect via stdout must still be caught
+        assert_eq!(
+            cl.classify("echo hello > file"),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            cl.classify("echo hello >> /tmp/log"),
+            Safety::WriteOperation
+        );
+        // Overwrite flag with fused redirect still blocks
+        assert_eq!(
+            cl.classify("sed -i 's/foo/bar/' file 2>/dev/null"),
+            Safety::WriteOperation
+        );
+    }
+
+    #[test]
+    fn test_filter_redirect_non_write_command_through() {
+        let cl = c();
+        // grep with redirect should be Unknown (not write)
+        assert_eq!(
+            cl.classify("grep -r foo src/ 2>/dev/null"),
+            Safety::Unknown
+        );
+        // find with redirect
+        assert_eq!(
+            cl.classify("find . -name '*.rs' 2>/dev/null"),
+            Safety::Unknown
         );
     }
 }
