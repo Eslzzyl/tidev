@@ -76,6 +76,15 @@ impl SessionManager {
         self.store.append_message(session_id, msg)
     }
 
+    /// Append multiple messages to a session in a single transaction.
+    pub fn append_messages(
+        &self,
+        session_id: Uuid,
+        messages: &[tidev_types::message::Message],
+    ) -> Result<()> {
+        self.store.append_messages(session_id, messages)
+    }
+
     /// Persist compaction state (summary + retained_from).
     pub fn update_context_state(
         &self,

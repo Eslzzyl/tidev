@@ -912,7 +912,15 @@ impl AgentContext for CoreContext {
         let has_tool_calls = messages
             .iter()
             .any(|m| m.role == MessageRole::Assistant && !m.tool_calls.is_empty());
-        if has_tool_calls
+
+        // If every tool in this round is read-only no files can change,
+        // so snapshot tracking is unnecessary.
+        let all_read_only = has_tool_calls && messages.iter()
+            .filter(|m| m.role == MessageRole::Assistant)
+            .flat_map(|m| &m.tool_calls)
+            .all(|tc| is_read_only(&tc.name));
+
+        if has_tool_calls && !all_read_only
             && let Some(ref snap) = self.snapshot
             && let Ok(Some(hash)) = snap.track()
         {
@@ -926,6 +934,11 @@ impl AgentContext for CoreContext {
                 let _ = self.session_manager
                     .update_session_start_hash(session_id, &persist_hash);
             }
+        } else if has_tool_calls && all_read_only {
+            // Read-only round: clear any stale pre-round hash so the
+            // post-round diff branch below does not run an unnecessary
+            // git diff against an old snapshot.
+            *self.pre_round_hash.lock().await = None;
         }
 
         // When tool result messages are saved, the round has finished —
@@ -988,9 +1001,7 @@ impl AgentContext for CoreContext {
                 buf.append(msg.clone());
             }
         }
-        for msg in &enriched {
-            self.session_manager.append_message(session_id, msg)?;
-        }
+        self.session_manager.append_messages(session_id, &enriched)?;
         Ok(())
     }
 

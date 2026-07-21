@@ -49,7 +49,10 @@ pub struct SessionStore {
 impl Clone for SessionStore {
     fn clone(&self) -> Self {
         Self {
-            write_conn: Arc::clone(&self.write_conn),
+            write_conn: Arc::new(Mutex::new(
+                crate::database::open_write_conn(&self.path)
+                    .expect("failed to clone SessionStore write_conn"),
+            )),
             read_conn: Mutex::new(
                 Connection::open(&self.path).expect("failed to clone SessionStore read_conn"),
             ),
@@ -1060,11 +1063,10 @@ impl SessionStore {
 // ---------------------------------------------------------------------------
 
 impl SessionStore {
-    /// Append a message to a session.
-    pub fn append_message(&self, session_id: Uuid, msg: &Message) -> Result<()> {
+    /// Insert a single message row (no session timestamp update).
+    fn insert_message(conn: &Connection, session_id: Uuid, msg: &Message) -> Result<()> {
         let now = msg.created_at.to_rfc3339();
         let completed = msg.completed_at.map(|t| t.to_rfc3339());
-        let conn = self.write_conn.lock().unwrap();
         conn.execute(
             "INSERT INTO messages (id, session_id, role, content, attachments, reasoning, \
              tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, \
@@ -1113,7 +1115,32 @@ impl SessionStore {
                     .map(|t| t.to_rfc3339()),
             ],
         )?;
-        // Update session timestamp
+        Ok(())
+    }
+
+    /// Append multiple messages in a single transaction.
+    ///
+    /// More efficient than calling [`append_message`] in a loop because it
+    /// acquires the write lock once and wraps all INSERTs + session timestamp
+    /// update in one SQLite transaction.
+    pub fn append_messages(&self, session_id: Uuid, messages: &[Message]) -> Result<()> {
+        let mut conn = self.write_conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        for msg in messages {
+            Self::insert_message(&tx, session_id, msg)?;
+        }
+        tx.execute(
+            "UPDATE sessions SET updated_at = ?1 WHERE id = ?2",
+            params![Utc::now().to_rfc3339(), session_id.to_string()],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Append a single message to a session.
+    pub fn append_message(&self, session_id: Uuid, msg: &Message) -> Result<()> {
+        let conn = self.write_conn.lock().unwrap();
+        Self::insert_message(&conn, session_id, msg)?;
         conn.execute(
             "UPDATE sessions SET updated_at = ?1 WHERE id = ?2",
             params![Utc::now().to_rfc3339(), session_id.to_string()],

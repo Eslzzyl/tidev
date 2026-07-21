@@ -143,6 +143,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
 
         let mut task_calls: Vec<(ToolCall, Option<uuid::Uuid>)> = Vec::new();
         let mut other_calls: Vec<(ToolCall, bool, bool)> = Vec::new();
+        let mut rejected_msgs: Vec<Message> = Vec::new();
 
         for approved_tool in &approved {
             if let Some(rejection) = &approved_tool.rejection {
@@ -152,7 +153,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
                     &approved_tool.tool_call.name,
                     rejection.clone(),
                 );
-                ctx.save_messages(session_id, &[result_msg]).await?;
+                rejected_msgs.push(result_msg);
                 let _ = event_tx.send(BackendEvent::ToolCompleted {
                     session_id,
                     request_id,
@@ -173,6 +174,10 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
             }
         }
 
+        if !rejected_msgs.is_empty() {
+            ctx.save_messages(session_id, &rejected_msgs).await?;
+        }
+
         // ─── 8. Execute tools ────────────────────────────────────────────
         let mut all_results: Vec<(ToolCall, ToolExecutionResult)> = Vec::new();
 
@@ -188,13 +193,11 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
         }
 
         // ─── 9. Persist tool results ──────────────────────────────────────
-        for (tool_call, result) in &all_results {
-            let result_msg = Message::tool_result(
-                &tool_call.id,
-                &tool_call.name,
-                result.clone(),
-            );
-            ctx.save_messages(session_id, &[result_msg]).await?;
+        if !all_results.is_empty() {
+            let result_msgs: Vec<Message> = all_results.iter().map(|(tc, r)| {
+                Message::tool_result(&tc.id, &tc.name, r.clone())
+            }).collect();
+            ctx.save_messages(session_id, &result_msgs).await?;
         }
 
         // ─── 10. Prepare for next turn ────────────────────────────────────
