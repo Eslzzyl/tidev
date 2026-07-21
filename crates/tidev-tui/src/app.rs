@@ -393,6 +393,7 @@ impl App {
             }
             self.pending_compacts.remove(&sid);
             self.compacting_sessions.remove(&sid);
+            self.pending_modes.remove(&sid);
         }
 
         // Clear queued prompts (all — they were for the user's current intent).
@@ -584,6 +585,7 @@ impl App {
                 if self.active_approval_session == Some(session_id) {
                     self.active_approval_session = None;
                 }
+                self.pending_modes.remove(&session_id);
 
                 // Mark the last streaming message as error.
                 if let Some(ref mut chat) = self.message_list {
