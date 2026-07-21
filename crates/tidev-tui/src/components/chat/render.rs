@@ -1135,6 +1135,12 @@ fn render_block_from_cache(
 // ---------------------------------------------------------------------------
 
 /// Compute the thinking duration string for display.
+///
+/// Format rules:
+/// - < 1s       → "999ms"        (integer milliseconds)
+/// - ≥ 1s, <1m  → "42.5s"        (one decimal place)
+/// - ≥ 1m, <1h  → "3min 15s"
+/// - ≥ 1h       → "1h 5min 30s"
 fn thinking_duration_str(message: &Message) -> Option<String> {
     let started = message.reasoning_started_at?;
     let ended = message.reasoning_completed_at.unwrap_or_else(chrono::Utc::now);
@@ -1142,11 +1148,22 @@ fn thinking_duration_str(message: &Message) -> Option<String> {
         return None;
     }
     let elapsed = ended - started;
-    let total_secs = elapsed.num_seconds().max(0) as u64;
-    let total_millis = elapsed.num_milliseconds().max(0) as u64;
-    if total_secs > 0 {
-        Some(format!("{}s", total_secs))
+    let total_secs = elapsed.num_seconds().max(0);
+
+    if total_secs >= 3600 {
+        let hours = total_secs / 3600;
+        let minutes = (total_secs % 3600) / 60;
+        let seconds = total_secs % 60;
+        Some(format!("{}h {}min {}s", hours, minutes, seconds))
+    } else if total_secs >= 60 {
+        let minutes = total_secs / 60;
+        let seconds = total_secs % 60;
+        Some(format!("{}min {}s", minutes, seconds))
+    } else if total_secs >= 1 {
+        let total_millis = elapsed.num_milliseconds().max(0) as f64;
+        Some(format!("{:.1}s", total_millis / 1000.0))
     } else {
+        let total_millis = elapsed.num_milliseconds().max(0) as u64;
         Some(format!("{}ms", total_millis))
     }
 }
