@@ -591,12 +591,9 @@ impl Runtime {
             match session {
                 Some(s) if !s.system_prompt.is_empty() => (s.system_prompt, ssh),
                 _ => {
-                    let instructions = self.config.read().unwrap().instructions.clone();
                     let sp = crate::agent_ctx::compose_system_prompt(
                         tidev_types::agent_type::AgentType::General,
-                        &instructions,
                         &self.workspace_root,
-                        &self.paths.config_dir,
                     );
                     // Persist system prompt to the session record.
                     self.session_manager
@@ -640,6 +637,7 @@ impl Runtime {
             self.config.clone(),
             self.auth.clone(),
             session_start_hash,
+            self.paths.config_dir.clone(),
         );
 
         // Extract a per-session queue for this loop to drain.

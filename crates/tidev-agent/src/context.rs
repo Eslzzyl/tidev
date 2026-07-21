@@ -182,4 +182,19 @@ pub trait AgentContext: Send + Sync {
         message_id: uuid::Uuid,
         content: String,
     ) -> Result<()>;
+
+    /// Inject new instruction files into the last user message via
+    /// `<system-reminder>` tags.
+    ///
+    /// Called once per agent-loop turn, before `stream_turn`.  The default
+    /// implementation is a no-op — only `CoreContext` provides a real
+    /// implementation.
+    async fn inject_instructions(
+        &self,
+        _session_id: uuid::Uuid,
+        _messages: &mut [Message],
+    ) -> Result<()> {
+        // default: no-op
+        Ok(())
+    }
 }

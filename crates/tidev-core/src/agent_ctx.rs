@@ -4,7 +4,7 @@
 //! LLM calls, tool execution, message persistence, context compaction, and
 //! permission approvals.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock as StdRwLock};
 
@@ -50,20 +50,15 @@ use crate::session::SessionManager;
 /// Compose the complete system prompt for a session.
 ///
 /// Assembled once at session creation and stored in `AgentLoopConfig.system_prompt`.
-/// Includes: base agent prompt + instructions from files + environment info.
+/// Includes: base agent prompt + environment info.
+/// Instruction files (AGENTS.md etc.) are injected into user messages via
+/// `<system-reminder>` tags instead (see `inject_instructions`).
 /// Mode reminders are injected into user messages instead (see `inject_mode_reminder`).
 pub fn compose_system_prompt(
     agent_type: tidev_types::agent_type::AgentType,
-    instructions: &[String],
     workspace_root: &std::path::Path,
-    config_dir: &std::path::Path,
 ) -> String {
     let base_prompt = tidev_agent::prompts::system_prompt(agent_type);
-
-    // Resolve instruction files (AGENTS.md etc.).
-    let instruction_text =
-        tidev_instructions::system_prompt(workspace_root, config_dir, instructions)
-            .unwrap_or_default();
 
     // Environment info (detected once, frozen for the session lifetime).
     let system_info = crate::system_info::SystemInfo::detect();
@@ -87,10 +82,6 @@ pub fn compose_system_prompt(
     );
 
     let mut prompt = base_prompt;
-    if !instruction_text.is_empty() {
-        prompt.push_str("\n\n");
-        prompt.push_str(&instruction_text);
-    }
     prompt.push_str(&env_block);
 
     prompt
@@ -233,6 +224,11 @@ pub struct CoreContext {
     config: Arc<StdRwLock<AppConfig>>,
     /// Auth store (shared, hot-reloadable).
     auth: Arc<StdRwLock<AuthStore>>,
+    /// Cached instruction file contents to avoid redundant I/O.
+    /// Key: canonical path, Value: file content.
+    instruction_content_cache: Arc<Mutex<HashMap<String, String>>>,
+    /// Config directory path (for instruction file lookup).
+    config_dir: PathBuf,
 }
 
 impl CoreContext {
@@ -258,6 +254,7 @@ impl CoreContext {
         config: Arc<StdRwLock<AppConfig>>,
         auth: Arc<StdRwLock<AuthStore>>,
         session_start_hash: Option<String>,
+        config_dir: PathBuf,
     ) -> Self {
         Self {
             llm,
@@ -280,12 +277,126 @@ impl CoreContext {
             session_start_hash: Arc::new(Mutex::new(session_start_hash)),
             config,
             auth,
+            instruction_content_cache: Arc::new(Mutex::new(HashMap::new())),
+            config_dir,
         }
     }
 
     /// Helper: emit an event; logging the error is sufficient (UI may have gone away).
     fn emit(&self, event: BackendEvent) {
         let _ = self.event_tx.send(event);
+    }
+
+    /// Inject new instruction files into the last user message.
+    ///
+    /// Loads all workspace-root instruction files (AGENTS.md, CLAUDE.md, etc.),
+    /// compares against already-injected sources in the DB, and prepends
+    /// `<system-reminder>` blocks for new sources to the last user message.
+    ///
+    /// Called once per agent loop turn, before `stream_turn`.  After the first
+    /// turn all workspace-root sources are injected, so subsequent turns are
+    /// no-ops (unless new sources are discovered via tool results).
+    pub(crate) async fn inject_instructions_impl(
+        &self,
+        session_id: Uuid,
+        messages: &mut [Message],
+    ) -> Result<()> {
+        // 1. Find the last user message.
+        let last_user_idx = match messages.iter().rposition(|m| m.role == MessageRole::User) {
+            Some(idx) => idx,
+            None => return Ok(()),
+        };
+
+        // 2. Load all instruction sources (with content cache).
+        let instructions = self.config.read().unwrap().instructions.clone();
+        let mut cache = self.instruction_content_cache.lock().await;
+        let (_, all_sources, new_cache) =
+            tidev_instructions::system_prompt_and_sources_with_cache(
+                &self.workspace_root,
+                &self.config_dir,
+                &instructions,
+                &cache,
+            )
+            .unwrap_or_default();
+        *cache = new_cache;
+        drop(cache);
+
+        if all_sources.is_empty() {
+            return Ok(());
+        }
+
+        // 3. Load already-injected sources from DB.
+        let mut already_injected = self
+            .session_manager
+            .store()
+            .load_instruction_sources(session_id)?;
+
+        // 4. Find new sources (paths from system_prompt_and_sources_with_cache
+        //    are already canonical — see system_paths + canonicalize_display).
+        let new_sources: Vec<&String> = all_sources
+            .iter()
+            .filter(|s| !already_injected.contains(s))
+            .collect();
+
+        if new_sources.is_empty() {
+            return Ok(());
+        }
+
+        // 5. Build <system-reminder> block from new sources.
+        let cache = self.instruction_content_cache.lock().await;
+        let mut sections: Vec<String> = Vec::new();
+        for source in &new_sources {
+            if let Some(content) = cache.get(*source) {
+                sections.push(format!("Instructions from: {}\n{}", source, content));
+            }
+        }
+        drop(cache);
+
+        if sections.is_empty() {
+            return Ok(());
+        }
+
+        let injection = format!(
+            "<system-reminder>\n{}\n</system-reminder>",
+            sections.join("\n\n"),
+        );
+
+        // 6. Safety check: avoid double injection if <system-reminder> already
+        //    present (should never happen given DB tracking, but be defensive).
+        if messages[last_user_idx].content.contains("<system-reminder>") {
+            return Ok(());
+        }
+
+        // 7. Prepend injection to the last user message (same pattern as
+        //    inject_mode_reminder in loop_.rs).
+        let new_content = format!("{}\n\n{}", injection, messages[last_user_idx].content);
+        let msg_id = messages[last_user_idx].id;
+        messages[last_user_idx].content = new_content.clone();
+
+        // Persist to store + buffer via the existing dual-write method.
+        self.update_message_content(session_id, msg_id, new_content).await?;
+
+        // 8. Persist new sources to DB so subsequent turns don't re-inject.
+        // Merge with already-injected sources (save_instruction_sources replaces ALL).
+        already_injected.extend(new_sources.iter().map(|s| (*s).clone()));
+        self.session_manager
+            .store()
+            .save_instruction_sources(session_id, &already_injected)?;
+
+        // 9. Notify frontend.
+        let string_sources: Vec<String> = new_sources.iter().map(|s| (*s).clone()).collect();
+        self.emit(BackendEvent::InstructionsLoaded {
+            session_id,
+            sources: string_sources,
+        });
+
+        log::info!(
+            "injected {} new instruction file(s) into user message {}",
+            new_sources.len(),
+            msg_id,
+        );
+
+        Ok(())
     }
 }
 
@@ -792,6 +903,7 @@ impl AgentContext for CoreContext {
                     llm: self.llm.clone(),
                     active_model: self.active_model.clone(),
                     workspace_root: self.workspace_root.clone(),
+                    config_dir: self.config_dir.clone(),
                     event_tx: self.event_tx.clone(),
                     mode: self.mode,
                     system_prompt: self.system_prompt.clone(),
@@ -1102,6 +1214,15 @@ impl AgentContext for CoreContext {
             .update_message_content(session_id, message_id, &content)?;
         Ok(())
     }
+
+    // -----------------------------------------------------------------------
+    async fn inject_instructions(
+        &self,
+        session_id: uuid::Uuid,
+        messages: &mut [Message],
+    ) -> Result<()> {
+        self.inject_instructions_impl(session_id, messages).await
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1115,6 +1236,7 @@ struct SubagentSpawner {
     llm: LlmClient,
     active_model: ActiveModel,
     workspace_root: PathBuf,
+    config_dir: PathBuf,
     event_tx: UnboundedSender<BackendEvent>,
     mode: SessionMode,
     system_prompt: String,
@@ -1275,6 +1397,7 @@ async fn execute_task_tool(
         spawner.config,
         spawner.auth,
         spawner.session_start_hash,
+        spawner.config_dir,
     );
 
     let loop_config = AgentLoopConfig {

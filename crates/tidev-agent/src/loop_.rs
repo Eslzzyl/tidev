@@ -22,11 +22,11 @@ use crate::prompts;
 /// # Flow
 ///
 /// ```text
-///  load messages → inject mode reminder → compose system prompt → stream LLM turn
-///       ↑                                                            │
-///       │                                                  tool calls? ──no──→ persist → exit
-///       │                                                            │
-///       └── persist results ←─ execute tools ←───────────────←───────┘
+///  load messages → inject instructions → inject mode reminder → compose system prompt → stream LLM turn
+///       ↑                                                                           │
+///       │                                                                 tool calls? ──no──→ persist → exit
+///       │                                                                           │
+///       └── persist results ←─ execute tools ←───────────────←──────────────────────┘
 /// ```
 pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> Result<()> {
     let session_id = config.session_id;
@@ -47,13 +47,20 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
         // ─── 1. Load messages ────────────────────────────────────────────
         let mut messages = ctx.load_messages(session_id).await?;
 
-        // ─── 2. Inject mode reminder into the last user message ───────────
+        // ─── 2. Inject instruction files into the last user message ───────
+        // Must run BEFORE inject_mode_reminder so that the mode-reminder
+        // de-duplication check (content.starts_with) still works across
+        // turns — after both injections the content looks like:
+        //   [mode_reminder]\n\n<system-reminder>...\n\n[original]
+        ctx.inject_instructions(session_id, &mut messages).await?;
+
+        // ─── 3. Inject mode reminder into the last user message ───────────
         inject_mode_reminder(ctx, session_id, &mut messages, config.mode).await?;
 
-        // ─── 3. Compose system prompt (no mode reminder — injected above) ─
+        // ─── 4. Compose system prompt ─────────────────────────────────────
         let system_prompt = config.definition.system_prompt.clone();
 
-        // ─── 4. Stream LLM turn ──────────────────────────────────────────
+        // ─── 5. Stream LLM turn ──────────────────────────────────────────
         let turn = match ctx
             .stream_turn(&messages, &system_prompt, &config.thinking_level, request_id)
             .await
@@ -82,7 +89,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
             }
         };
 
-        // ─── 5. No tool calls → check for queued messages ────────────────
+        // ─── 6. No tool calls → check for queued messages ────────────────
         if turn.tool_calls.is_empty() {
             let msg = build_assistant_message(&turn);
             ctx.save_messages(session_id, &[msg]).await?;
@@ -132,11 +139,11 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
             return Ok(());
         }
 
-        // ─── 6. Persist assistant message (with tool calls) ──────────────
+        // ─── 7. Persist assistant message (with tool calls) ──────────────
         let assistant_msg = build_assistant_message(&turn);
         ctx.save_messages(session_id, &[assistant_msg]).await?;
 
-        // ─── 7. Permission approval ──────────────────────────────────────
+        // ─── 8. Permission approval ──────────────────────────────────────
         let approved = ctx
             .request_tool_approval(&turn.tool_calls, config.mode)
             .await?;
@@ -178,7 +185,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
             ctx.save_messages(session_id, &rejected_msgs).await?;
         }
 
-        // ─── 8. Execute tools ────────────────────────────────────────────
+        // ─── 9. Execute tools ────────────────────────────────────────────
         let mut all_results: Vec<(ToolCall, ToolExecutionResult)> = Vec::new();
 
         if !other_calls.is_empty() || !task_calls.is_empty() {
@@ -192,7 +199,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
             all_results = results;
         }
 
-        // ─── 9. Persist tool results ──────────────────────────────────────
+        // ─── 10. Persist tool results ─────────────────────────────────────
         if !all_results.is_empty() {
             let result_msgs: Vec<Message> = all_results.iter().map(|(tc, r)| {
                 Message::tool_result(&tc.id, &tc.name, r.clone())
@@ -200,7 +207,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
             ctx.save_messages(session_id, &result_msgs).await?;
         }
 
-        // ─── 10. Prepare for next turn ────────────────────────────────────
+        // ─── 11. Prepare for next turn ────────────────────────────────────
         let _ = event_tx.send(BackendEvent::StreamEnd {
             session_id,
             request_id,

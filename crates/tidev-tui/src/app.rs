@@ -137,6 +137,8 @@ pub struct App {
 
     /// Current session's todo items (loaded from store).
     todos: Vec<TodoItem>,
+    /// Tracks instruction sources already shown as "Loaded instructions from" messages.
+    loaded_instruction_sources: Vec<String>,
 
     // ── Tool approval pipeline (per-session) ──
 
@@ -273,6 +275,7 @@ impl App {
             sidebar_area: None,
             terminal_area: Rect::new(0, 0, 0, 0),
             todos: Vec::new(),
+            loaded_instruction_sources: Vec::new(),
             image_picker: {
                 log::info!("[img] from_query_stdio START");
                 let r = Picker::from_query_stdio();
@@ -327,6 +330,63 @@ impl App {
     /// Forward terminal focus change to desktop notification manager.
     pub(crate) fn handle_focus_event(&self, focused: bool) {
         self.desktop_notifications.set_focused(focused);
+    }
+
+    /// Show "Loaded instructions from ..." messages for newly discovered
+    /// instruction sources.  Deduplicates against sources already shown in
+    /// this session (tracked by `loaded_instruction_sources`).
+    fn show_instruction_sources(&mut self, sources: &[String]) {
+        // Filter out already-displayed sources.
+        let new_sources: Vec<&String> = sources
+            .iter()
+            .filter(|s| !self.loaded_instruction_sources.contains(s))
+            .collect();
+        if new_sources.is_empty() {
+            return;
+        }
+
+        // Build the display text matching the old v0.6.x format.
+        let content = if new_sources.len() == 1 {
+            format!("Loaded instructions from {}", new_sources[0])
+        } else {
+            format!(
+                "Loaded {} instruction files: {}",
+                new_sources.len(),
+                new_sources.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "),
+            )
+        };
+
+        // Push as a System message into the current session's chat context.
+        if let Some(sid) = self.current_session_id {
+            if let Some(ref mut chat) = self.message_list {
+                if let Some(ref mut ctx) = chat.active_chat_context_mut()
+                    && ctx.session_id == sid
+                {
+                    let system_msg = Message::new(MessageRole::System, &content);
+                    ctx.push(system_msg);
+                }
+            }
+            // Also persist to the store so it survives session restart.
+            let system_msg = Message::new(MessageRole::System, &content);
+            let _ = self
+                .runtime
+                .session_manager()
+                .append_message(sid, &system_msg);
+        }
+
+        // Mark as shown to avoid duplicates in this session.
+        let owned: Vec<String> = new_sources.into_iter().cloned().collect();
+        self.loaded_instruction_sources.extend(owned);
+
+        // Persist the updated list to DB so session switches don't lose
+        // the tracking and cause duplicate "Loaded instructions from" messages.
+        if let Some(sid) = self.current_session_id {
+            let _ = self
+                .runtime
+                .session_manager()
+                .store()
+                .save_instruction_sources(sid, &self.loaded_instruction_sources);
+        }
     }
 
     /// Accessor for `spinner_start` so tui.rs can compute spinner frame.
@@ -555,10 +615,10 @@ impl App {
                 // Persist to store (record_usage API not yet available in new storage).
                 // TODO: add record_usage to tidev-storage if needed later.
             }
-            BackendEvent::InstructionsLoaded { sources, .. } => {
+            BackendEvent::InstructionsLoaded { session_id, sources } => {
                 log::info!("Instructions loaded: {sources:?}");
-                if !sources.is_empty() {
-                    self.set_notice(format!("Loaded {} instruction source(s)", sources.len()));
+                if Some(session_id) == self.current_session_id && !sources.is_empty() {
+                    self.show_instruction_sources(&sources);
                 }
             }
             BackendEvent::Retrying {
@@ -693,10 +753,20 @@ impl App {
                 }
                 self.set_notice("Undo complete");
             }
-            BackendEvent::ToolCompleted { session_id, ref tool_call, .. } if tool_call.name == "todowrite" => {
-                // Reload todos from database after todowrite completion.
-                if let Ok(todos) = self.runtime.session_manager().store().load_todos(session_id) {
-                    self.todos = todos;
+            BackendEvent::ToolCompleted { session_id, ref tool_call, result, .. } => {
+                // Handle instruction sources from tool results (nearby instructions
+                // discovered while reading files).
+                if Some(session_id) == self.current_session_id
+                    && !result.instruction_sources.is_empty()
+                {
+                    self.show_instruction_sources(&result.instruction_sources);
+                }
+
+                // todowrite-specific: reload todos from database.
+                if tool_call.name == "todowrite" {
+                    if let Ok(todos) = self.runtime.session_manager().store().load_todos(session_id) {
+                        self.todos = todos;
+                    }
                 }
             }
             BackendEvent::StreamEnd {
@@ -1784,6 +1854,12 @@ impl App {
                                 self.todos = todos;
                             }
 
+                            // Restore instruction sources so that InstructionsLoaded
+                            // events emitted on loop restart are de-duplicated.
+                            if let Ok(sources) = self.runtime.session_manager().store().load_instruction_sources(session_id) {
+                                self.loaded_instruction_sources = sources;
+                            }
+
                             // Refresh the Runtime's in-memory message buffer.
                             // Use the already-cached messages to avoid a redundant DB read.
                             if let Some(ctx) = chat.active_chat_context() {
@@ -1890,6 +1966,11 @@ impl App {
                     // Reload todos for the target session.
                     if let Ok(todos) = self.runtime.session_manager().store().load_todos(session_id) {
                         self.todos = todos;
+                    }
+
+                    // Restore instruction sources for dedup on loop restart.
+                    if let Ok(sources) = self.runtime.session_manager().store().load_instruction_sources(session_id) {
+                        self.loaded_instruction_sources = sources;
                     }
 
                     log::info!("Switching to session: {} ({})", session_title, session_id);
