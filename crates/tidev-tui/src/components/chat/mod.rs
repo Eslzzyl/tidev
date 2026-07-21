@@ -277,7 +277,7 @@ impl MessageList {
                         let status = old_status
                             .get(tc.id.as_str())
                             .cloned()
-                            .unwrap_or_else(|| "Thinking".to_string());
+                            .unwrap_or_else(|| "Awaiting delegation...".to_string());
                         self.running_subagents.push(render_mod::RunningSubagentInfo {
                             tool_call_id: tc.id.clone(),
                             description: extract_task_description(&tc.arguments),
@@ -434,7 +434,7 @@ impl MessageList {
                                 tool_call_id: tool_call.id.clone(),
                                 description: desc,
                                 subagent_type: sub_type,
-                                status_text: "Thinking".to_string(),
+                                status_text: "Awaiting delegation...".to_string(),
                                 child_session_id: None,
                                 interrupted: false,
                             });
