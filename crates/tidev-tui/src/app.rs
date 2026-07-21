@@ -208,6 +208,8 @@ struct QueuedPrompt {
     prompt: String,
     attachments: Vec<MessageAttachment>,
     session_id: Uuid,
+    mode: SessionMode,
+    thinking_level: ThinkingLevelType,
 }
 
 impl App {
@@ -424,8 +426,8 @@ impl App {
             let queued = self.pending_prompt_queue.remove(i);
             let text = queued.prompt;
             let attachments = queued.attachments;
-            let mode = self.mode;
-            let thinking_level = self.thinking_level.clone();
+            let mode = queued.mode;
+            let thinking_level = queued.thinking_level;
             let rt = self.runtime.clone();
             tokio::spawn(async move {
                 if let Err(e) = rt
@@ -2167,10 +2169,13 @@ impl App {
                             // If there's already an active request, queue the prompt.
                             if self.has_active_request() {
                                 let sid = self.current_session_id.unwrap_or(uuid::Uuid::nil());
+                                let queued_mode = self.pending_modes.get(&sid).copied().unwrap_or(self.mode);
                                 self.pending_prompt_queue.push(QueuedPrompt {
                                     prompt: text.clone(),
                                     attachments: final_attachments.clone(),
                                     session_id: sid,
+                                    mode: queued_mode,
+                                    thinking_level: self.thinking_level.clone(),
                                 });
                                 let queued_count = self.pending_prompt_queue.len();
                                 self.set_notice(format!(
@@ -2856,8 +2861,9 @@ impl App {
                 let text_width = main_area.width.saturating_sub(5).max(1) as usize;
                 let mut inner: usize = 0;
                 for (i, q) in self.pending_prompt_queue.iter().take(visible).enumerate() {
+                    // +1 for mode header line
                     let wrapped = wrap_text_lines(&q.prompt, text_width, MAX_QUEUED_PROMPT_LINES);
-                    inner += wrapped.len();
+                    inner += 1 + wrapped.len();
                     // Separator between items (not after last)
                     if i + 1 < visible {
                         inner += 1;
@@ -3299,7 +3305,8 @@ impl App {
 
             // Word-wrap the prompt into up to MAX_QUEUED_PROMPT_LINES lines
             let wrapped_lines = wrap_text_lines(&queued.prompt, width, MAX_QUEUED_PROMPT_LINES);
-            let row_text_height = wrapped_lines.len();
+            // +1 for mode header line
+            let row_text_height = 1 + wrapped_lines.len();
             let has_separator = i + 1 < visible;
             let row_height = row_text_height + if has_separator { 1 } else { 0 };
 
@@ -3329,7 +3336,18 @@ impl App {
                 );
             }
 
-            // Render each wrapped line of the prompt
+            // ── Mode header ──────────────────────────────────────────
+            let mode_color = palette.border_mode_color(queued.mode);
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    queued.mode.title(),
+                    Style::default().fg(mode_color).add_modifier(Modifier::BOLD),
+                ))),
+                Rect::new(inner.x, inner.y + y_offset, inner.width, 1),
+            );
+            y_offset += 1;
+
+            // ── Render each wrapped line of the prompt ───────────────
             let text_style = if is_hovered {
                 Style::default()
                     .fg(palette.text)
