@@ -699,7 +699,6 @@ fn compute_block_data(
             for (_, card_lines) in &cards {
                 line_count += card_lines.len();
             }
-            line_count += 1;
 
             let kind = MessageRenderCacheKey {
                 session_id: Uuid::default(),
@@ -1547,7 +1546,7 @@ fn render_system_card(
             && content.contains(" instruction files:"))
     {
         let line = Line::from(vec![
-            Span::styled("󱁤 ", Style::default().fg(palette.accent_soft)),
+            Span::styled("󱁤  ", Style::default().fg(palette.accent_soft)),
             Span::styled(
                 content.clone(),
                 Style::default().fg(palette.text).add_modifier(Modifier::ITALIC),

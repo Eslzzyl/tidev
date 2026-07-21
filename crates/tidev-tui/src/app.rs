@@ -137,8 +137,9 @@ pub struct App {
 
     /// Current session's todo items (loaded from store).
     todos: Vec<TodoItem>,
-    /// Tracks instruction sources already shown as "Loaded instructions from" messages.
-    loaded_instruction_sources: Vec<String>,
+    /// Tracks instruction sources already shown as "Loaded instructions from" messages
+    /// in the current session.  Pure in-memory dedup — never written to the DB.
+    shown_instruction_sources: Vec<String>,
 
     // ── Tool approval pipeline (per-session) ──
 
@@ -275,7 +276,7 @@ impl App {
             sidebar_area: None,
             terminal_area: Rect::new(0, 0, 0, 0),
             todos: Vec::new(),
-            loaded_instruction_sources: Vec::new(),
+            shown_instruction_sources: Vec::new(),
             image_picker: {
                 log::info!("[img] from_query_stdio START");
                 let r = Picker::from_query_stdio();
@@ -334,29 +335,47 @@ impl App {
 
     /// Show "Loaded instructions from ..." messages for newly discovered
     /// instruction sources.  Deduplicates against sources already shown in
-    /// this session (tracked by `loaded_instruction_sources`).
+    /// this session (tracked by `shown_instruction_sources`).
+    ///
+    /// This method only touches in-memory state (chat context + dedup list).
+    /// All persistence is handled by the backend (agent loop).
     fn show_instruction_sources(&mut self, sources: &[String]) {
         // Filter out already-displayed sources.
         let new_sources: Vec<&String> = sources
             .iter()
-            .filter(|s| !self.loaded_instruction_sources.contains(s))
+            .filter(|s| !self.shown_instruction_sources.contains(s))
             .collect();
         if new_sources.is_empty() {
             return;
         }
 
+        // Shorten canonical paths to workspace-relative for display.
+        let ws_root = self.runtime.workspace_root();
+        let to_rel = |s: &str| -> String {
+            let path = std::path::Path::new(s);
+            path.strip_prefix(ws_root)
+                .unwrap_or(path)
+                .display()
+                .to_string()
+        };
+        let display_paths: Vec<String> = new_sources
+            .iter()
+            .map(|s| to_rel(s))
+            .collect();
+
         // Build the display text matching the old v0.6.x format.
-        let content = if new_sources.len() == 1 {
-            format!("Loaded instructions from {}", new_sources[0])
+        let content = if display_paths.len() == 1 {
+            format!("Loaded instructions from {}", display_paths[0])
         } else {
             format!(
                 "Loaded {} instruction files: {}",
-                new_sources.len(),
-                new_sources.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "),
+                display_paths.len(),
+                display_paths.join(", "),
             )
         };
 
-        // Push as a System message into the current session's chat context.
+        // Push as a System message into the current session's chat context
+        // for immediate display.  Persistence is handled by the backend.
         if let Some(sid) = self.current_session_id {
             if let Some(ref mut chat) = self.message_list {
                 if let Some(ref mut ctx) = chat.active_chat_context_mut()
@@ -366,27 +385,11 @@ impl App {
                     ctx.push(system_msg);
                 }
             }
-            // Also persist to the store so it survives session restart.
-            let system_msg = Message::new(MessageRole::System, &content);
-            let _ = self
-                .runtime
-                .session_manager()
-                .append_message(sid, &system_msg);
         }
 
-        // Mark as shown to avoid duplicates in this session.
+        // Mark as shown in memory only — the backend owns `session_instruction_sources`.
         let owned: Vec<String> = new_sources.into_iter().cloned().collect();
-        self.loaded_instruction_sources.extend(owned);
-
-        // Persist the updated list to DB so session switches don't lose
-        // the tracking and cause duplicate "Loaded instructions from" messages.
-        if let Some(sid) = self.current_session_id {
-            let _ = self
-                .runtime
-                .session_manager()
-                .store()
-                .save_instruction_sources(sid, &self.loaded_instruction_sources);
-        }
+        self.shown_instruction_sources.extend(owned);
     }
 
     /// Accessor for `spinner_start` so tui.rs can compute spinner frame.
@@ -1857,7 +1860,7 @@ impl App {
                             // Restore instruction sources so that InstructionsLoaded
                             // events emitted on loop restart are de-duplicated.
                             if let Ok(sources) = self.runtime.session_manager().store().load_instruction_sources(session_id) {
-                                self.loaded_instruction_sources = sources;
+                                self.shown_instruction_sources = sources;
                             }
 
                             // Refresh the Runtime's in-memory message buffer.
@@ -1970,7 +1973,7 @@ impl App {
 
                     // Restore instruction sources for dedup on loop restart.
                     if let Ok(sources) = self.runtime.session_manager().store().load_instruction_sources(session_id) {
-                        self.loaded_instruction_sources = sources;
+                        self.shown_instruction_sources = sources;
                     }
 
                     log::info!("Switching to session: {} ({})", session_title, session_id);

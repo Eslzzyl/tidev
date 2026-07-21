@@ -396,6 +396,34 @@ impl CoreContext {
             msg_id,
         );
 
+        // 10. Persist a "Loaded instructions from" system message to the store
+        //     so the TUI can display it in the chat history.
+        let display_paths: Vec<String> = new_sources
+            .iter()
+            .map(|s| {
+                let path = std::path::Path::new(s);
+                path.strip_prefix(&self.workspace_root)
+                    .unwrap_or(path)
+                    .display()
+                    .to_string()
+            })
+            .collect();
+        let display_content = if display_paths.len() == 1 {
+            format!("Loaded instructions from {}", display_paths[0])
+        } else {
+            format!(
+                "Loaded {} instruction files: {}",
+                display_paths.len(),
+                display_paths.join(", "),
+            )
+        };
+        let system_msg = tidev_types::message::Message::new(
+            tidev_types::message::MessageRole::System,
+            &display_content,
+        );
+        self.session_manager
+            .append_message(session_id, &system_msg)?;
+
         Ok(())
     }
 }
@@ -1222,6 +1250,17 @@ impl AgentContext for CoreContext {
         messages: &mut [Message],
     ) -> Result<()> {
         self.inject_instructions_impl(session_id, messages).await
+    }
+
+    // -----------------------------------------------------------------------
+    async fn append_instruction_sources(
+        &self,
+        session_id: uuid::Uuid,
+        sources: &[String],
+    ) -> Result<()> {
+        self.session_manager
+            .store()
+            .append_instruction_sources(session_id, sources)
     }
 }
 

@@ -197,4 +197,17 @@ pub trait AgentContext: Send + Sync {
         // default: no-op
         Ok(())
     }
+
+    /// Persist instruction sources discovered during tool execution, so the
+    /// TUI can restore its dedup tracking across session switches.
+    ///
+    /// Uses INSERT OR IGNORE — duplicate entries are silently skipped.
+    /// The default implementation is a no-op.
+    async fn append_instruction_sources(
+        &self,
+        _session_id: uuid::Uuid,
+        _sources: &[String],
+    ) -> Result<()> {
+        Ok(())
+    }
 }

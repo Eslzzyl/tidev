@@ -22,20 +22,16 @@ use crate::prompts;
 /// # Flow
 ///
 /// ```text
-///  load messages → inject instructions → inject mode reminder → compose system prompt → stream LLM turn
-///       ↑                                                                           │
-///       │                                                                 tool calls? ──no──→ persist → exit
-///       │                                                                           │
-///       └── persist results ←─ execute tools ←───────────────←──────────────────────┘
+///  load messages → inject instructions → inject mode reminder → notify turn starting
+///       → compose system prompt → stream LLM turn
+///       ↑                                                            │
+///       │                                                  tool calls? ──no──→ persist → exit
+///       │                                                            │
+///       └── persist results ←─ execute tools ←───────────────←───────┘
 /// ```
 pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> Result<()> {
     let session_id = config.session_id;
     let event_tx = &config.event_tx;
-    // Notify frontend that a new turn is starting.
-    let _ = event_tx.send(BackendEvent::TurnStarting {
-        session_id,
-        request_id: 1,
-    });
 
     for request_id in 1_u64.. {
         // ─── 0. Cancellation check ──────────────────────────────────────
@@ -57,10 +53,19 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
         // ─── 3. Inject mode reminder into the last user message ───────────
         inject_mode_reminder(ctx, session_id, &mut messages, config.mode).await?;
 
-        // ─── 4. Compose system prompt ─────────────────────────────────────
+        // ─── 4. Notify frontend that a new turn is starting ───────────────
+        // Placed after instruction/mode injection so the TUI creates the
+        // streaming assistant message AFTER any system notification messages
+        // emitted by inject_instructions, keeping the correct visual order.
+        let _ = event_tx.send(BackendEvent::TurnStarting {
+            session_id,
+            request_id,
+        });
+
+        // ─── 5. Compose system prompt ─────────────────────────────────────
         let system_prompt = config.definition.system_prompt.clone();
 
-        // ─── 5. Stream LLM turn ──────────────────────────────────────────
+        // ─── 6. Stream LLM turn ──────────────────────────────────────────
         let turn = match ctx
             .stream_turn(&messages, &system_prompt, &config.thinking_level, request_id)
             .await
@@ -89,7 +94,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
             }
         };
 
-        // ─── 6. No tool calls → check for queued messages ────────────────
+        // ─── 7. No tool calls → check for queued messages ────────────────
         if turn.tool_calls.is_empty() {
             let msg = build_assistant_message(&turn);
             ctx.save_messages(session_id, &[msg]).await?;
@@ -120,13 +125,8 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
                     reasoning_started_at: turn.reasoning_started_at,
                     reasoning_completed_at: turn.reasoning_completed_at,
                 });
-                // Signal a new turn so the UI can update its state (spinner,
-                // progress indicators, etc.).  The next iteration's
-                // load_messages() will include the queued user message.
-                let _ = event_tx.send(BackendEvent::TurnStarting {
-                    session_id,
-                    request_id: request_id + 1,
-                });
+                // TurnStarting for the next iteration is emitted by
+                // step 4 inside the loop body.
                 continue;
             }
 
@@ -139,11 +139,11 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
             return Ok(());
         }
 
-        // ─── 7. Persist assistant message (with tool calls) ──────────────
+        // ─── 8. Persist assistant message (with tool calls) ──────────────
         let assistant_msg = build_assistant_message(&turn);
         ctx.save_messages(session_id, &[assistant_msg]).await?;
 
-        // ─── 8. Permission approval ──────────────────────────────────────
+        // ─── 9. Permission approval ──────────────────────────────────────
         let approved = ctx
             .request_tool_approval(&turn.tool_calls, config.mode)
             .await?;
@@ -185,7 +185,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
             ctx.save_messages(session_id, &rejected_msgs).await?;
         }
 
-        // ─── 9. Execute tools ────────────────────────────────────────────
+        // ─── 10. Execute tools ───────────────────────────────────────────
         let mut all_results: Vec<(ToolCall, ToolExecutionResult)> = Vec::new();
 
         if !other_calls.is_empty() || !task_calls.is_empty() {
@@ -199,25 +199,32 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
             all_results = results;
         }
 
-        // ─── 10. Persist tool results ─────────────────────────────────────
+        // ─── 11. Persist tool results ─────────────────────────────────────
         if !all_results.is_empty() {
             let result_msgs: Vec<Message> = all_results.iter().map(|(tc, r)| {
                 Message::tool_result(&tc.id, &tc.name, r.clone())
             }).collect();
             ctx.save_messages(session_id, &result_msgs).await?;
+
+            // Persist nearby instruction sources discovered during tool
+            // execution so the TUI can restore dedup tracking across
+            // session switches without writing to the DB itself.
+            for (_, result) in &all_results {
+                if !result.instruction_sources.is_empty() {
+                    ctx.append_instruction_sources(session_id, &result.instruction_sources).await?;
+                }
+            }
         }
 
-        // ─── 11. Prepare for next turn ────────────────────────────────────
+        // ─── 12. Prepare for next turn ────────────────────────────────────
         let _ = event_tx.send(BackendEvent::StreamEnd {
             session_id,
             request_id,
             reasoning_started_at: turn.reasoning_started_at,
             reasoning_completed_at: turn.reasoning_completed_at,
         });
-        let _ = event_tx.send(BackendEvent::TurnStarting {
-            session_id,
-            request_id,
-        });
+        // TurnStarting for the next iteration is emitted by
+        // step 4 inside the loop body.
     }
 
     Ok(())

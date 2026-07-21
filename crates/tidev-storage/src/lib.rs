@@ -2287,6 +2287,19 @@ impl SessionStore {
         Ok(())
     }
 
+    /// Append instruction sources for a session (INSERT OR IGNORE — deduplicates
+    /// against existing rows so the same source is never stored twice).
+    pub fn append_instruction_sources(&self, session_id: Uuid, sources: &[String]) -> Result<()> {
+        let conn = self.write_conn.lock().unwrap();
+        for source in sources {
+            conn.execute(
+                "INSERT OR IGNORE INTO session_instruction_sources (session_id, source) VALUES (?1, ?2)",
+                params![session_id.to_string(), source],
+            )?;
+        }
+        Ok(())
+    }
+
     /// Load instruction sources for a session.
     pub fn load_instruction_sources(&self, session_id: Uuid) -> Result<Vec<String>> {
         self.read(|conn| {
