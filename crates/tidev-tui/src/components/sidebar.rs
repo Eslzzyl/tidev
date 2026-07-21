@@ -167,7 +167,7 @@ impl Sidebar {
         )]));
         lines.push(Line::from(vec![Span::styled(
             format!(
-                "In: {} ({:.0}% Cached)",
+                "In: {} ({:.1}% Cached)",
                 format_token_count(token_usage.input_tokens as u64),
                 cache_pct,
             ),
