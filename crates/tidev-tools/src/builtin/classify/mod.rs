@@ -913,6 +913,18 @@ mod tests {
         assert_eq!(cl.classify("docker compose build"), Safety::WriteOperation);
     }
 
+    // ── Docker exec (ambiguous, should be Unknown) ─────────────────────────
+
+    #[test]
+    fn docker_exec_ambiguous() {
+        let cl = c();
+        assert_eq!(cl.classify("docker exec db cat /etc/hosts"), Safety::Unknown);
+        assert_eq!(
+            cl.classify("docker exec paper-postgres psql -U paper -d paper -c '\\d revision_versions' 2>&1"),
+            Safety::Unknown
+        );
+    }
+
     // ── Podman ─────────────────────────────────────────────────────────────
 
     #[test]
