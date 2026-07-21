@@ -699,15 +699,23 @@ impl MessageList {
                 }
             }
             BackendEvent::ShellOutput { session_id: _, tool_call_id, content, finished, .. } => {
+                log::debug!(
+                    "chat: ShellOutput (tool_call={}, content_len={}, finished={})",
+                    tool_call_id, content.len(), finished,
+                );
                 let existing = chat_context.messages.iter_mut().rev().find(|m| {
                     m.role == tidev_types::message::MessageRole::Tool
                         && m.tool_call_id.as_deref() == Some(tool_call_id)
                 });
                 if let Some(msg) = existing {
+                    let msg_id = msg.id;
                     msg.content = content.clone();
                     if *finished {
                         msg.streaming = false;
                     }
+                    // Mark only the affected block as dirty so the layout index
+                    // incrementally recomputes it — no full rebuild needed.
+                    self.layout_index.mark_block_dirty(&chat_context.messages, msg_id);
                 } else {
                     let mut msg = tidev_types::message::Message::streaming(
                         tidev_types::message::MessageRole::Tool,

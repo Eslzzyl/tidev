@@ -118,6 +118,26 @@ impl MessageLayoutIndex {
         }
     }
 
+    /// Mark the block containing the given message as dirty.
+    ///
+    /// This is like `mark_dirty`, but accepts *any* message ID within a block
+    /// (including Tool messages inside an Assistant+Tool group) and resolves
+    /// it to the block's primary message ID automatically.
+    ///
+    /// Without this, calling `mark_dirty(tool_msg.id)` on a Tool message never
+    /// matches any block because blocks are keyed by the primary message's ID.
+    pub fn mark_block_dirty(&mut self, messages: &[Message], message_id: Uuid) {
+        for block in &self.blocks {
+            let end_idx = block.message_start_idx + block.message_count;
+            for msg in &messages[block.message_start_idx..end_idx] {
+                if msg.id == message_id {
+                    self.mark_dirty(block.message_id);
+                    return;
+                }
+            }
+        }
+    }
+
     /// Find the scroll offset (start_line) for the block containing the given message.
     ///
     /// Uses the messages slice to correctly handle Assistant+Tool blocks where the
