@@ -39,9 +39,12 @@ pub(super) fn classify_brew(args: &[&str]) -> Safety {
             }
         }
 
-        // `brew update` modifies local taps — write
-        // Write operations
-        _ => Safety::WriteOperation,
+        // Explicit write commands
+        "install" | "uninstall" | "upgrade" | "reinstall" | "update" | "cleanup"
+        | "pin" | "unpin" => Safety::WriteOperation,
+
+        // Everything else — ambiguous, let through
+        _ => Safety::Unknown,
     }
 }
 

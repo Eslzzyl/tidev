@@ -25,10 +25,18 @@ pub(super) fn classify_systemctl(args: &[&str]) -> Safety {
         // `systemctl cat` outputs unit file content — read-only
         "cat" => Safety::ReadOnly,
 
-        // `systemctl list-*` is pattern: list-timers, list-units, etc. — already covered above
+        // Explicit write commands
+        "start" | "stop" | "restart" | "reload" | "enable" | "disable" | "enable-now"
+        | "mask" | "unmask" | "set-default" | "set-property" | "edit" | "add-wants"
+        | "add-requires" | "reenable" | "preset" | "preset-all" | "revert" | "kill"
+        | "clean" | "freeze" | "thaw" | "reset-failed" | "condreload" | "condrestart"
+        | "try-restart" | "reload-or-restart" | "reload-or-try-restart"
+        | "isolate" | "switch-root" | "cancel" | "poweroff" | "reboot" | "halt"
+        | "kexec" | "exit" | "suspend" | "hibernate" | "hybrid-sleep" | "suspend-then-hibernate"
+        | "service" => Safety::WriteOperation,
 
-        // Write
-        _ => Safety::WriteOperation,
+        // Everything else — ambiguous, let through
+        _ => Safety::Unknown,
     }
 }
 

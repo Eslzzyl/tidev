@@ -24,7 +24,7 @@ pub(super) fn classify_nix(args: &[&str]) -> Safety {
     match sub {
         // Modern nix read-only subcommands
         "show" | "search" | "eval" | "why-depends" | "edit" | "help" | "version"
-        | "completions" => Safety::ReadOnly,
+        | "completions" | "fmt" => Safety::ReadOnly,
 
         // `nix flake`: show/metadata/lock --show is read
         "flake" => {
@@ -82,8 +82,15 @@ pub(super) fn classify_nix(args: &[&str]) -> Safety {
             }
         }
 
-        // Write
-        _ => Safety::WriteOperation,
+        // Explicit write commands at top level
+        "build" | "run" | "develop" | "shell" | "bundle" | "copy" | "daemon"
+        | "derivation" | "dump" | "hash" | "log" | "make-content-addressable"
+        | "optimise-store" | "prefetch" | "realisation" | "repl" | "upgrade-nix" => {
+            Safety::WriteOperation
+        }
+
+        // Everything else — ambiguous, let through
+        _ => Safety::Unknown,
     }
 }
 
@@ -92,16 +99,15 @@ pub(super) fn classify_nix_env(args: &[&str]) -> Safety {
     if args.contains(&"-q") || args.contains(&"--query") {
         Safety::ReadOnly
     } else {
-        Safety::WriteOperation
+        // Without -q/--query, nix-env could be install/upgrade — ambiguous
+        Safety::Unknown
     }
 }
 
-/// Classify nix-shell: always starts a shell (write-like).
+/// Classify nix-shell: always starts a shell (ambiguous).
 pub(super) fn classify_nix_shell(_args: &[&str]) -> Safety {
-    // nix-shell with --command/-c runs a command — could be anything
-    // with --packages/-p installs packages temporarily — write
-    // Without args, it enters a shell — write
-    Safety::WriteOperation
+    // nix-shell starts an interactive shell or runs a command — could do anything
+    Safety::Unknown
 }
 
 #[cfg(test)]
@@ -154,18 +160,18 @@ mod tests {
 
     #[test]
     fn nix_env_write_commands() {
-        assert_eq!(classify_nix_env(&["-i", "hello"]), Safety::WriteOperation);
-        assert_eq!(classify_nix_env(&["--install", "hello"]), Safety::WriteOperation);
-        assert_eq!(classify_nix_env(&["-e", "hello"]), Safety::WriteOperation);
-        assert_eq!(classify_nix_env(&["-u", "hello"]), Safety::WriteOperation);
+        assert_eq!(classify_nix_env(&["-i", "hello"]), Safety::Unknown);
+        assert_eq!(classify_nix_env(&["--install", "hello"]), Safety::Unknown);
+        assert_eq!(classify_nix_env(&["-e", "hello"]), Safety::Unknown);
+        assert_eq!(classify_nix_env(&["-u", "hello"]), Safety::Unknown);
     }
 
     // ── Legacy nix-shell ──────────────────────────────────────────────────
 
     #[test]
-    fn nix_shell_is_write() {
-        assert_eq!(classify_nix_shell(&[]), Safety::WriteOperation);
-        assert_eq!(classify_nix_shell(&["-p", "hello"]), Safety::WriteOperation);
-        assert_eq!(classify_nix_shell(&["--command", "echo hi"]), Safety::WriteOperation);
+    fn nix_shell_is_unknown() {
+        assert_eq!(classify_nix_shell(&[]), Safety::Unknown);
+        assert_eq!(classify_nix_shell(&["-p", "hello"]), Safety::Unknown);
+        assert_eq!(classify_nix_shell(&["--command", "echo hi"]), Safety::Unknown);
     }
 }

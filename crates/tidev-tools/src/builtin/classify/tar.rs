@@ -9,7 +9,9 @@ pub(super) fn classify_tar(args: &[&str]) -> Safety {
     if is_list {
         Safety::ReadOnly
     } else {
-        Safety::WriteOperation
+        // Without -t/--list, tar extracts or creates archives — ambiguous.
+        // Per design principle: when in doubt, let it through.
+        Safety::Unknown
     }
 }
 
@@ -25,7 +27,7 @@ mod tests {
 
     #[test]
     fn tar_write_commands() {
-        assert_eq!(classify_tar(&["-cf", "archive.tar", "files/"]), Safety::WriteOperation);
-        assert_eq!(classify_tar(&["-xf", "archive.tar"]), Safety::WriteOperation);
+        assert_eq!(classify_tar(&["-cf", "archive.tar", "files/"]), Safety::Unknown);
+        assert_eq!(classify_tar(&["-xf", "archive.tar"]), Safety::Unknown);
     }
 }

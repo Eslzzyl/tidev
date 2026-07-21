@@ -55,8 +55,12 @@ pub(super) fn classify_terraform(args: &[&str]) -> Safety {
             }
         }
 
-        // Write
-        _ => Safety::WriteOperation,
+        // Explicit write commands at top level
+        "apply" | "destroy" | "init" | "refresh" | "import" | "taint" | "untaint"
+        | "force-unlock" | "test" | "bench" => Safety::WriteOperation,
+
+        // Everything else — ambiguous, let through
+        _ => Safety::Unknown,
     }
 }
 

@@ -23,6 +23,33 @@ static CARGO_READ_SUBCOMMANDS: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
     ]
 });
 
+/// Cargo sub-commands that are always write operations.
+static CARGO_WRITE_SUBCOMMANDS: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
+    vec![
+        "build",
+        "run",
+        "publish",
+        "install",
+        "uninstall",
+        "add",
+        "remove",
+        "update",
+        "upgrade",
+        "fix",
+        "fmt",
+        "init",
+        "new",
+        "clean",
+        "config",
+        "login",
+        "logout",
+        "owner",
+        "yank",
+        "package",
+        "vendor",
+    ]
+});
+
 /// Classify a cargo command by its subcommand.
 pub(super) fn classify_cargo(args: &[&str]) -> Safety {
     let Some(sub) = args.first().copied() else {
@@ -31,9 +58,11 @@ pub(super) fn classify_cargo(args: &[&str]) -> Safety {
 
     if CARGO_READ_SUBCOMMANDS.contains(&sub) {
         Safety::ReadOnly
-    } else {
-        // build, run, publish, install, etc. — all write
+    } else if CARGO_WRITE_SUBCOMMANDS.contains(&sub) {
         Safety::WriteOperation
+    } else {
+        // Everything else (bench, rustdoc, rustc, etc.) — ambiguous, let through
+        Safety::Unknown
     }
 }
 

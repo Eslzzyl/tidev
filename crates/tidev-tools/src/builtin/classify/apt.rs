@@ -38,8 +38,14 @@ pub(super) fn classify_apt(args: &[&str]) -> Safety {
             }
         }
 
-        // Write
-        _ => Safety::WriteOperation,
+        // Explicit write commands
+        "install" | "remove" | "purge" | "update" | "upgrade" | "full-upgrade"
+        | "dist-upgrade" | "autoremove" | "autoclean" | "clean" | "build-dep"
+        | "source" | "download" | "satisfies" | "add" | "delete" | "hold" | "unhold"
+        | "auto" | "manual" => Safety::WriteOperation,
+
+        // Everything else — ambiguous, let through
+        _ => Safety::Unknown,
     }
 }
 

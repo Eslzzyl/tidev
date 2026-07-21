@@ -22,7 +22,16 @@ pub(super) fn classify_npm(args: &[&str]) -> Safety {
             }
             Safety::ReadOnly
         }
-        _ => Safety::WriteOperation,
+
+        // Explicit write commands
+        "install" | "ci" | "add" | "uninstall" | "remove" | "publish" | "update" | "up"
+        | "pack" | "rebuild" | "link" | "unlink" | "dedupe" | "prune" | "shrinkwrap"
+        | "token" | "logout" | "init" | "owner" | "access" | "team" | "hook" => {
+            Safety::WriteOperation
+        }
+
+        // Everything else — ambiguous, let through
+        _ => Safety::Unknown,
     }
 }
 

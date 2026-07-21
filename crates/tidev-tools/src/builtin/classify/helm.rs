@@ -47,8 +47,12 @@ pub(super) fn classify_helm(args: &[&str]) -> Safety {
             }
         }
 
-        // Write
-        _ => Safety::WriteOperation,
+        // Explicit write commands at top level
+        "install" | "upgrade" | "uninstall" | "rollback" | "create" | "package"
+        | "push" | "env" => Safety::WriteOperation,
+
+        // Everything else — ambiguous, let through
+        _ => Safety::Unknown,
     }
 }
 

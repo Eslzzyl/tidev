@@ -38,8 +38,13 @@ pub(super) fn classify_deno(args: &[&str]) -> Safety {
         // `deno eval` runs code from stdin — could do anything, classified as Unknown
         "eval" | "eval-file" => Safety::Unknown,
 
-        // Write
-        _ => Safety::WriteOperation,
+        // Explicit write commands
+        "run" | "compile" | "cache" | "bundle" | "install" | "uninstall" | "upgrade"
+        | "publish" | "init" | "add" | "remove" | "task" | "test" | "bench" | "serve"
+        | "pack" | "vendor" => Safety::WriteOperation,
+
+        // Everything else — ambiguous, let through
+        _ => Safety::Unknown,
     }
 }
 

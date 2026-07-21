@@ -123,25 +123,24 @@ impl Classifier {
                 continue;
             }
 
-            // ── 4. Strip privilege-escalation / env wrappers ────────
-            let cmd_index = find_cmd_index(&parts);
-            let Some(cmd) = parts.get(cmd_index).copied() else {
-                continue;
-            };
-            let args = &parts[cmd_index + 1..];
+        // ── 4. Strip privilege-escalation / env wrappers ────────
+        let cmd_index = find_cmd_index(&parts);
+        let Some(cmd) = parts.get(cmd_index).copied() else {
+            continue;
+        };
+        let args = &parts[cmd_index + 1..];
 
-            let seg_safety = classify_command(cmd, args);
-            // Take the strictest: WriteOperation > ReadOnly > Unknown
-            if seg_safety == Safety::WriteOperation {
-                return Safety::WriteOperation; // short-circuit
-            }
-            if seg_safety == Safety::ReadOnly {
-                result = Safety::ReadOnly;
-            }
+        let seg_safety = classify_command(cmd, args);
+        // Take the strictest: WriteOperation > ReadOnly > Unknown
+        if seg_safety == Safety::WriteOperation {
+            return Safety::WriteOperation; // short-circuit
         }
-
-        result
+        if seg_safety == Safety::ReadOnly {
+            result = Safety::ReadOnly;
+        }
     }
+
+    result    }
 }
 
 // ---------------------------------------------------------------------------
@@ -425,13 +424,14 @@ fn classify_command(cmd: &str, args: &[&str]) -> Safety {
         "make" | "cmake" | "ninja" | "meson" | "just" | "task" => classify_build_tool(args),
         "gcc" | "g++" | "clang" | "clang++" | "cc" | "c++" | "ld" => Safety::WriteOperation,
         "bazel" | "blaze" => {
-            // `bazel query` / `bazel cquery` / `bazel aquery` / `bazel info` are read-only
             let Some(sub) = args.first().copied() else {
-                return Safety::WriteOperation;
+                return Safety::Unknown;
             };
             match sub {
                 "query" | "cquery" | "aquery" | "info" | "help" | "version" => Safety::ReadOnly,
-                _ => Safety::WriteOperation,
+                "build" | "test" | "run" | "clean" | "coverage" | "mobile-install"
+                | "fetch" | "shutdown" => Safety::WriteOperation,
+                _ => Safety::Unknown,
             }
         }
 
@@ -488,13 +488,14 @@ fn classify_command(cmd: &str, args: &[&str]) -> Safety {
             }
         }
         "singularity" | "apptainer" => {
-            // Container tools — primarily write operations
             let Some(sub) = args.first().copied() else {
                 return Safety::Unknown;
             };
             match sub {
                 "help" | "version" | "info" => Safety::ReadOnly,
-                _ => Safety::WriteOperation,
+                "build" | "exec" | "run" | "shell" | "instance" | "pull" | "push"
+                | "sign" | "verify" => Safety::WriteOperation,
+                _ => Safety::Unknown,
             }
         }
 
@@ -508,12 +509,35 @@ fn classify_command(cmd: &str, args: &[&str]) -> Safety {
         | "arj" | "cabextract" => Safety::WriteOperation,
 
         // ── Media / conversion (write files) ─────────────────────────
-        "ffmpeg" | "avconv" => Safety::WriteOperation,
+        "ffmpeg" | "avconv" => Safety::Unknown,
         "ffprobe" | "avprobe" | "mediainfo" | "exiftool" => Safety::ReadOnly,
         "convert" | "mogrify" | "magick" | "sox" => Safety::WriteOperation, // ImageMagick / SoX
 
-        // ── Network downloads (write files) ──────────────────────────
-        "curl" | "wget" | "scp" | "rsync" | "aria2c" => Safety::WriteOperation,
+        // ── Network downloads — ambiguous (output to stdout unless -o/-O) ─
+        "curl" => {
+            // `curl -o` / `-O` / `--output` writes to file
+            if args.iter().any(|a| a.starts_with("-o") || a == &"-O"
+                || a == &"--output" || a == &"--remote-name"
+                || a == &"--remote-header-name" || a == &"--data"
+                || a == &"-d" || a == &"-F" || a == &"--form")
+            {
+                Safety::WriteOperation
+            } else {
+                Safety::Unknown
+            }
+        }
+        "wget" => {
+            if args.contains(&"-O") || args.contains(&"--output-document")
+                || args.contains(&"-o") || args.contains(&"--output-file")
+                || args.contains(&"--post-data") || args.contains(&"--post-file")
+                || args.contains(&"-P") || args.contains(&"--directory-prefix")
+            {
+                Safety::WriteOperation
+            } else {
+                Safety::Unknown
+            }
+        }
+        "scp" | "rsync" | "aria2c" => Safety::Unknown,
 
         // ── Process management ───────────────────────────────────────
         "kill" | "pkill" | "killall" | "timeout" | "skill" | "snice" | "renice" => {
@@ -539,8 +563,8 @@ fn classify_command(cmd: &str, args: &[&str]) -> Safety {
         "apt" | "apt-get" | "aptitude" => classify_apt(args),
         "brew" => classify_brew(args),
         "gem" => classify_gem(args),
-        "bundle" | "composer" | "port" => Safety::WriteOperation,
-        "cargo-install" => Safety::WriteOperation,
+        "bundle" | "composer" | "port" => Safety::Unknown,
+        "cargo-install" => Safety::Unknown,
         "uv" => classify_pip(args), // uv is a fast Python package manager, same subcommands
 
         // ── Kubernetes / orchestration ───────────────────────────────
@@ -552,7 +576,8 @@ fn classify_command(cmd: &str, args: &[&str]) -> Safety {
             };
             match sub {
                 "build" | "version" | "help" => Safety::ReadOnly,
-                _ => Safety::WriteOperation,
+                "edit" => Safety::WriteOperation,
+                _ => Safety::Unknown,
             }
         }
 
@@ -573,19 +598,26 @@ fn classify_command(cmd: &str, args: &[&str]) -> Safety {
                         Safety::Unknown
                     }
                 }
-                _ => Safety::WriteOperation,
+                "up" | "destroy" | "init" | "import" | "refresh" | "rm" | "state"
+                | "policy" => Safety::WriteOperation,
+                _ => Safety::Unknown,
             }
         }
         "ansible" | "ansible-playbook" | "ansible-galaxy" | "ansible-vault" => {
-            Safety::WriteOperation
+            Safety::Unknown
         }
         "vagrant" => {
             let Some(sub) = args.first().copied() else {
                 return Safety::Unknown;
             };
             match sub {
-                "status" | "global-status" | "version" | "help" => Safety::ReadOnly,
-                _ => Safety::WriteOperation,
+                "status" | "global-status" | "version" | "help" | "validate"
+                | "port" | "ssh-config" => Safety::ReadOnly,
+                "up" | "destroy" | "halt" | "suspend" | "resume" | "reload"
+                | "provision" | "package" | "plugin" | "rsync-auto" | "snapshot" => {
+                    Safety::WriteOperation
+                }
+                _ => Safety::Unknown,
             }
         }
 
@@ -627,17 +659,17 @@ fn classify_command(cmd: &str, args: &[&str]) -> Safety {
         }
 
         // ── SSH ──────────────────────────────────────────────────────
-        "ssh-keygen" | "ssh-copy-id" | "ssh-add" => Safety::WriteOperation,
+        "ssh-keygen" | "ssh-copy-id" | "ssh-add" => Safety::Unknown,
         "ssh" | "ssh-keyscan" | "ssh-keysign" => Safety::Unknown, // interactive, let through
 
-        // ── Network config ───────────────────────────────────────────
+        // ── Network config (can be read with show/status) ────────────
         "ip" | "ifconfig" | "iwconfig" | "nmcli" | "nmtui" | "firewall-cmd"
-        | "ufw" | "iptables" | "nft" | "tc" => Safety::WriteOperation,
+        | "ufw" | "iptables" | "nft" | "tc" => Safety::Unknown,
         "ping" | "traceroute" | "mtr" | "dig" | "nslookup" | "host" | "nmap"
         | "netstat" | "ss" | "lsof" | "tcpdump" | "whois" => Safety::ReadOnly,
 
-        // ── SELinux / security ───────────────────────────────────────
-        "setenforce" | "restorecon" | "chcon" | "semodule" | "semanage" => Safety::WriteOperation,
+        // ── SELinux / security — ambiguous, depends on subcommand ────
+        "setenforce" | "restorecon" | "chcon" | "semodule" | "semanage" => Safety::Unknown,
         "getenforce" | "sestatus" | "sesearch" => Safety::ReadOnly,
 
         // ── System info (read-only) ──────────────────────────────────
@@ -652,10 +684,10 @@ fn classify_command(cmd: &str, args: &[&str]) -> Safety {
             }
         }
 
-        // ── Date/time (write to system clock) ────────────────────────
-        "timedatectl" | "date" | "hwclock" => Safety::WriteOperation,
+        // ── Date/time — ambiguous (date without args shows date) ────
+        "timedatectl" | "date" | "hwclock" => Safety::Unknown,
 
-        // ── User / group management (write) ──────────────────────────
+        // ── User / group management (always system-changing) ─────────
         "useradd" | "userdel" | "usermod" | "groupadd" | "groupdel" | "groupmod"
         | "passwd" | "chage" | "chsh" | "chfn" | "gpasswd" | "newgrp" | "sudo" => {
             Safety::WriteOperation
@@ -669,7 +701,7 @@ fn classify_command(cmd: &str, args: &[&str]) -> Safety {
                     return Safety::ReadOnly;
                 }
             }
-            Safety::WriteOperation
+            Safety::Unknown
         }
 
         // ── Flatpak / Snap ───────────────────────────────────────────
@@ -679,7 +711,9 @@ fn classify_command(cmd: &str, args: &[&str]) -> Safety {
             };
             match sub {
                 "list" | "info" | "search" | "history" | "help" | "version" => Safety::ReadOnly,
-                _ => Safety::WriteOperation, // install, uninstall, update, override, etc.
+                "install" | "uninstall" | "update" | "override" | "make-current"
+                | "mask" | "pin" | "remove" | "repair" => Safety::WriteOperation,
+                _ => Safety::Unknown,
             }
         }
         "snap" => {
@@ -689,7 +723,10 @@ fn classify_command(cmd: &str, args: &[&str]) -> Safety {
             match sub {
                 "list" | "info" | "search" | "help" | "version" | "changes" | "tasks"
                 | "services" => Safety::ReadOnly,
-                _ => Safety::WriteOperation, // install, uninstall, refresh, revert, etc.
+                "install" | "remove" | "uninstall" | "refresh" | "revert" | "enable"
+                | "disable" | "set" | "unset" | "alias" | "unalias" | "prefer"
+                | "hold" | "unhold" | "switch" => Safety::WriteOperation,
+                _ => Safety::Unknown,
             }
         }
 
@@ -711,19 +748,30 @@ mod tests {
     #[test]
     fn network_write_commands() {
         let cl = c();
+        // curl/wget without write flags output to stdout (Unknown)
         assert_eq!(
             cl.classify("curl https://example.com"),
-            Safety::WriteOperation
+            Safety::Unknown
         );
         assert_eq!(
             cl.classify("wget https://example.com/file"),
+            Safety::Unknown
+        );
+        // With -o/-O, curl/wget writes to file
+        assert_eq!(
+            cl.classify("curl -o output.txt https://example.com"),
             Safety::WriteOperation
         );
         assert_eq!(
-            cl.classify("scp file.txt user@host:/path"),
+            cl.classify("wget -O output.html https://example.com"),
             Safety::WriteOperation
         );
-        assert_eq!(cl.classify("rsync -a src/ dst/"), Safety::WriteOperation);
+        // scp/rsync always transfer files
+        assert_eq!(
+            cl.classify("scp file.txt user@host:/path"),
+            Safety::Unknown
+        );
+        assert_eq!(cl.classify("rsync -a src/ dst/"), Safety::Unknown);
     }
 
     // ── Process management ───────────────────────────────────────────────
@@ -956,7 +1004,9 @@ mod tests {
     #[test]
     fn just_write_commands() {
         let cl = c();
-        assert_eq!(cl.classify("just build"), Safety::WriteOperation);
+        // `just` tasks are user-defined — `build` is ambiguous
+        assert_eq!(cl.classify("just build"), Safety::Unknown);
+        // `test` is explicitly listed as a write target in build_tool.rs
         assert_eq!(cl.classify("just test"), Safety::WriteOperation);
     }
 
@@ -1085,7 +1135,7 @@ mod tests {
         assert_eq!(cl.classify("kubectl apply -f file.yaml"), Safety::WriteOperation);
         assert_eq!(cl.classify("kubectl delete pod nginx"), Safety::WriteOperation);
         assert_eq!(cl.classify("kubectl create deployment nginx"), Safety::WriteOperation);
-        assert_eq!(cl.classify("kubectl exec -it pod -- bash"), Safety::WriteOperation);
+        assert_eq!(cl.classify("kubectl exec -it pod -- bash"), Safety::Unknown);
         assert_eq!(cl.classify("kubectl config set-context prod"), Safety::WriteOperation);
     }
 
@@ -1239,15 +1289,15 @@ mod tests {
     #[test]
     fn nix_env_write_commands() {
         let cl = c();
-        assert_eq!(cl.classify("nix-env -i hello"), Safety::WriteOperation);
-        assert_eq!(cl.classify("nix-env -e hello"), Safety::WriteOperation);
+        assert_eq!(cl.classify("nix-env -i hello"), Safety::Unknown);
+        assert_eq!(cl.classify("nix-env -e hello"), Safety::Unknown);
     }
 
     #[test]
     fn nix_shell_is_write() {
         let cl = c();
-        assert_eq!(cl.classify("nix-shell -p hello"), Safety::WriteOperation);
-        assert_eq!(cl.classify("nix-shell --command 'echo hi'"), Safety::WriteOperation);
+        assert_eq!(cl.classify("nix-shell -p hello"), Safety::Unknown);
+        assert_eq!(cl.classify("nix-shell --command 'echo hi'"), Safety::Unknown);
     }
 
     // ── Additional deterministic writes ────────────────────────────────────
@@ -1268,7 +1318,7 @@ mod tests {
     #[test]
     fn media_write_commands() {
         let cl = c();
-        assert_eq!(cl.classify("ffmpeg -i input.mp4 output.avi"), Safety::WriteOperation);
+        assert_eq!(cl.classify("ffmpeg -i input.mp4 output.avi"), Safety::Unknown);
         assert_eq!(cl.classify("convert input.png output.jpg"), Safety::WriteOperation);
         assert_eq!(cl.classify("mogrify -resize 50% *.jpg"), Safety::WriteOperation);
     }
@@ -1303,8 +1353,8 @@ mod tests {
     #[test]
     fn ssh_keygen_is_write() {
         let cl = c();
-        assert_eq!(cl.classify("ssh-keygen -t rsa -b 4096"), Safety::WriteOperation);
-        assert_eq!(cl.classify("ssh-copy-id user@host"), Safety::WriteOperation);
+        assert_eq!(cl.classify("ssh-keygen -t rsa -b 4096"), Safety::Unknown);
+        assert_eq!(cl.classify("ssh-copy-id user@host"), Safety::Unknown);
     }
 
     // ── Network config (write) ─────────────────────────────────────────────
@@ -1312,11 +1362,11 @@ mod tests {
     #[test]
     fn network_config_is_write() {
         let cl = c();
-        assert_eq!(cl.classify("ip link set eth0 up"), Safety::WriteOperation);
-        assert_eq!(cl.classify("ifconfig eth0 up"), Safety::WriteOperation);
-        assert_eq!(cl.classify("firewall-cmd --add-port=80/tcp"), Safety::WriteOperation);
-        assert_eq!(cl.classify("ufw enable"), Safety::WriteOperation);
-        assert_eq!(cl.classify("iptables -A INPUT -p tcp --dport 80 -j ACCEPT"), Safety::WriteOperation);
+        assert_eq!(cl.classify("ip link set eth0 up"), Safety::Unknown);
+        assert_eq!(cl.classify("ifconfig eth0 up"), Safety::Unknown);
+        assert_eq!(cl.classify("firewall-cmd --add-port=80/tcp"), Safety::Unknown);
+        assert_eq!(cl.classify("ufw enable"), Safety::Unknown);
+        assert_eq!(cl.classify("iptables -A INPUT -p tcp --dport 80 -j ACCEPT"), Safety::Unknown);
     }
 
     #[test]
@@ -1367,8 +1417,8 @@ mod tests {
     #[test]
     fn selinux_write_commands() {
         let cl = c();
-        assert_eq!(cl.classify("setenforce 1"), Safety::WriteOperation);
-        assert_eq!(cl.classify("restorecon -Rv /var/www"), Safety::WriteOperation);
+        assert_eq!(cl.classify("setenforce 1"), Safety::Unknown);
+        assert_eq!(cl.classify("restorecon -Rv /var/www"), Safety::Unknown);
     }
 
     // ── Date/time ──────────────────────────────────────────────────────────
@@ -1376,9 +1426,9 @@ mod tests {
     #[test]
     fn datetime_is_write() {
         let cl = c();
-        assert_eq!(cl.classify("timedatectl set-time '2024-01-01 12:00:00'"), Safety::WriteOperation);
-        assert_eq!(cl.classify("date -s '2024-01-01'"), Safety::WriteOperation);
-        assert_eq!(cl.classify("hwclock --set --date '2024-01-01'"), Safety::WriteOperation);
+        assert_eq!(cl.classify("timedatectl set-time '2024-01-01 12:00:00'"), Safety::Unknown);
+        assert_eq!(cl.classify("date -s '2024-01-01'"), Safety::Unknown);
+        assert_eq!(cl.classify("hwclock --set --date '2024-01-01'"), Safety::Unknown);
     }
 
     // ── User management ────────────────────────────────────────────────────
@@ -1404,8 +1454,8 @@ mod tests {
     #[test]
     fn crontab_write_commands() {
         let cl = c();
-        assert_eq!(cl.classify("crontab -e"), Safety::WriteOperation);
-        assert_eq!(cl.classify("crontab myfile"), Safety::WriteOperation);
+        assert_eq!(cl.classify("crontab -e"), Safety::Unknown);
+        assert_eq!(cl.classify("crontab myfile"), Safety::Unknown);
     }
 
     // ── Flatpak ────────────────────────────────────────────────────────────
@@ -1474,7 +1524,7 @@ mod tests {
         let cl = c();
         assert_eq!(cl.classify("vagrant up"), Safety::WriteOperation);
         assert_eq!(cl.classify("vagrant destroy"), Safety::WriteOperation);
-        assert_eq!(cl.classify("vagrant ssh"), Safety::WriteOperation);
+        assert_eq!(cl.classify("vagrant ssh"), Safety::Unknown);
     }
 
     // ── Kustomize ──────────────────────────────────────────────────────────
@@ -1496,9 +1546,9 @@ mod tests {
     #[test]
     fn ansible_is_write() {
         let cl = c();
-        assert_eq!(cl.classify("ansible all -m ping"), Safety::WriteOperation);
-        assert_eq!(cl.classify("ansible-playbook deploy.yml"), Safety::WriteOperation);
-        assert_eq!(cl.classify("ansible-galaxy install role"), Safety::WriteOperation);
+        assert_eq!(cl.classify("ansible all -m ping"), Safety::Unknown);
+        assert_eq!(cl.classify("ansible-playbook deploy.yml"), Safety::Unknown);
+        assert_eq!(cl.classify("ansible-galaxy install role"), Safety::Unknown);
     }
 
     // ── Windows system ─────────────────────────────────────────────────────

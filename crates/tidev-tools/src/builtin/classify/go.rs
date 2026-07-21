@@ -16,8 +16,13 @@ pub(super) fn classify_go(args: &[&str]) -> Safety {
             }
             Safety::ReadOnly
         }
-        // build, run, test, install, get, mod, work, generate etc.
-        _ => Safety::WriteOperation,
+
+        // Explicit write commands
+        "build" | "run" | "test" | "install" | "get" | "mod" | "work" | "generate"
+        | "fix" | "clean" | "tool" | "telemetry" => Safety::WriteOperation,
+
+        // Everything else — ambiguous, let through
+        _ => Safety::Unknown,
     }
 }
 

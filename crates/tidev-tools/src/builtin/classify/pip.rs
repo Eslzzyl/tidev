@@ -23,8 +23,11 @@ pub(super) fn classify_pip(args: &[&str]) -> Safety {
             }
         }
 
-        // Write (install, uninstall, download, wheel, hash, etc.)
-        _ => Safety::WriteOperation,
+        // Explicit write commands
+        "install" | "uninstall" | "download" | "wheel" | "hash" => Safety::WriteOperation,
+
+        // Everything else — ambiguous, let through
+        _ => Safety::Unknown,
     }
 }
 

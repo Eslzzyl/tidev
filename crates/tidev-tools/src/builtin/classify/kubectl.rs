@@ -31,8 +31,17 @@ pub(super) fn classify_kubectl(args: &[&str]) -> Safety {
             }
         }
 
-        // Write
-        _ => Safety::WriteOperation,
+        // Explicit write commands
+        "apply" | "create" | "delete" | "edit" | "patch" | "replace" | "rollout"
+        | "scale" | "autoscale" | "cordon" | "uncordon" | "drain" | "taint"
+        | "label" | "annotate" | "port-forward" | "proxy" | "cp"
+        | "auth" | "set" | "expose" | "run" | "attach" | "debug" => Safety::WriteOperation,
+
+        // exec runs an arbitrary command inside a pod — could be read or write
+        "exec" => Safety::Unknown,
+
+        // Everything else — ambiguous, let through
+        _ => Safety::Unknown,
     }
 }
 
@@ -65,7 +74,7 @@ mod tests {
         assert_eq!(classify_kubectl(&["patch", "pod/nginx", "-p", "{}"]), Safety::WriteOperation);
         assert_eq!(classify_kubectl(&["rollout", "restart", "deploy/nginx"]), Safety::WriteOperation);
         assert_eq!(classify_kubectl(&["scale", "--replicas=3", "deploy/nginx"]), Safety::WriteOperation);
-        assert_eq!(classify_kubectl(&["exec", "-it", "pod", "--", "bash"]), Safety::WriteOperation);
+        assert_eq!(classify_kubectl(&["exec", "-it", "pod", "--", "bash"]), Safety::Unknown);
         assert_eq!(classify_kubectl(&["port-forward", "pod", "8080:80"]), Safety::WriteOperation);
         assert_eq!(classify_kubectl(&["label", "pod/nginx", "env=prod"]), Safety::WriteOperation);
         assert_eq!(classify_kubectl(&["annotate", "pod/nginx", "key=val"]), Safety::WriteOperation);

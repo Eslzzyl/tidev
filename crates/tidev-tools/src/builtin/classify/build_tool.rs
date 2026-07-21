@@ -21,7 +21,7 @@ pub(super) fn classify_build_tool(args: &[&str]) -> Safety {
         return match target {
             "--help" | "--version" | "--list" | "--summary" | "--choose" | "--justprint"
             | "--dry-run" | "--evaluate" => Safety::ReadOnly,
-            _ => Safety::WriteOperation,
+            _ => Safety::Unknown,
         };
     }
 
@@ -30,14 +30,18 @@ pub(super) fn classify_build_tool(args: &[&str]) -> Safety {
         let flag = target.chars().nth(1).unwrap();
         return match flag {
             'h' | 'v' | 'n' | 'l' | 's' => Safety::ReadOnly,
-            _ => Safety::WriteOperation,
+            _ => Safety::Unknown,
         };
     }
 
-    // Common read-only targets
+    // Common read-only targets, plus explicit write targets
     match target {
         "help" | "list" | "describe" => Safety::ReadOnly,
-        _ => Safety::WriteOperation,
+        // Explicit write targets
+        "install" | "clean" | "uninstall" | "distclean" | "maintainer-clean"
+        | "mostlyclean" | "realclean" | "check" | "test" | "benchmark" => Safety::WriteOperation,
+        // Everything else (including bare target names like `all`, `build`, `debug`, `release`)
+        _ => Safety::Unknown,
     }
 }
 
@@ -50,8 +54,8 @@ mod tests {
         assert_eq!(classify_build_tool(&[]), Safety::WriteOperation);
         assert_eq!(classify_build_tool(&["install"]), Safety::WriteOperation);
         assert_eq!(classify_build_tool(&["clean"]), Safety::WriteOperation);
-        assert_eq!(classify_build_tool(&["build"]), Safety::WriteOperation);
         assert_eq!(classify_build_tool(&["test"]), Safety::WriteOperation);
+        assert_eq!(classify_build_tool(&["build"]), Safety::Unknown);
     }
 
     #[test]

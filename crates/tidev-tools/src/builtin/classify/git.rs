@@ -84,6 +84,70 @@ static GIT_READ_SUBCOMMANDS: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
     ]
 });
 
+/// Git sub-commands that are always write operations.
+static GIT_WRITE_SUBCOMMANDS: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
+    vec![
+        // ── Commit / push / sync ─────────────────────────────────────────
+        "commit",
+        "push",
+        "pull",
+        "fetch",             // already in read list — doesn't modify working tree
+        // ── Branching / merging ──────────────────────────────────────────
+        "checkout",
+        "switch",
+        "restore",
+        "reset",
+        "revert",
+        "merge",
+        "rebase",
+        "cherry-pick",
+        "bisect",            // modifies bisect state
+        // ── File operations ─────────────────────────────────────────────
+        "add",
+        "rm",
+        "mv",
+        "clean",
+        // ── Repo maintenance ────────────────────────────────────────────
+        "gc",
+        "prune",
+        "repack",
+        "pack-refs",
+        "reflog",            // `reflog expire`/`delete` are write
+        "replace",
+        "update-ref",
+        "update-index",
+        "write-tree",
+        "mktag",
+        "mktree",
+        "commit-tree",
+        "read-tree",
+        "filter-branch",
+        "multi-pack-index",
+        "commit-graph",
+        "maintenance",       // handled by classify_maintenance, but listed for clarity
+        // ── Notes / worktree / submodule ────────────────────────────────
+        "notes",
+        "worktree",
+        "submodule",
+        "remote",
+        "stash",
+        // ── Config / other ──────────────────────────────────────────────
+        "config",
+        "symbolic-ref",
+        "interpret-trailers",
+        "hash-object",       // with -w
+        "diff-files",        // already in read list
+        "diff-index",
+        "diff-tree",
+        "apply",
+        "am",                // apply mailbox (used in rebase)
+        "format-patch",      // generates patch files
+        "send-email",        // sends emails
+        "request-pull",      // already in read list
+        "archive",           // already in read list
+    ]
+});
+
 /// Classify a git command by its subcommand.
 pub(super) fn classify_git(args: &[&str]) -> Safety {
     let Some(sub) = args.first().copied() else {
@@ -154,19 +218,13 @@ pub(super) fn classify_git(args: &[&str]) -> Safety {
         return Safety::ReadOnly;
     }
 
-    // ── Explicit write subcommands (caught by default, but listing for clarity)
-    // checkout, switch, restore, reset, revert, merge, rebase, pull,
-    // push, commit, add, clean, rm, mv, cherry-pick, bisect, gc, prune,
-    // update-ref, update-index, write-tree, read-tree, mktag, mktree,
-    // commit-tree, replace, filter-branch, worktree add/remove,
-    // submodule add/update, notes add/remove, maintenance start/stop,
-    // etc. — all fall through to the default WriteOperation below.
-
     if GIT_READ_SUBCOMMANDS.contains(&sub) {
         Safety::ReadOnly
-    } else {
-        // Unknown subcommand → assume write (safer to block)
+    } else if GIT_WRITE_SUBCOMMANDS.contains(&sub) {
         Safety::WriteOperation
+    } else {
+        // Unknown subcommand — ambiguous, let through
+        Safety::Unknown
     }
 }
 
@@ -192,13 +250,15 @@ fn classify_branch_tag(args: &[&str]) -> Safety {
     Safety::WriteOperation
 }
 
-/// `git stash`: list/show are read-only; everything else is write.
+/// `git stash`: list/show are read-only; push/pop/drop/clear are write; others ambiguous.
 fn classify_stash(args: &[&str]) -> Safety {
     let action = args.get(1).copied().unwrap_or("list");
-    if matches!(action, "list" | "show") {
-        Safety::ReadOnly
-    } else {
-        Safety::WriteOperation
+    match action {
+        "list" | "show" => Safety::ReadOnly,
+        "push" | "pop" | "apply" | "drop" | "clear" | "create" | "store" => {
+            Safety::WriteOperation
+        }
+        _ => Safety::Unknown,
     }
 }
 
@@ -234,7 +294,11 @@ fn classify_remote(args: &[&str]) -> Safety {
 
     match action {
         "show" | "get-url" | "get-head" => Safety::ReadOnly,
-        _ => Safety::WriteOperation, // add, rename, remove, set-url, set-head, prune, update
+        // Explicit write commands
+        "add" | "rename" | "remove" | "set-url" | "set-head" | "prune" | "update" => {
+            Safety::WriteOperation
+        }
+        _ => Safety::Unknown,
     }
 }
 
@@ -246,7 +310,11 @@ fn classify_submodule(args: &[&str]) -> Safety {
     };
     match action {
         "status" | "summary" | "foreach" => Safety::ReadOnly,
-        _ => Safety::WriteOperation, // add, update, init, deinit, absorbgitdirs, sync
+        // Explicit write commands
+        "add" | "update" | "init" | "deinit" | "absorbgitdirs" | "sync" => {
+            Safety::WriteOperation
+        }
+        _ => Safety::Unknown,
     }
 }
 
@@ -258,7 +326,9 @@ fn classify_worktree(args: &[&str]) -> Safety {
     };
     match action {
         "list" | "prune" | "lock" | "unlock" => Safety::ReadOnly,
-        _ => Safety::WriteOperation, // add, remove, move, repair
+        // Explicit write commands
+        "add" | "remove" | "move" | "repair" => Safety::WriteOperation,
+        _ => Safety::Unknown,
     }
 }
 
@@ -270,7 +340,11 @@ fn classify_notes(args: &[&str]) -> Safety {
     };
     match action {
         "list" | "show" | "get-ref" => Safety::ReadOnly,
-        _ => Safety::WriteOperation, // add, append, edit, remove, prune, merge, copy
+        // Explicit write commands
+        "add" | "append" | "edit" | "remove" | "prune" | "merge" | "copy" => {
+            Safety::WriteOperation
+        }
+        _ => Safety::Unknown,
     }
 }
 
@@ -283,7 +357,9 @@ fn classify_maintenance(args: &[&str]) -> Safety {
     match action {
         // `run` performs maintenance tasks but doesn't change config
         "run" => Safety::ReadOnly,
-        _ => Safety::WriteOperation, // start, stop, register, unregister
+        // Explicit write commands
+        "start" | "stop" | "register" | "unregister" => Safety::WriteOperation,
+        _ => Safety::Unknown,
     }
 }
 

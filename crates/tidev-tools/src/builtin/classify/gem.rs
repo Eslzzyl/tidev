@@ -35,8 +35,13 @@ pub(super) fn classify_gem(args: &[&str]) -> Safety {
             }
         }
 
-        // Write
-        _ => Safety::WriteOperation,
+        // Explicit write commands
+        "install" | "uninstall" | "update" | "build" | "push" | "owner" | "cleanup"
+        | "sources" | "generate_index" | "server" | "unpack" | "fetch" | "sign"
+        | "specification" | "signin" | "signout" => Safety::WriteOperation,
+
+        // Everything else — ambiguous, let through
+        _ => Safety::Unknown,
     }
 }
 
