@@ -1102,7 +1102,7 @@ impl SessionStore {
                 msg.tokens_per_second,
                 msg.snapshot_hash,
                 compress_text(msg.patch_files.as_deref().unwrap_or("")),
-                compress_text(msg.file_diffs.as_deref().unwrap_or("")),
+                msg.file_diffs.as_deref().map(compress_text),
                 msg.mode
                     .as_ref()
                     .map(|m| serde_json::to_string(m).unwrap_or_default()),
