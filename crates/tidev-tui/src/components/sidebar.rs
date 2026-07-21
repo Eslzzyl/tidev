@@ -153,18 +153,28 @@ impl Sidebar {
         }
 
         let total = token_usage.total();
-        let total_cache = token_usage.total_cache();
+        let non_cached =
+            (token_usage.input_tokens as u64).saturating_sub(token_usage.cache_read_tokens as u64);
+        let cache_pct = if token_usage.input_tokens > 0 {
+            (token_usage.cache_read_tokens as f64 / token_usage.input_tokens as f64) * 100.0
+        } else {
+            0.0
+        };
 
         lines.push(Line::from(vec![Span::styled(
             format!("Total: {}", format_token_count(total)),
             Style::default().fg(palette.text),
         )]));
         lines.push(Line::from(vec![Span::styled(
-            format!("In: {}", format_token_count(token_usage.input_tokens as u64)),
+            format!(
+                "In: {} ({:.0}% Cached)",
+                format_token_count(token_usage.input_tokens as u64),
+                cache_pct,
+            ),
             Style::default().fg(palette.muted),
         )]));
         lines.push(Line::from(vec![Span::styled(
-            format!("Cache: {}", format_token_count(total_cache)),
+            format!("Non-cached In: {}", format_token_count(non_cached)),
             Style::default().fg(palette.muted),
         )]));
         lines.push(Line::from(vec![Span::styled(

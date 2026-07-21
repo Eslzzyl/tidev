@@ -187,11 +187,6 @@ impl TokenUsage {
         self.input_tokens as u64 + self.output_tokens as u64
     }
 
-    /// Total cache tokens (read + write)
-    pub fn total_cache(&self) -> u64 {
-        self.cache_read_tokens as u64 + self.cache_write_tokens as u64
-    }
-
     /// Create from individual values
     pub fn new(
         input_tokens: u32,
