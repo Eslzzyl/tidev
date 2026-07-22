@@ -384,6 +384,10 @@ impl App {
                     let system_msg = Message::new(MessageRole::System, &content);
                     ctx.push(system_msg);
                 }
+                // Force a layout rebuild so the new message is rendered on
+                // the next frame, even if no other dirty-triggering event
+                // follows.
+                chat.invalidate_layout();
             }
         }
 

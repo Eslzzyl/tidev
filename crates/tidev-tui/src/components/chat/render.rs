@@ -713,7 +713,26 @@ fn compute_block_data(
 
             (1, line_count, cache_entries)
         }
-        MessageRole::Tool => (1, 0, Vec::new()),
+        MessageRole::Tool => {
+            let cards = render_tool_card(ctx, message, content_width);
+            let mut line_count = 0;
+            for (_, card_lines) in &cards {
+                line_count += card_lines.len();
+            }
+
+            let kind = MessageRenderCacheKey {
+                session_id: Uuid::default(),
+                message_id: message.id,
+                width: content_width,
+                is_round_end,
+                kind: MessageRenderCacheKind::Cards,
+            };
+            let cache_entries = vec![(kind, MessageRenderCacheEntry {
+                value: MessageRenderCacheValue::Cards(cards),
+            })];
+
+            (1, line_count, cache_entries)
+        }
     };
 
     BlockComputation { message_id: message.id, message_count, line_count, cache_entries }
@@ -872,7 +891,27 @@ fn compute_and_cache_block(
 
             (1, line_count, 0)
         }
-        MessageRole::Tool => (1, 0, 0),
+        MessageRole::Tool => {
+            let cards = render_single_card(ctx, message, content_width, is_round_end);
+            let mut line_count = 0;
+            for (_, card_lines) in &cards {
+                line_count += card_lines.len();
+            }
+            line_count += 1; // trailing empty line
+
+            let kind = MessageRenderCacheKey {
+                session_id: Uuid::default(),
+                message_id: message.id,
+                width: content_width,
+                is_round_end,
+                kind: MessageRenderCacheKind::Cards,
+            };
+            cache.put(kind, MessageRenderCacheEntry {
+                value: MessageRenderCacheValue::Cards(cards),
+            });
+
+            (1, line_count, 0)
+        }
     }
 }
 
@@ -1622,6 +1661,40 @@ fn render_system_card(
     vec![(palette.background, lines)]
 }
 
+/// Render a standalone Tool message that was not grouped with its parent
+/// Assistant block (defensive fallback).  Shows the tool name as a header
+/// followed by the output content rendered as markdown.
+fn render_tool_card(
+    ctx: &RenderContext,
+    message: &Message,
+    content_width: usize,
+) -> Vec<(Color, Vec<Line<'static>>)> {
+    let palette = ctx.palette;
+    let tool_name = message.tool_name.clone().unwrap_or_else(|| "tool".into());
+    let mut lines = Vec::new();
+
+    // Header line
+    lines.push(Line::from(vec![
+        Span::styled("Tool: ", Style::default().fg(palette.accent_soft)),
+        Span::styled(tool_name, Style::default().fg(palette.text).add_modifier(Modifier::BOLD)),
+    ]));
+
+    // Separator
+    lines.push(Line::from(vec![Span::styled(
+        "─".repeat(content_width.min(40)),
+        Style::default().fg(palette.muted),
+    )]));
+
+    // Output content (markdown-rendered)
+    let content_lines = render_text_body_lines(ctx, &message.content, content_width);
+    lines.extend(content_lines);
+
+    // Trailing empty line for inter-card spacing
+    lines.push(Line::from(""));
+
+    vec![(palette.panel_alt, lines)]
+}
+
 /// Render a single-card message (dispatches by role).
 fn render_single_card(
     ctx: &RenderContext,
@@ -1633,6 +1706,7 @@ fn render_single_card(
         MessageRole::User | MessageRole::Shell => render_user_shell_card(ctx, message, content_width),
         MessageRole::Error => render_error_card(ctx, message, content_width),
         MessageRole::System => render_system_card(ctx, message, content_width, is_round_end),
+        MessageRole::Tool => render_tool_card(ctx, message, content_width),
         _ => {
             let palette = ctx.palette;
             let content_lines = render_text_body_lines(ctx, &message.content, content_width);
