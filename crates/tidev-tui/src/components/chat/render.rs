@@ -1591,7 +1591,21 @@ fn render_system_card(
                 Style::default().fg(palette.text).add_modifier(Modifier::ITALIC),
             ),
         ]);
-        return vec![(palette.background, vec![line, Line::from("")])];
+        let mut lines = vec![Line::from("")];
+        lines.extend(
+            word_wrap_line(&line, WrapOptions::new(content_width).subsequent_indent(Line::from("    ")))
+                .into_iter()
+                .map(|l| {
+                    Line::from(
+                        l.spans
+                            .into_iter()
+                            .map(|s| Span::styled(s.content.to_string(), s.style))
+                            .collect::<Vec<_>>(),
+                    )
+                }),
+        );
+        lines.push(Line::from(""));
+        return vec![(palette.background, lines)];
     }
 
     // Compaction message
@@ -2282,6 +2296,60 @@ mod tests {
         assert_eq!(blank_count, 1,
             "Expected 1 blank line between assistant footer and next user, got {}",
             blank_count);
+    }
+
+    #[test]
+    fn test_instruction_message_wrapping() {
+        let palette = test_palette();
+        let expanded = HashSet::new();
+        let collapsed = HashSet::new();
+        let ctx = test_render_ctx(&palette, &expanded, &[], &collapsed);
+
+        // Short path: should NOT wrap
+        let short_content = "Loaded instructions from AGENTS.md".to_string();
+        let short_msg = Message::new(MessageRole::System, &short_content);
+        let cards = render_system_card(&ctx, &short_msg, 80, false);
+        // cards: [(bg, [leading "", line(s)..., trailing ""])]
+        let lines = &cards[0].1;
+        // lines[0] = leading "", last = trailing ""
+        let body = &lines[1..lines.len()-1];
+        // Should be exactly 1 line (the instruction text itself)
+        assert_eq!(body.len(), 1, "short instruction should not wrap");
+        let rendered: String = body[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(rendered.starts_with("󱁤"), "should start with icon");
+        assert!(rendered.contains("AGENTS.md"), "should contain path");
+
+        // Long path: SHOULD wrap at narrow width
+        let long_content = "Loaded 3 instruction files: a/very/long/path/that/should/definitely/wrap/AGENTS.md, another/long/path/CLAUDE.md, yet/another/CONTEXT.md".to_string();
+        let long_msg = Message::new(MessageRole::System, &long_content);
+        let cards2 = render_system_card(&ctx, &long_msg, 30, false);
+        let lines2 = &cards2[0].1;
+        let body2 = &lines2[1..lines2.len()-1];
+
+        // Should wrap to multiple lines
+        assert!(body2.len() > 1, "long instruction should wrap at narrow width (got {} lines)", body2.len());
+
+        // First line should start with icon
+        let first: String = body2[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(first.starts_with("󱁤"), "first line should start with icon");
+
+        // Continuation lines should be indented (have leading whitespace)
+        for (i, line) in body2[1..].iter().enumerate() {
+            let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+            assert!(text.starts_with("    "),
+                "continuation line {} should be indented with 4 spaces, got: {:?}",
+                i + 1, text);
+        }
+
+        // None of the lines should exceed the content_width in display width
+        use unicode_width::UnicodeWidthStr;
+        for (i, line) in body2.iter().enumerate() {
+            let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+            let w = UnicodeWidthStr::width(text.as_str());
+            assert!(w <= 30,
+                "line {} exceeds width: display_width={} content={:?}",
+                i, w, text);
+        }
     }
 }
 
