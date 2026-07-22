@@ -137,7 +137,7 @@ fn resolve(config_shell: Option<String>) -> ResolvedShell {
         eprintln!("ℹ️  Auto-detected shell: PowerShell 7+ ({path_str})");
         eprintln!("   Set shell.windows_shell in config.toml to override.");
         return ResolvedShell {
-            program: path_str,
+            program: path_str.clone(),
             arg: "-NoProfile -Command".into(),
             display_name: format!("PowerShell 7+ ({path_str})"),
         };
