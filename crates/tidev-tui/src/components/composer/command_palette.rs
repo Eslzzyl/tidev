@@ -106,7 +106,7 @@ pub(crate) static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "message",
-        aliases: &["msg"],
+        aliases: &["msg", "timeline", "history"],
         description: "Search current session user messages",
         action: CommandAction::Message,
     },
