@@ -73,12 +73,16 @@ pub fn compose_system_prompt(
          Working directory: {}\n  \
          Workspace root folder: {}\n  \
          Is directory a git repo: {}\n  \
-         {}\n\
+         {}\n  \
+         Shell: {}\n  \
+         Shell path: {}\n\
          </env>",
         working_dir,
         workspace_root.display(),
         if is_git { "yes" } else { "no" },
         system_info.format_env(),
+        tidev_tools::shell::get().display_name,
+        tidev_tools::shell::get().program,
     );
 
     let mut prompt = base_prompt;
