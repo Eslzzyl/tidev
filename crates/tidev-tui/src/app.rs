@@ -2108,6 +2108,7 @@ impl App {
 
                     // Switch to the new session
                     self.current_session_id = Some(new_session_id);
+                    self.shown_instruction_sources.clear();
                     self.scroll_target = None;
 
                     self.set_notice(format!(
@@ -2225,6 +2226,7 @@ impl App {
                     self.pending_prompt_queue.clear();
                     self.pending_compacts.clear();
                     self.compacting_sessions.clear();
+                    self.shown_instruction_sources.clear();
                 }
                 Action::Chat(action) => {
                     match &action {
@@ -2294,6 +2296,7 @@ impl App {
                                     match self.runtime.create_default_session("Untitled session") {
                                         Ok(id) => {
                                             self.current_session_id = Some(id);
+                                            self.shown_instruction_sources.clear();
 
                                             // Initialize MessageList for the new session.
                                             let config = self.runtime.config();
