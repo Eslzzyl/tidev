@@ -1152,7 +1152,7 @@ impl RuntimeBuilder {
         log::info!("startup: config + auth loaded in {:?}", _start.elapsed());
 
         // 4. Shell detection (must happen before any tool execution).
-        tidev_tools::shell::init(config.shell.windows_shell.clone(), Some(&paths));
+        tidev_tools::shell::init(config.shell.windows_shell.clone());
 
         // 5. Auto-cleanup of temp files (best-effort, ignore errors).
         if config.tmp.auto_cleanup {
