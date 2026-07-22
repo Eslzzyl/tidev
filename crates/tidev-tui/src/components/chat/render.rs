@@ -479,11 +479,20 @@ fn messages_text(
     let mut total_overall_lines = header_line_count + index.total_lines + retry_hint_height;
     let viewport = viewport.max(1);
     let max_scroll = total_overall_lines.saturating_sub(viewport);
-    let scroll = if follow_tail { max_scroll } else { scroll.min(max_scroll) };
-    let message_scroll = scroll.saturating_sub(header_line_count);
+    let mut scroll = if follow_tail { max_scroll } else { scroll.min(max_scroll) };
+    let mut message_scroll = scroll.saturating_sub(header_line_count);
 
     // Find visible blocks
-    let visible_blocks = index.find_visible_blocks(message_scroll, viewport);
+    let mut visible_blocks = index.find_visible_blocks(message_scroll, viewport);
+
+    // Inter-block spacing: account for spacer lines in total and scroll.
+    let num_spacers = visible_blocks.len().saturating_sub(1);
+    total_overall_lines += num_spacers;
+    if follow_tail {
+        scroll = total_overall_lines.saturating_sub(viewport);
+        message_scroll = scroll.saturating_sub(header_line_count);
+        visible_blocks = index.find_visible_blocks(message_scroll, viewport);
+    }
 
     lines.extend(header_lines);
 
@@ -507,7 +516,7 @@ fn messages_text(
     }
 
     let mut current_line_offset = lines.len();
-    for block in &visible_blocks {
+    for (block_idx, block) in visible_blocks.iter().enumerate() {
         let next_idx = block.message_start_idx + block.message_count;
         let is_round_end = next_idx >= messages.len()
             || !matches!(messages[next_idx].role, MessageRole::Tool);
@@ -518,6 +527,11 @@ fn messages_text(
         );
         lines.extend(block_lines);
         current_line_offset = lines.len();
+        // Neutral inter-block spacing between every pair of blocks.
+        if block_idx + 1 < visible_blocks.len() {
+            lines.push(Line::from(""));
+            current_line_offset += 1;
+        }
     }
 
     // Append the pre-computed retrying hint card at the bottom of the chat area
@@ -1063,6 +1077,8 @@ fn render_block_from_cache(
     // Render ToolResult entries (tool call output) for assistant blocks
     let msg = &messages[block.message_start_idx];
     if matches!(msg.role, MessageRole::Assistant) && !msg.tool_calls.is_empty() {
+        // Blank line between assistant body and tool calls
+        lines.push(Line::from(""));
         // Build tool_results_by_id for completion checks
         let tool_results_by_id: HashMap<String, &Message> = {
             let mut map = HashMap::new();
@@ -1340,7 +1356,8 @@ fn render_assistant_cards(
 
     let mut lines_with_margin = Vec::new();
     lines_with_margin.extend(body_lines);
-    lines_with_margin.push(Line::from(""));
+    // No trailing "" here — inter-block spacing is handled by messages_text.
+    // Spacing between body and tool calls is added in render_block_from_cache.
 
     vec![(palette.background, lines_with_margin)]
 }
@@ -1496,7 +1513,6 @@ fn render_user_shell_card(
         lines.push(Line::from(spans));
     }
     lines.push(Line::from(vec![Span::styled("┃ ", prefix_style)]));
-    lines.push(Line::from(""));
 
     vec![(palette.panel_alt, lines)]
 }
@@ -1564,8 +1580,6 @@ fn render_error_card(
     }
 
     // 3. No card background — just the error text in error colour.
-    //    Trailing empty line provides inter-card spacing.
-    lines.push(Line::from(""));
     vec![(palette.background, lines)]
 }
 
@@ -1591,7 +1605,7 @@ fn render_system_card(
                 Style::default().fg(palette.text).add_modifier(Modifier::ITALIC),
             ),
         ]);
-        let mut lines = vec![Line::from("")];
+        let mut lines = Vec::new();
         lines.extend(
             word_wrap_line(&line, WrapOptions::new(content_width).subsequent_indent(Line::from("    ")))
                 .into_iter()
@@ -1604,7 +1618,6 @@ fn render_system_card(
                     )
                 }),
         );
-        lines.push(Line::from(""));
         return vec![(palette.background, lines)];
     }
 
@@ -1664,15 +1677,13 @@ fn render_system_card(
                 )));
             }
         }
-        lines.push(Line::from(""));
         return vec![(palette.background, lines)];
     }
 
-    // Generic system message: render as markdown with trailing margin
+    // Generic system message: render as markdown
     let content_lines = render_text_body_lines(ctx, content, content_width);
     let mut lines = Vec::new();
     lines.extend(content_lines);
-    lines.push(Line::from(""));
     vec![(palette.background, lines)]
 }
 
@@ -1704,9 +1715,6 @@ fn render_tool_card(
     let display_content = crate::utils::strip_system_reminder_tags(&message.content);
     let content_lines = render_text_body_lines(ctx, &display_content, content_width);
     lines.extend(content_lines);
-
-    // Trailing empty line for inter-card spacing
-    lines.push(Line::from(""));
 
     vec![(palette.panel_alt, lines)]
 }
@@ -2309,13 +2317,11 @@ mod tests {
         let short_content = "Loaded instructions from AGENTS.md".to_string();
         let short_msg = Message::new(MessageRole::System, &short_content);
         let cards = render_system_card(&ctx, &short_msg, 80, false);
-        // cards: [(bg, [leading "", line(s)..., trailing ""])]
+        // cards: [(bg, [line(s)...])]
         let lines = &cards[0].1;
-        // lines[0] = leading "", last = trailing ""
-        let body = &lines[1..lines.len()-1];
         // Should be exactly 1 line (the instruction text itself)
-        assert_eq!(body.len(), 1, "short instruction should not wrap");
-        let rendered: String = body[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(lines.len(), 1, "short instruction should not wrap");
+        let rendered: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(rendered.starts_with("󱁤"), "should start with icon");
         assert!(rendered.contains("AGENTS.md"), "should contain path");
 
@@ -2324,17 +2330,16 @@ mod tests {
         let long_msg = Message::new(MessageRole::System, &long_content);
         let cards2 = render_system_card(&ctx, &long_msg, 30, false);
         let lines2 = &cards2[0].1;
-        let body2 = &lines2[1..lines2.len()-1];
 
         // Should wrap to multiple lines
-        assert!(body2.len() > 1, "long instruction should wrap at narrow width (got {} lines)", body2.len());
+        assert!(lines2.len() > 1, "long instruction should wrap at narrow width (got {} lines)", lines2.len());
 
         // First line should start with icon
-        let first: String = body2[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        let first: String = lines2[0].spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(first.starts_with("󱁤"), "first line should start with icon");
 
         // Continuation lines should be indented (have leading whitespace)
-        for (i, line) in body2[1..].iter().enumerate() {
+        for (i, line) in lines2[1..].iter().enumerate() {
             let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
             assert!(text.starts_with("    "),
                 "continuation line {} should be indented with 4 spaces, got: {:?}",
@@ -2343,7 +2348,7 @@ mod tests {
 
         // None of the lines should exceed the content_width in display width
         use unicode_width::UnicodeWidthStr;
-        for (i, line) in body2.iter().enumerate() {
+        for (i, line) in lines2.iter().enumerate() {
             let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
             let w = UnicodeWidthStr::width(text.as_str());
             assert!(w <= 30,
