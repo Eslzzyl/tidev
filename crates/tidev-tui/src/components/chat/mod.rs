@@ -402,6 +402,12 @@ impl MessageList {
         err_msg.completed_at = Some(Utc::now());
         chat_context.messages.push(err_msg);
 
+        // Invalidate layout index so the next render fully rebuilds from the
+        // current message list.  Without this, when the empty streaming message
+        // is removed and the error pushed (same message count), the incremental
+        // update path skips the layout recomputation, leaving total_lines stale
+        // and the scroll range too short to reach all content.
+        self.layout_index.invalidate_all();
         self.render_cache.clear();
         self.dirty = true;
     }

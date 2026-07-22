@@ -1125,7 +1125,6 @@ fn render_block_from_cache(
         }
     }
 
-    lines.push(Line::from(""));
     lines
 }
 
@@ -1462,8 +1461,9 @@ fn render_user_shell_card(
     vec![(palette.panel_alt, lines)]
 }
 
-/// Render an error message card with ! prefix, reasoning (if any),
-/// and panel_light background.  Wrapped with leading/trailing empty lines.
+/// Render an error message with `!` prefix and optional reasoning.
+/// Uses the default chat background (no card panel) with a trailing
+/// empty line for inter-card spacing.
 fn render_error_card(
     ctx: &RenderContext,
     message: &Message,
@@ -1523,11 +1523,10 @@ fn render_error_card(
         ]));
     }
 
-    // 3. Wrap with trailing empty lines, use panel_light background
-    let mut card = Vec::new();
-    card.extend(lines);
-    card.push(Line::from(""));
-    vec![(palette.panel_light, card)]
+    // 3. No card background — just the error text in error colour.
+    //    Trailing empty line provides inter-card spacing.
+    lines.push(Line::from(""));
+    vec![(palette.background, lines)]
 }
 
 /// Render a system message card (handles compaction, instructions, generic).
@@ -1552,7 +1551,7 @@ fn render_system_card(
                 Style::default().fg(palette.text).add_modifier(Modifier::ITALIC),
             ),
         ]);
-        return vec![(palette.background, vec![line])];
+        return vec![(palette.background, vec![Line::from(""), line, Line::from("")])];
     }
 
     // Compaction message
@@ -2042,6 +2041,171 @@ fn apply_badge_styling(lines: &mut [Line<'static>], palette: ThemePalette) {
                 line.spans.push(Span::styled(content, style));
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::style::Color;
+    use std::path::Path;
+
+    fn user_msg(content: &str, id: u128) -> Message {
+        let mut msg = Message::new(MessageRole::User, content);
+        msg.id = Uuid::from_u128(id);
+        msg
+    }
+
+    fn assistant_msg(reasoning: &str, content: &str, id: u128) -> Message {
+        let mut msg = Message::new(MessageRole::Assistant, content);
+        msg.id = Uuid::from_u128(id);
+        msg.reasoning = reasoning.to_string();
+        msg.completed_at = Some(chrono::Utc::now());
+        msg.model_id = Some("test-model".into());
+        msg
+    }
+
+    fn test_palette() -> ThemePalette {
+        ThemePalette {
+            name: crate::theme::ThemeName::Dark,
+            background: Color::Rgb(0, 0, 0),
+            panel: Color::Rgb(10, 10, 10),
+            panel_alt: Color::Rgb(20, 20, 20),
+            panel_light: Color::Rgb(30, 30, 30),
+            text: Color::Rgb(255, 255, 255),
+            muted: Color::Rgb(128, 128, 128),
+            border: Color::Rgb(64, 64, 64),
+            accent: Color::Rgb(0, 200, 200),
+            accent_soft: Color::Rgb(100, 150, 150),
+            success: Color::Rgb(0, 200, 0),
+            warning: Color::Rgb(200, 200, 0),
+            error: Color::Rgb(200, 0, 0),
+            diff_add: Color::Rgb(0, 200, 0),
+            diff_delete: Color::Rgb(200, 0, 0),
+            selection_bg: Color::Rgb(0, 200, 200),
+            selection_fg: Color::Rgb(255, 255, 255),
+            mode_build: Color::Rgb(0, 200, 200),
+            mode_plan: Color::Rgb(100, 150, 150),
+        }
+    }
+
+    fn test_render_ctx<'a>(
+        palette: &'a ThemePalette,
+        expanded: &'a HashSet<Uuid>,
+        subagents: &'a [RunningSubagentInfo],
+        collapsed: &'a HashSet<Uuid>,
+    ) -> RenderContext<'a> {
+        RenderContext {
+            palette: *palette,
+            spinner: "|",
+            workspace_root: Path::new("."),
+            expanded_tool_results: expanded,
+            hovered_card: None,
+            model_display_name: "test",
+            running_subagents: subagents,
+            hovered_inline_subagent: None,
+            thinking_collapsed_overrides: collapsed,
+            default_collapse_thinking: false,
+        }
+    }
+
+    #[test]
+    fn assistant_card_trailing_lines() {
+        let palette = test_palette();
+        let expanded = HashSet::new();
+        let subagents = Vec::new();
+        let collapsed = HashSet::new();
+        let ctx = test_render_ctx(&palette, &expanded, &subagents, &collapsed);
+
+        let msgs = vec![
+            user_msg("hello", 1),
+            assistant_msg("thinking about code", "here is my response", 2),
+            user_msg("next", 3),
+        ];
+
+        let chat_ctx = ChatContext::new(
+            Uuid::from_u128(100),
+            "test".into(),
+            msgs.clone(),
+            None,
+            "test-model".into(),
+            "test-provider".into(),
+        );
+
+        let geom = CardGeom::new(80);
+        let mut index = MessageLayoutIndex::new();
+        let mut cache = lru::LruCache::new(
+            std::num::NonZeroUsize::new(64).unwrap(),
+        );
+
+        update_layout_index(&mut index, &mut cache, &chat_ctx.messages, &geom, &ctx);
+
+        let retrying_hint: Option<(u32, u32, String, Instant)> = None;
+        let output = messages_text(
+            &chat_ctx,
+            &mut index,
+            &mut cache,
+            &ctx,
+            geom,
+            0,
+            200,
+            false,
+            &retrying_hint,
+        );
+
+        // Print rendered lines for manual inspection
+        eprintln!("\n=== Rendered lines ===");
+        for (i, line) in output.lines.iter().enumerate() {
+            let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+            let display = if text.trim().is_empty() {
+                "(empty)".to_string()
+            } else {
+                text.escape_debug().to_string()
+            };
+            eprintln!("  [{:3}] {}", i, display);
+        }
+
+        // Count blank lines between the assistant block's last rendered
+        // content line (the card trailing) and the next user block's
+        // first opening line.
+        let mut blank_count = 0usize;
+        let mut passed_footer = false;
+
+        for (_i, line) in output.lines.iter().enumerate() {
+            let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+            let trimmed = text.trim();
+
+            if trimmed.contains("test · 0s") || trimmed.contains("test-model") {
+                passed_footer = true;
+                continue;
+            }
+
+            if passed_footer && trimmed == "┃" {
+                // Next user card opening — stop counting
+                break;
+            }
+
+            if passed_footer {
+                let is_empty = trimmed.is_empty();
+                if is_empty {
+                    blank_count += 1;
+                }
+            }
+        }
+
+        eprintln!("\n=== Blank lines between assistant footer and next user ===");
+        eprintln!("  Count: {}", blank_count);
+
+        // After removing the unconditional `lines.push(Line::from(""))`
+        // at the end of render_block_from_cache, there should be exactly
+        // 1 blank line (from render_assistant_cards line 1305).
+        assert_eq!(blank_count, 1,
+            "Expected 1 blank line between assistant footer and next user, got {}",
+            blank_count);
     }
 }
 
