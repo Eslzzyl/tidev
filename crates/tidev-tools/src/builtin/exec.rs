@@ -22,11 +22,11 @@ use crate::builtin::classify::{Classifier, Safety};
 use crate::builtin::utils::decode_tool_args;
 use tidev_types::message::BackendEvent;
 use tidev_types::prompts::SessionMode;
-use tidev_types::tools::{BashArgs, ToolDefinition, ToolPermission};
+use tidev_types::tools::{ShellArgs, ToolDefinition, ToolPermission};
 use tidev_utils::encoding::decode_command_output;
 use tidev_utils::encoding::prepare_command_for_shell;
 
-/// Registry of active child process PIDs spawned by the bash tool.
+/// Registry of active child process PIDs spawned by the shell tool.
 /// Used during program exit to prevent orphaned processes.
 static ACTIVE_CHILDREN: LazyLock<Mutex<HashSet<u32>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));
@@ -101,15 +101,15 @@ pub fn kill_all_children() {
     // Windows support could be added later using TerminateProcess
 }
 
-/// Result of bash tool execution.
+/// Result of shell tool execution.
 #[derive(Debug)]
-pub struct BashExecutionResult {
+pub struct ShellExecutionResult {
     pub output: String,
 }
 
 pub fn definitions() -> Vec<ToolDefinition> {
-    vec![ToolDefinition::new::<BashArgs>(
-        "bash",
+    vec![ToolDefinition::new::<ShellArgs>(
+        "shell",
         "Run a shell command in the workspace root",
         ToolPermission::Execute,
     )]
@@ -124,8 +124,8 @@ pub fn execute_tool_call(
     mode: SessionMode,
     session_id: Uuid,
     event_tx: Option<UnboundedSender<BackendEvent>>,
-) -> Result<BashExecutionResult> {
-    let args = decode_tool_args::<BashArgs>(tool_name, arguments)?;
+) -> Result<ShellExecutionResult> {
+    let args = decode_tool_args::<ShellArgs>(tool_name, arguments)?;
     let timeout = args.timeout.unwrap_or(120_000) as u64; // default 2 minutes
     run_shell_inner(
         workspace_root,
@@ -150,8 +150,8 @@ pub fn execute_tool_call_with_cancel(
     mode: SessionMode,
     session_id: Uuid,
     event_tx: Option<UnboundedSender<BackendEvent>>,
-) -> Result<BashExecutionResult> {
-    let args = decode_tool_args::<BashArgs>(tool_name, arguments)?;
+) -> Result<ShellExecutionResult> {
+    let args = decode_tool_args::<ShellArgs>(tool_name, arguments)?;
     let timeout = args.timeout.unwrap_or(120_000) as u64;
     run_shell_inner(
         workspace_root,
@@ -166,7 +166,7 @@ pub fn execute_tool_call_with_cancel(
     )
 }
 
-/// Execute a bash command with streaming output, cancellation, and timeout.
+/// Execute a shell command with streaming output, cancellation, and timeout.
 ///
 /// Uses `tokio::process::Command` for non-blocking process execution.
 /// Stdout is streamed chunk-by-chunk via `BackendEvent::ShellOutput` events.
@@ -182,8 +182,8 @@ pub async fn execute_tool_call_with_cancel_async(
     session_id: Uuid,
     event_tx: Option<UnboundedSender<BackendEvent>>,
     tool_call_id: &str,
-) -> Result<BashExecutionResult> {
-    let args = decode_tool_args::<BashArgs>(tool_name, arguments)?;
+) -> Result<ShellExecutionResult> {
+    let args = decode_tool_args::<ShellArgs>(tool_name, arguments)?;
     let timeout = args.timeout.unwrap_or(120_000) as u64;
     run_shell_streaming(
         workspace_root,
@@ -199,7 +199,7 @@ pub async fn execute_tool_call_with_cancel_async(
     .await
 }
 
-/// Async streaming bash execution — non-blocking, supports cancellation and timeout.
+/// Async streaming shell execution — non-blocking, supports cancellation and timeout.
 ///
 /// Internally uses `tokio::process::Command` so the calling async task is never
 /// blocked by a running shell command. Output is read chunk-by-chunk and
@@ -214,7 +214,7 @@ async fn run_shell_streaming(
     mode: SessionMode,
     session_id: Uuid,
     tool_call_id: &str,
-) -> Result<BashExecutionResult> {
+) -> Result<ShellExecutionResult> {
     let mut actual_command = command.to_string();
 
     // ── Layer 0: Plan mode command classification ────────────────────
@@ -227,7 +227,7 @@ async fn run_shell_streaming(
 
             // Emit ShellOutput so the TUI creates a streaming message
             // that ToolCompleted can finalize; otherwise the result is lost
-            // because bash results rely on ShellOutput for display.
+            // because shell results rely on ShellOutput for display.
             if let Some(ref tx) = event_tx {
                 let _ = tx.send(BackendEvent::ShellOutput {
                     session_id,
@@ -240,7 +240,7 @@ async fn run_shell_streaming(
                 });
             }
 
-            return Ok(BashExecutionResult {
+            return Ok(ShellExecutionResult {
                 output: format!(
                     "[exit 1]\nError: Command blocked in Plan mode — this command appears \
                      to modify files."
@@ -348,7 +348,7 @@ async fn run_shell_streaming(
                 }
 
                 truncate_in_place(&mut output_buf, max_output_bytes);
-                return Ok(BashExecutionResult {
+                return Ok(ShellExecutionResult {
                     output: format!("[exit -1] (cancelled)\n{}", output_buf),
                 });
             }
@@ -369,7 +369,7 @@ async fn run_shell_streaming(
                 }
 
                 truncate_in_place(&mut output_buf, max_output_bytes);
-                return Ok(BashExecutionResult {
+                return Ok(ShellExecutionResult {
                     output: format!(
                         "[exit -1] (timed out after {}s)\n{}",
                         timeout_ms / 1000,
@@ -459,7 +459,7 @@ async fn run_shell_streaming(
 
     let status_code = exit_code.unwrap_or_default();
 
-    Ok(BashExecutionResult {
+    Ok(ShellExecutionResult {
         output: format!("[exit {status_code}]\n{}", combined),
     })
 }
@@ -474,7 +474,7 @@ fn run_shell_inner(
     mode: SessionMode,
     session_id: Uuid,
     tool_call_id: &str,
-) -> Result<BashExecutionResult> {
+) -> Result<ShellExecutionResult> {
     let mut actual_command = command.to_string();
 
     // ── Layer 0: Plan mode command classification ────────────────────
@@ -487,7 +487,7 @@ fn run_shell_inner(
 
             // Emit ShellOutput so the TUI creates a streaming message
             // that ToolCompleted can finalize; otherwise the result is lost
-            // because bash results rely on ShellOutput for display.
+            // because shell results rely on ShellOutput for display.
             if let Some(ref tx) = event_tx {
                 let _ = tx.send(BackendEvent::ShellOutput {
                     session_id,
@@ -500,7 +500,7 @@ fn run_shell_inner(
                 });
             }
 
-            return Ok(BashExecutionResult {
+            return Ok(ShellExecutionResult {
                 output: format!(
                     "[exit 1]\nError: Command blocked in Plan mode — this command appears \
                      to modify files."
@@ -643,7 +643,7 @@ fn run_shell_inner(
 
             // Only show the output we got so far (truncated at max)
             truncate_in_place(&mut output_buf, max_output_bytes);
-            return Ok(BashExecutionResult {
+            return Ok(ShellExecutionResult {
                 output: format!("[exit -1] (cancelled)\n{}", output_buf),
             });
         }
@@ -664,7 +664,7 @@ fn run_shell_inner(
             }
 
             truncate_in_place(&mut output_buf, max_output_bytes);
-            return Ok(BashExecutionResult {
+            return Ok(ShellExecutionResult {
                 output: format!(
                     "[exit -1] (timed out after {}s)\n{}",
                     timeout_ms / 1000,
@@ -746,7 +746,7 @@ fn run_shell_inner(
 
     let status_code = exit_code.unwrap_or_default();
 
-    Ok(BashExecutionResult {
+    Ok(ShellExecutionResult {
         output: format!("[exit {status_code}]\n{}", combined),
     })
 }

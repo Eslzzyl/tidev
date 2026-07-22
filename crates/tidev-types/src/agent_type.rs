@@ -82,10 +82,10 @@ impl AgentType {
         match self {
             Self::General => None,
             Self::Explorer => Some(&[
-                "read", "glob", "grep", "bash", "websearch", "webfetch",
+                "read", "glob", "grep", "shell", "websearch", "webfetch",
             ]),
             Self::Librarian => Some(&[
-                "read", "glob", "grep", "bash", "websearch", "webfetch", "question",
+                "read", "glob", "grep", "shell", "websearch", "webfetch", "question",
             ]),
             Self::Oracle => Some(&[
                 "read", "glob", "grep", "websearch", "webfetch", "question",

@@ -2,7 +2,7 @@
 //!
 //! This crate provides:
 //!
-//! - All builtin tool implementations (file read/write/edit, bash, glob/grep,
+//! - All builtin tool implementations (file read/write/edit, shell, glob/grep,
 //!   web search/fetch, todo, task delegation, apply_patch, question, skill)
 //! - [`execute_tool_call`] dispatch routing tool names to implementations
 //! - [`ToolContext`] carrying shared configuration into every tool invocation

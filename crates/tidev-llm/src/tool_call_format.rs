@@ -204,13 +204,13 @@ mod tests {
 
     #[test]
     fn test_parse_invoke_xml_without_minimax_wrapper() {
-        let text = r#"<invoke name="bash">
+        let text = r#"<invoke name="shell">
 <parameter name="command">echo hello</parameter>
 </invoke>"#;
 
         let (cleaned, calls) = parse_invoke_xml(text);
         assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].name, "bash");
+        assert_eq!(calls[0].name, "shell");
         assert!(calls[0].arguments.contains("echo hello"));
         assert!(cleaned.is_empty());
     }

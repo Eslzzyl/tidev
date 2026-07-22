@@ -650,8 +650,8 @@ impl MessageList {
                 // chat_context hasn't been created yet.
             }
             BackendEvent::ToolCompleted { tool_call, result, .. } => {
-                if tool_call.name == "bash" {
-                    // Bash output was streamed via ShellOutput — find and finalize
+                if tool_call.name == "shell" {
+                    // Shell output was streamed via ShellOutput — find and finalize
                     // the existing streaming Tool message instead of creating a new one.
                     if let Some(idx) = chat_context.messages.iter().rposition(|m| {
                         m.role == tidev_types::message::MessageRole::Tool
@@ -728,7 +728,7 @@ impl MessageList {
                         content.clone(),
                     );
                     msg.tool_call_id = Some(tool_call_id.clone());
-                    msg.tool_name = Some("bash".to_string());
+                    msg.tool_name = Some("shell".to_string());
                     msg.streaming = !*finished;
                     chat_context.messages.push(msg);
                 }

@@ -2,7 +2,7 @@
 //!
 //! Renders tool call cards with argument previews, expand/collapse for tool
 //! results, pending/waiting states during streaming, and specialised
-//! formatting for read/write/edit/bash/websearch/webfetch/task/question/todowrite tools.
+//! formatting for read/write/edit/shell/websearch/webfetch/task/question/todowrite tools.
 
 use std::path::Path;
 
@@ -105,7 +105,7 @@ pub(crate) fn render_tool_call_with_result(
         return (lines, Vec::new());
     }
 
-    // Get result lines and exit code (for bash)
+    // Get result lines and exit code (for shell)
     let (result_lines, exit_code, mut regions) = if let Some(result_msg) = tool_result {
         render_tool_result_detail_lines(result_msg, content_width, ctx, is_expanded)
     } else {
@@ -363,13 +363,13 @@ fn render_tool_call_lines(
     let canonical_name = canonical_tool_name(&tool_call.name).unwrap_or("");
 
     match canonical_name {
-        "bash" => {
+        "shell" => {
             let command = string_field("command").unwrap_or_default();
             let desc = string_field("description");
 
             let display = desc.as_deref().unwrap_or(&command);
             let mut title_spans = vec![
-                Span::styled("Bash: ", Style::default().fg(palette.muted)),
+                Span::styled("Shell: ", Style::default().fg(palette.muted)),
                 Span::styled(display.to_string(), Style::default().fg(palette.text).add_modifier(Modifier::BOLD)),
             ];
 
@@ -544,9 +544,9 @@ fn render_tool_result_detail_lines(
     let tool_name = message.tool_name.as_deref().unwrap_or("tool");
     let canonical_name = canonical_tool_name(tool_name).unwrap_or(tool_name);
 
-    // For bash, parse exit code and strip it from output
-    let (exit_code, effective_output) = if canonical_name == "bash" {
-        parse_bash_exit_code(output)
+    // For shell, parse exit code and strip it from output
+    let (exit_code, effective_output) = if canonical_name == "shell" {
+        parse_shell_exit_code(output)
     } else {
         (None, output)
     };
@@ -1244,11 +1244,14 @@ fn tool_output_is_error(output: &str) -> bool {
 }
 
 // ---------------------------------------------------------------------------
-// Bash exit code
-// ---------------------------------------------------------------------------
+// Shell exit code
 
-fn parse_bash_exit_code(output: &str) -> (Option<i32>, &str) {
-    // Try [exit N] format (new tool output)
+/// Parse the exit code from the tool output.
+///
+/// Supports two formats:
+/// - `[exit N]` (current)
+/// - `Exit code: N` (legacy)
+fn parse_shell_exit_code(output: &str) -> (Option<i32>, &str) {    // Try [exit N] format (new tool output)
     if let Some(stripped) = output.strip_prefix("[exit ")
         && let Some(end_idx) = stripped.find(']') {
             let code_str = &stripped[..end_idx];
@@ -1459,7 +1462,7 @@ pub(crate) fn tool_call_arguments_are_complete(arguments: &str) -> bool {
 
 fn preparing_text_for_tool(canonical_name: &str) -> &'static str {
     match canonical_name {
-        "bash" => "Preparing shell command...",
+        "shell" => "Preparing shell command...",
         "write" => "Preparing write...",
         "edit" => "Preparing edit...",
         "websearch" => "Preparing web search...",

@@ -1,7 +1,7 @@
 //! Shell command classification — determines whether a command is read-only
 //! or likely to perform write operations.
 //!
-//! Used by the bash tool to block modifying commands in Plan mode.
+//! Used by the shell tool to block modifying commands in Plan mode.
 //! The classification is best-effort: false positives (blocking a read-only command)
 //! are worse than false negatives (letting a write command through), so when in doubt
 //! we return [`Safety::Unknown`] which lets the command execute.

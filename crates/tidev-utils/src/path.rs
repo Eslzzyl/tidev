@@ -282,7 +282,7 @@ pub fn is_path_sensitive(workspace_root: &Path, resolved_path: &Path, patterns: 
 /// Supports `read`, `write`, `edit` (field `file_path`), `glob`, `grep`
 /// (field `path`), and `apply_patch` (extracts path from patch header).
 /// Returns `None` if the tool call does not reference any path outside the
-/// workspace (e.g. `bash`).
+/// workspace (e.g. `shell`).
 pub fn extract_boundary_violation_path(
     workspace_root: &Path,
     tool_name: &str,
@@ -302,7 +302,7 @@ pub fn extract_boundary_violation_path(
             let patch = arguments.get("patch_text")?.as_str()?;
             PathBuf::from(extract_file_path_from_patch(patch)?)
         }
-        "bash" => return None,
+        "shell" | "bash" => return None,
         _ => return None,
     };
 

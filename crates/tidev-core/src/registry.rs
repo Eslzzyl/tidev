@@ -63,7 +63,7 @@ impl ToolRegistry {
 
     /// Execute a tool call with cooperative cancellation and optional streaming.
     ///
-    /// Bash commands honor the `cancel` token — when cancelled, the
+    /// Shell commands honor the `cancel` token — when cancelled, the
     /// process group is killed and partial output is returned. Other tools ignore it.
     /// When `event_tx` is `Some`, shell output is streamed as
     /// [`BackendEvent::ShellOutput`] events.

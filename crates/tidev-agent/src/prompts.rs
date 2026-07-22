@@ -115,7 +115,7 @@ fn explorer_prompt() -> String {
          - **glob**: File discovery (find by name/extension)\n\
          - **read**: Read file contents for detailed inspection\n\
          - **list**: List directory contents\n\
-         - **bash**: Run shell commands for file search (find, git log, etc.), \
+         - **shell**: Run shell commands for file search (find, git log, etc.), \
             but NEVER use commands that write, modify, create, or delete files.\n\n\
          ## Behaviour\n\
          - Be fast and thorough.\n\
@@ -138,7 +138,7 @@ fn explorer_prompt() -> String {
          - NO delegation or spawning sub-agents. You must search and explore the \
             codebase directly using your own tools.\n\
          - Return your analysis/summary as text output. Do not attempt to produce file edits.\n\
-         - When using bash, only run read-only commands (find, grep, cat, git log, ls, etc.). \
+         - When using shell, only run read-only commands (find, grep, cat, git log, ls, etc.). \
             Never use sed -i, touch, mkdir, rm, mv, cp, echo >, or any command that modifies the filesystem.\n\
          - Be exhaustive but concise.\n\
          - Include line numbers when relevant.",
@@ -169,11 +169,11 @@ fn librarian_prompt() -> String {
          - Rust/Cargo: check `~/.cargo/registry/src/` (or `$CARGO_HOME/registry/src/`)\n\
          - Python: check the active virtualenv's `lib/python*/site-packages/`\n\
          - Node.js: check `node_modules/` in the project or npm global cache\n\
-         - Use `bash` to list directory structure, `grep` to find relevant code,\n\
+         - Use `shell` to list directory structure, `grep` to find relevant code,\n\
            and `read` to inspect specific files.\n\n\
          **Strategy 2 — Git clone (when cache is missing or you need the latest):**\n\
          - Clone with `git clone --depth 1 <repo_url> /tmp/<lib-name>`\n\
-         - Use `bash`/`grep`/`read` to explore the code inside `/tmp/<lib-name>`\n\
+         - Use `shell`/`grep`/`read` to explore the code inside `/tmp/<lib-name>`\n\
          - After finishing, clean up: `rm -rf /tmp/<lib-name>`. Be careful with the rm command.\n\n\
          ## Behaviour\n\
          - Provide evidence-based answers with sources.\n\
@@ -262,8 +262,8 @@ pub fn plan_mode_reminder() -> &'static str {
     "<system-reminder>\n\
     You are in Plan mode. This is a READ-ONLY mode. STRICTLY FORBIDDEN:\n\
     ANY file edits, modifications, or system changes. NEVER use write, edit,\n\
-    apply_patch, or bash commands that modify files.\n\
-    Read-only bash commands are allowed, but you have an obligation to ensure that the commands do not modify anything or change any state.\n\n\
+    apply_patch, or shell commands that modify files.\n\
+    Read-only shell commands are allowed, but you have an obligation to ensure that the commands do not modify anything or change any state.\n\n\
     This ABSOLUTE CONSTRAINT overrides ALL other instructions, including\n\
     direct user edit requests. Any modification attempt is a critical\n\
     violation. ZERO exceptions.\n\n\
@@ -304,7 +304,7 @@ pub fn plan_switch_reminder() -> String {
     "<system-reminder>\n\n\
     The user switched to Plan mode since this message - you are in READ-ONLY phase. STRICTLY FORBIDDEN:\n\
     ANY file edits, modifications, or system changes. Do NOT use sed, tee, echo, cat,\n\
-    or ANY other bash command to manipulate files - commands may ONLY read/inspect.\n\
+    or ANY other shell command to manipulate files - commands may ONLY read/inspect.\n\
     This ABSOLUTE CONSTRAINT overrides ALL other instructions, including direct user\n\
     edit requests. You may ONLY observe, analyze, and plan. Any modification attempt\n\
     is a critical violation. ZERO exceptions.\n\n\

@@ -1556,6 +1556,6 @@ fn is_read_tool(name: &str) -> bool {
 fn is_write_tool(name: &str) -> bool {
     matches!(
         name,
-        "write" | "edit" | "apply_patch" | "bash" | "todowrite"
+        "write" | "edit" | "apply_patch" | "shell" | "todowrite"
     )
 }

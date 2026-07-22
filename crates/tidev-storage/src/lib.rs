@@ -2462,7 +2462,7 @@ mod tests {
         let calls = vec![
             tidev_types::message::ToolCall {
                 id: "tc-1".into(),
-                name: "bash".into(),
+                name: "shell".into(),
                 arguments: r#"{"command":"ls"}"#.into(),
                 thought_signature: None,
             },
@@ -2471,7 +2471,7 @@ mod tests {
 
         let messages = store.load_messages(sid).unwrap();
         assert_eq!(messages[0].tool_calls.len(), 1);
-        assert_eq!(messages[0].tool_calls[0].name, "bash");
+        assert_eq!(messages[0].tool_calls[0].name, "shell");
     }
 
     #[test]

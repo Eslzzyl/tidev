@@ -80,7 +80,7 @@ mod tests {
         assert!(def.allowed_tools.is_some());
         let tools = def.allowed_tools.as_ref().unwrap();
         assert!(tools.contains(&"grep".to_string()));
-        assert!(tools.contains(&"bash".to_string()));
+        assert!(tools.contains(&"shell".to_string()));
         assert!(!tools.contains(&"write".to_string()));
     }
 

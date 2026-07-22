@@ -1837,8 +1837,8 @@ mod tests {
     #[test]
     fn test_response_tool_spec() {
         let tool = ToolDefinition {
-            name: "bash".to_string(),
-            display_name: "Bash".to_string(),
+            name: "shell".to_string(),
+            display_name: "Shell".to_string(),
             description: "Execute shell command".to_string(),
             parameters: serde_json::json!({
                 "type": "object",
@@ -1851,7 +1851,7 @@ mod tests {
         let response_tool = ResponseTool::from(&tool);
 
         assert_eq!(response_tool.kind, "function");
-        assert_eq!(response_tool.name, "bash");
+        assert_eq!(response_tool.name, "shell");
         assert!(!response_tool.description.is_empty());
     }
 }

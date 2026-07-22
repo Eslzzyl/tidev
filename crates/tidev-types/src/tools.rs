@@ -455,7 +455,7 @@ tool_args! {
 
 tool_args! {
     /// Run a shell command.
-    pub struct BashArgs {
+    pub struct ShellArgs {
         command: string("Shell command to execute from the workspace root"),
         description: optional_string("Clear, concise description of what this command does"),
         timeout: optional_integer("Timeout in milliseconds (default: 120000, max: 600000)"),
@@ -570,7 +570,7 @@ pub fn canonical_tool_name(tool_name: &str) -> Option<&'static str> {
         "edit" => Some("edit"),
         "glob" => Some("glob"),
         "grep" => Some("grep"),
-        "bash" | "shell" => Some("bash"),
+        "bash" | "shell" => Some("shell"),
         "task" => Some("task"),
         "question" => Some("question"),
         "todowrite" | "todo" => Some("todowrite"),
@@ -595,7 +595,8 @@ mod tests {
         assert_eq!(canonical_tool_name("read"), Some("read"));
         assert_eq!(canonical_tool_name("read_file"), Some("read"));
         assert_eq!(canonical_tool_name("write_file"), Some("write"));
-        assert_eq!(canonical_tool_name("shell"), Some("bash"));
+        assert_eq!(canonical_tool_name("shell"), Some("shell"));
+        assert_eq!(canonical_tool_name("bash"), Some("shell"));
         assert_eq!(canonical_tool_name("todo"), Some("todowrite"));
         assert_eq!(canonical_tool_name("unknown"), None);
     }

@@ -1,6 +1,6 @@
-//! Privilege escalation handling for the bash tool.
+//! Privilege escalation handling for the shell tool.
 //!
-//! When the bash tool runs a command that contains `sudo` (or similar privilege
+//! When the shell tool runs a command that contains `sudo` (or similar privilege
 //! escalation tools like `doas`, `pkexec`), the child process may try to open
 //! `/dev/tty` directly to prompt for a password. In TUI mode, this writes raw
 //! text to the terminal outside of the alternate screen, corrupting the display.

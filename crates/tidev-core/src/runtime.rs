@@ -699,7 +699,7 @@ impl Runtime {
     /// 2. Force-abort the agent loop task, which cascades through JoinSet
     ///    drops to abort every spawned tool task — including subagents and
     ///    their nested tools at any depth.
-    /// 3. Kill any remaining child processes (bash).
+    /// 3. Kill any remaining child processes (shell).
     pub async fn cancel(&self) {
         // 1. Signal cooperative cancellation for ALL sessions.
         let tokens: Vec<CancellationToken> = self.active_loop_cancels
@@ -724,7 +724,7 @@ impl Runtime {
             let _ = tokio::time::timeout(Duration::from_millis(200), h).await;
         }
 
-        // 3. Force-kill any lingering child processes (bash).
+        // 3. Force-kill any lingering child processes (shell).
         tidev_tools::kill_all_children();
     }
 
@@ -747,7 +747,7 @@ impl Runtime {
             let _ = tokio::time::timeout(Duration::from_millis(200), h).await;
         }
         // Note: child processes for THIS session are handled by the
-        // CancellationToken chain inside the bash tool. We don't call
+        // CancellationToken chain inside the shell tool. We don't call
         // kill_all_children() here because that would kill other sessions'
         // processes too.
     }

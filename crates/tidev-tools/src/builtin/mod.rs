@@ -129,10 +129,10 @@ fn panic_msg(panic: Box<dyn Any + Send>) -> String {
 
 /// Execute a tool call with streaming output support.
 ///
-/// Bash emits [`BackendEvent::ShellOutput`] events when `event_tx` is `Some`.
+/// Shell emits [`BackendEvent::ShellOutput`] events when `event_tx` is `Some`.
 /// Other tools execute in [`tokio::task::spawn_blocking`] to avoid blocking the
 /// async runtime. The `cancel` token is used for cooperative cancellation of
-/// the bash tool.
+/// the shell tool.
 ///
 /// This function never returns an error — every failure (parse error, tool
 /// error, panic) is converted into a `ToolExecutionResult` with an error
@@ -193,8 +193,8 @@ pub async fn execute_tool_call(
             .await
         }
 
-        // ── Bash (async, panics caught via tokio::spawn) ───────────────
-        Some("bash") => {
+        // ── Shell (async, panics caught via tokio::spawn) ───────────────
+        Some("shell") => {
             let workspace_root = ctx.workspace_root.to_path_buf();
             let call_name = call.name.clone();
             let max_output_bytes = ctx.max_output_bytes;
@@ -306,5 +306,5 @@ pub async fn execute_tool_call(
 }
 
 /// Kill any remaining tracked child processes. Called during program exit
-/// to prevent orphaned bash subprocesses.
+/// to prevent orphaned shell subprocesses.
 pub use exec::{kill_all_children, kill_process_group};
