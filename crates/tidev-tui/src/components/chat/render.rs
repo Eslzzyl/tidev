@@ -1496,6 +1496,7 @@ fn render_user_shell_card(
         lines.push(Line::from(spans));
     }
     lines.push(Line::from(vec![Span::styled("┃ ", prefix_style)]));
+    lines.push(Line::from(""));
 
     vec![(palette.panel_alt, lines)]
 }
@@ -1590,7 +1591,7 @@ fn render_system_card(
                 Style::default().fg(palette.text).add_modifier(Modifier::ITALIC),
             ),
         ]);
-        return vec![(palette.background, vec![Line::from(""), line, Line::from("")])];
+        return vec![(palette.background, vec![line, Line::from("")])];
     }
 
     // Compaction message
