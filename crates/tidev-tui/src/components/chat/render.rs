@@ -1685,8 +1685,9 @@ fn render_tool_card(
         Style::default().fg(palette.muted),
     )]));
 
-    // Output content (markdown-rendered)
-    let content_lines = render_text_body_lines(ctx, &message.content, content_width);
+    // Output content (markdown-rendered), with system-reminder tags stripped
+    let display_content = crate::utils::strip_system_reminder_tags(&message.content);
+    let content_lines = render_text_body_lines(ctx, &display_content, content_width);
     lines.extend(content_lines);
 
     // Trailing empty line for inter-card spacing

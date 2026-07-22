@@ -557,15 +557,16 @@ fn render_tool_result_detail_lines(
     is_expanded: bool,
 ) -> (Vec<Line<'static>>, Option<i32>, Vec<SelectableRegionRange>) {
     let palette = ctx.palette;
-    let output = message.content.as_str();
+    // Strip system-reminder tags injected by instruction file discovery
+    let output = crate::utils::strip_system_reminder_tags(&message.content);
     let tool_name = message.tool_name.as_deref().unwrap_or("tool");
     let canonical_name = canonical_tool_name(tool_name).unwrap_or(tool_name);
 
     // For shell, parse exit code and strip it from output
     let (exit_code, effective_output) = if canonical_name == "shell" {
-        parse_shell_exit_code(output)
+        parse_shell_exit_code(&output)
     } else {
-        (None, output)
+        (None, output.as_str())
     };
 
     let is_error = tool_output_is_error(effective_output);
@@ -1629,6 +1630,126 @@ fn wrap_tool_title(
     wrapped.into_iter().map(|l| {
         Line::from(l.spans.into_iter().map(|s| Span::styled(s.content.to_string(), s.style)).collect::<Vec<_>>())
     }).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+    use std::path::Path;
+    use ratatui::style::Color;
+    use tidev_types::message::{Message, ToolCall, ToolExecutionResult};
+
+    fn test_palette() -> ThemePalette {
+        ThemePalette {
+            name: crate::theme::ThemeName::Dark,
+            background: Color::Reset,
+            panel: Color::Reset,
+            panel_alt: Color::Reset,
+            panel_light: Color::Reset,
+            text: Color::Reset,
+            muted: Color::Reset,
+            border: Color::Reset,
+            accent: Color::Reset,
+            accent_soft: Color::Reset,
+            success: Color::Reset,
+            warning: Color::Reset,
+            error: Color::Reset,
+            diff_add: Color::Reset,
+            diff_delete: Color::Reset,
+            selection_bg: Color::Reset,
+            selection_fg: Color::Reset,
+            mode_build: Color::Reset,
+            mode_plan: Color::Reset,
+        }
+    }
+
+    #[test]
+    fn test_read_tool_summary_only_no_leak() {
+        let tool_call = ToolCall {
+            id: "call_1".into(),
+            name: "read".into(),
+            arguments: r#"{"file_path": "src/main.rs"}"#.into(),
+            thought_signature: None,
+        };
+
+        let palette = test_palette();
+        let empty_set = HashSet::new();
+        let ctx = RenderContext {
+            palette,
+            spinner: ".",
+            workspace_root: Path::new("/test"),
+            expanded_tool_results: &empty_set,
+            hovered_card: None,
+            model_display_name: "test",
+            running_subagents: &[],
+            hovered_inline_subagent: None,
+            thinking_collapsed_overrides: &empty_set,
+            default_collapse_thinking: false,
+        };
+        // Normal read output (no instruction files)
+        let normal_output = "\
+<path>src/main.rs</path>
+<type>file</type>
+<line_range>1-3</line_range>
+<content>
+1: fn main() {}
+</content>";
+
+        let result_msg = Message::tool_result(
+            "call_1",
+            "read",
+            ToolExecutionResult::new(normal_output),
+        );
+
+        let (lines, _regions) = render_tool_call_with_result(
+            &tool_call,
+            Some(&result_msg),
+            80,
+            false,
+            &ctx,
+            false,
+        );
+
+        let rendered: String = lines.iter().flat_map(|l| {
+            l.spans.iter().map(|s| s.content.as_ref())
+        }).collect();
+
+        assert!(rendered.contains("Read"), "Should contain 'Read' label");
+        assert!(!rendered.contains("<path>"), "Should NOT leak raw <path> XML");
+        assert!(!rendered.contains("<content>"), "Should NOT leak <content> tag");
+
+        // Read output WITH appended instruction content
+        let output_with_instructions = format!(
+            "{}\n\n<system-reminder>\nInstructions from: /test/AGENTS.md\n# agent instructions\n</system-reminder>",
+            normal_output
+        );
+
+        let result_msg2 = Message::tool_result(
+            "call_1",
+            "read",
+            ToolExecutionResult::new(&output_with_instructions),
+        );
+
+        let (lines2, _regions2) = render_tool_call_with_result(
+            &tool_call,
+            Some(&result_msg2),
+            80,
+            false,
+            &ctx,
+            false,
+        );
+
+        let rendered2: String = lines2.iter().flat_map(|l| {
+            l.spans.iter().map(|s| s.content.as_ref())
+        }).collect();
+
+        assert!(rendered2.contains("Read"), "Should contain 'Read' label");
+        assert!(!rendered2.contains("system-reminder"), "Should NOT leak system-reminder tag");
+        assert!(!rendered2.contains("AGENTS"), "Should NOT leak instruction file content");
+        assert!(!rendered2.contains("<path>"), "Should NOT leak raw XML even with instructions");
+        assert!(!rendered2.contains("<content>"), "Should NOT leak content tag");
+    }
 }
 
 
