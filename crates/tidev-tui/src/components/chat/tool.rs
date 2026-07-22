@@ -245,7 +245,7 @@ fn render_tool_call_summary_line_inner(
             let summary = summarize_tool_call(tool_call, content_width);
             return vec![Line::from(vec![Span::styled(
                 summary,
-                Style::default().fg(palette.text).add_modifier(Modifier::BOLD),
+                Style::default().fg(palette.accent_soft),
             )])];
         }
     };
@@ -369,7 +369,7 @@ fn render_tool_call_lines(
 
             let display = desc.as_deref().unwrap_or(&command);
             let mut title_spans = vec![
-                Span::styled("Shell: ", Style::default().fg(palette.muted)),
+                Span::styled("Shell ", Style::default().fg(palette.accent_soft)),
                 Span::styled(display.to_string(), Style::default().fg(palette.text).add_modifier(Modifier::BOLD)),
             ];
 
@@ -407,7 +407,7 @@ fn render_tool_call_lines(
             let rel = display_workspace_relative(workspace_root, Path::new(&path));
             lines.extend(wrap_tool_title(
                 Line::from(vec![
-                    Span::styled("Write ", Style::default().fg(palette.muted)),
+                    Span::styled("Write ", Style::default().fg(palette.accent_soft)),
                     Span::styled(rel, Style::default().fg(palette.text).add_modifier(Modifier::BOLD)),
                 ]),
                 content_width, "      ",
@@ -418,7 +418,7 @@ fn render_tool_call_lines(
             let rel = display_workspace_relative(workspace_root, Path::new(&path));
             lines.extend(wrap_tool_title(
                 Line::from(vec![
-                    Span::styled("Edit ", Style::default().fg(palette.muted)),
+                    Span::styled("Edit ", Style::default().fg(palette.accent_soft)),
                     Span::styled(rel, Style::default().fg(palette.text).add_modifier(Modifier::BOLD)),
                 ]),
                 content_width, "      ",
@@ -451,7 +451,7 @@ fn render_tool_call_lines(
         "webfetch" => {
             let url = string_field("url").unwrap_or_default();
             let mut title_spans = vec![
-                Span::styled("Fetch web page from ", Style::default().fg(palette.accent)),
+                Span::styled("Fetch web page from ", Style::default().fg(palette.accent_soft)),
                 Span::styled(url, Style::default().fg(palette.text).add_modifier(Modifier::BOLD)),
             ];
             let mut suffix_parts: Vec<String> = Vec::new();
@@ -491,7 +491,7 @@ fn render_tool_call_lines(
                 format!("Apply patch to {} files", file_paths.len())
             };
             lines.extend(wrap_tool_title(
-                Line::from(vec![Span::styled(title, Style::default().fg(palette.text).add_modifier(Modifier::BOLD))]),
+                Line::from(vec![Span::styled(title, Style::default().fg(palette.accent_soft))]),
                 content_width, "               ",
             ));
         }
@@ -507,20 +507,20 @@ fn render_tool_call_lines(
                 format!("Ask {} questions", count)
             };
             lines.extend(wrap_tool_title(
-                Line::from(vec![Span::styled(title, Style::default().fg(palette.text).add_modifier(Modifier::BOLD))]),
+                Line::from(vec![Span::styled(title, Style::default().fg(palette.accent_soft))]),
                 content_width, "   ",
             ));
         }
         "todowrite" => {
             lines.extend(wrap_tool_title(
-                Line::from(vec![Span::styled("Update todo list", Style::default().fg(palette.text).add_modifier(Modifier::BOLD))]),
+                Line::from(vec![Span::styled("Update todo list", Style::default().fg(palette.accent_soft))]),
                 content_width, "   ",
             ));
         }
         _ => {
             let summary = summarize_tool_call(tool_call, content_width);
             lines.extend(wrap_tool_title(
-                Line::from(vec![Span::styled(summary, Style::default().fg(palette.text).add_modifier(Modifier::BOLD))]),
+                Line::from(vec![Span::styled(summary, Style::default().fg(palette.accent_soft))]),
                 content_width, "  ",
             ));
         }
