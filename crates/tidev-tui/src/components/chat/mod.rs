@@ -119,6 +119,10 @@ pub(crate) struct MessageList {
 
     // ── Dirty tracking ──
     pub(crate) dirty: bool,
+
+    // ── Interrupt handling ──
+    /// Set on user abort to discard stale delta events after cancellation.
+    cancelled: bool,
 }
 
 impl MessageList {
@@ -153,6 +157,7 @@ impl MessageList {
             retrying_hint: None,
             image_badge_bounds: Vec::new(),
             dirty: true,
+            cancelled: false,
         }
     }
 
@@ -369,19 +374,25 @@ impl MessageList {
 
         // Finalise the streaming message, preserving content and reasoning.
         let finalized_idx = self.streaming_buffer.finalise_message(&mut chat_context.messages);
-        if let Some(idx) = finalized_idx {
-            if chat_context.messages[idx].content.is_empty()
-                && chat_context.messages[idx].reasoning.trim().is_empty()
-                && chat_context.messages[idx].tool_calls.is_empty()
-            {
-                // Interrupted before any content was produced — drop the
-                // empty ghost instead of letting it render as "(empty)".
-                chat_context.messages.remove(idx);
-            } else {
-                chat_context.messages[idx].completed_at = Some(Utc::now());
-                self.layout_index.mark_dirty(chat_context.messages[idx].id);
-            }
+
+        // Remove the message if it's empty, whether it was just finalized or
+        // already finalized by a prior StreamEnd event.
+        let idx_to_remove = finalized_idx.or_else(|| {
+            chat_context.messages.iter().rposition(|m| {
+                m.role == tidev_types::message::MessageRole::Assistant
+                    && !m.streaming
+                    && m.content.is_empty()
+                    && m.reasoning.trim().is_empty()
+                    && m.tool_calls.is_empty()
+            })
+        });
+        if let Some(idx) = idx_to_remove {
+            chat_context.messages.remove(idx);
+            self.dirty = true;
         }
+
+        // Suppress stale delta events that arrive after cancellation.
+        self.cancelled = true;
 
         // Clear hover state for the subagent card.
         self.hovered_inline_subagent = None;
@@ -497,6 +508,7 @@ impl MessageList {
 
         match event {
             BackendEvent::TurnStarting { .. } => {
+                self.cancelled = false;
                 if self.active_session_id == Some(session_id) {
                     self.streaming_buffer.begin_streaming(&mut chat_context.messages);
                 } else {
@@ -536,7 +548,7 @@ impl MessageList {
                         msg.reasoning_completed_at = Some(Utc::now());
                     }
                     self.layout_index.mark_dirty(msg.id);
-                } else if is_active_session {
+                } else if is_active_session && !self.cancelled {
                     // Recovery path for active session: TurnStarting was missed.
                     let mid = self.streaming_buffer.recover_or_begin_streaming(&mut chat_context.messages);
                     self.streaming_buffer.push_delta(content, &mut chat_context.messages);
@@ -571,7 +583,7 @@ impl MessageList {
                         msg.reasoning_started_at = Some(Utc::now());
                     }
                     self.layout_index.mark_dirty(msg.id);
-                } else if is_active_session {
+                } else if is_active_session && !self.cancelled {
                     self.streaming_buffer.recover_or_begin_streaming(&mut chat_context.messages);
                     self.streaming_buffer.push_reasoning_delta(content, &mut chat_context.messages);
                     if let Some(msg_id) = self.streaming_buffer.current_message_id {
