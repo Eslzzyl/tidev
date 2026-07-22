@@ -222,24 +222,39 @@ fn render_tool_call_summary_line_inner(
 
     let rel_path = |p: &str| display_workspace_relative(ctx.workspace_root, Path::new(p));
 
-    let (action_label, target) = match canonical_name {
+    let (action_label, target_spans) = match canonical_name {
         "grep" => {
             let pattern = string_field("pattern").unwrap_or_default();
             let path = string_field("path").unwrap_or_else(|| ".".to_string());
-            ("Search", format!("\"{}\" in {}", pattern, rel_path(&path)))
+            let rel = rel_path(&path);
+            ("Search", vec![
+                Span::styled(format!("\"{}\"", pattern), Style::default().fg(palette.text).add_modifier(Modifier::BOLD)),
+                Span::styled(" in ", Style::default().fg(palette.muted)),
+                Span::styled(rel, Style::default().fg(palette.text).add_modifier(Modifier::BOLD)),
+            ])
         }
         "glob" => {
             let pattern = string_field("pattern").unwrap_or_else(|| "*".to_string());
             let path = string_field("path").unwrap_or_else(|| ".".to_string());
-            ("Find", format!("{} in {}", pattern, rel_path(&path)))
+            let rel = rel_path(&path);
+            ("Find", vec![
+                Span::styled(pattern.clone(), Style::default().fg(palette.text).add_modifier(Modifier::BOLD)),
+                Span::styled(" in ", Style::default().fg(palette.muted)),
+                Span::styled(rel, Style::default().fg(palette.text).add_modifier(Modifier::BOLD)),
+            ])
         }
         "read" => {
             let path = string_field("file_path").unwrap_or_else(|| "file".to_string());
-            ("Read", rel_path(&path).to_string())
+            let rel = rel_path(&path);
+            ("Read", vec![
+                Span::styled(rel, Style::default().fg(palette.text).add_modifier(Modifier::BOLD)),
+            ])
         }
         "skill" => {
             let name = string_field("name").unwrap_or_default();
-            ("Loaded skill", name)
+            ("Loaded skill", vec![
+                Span::styled(name, Style::default().fg(palette.text).add_modifier(Modifier::BOLD)),
+            ])
         }
         _ => {
             let summary = summarize_tool_call(tool_call, content_width);
@@ -257,11 +272,13 @@ fn render_tool_call_summary_line_inner(
         " ...".to_string()
     };
 
-    let line = Line::from(vec![
+    let mut all_spans = vec![
         Span::styled(format!("{} ", action_label), Style::default().fg(palette.accent_soft)),
-        Span::styled(target.clone(), Style::default().fg(palette.text).add_modifier(Modifier::BOLD)),
-        Span::styled(result_suffix, Style::default().fg(palette.muted)),
-    ]);
+    ];
+    all_spans.extend(target_spans);
+    all_spans.push(Span::styled(result_suffix, Style::default().fg(palette.muted)));
+
+    let line = Line::from(all_spans);
 
     // Wrap the line if it exceeds content_width
     let indent_width = UnicodeWidthStr::width(action_label) + 1;
@@ -579,10 +596,10 @@ fn render_tool_result_detail_lines(
                 _ => "Edit",
             };
 
-            lines.push(Line::from(vec![Span::styled(
-                format!("{} {}", label, change.path),
-                Style::default().add_modifier(Modifier::BOLD),
-            )]));
+            lines.push(Line::from(vec![
+                Span::styled(format!("{} ", label), Style::default().fg(palette.accent_soft)),
+                Span::styled(change.path.clone(), Style::default().fg(palette.text).add_modifier(Modifier::BOLD)),
+            ]));
             line_offset += 1;
 
             if let Some(diff) = &change.diff
