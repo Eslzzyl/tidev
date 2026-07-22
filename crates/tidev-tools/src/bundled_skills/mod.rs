@@ -20,6 +20,7 @@ pub fn load() -> Vec<SkillInfo> {
         skill_from_str(include_str!("code-review/SKILL.md"), "code-review"),
         skill_from_str(include_str!("debug/SKILL.md"), "debug"),
         skill_from_str(include_str!("git-workflow/SKILL.md"), "git-workflow"),
+        skill_from_str(include_str!("powershell/SKILL.md"), "powershell"),
     ]
 }
 
@@ -48,7 +49,7 @@ mod tests {
     #[test]
     fn test_bundled_skills_load() {
         let skills = load();
-        assert_eq!(skills.len(), 4, "expected 4 bundled skills");
+        assert_eq!(skills.len(), 5, "expected 5 bundled skills");
 
         for skill in &skills {
             assert!(!skill.name.is_empty(), "name must not be empty");

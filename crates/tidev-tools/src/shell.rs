@@ -1,7 +1,8 @@
 //! Shell detection and selection for command execution.
 //!
 //! On Unix, always uses `sh -lc`.
-//! On Windows, defaults to PowerShell.  Users can override via
+//! On Windows, auto-detects `pwsh` (PowerShell 7+) first, falling back to
+//! `powershell` (Windows PowerShell 5.1).  Users can override via
 //! `config.shell.windows_shell` in `config.toml`.
 //!
 //! # Initialization
@@ -76,7 +77,8 @@ fn classify_shell_display_name(program: &str) -> String {
         .unwrap_or("");
     match name.to_lowercase().as_str() {
         "bash" | "sh" | "zsh" | "fish" | "dash" | "ksh" => format!("Bash ({program})"),
-        "powershell" | "pwsh" => format!("PowerShell ({program})"),
+        "pwsh" => format!("PowerShell 7+ ({program})"),
+        "powershell" => format!("Windows PowerShell 5.1 ({program})"),
         "nu" => format!("Nushell ({program})"),
         _ => format!("Custom shell ({program})"),
     }
@@ -86,11 +88,36 @@ fn classify_shell_display_name(program: &str) -> String {
 // Resolution logic (Windows only)
 // ---------------------------------------------------------------------------
 
+/// Look for `pwsh.exe` on PATH.
+#[cfg(windows)]
+fn find_pwsh() -> Option<std::path::PathBuf> {
+    let paths = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&paths) {
+        let pwsh = dir.join("pwsh.exe");
+        if pwsh.is_file() {
+            return Some(pwsh);
+        }
+    }
+
+    // Also check common install location for pwsh
+    let pf = std::env::var("ProgramFiles").unwrap_or_else(|_| "C:\\Program Files".to_string());
+    let candidate = std::path::Path::new(&pf)
+        .join("PowerShell")
+        .join("7")
+        .join("pwsh.exe");
+    if candidate.is_file() {
+        return Some(candidate);
+    }
+
+    None
+}
+
 /// Resolve the shell to use on Windows.
 ///
 /// Priority:
 /// 1. User-configured value from `config.shell.windows_shell`.
-/// 2. Default to PowerShell.
+/// 2. `pwsh` (PowerShell 7+) on PATH.
+/// 3. `powershell` (Windows PowerShell 5.1).
 #[cfg(windows)]
 fn resolve(config_shell: Option<String>) -> ResolvedShell {
     // 1. User-configured value (from config.toml) takes priority.
@@ -104,13 +131,26 @@ fn resolve(config_shell: Option<String>) -> ResolvedShell {
         };
     }
 
-    // 2. Default to PowerShell.
-    eprintln!("ℹ️  Defaulting to PowerShell for shell tool.");
+    // 2. Try pwsh (PowerShell 7+) first.
+    if let Some(pwsh_path) = find_pwsh() {
+        let path_str = pwsh_path.to_string_lossy().to_string();
+        eprintln!("ℹ️  Auto-detected shell: PowerShell 7+ ({path_str})");
+        eprintln!("   Set shell.windows_shell in config.toml to override.");
+        return ResolvedShell {
+            program: path_str,
+            arg: "-NoProfile -Command".into(),
+            display_name: format!("PowerShell 7+ ({path_str})"),
+        };
+    }
+
+    // 3. Fall back to Windows PowerShell 5.1.
+    eprintln!("ℹ️  PowerShell 7+ (pwsh) not found. Falling back to Windows PowerShell 5.1.");
+    eprintln!("   Install pwsh from https://github.com/PowerShell/PowerShell for modern features.");
     eprintln!("   Set shell.windows_shell in config.toml to override.");
     ResolvedShell {
         program: "powershell".into(),
         arg: "-NoProfile -Command".into(),
-        display_name: "PowerShell".into(),
+        display_name: "Windows PowerShell 5.1 (powershell)".into(),
     }
 }
 
