@@ -574,6 +574,69 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn diff_lightweight_works_without_git_repo() {
+        let workspace_root = unique_temp_dir("tidev-diff-worktree");
+        let data_dir = unique_temp_dir("tidev-diff-data");
+
+        // Write initial files.
+        fs::write(workspace_root.join("a.txt"), "hello\n").expect("write");
+        fs::write(workspace_root.join("b.txt"), "world\n").expect("write");
+
+        let paths = test_paths(&data_dir);
+        let snapshot =
+            SnapshotService::new(&workspace_root, &paths, default_snapshot_config())
+                .expect("snapshot should init");
+
+        // First track: capture initial state.
+        let hash1 = snapshot
+            .track()
+            .expect("first track should succeed")
+            .expect("first track should return hash");
+
+        // Modify file, add a file, delete a file.
+        fs::write(workspace_root.join("a.txt"), "modified\n").expect("write");
+        fs::write(workspace_root.join("c.txt"), "new file\n").expect("write");
+        fs::remove_file(workspace_root.join("b.txt")).expect("remove");
+
+        // Second track: capture modified state.
+        let hash2 = snapshot
+            .track()
+            .expect("second track should succeed")
+            .expect("second track should return hash");
+
+        // Hashes should differ when workspace changed.
+        assert_ne!(
+            hash1, hash2,
+            "modified workspace should produce a different tree hash"
+        );
+
+        // diff_lightweight should detect the changes.
+        let diffs = snapshot
+            .diff_lightweight(&hash1, &hash2)
+            .await
+            .expect("diff_lightweight should succeed");
+
+        assert!(!diffs.is_empty(), "diff_lightweight should return non-empty diffs");
+
+        let file_names: Vec<&str> = diffs.iter().map(|d| d.file.as_str()).collect();
+        assert!(
+            file_names.contains(&"a.txt"),
+            "should detect modified file"
+        );
+        assert!(
+            file_names.contains(&"c.txt"),
+            "should detect new file"
+        );
+        assert!(
+            file_names.contains(&"b.txt"),
+            "should detect deleted file"
+        );
+
+        let _ = fs::remove_dir_all(&workspace_root);
+        let _ = fs::remove_dir_all(&data_dir);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn restore_round_trips_without_git_repo() {
         let workspace_root = unique_temp_dir("tidev-restore-worktree");
         let data_dir = unique_temp_dir("tidev-restore-data");
