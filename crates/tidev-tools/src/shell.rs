@@ -95,6 +95,7 @@ fn classify_shell_display_name(program: &str) -> String {
     match name.to_lowercase().as_str() {
         "bash" | "sh" | "zsh" | "fish" | "dash" | "ksh" => format!("Bash ({program})"),
         "powershell" | "pwsh" => format!("PowerShell ({program})"),
+        "nu" => format!("Nushell ({program})"),
         _ => format!("Custom shell ({program})"),
     }
 }
@@ -215,6 +216,7 @@ fn infer_shell_arg(program: &str) -> String {
         "bash" | "sh" | "zsh" | "fish" | "dash" | "ksh" => "-lc".into(),
         "powershell" | "pwsh" => "-NoProfile -Command".into(),
         "cmd" => "/C".into(),
+        "nu" => "-c".into(),
         // Default to `-lc` since most custom shells are POSIX-like.
         _ => "-lc".into(),
     }
