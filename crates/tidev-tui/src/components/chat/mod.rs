@@ -377,15 +377,24 @@ impl MessageList {
 
         // Remove the message if it's empty, whether it was just finalized or
         // already finalized by a prior StreamEnd event.
-        let idx_to_remove = finalized_idx.or_else(|| {
-            chat_context.messages.iter().rposition(|m| {
-                m.role == tidev_types::message::MessageRole::Assistant
-                    && !m.streaming
-                    && m.content.is_empty()
-                    && m.reasoning.trim().is_empty()
-                    && m.tool_calls.is_empty()
+        let idx_to_remove = finalized_idx
+            .filter(|&idx| {
+                // Only remove if the finalized message is actually empty.
+                chat_context.messages.get(idx).map_or(false, |m| {
+                    m.content.is_empty()
+                        && m.reasoning.trim().is_empty()
+                        && m.tool_calls.is_empty()
+                })
             })
-        });
+            .or_else(|| {
+                chat_context.messages.iter().rposition(|m| {
+                    m.role == tidev_types::message::MessageRole::Assistant
+                        && !m.streaming
+                        && m.content.is_empty()
+                        && m.reasoning.trim().is_empty()
+                        && m.tool_calls.is_empty()
+                })
+            });
         if let Some(idx) = idx_to_remove {
             chat_context.messages.remove(idx);
             self.dirty = true;
