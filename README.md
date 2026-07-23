@@ -42,9 +42,16 @@ AI coding agent built in pure Rust. tidev reimplements the interaction model of 
 
 - **Session Persistence** -- All conversations are stored in SQLite. Sessions, workspaces, messages, tool events, and reverts survive restarts. Large database columns are compressed using zstd at the application layer to ensure a stable increase in database file size.
 
-**Agent Skills** -- tidev includes several built-in skills and allows you to create your own.
+- **Agent Skills** -- tidev includes several built-in skills and allows you to create your own.
 
 - **Cost-friendly** -- tidev was designed with the goal of maximizing the use of context caching.
+
+  Statistics for a real session using a DeepSeek V4 Flash model:
+  - Context 415K
+  - Total Tokens 117.6M
+  - Cached Tokens 117.4M, average cache hit rate 99.8%
+  - Non-cached Inputs 236K
+  - Outputs 215.2K
 
 ---
 
