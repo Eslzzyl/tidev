@@ -134,8 +134,8 @@ fn resolve(config_shell: Option<String>) -> ResolvedShell {
     // 2. Try pwsh (PowerShell 7+) first.
     if let Some(pwsh_path) = find_pwsh() {
         let path_str = pwsh_path.to_string_lossy().to_string();
-        eprintln!("ℹ️  Auto-detected shell: PowerShell 7+ ({path_str})");
-        eprintln!("   Set shell.windows_shell in config.toml to override.");
+        log::info!("Auto-detected shell: PowerShell 7+ ({path_str})");
+        log::info!("Set shell.windows_shell in config.toml to override.");
         return ResolvedShell {
             program: path_str.clone(),
             arg: "-NoProfile -Command".into(),
@@ -144,9 +144,7 @@ fn resolve(config_shell: Option<String>) -> ResolvedShell {
     }
 
     // 3. Fall back to Windows PowerShell 5.1.
-    eprintln!("ℹ️  PowerShell 7+ (pwsh) not found. Falling back to Windows PowerShell 5.1.");
-    eprintln!("   Install pwsh from https://github.com/PowerShell/PowerShell for modern features.");
-    eprintln!("   Set shell.windows_shell in config.toml to override.");
+    log::info!("PowerShell 7+ (pwsh) not found. Falling back to Windows PowerShell 5.1.");
     ResolvedShell {
         program: "powershell".into(),
         arg: "-NoProfile -Command".into(),
