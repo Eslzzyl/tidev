@@ -1046,15 +1046,14 @@ fn compute_tool_result_suffix(
                         files += 1;
                     }
                 }
-                let total = files + dirs;
-                if total == 0 {
+                if files == 0 && dirs == 0 {
                     " → empty".to_string()
                 } else if dirs == 0 {
-                    format!(" → {} items ({} files)", total, files)
+                    format!(" → {} files", files)
                 } else if files == 0 {
-                    format!(" → {} items ({} dirs)", total, dirs)
+                    format!(" → {} dirs", dirs)
                 } else {
-                    format!(" → {} items ({} files, {} dirs)", total, files, dirs)
+                    format!(" → {} files, {} dirs", files, dirs)
                 }
             } else {
                 let metadata = parse_read_content_metadata(output);
