@@ -1607,7 +1607,7 @@ fn render_system_card(
         ]);
         let mut lines = Vec::new();
         lines.extend(
-            word_wrap_line(&line, WrapOptions::new(content_width).subsequent_indent(Line::from("    ")))
+            word_wrap_line(&line, WrapOptions::new(content_width).subsequent_indent(Line::from("   ")))
                 .into_iter()
                 .map(|l| {
                     Line::from(
