@@ -1061,65 +1061,18 @@ fn compute_tool_result_suffix(
 
                 match metadata {
                     Some(((start, end), requested_range, total, truncated_by)) => {
-                        // Check if this is a full file read (start==1 && end==total)
-                        let is_full_file = start == 1 && end == total;
-                        let has_requested_range = requested_range.is_some();
-
-                        if is_size_truncated {
-                            // 50KB truncation
-                            if has_requested_range {
-                                let (req_start, req_end) = requested_range.unwrap();
-                                if is_full_file {
-                                    format!(
-                                        " → All {} lines (requested {}-{}, truncated due to 50KB cap)",
-                                        total, req_start, req_end
-                                    )
-                                } else {
-                                    format!(
-                                        " → Line {}-{} of {} (requested {}-{}, truncated due to 50KB cap)",
-                                        start, end, total, req_start, req_end
-                                    )
-                                }
-                            } else if is_full_file {
-                                format!(
-                                    " → All {} lines (requested all lines, truncated due to 50KB cap)",
-                                    total
-                                )
-                            } else {
-                                format!(
-                                    " → Line {}-{} of {} (requested all lines, truncated due to 50KB cap)",
-                                    start, end, total
-                                )
-                            }
-                        } else if truncated_by.as_deref() == Some("lines") {
-                            // 2000-line cap (more flag, but no 50KB cutoff)
-                            if has_requested_range {
-                                let (req_start, req_end) = requested_range.unwrap();
-                                if is_full_file {
-                                    format!(
-                                        " → All {} lines (requested {}-{}, truncated due to 2000 lines cap)",
-                                        total, req_start, req_end
-                                    )
-                                } else {
-                                    format!(
-                                        " → Line {}-{} of {} (requested {}-{}, truncated due to 2000 lines cap)",
-                                        start, end, total, req_start, req_end
-                                    )
-                                }
-                            } else if is_full_file {
-                                format!(
-                                    " → All {} lines (requested all lines, truncated due to 2000 lines cap)",
-                                    total
-                                )
-                            } else {
-                                format!(
-                                    " → Line {}-{} of {} (requested all lines, truncated due to 2000 lines cap)",
-                                    start, end, total
-                                )
-                            }
-                        } else if is_full_file {
-                            // Complete file read without truncation
-                            format!(" → All {} lines", total)
+                        if is_size_truncated
+                            || truncated_by.as_deref() == Some("lines")
+                            || (start == 1 && end == total)
+                        {
+                            format_read_result_label(
+                                start,
+                                end,
+                                total,
+                                requested_range,
+                                truncated_by.as_deref(),
+                                is_size_truncated,
+                            )
                         } else {
                             // Partial read without truncation
                             format!(" → Line {}-{} of {}", start, end, total)
@@ -1585,6 +1538,70 @@ fn parse_read_content_metadata(content: &str) -> ReadContentMetadata {
     match (line_range, file_total) {
         (Some(lr), Some(ft)) => Some((lr, requested_range, ft, truncated_by)),
         _ => None,
+    }
+}
+
+/// Format the label for a read tool result (file content).
+///
+/// Handles three cases:
+/// - 50KB size truncation (`is_size_truncated`)
+/// - 2000-line cap truncation (`truncated_by == "lines"`)
+/// - No truncation
+///
+/// When a specific range was requested **and** all requested lines were returned,
+/// the truncation label is omitted even if the 50KB cap was triggered internally,
+/// because the cap only affected content beyond what the user asked for.
+fn format_read_result_label(
+    start: i64,
+    end: i64,
+    total: i64,
+    requested_range: Option<(i64, i64)>,
+    truncated_by: Option<&str>,
+    is_size_truncated: bool,
+) -> String {
+    let is_full_file = start == 1 && end == total;
+
+    // Determine the truncation suffix (if any) — the user may have gotten
+    // everything they asked for even when the tool hit the 50KB cap.
+    let trunc_suffix = if is_size_truncated {
+        if let Some((_req_start, req_end)) = requested_range {
+            if end >= req_end {
+                None // All requested lines returned; cap only affected lines beyond
+            } else {
+                Some("truncated due to 50KB cap")
+            }
+        } else {
+            Some("truncated due to 50KB cap")
+        }
+    } else if truncated_by == Some("lines") {
+        Some("truncated due to 2000 lines cap")
+    } else {
+        None
+    };
+
+    match (is_full_file, requested_range, trunc_suffix) {
+        // Full file — no truncation possible when all lines are returned
+        (true, _, _) => format!(" → All {} lines", total),
+        // Partial read without truncation
+        (false, None, None) => {
+            format!(" → Line {start}-{end} of {total}")
+        }
+        (false, Some((req_start, req_end)), None) => {
+            format!(
+                " → Line {start}-{end} of {total} (requested {req_start}-{req_end})"
+            )
+        }
+        // Partial read with truncation
+        (false, None, Some(suffix)) => {
+            format!(
+                " → Line {start}-{end} of {total} (requested all lines, {suffix})"
+            )
+        }
+        (false, Some((req_start, req_end)), Some(suffix)) => {
+            format!(
+                " → Line {start}-{end} of {total} (requested {req_start}-{req_end}, {suffix})"
+            )
+        }
     }
 }
 
