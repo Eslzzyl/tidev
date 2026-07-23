@@ -7,6 +7,8 @@
 //! The loop is generic over [`AgentContext`], which provides the concrete
 //! implementations for LLM calls, tool execution, and persistence.
 
+use std::path::Path;
+
 use anyhow::Result;
 use chrono::Utc;
 
@@ -48,7 +50,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
         // de-duplication check (content.starts_with) still works across
         // turns — after both injections the content looks like:
         //   [mode_reminder]\n\n<system-reminder>...\n\n[original]
-        ctx.inject_instructions(session_id, &mut messages).await?;
+        let already_injected = ctx.inject_instructions(session_id, &mut messages).await?;
 
         // ─── 3. Inject mode reminder into the last user message ───────────
         inject_mode_reminder(ctx, session_id, &mut messages, config.mode).await?;
@@ -212,6 +214,37 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
             for (_, result) in &all_results {
                 if !result.instruction_sources.is_empty() {
                     ctx.append_instruction_sources(session_id, &result.instruction_sources).await?;
+                }
+            }
+
+            // Also persist a "Loaded instructions from" System message for
+            // correct cross-session replay in the conversation history.
+            // Only create it for sources NOT already known before this turn
+            // (already_injected — captured from step 2's DB snapshot).
+            let system_sources: Vec<String> = all_results.iter()
+                .flat_map(|(_, r)| r.instruction_sources.iter().cloned())
+                .collect();
+            if !system_sources.is_empty() {
+                let mut unique = system_sources;
+                unique.sort();
+                unique.dedup();
+
+                let new_sources: Vec<String> = unique.into_iter()
+                    .filter(|s| !already_injected.contains(s))
+                    .collect();
+                if !new_sources.is_empty() {
+                    let ws_root = ctx.workspace_root();
+                    let display: Vec<String> = new_sources.iter().map(|s| {
+                        Path::new(s).strip_prefix(ws_root).unwrap_or(Path::new(s))
+                            .display().to_string()
+                    }).collect();
+                    let content = if display.len() == 1 {
+                        format!("Loaded instructions from {}", display[0])
+                    } else {
+                        format!("Loaded {} instruction files: {}",
+                            display.len(), display.join(", "))
+                    };
+                    ctx.save_messages(session_id, &[Message::new(MessageRole::System, &content)]).await?;
                 }
             }
         }

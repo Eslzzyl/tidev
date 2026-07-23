@@ -304,14 +304,8 @@ impl CoreContext {
         &self,
         session_id: Uuid,
         messages: &mut [Message],
-    ) -> Result<()> {
-        // 1. Find the last user message.
-        let last_user_idx = match messages.iter().rposition(|m| m.role == MessageRole::User) {
-            Some(idx) => idx,
-            None => return Ok(()),
-        };
-
-        // 2. Load all instruction sources (with content cache).
+    ) -> Result<Vec<String>> {
+        // 1. Load all instruction sources (with content cache).
         let instructions = self.config.read().unwrap().instructions.clone();
         let mut cache = self.instruction_content_cache.lock().await;
         let (_, all_sources, new_cache) =
@@ -325,15 +319,21 @@ impl CoreContext {
         *cache = new_cache;
         drop(cache);
 
-        if all_sources.is_empty() {
-            return Ok(());
-        }
-
-        // 3. Load already-injected sources from DB.
-        let mut already_injected = self
+        // 2. Load already-injected sources from DB.
+        let already_injected = self
             .session_manager
             .store()
             .load_instruction_sources(session_id)?;
+
+        if all_sources.is_empty() {
+            return Ok(already_injected);
+        }
+
+        // 3. Find the last user message.
+        let last_user_idx = match messages.iter().rposition(|m| m.role == MessageRole::User) {
+            Some(idx) => idx,
+            None => return Ok(already_injected),
+        };
 
         // 4. Find new sources (paths from system_prompt_and_sources_with_cache
         //    are already canonical — see system_paths + canonicalize_display).
@@ -343,7 +343,7 @@ impl CoreContext {
             .collect();
 
         if new_sources.is_empty() {
-            return Ok(());
+            return Ok(already_injected);
         }
 
         // 5. Build <system-reminder> block from new sources.
@@ -357,7 +357,7 @@ impl CoreContext {
         drop(cache);
 
         if sections.is_empty() {
-            return Ok(());
+            return Ok(already_injected);
         }
 
         let injection = format!(
@@ -368,7 +368,7 @@ impl CoreContext {
         // 6. Safety check: avoid double injection if <system-reminder> already
         //    present (should never happen given DB tracking, but be defensive).
         if messages[last_user_idx].content.contains("<system-reminder>") {
-            return Ok(());
+            return Ok(already_injected);
         }
 
         // 7. Prepend injection to the last user message (same pattern as
@@ -382,10 +382,11 @@ impl CoreContext {
 
         // 8. Persist new sources to DB so subsequent turns don't re-inject.
         // Merge with already-injected sources (save_instruction_sources replaces ALL).
-        already_injected.extend(new_sources.iter().map(|s| (*s).clone()));
+        let mut updated = already_injected;
+        updated.extend(new_sources.iter().map(|s| (*s).clone()));
         self.session_manager
             .store()
-            .save_instruction_sources(session_id, &already_injected)?;
+            .save_instruction_sources(session_id, &updated)?;
 
         // 9. Notify frontend.
         let string_sources: Vec<String> = new_sources.iter().map(|s| (*s).clone()).collect();
@@ -400,35 +401,24 @@ impl CoreContext {
             msg_id,
         );
 
-        // 10. Persist a "Loaded instructions from" system message to the store
-        //     so the TUI can display it in the chat history.
-        let display_paths: Vec<String> = new_sources
-            .iter()
-            .map(|s| {
-                let path = std::path::Path::new(s);
-                path.strip_prefix(&self.workspace_root)
-                    .unwrap_or(path)
-                    .display()
-                    .to_string()
-            })
-            .collect();
+        // 10. Persist "Loaded instructions from" notification for
+        //     cross-session replay (only the first time each source
+        //     is injected).
+        let display_paths: Vec<String> = new_sources.iter().map(|s| {
+            let path = std::path::Path::new(s);
+            path.strip_prefix(&self.workspace_root).unwrap_or(path)
+                .display().to_string()
+        }).collect();
         let display_content = if display_paths.len() == 1 {
             format!("Loaded instructions from {}", display_paths[0])
         } else {
-            format!(
-                "Loaded {} instruction files: {}",
-                display_paths.len(),
-                display_paths.join(", "),
-            )
+            format!("Loaded {} instruction files: {}",
+                display_paths.len(), display_paths.join(", "))
         };
-        let system_msg = tidev_types::message::Message::new(
-            tidev_types::message::MessageRole::System,
-            &display_content,
-        );
-        self.session_manager
-            .append_message(session_id, &system_msg)?;
+        self.session_manager.append_message(session_id,
+            &Message::new(MessageRole::System, &display_content))?;
 
-        Ok(())
+        Ok(updated)
     }
 }
 
@@ -445,6 +435,10 @@ impl AgentContext for CoreContext {
 
     fn event_tx(&self) -> UnboundedSender<BackendEvent> {
         self.event_tx.clone()
+    }
+
+    fn workspace_root(&self) -> &std::path::Path {
+        &self.workspace_root
     }
 
     // -----------------------------------------------------------------------
@@ -1252,7 +1246,7 @@ impl AgentContext for CoreContext {
         &self,
         session_id: uuid::Uuid,
         messages: &mut [Message],
-    ) -> Result<()> {
+    ) -> Result<Vec<String>> {
         self.inject_instructions_impl(session_id, messages).await
     }
 

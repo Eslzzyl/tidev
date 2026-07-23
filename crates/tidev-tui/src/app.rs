@@ -347,12 +347,9 @@ impl App {
     /// instruction sources.  Deduplicates against sources already shown in
     /// this session (tracked by `shown_instruction_sources`).
     ///
-    /// When `persist_to_store` is true, the System message is also written to
-    /// the store so it survives restart.  This should be `true` when called
-    /// from `ToolCompleted` (the backend does not persist in that path), and
-    /// `false` when called from `InstructionsLoaded` (the backend already
-    /// persists there).
-    fn show_instruction_sources(&mut self, sources: &[String], persist_to_store: bool) {        // Filter out already-displayed sources.
+    /// **Does not persist.** The caller is responsible for persisting via
+    /// `Runtime::append_message` when cross-session replay is needed.
+    fn show_instruction_sources(&mut self, sources: &[String]) {
         let new_sources: Vec<&String> = sources
             .iter()
             .filter(|s| !self.shown_instruction_sources.contains(s))
@@ -387,7 +384,7 @@ impl App {
         };
 
         // Push as a System message into the current session's chat context
-        // for immediate display.  Persistence is handled by the backend.
+        // for immediate display.
         if let Some(sid) = self.current_session_id {
             if let Some(ref mut chat) = self.message_list {
                 if let Some(ref mut ctx) = chat.active_chat_context_mut()
@@ -400,17 +397,6 @@ impl App {
                 // the next frame, even if no other dirty-triggering event
                 // follows.
                 chat.invalidate_layout();
-            }
-
-            // Persist to store so the message survives session restarts.
-            // Used when the source was discovered during tool execution
-            // (ToolCompleted path) where the backend does not persist.
-            if persist_to_store {
-                let persist_msg = Message::new(MessageRole::System, &content);
-                let _ = self.runtime
-                    .session_manager()
-                    .store()
-                    .append_message(sid, &persist_msg);
             }
         }
 
@@ -648,7 +634,7 @@ impl App {
             BackendEvent::InstructionsLoaded { session_id, sources } => {
                 log::info!("Instructions loaded: {sources:?}");
                 if Some(session_id) == self.current_session_id && !sources.is_empty() {
-                    self.show_instruction_sources(&sources, false);
+                    self.show_instruction_sources(&sources);
                 }
             }
             BackendEvent::Retrying {
@@ -809,15 +795,14 @@ impl App {
                 ..
             } => {
                 // Flush pending instruction sources discovered during tool
-                // execution.  This happens after all tool results have been
-                // placed in the chat_context, ensuring the System notification
-                // appears after all tools in this turn.
-                if Some(session_id) == self.current_session_id {
-                    if let Some(sources) = self.pending_instruction_sources.remove(&session_id) {
-                        if !sources.is_empty() {
-                            // Dedup is handled inside show_instruction_sources.
-                            self.show_instruction_sources(&sources, true);
-                        }
+                // execution.  Only inserts into the in-memory chat_context —
+                // persistence is handled by the backend (loop_.rs step 11)
+                // so the System message appears after all tool results.
+                if let Some(sources) = self.pending_instruction_sources.remove(&session_id) {
+                    if !sources.is_empty()
+                        && Some(session_id) == self.current_session_id
+                    {
+                        self.show_instruction_sources(&sources);
                     }
                 }
 

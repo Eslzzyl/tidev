@@ -4,7 +4,7 @@
 //! tidev-agent defines the loop skeleton; tidev-core implements [`AgentContext`].
 
 use std::collections::VecDeque;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
@@ -172,6 +172,9 @@ pub trait AgentContext: Send + Sync {
     /// Persist one or more messages to the session store.
     async fn save_messages(&self, session_id: uuid::Uuid, messages: &[Message]) -> Result<()>;
 
+    /// Return the workspace root path.
+    fn workspace_root(&self) -> &Path;
+
     /// Load all messages for the current session.
     async fn load_messages(&self, session_id: uuid::Uuid) -> Result<Vec<Message>>;
 
@@ -186,16 +189,20 @@ pub trait AgentContext: Send + Sync {
     /// Inject new instruction files into the last user message via
     /// `<system-reminder>` tags.
     ///
-    /// Called once per agent-loop turn, before `stream_turn`.  The default
-    /// implementation is a no-op — only `CoreContext` provides a real
-    /// implementation.
+    /// Called once per agent-loop turn, before `stream_turn`.  Returns the
+    /// full list of instruction sources known after injection (including
+    /// both previously-known and newly-injected sources), so callers can
+    /// reuse it for downstream dedup without an extra DB query.
+    ///
+    /// The default implementation is a no-op — only `CoreContext` provides
+    /// a real implementation.
     async fn inject_instructions(
         &self,
         _session_id: uuid::Uuid,
         _messages: &mut [Message],
-    ) -> Result<()> {
+    ) -> Result<Vec<String>> {
         // default: no-op
-        Ok(())
+        Ok(Vec::new())
     }
 
     /// Persist instruction sources discovered during tool execution, so the
