@@ -144,6 +144,10 @@ pub struct App {
     /// Tracks instruction sources already shown as "Loaded instructions from" messages
     /// in the current session.  Pure in-memory dedup — never written to the DB.
     shown_instruction_sources: Vec<String>,
+    /// Buffer for instruction sources discovered during tool execution.
+    /// Flushed to chat_context (and persisted) on StreamEnd, after all tool
+    /// results for this turn have been placed in the message list.
+    pending_instruction_sources: HashMap<Uuid, Vec<String>>,
 
     // ── Tool approval pipeline (per-session) ──
 
@@ -282,6 +286,7 @@ impl App {
             terminal_area: Rect::new(0, 0, 0, 0),
             todos: Vec::new(),
             shown_instruction_sources: Vec::new(),
+            pending_instruction_sources: HashMap::new(),
             image_picker: {
                 log::info!("[img] from_query_stdio START");
                 let r = Picker::from_query_stdio();
@@ -779,12 +784,17 @@ impl App {
                 self.set_notice("Undo complete");
             }
             BackendEvent::ToolCompleted { session_id, ref tool_call, result, .. } => {
-                // Handle instruction sources from tool results (nearby instructions
-                // discovered while reading files).
+                // Buffer instruction sources discovered during tool execution.
+                // They will be flushed on StreamEnd, after all tool results in
+                // this turn are placed into the chat_context (which guarantees
+                // the System notification message appears after all tools).
                 if Some(session_id) == self.current_session_id
                     && !result.instruction_sources.is_empty()
                 {
-                    self.show_instruction_sources(&result.instruction_sources, true);
+                    self.pending_instruction_sources
+                        .entry(session_id)
+                        .or_default()
+                        .extend(result.instruction_sources.iter().cloned());
                 }
 
                 // todowrite-specific: reload todos from database.
@@ -798,6 +808,19 @@ impl App {
                 session_id,
                 ..
             } => {
+                // Flush pending instruction sources discovered during tool
+                // execution.  This happens after all tool results have been
+                // placed in the chat_context, ensuring the System notification
+                // appears after all tools in this turn.
+                if Some(session_id) == self.current_session_id {
+                    if let Some(sources) = self.pending_instruction_sources.remove(&session_id) {
+                        if !sources.is_empty() {
+                            // Dedup is handled inside show_instruction_sources.
+                            self.show_instruction_sources(&sources, true);
+                        }
+                    }
+                }
+
                 // Flush queued prompts for sessions that are no longer busy.
                 self.flush_pending_prompt_queue();
 
