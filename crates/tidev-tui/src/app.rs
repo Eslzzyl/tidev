@@ -129,6 +129,10 @@ pub struct App {
     /// Mouse text selection state for the message area.
     mouse_selection: MouseSelection,
 
+    /// Last time an auto-scroll step was performed while dragging a
+    /// selection, used to throttle the rate independent of frame rate.
+    last_selection_auto_scroll: Option<Instant>,
+
     /// Cached sidebar area for mouse hit-testing.
     sidebar_area: Option<Rect>,
 
@@ -273,6 +277,7 @@ impl App {
             message_list: None,
             sidebar: Sidebar::new(),
             mouse_selection: MouseSelection::default(),
+            last_selection_auto_scroll: None,
             sidebar_area: None,
             terminal_area: Rect::new(0, 0, 0, 0),
             todos: Vec::new(),
@@ -1404,8 +1409,10 @@ impl App {
         // Sidebar scroll (scroll events in the sidebar area)
         if let Some(sidebar_area) = self.sidebar_area
             && sidebar_area.contains(position) {
-                let speed = self.runtime.config().ui.scroll_speed as usize;
-                match mouse.kind {
+        // Auto-scroll runs every frame (~60 fps), much more frequently than
+        // discrete scroll-wheel ticks, so use a fraction of the base speed.
+        let raw = self.runtime.config().ui.scroll_speed as usize;
+        let speed = raw.saturating_div(3).max(1);                match mouse.kind {
                     MouseEventKind::ScrollDown => {
                         self.sidebar.scroll_down(speed);
                     }
@@ -1605,8 +1612,13 @@ impl App {
 
     /// Per-frame auto-scroll while dragging a mouse selection near the
     /// top/bottom edge of the message content area.
+    ///
+    /// Time-throttled: a minimum interval (50 ms) is enforced between
+    /// scroll steps so the rate is consistent regardless of frame rate
+    /// or event-loop iteration frequency.
     pub fn update_mouse_selection_auto_scroll(&mut self) {
         if !self.mouse_selection.is_dragging() {
+            self.last_selection_auto_scroll = None;
             return;
         }
         let Some(area) = self
@@ -1625,6 +1637,16 @@ impl App {
         if pointer.x < left || pointer.x >= right {
             return;
         }
+
+        // Throttle: at most one step per 50 ms.
+        let now = Instant::now();
+        let min_interval = Duration::from_millis(50);
+        if let Some(last) = self.last_selection_auto_scroll
+            && now - last < min_interval
+        {
+            return;
+        }
+        self.last_selection_auto_scroll = Some(now);
 
         let top_threshold = area.y.saturating_add(1);
         let bottom_threshold = area.y.saturating_add(area.height.saturating_sub(2));
