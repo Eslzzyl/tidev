@@ -280,6 +280,7 @@ async fn run_shell_streaming(
         cmd.env("LC_ALL", "C.UTF-8");
         cmd.env("MSYS2_ENCODING", "UTF-8");
         cmd.env("PYTHONIOENCODING", "utf-8:surrogateescape");
+        cmd.env("NO_COLOR", "1");
 
         if let Some(ref guard) = sudo_guard {
             cmd.env("SUDO_ASKPASS", guard.path());
@@ -549,6 +550,7 @@ fn run_shell_inner(
         cmd.env("LC_ALL", "C.UTF-8");
         cmd.env("MSYS2_ENCODING", "UTF-8");
         cmd.env("PYTHONIOENCODING", "utf-8:surrogateescape");
+        cmd.env("NO_COLOR", "1");
 
         // Inject SUDO_ASKPASS for privilege escalation handling
         if let Some(ref guard) = sudo_guard {
