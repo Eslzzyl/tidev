@@ -1586,9 +1586,22 @@ impl App {
                     }
                 }
                 let speed = self.runtime.config().ui.scroll_speed as isize;
-                self.mouse_selection.shift_for_scroll(speed);
+                // Compare effective scroll position (accounts for follow_tail)
+                // so we don't shift the selection when the viewport doesn't
+                // actually move (e.g. already at the bottom).
+                let old_effective = self.message_list.as_ref().map(|ml| {
+                    let max = ml.max_scroll();
+                    if ml.follow_tail { max } else { ml.scroll_offset.min(max) }
+                });
                 if self.message_list.is_some() {
                     self.process_action(Action::Chat(ChatAction::ScrollDelta(speed)));
+                }
+                let new_effective = self.message_list.as_ref().map(|ml| {
+                    let max = ml.max_scroll();
+                    if ml.follow_tail { max } else { ml.scroll_offset.min(max) }
+                });
+                if old_effective != new_effective {
+                    self.mouse_selection.shift_for_scroll(speed);
                 }
             }
             MouseEventKind::ScrollUp => {
@@ -1601,9 +1614,19 @@ impl App {
                     }
                 }
                 let speed = self.runtime.config().ui.scroll_speed as isize;
-                self.mouse_selection.shift_for_scroll(-speed);
+                let old_effective = self.message_list.as_ref().map(|ml| {
+                    let max = ml.max_scroll();
+                    if ml.follow_tail { max } else { ml.scroll_offset.min(max) }
+                });
                 if self.message_list.is_some() {
                     self.process_action(Action::Chat(ChatAction::ScrollDelta(-speed)));
+                }
+                let new_effective = self.message_list.as_ref().map(|ml| {
+                    let max = ml.max_scroll();
+                    if ml.follow_tail { max } else { ml.scroll_offset.min(max) }
+                });
+                if old_effective != new_effective {
+                    self.mouse_selection.shift_for_scroll(-speed);
                 }
             }
             _ => {}

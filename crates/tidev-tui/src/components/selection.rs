@@ -134,13 +134,24 @@ impl MouseSelection {
     /// Shift the selection by a scroll delta preserving content-relative
     /// positions.  Called when the user manually scrolls (scroll wheel)
     /// during an active selection so the selected content stays the same.
+    ///
+    /// When actively dragging (`self.dragging`) the focus is left at the
+    /// current mouse screen position so the selection naturally extends as
+    /// new content scrolls into view — matching auto-scroll behaviour.
+    /// When not dragging the focus is shifted together with the anchor so
+    /// that a simple press (without drag) does not accidentally create a
+    /// spurious non-zero selection range.
     pub fn shift_for_scroll(&mut self, delta: isize) {
         let dy = delta as i32;
         if let Some(ref mut a) = self.anchor {
             a.y = (a.y as i32 - dy).clamp(0, u16::MAX as i32) as u16;
         }
-        if let Some(ref mut f) = self.focus {
-            f.y = (f.y as i32 - dy).clamp(0, u16::MAX as i32) as u16;
+        if !self.dragging {
+            // When not dragging, shift focus together with anchor so a
+            // plain press + scroll doesn't accidentally create a selection.
+            if let Some(ref mut f) = self.focus {
+                f.y = (f.y as i32 - dy).clamp(0, u16::MAX as i32) as u16;
+            }
         }
         // pointer is the raw mouse screen position – do NOT adjust it
         // (auto-scroll reads pointer against the screen-area bounds).
