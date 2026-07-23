@@ -16,6 +16,7 @@ tidev-utils = { path = "../tidev-utils" }
 anyhow = "1"
 ansi-to-tui = "8"
 arboard = "3"
+base64 = "0.22"
 blake3 = "1"
 chrono = { version = "0.4", features = ["serde"] }
 crossterm = "0.29"

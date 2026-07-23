@@ -12,6 +12,8 @@ use ratatui::layout::{Position, Rect};
 use ratatui::prelude::Style;
 use unicode_width::UnicodeWidthStr;
 
+use base64::Engine as _;
+
 
 /// State tracking an active (or recently-finished) mouse selection.
 #[derive(Clone, Debug, Default)]
@@ -504,10 +506,54 @@ fn effective_area(buffer_area: Rect, bounds: Option<Rect>) -> Rect {
 // ---------------------------------------------------------------------------
 
 /// Copy text to the system clipboard.
+///
+/// Uses `arboard` for native clipboard access (local desktop).  Falls back
+/// to the **OSC 52** terminal escape sequence when the native clipboard is
+/// unavailable (e.g. over SSH, inside tmux, or in a container without a
+/// display server).  OSC 52 writes the selected text to the **client-side**
+/// clipboard via the terminal emulator.
 pub(crate) fn copy_to_clipboard(text: &str) -> Result<(), String> {
+    // 1. Try native clipboard first.
+    if let Err(err) = copy_via_arboard(text) {
+        log::debug!("arboard clipboard failed (SSH?): {err}; falling back to OSC 52");
+        copy_via_osc52(text)?;
+    }
+    Ok(())
+}
+
+/// Try native `arboard` clipboard.
+fn copy_via_arboard(text: &str) -> Result<(), String> {
     let mut clipboard =
         arboard::Clipboard::new().map_err(|e| format!("clipboard unavailable: {e}"))?;
     clipboard
         .set_text(text)
         .map_err(|e| format!("failed to set clipboard text: {e}"))
+}
+
+/// Copy text via OSC 52 escape sequence to the terminal emulator's clipboard.
+///
+/// Writes the sequence immediately to stdout (with flush), which is safe
+/// inside `ratatui::Terminal::draw()` — the escape sequence is sent to the
+/// terminal alongside the frame buffer update.
+///
+/// When running inside tmux (detected via `$TMUX`), the sequence is wrapped
+/// with tmux's DCS passthrough so tmux forwards it to the client terminal.
+fn copy_via_osc52(text: &str) -> Result<(), String> {
+    use std::io::Write;
+
+    let base64 = base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
+
+    let sequence = if std::env::var("TMUX").is_ok() {
+        // Inside tmux: wrap with tmux's DCS passthrough so it reaches the
+        // client terminal rather than being consumed by tmux's clipboard.
+        format!("\x1bPtmux;\x1b]52;c;{base64}\x07\x1b\\")
+    } else {
+        format!("\x1b]52;c;{base64}\x07")
+    };
+
+    let mut stdout = std::io::stdout().lock();
+    stdout
+        .write_all(sequence.as_bytes())
+        .and_then(|()| stdout.flush())
+        .map_err(|e| format!("failed to write OSC 52 sequence: {e}"))
 }
