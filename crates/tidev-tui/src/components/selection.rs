@@ -131,6 +131,29 @@ impl MouseSelection {
         self.dragging
     }
 
+    /// Shift the selection by a scroll delta preserving content-relative
+    /// positions.  Called when the user manually scrolls (scroll wheel)
+    /// during an active selection so the selected content stays the same.
+    pub fn shift_for_scroll(&mut self, delta: isize) {
+        let dy = delta as i32;
+        if let Some(ref mut a) = self.anchor {
+            a.y = (a.y as i32 - dy).clamp(0, u16::MAX as i32) as u16;
+        }
+        if let Some(ref mut f) = self.focus {
+            f.y = (f.y as i32 - dy).clamp(0, u16::MAX as i32) as u16;
+        }
+        // pointer is the raw mouse screen position – do NOT adjust it
+        // (auto-scroll reads pointer against the screen-area bounds).
+
+        if delta >= 0 {
+            self.anchor_scroll_offset =
+                self.anchor_scroll_offset.saturating_add(delta as usize);
+        } else {
+            self.anchor_scroll_offset =
+                self.anchor_scroll_offset.saturating_sub((-delta) as usize);
+        }
+    }
+
     /// Compute the effective selection range, adjusting anchor for scroll offset.
     fn compute_range(&self, current_scroll: usize) -> Option<SelectionRange> {
         let (mut anchor, focus) = match (self.anchor, self.focus) {

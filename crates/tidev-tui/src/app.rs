@@ -1578,8 +1578,8 @@ impl App {
                         return;
                     }
                 }
-                self.mouse_selection.clear();
                 let speed = self.runtime.config().ui.scroll_speed as isize;
+                self.mouse_selection.shift_for_scroll(speed);
                 if self.message_list.is_some() {
                     self.process_action(Action::Chat(ChatAction::ScrollDelta(speed)));
                 }
@@ -1593,8 +1593,8 @@ impl App {
                         return;
                     }
                 }
-                self.mouse_selection.clear();
                 let speed = self.runtime.config().ui.scroll_speed as isize;
+                self.mouse_selection.shift_for_scroll(-speed);
                 if self.message_list.is_some() {
                     self.process_action(Action::Chat(ChatAction::ScrollDelta(-speed)));
                 }
