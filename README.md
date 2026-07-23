@@ -57,15 +57,19 @@ AI coding agent built in pure Rust. tidev reimplements the interaction model of 
 
 ## Performance
 
-| Page            | OpenCode Memory | tidev Memory |
-| --------------- | --------------- | ------------ |
-| Welcome page    | ~470 MB         | ~17 MB       |
-| simple session  | ~580 MB         | ~32 MB       |
-| complex session | >1GB            | ~200 MB      |
+Test results on macOS 27:
 
-| Metric      | OpenCode | tidev |
-| ----------- | -------- | ----- |
-| Binary size | 121 MB   | 26 MB |
+| Page            | OpenCode 1.18.4 Memory | tidev v0.7.0 Memory |
+| --------------- | ---------------------- | ------------------- |
+| Welcome page    | ~510 MB                | 7.1 MB              |
+| simple session  | ~580 MB                | ~30 MB              |
+| complex session | >1GB                   | ~60 MB              |
+
+| Metric      | OpenCode 1.18.4 | tidev 0.7.0 |
+| ----------- | --------------- | ----------- |
+| Binary size | 132 MB          | 13 MB       |
+
+> It should be noted that OpenCode has a built-in web client, but tidev does not.
 
 ---
 
