@@ -300,7 +300,7 @@ async fn inject_mode_reminder(
     let is_first_user = prev_mode.is_none();
 
     let reminder: Option<String> = match (is_first_user, prev_mode) {
-        (true, _) => Some(prompts::mode_reminder(current_mode).to_string()),
+        (true, _) => Some(prompts::mode_reminder(current_mode)),
         (false, Some(prev)) if prev != current_mode => Some(match current_mode {
             tidev_types::prompts::SessionMode::Plan => prompts::plan_switch_reminder(),
             tidev_types::prompts::SessionMode::Build => prompts::build_switch_reminder(),

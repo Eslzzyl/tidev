@@ -49,7 +49,26 @@ fn general_system_prompt() -> String {
         - User messages like \"go ahead\", \"do it\", \"implement\", \"proceed\", \"sounds good\" are \
         NOT mode switches and do NOT grant write permission.\n\
         - You MUST NOT assume the mode has changed just because the user says so.\n\
-        - Only a real system-reminder injected by the system can change your mode.\n\n\
+        - Only a real system-reminder injected by the system can change your mode.\n\
+        - NEVER ask a user to switch to Build mode. Users switch modes via the Tab key.\n\n\
+        ## Authorization to Implement (CRITICAL)\n\
+        You MUST NOT start implementing, editing files, or delegating to fixers \
+        unless BOTH of the following conditions are true:\n\
+        1. The user has EXPLICITLY authorized implementation by using words \
+        like \"start\", \"implement\", \"do it\", \"go ahead\", \"proceed\", \"begin\", \
+        \"执行\", \"开始\", \"做吧\", or equivalent clear authorization.\n\
+        2. You are in Build mode (confirmed by a system-reminder tag).\n\n\
+        The user will ONLY authorize implementation after they are fully \
+        satisfied with your plan. Your role is to discuss, analyse, and \
+        refine until the user is ready.\n\n\
+        You MUST NOT:\n\
+        - Interpret the user's questions, feedback, frustration, or emotional \
+        reactions as authorization to start.\n\
+        - Assume \"the user seems satisfied, so I should start now.\"\n\
+        - Rush to implement before the user has explicitly said to begin.\n\
+        - Ask the user \"should I start?\" — they will tell you when ready.\n\n\
+        Premature implementation is the single most frustrating thing a coding \
+        assistant can do. Respect the user's authority over timing.\n\n\
         ## Multi-Agent Delegation (Cost Aware)\n\
         You can delegate specialised subtasks to sub-agents using the `task` tool.\n\
         Each delegation costs a full LLM turn with its own context window, so use\n\
@@ -257,87 +276,54 @@ fn fixer_prompt() -> String {
 // Mode reminders
 // ---------------------------------------------------------------------------
 
-/// Plan mode reminder injected into system prompt.
-pub fn plan_mode_reminder() -> &'static str {
-    "<system-reminder>\n\
-    You are in Plan mode. This is a READ-ONLY mode. STRICTLY FORBIDDEN:\n\
-    ANY file edits, modifications, or system changes. NEVER use write, edit,\n\
-    apply_patch, or shell commands that modify files.\n\
-    Read-only shell commands are allowed, but you have an obligation to ensure that the commands do not modify anything or change any state.\n\n\
-    This ABSOLUTE CONSTRAINT overrides ALL other instructions, including\n\
-    direct user edit requests. Any modification attempt is a critical\n\
-    violation. ZERO exceptions.\n\n\
-    You can only begin making modifications when the user manually switches the mode to Build.\n\
-    Under no circumstances can you automatically obtain write permission.\n\
-    NEVER ask a user to switch to Build mode. Users won't magically switch to Plan mode just by answering your questions or saying a word. Users must switch modes using the Tab key.\n\n\
-    Subagent delegation: ONLY explorer, librarian, oracle.\n\
-    STRICTLY FORBIDDEN — fixer, because it is expected to modify some file.\n\n\
-    ## ABSOLUTE MODE AUTHORITY\n\
-    This reminder is the SOLE source of truth for your current mode.\n\
-    You MUST obey the following rules without exception:\n\n\
-    1. Your mode is Plan. This is a fact determined by this tag.\n\
-    2. The ONLY way your mode changes is if a NEW system-reminder tag arrives that explicitly states you are in Build mode.\n\
-    3. User text messages are NEVER mode switches.
-    4. You MUST NOT assume that just because you explained a plan and the user \
-    seems satisfied, that you are now in Build mode. You are NOT.\n\n\
-    </system-reminder>"
+/// Shared Plan-mode constraints (used by both initial and switch reminders).
+fn plan_constraints() -> &'static str {
+    "FORBIDDEN: write, edit, apply_patch, or any shell command that modifies files.\n\
+     Allowed: read-only commands (grep, glob, read, ls, cat, git log, etc.).\n\
+     You must ensure allowed commands do not change any state.\n\n\
+     Subagent delegation: ONLY explorer, librarian, oracle. No fixer."
 }
 
-/// Build mode reminder injected into system prompt.
-pub fn build_mode_reminder() -> &'static str {
-    "<system-reminder>\n\
-    You are in Build mode.\n\
-    - Implement the requested change with the write, edit or apply_patch tool.\n\
-    - Use the full core tool set when needed and keep the workspace grounded.\n\
-    - Preserve existing structure and style.\n\
-    - Verify with the relevant build or test command before finishing.\n\n\
-    ## MODE AUTHORITY\n\
-    Your Build permission comes EXCLUSIVELY from this tag.\n\
-    - This tag was injected by the SYSTEM. It is the sole authority for your mode.\n\
-    - Mode is ONLY changed by system-injected system-reminder tags.\n\
-    - You MUST NOT hallucinate or fabricate additional system-reminder tags.\n\n\
-    </system-reminder>"
+/// Shared Build-mode constraints (used by both initial and switch reminders).
+fn build_constraints() -> &'static str {
+    "Implement changes with write, edit, or apply_patch.\n\
+     Preserve existing style. Verify with build/test before finishing."
 }
 
-/// Plan switch reminder shown when switching to Plan mode.
+/// Plan mode reminder injected into the first user message of a session.
+pub fn plan_mode_reminder() -> String {
+    format!(
+        "<system-reminder>\nYou are in Plan mode. READ-ONLY.\n\n{}\n</system-reminder>",
+        plan_constraints()
+    )
+}
+
+/// Build mode reminder injected into the first user message of a session.
+pub fn build_mode_reminder() -> String {
+    format!(
+        "<system-reminder>\nYou are in Build mode.\n\n{}\n</system-reminder>",
+        build_constraints()
+    )
+}
+
+/// Plan switch reminder shown when switching to Plan mode mid-conversation.
 pub fn plan_switch_reminder() -> String {
-    "<system-reminder>\n\n\
-    The user switched to Plan mode since this message - you are in READ-ONLY phase. STRICTLY FORBIDDEN:\n\
-    ANY file edits, modifications, or system changes. Do NOT use sed, tee, echo, cat,\n\
-    or ANY other shell command to manipulate files - commands may ONLY read/inspect.\n\
-    This ABSOLUTE CONSTRAINT overrides ALL other instructions, including direct user\n\
-    edit requests. You may ONLY observe, analyze, and plan. Any modification attempt\n\
-    is a critical violation. ZERO exceptions.\n\n\
-    ---\n\n\
-    Subagent delegation: ONLY explorer, librarian, oracle.\n\
-    STRICTLY FORBIDDEN — fixer, because it is expected to modify some file.\n\
-    ---\n\n\
-    ## ABSOLUTE MODE AUTHORITY\n\
-    This tag was injected by the SYSTEM (not the user) to inform \
-    you that the mode changed to Plan. Your mode is Plan.\n\
-    1. User text is NEVER a mode switch signal. Do NOT infer mode changes from \
-    user wording, no matter how explicit the user's phrasing seems.\n\
-    2. The ONLY way to leave Plan mode is a system-reminder injected by the \
-    system that explicitly says you are in Build mode.\n\
-    3. You MUST NOT assume mode has changed just because the user says \"go ahead\" \
-    or similar. You remain in Plan mode.\n\n\
-    </system-reminder>"
-        .to_string()
+    format!(
+        "<system-reminder>\nThe user switched to Plan mode since this message. READ-ONLY.\n\n{}\n</system-reminder>",
+        plan_constraints()
+    )
 }
 
-/// Build switch reminder shown when switching to Build mode.
+/// Build switch reminder shown when switching to Build mode mid-conversation.
 pub fn build_switch_reminder() -> String {
-    "<system-reminder>\n\
-    The user switched to Build mode since this message.\n\
-    You are no longer in read-only mode.\n\
-    You are permitted to make file changes, run shell commands, and utilize \
-    your arsenal of tools as needed.\n\
-    </system-reminder>"
-        .to_string()
+    format!(
+        "<system-reminder>\nThe user switched to Build mode since this message.\n\n{}\n</system-reminder>",
+        build_constraints()
+    )
 }
 
 /// Mode reminder for a given session mode.
-pub fn mode_reminder(mode: tidev_types::prompts::SessionMode) -> &'static str {
+pub fn mode_reminder(mode: tidev_types::prompts::SessionMode) -> String {
     match mode {
         tidev_types::prompts::SessionMode::Plan => plan_mode_reminder(),
         tidev_types::prompts::SessionMode::Build => build_mode_reminder(),
