@@ -70,3 +70,82 @@ pub struct ModelConfig {
 fn default_true() -> bool {
     true
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn model(api_type: Option<String>, base_url: Option<String>) -> ModelConfig {
+        ModelConfig {
+            display_name: "test".into(),
+            context_window: 100_000,
+            max_output_tokens: 8_000,
+            api_type,
+            base_url,
+            temperature: None,
+            system_prompt: None,
+            supports_streaming: true,
+            supports_images: false,
+            extra_body: None,
+            request_model_id: None,
+        }
+    }
+
+    fn provider(api_type: Option<String>, base_url: String) -> ProviderConfig {
+        ProviderConfig {
+            display_name: "Test".into(),
+            base_url,
+            api_type,
+            models: BTreeMap::new(),
+        }
+    }
+
+    // ── resolve_api_type ────────────────────────────────────────────────
+
+    #[test]
+    fn resolve_api_type_model_overrides_provider() {
+        let provider = provider(Some("anthropic".into()), "https://api.anthropic.com".into());
+        let model = model(Some("openai_chat_completions".into()), None);
+        assert_eq!(
+            provider.resolve_api_type(&model),
+            ApiType::OpenAiChatCompletions
+        );
+    }
+
+    #[test]
+    fn resolve_api_type_falls_back_to_provider() {
+        let provider = provider(Some("anthropic".into()), "https://api.anthropic.com".into());
+        let model = model(None, None);
+        assert_eq!(provider.resolve_api_type(&model), ApiType::Anthropic);
+    }
+
+    #[test]
+    fn resolve_api_type_default_when_both_none() {
+        let provider = provider(None, "https://api.test.com".into());
+        let model = model(None, None);
+        assert_eq!(provider.resolve_api_type(&model), ApiType::default());
+    }
+
+    // ── resolve_base_url ────────────────────────────────────────────────
+
+    #[test]
+    fn resolve_base_url_model_overrides_provider() {
+        let provider = provider(None, "https://api.default.com".into());
+        let model = model(None, Some("https://api.custom.com".into()));
+        assert_eq!(
+            provider.resolve_base_url(&model),
+            "https://api.custom.com"
+        );
+    }
+
+    #[test]
+    fn resolve_base_url_falls_back_to_provider() {
+        let provider = provider(None, "https://api.default.com".into());
+        let model = model(None, None);
+        assert_eq!(provider.resolve_base_url(&model), "https://api.default.com");
+    }
+}

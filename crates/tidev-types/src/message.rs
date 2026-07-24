@@ -709,9 +709,553 @@ impl BackendEvent {
             Self::InstructionsLoaded { .. }
             | Self::ContextCompacted { .. }
             | Self::UndoCompleted { .. }
-            | Self::UserMessageCreated { .. }
+            |             Self::UserMessageCreated { .. }
             | Self::ShellOutput { .. }
             | Self::MessagesTruncated { .. } => None,
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── MessageAttachment ───────────────────────────────────────────────
+
+    #[test]
+    fn is_image_returns_true_for_image_variant() {
+        let img = MessageAttachment::Image {
+            filename: "x.png".into(),
+            mime: "image/png".into(),
+            data: vec![0u8; 16],
+            file_size: 16,
+        };
+        assert!(img.is_image());
+    }
+
+    #[test]
+    fn is_image_returns_false_for_file_reference() {
+        let fr = MessageAttachment::FileReference {
+            path: "a.rs".into(),
+            content: Arc::new("fn main() {}".into()),
+            tool_output: None,
+            truncated: false,
+        };
+        assert!(!fr.is_image());
+    }
+
+    #[test]
+    fn is_image_returns_false_for_directory_reference() {
+        let dr = MessageAttachment::DirectoryReference {
+            path: "src".into(),
+            tree: Arc::new("src/\n  main.rs".into()),
+        };
+        assert!(!dr.is_image());
+    }
+
+    #[test]
+    fn prompt_text_file_reference_without_tool_output() {
+        let fr = MessageAttachment::FileReference {
+            path: "src/main.rs".into(),
+            content: Arc::new("let x = 1;".into()),
+            tool_output: None,
+            truncated: false,
+        };
+        let text = fr.prompt_text().unwrap();
+        assert!(text.contains("Referenced file: src/main.rs"));
+        assert!(text.contains("let x = 1;"));
+    }
+
+    #[test]
+    fn prompt_text_file_reference_with_tool_output() {
+        let fr = MessageAttachment::FileReference {
+            path: "Cargo.toml".into(),
+            content: Arc::new("[package]".into()),
+            tool_output: Some(Arc::new("[package]\nname = \"foo\"".into())),
+            truncated: false,
+        };
+        let text = fr.prompt_text().unwrap();
+        assert!(text.contains("read"));       // tool_name = "read"
+        assert!(text.contains("\"path\":\"Cargo.toml\"")); // serialised arg
+        assert!(text.contains("name = \"foo\""));
+        assert!(!text.contains("truncated")); // truncated_hint is empty
+    }
+
+    #[test]
+    fn prompt_text_file_reference_with_truncated_output() {
+        let fr = MessageAttachment::FileReference {
+            path: "big.log".into(),
+            content: Arc::new("".into()),
+            tool_output: Some(Arc::new("lots of data".into())),
+            truncated: true,
+        };
+        let text = fr.prompt_text().unwrap();
+        assert!(text.contains("The tool call succeeded but the output was truncated."));
+    }
+
+    #[test]
+    fn prompt_text_directory_reference() {
+        let dr = MessageAttachment::DirectoryReference {
+            path: "src".into(),
+            tree: Arc::new("src/\n  lib.rs".into()),
+        };
+        let text = dr.prompt_text().unwrap();
+        assert!(text.contains("Referenced directory: src"));
+        assert!(text.contains("lib.rs"));
+    }
+
+    #[test]
+    fn prompt_text_image_returns_none() {
+        let img = MessageAttachment::Image {
+            filename: "x.png".into(),
+            mime: "image/png".into(),
+            data: vec![0u8; 16],
+            file_size: 16,
+        };
+        assert!(img.prompt_text().is_none());
+    }
+
+    // ── truncate_preview / tail_preview ─────────────────────────────────
+
+    #[test]
+    fn truncate_preview_short_input() {
+        assert_eq!(truncate_preview("hello", 100), "hello");
+    }
+
+    #[test]
+    fn truncate_preview_exact_fit() {
+        assert_eq!(truncate_preview("hello", 5), "hello");
+    }
+
+    #[test]
+    fn truncate_preview_truncates_long_input() {
+        let result = truncate_preview("hello world", 5);
+        assert_eq!(result, "hello...");
+        assert_eq!(result.chars().count(), 8); // 5 + 3 dots
+    }
+
+    #[test]
+    fn truncate_preview_empty_input() {
+        assert_eq!(truncate_preview("", 10), "");
+    }
+
+    #[test]
+    fn truncate_preview_zero_max() {
+        let result = truncate_preview("hello", 0);
+        assert_eq!(result, "...");
+        assert_eq!(result.chars().count(), 3);
+    }
+
+    #[test]
+    fn tail_preview_short_input() {
+        assert_eq!(tail_preview("hello", 100), "hello");
+    }
+
+    #[test]
+    fn tail_preview_truncates_long_input() {
+        let result = tail_preview("hello world", 5);
+        assert_eq!(result, "...world");
+        assert_eq!(result.chars().count(), 8); // 3 dots + 5 chars
+    }
+
+    #[test]
+    fn tail_preview_empty_input() {
+        assert_eq!(tail_preview("", 10), "");
+    }
+
+    #[test]
+    fn tail_preview_zero_max() {
+        let result = tail_preview("hello", 0);
+        assert_eq!(result, "...");
+    }
+
+    #[test]
+    fn truncate_preview_multibyte() {
+        // "你好世界" is 4 CJK characters (12 bytes, 4 chars)
+        let result = truncate_preview("你好世界", 2);
+        assert_eq!(result, "你好...");
+        assert_eq!(result.chars().count(), 5);
+    }
+
+    #[test]
+    fn tail_preview_multibyte() {
+        let result = tail_preview("你好世界", 2);
+        assert_eq!(result, "...世界");
+        assert_eq!(result.chars().count(), 5);
+    }
+
+    // ── tool_output_preview ─────────────────────────────────────────────
+
+    #[test]
+    fn tool_output_preview_short_output() {
+        let result = tool_output_preview(Some("read"), "short");
+        assert_eq!(result, "short");
+    }
+
+    #[test]
+    fn tool_output_preview_at_threshold() {
+        let s = "a".repeat(8_000);
+        let result = tool_output_preview(None, &s);
+        assert_eq!(result, s); // not truncated
+    }
+
+    #[test]
+    fn tool_output_preview_over_threshold() {
+        let s = "a".repeat(8_001);
+        let result = tool_output_preview(Some("shell"), &s);
+        assert!(result.starts_with("[shell output truncated: 8001 chars]"));
+        assert!(result.contains("First excerpt:"));
+        assert!(result.contains("Last excerpt:"));
+    }
+
+    #[test]
+    fn tool_output_preview_none_tool_name() {
+        let s = "b".repeat(8_001);
+        let result = tool_output_preview(None, &s);
+        // Falls back to "tool" when tool_name is None
+        assert!(result.starts_with("[tool output truncated: 8001 chars]"));
+    }
+
+    // ── ToolExecutionResult ─────────────────────────────────────────────
+
+    #[test]
+    fn tool_execution_result_new() {
+        let r = ToolExecutionResult::new("hello");
+        assert_eq!(r.output, "hello");
+        assert!(r.attachments.is_empty());
+        assert!(r.snapshot_hash.is_none());
+    }
+
+    #[test]
+    fn preview_for_storage_no_truncation_needed() {
+        let r = ToolExecutionResult::new("short");
+        let previewed = r.preview_for_storage(Some("read"));
+        // No truncation → returns clone, same content
+        assert_eq!(previewed.output, "short");
+    }
+
+    #[test]
+    fn preview_for_storage_with_truncation() {
+        let s = "x".repeat(9_000);
+        let r = ToolExecutionResult::new(s);
+        let previewed = r.preview_for_storage(Some("shell"));
+        assert!(previewed.output.starts_with("[shell output truncated: 9000 chars]"));
+    }
+
+    // ── MessageRole ─────────────────────────────────────────────────────
+
+    #[test]
+    fn message_role_from_db_value_known() {
+        assert_eq!(MessageRole::from_db_value("system"), MessageRole::System);
+        assert_eq!(MessageRole::from_db_value("user"), MessageRole::User);
+        assert_eq!(MessageRole::from_db_value("assistant"), MessageRole::Assistant);
+        assert_eq!(MessageRole::from_db_value("tool"), MessageRole::Tool);
+        assert_eq!(MessageRole::from_db_value("error"), MessageRole::Error);
+        assert_eq!(MessageRole::from_db_value("shell"), MessageRole::Shell);
+    }
+
+    #[test]
+    fn message_role_from_db_value_unknown_falls_back_to_user() {
+        assert_eq!(MessageRole::from_db_value("unknown"), MessageRole::User);
+        assert_eq!(MessageRole::from_db_value(""), MessageRole::User);
+    }
+
+    #[test]
+    fn message_role_db_value_roundtrip() {
+        for role in &[
+            MessageRole::System,
+            MessageRole::User,
+            MessageRole::Assistant,
+            MessageRole::Tool,
+            MessageRole::Error,
+            MessageRole::Shell,
+        ] {
+            let db = role.db_value();
+            let back = MessageRole::from_db_value(db);
+            assert_eq!(*role, back);
+        }
+    }
+
+    // ── AssistantTurn ───────────────────────────────────────────────────
+
+    #[test]
+    fn assistant_turn_upsert_tool_call_updates_existing() {
+        let mut turn = AssistantTurn::default();
+        let tc1 = ToolCall {
+            id: "call_1".into(),
+            name: "read".into(),
+            arguments: r#"{"file_path": "a.rs"}"#.into(),
+            thought_signature: None,
+        };
+        turn.upsert_tool_call(tc1.clone());
+        assert_eq!(turn.tool_calls.len(), 1);
+
+        let tc2 = ToolCall {
+            id: "call_1".into(),
+            name: "read".into(),
+            arguments: r#"{"file_path": "b.rs"}"#.into(),
+            thought_signature: None,
+        };
+        turn.upsert_tool_call(tc2);
+        assert_eq!(turn.tool_calls.len(), 1);
+        assert_eq!(turn.tool_calls[0].arguments, r#"{"file_path": "b.rs"}"#);
+    }
+
+    #[test]
+    fn assistant_turn_upsert_tool_call_appends_new() {
+        let mut turn = AssistantTurn::default();
+        let tc1 = ToolCall {
+            id: "call_1".into(),
+            name: "read".into(),
+            arguments: "{}".into(),
+            thought_signature: None,
+        };
+        let tc2 = ToolCall {
+            id: "call_2".into(),
+            name: "write".into(),
+            arguments: "{}".into(),
+            thought_signature: None,
+        };
+        turn.upsert_tool_call(tc1);
+        turn.upsert_tool_call(tc2);
+        assert_eq!(turn.tool_calls.len(), 2);
+    }
+
+    // ── Message ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn message_new_creates_correct_role() {
+        let msg = Message::new(MessageRole::User, "hello");
+        assert_eq!(msg.role, MessageRole::User);
+        assert_eq!(msg.content, "hello");
+        assert!(!msg.streaming);
+        assert!(msg.metadata.prior_summary.is_none());
+    }
+
+    #[test]
+    fn message_compaction_creates_system_message() {
+        let msg = Message::compaction("summary text");
+        assert_eq!(msg.role, MessageRole::System);
+        assert!(msg.content.starts_with("Compaction"));
+        assert!(msg.content.contains("summary text"));
+    }
+
+    #[test]
+    fn message_streaming_has_streaming_flag() {
+        let msg = Message::streaming(MessageRole::Assistant, "partial");
+        assert!(msg.streaming);
+        assert_eq!(msg.content, "partial");
+    }
+
+    #[test]
+    fn message_persisted_roundtrip() {
+        let id = Uuid::new_v4();
+        let ts = Utc::now();
+        let msg = Message::persisted(id, MessageRole::User, "content", ts, true);
+        assert_eq!(msg.id, id);
+        assert_eq!(msg.role, MessageRole::User);
+        assert_eq!(msg.content, "content");
+        assert_eq!(msg.created_at, ts);
+        assert!(msg.streaming);
+    }
+
+    #[test]
+    fn message_tool_result_sets_fields() {
+        let result = ToolExecutionResult::new("done");
+        let msg = Message::tool_result("tc_1", "shell", result);
+        assert_eq!(msg.role, MessageRole::Tool);
+        assert_eq!(msg.tool_call_id.as_deref(), Some("tc_1"));
+        assert_eq!(msg.tool_name.as_deref(), Some("shell"));
+        assert_eq!(msg.content, "done");
+    }
+
+    #[test]
+    fn message_upsert_tool_call_updates_existing() {
+        let mut msg = Message::new(MessageRole::Assistant, "");
+        let tc1 = ToolCall {
+            id: "c1".into(),
+            name: "read".into(),
+            arguments: "{}".into(),
+            thought_signature: None,
+        };
+        msg.upsert_tool_call(tc1);
+        let tc2 = ToolCall {
+            id: "c1".into(),
+            name: "read".into(),
+            arguments: r#"{"file_path": "x"}"#.into(),
+            thought_signature: None,
+        };
+        msg.upsert_tool_call(tc2);
+        assert_eq!(msg.tool_calls.len(), 1);
+        assert_eq!(msg.tool_calls[0].arguments, r#"{"file_path": "x"}"#);
+    }
+
+    #[test]
+    fn message_upsert_tool_call_appends_new() {
+        let mut msg = Message::new(MessageRole::Assistant, "");
+        msg.upsert_tool_call(ToolCall {
+            id: "c1".into(),
+            name: "read".into(),
+            arguments: "{}".into(),
+            thought_signature: None,
+        });
+        msg.upsert_tool_call(ToolCall {
+            id: "c2".into(),
+            name: "write".into(),
+            arguments: "{}".into(),
+            thought_signature: None,
+        });
+        assert_eq!(msg.tool_calls.len(), 2);
+    }
+
+    // ── Message serialisation ───────────────────────────────────────────
+
+    #[test]
+    fn message_serde_roundtrip() {
+        let msg = Message::new(MessageRole::User, "hello");
+        let json = serde_json::to_string(&msg).unwrap();
+        let deserialized: Message = serde_json::from_str(&json).unwrap();
+        assert_eq!(msg.id, deserialized.id);
+        assert_eq!(msg.role, deserialized.role);
+        assert_eq!(msg.content, deserialized.content);
+    }
+
+    #[test]
+    fn tool_call_serde_roundtrip() {
+        let tc = ToolCall {
+            id: "call_abc".into(),
+            name: "read".into(),
+            arguments: r#"{"file_path":"/tmp/x"}"#.into(),
+            thought_signature: Some("sig123".into()),
+        };
+        let json = serde_json::to_string(&tc).unwrap();
+        let back: ToolCall = serde_json::from_str(&json).unwrap();
+        assert_eq!(tc, back);
+    }
+
+    #[test]
+    fn tool_call_serde_thought_signature_optional() {
+        // When thought_signature is None it should be skipped in JSON
+        let tc = ToolCall {
+            id: "c".into(),
+            name: "read".into(),
+            arguments: "{}".into(),
+            thought_signature: None,
+        };
+        let json = serde_json::to_string(&tc).unwrap();
+        assert!(!json.contains("thought_signature"));
+        // roundtrip should still work
+        let back: ToolCall = serde_json::from_str(&json).unwrap();
+        assert!(back.thought_signature.is_none());
+    }
+
+    // ── BackendEvent ────────────────────────────────────────────────────
+
+    #[test]
+    fn backend_event_session_id_and_request_id() {
+        let sid = Uuid::new_v4();
+        let events: Vec<BackendEvent> = vec![
+            BackendEvent::Delta { session_id: sid, request_id: 1, content: "a".into() },
+            BackendEvent::ReasoningDelta { session_id: sid, request_id: 1, content: "b".into() },
+            BackendEvent::ToolCallUpdated { session_id: sid, request_id: 1, tool_call: ToolCall::default() },
+            BackendEvent::Finished { session_id: sid, request_id: 1, turn: AssistantTurn::default() },
+            BackendEvent::Failed { session_id: sid, request_id: 1, error: "err".into() },
+            BackendEvent::Retrying { session_id: sid, request_id: 1, attempt: 1, max_attempts: 3, reason: "timeout".into(), retry_after_secs: None },
+            BackendEvent::InstructionsLoaded { session_id: sid, sources: vec!["AGENTS.md".into()] },
+            BackendEvent::ToolStarting { session_id: sid, request_id: 1, tool_call: ToolCall::default() },
+            BackendEvent::ToolCompleted { session_id: sid, request_id: 1, tool_call: ToolCall::default(), result: ToolExecutionResult::new("ok") },
+            BackendEvent::SubagentStatus { session_id: sid, request_id: 1, tool_call_id: "t1".into(), child_session_id: Uuid::new_v4(), status_text: "running".into(), current_tool_call: None, assistant_message: None, content_delta: None, reasoning_delta: None },
+            BackendEvent::SubagentCompleted { session_id: sid, request_id: 1, tool_call: ToolCall::default(), child_session_id: Uuid::new_v4(), result: ToolExecutionResult::new("ok") },
+            BackendEvent::UsageStats { session_id: sid, request_id: 1, input_tokens: 10, output_tokens: 20, total_tokens: 30, cache_read_tokens: 0, cache_write_tokens: 0, model_id: "gpt-4".into(), duration_ms: None },
+            BackendEvent::ContextCompacted { session_id: sid, compacted: true, manual: false, summary: Some("sum".into()), retained_from: 5, model_id: None, completed_at: None, error: None },
+            BackendEvent::UserMessageCreated { session_id: sid, message: Message::new(MessageRole::User, "hi") },
+            BackendEvent::UndoCompleted { session_id: sid, target_id: Uuid::new_v4(), message_content: "restored".into() },
+            BackendEvent::SidebarSnapshotReady { session_id: sid, request_id: 1, tool_call_id: "t1".into(), file_diffs_json: "[]".into() },
+            BackendEvent::ShellOutput { session_id: sid, tool_call_id: "t1".into(), content: "out".into(), finished: false, exit_code: None },
+            BackendEvent::TurnStarting { session_id: sid, request_id: 1 },
+            BackendEvent::StreamEnd { session_id: sid, request_id: 1, reasoning_started_at: None, reasoning_completed_at: None },
+            BackendEvent::MessagesTruncated { session_id: sid, kept_count: 10 },
+        ];
+        for ev in &events {
+            assert_eq!(ev.session_id(), sid, "session_id mismatch for {ev:?}");
+        }
+    }
+
+    #[test]
+    fn backend_event_request_id_present() {
+        let sid = Uuid::new_v4();
+        assert_eq!(
+            BackendEvent::Delta { session_id: sid, request_id: 42, content: "a".into() }.request_id(),
+            Some(42)
+        );
+    }
+
+    #[test]
+    fn backend_event_request_id_absent() {
+        let sid = Uuid::new_v4();
+        assert_eq!(
+            BackendEvent::InstructionsLoaded { session_id: sid, sources: vec![] }.request_id(),
+            None
+        );
+        assert_eq!(
+            BackendEvent::ContextCompacted { session_id: sid, compacted: true, manual: false, summary: None, retained_from: 0, model_id: None, completed_at: None, error: None }.request_id(),
+            None
+        );
+        assert_eq!(
+            BackendEvent::UndoCompleted { session_id: sid, target_id: Uuid::new_v4(), message_content: "".into() }.request_id(),
+            None
+        );
+        assert_eq!(
+            BackendEvent::UserMessageCreated { session_id: sid, message: Message::new(MessageRole::User, "") }.request_id(),
+            None
+        );
+        assert_eq!(
+            BackendEvent::ShellOutput { session_id: sid, tool_call_id: "t1".into(), content: "".into(), finished: false, exit_code: None }.request_id(),
+            None
+        );
+        assert_eq!(
+            BackendEvent::MessagesTruncated { session_id: sid, kept_count: 0 }.request_id(),
+            None
+        );
+    }
+
+    // ── Serialisation: MessageAttachment tagged enum ────────────────────
+
+    #[test]
+    fn message_attachment_file_reference_json_tag() {
+        let fr = MessageAttachment::FileReference {
+            path: "f".into(),
+            content: Arc::new("c".into()),
+            tool_output: None,
+            truncated: false,
+        };
+        let json = serde_json::to_value(&fr).unwrap();
+        assert_eq!(json["type"], "file_reference");
+    }
+
+    #[test]
+    fn message_attachment_directory_reference_json_tag() {
+        let dr = MessageAttachment::DirectoryReference {
+            path: "d".into(),
+            tree: Arc::new("t".into()),
+        };
+        let json = serde_json::to_value(&dr).unwrap();
+        assert_eq!(json["type"], "directory_reference");
+    }
+
+    #[test]
+    fn message_attachment_image_json_tag() {
+        let img = MessageAttachment::Image {
+            filename: "x.png".into(),
+            mime: "image/png".into(),
+            data: vec![1, 2, 3],
+            file_size: 3,
+        };
+        let json = serde_json::to_value(&img).unwrap();
+        assert_eq!(json["type"], "image");
     }
 }

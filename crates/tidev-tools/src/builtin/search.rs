@@ -397,3 +397,79 @@ fn glob_matches_path(
         .map(|name| matcher.is_match(name))
         .unwrap_or(false)
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use globset::Glob;
+
+    #[test]
+    fn glob_matches_exact_relative_path() {
+        let root = Path::new("/workspace");
+        let path = Path::new("/workspace/src/main.rs");
+        let glob = Glob::new("src/main.rs").unwrap().compile_matcher();
+        assert!(glob_matches_path(path, root, &glob, "src/main.rs"));
+    }
+
+    #[test]
+    fn glob_matches_wildcard_pattern() {
+        let root = Path::new("/workspace");
+        let path = Path::new("/workspace/src/main.rs");
+        let glob = Glob::new("**/*.rs").unwrap().compile_matcher();
+        assert!(glob_matches_path(path, root, &glob, "*.rs"));
+    }
+
+    #[test]
+    fn glob_does_not_match_non_matching_pattern() {
+        let root = Path::new("/workspace");
+        let path = Path::new("/workspace/src/main.rs");
+        let glob = Glob::new("*.toml").unwrap().compile_matcher();
+        assert!(!glob_matches_path(path, root, &glob, "*.toml"));
+    }
+
+    #[test]
+    fn glob_falls_back_to_filename_when_no_slash_in_pattern() {
+        let root = Path::new("/workspace");
+        let path = Path::new("/workspace/src/main.rs");
+        // Pattern "*.rs" has no slash → fallback matches filename "main.rs"
+        let glob = Glob::new("*.rs").unwrap().compile_matcher();
+        assert!(glob_matches_path(path, root, &glob, "*.rs"));
+    }
+
+    #[test]
+    fn glob_no_filename_fallback_when_slash_in_pattern() {
+        let root = Path::new("/workspace");
+        let path = Path::new("/workspace/src/main.rs");
+        // Pattern "*.rs" has no slash, but "src/*.rs" has a slash
+        // For a path that doesn't match the relative path, but has a matching filename
+        // the fallback should NOT happen because the pattern contains "/"
+        let glob = Glob::new("src/*.rs").unwrap().compile_matcher();
+        // This matches because the relative path IS src/main.rs
+        assert!(glob_matches_path(path, root, &glob, "src/*.rs"));
+    }
+
+    #[test]
+    fn glob_path_outside_root_uses_absolute_path() {
+        let root = Path::new("/workspace");
+        let path = Path::new("/outside/other.rs");
+        let glob = Glob::new("other.rs").unwrap().compile_matcher();
+        // strip_prefix will fail → uses full path → no match on full path
+        // then fallback to filename matching since "other.rs" has no slash
+        assert!(glob_matches_path(path, root, &glob, "other.rs"));
+    }
+
+    #[test]
+    fn glob_path_without_file_name_returns_false() {
+        let root = Path::new("/workspace");
+        let path = Path::new("/workspace");
+        let glob = Glob::new("*.rs").unwrap().compile_matcher();
+        // No fallback since the relative path won't match the glob, and
+        // file_name() returns None for the root path "/" but Some("/workspace") here
+        // Actually "/workspace" has file_name "workspace" which won't match "*.rs"
+        assert!(!glob_matches_path(path, root, &glob, "*.rs"));
+    }
+}

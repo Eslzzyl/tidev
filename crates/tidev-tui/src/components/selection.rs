@@ -557,3 +557,235 @@ fn copy_via_osc52(text: &str) -> Result<(), String> {
         .and_then(|()| stdout.flush())
         .map_err(|e| format!("failed to write OSC 52 sequence: {e}"))
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::layout::Position;
+
+    // ── clamp_to_bounds ─────────────────────────────────────────────────
+
+    #[test]
+    fn clamp_to_bounds_within_rect_is_unchanged() {
+        let bounds = Rect::new(10, 20, 80, 40);
+        let pos = Position::new(30, 30);
+        assert_eq!(clamp_to_bounds(pos, Some(bounds)), pos);
+    }
+
+    #[test]
+    fn clamp_to_bounds_clamps_left_edge() {
+        let bounds = Rect::new(10, 20, 80, 40);
+        let pos = Position::new(5, 30);
+        assert_eq!(clamp_to_bounds(pos, Some(bounds)), Position::new(10, 30));
+    }
+
+    #[test]
+    fn clamp_to_bounds_clamps_right_edge() {
+        let bounds = Rect::new(10, 20, 80, 40);
+        let pos = Position::new(100, 30);
+        assert_eq!(clamp_to_bounds(pos, Some(bounds)), Position::new(89, 30));
+    }
+
+    #[test]
+    fn clamp_to_bounds_clamps_top_edge() {
+        let bounds = Rect::new(10, 20, 80, 40);
+        let pos = Position::new(30, 10);
+        assert_eq!(clamp_to_bounds(pos, Some(bounds)), Position::new(30, 20));
+    }
+
+    #[test]
+    fn clamp_to_bounds_clamps_bottom_edge() {
+        let bounds = Rect::new(10, 20, 80, 40);
+        let pos = Position::new(30, 70);
+        assert_eq!(clamp_to_bounds(pos, Some(bounds)), Position::new(30, 59));
+    }
+
+    #[test]
+    fn clamp_to_bounds_none_bounds_returns_input() {
+        let pos = Position::new(100, 200);
+        assert_eq!(clamp_to_bounds(pos, None), pos);
+    }
+
+    // ── SelectionRange::new ────────────────────────────────────────────
+
+    #[test]
+    fn selection_range_normalises_order() {
+        let a = Position::new(5, 10);
+        let b = Position::new(3, 5);
+        let r = SelectionRange::new(a, b);
+        assert_eq!(r.start, b);
+        assert_eq!(r.end, a);
+    }
+
+    #[test]
+    fn selection_range_same_position() {
+        let p = Position::new(5, 10);
+        let r = SelectionRange::new(p, p);
+        assert_eq!(r.start, p);
+        assert_eq!(r.end, p);
+    }
+
+    // ── MouseSelection state machine ───────────────────────────────────
+
+    #[test]
+    fn press_sets_anchor_and_focus() {
+        let mut sel = MouseSelection::default();
+        sel.press(Position::new(10, 5), None, 0);
+        assert_eq!(sel.anchor, Some(Position::new(10, 5)));
+        assert_eq!(sel.focus, Some(Position::new(10, 5)));
+        assert!(!sel.dragging);
+        assert!(!sel.moved);
+    }
+
+    #[test]
+    fn drag_updates_focus_and_sets_dragging() {
+        let mut sel = MouseSelection::default();
+        sel.press(Position::new(10, 5), None, 0);
+        sel.drag(Position::new(30, 8));
+        assert_eq!(sel.focus, Some(Position::new(30, 8)));
+        assert!(sel.dragging);
+        assert!(sel.moved);
+    }
+
+    #[test]
+    fn drag_without_press_is_noop() {
+        let mut sel = MouseSelection::default();
+        sel.drag(Position::new(10, 5));
+        assert!(sel.anchor.is_none());
+    }
+
+    #[test]
+    fn release_without_anchor_clears() {
+        let mut sel = MouseSelection::default();
+        sel.release(Position::new(0, 0), 0);
+        assert!(sel.anchor.is_none());
+    }
+
+    #[test]
+    fn release_with_anchor_and_movement_sets_pending_copy() {
+        let mut sel = MouseSelection::default();
+        sel.press(Position::new(5, 5), None, 0);
+        sel.drag(Position::new(10, 8));
+        sel.release(Position::new(10, 8), 0);
+        assert!(sel.pending_copy);
+        assert!(!sel.dragging);
+    }
+
+    #[test]
+    fn release_without_movement_clears() {
+        let mut sel = MouseSelection::default();
+        sel.press(Position::new(5, 5), None, 0);
+        sel.release(Position::new(5, 5), 0);
+        assert!(sel.anchor.is_none());
+        assert!(!sel.pending_copy);
+    }
+
+    #[test]
+    fn has_selection_returns_true_when_anchor_differs_from_focus() {
+        let mut sel = MouseSelection::default();
+        sel.press(Position::new(5, 5), None, 0);
+        sel.drag(Position::new(10, 8));
+        assert!(sel.has_selection(0));
+    }
+
+    #[test]
+    fn has_selection_returns_false_when_no_anchor() {
+        let sel = MouseSelection::default();
+        assert!(!sel.has_selection(0));
+    }
+
+    #[test]
+    fn compute_range_adjusts_for_scroll() {
+        let mut sel = MouseSelection::default();
+        sel.press(Position::new(5, 10), None, 5); // anchor_scroll_offset = 5
+        sel.drag(Position::new(10, 20));
+        // current_scroll=10 → dy = 10-5 = 5 → anchor.y shifts UP by 5 (10-5=5)
+        let range = sel.compute_range(10);
+        assert!(range.is_some());
+        assert_eq!(range.unwrap().start.y, 5); // 10 - 5
+    }
+
+    #[test]
+    fn compute_range_returns_none_when_anchor_and_focus_equal_and_not_moved() {
+        let mut sel = MouseSelection::default();
+        sel.press(Position::new(5, 5), None, 0);
+        // No drag — anchor == focus and not moved
+        assert!(sel.compute_range(0).is_none());
+    }
+
+    #[test]
+    fn take_pending_copy_consumes_flag() {
+        let mut sel = MouseSelection::default();
+        sel.press(Position::new(5, 5), None, 0);
+        sel.drag(Position::new(10, 8));
+        // pending_copy is set by release(), not drag()
+        sel.pending_copy = true;
+        assert!(sel.take_pending_copy(0).is_some());
+        assert!(!sel.pending_copy);
+    }
+
+    #[test]
+    fn take_pending_copy_none_when_no_selection() {
+        let mut sel = MouseSelection::default();
+        assert!(sel.take_pending_copy(0).is_none());
+    }
+
+    #[test]
+    fn clear_resets_all_state() {
+        let mut sel = MouseSelection::default();
+        sel.press(Position::new(5, 5), None, 0);
+        sel.drag(Position::new(10, 8));
+        sel.clear();
+        assert!(sel.anchor.is_none());
+        assert!(sel.focus.is_none());
+        assert!(!sel.dragging);
+        assert!(!sel.pending_copy);
+    }
+
+    #[test]
+    fn shift_for_scroll_adjusts_both_anchor_and_focus_when_not_dragging() {
+        let mut sel = MouseSelection::default();
+        sel.press(Position::new(10, 20), None, 0);
+        sel.drag(Position::new(30, 40));
+        // Now not dragging but anchor != focus
+        sel.dragging = false;
+        sel.shift_for_scroll(5);
+        // dy = 5; both shift UP: 20-5=15, 40-5=35
+        assert_eq!(sel.anchor.unwrap().y, 15);
+        assert_eq!(sel.focus.unwrap().y, 35);
+    }
+
+    #[test]
+    fn shift_for_scroll_does_not_change_focus_when_dragging() {
+        let mut sel = MouseSelection::default();
+        sel.press(Position::new(10, 20), None, 0);
+        sel.drag(Position::new(30, 40));
+        sel.shift_for_scroll(3);
+        // When dragging, only anchor shifts UP: 20-3=17, focus stays at 40
+        assert_eq!(sel.anchor.unwrap().y, 17);
+        assert_eq!(sel.focus.unwrap().y, 40);
+    }
+
+    // ── Bounds clamping during press/drag ──────────────────────────────
+
+    #[test]
+    fn press_clamps_to_bounds() {
+        let bounds = Rect::new(10, 10, 50, 20);
+        let mut sel = MouseSelection::default();
+        sel.press(Position::new(0, 0), Some(bounds), 0);
+        assert_eq!(sel.anchor, Some(Position::new(10, 10)));
+    }
+
+    #[test]
+    fn drag_clamps_to_bounds() {
+        let bounds = Rect::new(10, 10, 50, 20);
+        let mut sel = MouseSelection::default();
+        sel.press(Position::new(20, 20), Some(bounds), 0);
+        sel.drag(Position::new(200, 100));
+        assert_eq!(sel.focus, Some(Position::new(59, 29))); // right/bottom edge
+    }
+}

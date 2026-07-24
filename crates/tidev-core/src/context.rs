@@ -429,3 +429,285 @@ impl ContextManager {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tidev_types::message::{MessageRole, Message, ToolCall, ToolExecutionResult};
+    use uuid::Uuid;
+
+    fn user_msg(content: &str) -> Message {
+        Message::new(MessageRole::User, content)
+    }
+
+    fn assistant_msg(content: &str) -> Message {
+        Message::new(MessageRole::Assistant, content)
+    }
+
+    fn assistant_with_tool_calls(tool_calls: Vec<ToolCall>) -> Message {
+        let mut m = Message::new(MessageRole::Assistant, "thinking...");
+        m.tool_calls = tool_calls;
+        m
+    }
+
+    fn tool_result_msg(tool_call_id: &str, tool_name: &str, output: &str) -> Message {
+        Message::tool_result(tool_call_id, tool_name, ToolExecutionResult::new(output))
+    }
+
+    #[test]
+    fn build_request_messages_empty_buffer() {
+        let cm = ContextManager::new();
+        let buf = MessageBuffer::new(vec![]);
+        let result = cm.build_request_messages(&buf);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn build_request_messages_skips_streaming() {
+        let mut streaming = Message::streaming(MessageRole::Assistant, "in progress");
+        streaming.id = Uuid::new_v4();
+        let done = assistant_msg("done");
+        let buf = MessageBuffer::new(vec![streaming, done]);
+        let cm = ContextManager::new();
+        let result = cm.build_request_messages(&buf);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].content, "done");
+    }
+
+    #[test]
+    fn build_request_messages_skips_system_error_shell() {
+        let msgs = vec![
+            Message::new(MessageRole::System, "system prompt"),
+            Message::new(MessageRole::Error, "error msg"),
+            Message::new(MessageRole::Shell, "shell output"),
+            user_msg("hello"),
+        ];
+        let buf = MessageBuffer::new(msgs);
+        let cm = ContextManager::new();
+        let result = cm.build_request_messages(&buf);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].role, MessageRole::User);
+    }
+
+    #[test]
+    fn build_request_messages_injects_summary() {
+        let cm = ContextManager::from_state(Some("previous summary".into()), 2);
+        let buf = MessageBuffer::new(vec![user_msg("msg1"), user_msg("msg2"), user_msg("msg3")]);
+        let result = cm.build_request_messages(&buf);
+        // First message is the summary injection
+        assert_eq!(result.len(), 2); // summary + msg3 (since retained_from=2)
+        assert_eq!(result[0].role, MessageRole::User);
+        assert!(result[0].content.contains("previous summary"));
+    }
+
+    #[test]
+    fn build_request_messages_skips_before_retained_from() {
+        let msgs = vec![user_msg("old1"), user_msg("old2"), user_msg("current")];
+        let buf = MessageBuffer::new(msgs);
+        let cm = ContextManager::from_state(None, 2);
+        let result = cm.build_request_messages(&buf);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].content, "current");
+    }
+
+    #[test]
+    fn build_request_messages_drains_pending_on_user_message() {
+        // If there are pending tool_calls when a User message arrives, they
+        // should be drained first.
+        let tc = ToolCall {
+            id: "call_1".into(),
+            name: "read".into(),
+            arguments: "{}".into(),
+            thought_signature: None,
+        };
+        let msgs = vec![
+            assistant_with_tool_calls(vec![tc]),
+            user_msg("never mind"),
+        ];
+        let buf = MessageBuffer::new(msgs);
+        let cm = ContextManager::new();
+        let result = cm.build_request_messages(&buf);
+        // Should have: assistant msg, synthetic tool_result, user msg
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0].role, MessageRole::Assistant);
+        assert_eq!(result[1].role, MessageRole::Tool);
+        assert_eq!(result[1].tool_name.as_deref(), Some("read"));
+        assert!(result[1].content.contains("not captured"));
+        assert_eq!(result[2].role, MessageRole::User);
+    }
+
+    #[test]
+    fn build_request_messages_pairs_tool_call_with_result() {
+        let tc = ToolCall {
+            id: "call_1".into(),
+            name: "read".into(),
+            arguments: "{}".into(),
+            thought_signature: None,
+        };
+        let msgs = vec![
+            assistant_with_tool_calls(vec![tc]),
+            tool_result_msg("call_1", "read", "file content"),
+            user_msg("thanks"),
+        ];
+        let buf = MessageBuffer::new(msgs);
+        let cm = ContextManager::new();
+        let result = cm.build_request_messages(&buf);
+        // assistant, tool_result, user — all three present
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0].role, MessageRole::Assistant);
+        assert_eq!(result[1].role, MessageRole::Tool);
+        assert_eq!(result[1].content, "file content");
+        assert_eq!(result[2].role, MessageRole::User);
+    }
+
+    #[test]
+    fn build_request_messages_skips_orphan_tool_result() {
+        // A tool result without a matching pending tool_call should be dropped.
+        let msgs = vec![
+            tool_result_msg("call_ghost", "read", "should not appear"),
+            user_msg("hi"),
+        ];
+        let buf = MessageBuffer::new(msgs);
+        let cm = ContextManager::new();
+        let result = cm.build_request_messages(&buf);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].content, "hi");
+    }
+
+    #[test]
+    fn build_request_messages_skips_assistant_with_no_content_and_no_tool_calls() {
+        let empty = Message::new(MessageRole::Assistant, "");
+        let buf = MessageBuffer::new(vec![empty, user_msg("hello")]);
+        let cm = ContextManager::new();
+        let result = cm.build_request_messages(&buf);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].content, "hello");
+    }
+
+    #[test]
+    fn build_request_messages_sanitizes_invalid_tool_call_arguments() {
+        let tc = ToolCall {
+            id: "bad".into(),
+            name: "read".into(),
+            arguments: "not valid json".into(),
+            thought_signature: None,
+        };
+        let msgs = vec![assistant_with_tool_calls(vec![tc])];
+        let buf = MessageBuffer::new(msgs);
+        let cm = ContextManager::new();
+        let result = cm.build_request_messages(&buf);
+        // assistant msg + synthetic tool_result for orphaned call
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].tool_calls[0].arguments, "{}");
+        assert_eq!(result[1].role, MessageRole::Tool);
+    }
+
+    #[test]
+    fn build_request_messages_preserves_valid_tool_call_arguments() {
+        let tc = ToolCall {
+            id: "good".into(),
+            name: "read".into(),
+            arguments: r#"{"file_path":"/tmp/x"}"#.into(),
+            thought_signature: None,
+        };
+        let msgs = vec![assistant_with_tool_calls(vec![tc])];
+        let buf = MessageBuffer::new(msgs);
+        let cm = ContextManager::new();
+        let result = cm.build_request_messages(&buf);
+        assert_eq!(result[0].tool_calls[0].arguments, r#"{"file_path":"/tmp/x"}"#);
+    }
+
+    #[test]
+    fn build_request_messages_drains_pending_at_end() {
+        let tc = ToolCall {
+            id: "orphan".into(),
+            name: "shell".into(),
+            arguments: "{}".into(),
+            thought_signature: None,
+        };
+        let msgs = vec![assistant_with_tool_calls(vec![tc])];
+        let buf = MessageBuffer::new(msgs);
+        let cm = ContextManager::new();
+        let result = cm.build_request_messages(&buf);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].role, MessageRole::Assistant);
+        assert_eq!(result[1].role, MessageRole::Tool);
+        assert_eq!(result[1].tool_name.as_deref(), Some("shell"));
+    }
+
+    #[test]
+    fn build_request_messages_global_ordering() {
+        // Complex scenario with summary, retained_from, and interleaved calls.
+        let tc1 = ToolCall {
+            id: "c1".into(), name: "read".into(), arguments: "{}".into(),
+            thought_signature: None,
+        };
+        let msgs = vec![
+            user_msg("first"),
+            assistant_with_tool_calls(vec![tc1]),
+            tool_result_msg("c1", "read", "data"),
+            user_msg("second"),
+        ];
+        let buf = MessageBuffer::new(msgs);
+        let cm = ContextManager::from_state(Some("sum".into()), 0);
+        let result = cm.build_request_messages(&buf);
+        assert_eq!(result.len(), 5);
+        // summary injection, user, assistant, tool_result, user
+        assert_eq!(result[0].content, "Earlier conversation summary:\nsum");
+        assert_eq!(result[1].content, "first");
+        assert_eq!(result[2].role, MessageRole::Assistant);
+        assert_eq!(result[3].role, MessageRole::Tool);
+        assert_eq!(result[4].content, "second");
+    }
+
+    // ── compaction_budget ─────────────────────────────────────────────────
+
+    #[test]
+    fn compaction_budget_zero_context_uses_fallback() {
+        let cm = ContextManager::new();
+        let (trigger, retain) = cm.compaction_budget(0, 0);
+        assert_eq!(trigger, cm.prune_threshold_tokens);
+        assert_eq!(retain, cm.retain_recent_tokens);
+    }
+
+    #[test]
+    fn compaction_budget_respects_max_output() {
+        let cm = ContextManager::new();
+        // context_window=100000, max_output=8000
+        // reserved = max(8000, 12500, 4000) = 12500
+        // trigger = 100000 - 12500 = 87500
+        // retain = max(12000, 12500) = 12500
+        let (trigger, retain) = cm.compaction_budget(100_000, 8_000);
+        // reserved = max(8000, 100000/8=12500, 4000) = 12500
+        assert_eq!(trigger, 100_000 - 12_500);
+        assert_eq!(retain, 12_500);
+    }
+
+    #[test]
+    fn compaction_budget_large_reserved_triggers_at_least_1() {
+        // When context_window is very small, trigger should be at least 1
+        let cm = ContextManager::new();
+        let (trigger, retain) = cm.compaction_budget(10_000, 9_999);
+        // reserved = max(9999, 1250, 4000) = 9999
+        // trigger = 10000 - 9999 = 1
+        assert_eq!(trigger, 1);
+        // retain = max(12000, 9999) clamped to trigger=1 => 1
+        assert_eq!(retain, 1);
+    }
+
+    // ── estimate_tokens_for_messages ──────────────────────────────────────
+
+    #[test]
+    fn estimate_tokens_for_messages_sums_content_and_reasoning() {
+        let mut m1 = Message::new(MessageRole::User, "hello world");      // 11 / 4 = 2
+        m1.reasoning = "think".into();                                      // 5 / 4 = 1
+        let m2 = Message::new(MessageRole::Assistant, "a".repeat(40));    // 40 / 4 = 10
+        let buf = MessageBuffer::new(vec![m1, m2]);
+        let tokens = ContextManager::estimate_tokens_for_messages(buf.load());
+        assert_eq!(tokens, 2 + 1 + 10);
+    }
+}

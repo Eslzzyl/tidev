@@ -186,3 +186,268 @@ impl ToolRegistry {
             })
     }
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use tidev_config::auth::ActiveModel;
+    use tidev_config::ApiType;
+
+    /// Stub TodoPersistence for tests.
+    struct StubTodoStore;
+    impl TodoPersistence for StubTodoStore {
+        fn load_todos(&self, _session_id: Uuid) -> anyhow::Result<Vec<tidev_types::tools::TodoItem>> {
+            Ok(Vec::new())
+        }
+        fn replace_todos(&self, _session_id: Uuid, _todos: &[tidev_types::tools::TodoItem]) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn make_registry() -> ToolRegistry {
+        ToolRegistry::new(
+            PathBuf::from("/tmp"),
+            PathBuf::from("/tmp/.config"),
+            SkillCatalog::default(),
+            Arc::new(StubTodoStore),
+            WebSearchConfig::default(),
+            AuthStore::default(),
+            0,
+            PermissionConfig::default(),
+        )
+    }
+
+    fn make_model(model_id: &str) -> ActiveModel {
+        ActiveModel {
+            provider_id: "test".into(),
+            provider_display_name: "Test".into(),
+            base_url: "https://api.test.com".into(),
+            api_type: ApiType::OpenAiChatCompletions,
+            model_id: model_id.into(),
+            request_model_id: model_id.into(),
+            display_name: model_id.into(),
+            context_window: 200_000,
+            max_output_tokens: 8_000,
+            temperature: None,
+            supports_images: false,
+            system_prompt: String::new(),
+            api_key: None,
+            extra_body: None,
+            thinking_level: tidev_config::ThinkingLevelType::None,
+        }
+    }
+
+    // ── definitions_for_model ───────────────────────────────────────────
+
+    #[test]
+    fn definitions_for_gpt_4o_excludes_write_edit() {
+        let reg = make_registry();
+        let model = make_model("gpt-4o");
+        let defs = reg.definitions_for_model(&model);
+        assert!(!defs.iter().any(|d| d.name == "write"));
+        assert!(!defs.iter().any(|d| d.name == "edit"));
+        assert!(defs.iter().any(|d| d.name == "apply_patch"));
+    }
+
+    #[test]
+    fn definitions_for_claude_includes_write_edit() {
+        let reg = make_registry();
+        let model = make_model("claude-3-5-sonnet");
+        let defs = reg.definitions_for_model(&model);
+        assert!(defs.iter().any(|d| d.name == "write"));
+        assert!(defs.iter().any(|d| d.name == "edit"));
+        assert!(!defs.iter().any(|d| d.name == "apply_patch"));
+    }
+
+    #[test]
+    fn definitions_for_gpt4_legacy_includes_write_edit() {
+        // GPT-4 (non-o) should NOT use apply_patch
+        let reg = make_registry();
+        let model = make_model("gpt-4");
+        let defs = reg.definitions_for_model(&model);
+        assert!(defs.iter().any(|d| d.name == "write"));
+        assert!(defs.iter().any(|d| d.name == "edit"));
+        assert!(!defs.iter().any(|d| d.name == "apply_patch"));
+    }
+
+    #[test]
+    fn definitions_for_deepseek_includes_write_edit() {
+        let reg = make_registry();
+        let model = make_model("deepseek-v4-flash");
+        let defs = reg.definitions_for_model(&model);
+        assert!(defs.iter().any(|d| d.name == "write"));
+        assert!(!defs.iter().any(|d| d.name == "apply_patch"));
+    }
+
+    #[test]
+    fn definitions_includes_core_tools() {
+        let reg = make_registry();
+        let model = make_model("claude-3-5-sonnet");
+        let defs = reg.definitions_for_model(&model);
+        let names: Vec<&str> = defs.iter().map(|d| d.name.as_str()).collect();
+        assert!(names.contains(&"read"));
+        assert!(names.contains(&"shell"));
+        assert!(names.contains(&"glob"));
+        assert!(names.contains(&"grep"));
+        assert!(names.contains(&"task"));
+        assert!(names.contains(&"question"));
+        assert!(names.contains(&"skill"));
+        assert!(names.contains(&"todowrite"));
+    }
+
+    // ── definition_for (alias lookup) ────────────────────────────────────
+
+    #[test]
+    fn definition_for_exact_name() {
+        let reg = make_registry();
+        assert!(reg.definition_for("read").is_some());
+    }
+
+    #[test]
+    fn definition_for_alias_name() {
+        let reg = make_registry();
+        // "read_file" is a canonical alias for "read"
+        assert!(reg.definition_for("read_file").is_some());
+    }
+
+    #[test]
+    fn definition_for_unknown_name() {
+        let reg = make_registry();
+        assert!(reg.definition_for("nonexistent_tool").is_none());
+    }
+
+    // ── can_execute ─────────────────────────────────────────────────────
+
+    #[test]
+    fn can_execute_read_in_plan_mode() {
+        let reg = make_registry();
+        assert!(reg.can_execute("read", SessionMode::Plan));
+    }
+
+    #[test]
+    fn can_execute_write_in_plan_mode_default_false() {
+        let reg = make_registry();
+        // Default permission: plan mode disallows write
+        assert!(!reg.can_execute("write", SessionMode::Plan));
+    }
+
+    #[test]
+    fn can_execute_write_in_build_mode() {
+        let reg = make_registry();
+        assert!(reg.can_execute("write", SessionMode::Build));
+    }
+
+    #[test]
+    fn can_execute_unknown_tool() {
+        let reg = make_registry();
+        assert!(!reg.can_execute("nonexistent", SessionMode::Plan));
+    }
+
+    // ── permission_key_for_call ─────────────────────────────────────────
+
+    #[test]
+    fn permission_key_for_known_tool() {
+        let reg = make_registry();
+        let call = ToolCall {
+            id: "c1".into(),
+            name: "read".into(),
+            arguments: "{}".into(),
+            thought_signature: None,
+        };
+        // Built-in tools use their own name as the permission key
+        assert_eq!(reg.permission_key_for_call(&call), "read");
+    }
+
+    #[test]
+    fn permission_key_for_skill_with_name() {
+        let reg = make_registry();
+        let call = ToolCall {
+            id: "c1".into(),
+            name: "skill".into(),
+            arguments: r#"{"name":"debug"}"#.into(),
+            thought_signature: None,
+        };
+        assert_eq!(reg.permission_key_for_call(&call), "skill:debug");
+    }
+
+    #[test]
+    fn permission_key_for_skill_without_name() {
+        let reg = make_registry();
+        let call = ToolCall {
+            id: "c1".into(),
+            name: "skill".into(),
+            arguments: "{}".into(),
+            thought_signature: None,
+        };
+        assert_eq!(reg.permission_key_for_call(&call), "skill:unknown");
+    }
+
+    #[test]
+    fn permission_key_for_alias_tool() {
+        let reg = make_registry();
+        let call = ToolCall {
+            id: "c1".into(),
+            name: "read_file".into(),
+            arguments: "{}".into(),
+            thought_signature: None,
+        };
+        // Falls back to canonical name "read"
+        assert_eq!(reg.permission_key_for_call(&call), "read");
+    }
+
+    #[test]
+    fn permission_key_for_unknown_tool() {
+        let reg = make_registry();
+        let call = ToolCall {
+            id: "c1".into(),
+            name: "unknown_tool".into(),
+            arguments: "{}".into(),
+            thought_signature: None,
+        };
+        // Falls back to original name since no canonical mapping either
+        assert_eq!(reg.permission_key_for_call(&call), "unknown_tool");
+    }
+
+    // ── permission_label_for_call ───────────────────────────────────────
+
+    #[test]
+    fn permission_label_for_skill_with_name() {
+        let reg = make_registry();
+        let call = ToolCall {
+            id: "c1".into(),
+            name: "skill".into(),
+            arguments: r#"{"name":"code-review"}"#.into(),
+            thought_signature: None,
+        };
+        assert_eq!(reg.permission_label_for_call(&call), "skill 'code-review'");
+    }
+
+    #[test]
+    fn permission_label_for_skill_without_name() {
+        let reg = make_registry();
+        let call = ToolCall {
+            id: "c1".into(),
+            name: "skill".into(),
+            arguments: "{}".into(),
+            thought_signature: None,
+        };
+        assert_eq!(reg.permission_label_for_call(&call), "skill");
+    }
+
+    #[test]
+    fn permission_label_for_known_tool() {
+        let reg = make_registry();
+        let call = ToolCall {
+            id: "c1".into(),
+            name: "read".into(),
+            arguments: "{}".into(),
+            thought_signature: None,
+        };
+        assert_eq!(reg.permission_label_for_call(&call), "read");
+    }
+}
