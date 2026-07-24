@@ -144,7 +144,6 @@ mod tests {
     fn push_delta_appends_to_correct_message() {
         let mut sb = StreamingBuffer::new();
         let mut msgs = Vec::new();
-        let id = sb.begin_streaming(&mut msgs);
         sb.push_delta("Hello ", &mut msgs);
         sb.push_delta("world", &mut msgs);
         assert_eq!(msgs[0].content, "Hello world");
@@ -170,9 +169,8 @@ mod tests {
 
     #[test]
     fn resolve_idx_fast_path_uses_cache() {
-        let mut sb = StreamingBuffer::new();
+        let sb = StreamingBuffer::new();
         let mut msgs = Vec::new();
-        let id = sb.begin_streaming(&mut msgs);
         // Add a message before the streaming one to test cache offset.
         let before = Message::new(MessageRole::User, "before");
         msgs.insert(0, before);
@@ -190,7 +188,6 @@ mod tests {
     fn finalise_message_clears_state() {
         let mut sb = StreamingBuffer::new();
         let mut msgs = Vec::new();
-        let id = sb.begin_streaming(&mut msgs);
         let idx = sb.finalise_message(&mut msgs);
         assert_eq!(idx, Some(0));
         assert!(!msgs[0].streaming);
@@ -253,7 +250,6 @@ mod tests {
     fn stream_full_lifecycle() {
         let mut sb = StreamingBuffer::new();
         let mut msgs = Vec::new();
-        let id = sb.begin_streaming(&mut msgs);
         sb.push_delta("Hello", &mut msgs);
         sb.push_reasoning_delta("thinking...", &mut msgs);
         sb.push_delta(" world", &mut msgs);
