@@ -2839,6 +2839,22 @@ impl App {
                 if sub_count > 0 {
                     let label = if sub_count == 1 { "subagent" } else { "subagents" };
                     format!("{spinner} Waiting for {sub_count} {label}")
+                } else if ml.running_tools_count() > 0 {
+                    let counts = ml.running_tool_counts();
+                    let total = ml.running_tools_count();
+                    if counts.len() == 1 {
+                        let (name, n) = &counts[0];
+                        if *n == 1 {
+                            format!("{spinner} Running {name}")
+                        } else {
+                            format!("{spinner} Running {n}× {name}")
+                        }
+                    } else {
+                        let items: Vec<String> = counts.iter().map(|(name, n)| {
+                            if *n == 1 { name.clone() } else { format!("{n}× {name}") }
+                        }).collect();
+                        format!("{spinner} Running {} tools ({})", total, items.join(", "))
+                    }
                 } else if ml.is_streaming() {
                     let pending_mode = self.current_session_id
                         .and_then(|sid| self.pending_modes.get(&sid));

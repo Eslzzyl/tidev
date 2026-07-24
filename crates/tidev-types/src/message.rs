@@ -560,6 +560,11 @@ pub enum BackendEvent {
         session_id: Uuid,
         sources: Vec<String>,
     },
+    ToolStarting {
+        session_id: Uuid,
+        request_id: u64,
+        tool_call: ToolCall,
+    },
     ToolCompleted {
         session_id: Uuid,
         request_id: u64,
@@ -664,10 +669,11 @@ impl BackendEvent {
         match self {
             Self::Delta { session_id, .. }
             | Self::ReasoningDelta { session_id, .. }
-            | Self::ToolCallUpdated { session_id, .. }
+            |             Self::ToolCallUpdated { session_id, .. }
             | Self::Finished { session_id, .. }
             | Self::Failed { session_id, .. }
             | Self::Retrying { session_id, .. }
+            | Self::ToolStarting { session_id, .. }
             | Self::ToolCompleted { session_id, .. }
             | Self::SubagentStatus { session_id, .. }
             | Self::SubagentCompleted { session_id, .. }
@@ -692,6 +698,7 @@ impl BackendEvent {
             | Self::Finished { request_id, .. }
             | Self::Failed { request_id, .. }
             | Self::Retrying { request_id, .. }
+            | Self::ToolStarting { request_id, .. }
             | Self::ToolCompleted { request_id, .. }
             | Self::SubagentStatus { request_id, .. }
             | Self::SubagentCompleted { request_id, .. }

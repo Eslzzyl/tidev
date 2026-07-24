@@ -44,6 +44,13 @@ struct ScrollbarDrag {
     max_scroll: usize,
 }
 
+/// A non-subagent tool currently being executed by the agent loop.
+#[derive(Clone, Debug)]
+struct RunningToolInfo {
+    tool_call_id: String,
+    tool_name: String,
+}
+
 pub(crate) mod layout_index;
 pub(crate) mod render_cache;
 pub(crate) mod render;
@@ -111,6 +118,9 @@ pub(crate) struct MessageList {
     hovered_inline_subagent: Option<usize>,
     inline_subagent_card_bounds: Vec<(usize, Rect)>,
 
+    // ── Running tool tracking (non-subagent tools) ──
+    running_tools: Vec<RunningToolInfo>,
+
     // ── Retrying hint (persistent inline display) ──
     retrying_hint: Option<(u32, u32, String, Instant)>,
 
@@ -154,6 +164,7 @@ impl MessageList {
             completed_subagent_sessions: HashMap::new(),
             hovered_inline_subagent: None,
             inline_subagent_card_bounds: Vec::new(),
+            running_tools: Vec::new(),
             retrying_hint: None,
             image_badge_bounds: Vec::new(),
             dirty: true,
@@ -467,6 +478,19 @@ impl MessageList {
                         }
                     }
                 }
+                BackendEvent::ToolStarting { tool_call, .. } => {
+                    // Track non-subagent tools so the status bar can display them.
+                    if canonical_tool_name(&tool_call.name) != Some("task") {
+                        let already = self.running_tools.iter().any(|t| t.tool_call_id == tool_call.id);
+                        if !already {
+                            self.running_tools.push(RunningToolInfo {
+                                tool_call_id: tool_call.id.clone(),
+                                tool_name: tool_call.name.clone(),
+                            });
+                            self.dirty = true;
+                        }
+                    }
+                }
                 BackendEvent::ToolCompleted { tool_call, .. } => {
                     if canonical_tool_name(&tool_call.name) == Some("task") {
                         self.running_subagents.retain(|s| s.tool_call_id != tool_call.id);
@@ -474,6 +498,8 @@ impl MessageList {
                             self.hovered_inline_subagent = None;
                         }
                     }
+                    // Clean up running_tools for any tool (both task and non-task).
+                    self.running_tools.retain(|t| t.tool_call_id != tool_call.id);
                 }
                 BackendEvent::SubagentStatus {
                     tool_call_id,
@@ -1253,6 +1279,23 @@ impl MessageList {
         self.running_subagents
             .iter()
             .any(|s| s.child_session_id == Some(session_id))
+    }
+
+    /// Number of non-subagent tools currently being executed.
+    pub fn running_tools_count(&self) -> usize {
+        self.running_tools.len()
+    }
+
+    /// (name, count) pairs for running tools, sorted by name.
+    /// Useful when the same tool runs multiple times in parallel.
+    pub fn running_tool_counts(&self) -> Vec<(String, usize)> {
+        let mut counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        for t in &self.running_tools {
+            *counts.entry(t.tool_name.clone()).or_insert(0) += 1;
+        }
+        let mut pairs: Vec<(String, usize)> = counts.into_iter().collect();
+        pairs.sort_by(|a, b| a.0.cmp(&b.0));
+        pairs
     }
 
     /// Update hovered card based on mouse position.

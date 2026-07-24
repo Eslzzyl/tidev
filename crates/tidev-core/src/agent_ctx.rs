@@ -788,6 +788,16 @@ impl AgentContext for CoreContext {
             let mut pending_tcs: Vec<ToolCall> =
                 read_only.iter().map(|(tc, _, _)| tc.clone()).collect();
             let mut join_set = tokio::task::JoinSet::new();
+
+            // Notify TUI that read-only tools have started executing.
+            for (tc, _, _) in &read_only {
+                self.emit(BackendEvent::ToolStarting {
+                    session_id,
+                    request_id,
+                    tool_call: tc.clone(),
+                });
+            }
+
             for (tc, allow_outside, sensitive_approved) in read_only {
                 let reg = self.tool_registry.clone();
                 let sid = session_id;
@@ -854,6 +864,13 @@ impl AgentContext for CoreContext {
                 results.push((tc, ToolExecutionResult::new("User cancelled the request")));
                 continue;
             }
+
+            // Notify TUI that this tool has started executing.
+            self.emit(BackendEvent::ToolStarting {
+                session_id,
+                request_id,
+                tool_call: tc.clone(),
+            });
 
             let tool_fut = self.tool_registry.execute(
                 &tc,
