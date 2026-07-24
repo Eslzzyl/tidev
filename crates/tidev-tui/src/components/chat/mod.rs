@@ -476,11 +476,11 @@ impl MessageList {
                                 interrupted: false,
                             });
                         }
-                    }
-                }
-                BackendEvent::ToolStarting { tool_call, .. } => {
-                    // Track non-subagent tools so the status bar can display them.
-                    if canonical_tool_name(&tool_call.name) != Some("task") {
+                    } else {
+                        // Non-subagent tools: add to running_tools as soon as the
+                        // tool name is known from the stream, so the status bar shows
+                        // "Running write/edit/…" immediately rather than only during
+                        // the brief execution window.
                         let already = self.running_tools.iter().any(|t| t.tool_call_id == tool_call.id);
                         if !already {
                             self.running_tools.push(RunningToolInfo {
@@ -490,6 +490,11 @@ impl MessageList {
                             self.dirty = true;
                         }
                     }
+                }
+                BackendEvent::ToolStarting { .. } => {
+                    // ToolStarting is now a no-op for running_tools display;
+                    // ToolCallUpdated already populated it.  The event remains
+                    // useful for future backend-level concerns.
                 }
                 BackendEvent::ToolCompleted { tool_call, .. } => {
                     if canonical_tool_name(&tool_call.name) == Some("task") {
