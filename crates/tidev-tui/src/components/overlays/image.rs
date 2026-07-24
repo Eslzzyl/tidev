@@ -24,7 +24,11 @@ pub(crate) struct ImageViewer {
 }
 
 impl ImageViewer {
-    pub(crate) fn from_raw(data: Vec<u8>, filename: String, picker: Option<Picker>) -> Option<Self> {
+    pub(crate) fn from_raw(
+        data: Vec<u8>,
+        filename: String,
+        picker: Option<Picker>,
+    ) -> Option<Self> {
         let dyn_img = image::load_from_memory(&data).ok()?;
         let (width, height) = (dyn_img.width(), dyn_img.height());
         Some(Self {
@@ -50,12 +54,12 @@ impl Component for ImageViewer {
             return None;
         }
         match key.code {
-            KeyCode::Char(_) | KeyCode::Esc | KeyCode::Enter => {
-                Some(Action::Overlay(OverlayAction::Close(OverlayKind::ImageViewer {
+            KeyCode::Char(_) | KeyCode::Esc | KeyCode::Enter => Some(Action::Overlay(
+                OverlayAction::Close(OverlayKind::ImageViewer {
                     data: Vec::new(),
                     filename: String::new(),
-                })))
-            }
+                }),
+            )),
             _ => None,
         }
     }
@@ -66,7 +70,12 @@ impl Component for ImageViewer {
         // Use the cached picker; fall back to a text placeholder.
         let Some(picker) = &self.picker else {
             let placeholder = Paragraph::new(Line::from(vec![
-                Span::styled("Image: ", Style::default().fg(palette.accent).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "Image: ",
+                    Style::default()
+                        .fg(palette.accent)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw(&self.filename),
                 Span::raw(format!(" [{}x{}]", self.width, self.height)),
             ]))
@@ -151,10 +160,7 @@ impl Component for ImageViewer {
             width: rect.width,
             height: 1,
         };
-        frame.render_widget(
-            Paragraph::new(hint).alignment(Alignment::Center),
-            hint_area,
-        );
+        frame.render_widget(Paragraph::new(hint).alignment(Alignment::Center), hint_area);
     }
 
     fn is_overlay(&self) -> bool {
@@ -169,5 +175,3 @@ impl Component for ImageViewer {
         true
     }
 }
-
-

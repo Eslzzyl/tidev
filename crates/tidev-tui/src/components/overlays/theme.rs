@@ -1,5 +1,6 @@
 //! ThemePanel component — theme selection panel.
 
+use crate::theme::ThemeName;
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::{Constraint, Layout, Margin, Position, Rect};
@@ -7,7 +8,6 @@ use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph};
 use unicode_width::UnicodeWidthStr;
-use crate::theme::ThemeName;
 
 use crate::action::{Action, OverlayAction, OverlayKind, ThemeAction};
 use crate::component::Component;
@@ -100,7 +100,9 @@ impl ThemePanel {
         let len = self.display_items.len();
         let mut idx = self.selected_index;
         for _ in 0..len {
-            if idx == 0 { idx = len; }
+            if idx == 0 {
+                idx = len;
+            }
             idx -= 1;
             if matches!(self.display_items[idx], DisplayItem::Theme(_)) {
                 self.selected_index = idx;
@@ -178,11 +180,13 @@ impl Component for ThemePanel {
             }
             KeyCode::Enter => {
                 self.confirmed = true;
-                Some(Action::Overlay(OverlayAction::Close(OverlayKind::ThemePanel)))
+                Some(Action::Overlay(OverlayAction::Close(
+                    OverlayKind::ThemePanel,
+                )))
             }
-            KeyCode::Esc | KeyCode::Char('q') => {
-                Some(Action::Overlay(OverlayAction::Close(OverlayKind::ThemePanel)))
-            }
+            KeyCode::Esc | KeyCode::Char('q') => Some(Action::Overlay(OverlayAction::Close(
+                OverlayKind::ThemePanel,
+            ))),
             _ => None,
         }
     }
@@ -194,7 +198,10 @@ impl Component for ThemePanel {
         }
 
         let overlay = centered_rect(36, 22, area);
-        let inner = overlay.inner(Margin { horizontal: 1, vertical: 1 });
+        let inner = overlay.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
 
         match mouse.kind {
             MouseEventKind::ScrollUp => {
@@ -269,12 +276,17 @@ impl Component for ThemePanel {
         let block = Block::default().style(Style::default().bg(palette.panel_alt));
         frame.render_widget(Clear, overlay);
         frame.render_widget(block, overlay);
-        let inner = overlay.inner(Margin { horizontal: 1, vertical: 1 });
+        let inner = overlay.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
 
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
                 " Theme ",
-                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
             )]))
             .style(Style::default().bg(palette.panel_alt)),
             Rect::new(inner.x, inner.y, inner.width, 1),
@@ -286,8 +298,11 @@ impl Component for ThemePanel {
             format!("  {}", self.query)
         };
         frame.render_widget(
-            Paragraph::new(Line::from(vec![Span::styled(search_text, Style::default().fg(palette.muted))]))
-                .style(Style::default().bg(palette.panel_alt)),
+            Paragraph::new(Line::from(vec![Span::styled(
+                search_text,
+                Style::default().fg(palette.muted),
+            )]))
+            .style(Style::default().bg(palette.panel_alt)),
             Rect::new(inner.x, inner.y + 1, inner.width, 1),
         );
         if !self.query.is_empty() {
@@ -309,12 +324,14 @@ impl Component for ThemePanel {
 
         let list_y = inner.y + 3;
         let list_height = inner.height.saturating_sub(3);
-        if list_height == 0 { return; }
+        if list_height == 0 {
+            return;
+        }
         let list_area = Rect::new(inner.x, list_y, inner.width, list_height);
 
         let (content_area, _scrollbar_area) = if list_area.width > 2 {
-            let chunks = Layout::horizontal([Constraint::Min(1), Constraint::Length(1)])
-                .split(list_area);
+            let chunks =
+                Layout::horizontal([Constraint::Min(1), Constraint::Length(1)]).split(list_area);
             (chunks[0], Some(chunks[1]))
         } else {
             (list_area, None)
@@ -330,7 +347,9 @@ impl Component for ThemePanel {
 
         for i in 0..list_height {
             let idx = scroll + i as usize;
-            if idx >= display_len { break; }
+            if idx >= display_len {
+                break;
+            }
             let item = &self.display_items[idx];
             let y = content_area.y + i;
 
@@ -339,7 +358,9 @@ impl Component for ThemePanel {
                     frame.render_widget(
                         Paragraph::new(Line::from(Span::styled(
                             format!(" {} ", label),
-                            Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+                            Style::default()
+                                .fg(palette.accent)
+                                .add_modifier(Modifier::BOLD),
                         )))
                         .style(Style::default().bg(palette.panel_alt)),
                         Rect::new(content_area.x, y, content_area.width, 1),
@@ -349,7 +370,9 @@ impl Component for ThemePanel {
                     let is_selected = idx == self.selected_index;
                     let (text_style, bg_block) = if is_selected {
                         (
-                            Style::default().fg(palette.selection_fg).add_modifier(Modifier::BOLD),
+                            Style::default()
+                                .fg(palette.selection_fg)
+                                .add_modifier(Modifier::BOLD),
                             Paragraph::new(Line::from(Span::styled(
                                 "█",
                                 Style::default().bg(palette.selection_bg),
@@ -366,7 +389,10 @@ impl Component for ThemePanel {
                             .style(Style::default().bg(palette.panel_alt)),
                         )
                     };
-                    frame.render_widget(bg_block, Rect::new(content_area.x, y, content_area.width, 1));
+                    frame.render_widget(
+                        bg_block,
+                        Rect::new(content_area.x, y, content_area.width, 1),
+                    );
                     let name = format!("  {}", t.as_str());
                     frame.render_widget(
                         Paragraph::new(Line::from(Span::styled(name, text_style))),

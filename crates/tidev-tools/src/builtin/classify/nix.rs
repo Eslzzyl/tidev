@@ -83,11 +83,23 @@ pub(super) fn classify_nix(args: &[&str]) -> Safety {
         }
 
         // Explicit write commands at top level
-        "build" | "run" | "develop" | "shell" | "bundle" | "copy" | "daemon"
-        | "derivation" | "dump" | "hash" | "log" | "make-content-addressable"
-        | "optimise-store" | "prefetch" | "realisation" | "repl" | "upgrade-nix" => {
-            Safety::WriteOperation
-        }
+        "build"
+        | "run"
+        | "develop"
+        | "shell"
+        | "bundle"
+        | "copy"
+        | "daemon"
+        | "derivation"
+        | "dump"
+        | "hash"
+        | "log"
+        | "make-content-addressable"
+        | "optimise-store"
+        | "prefetch"
+        | "realisation"
+        | "repl"
+        | "upgrade-nix" => Safety::WriteOperation,
 
         // Everything else — ambiguous, let through
         _ => Safety::Unknown,
@@ -119,16 +131,31 @@ mod tests {
     #[test]
     fn nix_read_commands() {
         assert_eq!(classify_nix(&["show", "config"]), Safety::ReadOnly);
-        assert_eq!(classify_nix(&["search", "nixpkgs", "hello"]), Safety::ReadOnly);
-        assert_eq!(classify_nix(&["eval", "-f", "default.nix", "name"]), Safety::ReadOnly);
-        assert_eq!(classify_nix(&["why-depends", "pkg", "dep"]), Safety::ReadOnly);
+        assert_eq!(
+            classify_nix(&["search", "nixpkgs", "hello"]),
+            Safety::ReadOnly
+        );
+        assert_eq!(
+            classify_nix(&["eval", "-f", "default.nix", "name"]),
+            Safety::ReadOnly
+        );
+        assert_eq!(
+            classify_nix(&["why-depends", "pkg", "dep"]),
+            Safety::ReadOnly
+        );
         assert_eq!(classify_nix(&["path-info", "pkg"]), Safety::ReadOnly);
         assert_eq!(classify_nix(&["flake", "show", "."]), Safety::ReadOnly);
         assert_eq!(classify_nix(&["flake", "metadata", "."]), Safety::ReadOnly);
         assert_eq!(classify_nix(&["flake", "lock", "--show"]), Safety::ReadOnly);
         assert_eq!(classify_nix(&["registry", "list"]), Safety::ReadOnly);
-        assert_eq!(classify_nix(&["store", "ls", "store-path"]), Safety::ReadOnly);
-        assert_eq!(classify_nix(&["store", "cat", "store-path", "file"]), Safety::ReadOnly);
+        assert_eq!(
+            classify_nix(&["store", "ls", "store-path"]),
+            Safety::ReadOnly
+        );
+        assert_eq!(
+            classify_nix(&["store", "cat", "store-path", "file"]),
+            Safety::ReadOnly
+        );
         assert_eq!(classify_nix(&["nar", "ls", "nar-path"]), Safety::ReadOnly);
         assert_eq!(classify_nix(&["profile", "list"]), Safety::ReadOnly);
         assert_eq!(classify_nix(&["profile", "history"]), Safety::ReadOnly);
@@ -138,14 +165,32 @@ mod tests {
     fn nix_write_commands() {
         assert_eq!(classify_nix(&["build", ".#hello"]), Safety::WriteOperation);
         assert_eq!(classify_nix(&["run", ".#app"]), Safety::WriteOperation);
-        assert_eq!(classify_nix(&["develop", ".#devShell"]), Safety::WriteOperation);
-        assert_eq!(classify_nix(&["shell", "nixpkgs#hello"]), Safety::WriteOperation);
+        assert_eq!(
+            classify_nix(&["develop", ".#devShell"]),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            classify_nix(&["shell", "nixpkgs#hello"]),
+            Safety::WriteOperation
+        );
         assert_eq!(classify_nix(&["flake", "update"]), Safety::WriteOperation);
         assert_eq!(classify_nix(&["flake", "lock"]), Safety::WriteOperation);
-        assert_eq!(classify_nix(&["registry", "add", "name", "url"]), Safety::WriteOperation);
-        assert_eq!(classify_nix(&["store", "delete", "store-path"]), Safety::WriteOperation);
-        assert_eq!(classify_nix(&["profile", "install", "nixpkgs#hello"]), Safety::WriteOperation);
-        assert_eq!(classify_nix(&["profile", "remove", "index"]), Safety::WriteOperation);
+        assert_eq!(
+            classify_nix(&["registry", "add", "name", "url"]),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            classify_nix(&["store", "delete", "store-path"]),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            classify_nix(&["profile", "install", "nixpkgs#hello"]),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            classify_nix(&["profile", "remove", "index"]),
+            Safety::WriteOperation
+        );
         assert_eq!(classify_nix(&["edit", "flake.nix"]), Safety::ReadOnly);
     }
 
@@ -172,6 +217,9 @@ mod tests {
     fn nix_shell_is_unknown() {
         assert_eq!(classify_nix_shell(&[]), Safety::Unknown);
         assert_eq!(classify_nix_shell(&["-p", "hello"]), Safety::Unknown);
-        assert_eq!(classify_nix_shell(&["--command", "echo hi"]), Safety::Unknown);
+        assert_eq!(
+            classify_nix_shell(&["--command", "echo hi"]),
+            Safety::Unknown
+        );
     }
 }

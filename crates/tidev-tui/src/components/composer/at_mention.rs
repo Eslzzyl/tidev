@@ -134,7 +134,9 @@ impl AtMentionState {
             return;
         }
 
-        self.selected_index = self.selected_index.min(self.suggestions.len().saturating_sub(1));
+        self.selected_index = self
+            .selected_index
+            .min(self.suggestions.len().saturating_sub(1));
     }
 
     /// Height of the popup in terminal rows (0 if hidden).

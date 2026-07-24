@@ -9,12 +9,12 @@
 
 use std::path::PathBuf;
 
+use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
-use anyhow::Result;
 
 use unicode_width::UnicodeWidthStr;
 
@@ -145,7 +145,10 @@ impl Component for WorkspaceBoundaryDialog {
                 }
                 _ => None,
             },
-            WbPhase::Input { reason, base_decision } => {
+            WbPhase::Input {
+                reason,
+                base_decision,
+            } => {
                 let mut reason = reason.clone();
                 let base_decision = base_decision.clone();
                 match key.code {
@@ -301,10 +304,8 @@ impl Component for WorkspaceBoundaryDialog {
 
                 // Message
                 frame.render_widget(
-                    Paragraph::new(
-                        "A tool is trying to access a path outside the workspace:",
-                    )
-                    .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
+                    Paragraph::new("A tool is trying to access a path outside the workspace:")
+                        .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
                     sections[1],
                 );
 
@@ -367,9 +368,7 @@ impl Component for WorkspaceBoundaryDialog {
                 );
 
                 // Input field
-                let input_style = Style::default()
-                    .bg(palette.background)
-                    .fg(palette.text);
+                let input_style = Style::default().bg(palette.background).fg(palette.text);
                 frame.render_widget(
                     Paragraph::new(reason.clone())
                         .style(input_style)
@@ -379,19 +378,15 @@ impl Component for WorkspaceBoundaryDialog {
                 let text_w = UnicodeWidthStr::width(reason.as_str()) as u16;
                 let col = text_w % sections[3].width;
                 let row = text_w / sections[3].width;
-                frame.set_cursor_position((
-                    sections[3].x + col,
-                    sections[3].y + row,
-                ));
+                frame.set_cursor_position((sections[3].x + col, sections[3].y + row));
 
                 // Help
                 frame.render_widget(
-                    Paragraph::new("Enter confirm · Esc cancel")
-                        .style(
-                            Style::default()
-                                .bg(palette.panel_alt)
-                                .fg(palette.accent_soft),
-                        ),
+                    Paragraph::new("Enter confirm · Esc cancel").style(
+                        Style::default()
+                            .bg(palette.panel_alt)
+                            .fg(palette.accent_soft),
+                    ),
                     sections[4],
                 );
             }
@@ -425,8 +420,10 @@ impl Component for WorkspaceBoundaryDialog {
                     "deny"
                 };
                 frame.render_widget(
-                    Paragraph::new(format!("Are you sure you want to {action_text} this path until exit?"))
-                        .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
+                    Paragraph::new(format!(
+                        "Are you sure you want to {action_text} this path until exit?"
+                    ))
+                    .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
                     sections[1],
                 );
 
@@ -441,8 +438,9 @@ impl Component for WorkspaceBoundaryDialog {
                 );
 
                 // Buttons
-                let buttons = Layout::horizontal([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)])
-                    .split(sections[3]);
+                let buttons =
+                    Layout::horizontal([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)])
+                        .split(sections[3]);
 
                 let confirm_style = if self.selected == 0 {
                     Style::default()
@@ -461,14 +459,8 @@ impl Component for WorkspaceBoundaryDialog {
                     Style::default().fg(palette.text).bg(palette.panel_alt)
                 };
 
-                frame.render_widget(
-                    Paragraph::new(" Confirm ").style(confirm_style),
-                    buttons[0],
-                );
-                frame.render_widget(
-                    Paragraph::new(" Cancel ").style(cancel_style),
-                    buttons[1],
-                );
+                frame.render_widget(Paragraph::new(" Confirm ").style(confirm_style), buttons[0]);
+                frame.render_widget(Paragraph::new(" Cancel ").style(cancel_style), buttons[1]);
 
                 // Help
                 frame.render_widget(

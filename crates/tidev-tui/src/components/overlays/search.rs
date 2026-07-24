@@ -265,9 +265,9 @@ impl Component for SearchPanel {
                         None
                     }
                 }
-                KeyCode::Esc | KeyCode::Char('q') => {
-                    Some(Action::Overlay(OverlayAction::Close(OverlayKind::SearchPanel)))
-                }
+                KeyCode::Esc | KeyCode::Char('q') => Some(Action::Overlay(OverlayAction::Close(
+                    OverlayKind::SearchPanel,
+                ))),
                 _ => None,
             }
         }
@@ -279,11 +279,7 @@ impl Component for SearchPanel {
             return None;
         }
 
-        let overlay = centered_rect(
-            area.width.min(60),
-            area.height.min(20),
-            area,
-        );
+        let overlay = centered_rect(area.width.min(60), area.height.min(20), area);
 
         match mouse.kind {
             MouseEventKind::ScrollUp => {
@@ -343,8 +339,9 @@ impl Component for SearchPanel {
                 // Update local snapshot
                 if *is_cx {
                     self.provider_cx_set = true;
-                } else if let Some(idx) =
-                    BUILTIN_PROVIDERS.iter().position(|info| info.id == provider)
+                } else if let Some(idx) = BUILTIN_PROVIDERS
+                    .iter()
+                    .position(|info| info.id == provider)
                 {
                     self.provider_keys_set[idx] = true;
                 }
@@ -430,10 +427,7 @@ impl Component for SearchPanel {
                     .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
                 sections[0],
             );
-            frame.set_cursor_position((
-                sections[0].right().saturating_sub(1),
-                sections[0].y,
-            ));
+            frame.set_cursor_position((sections[0].right().saturating_sub(1), sections[0].y));
 
             // Footer
             let footer = Line::from(vec![

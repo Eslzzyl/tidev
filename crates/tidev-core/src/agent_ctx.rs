@@ -308,14 +308,13 @@ impl CoreContext {
         // 1. Load all instruction sources (with content cache).
         let instructions = self.config.read().unwrap().instructions.clone();
         let mut cache = self.instruction_content_cache.lock().await;
-        let (_, all_sources, new_cache) =
-            tidev_instructions::system_prompt_and_sources_with_cache(
-                &self.workspace_root,
-                &self.config_dir,
-                &instructions,
-                &cache,
-            )
-            .unwrap_or_default();
+        let (_, all_sources, new_cache) = tidev_instructions::system_prompt_and_sources_with_cache(
+            &self.workspace_root,
+            &self.config_dir,
+            &instructions,
+            &cache,
+        )
+        .unwrap_or_default();
         *cache = new_cache;
         drop(cache);
 
@@ -367,7 +366,10 @@ impl CoreContext {
 
         // 6. Safety check: avoid double injection if <system-reminder> already
         //    present (should never happen given DB tracking, but be defensive).
-        if messages[last_user_idx].content.contains("<system-reminder>") {
+        if messages[last_user_idx]
+            .content
+            .contains("<system-reminder>")
+        {
             return Ok(already_injected);
         }
 
@@ -378,7 +380,8 @@ impl CoreContext {
         messages[last_user_idx].content = new_content.clone();
 
         // Persist to store + buffer via the existing dual-write method.
-        self.update_message_content(session_id, msg_id, new_content).await?;
+        self.update_message_content(session_id, msg_id, new_content)
+            .await?;
 
         // 8. Persist new sources to DB so subsequent turns don't re-inject.
         // Merge with already-injected sources (save_instruction_sources replaces ALL).
@@ -404,19 +407,29 @@ impl CoreContext {
         // 10. Persist "Loaded instructions from" notification for
         //     cross-session replay (only the first time each source
         //     is injected).
-        let display_paths: Vec<String> = new_sources.iter().map(|s| {
-            let path = std::path::Path::new(s);
-            path.strip_prefix(&self.workspace_root).unwrap_or(path)
-                .display().to_string()
-        }).collect();
+        let display_paths: Vec<String> = new_sources
+            .iter()
+            .map(|s| {
+                let path = std::path::Path::new(s);
+                path.strip_prefix(&self.workspace_root)
+                    .unwrap_or(path)
+                    .display()
+                    .to_string()
+            })
+            .collect();
         let display_content = if display_paths.len() == 1 {
             format!("Loaded instructions from {}", display_paths[0])
         } else {
-            format!("Loaded {} instruction files: {}",
-                display_paths.len(), display_paths.join(", "))
+            format!(
+                "Loaded {} instruction files: {}",
+                display_paths.len(),
+                display_paths.join(", ")
+            )
         };
-        self.session_manager.append_message(session_id,
-            &Message::new(MessageRole::System, &display_content))?;
+        self.session_manager.append_message(
+            session_id,
+            &Message::new(MessageRole::System, &display_content),
+        )?;
 
         Ok(updated)
     }
@@ -805,7 +818,15 @@ impl AgentContext for CoreContext {
                 let cancel = self.cancel.clone();
                 join_set.spawn(async move {
                     let result = reg
-                        .execute(&tc, sid, mode, allow_outside, sensitive_approved, &cancel, None)
+                        .execute(
+                            &tc,
+                            sid,
+                            mode,
+                            allow_outside,
+                            sensitive_approved,
+                            &cancel,
+                            None,
+                        )
                         .await;
                     (tc, result)
                 });
@@ -1070,12 +1091,15 @@ impl AgentContext for CoreContext {
 
         // If every tool in this round is read-only no files can change,
         // so snapshot tracking is unnecessary.
-        let all_read_only = has_tool_calls && messages.iter()
-            .filter(|m| m.role == MessageRole::Assistant)
-            .flat_map(|m| &m.tool_calls)
-            .all(|tc| is_read_only(&tc.name));
+        let all_read_only = has_tool_calls
+            && messages
+                .iter()
+                .filter(|m| m.role == MessageRole::Assistant)
+                .flat_map(|m| &m.tool_calls)
+                .all(|tc| is_read_only(&tc.name));
 
-        if has_tool_calls && !all_read_only
+        if has_tool_calls
+            && !all_read_only
             && let Some(ref snap) = self.snapshot
             && let Ok(Some(hash)) = snap.track()
         {
@@ -1086,7 +1110,8 @@ impl AgentContext for CoreContext {
                 let persist_hash = hash.clone();
                 *ssh = Some(hash);
                 // Persist to DB so restored sessions retain the correct baseline.
-                let _ = self.session_manager
+                let _ = self
+                    .session_manager
                     .update_session_start_hash(session_id, &persist_hash);
             }
         } else if has_tool_calls && all_read_only {
@@ -1133,8 +1158,7 @@ impl AgentContext for CoreContext {
                         let baseline = start.as_ref().unwrap_or(&pre);
                         if let Ok(cumulative_diffs) =
                             snap.diff_lightweight(baseline, &post_hash).await
-                            && let Ok(diffs_json) =
-                                serde_json::to_string(&cumulative_diffs)
+                            && let Ok(diffs_json) = serde_json::to_string(&cumulative_diffs)
                         {
                             last.file_diffs = Some(diffs_json.clone());
                             self.emit(BackendEvent::SidebarSnapshotReady {
@@ -1156,7 +1180,8 @@ impl AgentContext for CoreContext {
                 buf.append(msg.clone());
             }
         }
-        self.session_manager.append_messages(session_id, &enriched)?;
+        self.session_manager
+            .append_messages(session_id, &enriched)?;
         Ok(())
     }
 
@@ -1463,9 +1488,7 @@ async fn execute_task_tool(
         cancel: config.cancel_token.clone(),
         // Subagents run in isolation — they don't process main-session
         // user messages, so give them a fresh empty queue.
-        queued_messages: Arc::new(std::sync::Mutex::new(
-            std::collections::VecDeque::new(),
-        )),
+        queued_messages: Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
     };
 
     // 8. Run the inner loop.
@@ -1552,8 +1575,7 @@ fn filter_subagent_tools(
         })
         // Never include the task tool — subagents must not spawn further subagents.
         .filter(|def| {
-            let canonical = tidev_types::tools::canonical_tool_name(&def.name)
-                .unwrap_or(&def.name);
+            let canonical = tidev_types::tools::canonical_tool_name(&def.name).unwrap_or(&def.name);
             canonical != "task"
         })
         .cloned()

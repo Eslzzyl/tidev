@@ -12,7 +12,9 @@ use diffy::DiffOptions;
 
 use super::parser::{Hunk, UpdateFileChunk};
 use super::seek_sequence::seek_sequence;
-use crate::builtin::utils::{display_workspace_relative, read_existing_text, resolve_workspace_path};
+use crate::builtin::utils::{
+    display_workspace_relative, read_existing_text, resolve_workspace_path,
+};
 
 /// Result of applying a patch — which files were added / modified / deleted.
 #[derive(Debug, Default)]
@@ -154,13 +156,12 @@ fn apply_update_file(
         );
     }
 
-    let old_content = read_existing_text(&abs_path)
-        .with_context(|| {
-            format!(
-                "failed to read {}",
-                display_workspace_relative(workspace_root, &abs_path)
-            )
-        })?;
+    let old_content = read_existing_text(&abs_path).with_context(|| {
+        format!(
+            "failed to read {}",
+            display_workspace_relative(workspace_root, &abs_path)
+        )
+    })?;
 
     // Compute new content from chunks
     let new_content = derive_new_contents(workspace_root, &abs_path, &old_content, chunks)?;

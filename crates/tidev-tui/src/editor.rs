@@ -157,8 +157,8 @@ impl Drop for TempEditFile {
 pub fn suspend_tui() -> anyhow::Result<()> {
     use crossterm::cursor::Show;
     use crossterm::event::{DisableBracketedPaste, DisableFocusChange, DisableMouseCapture};
-    use crossterm::terminal::{DisableLineWrap, LeaveAlternateScreen, disable_raw_mode};
     use crossterm::execute;
+    use crossterm::terminal::{DisableLineWrap, LeaveAlternateScreen, disable_raw_mode};
     execute!(
         std::io::stdout(),
         LeaveAlternateScreen,
@@ -177,8 +177,8 @@ pub fn suspend_tui() -> anyhow::Result<()> {
 pub fn resume_tui() -> anyhow::Result<()> {
     use crossterm::cursor::Hide;
     use crossterm::event::{EnableBracketedPaste, EnableFocusChange, EnableMouseCapture};
-    use crossterm::terminal::{EnableLineWrap, EnterAlternateScreen, enable_raw_mode};
     use crossterm::execute;
+    use crossterm::terminal::{EnableLineWrap, EnterAlternateScreen, enable_raw_mode};
     enable_raw_mode().context("failed to enable raw mode")?;
     execute!(
         std::io::stdout(),
@@ -195,16 +195,12 @@ pub fn resume_tui() -> anyhow::Result<()> {
 
 /// Open an external editor with the given text content.
 /// Returns the edited text, or an error.
-pub fn open_external_editor(
-    text: &str,
-    ui_config: &UiConfig,
-) -> anyhow::Result<String> {
+pub fn open_external_editor(text: &str, ui_config: &UiConfig) -> anyhow::Result<String> {
     let Some((cmd, mut args)) = resolve_editor(ui_config) else {
         anyhow::bail!("No editor found. Set external_editor in config, $VISUAL, or $EDITOR.");
     };
 
-    let edit_file = TempEditFile::create(text)
-        .context("Failed to create temp file for editing")?;
+    let edit_file = TempEditFile::create(text).context("Failed to create temp file for editing")?;
 
     suspend_tui()?;
 
@@ -215,9 +211,10 @@ pub fn open_external_editor(
 
     // Report editor exit status if it failed.
     if let Some(exit_code) = status.ok().and_then(|s| s.code())
-        && exit_code != 0 {
-            log::warn!("Editor {cmd} exited with code {exit_code}");
-        }
+        && exit_code != 0
+    {
+        log::warn!("Editor {cmd} exited with code {exit_code}");
+    }
 
     let edited = edit_file.read().context("Failed to read edited file")?;
     Ok(edited)

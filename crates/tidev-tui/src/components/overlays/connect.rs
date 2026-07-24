@@ -8,11 +8,11 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
 use tidev_config::provider::ProviderSource;
 
-use unicode_width::UnicodeWidthStr;
 use crate::action::{Action, ConnectAction, OverlayAction, OverlayKind};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
 use crate::utils::{centered_rect, paste_from_clipboard};
+use unicode_width::UnicodeWidthStr;
 
 /// Phase of the connect dialog.
 enum ConnectPhase {
@@ -92,9 +92,7 @@ impl ConnectDialog {
             let q = self.query.trim().to_ascii_lowercase();
             self.all_providers
                 .iter()
-                .filter(|p| {
-                    provider_picker_matches(&q, &p.provider_id, &p.display_name)
-                })
+                .filter(|p| provider_picker_matches(&q, &p.provider_id, &p.display_name))
                 .count()
         }
     }
@@ -147,21 +145,16 @@ impl Component for ConnectDialog {
 
         match &mut self.phase {
             ConnectPhase::ProviderPicker => match key.code {
-                KeyCode::Esc => {
-                    Some(Action::Overlay(OverlayAction::Close(
-                        OverlayKind::ConnectDialog,
-                    )))
-                }
+                KeyCode::Esc => Some(Action::Overlay(OverlayAction::Close(
+                    OverlayKind::ConnectDialog,
+                ))),
                 KeyCode::Tab => None,
                 KeyCode::Enter
                     if !key.modifiers.contains(KeyModifiers::SHIFT)
                         && !key.modifiers.contains(KeyModifiers::ALT) =>
                 {
                     if let Some(item) = self.visible_provider(self.selected) {
-                        self.switch_to_api_key(
-                            item.provider_id.clone(),
-                            item.display_name.clone(),
-                        );
+                        self.switch_to_api_key(item.provider_id.clone(), item.display_name.clone());
                     }
                     None
                 }
@@ -398,7 +391,11 @@ impl Component for ConnectDialog {
                     let line = Line::from(vec![
                         Span::styled(
                             prefix,
-                            Style::default().fg(if is_selected { palette.accent } else { palette.panel_alt }),
+                            Style::default().fg(if is_selected {
+                                palette.accent
+                            } else {
+                                palette.panel_alt
+                            }),
                         ),
                         Span::styled(
                             &item.display_name,
@@ -416,7 +413,11 @@ impl Component for ConnectDialog {
                         ),
                         Span::raw("  "),
                         Span::styled(
-                            if item.connected { "connected" } else { "not connected" },
+                            if item.connected {
+                                "connected"
+                            } else {
+                                "not connected"
+                            },
                             status_style,
                         ),
                     ]);
@@ -460,8 +461,10 @@ impl Component for ConnectDialog {
 
                 // Security notice
                 frame.render_widget(
-                    Paragraph::new("The key will be stored in auth.json and used for future requests.")
-                        .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
+                    Paragraph::new(
+                        "The key will be stored in auth.json and used for future requests.",
+                    )
+                    .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                     sections[1],
                 );
 

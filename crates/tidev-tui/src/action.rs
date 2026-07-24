@@ -7,8 +7,8 @@ use std::path::PathBuf;
 
 use uuid::Uuid;
 
-use tidev_types::message::MessageAttachment;
 use crate::theme::ThemeName;
+use tidev_types::message::MessageAttachment;
 
 /// Panel action identifiers (launcher target).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,8 +76,6 @@ pub(crate) enum ThemeAction {
     Preview(ThemeName),
 }
 
-
-
 /// Search provider panel actions.
 #[derive(Clone, Debug)]
 pub(crate) enum SearchAction {
@@ -95,15 +93,10 @@ pub(crate) enum SearchAction {
 #[derive(Clone, Debug)]
 pub(crate) enum ConnectAction {
     /// Save an API key for the given LLM provider.
-    SaveApiKey {
-        provider_id: String,
-        key: String,
-    },
+    SaveApiKey { provider_id: String, key: String },
     /// Prune orphan auth entries whose provider is no longer in config.
     PruneOrphans,
 }
-
-
 
 // ---------------------------------------------------------------------------
 // Tool approval pipeline types

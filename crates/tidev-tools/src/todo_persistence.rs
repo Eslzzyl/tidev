@@ -15,9 +15,5 @@ pub trait TodoPersistence: Send + Sync {
     fn load_todos(&self, session_id: uuid::Uuid) -> anyhow::Result<Vec<TodoItem>>;
 
     /// Atomically replace the todo list for the given session.
-    fn replace_todos(
-        &self,
-        session_id: uuid::Uuid,
-        todos: &[TodoItem],
-    ) -> anyhow::Result<()>;
+    fn replace_todos(&self, session_id: uuid::Uuid, todos: &[TodoItem]) -> anyhow::Result<()>;
 }

@@ -6,12 +6,12 @@
 
 use std::path::Path;
 
+use crate::theme::ThemePalette;
 use ratatui::prelude::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use tidev_types::message::{Message, MessageAttachment, ToolCall};
-use tidev_types::tools::{canonical_tool_name, TaskArgs};
+use tidev_types::tools::{TaskArgs, canonical_tool_name};
 use tidev_utils::path::display_workspace_relative;
-use crate::theme::ThemePalette;
 use unicode_width::UnicodeWidthStr;
 
 use crate::ansi::ansi_to_styled_line;
@@ -60,10 +60,12 @@ pub(crate) fn render_tool_call_with_result(
     let (edit_old_lines, edit_new_lines) =
         if matches!(canonical_name, "edit") && tool_result.is_none() {
             (
-                count_lines_in_partial_json(&tool_call.arguments, "old_text")
-                    .max(count_lines_in_partial_json(&tool_call.arguments, "old_string")),
-                count_lines_in_partial_json(&tool_call.arguments, "new_text")
-                    .max(count_lines_in_partial_json(&tool_call.arguments, "new_string")),
+                count_lines_in_partial_json(&tool_call.arguments, "old_text").max(
+                    count_lines_in_partial_json(&tool_call.arguments, "old_string"),
+                ),
+                count_lines_in_partial_json(&tool_call.arguments, "new_text").max(
+                    count_lines_in_partial_json(&tool_call.arguments, "new_string"),
+                ),
             )
         } else {
             (0, 0)
@@ -88,7 +90,13 @@ pub(crate) fn render_tool_call_with_result(
     // Summary-only tools (read/glob/grep/skill)
     if matches!(canonical_name, "grep" | "glob" | "read" | "skill") {
         return (
-            render_tool_call_summary_line_inner(tool_call, tool_result, content_width, palette, ctx),
+            render_tool_call_summary_line_inner(
+                tool_call,
+                tool_result,
+                content_width,
+                palette,
+                ctx,
+            ),
             Vec::new(),
         );
     }
@@ -100,7 +108,12 @@ pub(crate) fn render_tool_call_with_result(
     {
         let output = tool_result.map(|m| m.content.as_str()).unwrap_or("");
         let lines = render_subagent_task_preview(
-            output, content_width, palette, is_expanded, &task_args.description, task_args.subagent_type.as_str(),
+            output,
+            content_width,
+            palette,
+            is_expanded,
+            &task_args.description,
+            task_args.subagent_type.as_str(),
         );
         return (lines, Vec::new());
     }
@@ -156,7 +169,10 @@ pub(crate) fn render_tool_call_with_result(
         let progress_text = match canonical_name {
             "write" if write_lines > 0 => format!("Writing {} lines...", write_lines),
             "edit" if edit_old_lines > 0 && edit_new_lines > 0 => {
-                format!("Replacing {} lines with {} lines...", edit_old_lines, edit_new_lines)
+                format!(
+                    "Replacing {} lines with {} lines...",
+                    edit_old_lines, edit_new_lines
+                )
             }
             "edit" if edit_old_lines > 0 => {
                 format!("Replacing {} lines with 0 lines...", edit_old_lines)
@@ -166,15 +182,22 @@ pub(crate) fn render_tool_call_with_result(
             }
             "apply_patch" if patch_file_ops > 0 => {
                 let mut parts = vec![];
-                if patch_add_lines > 0 { parts.push(format!("+{}", patch_add_lines)); }
-                if patch_del_lines > 0 { parts.push(format!("-{}", patch_del_lines)); }
+                if patch_add_lines > 0 {
+                    parts.push(format!("+{}", patch_add_lines));
+                }
+                if patch_del_lines > 0 {
+                    parts.push(format!("-{}", patch_del_lines));
+                }
                 let change_summary = if parts.is_empty() {
                     String::new()
                 } else {
                     format!(" ({} lines)", parts.join(" "))
                 };
-                format!("Applying patch to {}{}...",
-                    pluralize(patch_file_ops, "file", "files"), change_summary)
+                format!(
+                    "Applying patch to {}{}...",
+                    pluralize(patch_file_ops, "file", "files"),
+                    change_summary
+                )
             }
             _ => unreachable!(),
         };
@@ -214,7 +237,8 @@ fn render_tool_call_summary_line_inner(
     let parsed = serde_json::from_str::<serde_json::Value>(&tool_call.arguments).ok();
 
     let string_field = |key: &str| {
-        parsed.as_ref()
+        parsed
+            .as_ref()
             .and_then(|v| v.get(key))
             .and_then(serde_json::Value::as_str)
             .map(|s| s.to_string())
@@ -227,34 +251,72 @@ fn render_tool_call_summary_line_inner(
             let pattern = string_field("pattern").unwrap_or_default();
             let path = string_field("path").unwrap_or_else(|| ".".to_string());
             let rel = rel_path(&path);
-            ("Search", vec![
-                Span::styled(format!("\"{}\"", pattern), Style::default().fg(palette.text).add_modifier(Modifier::BOLD)),
-                Span::styled(" in ", Style::default().fg(palette.muted)),
-                Span::styled(rel, Style::default().fg(palette.text).add_modifier(Modifier::BOLD)),
-            ])
+            (
+                "Search",
+                vec![
+                    Span::styled(
+                        format!("\"{}\"", pattern),
+                        Style::default()
+                            .fg(palette.text)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(" in ", Style::default().fg(palette.muted)),
+                    Span::styled(
+                        rel,
+                        Style::default()
+                            .fg(palette.text)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ],
+            )
         }
         "glob" => {
             let pattern = string_field("pattern").unwrap_or_else(|| "*".to_string());
             let path = string_field("path").unwrap_or_else(|| ".".to_string());
             let rel = rel_path(&path);
-            ("Find", vec![
-                Span::styled(pattern.clone(), Style::default().fg(palette.text).add_modifier(Modifier::BOLD)),
-                Span::styled(" in ", Style::default().fg(palette.muted)),
-                Span::styled(rel, Style::default().fg(palette.text).add_modifier(Modifier::BOLD)),
-            ])
+            (
+                "Find",
+                vec![
+                    Span::styled(
+                        pattern.clone(),
+                        Style::default()
+                            .fg(palette.text)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(" in ", Style::default().fg(palette.muted)),
+                    Span::styled(
+                        rel,
+                        Style::default()
+                            .fg(palette.text)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ],
+            )
         }
         "read" => {
             let path = string_field("file_path").unwrap_or_else(|| "file".to_string());
             let rel = rel_path(&path);
-            ("Read", vec![
-                Span::styled(rel, Style::default().fg(palette.text).add_modifier(Modifier::BOLD)),
-            ])
+            (
+                "Read",
+                vec![Span::styled(
+                    rel,
+                    Style::default()
+                        .fg(palette.text)
+                        .add_modifier(Modifier::BOLD),
+                )],
+            )
         }
         "skill" => {
             let name = string_field("name").unwrap_or_default();
-            ("Loaded skill", vec![
-                Span::styled(name, Style::default().fg(palette.text).add_modifier(Modifier::BOLD)),
-            ])
+            (
+                "Loaded skill",
+                vec![Span::styled(
+                    name,
+                    Style::default()
+                        .fg(palette.text)
+                        .add_modifier(Modifier::BOLD),
+                )],
+            )
         }
         _ => {
             let summary = summarize_tool_call(tool_call, content_width);
@@ -272,11 +334,15 @@ fn render_tool_call_summary_line_inner(
         " ...".to_string()
     };
 
-    let mut all_spans = vec![
-        Span::styled(format!("{} ", action_label), Style::default().fg(palette.accent_soft)),
-    ];
+    let mut all_spans = vec![Span::styled(
+        format!("{} ", action_label),
+        Style::default().fg(palette.accent_soft),
+    )];
     all_spans.extend(target_spans);
-    all_spans.push(Span::styled(result_suffix, Style::default().fg(palette.muted)));
+    all_spans.push(Span::styled(
+        result_suffix,
+        Style::default().fg(palette.muted),
+    ));
 
     let line = Line::from(all_spans);
 
@@ -289,9 +355,17 @@ fn render_tool_call_summary_line_inner(
             .subsequent_indent(indent)
             .break_words(true),
     );
-    wrapped.into_iter().map(|l| {
-        Line::from(l.spans.into_iter().map(|s| Span::styled(s.content.to_string(), s.style)).collect::<Vec<_>>())
-    }).collect()
+    wrapped
+        .into_iter()
+        .map(|l| {
+            Line::from(
+                l.spans
+                    .into_iter()
+                    .map(|s| Span::styled(s.content.to_string(), s.style))
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -309,7 +383,10 @@ fn render_subagent_task_preview(
     let mut lines = Vec::new();
 
     if output.trim().is_empty() {
-        lines.push(Line::from(Span::styled("(empty result)", Style::default().fg(palette.muted))));
+        lines.push(Line::from(Span::styled(
+            "(empty result)",
+            Style::default().fg(palette.muted),
+        )));
         return lines;
     }
 
@@ -318,15 +395,32 @@ fn render_subagent_task_preview(
 
     // Header: [@type] subagent: description
     let header_line = Line::from(vec![
-        Span::styled(format!("@{}", subagent_type), Style::default().fg(palette.accent_soft)),
+        Span::styled(
+            format!("@{}", subagent_type),
+            Style::default().fg(palette.accent_soft),
+        ),
         Span::styled(" subagent: ", Style::default().fg(palette.muted)),
-        Span::styled(description.to_string(), Style::default().fg(palette.text).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            description.to_string(),
+            Style::default()
+                .fg(palette.text)
+                .add_modifier(Modifier::BOLD),
+        ),
     ]);
     lines.extend(
-        word_wrap_line(&header_line, WrapOptions::new(content_width).break_words(true))
-            .into_iter().map(|l| {
-                Line::from(l.spans.into_iter().map(|s| Span::styled(s.content.to_string(), s.style)).collect::<Vec<_>>())
-            }),
+        word_wrap_line(
+            &header_line,
+            WrapOptions::new(content_width).break_words(true),
+        )
+        .into_iter()
+        .map(|l| {
+            Line::from(
+                l.spans
+                    .into_iter()
+                    .map(|s| Span::styled(s.content.to_string(), s.style))
+                    .collect::<Vec<_>>(),
+            )
+        }),
     );
     lines.push(Line::from(""));
 
@@ -370,7 +464,8 @@ fn render_tool_call_lines(
     let parsed = serde_json::from_str::<serde_json::Value>(&tool_call.arguments).ok();
 
     let string_field = |key: &str| {
-        parsed.as_ref()
+        parsed
+            .as_ref()
             .and_then(|v| v.get(key))
             .and_then(serde_json::Value::as_str)
             .map(|s| s.to_string())
@@ -387,17 +482,29 @@ fn render_tool_call_lines(
             let display = desc.as_deref().unwrap_or(&command);
             let mut title_spans = vec![
                 Span::styled("Shell ", Style::default().fg(palette.accent_soft)),
-                Span::styled(display.to_string(), Style::default().fg(palette.text).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    display.to_string(),
+                    Style::default()
+                        .fg(palette.text)
+                        .add_modifier(Modifier::BOLD),
+                ),
             ];
 
             if let Some(code) = exit_code {
                 if code == 0 {
                     title_spans.push(Span::styled("  ✓", Style::default().fg(palette.success)));
                 } else {
-                    title_spans.push(Span::styled(format!("  ✗ {}", code), Style::default().fg(palette.error)));
+                    title_spans.push(Span::styled(
+                        format!("  ✗ {}", code),
+                        Style::default().fg(palette.error),
+                    ));
                 }
             }
-            lines.extend(wrap_tool_title(Line::from(title_spans), content_width, "      "));
+            lines.extend(wrap_tool_title(
+                Line::from(title_spans),
+                content_width,
+                "      ",
+            ));
 
             for cmd_line in command.lines() {
                 let owned_line = Line::from(cmd_line.to_string());
@@ -425,9 +532,15 @@ fn render_tool_call_lines(
             lines.extend(wrap_tool_title(
                 Line::from(vec![
                     Span::styled("Write ", Style::default().fg(palette.accent_soft)),
-                    Span::styled(rel, Style::default().fg(palette.text).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        rel,
+                        Style::default()
+                            .fg(palette.text)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                 ]),
-                content_width, "      ",
+                content_width,
+                "      ",
             ));
         }
         "edit" => {
@@ -436,19 +549,31 @@ fn render_tool_call_lines(
             lines.extend(wrap_tool_title(
                 Line::from(vec![
                     Span::styled("Edit ", Style::default().fg(palette.accent_soft)),
-                    Span::styled(rel, Style::default().fg(palette.text).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        rel,
+                        Style::default()
+                            .fg(palette.text)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                 ]),
-                content_width, "      ",
+                content_width,
+                "      ",
             ));
         }
         "websearch" => {
             let query = string_field("query").unwrap_or_default();
             let mut title_spans = vec![
                 Span::styled("Search web for ", Style::default().fg(palette.accent_soft)),
-                Span::styled(query, Style::default().fg(palette.text).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    query,
+                    Style::default()
+                        .fg(palette.text)
+                        .add_modifier(Modifier::BOLD),
+                ),
             ];
             let mut suffix_parts: Vec<String> = Vec::new();
-            if let Some(num) = parsed.as_ref()
+            if let Some(num) = parsed
+                .as_ref()
                 .and_then(|v| v.get("num_results"))
                 .and_then(|v| v.as_i64())
             {
@@ -463,19 +588,32 @@ fn render_tool_call_lines(
                     Style::default().fg(palette.muted),
                 ));
             }
-            lines.extend(wrap_tool_title(Line::from(title_spans), content_width, "               "));
+            lines.extend(wrap_tool_title(
+                Line::from(title_spans),
+                content_width,
+                "               ",
+            ));
         }
         "webfetch" => {
             let url = string_field("url").unwrap_or_default();
             let mut title_spans = vec![
-                Span::styled("Fetch web page from ", Style::default().fg(palette.accent_soft)),
-                Span::styled(url, Style::default().fg(palette.text).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "Fetch web page from ",
+                    Style::default().fg(palette.accent_soft),
+                ),
+                Span::styled(
+                    url,
+                    Style::default()
+                        .fg(palette.text)
+                        .add_modifier(Modifier::BOLD),
+                ),
             ];
             let mut suffix_parts: Vec<String> = Vec::new();
             if let Some(fmt) = string_field("format") {
                 suffix_parts.push(format!("format: {}", fmt));
             }
-            if let Some(to) = parsed.as_ref()
+            if let Some(to) = parsed
+                .as_ref()
                 .and_then(|v| v.get("timeout"))
                 .and_then(|v| v.as_i64())
             {
@@ -487,7 +625,11 @@ fn render_tool_call_lines(
                     Style::default().fg(palette.muted),
                 ));
             }
-            lines.extend(wrap_tool_title(Line::from(title_spans), content_width, "                    "));
+            lines.extend(wrap_tool_title(
+                Line::from(title_spans),
+                content_width,
+                "                    ",
+            ));
         }
         "apply_patch" => {
             let patch_text = string_field("patch_text").unwrap_or_default();
@@ -495,7 +637,8 @@ fn render_tool_call_lines(
                 .lines()
                 .filter_map(|line| {
                     let trimmed = line.trim();
-                    trimmed.strip_prefix("*** Add File: ")
+                    trimmed
+                        .strip_prefix("*** Add File: ")
                         .or_else(|| trimmed.strip_prefix("*** Update File: "))
                         .or_else(|| trimmed.strip_prefix("*** Delete File: "))
                 })
@@ -508,12 +651,17 @@ fn render_tool_call_lines(
                 format!("Apply patch to {} files", file_paths.len())
             };
             lines.extend(wrap_tool_title(
-                Line::from(vec![Span::styled(title, Style::default().fg(palette.accent_soft))]),
-                content_width, "               ",
+                Line::from(vec![Span::styled(
+                    title,
+                    Style::default().fg(palette.accent_soft),
+                )]),
+                content_width,
+                "               ",
             ));
         }
         "question" => {
-            let count = parsed.as_ref()
+            let count = parsed
+                .as_ref()
                 .and_then(|v| v.get("questions"))
                 .and_then(|a| a.as_array())
                 .map(|a| a.len())
@@ -524,21 +672,33 @@ fn render_tool_call_lines(
                 format!("Ask {} questions", count)
             };
             lines.extend(wrap_tool_title(
-                Line::from(vec![Span::styled(title, Style::default().fg(palette.accent_soft))]),
-                content_width, "   ",
+                Line::from(vec![Span::styled(
+                    title,
+                    Style::default().fg(palette.accent_soft),
+                )]),
+                content_width,
+                "   ",
             ));
         }
         "todowrite" => {
             lines.extend(wrap_tool_title(
-                Line::from(vec![Span::styled("Update todo list", Style::default().fg(palette.accent_soft))]),
-                content_width, "   ",
+                Line::from(vec![Span::styled(
+                    "Update todo list",
+                    Style::default().fg(palette.accent_soft),
+                )]),
+                content_width,
+                "   ",
             ));
         }
         _ => {
             let summary = summarize_tool_call(tool_call, content_width);
             lines.extend(wrap_tool_title(
-                Line::from(vec![Span::styled(summary, Style::default().fg(palette.accent_soft))]),
-                content_width, "  ",
+                Line::from(vec![Span::styled(
+                    summary,
+                    Style::default().fg(palette.accent_soft),
+                )]),
+                content_width,
+                "  ",
             ));
         }
     }
@@ -581,10 +741,7 @@ fn render_tool_result_detail_lines(
     }
 
     // apply_patch with structured file_changes
-    if canonical_name == "apply_patch"
-        && !is_error
-        && !message.metadata.file_changes.is_empty()
-    {
+    if canonical_name == "apply_patch" && !is_error && !message.metadata.file_changes.is_empty() {
         let mut lines = Vec::new();
         let mut regions = Vec::new();
         let mut line_offset = 0usize;
@@ -598,8 +755,16 @@ fn render_tool_result_detail_lines(
             };
 
             lines.push(Line::from(vec![
-                Span::styled(format!("{} ", label), Style::default().fg(palette.accent_soft)),
-                Span::styled(change.path.clone(), Style::default().fg(palette.text).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    format!("{} ", label),
+                    Style::default().fg(palette.accent_soft),
+                ),
+                Span::styled(
+                    change.path.clone(),
+                    Style::default()
+                        .fg(palette.text)
+                        .add_modifier(Modifier::BOLD),
+                ),
             ]));
             line_offset += 1;
 
@@ -654,7 +819,8 @@ fn render_tool_result_detail_lines(
         let raw_todos = if let Ok(todos) = serde_json::from_str::<Vec<RawTodo>>(effective_output) {
             Some(todos)
         } else if let Ok(value) = serde_json::from_str::<serde_json::Value>(effective_output) {
-            value.get("newTodos")
+            value
+                .get("newTodos")
                 .or_else(|| value.get("todos"))
                 .and_then(|v| serde_json::from_value::<Vec<RawTodo>>(v.clone()).ok())
         } else {
@@ -662,7 +828,8 @@ fn render_tool_result_detail_lines(
         };
 
         if let Some(raw_todos) = raw_todos {
-            let todos: Vec<TodoItem> = raw_todos.into_iter()
+            let todos: Vec<TodoItem> = raw_todos
+                .into_iter()
                 .map(|r| TodoItem {
                     content: r.content,
                     status: r.status.unwrap_or_else(|| "pending".to_string()),
@@ -679,7 +846,13 @@ fn render_tool_result_detail_lines(
     // Web search results: styled markdown with header
     if canonical_name == "websearch" {
         return (
-            render_websearch_result_lines(effective_output, content_width, palette, is_expanded, is_error),
+            render_websearch_result_lines(
+                effective_output,
+                content_width,
+                palette,
+                is_expanded,
+                is_error,
+            ),
             None,
             vec![],
         );
@@ -688,7 +861,13 @@ fn render_tool_result_detail_lines(
     // Web fetch results: styled markdown with header
     if canonical_name == "webfetch" {
         return (
-            render_webfetch_result_lines(effective_output, content_width, palette, is_expanded, is_error),
+            render_webfetch_result_lines(
+                effective_output,
+                content_width,
+                palette,
+                is_expanded,
+                is_error,
+            ),
             None,
             vec![],
         );
@@ -696,7 +875,13 @@ fn render_tool_result_detail_lines(
 
     // Fallback: standard output preview
     (
-        render_output_preview_lines(effective_output, content_width, palette, is_expanded, is_error),
+        render_output_preview_lines(
+            effective_output,
+            content_width,
+            palette,
+            is_expanded,
+            is_error,
+        ),
         exit_code,
         vec![],
     )
@@ -716,7 +901,10 @@ fn render_websearch_result_lines(
     let mut lines = Vec::new();
 
     if output.trim().is_empty() {
-        lines.push(Line::from(Span::styled("(no results)", Style::default().fg(palette.muted))));
+        lines.push(Line::from(Span::styled(
+            "(no results)",
+            Style::default().fg(palette.muted),
+        )));
         return lines;
     }
 
@@ -730,9 +918,7 @@ fn render_websearch_result_lines(
     )]));
     lines.push(Line::from(""));
 
-    let rendered = render_markdown_text_with_width_and_cwd(
-        output, Some(content_width), None,
-    );
+    let rendered = render_markdown_text_with_width_and_cwd(output, Some(content_width), None);
     let md_lines: Vec<Line<'static>> = rendered.lines.clone();
 
     if is_expanded {
@@ -752,7 +938,10 @@ fn render_websearch_result_lines(
         } else {
             lines.extend(md_lines.into_iter().take(max_preview));
             lines.push(Line::from(vec![Span::styled(
-                format!("  ▼ {} more line(s) — Click to expand", line_count - max_preview),
+                format!(
+                    "  ▼ {} more line(s) — Click to expand",
+                    line_count - max_preview
+                ),
                 Style::default().fg(palette.muted),
             )]));
         }
@@ -775,7 +964,10 @@ fn render_webfetch_result_lines(
     let mut lines = Vec::new();
 
     if output.trim().is_empty() {
-        lines.push(Line::from(Span::styled("(empty page)", Style::default().fg(palette.muted))));
+        lines.push(Line::from(Span::styled(
+            "(empty page)",
+            Style::default().fg(palette.muted),
+        )));
         return lines;
     }
 
@@ -789,9 +981,7 @@ fn render_webfetch_result_lines(
     )]));
     lines.push(Line::from(""));
 
-    let rendered = render_markdown_text_with_width_and_cwd(
-        output, Some(content_width), None,
-    );
+    let rendered = render_markdown_text_with_width_and_cwd(output, Some(content_width), None);
     let md_lines: Vec<Line<'static>> = rendered.lines.clone();
 
     if is_expanded {
@@ -811,7 +1001,10 @@ fn render_webfetch_result_lines(
         } else {
             lines.extend(md_lines.into_iter().take(max_preview));
             lines.push(Line::from(vec![Span::styled(
-                format!("  ▼ {} more line(s) — Click to expand", line_count - max_preview),
+                format!(
+                    "  ▼ {} more line(s) — Click to expand",
+                    line_count - max_preview
+                ),
                 Style::default().fg(palette.muted),
             )]));
         }
@@ -838,7 +1031,10 @@ fn render_question_result_pairs(
     lines.push(Line::from(""));
 
     if output.trim().is_empty() {
-        lines.push(Line::from(Span::styled("(no output)", Style::default().fg(palette.muted))));
+        lines.push(Line::from(Span::styled(
+            "(no output)",
+            Style::default().fg(palette.muted),
+        )));
         return lines;
     }
 
@@ -848,12 +1044,14 @@ fn render_question_result_pairs(
             continue;
         }
 
-        let question_text: String = q_line.strip_prefix("Q")
+        let question_text: String = q_line
+            .strip_prefix("Q")
             .and_then(|rest| rest.split_once(':').map(|x| x.1))
             .map(|s| s.trim().to_string())
             .unwrap_or_else(|| q_line.to_string());
 
-        let answer_text = lines_iter.next()
+        let answer_text = lines_iter
+            .next()
             .and_then(|a_line| a_line.strip_prefix("A: "))
             .map(|s| s.trim().to_string())
             .unwrap_or_default();
@@ -864,7 +1062,9 @@ fn render_question_result_pairs(
             WrapOptions::new(content_width)
                 .initial_indent(Line::from(vec![Span::styled(
                     "  Q: ",
-                    Style::default().fg(palette.accent_soft).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(palette.accent_soft)
+                        .add_modifier(Modifier::BOLD),
                 )]))
                 .subsequent_indent(Line::from(vec![Span::styled(
                     "     ",
@@ -872,7 +1072,9 @@ fn render_question_result_pairs(
                 )])),
         );
         for wl in q_wrapped {
-            let mut owned_spans: Vec<Span<'static>> = wl.spans.into_iter()
+            let mut owned_spans: Vec<Span<'static>> = wl
+                .spans
+                .into_iter()
                 .map(|s| Span::styled(s.content.to_string(), s.style))
                 .collect();
             for span in owned_spans.iter_mut().skip(1) {
@@ -897,7 +1099,9 @@ fn render_question_result_pairs(
                 )])),
         );
         for wl in a_wrapped {
-            let mut owned_spans: Vec<Span<'static>> = wl.spans.into_iter()
+            let mut owned_spans: Vec<Span<'static>> = wl
+                .spans
+                .into_iter()
                 .map(|s| Span::styled(s.content.to_string(), s.style))
                 .collect();
             for span in owned_spans.iter_mut().skip(1) {
@@ -931,7 +1135,10 @@ fn render_todos_checkbox_list(
     let mut lines = Vec::new();
 
     if todos.is_empty() {
-        lines.push(Line::from(Span::styled("  (no items)", Style::default().fg(palette.muted))));
+        lines.push(Line::from(Span::styled(
+            "  (no items)",
+            Style::default().fg(palette.muted),
+        )));
         return lines;
     }
 
@@ -939,11 +1146,15 @@ fn render_todos_checkbox_list(
         let (checkbox, style) = match todo.status.as_str() {
             "completed" => (
                 "x ",
-                Style::default().fg(palette.muted).add_modifier(Modifier::CROSSED_OUT),
+                Style::default()
+                    .fg(palette.muted)
+                    .add_modifier(Modifier::CROSSED_OUT),
             ),
             "in_progress" => (
                 "● ",
-                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
             ),
             _ => ("○ ", Style::default().fg(palette.text)),
         };
@@ -961,7 +1172,9 @@ fn render_todos_checkbox_list(
         );
 
         for wl in wrapped {
-            let mut owned_spans: Vec<Span<'static>> = wl.spans.into_iter()
+            let mut owned_spans: Vec<Span<'static>> = wl
+                .spans
+                .into_iter()
                 .map(|s| Span::styled(s.content.to_string(), s.style))
                 .collect();
             for span in owned_spans.iter_mut().skip(1) {
@@ -988,10 +1201,16 @@ fn compute_tool_result_suffix(
     match canonical_name {
         "grep" | "glob" => {
             if tool_output_is_error(output) {
-                let count = if output.is_empty() { 0 } else { output.lines().count() };
+                let count = if output.is_empty() {
+                    0
+                } else {
+                    output.lines().count()
+                };
                 format!(" → failed ({} lines)", count)
             } else {
-                let count = output.lines().next()
+                let count = output
+                    .lines()
+                    .next()
                     .and_then(|first_line| {
                         if first_line.starts_with("No files found") {
                             Some(0usize)
@@ -1019,7 +1238,10 @@ fn compute_tool_result_suffix(
             } else if has_image_attachment(attachments) {
                 // Enriched image suffix: " → TYPE, SIZE"
                 let image = attachments.iter().find_map(|a| {
-                    if let MessageAttachment::Image { mime, file_size, .. } = a {
+                    if let MessageAttachment::Image {
+                        mime, file_size, ..
+                    } = a
+                    {
                         Some((mime.as_str(), *file_size))
                     } else {
                         None
@@ -1110,7 +1332,8 @@ fn compute_tool_result_suffix(
             if tool_output_is_error(output) {
                 " → error".to_string()
             } else {
-                let content_lines: Vec<_> = output.lines()
+                let content_lines: Vec<_> = output
+                    .lines()
                     .skip_while(|l| l.starts_with('#') || l.starts_with("**"))
                     .filter(|l| !l.is_empty())
                     .collect();
@@ -1122,11 +1345,15 @@ fn compute_tool_result_suffix(
 }
 
 fn has_directory_attachment(attachments: &[MessageAttachment]) -> bool {
-    attachments.iter().any(|a| matches!(a, MessageAttachment::DirectoryReference { .. }))
+    attachments
+        .iter()
+        .any(|a| matches!(a, MessageAttachment::DirectoryReference { .. }))
 }
 
 fn has_image_attachment(attachments: &[MessageAttachment]) -> bool {
-    attachments.iter().any(|a| matches!(a, MessageAttachment::Image { .. }))
+    attachments
+        .iter()
+        .any(|a| matches!(a, MessageAttachment::Image { .. }))
 }
 
 // ---------------------------------------------------------------------------
@@ -1152,7 +1379,11 @@ pub(crate) fn render_output_preview_lines(
         TOOL_OUTPUT_PREVIEW_LINES
     };
 
-    let fg = if is_error { palette.error } else { palette.text };
+    let fg = if is_error {
+        palette.error
+    } else {
+        palette.text
+    };
     let default_style = Style::default().fg(fg);
     let wrap_width = content_width;
 
@@ -1162,7 +1393,9 @@ pub(crate) fn render_output_preview_lines(
         for sl in &styled_lines {
             let wrapped = word_wrap_line(sl, WrapOptions::new(wrap_width).break_words(true));
             for wl in wrapped.iter() {
-                let spans: Vec<Span<'static>> = wl.spans.iter()
+                let spans: Vec<Span<'static>> = wl
+                    .spans
+                    .iter()
                     .map(|s| Span::styled(s.content.to_string(), s.style))
                     .collect();
                 lines.push(Line::from(spans));
@@ -1179,13 +1412,19 @@ pub(crate) fn render_output_preview_lines(
         }
     } else if total_output_lines > max_lines {
         lines.push(Line::from(vec![Span::styled(
-            format!("  ▼ {} more line(s) — Click to expand", total_output_lines - max_lines),
+            format!(
+                "  ▼ {} more line(s) — Click to expand",
+                total_output_lines - max_lines
+            ),
             Style::default().fg(palette.muted),
         )]));
     }
 
     if lines.is_empty() {
-        lines.push(Line::from(Span::styled("(no output)", Style::default().fg(palette.muted))));
+        lines.push(Line::from(Span::styled(
+            "(no output)",
+            Style::default().fg(palette.muted),
+        )));
     }
 
     lines
@@ -1221,16 +1460,18 @@ fn tool_output_is_error(output: &str) -> bool {
 /// Supports two formats:
 /// - `[exit N]` (current)
 /// - `Exit code: N` (legacy)
-fn parse_shell_exit_code(output: &str) -> (Option<i32>, &str) {    // Try [exit N] format (new tool output)
+fn parse_shell_exit_code(output: &str) -> (Option<i32>, &str) {
+    // Try [exit N] format (new tool output)
     if let Some(stripped) = output.strip_prefix("[exit ")
-        && let Some(end_idx) = stripped.find(']') {
-            let code_str = &stripped[..end_idx];
-            if let Ok(code) = code_str.parse::<i32>() {
-                let remaining = &stripped[end_idx + 1..];
-                let remaining = remaining.strip_prefix('\n').unwrap_or(remaining);
-                return (Some(code), remaining);
-            }
+        && let Some(end_idx) = stripped.find(']')
+    {
+        let code_str = &stripped[..end_idx];
+        if let Ok(code) = code_str.parse::<i32>() {
+            let remaining = &stripped[end_idx + 1..];
+            let remaining = remaining.strip_prefix('\n').unwrap_or(remaining);
+            return (Some(code), remaining);
         }
+    }
     // Fallback: "Exit code: N" format (legacy)
     if let Some(pos) = output.rfind("Exit code: ") {
         let rest = &output[pos + "Exit code: ".len()..];
@@ -1270,7 +1511,8 @@ fn summarize_tool_call(tool_call: &ToolCall, max_width: usize) -> String {
 fn summarize_tool_arguments(tool_call: &ToolCall, max_width: usize) -> String {
     match serde_json::from_str::<serde_json::Value>(&tool_call.arguments) {
         Ok(serde_json::Value::Object(map)) => {
-            let parts: Vec<String> = map.iter()
+            let parts: Vec<String> = map
+                .iter()
                 .map(|(k, v)| {
                     let val_str = match v {
                         serde_json::Value::String(s) => {
@@ -1451,10 +1693,10 @@ fn preparing_text_for_tool(canonical_name: &str) -> &'static str {
 
 /// Parsed metadata from a read tool output's XML-style metadata block.
 type ReadContentMetadata = Option<(
-    (i64, i64),           // line_range (start, end)
-    Option<(i64, i64)>,   // requested_range (None if model didn't specify)
-    i64,                  // file_total
-    Option<String>,       // truncated_by: None | "size" | "lines"
+    (i64, i64),         // line_range (start, end)
+    Option<(i64, i64)>, // requested_range (None if model didn't specify)
+    i64,                // file_total
+    Option<String>,     // truncated_by: None | "size" | "lines"
 )>;
 
 /// Parse range string "start-end" into (start, end).
@@ -1587,20 +1829,14 @@ fn format_read_result_label(
             format!(" → Line {start}-{end} of {total}")
         }
         (false, Some((req_start, req_end)), None) => {
-            format!(
-                " → Line {start}-{end} of {total} (requested {req_start}-{req_end})"
-            )
+            format!(" → Line {start}-{end} of {total} (requested {req_start}-{req_end})")
         }
         // Partial read with truncation
         (false, None, Some(suffix)) => {
-            format!(
-                " → Line {start}-{end} of {total} (requested all lines, {suffix})"
-            )
+            format!(" → Line {start}-{end} of {total} (requested all lines, {suffix})")
         }
         (false, Some((req_start, req_end)), Some(suffix)) => {
-            format!(
-                " → Line {start}-{end} of {total} (requested {req_start}-{req_end}, {suffix})"
-            )
+            format!(" → Line {start}-{end} of {total} (requested {req_start}-{req_end}, {suffix})")
         }
     }
 }
@@ -1643,17 +1879,25 @@ fn wrap_tool_title(
             .subsequent_indent(indent)
             .break_words(true),
     );
-    wrapped.into_iter().map(|l| {
-        Line::from(l.spans.into_iter().map(|s| Span::styled(s.content.to_string(), s.style)).collect::<Vec<_>>())
-    }).collect()
+    wrapped
+        .into_iter()
+        .map(|l| {
+            Line::from(
+                l.spans
+                    .into_iter()
+                    .map(|s| Span::styled(s.content.to_string(), s.style))
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::style::Color;
     use std::collections::HashSet;
     use std::path::Path;
-    use ratatui::style::Color;
     use tidev_types::message::{Message, ToolCall, ToolExecutionResult};
 
     fn test_palette() -> ThemePalette {
@@ -1712,28 +1956,26 @@ mod tests {
 1: fn main() {}
 </content>";
 
-        let result_msg = Message::tool_result(
-            "call_1",
-            "read",
-            ToolExecutionResult::new(normal_output),
-        );
+        let result_msg =
+            Message::tool_result("call_1", "read", ToolExecutionResult::new(normal_output));
 
-        let (lines, _regions) = render_tool_call_with_result(
-            &tool_call,
-            Some(&result_msg),
-            80,
-            false,
-            &ctx,
-            false,
-        );
+        let (lines, _regions) =
+            render_tool_call_with_result(&tool_call, Some(&result_msg), 80, false, &ctx, false);
 
-        let rendered: String = lines.iter().flat_map(|l| {
-            l.spans.iter().map(|s| s.content.as_ref())
-        }).collect();
+        let rendered: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+            .collect();
 
         assert!(rendered.contains("Read"), "Should contain 'Read' label");
-        assert!(!rendered.contains("<path>"), "Should NOT leak raw <path> XML");
-        assert!(!rendered.contains("<content>"), "Should NOT leak <content> tag");
+        assert!(
+            !rendered.contains("<path>"),
+            "Should NOT leak raw <path> XML"
+        );
+        assert!(
+            !rendered.contains("<content>"),
+            "Should NOT leak <content> tag"
+        );
 
         // Read output WITH appended instruction content
         let output_with_instructions = format!(
@@ -1747,25 +1989,30 @@ mod tests {
             ToolExecutionResult::new(&output_with_instructions),
         );
 
-        let (lines2, _regions2) = render_tool_call_with_result(
-            &tool_call,
-            Some(&result_msg2),
-            80,
-            false,
-            &ctx,
-            false,
-        );
+        let (lines2, _regions2) =
+            render_tool_call_with_result(&tool_call, Some(&result_msg2), 80, false, &ctx, false);
 
-        let rendered2: String = lines2.iter().flat_map(|l| {
-            l.spans.iter().map(|s| s.content.as_ref())
-        }).collect();
+        let rendered2: String = lines2
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+            .collect();
 
         assert!(rendered2.contains("Read"), "Should contain 'Read' label");
-        assert!(!rendered2.contains("system-reminder"), "Should NOT leak system-reminder tag");
-        assert!(!rendered2.contains("AGENTS"), "Should NOT leak instruction file content");
-        assert!(!rendered2.contains("<path>"), "Should NOT leak raw XML even with instructions");
-        assert!(!rendered2.contains("<content>"), "Should NOT leak content tag");
+        assert!(
+            !rendered2.contains("system-reminder"),
+            "Should NOT leak system-reminder tag"
+        );
+        assert!(
+            !rendered2.contains("AGENTS"),
+            "Should NOT leak instruction file content"
+        );
+        assert!(
+            !rendered2.contains("<path>"),
+            "Should NOT leak raw XML even with instructions"
+        );
+        assert!(
+            !rendered2.contains("<content>"),
+            "Should NOT leak content tag"
+        );
     }
 }
-
-

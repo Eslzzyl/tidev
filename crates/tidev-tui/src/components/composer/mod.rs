@@ -18,23 +18,21 @@ pub(crate) mod command_palette;
 pub(crate) mod render;
 pub(crate) mod snippet;
 
-
-
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::LazyLock;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use fancy_regex::Regex;
-use ratatui::layout::{Position, Rect};
 use ratatui::Frame;
+use ratatui::layout::{Position, Rect};
 use tidev_search::current_at_fragment;
 use unicode_width::UnicodeWidthChar;
 
-use tidev_types::message::MessageAttachment;
 use crate::action::{Action, ChatAction};
 use crate::component::Component;
 use crate::context::DrawContext;
+use tidev_types::message::MessageAttachment;
 
 pub(crate) use at_mention::AtMentionState;
 pub(crate) use command_palette::{CommandPaletteState, CommandRegistry};
@@ -42,9 +40,8 @@ pub(crate) use snippet::SnippetState;
 
 /// Regex for detecting @ file/directory references in composer text.
 /// Look-behind ensures @ is not preceded by word chars or backticks.
-pub(crate) static AT_REF_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?<![\w`])@(\.?[^\s`.,]*(?:\.[^\s`.,]+)*)").unwrap()
-});
+pub(crate) static AT_REF_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?<![\w`])@(\.?[^\s`.,]*(?:\.[^\s`.,]+)*)").unwrap());
 
 /// Kind of an inline span in the composer.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -124,7 +121,6 @@ pub(crate) struct Composer {
     dirty: bool,
 
     // ── Inline autocomplete subsystems ──────────────────────────────
-
     /// /command suggestion popup.
     command_palette: CommandPaletteState,
     /// Command registry for fuzzy matching.
@@ -293,7 +289,14 @@ impl Composer {
         if start >= end {
             return;
         }
-        let span = InlineSpan { start, end, display, kind, image_data, image_filename };
+        let span = InlineSpan {
+            start,
+            end,
+            display,
+            kind,
+            image_data,
+            image_filename,
+        };
         // Insert sorted by start
         let pos = self.spans.partition_point(|s| s.start < span.start);
         self.spans.insert(pos, span);
@@ -314,7 +317,14 @@ impl Composer {
                 let abs_start = start + path_match.start() - 1; // include the '@'
                 let abs_end = start + path_match.end();
                 let display = text[abs_start..abs_end].to_string();
-                self.register_span(abs_start, abs_end, display, InlineSpanKind::AtReference, None, None);
+                self.register_span(
+                    abs_start,
+                    abs_end,
+                    display,
+                    InlineSpanKind::AtReference,
+                    None,
+                    None,
+                );
                 start += path_match.end();
             } else {
                 break;
@@ -466,14 +476,16 @@ impl Composer {
             self.draft = self.text.clone();
             self.history_cursor = self.history.len().checked_sub(1);
         } else if let Some(index) = self.history_cursor
-            && index > 0 {
-                self.history_cursor = Some(index - 1);
-            }
+            && index > 0
+        {
+            self.history_cursor = Some(index - 1);
+        }
 
         if let Some(index) = self.history_cursor
-            && index < self.history.len() {
-                self.text = self.history[index].clone();
-            }
+            && index < self.history.len()
+        {
+            self.text = self.history[index].clone();
+        }
         self.cursor = self.text.len();
         self.preferred_column = None;
         self.visual_line_hint = None;
@@ -551,7 +563,10 @@ impl Composer {
                 })
             })
             .or_else(|| {
-                lines.iter().enumerate().rposition(|(_, line)| line.start <= cursor)
+                lines
+                    .iter()
+                    .enumerate()
+                    .rposition(|(_, line)| line.start <= cursor)
             })
             .unwrap_or(0);
 
@@ -693,7 +708,14 @@ impl Composer {
                 let insert_pos = self.cursor;
                 self.insert_str(&placeholder);
                 let end_pos = self.cursor;
-                self.register_span(insert_pos, end_pos, placeholder, InlineSpanKind::Image, Some(data), Some(filename));
+                self.register_span(
+                    insert_pos,
+                    end_pos,
+                    placeholder,
+                    InlineSpanKind::Image,
+                    Some(data),
+                    Some(filename),
+                );
                 self.ensure_input_cursor_visible();
                 self.dirty = true;
                 log::info!("Pasted image: {} bytes", file_size);
@@ -747,7 +769,8 @@ impl Composer {
             let span_end = span.end;
             self.text.drain(span_start..span_end);
             self.cursor = span_start;
-            self.spans.retain(|s| s.start != span_start || s.end != span_end);
+            self.spans
+                .retain(|s| s.start != span_start || s.end != span_end);
             self.adjust_after_edit(span_start, span_end - span_start, 0);
             self.preferred_column = None;
             self.visual_line_hint = None;
@@ -899,11 +922,7 @@ impl Composer {
     /// Snap the cursor out of a span boundary: if `pos` is strictly inside a
     /// span, return the span's start; otherwise return `pos`.
     fn snap_to_span_edge(&self, pos: usize) -> usize {
-        if let Some(span) = self
-            .spans
-            .iter()
-            .find(|s| pos > s.start && pos < s.end)
-        {
+        if let Some(span) = self.spans.iter().find(|s| pos > s.start && pos < s.end) {
             span.start
         } else {
             pos
@@ -1019,7 +1038,11 @@ impl Composer {
         let replacement = match selection.kind {
             at_mention::AtMentionKind::Directory => {
                 let separator = std::path::MAIN_SEPARATOR;
-                format!("@{}{}", selection.path.trim_end_matches(['/', '\\']), separator)
+                format!(
+                    "@{}{}",
+                    selection.path.trim_end_matches(['/', '\\']),
+                    separator
+                )
             }
             _ => format!("@{}", selection.path),
         };
@@ -1099,7 +1122,10 @@ impl Composer {
         let scroll = self.input_scroll_offset as u16;
         let local_y = position
             .y
-            .clamp(text_area.y, text_area.y + text_area.height.saturating_sub(1))
+            .clamp(
+                text_area.y,
+                text_area.y + text_area.height.saturating_sub(1),
+            )
             .saturating_sub(text_area.y);
         let local_x = position.x.saturating_sub(text_area.x);
         let target_line = scroll.saturating_add(local_y);
@@ -1161,7 +1187,10 @@ impl Composer {
             self.dirty = true;
             return true;
         }
-        if pointer.y >= text_area.y.saturating_add(text_area.height.saturating_sub(1))
+        if pointer.y
+            >= text_area
+                .y
+                .saturating_add(text_area.height.saturating_sub(1))
             && self.input_scroll_offset < max_scroll
         {
             self.input_scroll_offset += 1;
@@ -1301,11 +1330,8 @@ impl Component for Composer {
 
             match key.code {
                 KeyCode::Up => {
-                    if cursor_line == self.input_scroll_offset
-                        && self.input_scroll_offset > 0
-                    {
-                        self.input_scroll_offset =
-                            self.input_scroll_offset.saturating_sub(1);
+                    if cursor_line == self.input_scroll_offset && self.input_scroll_offset > 0 {
+                        self.input_scroll_offset = self.input_scroll_offset.saturating_sub(1);
                     }
                     self.move_up(width);
                 }
@@ -1314,8 +1340,7 @@ impl Component for Composer {
                         >= (self.input_scroll_offset + visible_lines).min(total_lines)
                         && self.input_scroll_offset < max_scroll
                     {
-                        self.input_scroll_offset =
-                            (self.input_scroll_offset + 1).min(max_scroll);
+                        self.input_scroll_offset = (self.input_scroll_offset + 1).min(max_scroll);
                     }
                     self.move_down(width);
                 }
@@ -1394,7 +1419,9 @@ impl Component for Composer {
         self.dirty = true;
 
         if let Some(text) = submitted {
-            let attachments: Vec<MessageAttachment> = self.spans.iter()
+            let attachments: Vec<MessageAttachment> = self
+                .spans
+                .iter()
                 .filter_map(|s| {
                     s.image_data.as_ref().map(|data| MessageAttachment::Image {
                         data: data.clone(),
@@ -1404,10 +1431,7 @@ impl Component for Composer {
                     })
                 })
                 .collect();
-            return Some(Action::Chat(ChatAction::SendMessage {
-                text,
-                attachments,
-            }));
+            return Some(Action::Chat(ChatAction::SendMessage { text, attachments }));
         }
 
         None
@@ -1671,7 +1695,14 @@ mod tests {
     fn test_inline_span_snap() {
         let mut c = Composer::new(">");
         c.set_text("hello @file.txt world".to_string());
-        c.register_span(6, 15, "@file.txt".to_string(), InlineSpanKind::AtReference, None, None);
+        c.register_span(
+            6,
+            15,
+            "@file.txt".to_string(),
+            InlineSpanKind::AtReference,
+            None,
+            None,
+        );
 
         // Cursor at 10 (inside span) should snap to 6.
         let snapped = c.snap_to_span_edge(10);

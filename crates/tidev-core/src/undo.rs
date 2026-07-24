@@ -4,7 +4,7 @@
 //! (snapshot capture, persistence, event emission) lives in [`Runtime`](crate::Runtime).
 
 use tidev_snapshot::Patch;
-use tidev_types::message::{Message, MessageRole, COMPACTION_MESSAGE_LABEL};
+use tidev_types::message::{COMPACTION_MESSAGE_LABEL, Message, MessageRole};
 use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
@@ -27,7 +27,9 @@ pub fn prev_user_message_before(messages: &[Message], before_id: Uuid) -> Option
     let mut found = false;
     for m in messages.iter().rev() {
         if found
-            && m.role == MessageRole::User && !m.streaming && m.content != COMPACTION_MESSAGE_LABEL
+            && m.role == MessageRole::User
+            && !m.streaming
+            && m.content != COMPACTION_MESSAGE_LABEL
         {
             return Some(m.id);
         }
@@ -43,7 +45,9 @@ pub fn next_user_message_after(messages: &[Message], after_id: Uuid) -> Option<U
     let mut found = false;
     for m in messages {
         if found
-            && m.role == MessageRole::User && !m.streaming && m.content != COMPACTION_MESSAGE_LABEL
+            && m.role == MessageRole::User
+            && !m.streaming
+            && m.content != COMPACTION_MESSAGE_LABEL
         {
             return Some(m.id);
         }
@@ -211,7 +215,11 @@ mod tests {
         m
     }
 
-    fn msg_compaction_with(summary: &str, prior_summary: Option<&str>, prior_retained: usize) -> Message {
+    fn msg_compaction_with(
+        summary: &str,
+        prior_summary: Option<&str>,
+        prior_retained: usize,
+    ) -> Message {
         let mut m = Message::compaction(summary);
         m.metadata.prior_summary = prior_summary.map(|s| s.to_string());
         m.metadata.prior_retained_from = Some(prior_retained);
@@ -293,17 +301,19 @@ mod tests {
         let msgs = vec![msg_user(Uuid::new_v4())];
         let mut summary = None;
         let mut retained = 0;
-        assert!(!restore_context_from_compaction(&msgs, Uuid::new_v4(), &mut summary, &mut retained));
+        assert!(!restore_context_from_compaction(
+            &msgs,
+            Uuid::new_v4(),
+            &mut summary,
+            &mut retained
+        ));
     }
 
     #[test]
     fn restore_context_returns_state_from_first_compaction_after_target() {
         let target_id = Uuid::new_v4();
         let compaction = msg_compaction("summary after compact");
-        let msgs = vec![
-            msg_user(target_id),
-            compaction,
-        ];
+        let msgs = vec![msg_user(target_id), compaction];
         let mut summary = None;
         let mut retained = 0;
         let found = restore_context_from_compaction(&msgs, target_id, &mut summary, &mut retained);
@@ -332,12 +342,7 @@ mod tests {
         // Multiple compactions after target — should return the first one's prior state
         let c1 = msg_compaction_with("first", Some("summary-a"), 5);
         let c2 = msg_compaction_with("second", Some("summary-b"), 10);
-        let msgs = vec![
-            msg_user(target_id),
-            msg_assistant(Uuid::new_v4()),
-            c1,
-            c2,
-        ];
+        let msgs = vec![msg_user(target_id), msg_assistant(Uuid::new_v4()), c1, c2];
         let mut summary = None;
         let mut retained = 0;
         let found = restore_context_from_compaction(&msgs, target_id, &mut summary, &mut retained);

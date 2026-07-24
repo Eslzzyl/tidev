@@ -14,8 +14,8 @@ pub(super) fn classify_deno(args: &[&str]) -> Safety {
 
     match sub {
         // Read-only
-        "check" | "doc" | "info" | "types" | "help" | "version" | "completions"
-        | "repl" | "lsp" => Safety::ReadOnly,
+        "check" | "doc" | "info" | "types" | "help" | "version" | "completions" | "repl"
+        | "lsp" => Safety::ReadOnly,
 
         // `deno lint` is read-only, `deno lint --fix` is write
         "lint" => {
@@ -40,8 +40,8 @@ pub(super) fn classify_deno(args: &[&str]) -> Safety {
 
         // Explicit write commands
         "run" | "compile" | "cache" | "bundle" | "install" | "uninstall" | "upgrade"
-        | "publish" | "init" | "add" | "remove" | "task" | "test" | "bench" | "serve"
-        | "pack" | "vendor" => Safety::WriteOperation,
+        | "publish" | "init" | "add" | "remove" | "task" | "test" | "bench" | "serve" | "pack"
+        | "vendor" => Safety::WriteOperation,
 
         // Everything else — ambiguous, let through
         _ => Safety::Unknown,
@@ -67,18 +67,30 @@ mod tests {
     #[test]
     fn deno_write_commands() {
         assert_eq!(classify_deno(&["run", "main.ts"]), Safety::WriteOperation);
-        assert_eq!(classify_deno(&["compile", "main.ts"]), Safety::WriteOperation);
+        assert_eq!(
+            classify_deno(&["compile", "main.ts"]),
+            Safety::WriteOperation
+        );
         assert_eq!(classify_deno(&["cache", "deps.ts"]), Safety::WriteOperation);
-        assert_eq!(classify_deno(&["bundle", "main.ts"]), Safety::WriteOperation);
+        assert_eq!(
+            classify_deno(&["bundle", "main.ts"]),
+            Safety::WriteOperation
+        );
         assert_eq!(classify_deno(&["fmt"]), Safety::WriteOperation);
         assert_eq!(classify_deno(&["lint", "--fix"]), Safety::WriteOperation);
         assert_eq!(classify_deno(&["task", "build"]), Safety::WriteOperation);
         assert_eq!(classify_deno(&["test"]), Safety::WriteOperation);
         assert_eq!(classify_deno(&["bench"]), Safety::WriteOperation);
         assert_eq!(classify_deno(&["publish"]), Safety::WriteOperation);
-        assert_eq!(classify_deno(&["init", "my_project"]), Safety::WriteOperation);
+        assert_eq!(
+            classify_deno(&["init", "my_project"]),
+            Safety::WriteOperation
+        );
         assert_eq!(classify_deno(&["add", "@std/fs"]), Safety::WriteOperation);
-        assert_eq!(classify_deno(&["install", "cli.ts"]), Safety::WriteOperation);
+        assert_eq!(
+            classify_deno(&["install", "cli.ts"]),
+            Safety::WriteOperation
+        );
         assert_eq!(classify_deno(&["uninstall", "cli"]), Safety::WriteOperation);
         assert_eq!(classify_deno(&["upgrade"]), Safety::WriteOperation);
     }

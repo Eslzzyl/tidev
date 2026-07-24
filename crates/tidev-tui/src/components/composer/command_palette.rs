@@ -13,8 +13,6 @@
 //!    3_500  alias contains query
 //!    1_000  empty query (show all)
 
-
-
 use crate::action::{Action, ChatAction, OverlayAction, OverlayKind, SessionAction, ThemeAction};
 use crate::theme::ThemeName;
 
@@ -213,11 +211,16 @@ impl CommandRegistry {
         let normalized = query.trim().trim_start_matches('/').to_ascii_lowercase();
         let mut candidates: Vec<CommandSuggestion> = COMMANDS
             .iter()
-            .filter_map(|spec| self.score(spec, &normalized).map(|score| CommandSuggestion { spec, score }))
+            .filter_map(|spec| {
+                self.score(spec, &normalized)
+                    .map(|score| CommandSuggestion { spec, score })
+            })
             .collect();
 
         candidates.sort_by(|a, b| {
-            b.score.cmp(&a.score).then_with(|| a.spec.name.cmp(b.spec.name))
+            b.score
+                .cmp(&a.score)
+                .then_with(|| a.spec.name.cmp(b.spec.name))
         });
 
         candidates
@@ -306,12 +309,18 @@ impl CommandPaletteState {
 
         // Preserve selection if the previously selected command still exists.
         if let Some(prev) = previous
-            && let Some(index) = self.suggestions.iter().position(|item| item.spec.name == prev) {
-                self.selected_index = index;
-                return;
-            }
+            && let Some(index) = self
+                .suggestions
+                .iter()
+                .position(|item| item.spec.name == prev)
+        {
+            self.selected_index = index;
+            return;
+        }
 
-        self.selected_index = self.selected_index.min(self.suggestions.len().saturating_sub(1));
+        self.selected_index = self
+            .selected_index
+            .min(self.suggestions.len().saturating_sub(1));
     }
 
     pub fn move_selection(&mut self, delta: isize) {
@@ -333,8 +342,7 @@ impl CommandPaletteState {
     }
 
     pub fn completion(&self) -> Option<String> {
-        self.selected()
-            .map(|s| format!("/{} ", s.spec.name))
+        self.selected().map(|s| format!("/{} ", s.spec.name))
     }
 
     /// Total height of the popup in terminal rows (0 if hidden).
@@ -371,26 +379,40 @@ fn command_fragment(input: &str) -> Option<&str> {
 pub(crate) fn execute_command(action: CommandAction, args: &[String]) -> Vec<Action> {
     match action {
         CommandAction::Connect => {
-            vec![Action::Overlay(OverlayAction::Open(OverlayKind::ConnectDialog))]
+            vec![Action::Overlay(OverlayAction::Open(
+                OverlayKind::ConnectDialog,
+            ))]
         }
         CommandAction::Model => {
-            vec![Action::Overlay(OverlayAction::Open(OverlayKind::ModelPanel))]
+            vec![Action::Overlay(OverlayAction::Open(
+                OverlayKind::ModelPanel,
+            ))]
         }
         CommandAction::Search => {
-            vec![Action::Overlay(OverlayAction::Open(OverlayKind::SearchPanel))]
+            vec![Action::Overlay(OverlayAction::Open(
+                OverlayKind::SearchPanel,
+            ))]
         }
         CommandAction::Session => {
-            vec![Action::Overlay(OverlayAction::Open(OverlayKind::SessionPanel))]
+            vec![Action::Overlay(OverlayAction::Open(
+                OverlayKind::SessionPanel,
+            ))]
         }
         CommandAction::Message => {
-            vec![Action::Overlay(OverlayAction::Open(OverlayKind::MessagePanel))]
+            vec![Action::Overlay(OverlayAction::Open(
+                OverlayKind::MessagePanel,
+            ))]
         }
         CommandAction::Rename => {
-            vec![Action::Overlay(OverlayAction::Open(OverlayKind::RenameDialog))]
+            vec![Action::Overlay(OverlayAction::Open(
+                OverlayKind::RenameDialog,
+            ))]
         }
         CommandAction::Theme => {
             if args.is_empty() {
-                vec![Action::Overlay(OverlayAction::Open(OverlayKind::ThemePanel))]
+                vec![Action::Overlay(OverlayAction::Open(
+                    OverlayKind::ThemePanel,
+                ))]
             } else if let Some(theme) = ThemeName::parse(&args.join(" ")) {
                 vec![Action::Theme(ThemeAction::Set(theme))]
             } else {
@@ -404,13 +426,19 @@ pub(crate) fn execute_command(action: CommandAction, args: &[String]) -> Vec<Act
             vec![Action::Session(SessionAction::Redo)]
         }
         CommandAction::Settings => {
-            vec![Action::Overlay(OverlayAction::Open(OverlayKind::SettingsPanel))]
+            vec![Action::Overlay(OverlayAction::Open(
+                OverlayKind::SettingsPanel,
+            ))]
         }
         CommandAction::Agents => {
-            vec![Action::Overlay(OverlayAction::Open(OverlayKind::AgentsPanel))]
+            vec![Action::Overlay(OverlayAction::Open(
+                OverlayKind::AgentsPanel,
+            ))]
         }
         CommandAction::Skills => {
-            vec![Action::Overlay(OverlayAction::Open(OverlayKind::SkillsPanel))]
+            vec![Action::Overlay(OverlayAction::Open(
+                OverlayKind::SkillsPanel,
+            ))]
         }
         CommandAction::Clear => {
             vec![Action::Session(SessionAction::Create)]
@@ -445,7 +473,8 @@ mod tests {
             Some("theme".to_string())
         );
         assert_eq!(
-            reg.parse_invocation("/session query").map(|(n, a)| (n, a.len())),
+            reg.parse_invocation("/session query")
+                .map(|(n, a)| (n, a.len())),
             Some(("session".to_string(), 1))
         );
         assert!(reg.parse_invocation("not a command").is_none());
@@ -464,7 +493,9 @@ mod tests {
     fn test_suggestions_prefix() {
         let reg = CommandRegistry::new();
         let results = reg.suggestions("/se");
-        assert!(results.iter().any(|s| s.spec.name == "session" || s.spec.name == "search" || s.spec.name == "settings"));
+        assert!(results.iter().any(|s| s.spec.name == "session"
+            || s.spec.name == "search"
+            || s.spec.name == "settings"));
     }
 
     #[test]
@@ -480,9 +511,10 @@ mod tests {
         assert_eq!(state.popup_height(), 0);
 
         state.visible = true;
-        state.suggestions = vec![
-            CommandSuggestion { spec: &COMMANDS[0], score: 100 },
-        ];
+        state.suggestions = vec![CommandSuggestion {
+            spec: &COMMANDS[0],
+            score: 100,
+        }];
         assert_eq!(state.popup_height(), 3); // 2 border + 1 item
     }
 

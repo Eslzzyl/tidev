@@ -62,9 +62,11 @@ impl StreamingBuffer {
         let mid = self.current_message_id?;
         // Fast path: cached index still points to the right message.
         if let Some(idx) = self.current_message_idx
-            && idx < messages.len() && messages[idx].id == mid {
-                return Some(idx);
-            }
+            && idx < messages.len()
+            && messages[idx].id == mid
+        {
+            return Some(idx);
+        }
         // Slow path: find by id.
         messages.iter().position(|m| m.id == mid)
     }
@@ -93,9 +95,11 @@ impl StreamingBuffer {
         }
 
         // Look for an existing streaming Assistant message.
-        if let Some(msg) = messages.iter_mut().rev().find(|m| {
-            m.streaming && m.role == MessageRole::Assistant
-        }) {
+        if let Some(msg) = messages
+            .iter_mut()
+            .rev()
+            .find(|m| m.streaming && m.role == MessageRole::Assistant)
+        {
             let id = msg.id;
             self.current_message_id = Some(id);
             self.current_message_idx = messages.iter().position(|m| m.id == id);

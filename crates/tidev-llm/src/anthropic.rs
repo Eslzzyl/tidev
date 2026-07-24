@@ -829,22 +829,14 @@ enum AnthropicContentBlockStart {
 #[serde(tag = "type")]
 enum AnthropicDelta {
     #[serde(rename = "text_delta")]
-    Text {
-        text: String,
-    },
+    Text { text: String },
     #[serde(rename = "input_json_delta")]
-    InputJson {
-        partial_json: String,
-    },
+    InputJson { partial_json: String },
     #[serde(rename = "thinking_delta")]
-    Thinking {
-        thinking: String,
-    },
+    Thinking { thinking: String },
     #[serde(rename = "signature_delta")]
     #[allow(dead_code)]
-    Signature {
-        signature: String,
-    },
+    Signature { signature: String },
 }
 
 #[derive(Clone, Debug, Deserialize)]

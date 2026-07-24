@@ -13,7 +13,7 @@ pub mod types;
 use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result};
-use include_dir::{include_dir, Dir};
+use include_dir::{Dir, include_dir};
 use serde::{Deserialize, Serialize};
 
 pub use crate::auth::AuthStore;

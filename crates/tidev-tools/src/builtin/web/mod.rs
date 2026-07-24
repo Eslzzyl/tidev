@@ -20,8 +20,8 @@ use serde_json::Value;
 
 use tidev_config::AuthStore;
 use tidev_config::{WebSearchConfig, WebSearchProviderConfig};
-use tidev_types::tools::{WebFetchArgs as WebFetchToolArgs, WebSearchArgs as WebSearchToolArgs};
 use tidev_types::tools::{ToolDefinition, ToolPermission};
+use tidev_types::tools::{WebFetchArgs as WebFetchToolArgs, WebSearchArgs as WebSearchToolArgs};
 
 // ---------------------------------------------------------------------------
 // Provider trait

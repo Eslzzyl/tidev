@@ -69,7 +69,12 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
 
         // ─── 6. Stream LLM turn ──────────────────────────────────────────
         let turn = match ctx
-            .stream_turn(&messages, &system_prompt, &config.thinking_level, request_id)
+            .stream_turn(
+                &messages,
+                &system_prompt,
+                &config.thinking_level,
+                request_id,
+            )
             .await
         {
             Ok(turn) => turn,
@@ -191,21 +196,16 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
         let mut all_results: Vec<(ToolCall, ToolExecutionResult)> = Vec::new();
 
         if !other_calls.is_empty() || !task_calls.is_empty() {
-            let results = ctx
-                .execute_tools(
-                    &approved,
-                    session_id,
-                    request_id,
-                )
-                .await?;
+            let results = ctx.execute_tools(&approved, session_id, request_id).await?;
             all_results = results;
         }
 
         // ─── 11. Persist tool results ─────────────────────────────────────
         if !all_results.is_empty() {
-            let result_msgs: Vec<Message> = all_results.iter().map(|(tc, r)| {
-                Message::tool_result(&tc.id, &tc.name, r.clone())
-            }).collect();
+            let result_msgs: Vec<Message> = all_results
+                .iter()
+                .map(|(tc, r)| Message::tool_result(&tc.id, &tc.name, r.clone()))
+                .collect();
             ctx.save_messages(session_id, &result_msgs).await?;
 
             // Persist nearby instruction sources discovered during tool
@@ -213,7 +213,8 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
             // session switches without writing to the DB itself.
             for (_, result) in &all_results {
                 if !result.instruction_sources.is_empty() {
-                    ctx.append_instruction_sources(session_id, &result.instruction_sources).await?;
+                    ctx.append_instruction_sources(session_id, &result.instruction_sources)
+                        .await?;
                 }
             }
 
@@ -221,7 +222,8 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
             // correct cross-session replay in the conversation history.
             // Only create it for sources NOT already known before this turn
             // (already_injected — captured from step 2's DB snapshot).
-            let system_sources: Vec<String> = all_results.iter()
+            let system_sources: Vec<String> = all_results
+                .iter()
                 .flat_map(|(_, r)| r.instruction_sources.iter().cloned())
                 .collect();
             if !system_sources.is_empty() {
@@ -229,22 +231,33 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
                 unique.sort();
                 unique.dedup();
 
-                let new_sources: Vec<String> = unique.into_iter()
+                let new_sources: Vec<String> = unique
+                    .into_iter()
                     .filter(|s| !already_injected.contains(s))
                     .collect();
                 if !new_sources.is_empty() {
                     let ws_root = ctx.workspace_root();
-                    let display: Vec<String> = new_sources.iter().map(|s| {
-                        Path::new(s).strip_prefix(ws_root).unwrap_or(Path::new(s))
-                            .display().to_string()
-                    }).collect();
+                    let display: Vec<String> = new_sources
+                        .iter()
+                        .map(|s| {
+                            Path::new(s)
+                                .strip_prefix(ws_root)
+                                .unwrap_or(Path::new(s))
+                                .display()
+                                .to_string()
+                        })
+                        .collect();
                     let content = if display.len() == 1 {
                         format!("Loaded instructions from {}", display[0])
                     } else {
-                        format!("Loaded {} instruction files: {}",
-                            display.len(), display.join(", "))
+                        format!(
+                            "Loaded {} instruction files: {}",
+                            display.len(),
+                            display.join(", ")
+                        )
                     };
-                    ctx.save_messages(session_id, &[Message::new(MessageRole::System, &content)]).await?;
+                    ctx.save_messages(session_id, &[Message::new(MessageRole::System, &content)])
+                        .await?;
                 }
             }
         }
@@ -325,7 +338,8 @@ async fn inject_mode_reminder(
     messages[last_user_idx].content = new_content.clone();
 
     // Persist to buffer + store.
-    ctx.update_message_content(session_id, msg_id, new_content).await?;
+    ctx.update_message_content(session_id, msg_id, new_content)
+        .await?;
 
     log::info!(
         "injected mode reminder into user message {} (mode={:?}, is_first={})",

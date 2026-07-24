@@ -6,12 +6,14 @@ use std::sync::Arc;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_util::sync::CancellationToken;
 
+use crate::builtin::utils::parse_arguments;
 use tidev_types::message::BackendEvent;
 use tidev_types::message::ToolCall;
 use tidev_types::message::ToolExecutionResult;
 use tidev_types::prompts::SessionMode;
-use tidev_types::tools::{QuestionArgs, SkillArgs, ToolDefinition, ToolPermission, canonical_tool_name};
-use crate::builtin::utils::parse_arguments;
+use tidev_types::tools::{
+    QuestionArgs, SkillArgs, ToolDefinition, ToolPermission, canonical_tool_name,
+};
 
 use crate::skills::SkillCatalog;
 use crate::todo_persistence::TodoPersistence;
@@ -87,9 +89,7 @@ where
         Ok(Err(panic)) => {
             ToolExecutionResult::new(format!("Error: tool panicked: {}", panic_msg(panic)))
         }
-        Err(join_err) => {
-            ToolExecutionResult::new(format!("Error: tool aborted: {join_err}"))
-        }
+        Err(join_err) => ToolExecutionResult::new(format!("Error: tool aborted: {join_err}")),
     }
 }
 
@@ -111,9 +111,7 @@ where
         Ok(Err(panic)) => {
             ToolExecutionResult::new(format!("Error: tool panicked: {}", panic_msg(panic)))
         }
-        Err(join_err) => {
-            ToolExecutionResult::new(format!("Error: tool aborted: {join_err}"))
-        }
+        Err(join_err) => ToolExecutionResult::new(format!("Error: tool aborted: {join_err}")),
     }
 }
 
@@ -255,13 +253,7 @@ pub async fn execute_tool_call(
             let session_id = ctx.session_id;
             let call_name = call.name.clone();
             safe_spawn_blocking_str(move || {
-                todo::execute_tool_call(
-                    &workspace_root,
-                    &*store,
-                    session_id,
-                    &call_name,
-                    arguments,
-                )
+                todo::execute_tool_call(&workspace_root, &*store, session_id, &call_name, arguments)
             })
             .await
         }

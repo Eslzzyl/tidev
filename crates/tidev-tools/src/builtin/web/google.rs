@@ -35,11 +35,11 @@ impl SearchProvider for GoogleProvider {
             .api_key("google.cse_id")
             .or_else(|| params.auth.api_key("google_cse_id"))
             .ok_or_else(|| {
-            anyhow::anyhow!(
-                "Google Custom Search requires a Search Engine ID (cx). \
+                anyhow::anyhow!(
+                    "Google Custom Search requires a Search Engine ID (cx). \
                      Set it via: tidev config set google.cse_id YOUR_CSE_ID"
-            )
-        })?;
+                )
+            })?;
         // Google allows max 10 results per request.
         let num = params.num_results.unwrap_or(8).clamp(1, 10);
         // Google 'start' is 1-indexed; offset is 0-indexed

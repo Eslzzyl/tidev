@@ -35,16 +35,11 @@ pub(crate) fn open_write_conn(path: &Path) -> Result<Connection> {
         .context("failed to set busy_timeout")?;
 
     // Register zstd_decode(blob) → text for CLI debugging
-    conn.create_scalar_function(
-        "zstd_decode",
-        1,
-        FunctionFlags::SQLITE_UTF8,
-        |ctx| {
-            let blob = ctx.get::<Vec<u8>>(0)?;
-            let text = crate::compression::decompress_text(&blob);
-            Ok(text)
-        },
-    )
+    conn.create_scalar_function("zstd_decode", 1, FunctionFlags::SQLITE_UTF8, |ctx| {
+        let blob = ctx.get::<Vec<u8>>(0)?;
+        let text = crate::compression::decompress_text(&blob);
+        Ok(text)
+    })
     .context("failed to register zstd_decode function")?;
 
     Ok(conn)
@@ -79,14 +74,10 @@ impl Database {
             let conn = write_conn.lock().unwrap();
             conn.execute_batch(SCHEMA_SQL)
                 .context("failed to execute initial schema")?;
-            migration::run_migrations(&conn)
-                .context("failed to run schema migrations")?;
+            migration::run_migrations(&conn).context("failed to run schema migrations")?;
         }
 
-        Ok(Self {
-            path,
-            write_conn,
-        })
+        Ok(Self { path, write_conn })
     }
 
     /// Create a new [`SessionStore`] for this database.
@@ -95,14 +86,11 @@ impl Database {
     /// With WAL mode and `busy_timeout` this is safe for concurrent writers
     /// writing to different sessions.
     pub fn create_store(&self) -> Result<SessionStore> {
-        let read_conn = Connection::open(&self.path)
-            .with_context(|| format!("failed to open read connection to {}", self.path.display()))?;
-        read_conn
-            .pragma_update(None, "journal_mode", "WAL")
-            .ok();
-        read_conn
-            .pragma_update(None, "foreign_keys", "ON")
-            .ok();
+        let read_conn = Connection::open(&self.path).with_context(|| {
+            format!("failed to open read connection to {}", self.path.display())
+        })?;
+        read_conn.pragma_update(None, "journal_mode", "WAL").ok();
+        read_conn.pragma_update(None, "foreign_keys", "ON").ok();
         read_conn
             .pragma_update(None, "query_only", "true")
             .context("failed to set query_only on read connection")?;

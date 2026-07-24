@@ -3,13 +3,13 @@
 //! Shows a filterable list of available panels. Selecting one closes the
 //! launcher and opens the chosen panel.
 
+use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Margin, Rect};
 use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, List, ListItem, ListState, Paragraph};
 use unicode_width::UnicodeWidthStr;
-use anyhow::Result;
 
 use crate::action::{Action, OverlayAction, OverlayKind, PanelAction};
 use crate::component::Component;
@@ -26,14 +26,38 @@ struct PanelEntry {
 }
 
 static PANEL_ENTRIES: &[PanelEntry] = &[
-    PanelEntry { description: "Switch AI model provider", action: PanelAction::Model },
-    PanelEntry { description: "Manage chat sessions", action: PanelAction::Session },
-    PanelEntry { description: "Change color theme", action: PanelAction::Theme },
-    PanelEntry { description: "Configure application settings", action: PanelAction::Settings },
-    PanelEntry { description: "List available sub-agent types", action: PanelAction::Agents },
-    PanelEntry { description: "Browse and preview available skills", action: PanelAction::Skills },
-    PanelEntry { description: "View message details in the current session", action: PanelAction::Message },
-    PanelEntry { description: "Search web / providers", action: PanelAction::Search },
+    PanelEntry {
+        description: "Switch AI model provider",
+        action: PanelAction::Model,
+    },
+    PanelEntry {
+        description: "Manage chat sessions",
+        action: PanelAction::Session,
+    },
+    PanelEntry {
+        description: "Change color theme",
+        action: PanelAction::Theme,
+    },
+    PanelEntry {
+        description: "Configure application settings",
+        action: PanelAction::Settings,
+    },
+    PanelEntry {
+        description: "List available sub-agent types",
+        action: PanelAction::Agents,
+    },
+    PanelEntry {
+        description: "Browse and preview available skills",
+        action: PanelAction::Skills,
+    },
+    PanelEntry {
+        description: "View message details in the current session",
+        action: PanelAction::Message,
+    },
+    PanelEntry {
+        description: "Search web / providers",
+        action: PanelAction::Search,
+    },
 ];
 
 // ---------------------------------------------------------------------------
@@ -96,7 +120,9 @@ impl PanelLauncher {
             scored.sort_by_key(|b| std::cmp::Reverse(b.1));
             self.filtered = scored.into_iter().map(|(e, _)| e).collect();
         }
-        self.selected_index = self.selected_index.min(self.filtered.len().saturating_sub(1));
+        self.selected_index = self
+            .selected_index
+            .min(self.filtered.len().saturating_sub(1));
     }
 }
 
@@ -112,11 +138,9 @@ impl Component for PanelLauncher {
         }
 
         match key.code {
-            KeyCode::Esc => {
-                Some(Action::Overlay(OverlayAction::Close(
-                    OverlayKind::PanelLauncher,
-                )))
-            }
+            KeyCode::Esc => Some(Action::Overlay(OverlayAction::Close(
+                OverlayKind::PanelLauncher,
+            ))),
             KeyCode::Up | KeyCode::Char('k') => {
                 if !self.filtered.is_empty() {
                     self.selected_index = self
@@ -148,7 +172,11 @@ impl Component for PanelLauncher {
                     None
                 }
             }
-            KeyCode::Char(c) if !key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) => {
+            KeyCode::Char(c)
+                if !key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+            {
                 self.query.push(c);
                 self.sync();
                 None
@@ -221,10 +249,7 @@ impl Component for PanelLauncher {
             Rect::new(inner.x, inner.y, inner.width, 1),
         );
         if !self.query.is_empty() {
-            frame.set_cursor_position((
-                inner.x + 2 + self.query.as_str().width() as u16,
-                inner.y,
-            ));
+            frame.set_cursor_position((inner.x + 2 + self.query.as_str().width() as u16, inner.y));
         }
 
         // Divider
@@ -248,9 +273,7 @@ impl Component for PanelLauncher {
         let items: Vec<ListItem> = self
             .filtered
             .iter()
-            .map(|entry| {
-                ListItem::new(Line::from(Span::raw(entry.description)))
-            })
+            .map(|entry| ListItem::new(Line::from(Span::raw(entry.description))))
             .collect();
 
         let mut state = ListState::default();

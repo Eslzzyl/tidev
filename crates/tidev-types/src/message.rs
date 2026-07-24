@@ -21,7 +21,10 @@ pub enum MessageAttachment {
         #[serde(default)]
         truncated: bool,
     },
-    DirectoryReference { path: String, tree: Arc<String> },
+    DirectoryReference {
+        path: String,
+        tree: Arc<String>,
+    },
     Image {
         filename: String,
         mime: String,
@@ -669,7 +672,7 @@ impl BackendEvent {
         match self {
             Self::Delta { session_id, .. }
             | Self::ReasoningDelta { session_id, .. }
-            |             Self::ToolCallUpdated { session_id, .. }
+            | Self::ToolCallUpdated { session_id, .. }
             | Self::Finished { session_id, .. }
             | Self::Failed { session_id, .. }
             | Self::Retrying { session_id, .. }
@@ -709,7 +712,7 @@ impl BackendEvent {
             Self::InstructionsLoaded { .. }
             | Self::ContextCompacted { .. }
             | Self::UndoCompleted { .. }
-            |             Self::UserMessageCreated { .. }
+            | Self::UserMessageCreated { .. }
             | Self::ShellOutput { .. }
             | Self::MessagesTruncated { .. } => None,
         }
@@ -779,7 +782,7 @@ mod tests {
             truncated: false,
         };
         let text = fr.prompt_text().unwrap();
-        assert!(text.contains("read"));       // tool_name = "read"
+        assert!(text.contains("read")); // tool_name = "read"
         assert!(text.contains("\"path\":\"Cargo.toml\"")); // serialised arg
         assert!(text.contains("name = \"foo\""));
         assert!(!text.contains("truncated")); // truncated_hint is empty
@@ -943,7 +946,11 @@ mod tests {
         let s = "x".repeat(9_000);
         let r = ToolExecutionResult::new(s);
         let previewed = r.preview_for_storage(Some("shell"));
-        assert!(previewed.output.starts_with("[shell output truncated: 9000 chars]"));
+        assert!(
+            previewed
+                .output
+                .starts_with("[shell output truncated: 9000 chars]")
+        );
     }
 
     // ── MessageRole ─────────────────────────────────────────────────────
@@ -952,7 +959,10 @@ mod tests {
     fn message_role_from_db_value_known() {
         assert_eq!(MessageRole::from_db_value("system"), MessageRole::System);
         assert_eq!(MessageRole::from_db_value("user"), MessageRole::User);
-        assert_eq!(MessageRole::from_db_value("assistant"), MessageRole::Assistant);
+        assert_eq!(
+            MessageRole::from_db_value("assistant"),
+            MessageRole::Assistant
+        );
         assert_eq!(MessageRole::from_db_value("tool"), MessageRole::Tool);
         assert_eq!(MessageRole::from_db_value("error"), MessageRole::Error);
         assert_eq!(MessageRole::from_db_value("shell"), MessageRole::Shell);
@@ -1159,26 +1169,129 @@ mod tests {
     fn backend_event_session_id_and_request_id() {
         let sid = Uuid::new_v4();
         let events: Vec<BackendEvent> = vec![
-            BackendEvent::Delta { session_id: sid, request_id: 1, content: "a".into() },
-            BackendEvent::ReasoningDelta { session_id: sid, request_id: 1, content: "b".into() },
-            BackendEvent::ToolCallUpdated { session_id: sid, request_id: 1, tool_call: ToolCall::default() },
-            BackendEvent::Finished { session_id: sid, request_id: 1, turn: AssistantTurn::default() },
-            BackendEvent::Failed { session_id: sid, request_id: 1, error: "err".into() },
-            BackendEvent::Retrying { session_id: sid, request_id: 1, attempt: 1, max_attempts: 3, reason: "timeout".into(), retry_after_secs: None },
-            BackendEvent::InstructionsLoaded { session_id: sid, sources: vec!["AGENTS.md".into()] },
-            BackendEvent::ToolStarting { session_id: sid, request_id: 1, tool_call: ToolCall::default() },
-            BackendEvent::ToolCompleted { session_id: sid, request_id: 1, tool_call: ToolCall::default(), result: ToolExecutionResult::new("ok") },
-            BackendEvent::SubagentStatus { session_id: sid, request_id: 1, tool_call_id: "t1".into(), child_session_id: Uuid::new_v4(), status_text: "running".into(), current_tool_call: None, assistant_message: None, content_delta: None, reasoning_delta: None },
-            BackendEvent::SubagentCompleted { session_id: sid, request_id: 1, tool_call: ToolCall::default(), child_session_id: Uuid::new_v4(), result: ToolExecutionResult::new("ok") },
-            BackendEvent::UsageStats { session_id: sid, request_id: 1, input_tokens: 10, output_tokens: 20, total_tokens: 30, cache_read_tokens: 0, cache_write_tokens: 0, model_id: "gpt-4".into(), duration_ms: None },
-            BackendEvent::ContextCompacted { session_id: sid, compacted: true, manual: false, summary: Some("sum".into()), retained_from: 5, model_id: None, completed_at: None, error: None },
-            BackendEvent::UserMessageCreated { session_id: sid, message: Message::new(MessageRole::User, "hi") },
-            BackendEvent::UndoCompleted { session_id: sid, target_id: Uuid::new_v4(), message_content: "restored".into() },
-            BackendEvent::SidebarSnapshotReady { session_id: sid, request_id: 1, tool_call_id: "t1".into(), file_diffs_json: "[]".into() },
-            BackendEvent::ShellOutput { session_id: sid, tool_call_id: "t1".into(), content: "out".into(), finished: false, exit_code: None },
-            BackendEvent::TurnStarting { session_id: sid, request_id: 1 },
-            BackendEvent::StreamEnd { session_id: sid, request_id: 1, reasoning_started_at: None, reasoning_completed_at: None },
-            BackendEvent::MessagesTruncated { session_id: sid, kept_count: 10 },
+            BackendEvent::Delta {
+                session_id: sid,
+                request_id: 1,
+                content: "a".into(),
+            },
+            BackendEvent::ReasoningDelta {
+                session_id: sid,
+                request_id: 1,
+                content: "b".into(),
+            },
+            BackendEvent::ToolCallUpdated {
+                session_id: sid,
+                request_id: 1,
+                tool_call: ToolCall::default(),
+            },
+            BackendEvent::Finished {
+                session_id: sid,
+                request_id: 1,
+                turn: AssistantTurn::default(),
+            },
+            BackendEvent::Failed {
+                session_id: sid,
+                request_id: 1,
+                error: "err".into(),
+            },
+            BackendEvent::Retrying {
+                session_id: sid,
+                request_id: 1,
+                attempt: 1,
+                max_attempts: 3,
+                reason: "timeout".into(),
+                retry_after_secs: None,
+            },
+            BackendEvent::InstructionsLoaded {
+                session_id: sid,
+                sources: vec!["AGENTS.md".into()],
+            },
+            BackendEvent::ToolStarting {
+                session_id: sid,
+                request_id: 1,
+                tool_call: ToolCall::default(),
+            },
+            BackendEvent::ToolCompleted {
+                session_id: sid,
+                request_id: 1,
+                tool_call: ToolCall::default(),
+                result: ToolExecutionResult::new("ok"),
+            },
+            BackendEvent::SubagentStatus {
+                session_id: sid,
+                request_id: 1,
+                tool_call_id: "t1".into(),
+                child_session_id: Uuid::new_v4(),
+                status_text: "running".into(),
+                current_tool_call: None,
+                assistant_message: None,
+                content_delta: None,
+                reasoning_delta: None,
+            },
+            BackendEvent::SubagentCompleted {
+                session_id: sid,
+                request_id: 1,
+                tool_call: ToolCall::default(),
+                child_session_id: Uuid::new_v4(),
+                result: ToolExecutionResult::new("ok"),
+            },
+            BackendEvent::UsageStats {
+                session_id: sid,
+                request_id: 1,
+                input_tokens: 10,
+                output_tokens: 20,
+                total_tokens: 30,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+                model_id: "gpt-4".into(),
+                duration_ms: None,
+            },
+            BackendEvent::ContextCompacted {
+                session_id: sid,
+                compacted: true,
+                manual: false,
+                summary: Some("sum".into()),
+                retained_from: 5,
+                model_id: None,
+                completed_at: None,
+                error: None,
+            },
+            BackendEvent::UserMessageCreated {
+                session_id: sid,
+                message: Message::new(MessageRole::User, "hi"),
+            },
+            BackendEvent::UndoCompleted {
+                session_id: sid,
+                target_id: Uuid::new_v4(),
+                message_content: "restored".into(),
+            },
+            BackendEvent::SidebarSnapshotReady {
+                session_id: sid,
+                request_id: 1,
+                tool_call_id: "t1".into(),
+                file_diffs_json: "[]".into(),
+            },
+            BackendEvent::ShellOutput {
+                session_id: sid,
+                tool_call_id: "t1".into(),
+                content: "out".into(),
+                finished: false,
+                exit_code: None,
+            },
+            BackendEvent::TurnStarting {
+                session_id: sid,
+                request_id: 1,
+            },
+            BackendEvent::StreamEnd {
+                session_id: sid,
+                request_id: 1,
+                reasoning_started_at: None,
+                reasoning_completed_at: None,
+            },
+            BackendEvent::MessagesTruncated {
+                session_id: sid,
+                kept_count: 10,
+            },
         ];
         for ev in &events {
             assert_eq!(ev.session_id(), sid, "session_id mismatch for {ev:?}");
@@ -1189,7 +1302,12 @@ mod tests {
     fn backend_event_request_id_present() {
         let sid = Uuid::new_v4();
         assert_eq!(
-            BackendEvent::Delta { session_id: sid, request_id: 42, content: "a".into() }.request_id(),
+            BackendEvent::Delta {
+                session_id: sid,
+                request_id: 42,
+                content: "a".into()
+            }
+            .request_id(),
             Some(42)
         );
     }
@@ -1198,27 +1316,61 @@ mod tests {
     fn backend_event_request_id_absent() {
         let sid = Uuid::new_v4();
         assert_eq!(
-            BackendEvent::InstructionsLoaded { session_id: sid, sources: vec![] }.request_id(),
+            BackendEvent::InstructionsLoaded {
+                session_id: sid,
+                sources: vec![]
+            }
+            .request_id(),
             None
         );
         assert_eq!(
-            BackendEvent::ContextCompacted { session_id: sid, compacted: true, manual: false, summary: None, retained_from: 0, model_id: None, completed_at: None, error: None }.request_id(),
+            BackendEvent::ContextCompacted {
+                session_id: sid,
+                compacted: true,
+                manual: false,
+                summary: None,
+                retained_from: 0,
+                model_id: None,
+                completed_at: None,
+                error: None
+            }
+            .request_id(),
             None
         );
         assert_eq!(
-            BackendEvent::UndoCompleted { session_id: sid, target_id: Uuid::new_v4(), message_content: "".into() }.request_id(),
+            BackendEvent::UndoCompleted {
+                session_id: sid,
+                target_id: Uuid::new_v4(),
+                message_content: "".into()
+            }
+            .request_id(),
             None
         );
         assert_eq!(
-            BackendEvent::UserMessageCreated { session_id: sid, message: Message::new(MessageRole::User, "") }.request_id(),
+            BackendEvent::UserMessageCreated {
+                session_id: sid,
+                message: Message::new(MessageRole::User, "")
+            }
+            .request_id(),
             None
         );
         assert_eq!(
-            BackendEvent::ShellOutput { session_id: sid, tool_call_id: "t1".into(), content: "".into(), finished: false, exit_code: None }.request_id(),
+            BackendEvent::ShellOutput {
+                session_id: sid,
+                tool_call_id: "t1".into(),
+                content: "".into(),
+                finished: false,
+                exit_code: None
+            }
+            .request_id(),
             None
         );
         assert_eq!(
-            BackendEvent::MessagesTruncated { session_id: sid, kept_count: 0 }.request_id(),
+            BackendEvent::MessagesTruncated {
+                session_id: sid,
+                kept_count: 0
+            }
+            .request_id(),
             None
         );
     }

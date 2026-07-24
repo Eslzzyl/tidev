@@ -74,9 +74,9 @@ impl Component for AgentsPanel {
             return None;
         }
         match key.code {
-            KeyCode::Esc | KeyCode::Char('q') => {
-                Some(Action::Overlay(OverlayAction::Close(OverlayKind::AgentsPanel)))
-            }
+            KeyCode::Esc | KeyCode::Char('q') => Some(Action::Overlay(OverlayAction::Close(
+                OverlayKind::AgentsPanel,
+            ))),
             KeyCode::Up | KeyCode::Char('k') => {
                 self.scroll_up(1);
                 None
@@ -127,7 +127,10 @@ impl Component for AgentsPanel {
         let block = Block::default().style(Style::default().bg(palette.panel_alt));
         frame.render_widget(block, overlay);
 
-        let inner = overlay.inner(Margin { horizontal: 1, vertical: 1 });
+        let inner = overlay.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
 
         let sections = Layout::vertical([
             Constraint::Length(1),
@@ -140,7 +143,9 @@ impl Component for AgentsPanel {
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
                 " Agents ",
-                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
             )]))
             .style(Style::default().bg(palette.panel_alt)),
             sections[0],
@@ -149,12 +154,16 @@ impl Component for AgentsPanel {
         let header = Line::from(vec![
             Span::styled(
                 "  Agent",
-                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::raw("    "),
             Span::styled(
                 "Description",
-                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
             ),
         ]);
         frame.render_widget(
@@ -174,13 +183,15 @@ impl Component for AgentsPanel {
         let content_area = sections[3];
         let (content_area, scrollbar_area) = if content_area.width > 2 {
             let chunks = Layout::horizontal([
-                Constraint::Min(1), Constraint::Length(1), Constraint::Length(1),
+                Constraint::Min(1),
+                Constraint::Length(1),
+                Constraint::Length(1),
             ])
             .split(content_area);
             (chunks[0], Some(chunks[2]))
         } else if content_area.width > 1 {
-            let chunks = Layout::horizontal([Constraint::Min(1), Constraint::Length(1)])
-                .split(content_area);
+            let chunks =
+                Layout::horizontal([Constraint::Min(1), Constraint::Length(1)]).split(content_area);
             (chunks[0], Some(chunks[1]))
         } else {
             (content_area, None)
@@ -194,7 +205,9 @@ impl Component for AgentsPanel {
             lines.push(Line::from(vec![
                 Span::styled(
                     format!("  @{}", agent.display_name),
-                    Style::default().fg(palette.text).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(palette.text)
+                        .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     format!("  {}{}", agent.description, tag),

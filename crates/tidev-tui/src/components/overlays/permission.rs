@@ -5,12 +5,12 @@
 //! 2. **Input** — if Deny was chosen, an optional reason may be typed.
 //!    Enter submits (reason may be empty), Esc returns to Select.
 
+use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
-use anyhow::Result;
 
 use unicode_width::UnicodeWidthStr;
 
@@ -208,11 +208,7 @@ impl Component for PermissionDialog {
 
         match &self.phase {
             Phase::Select => {
-                let overlay = centered_rect(
-                    rect.width,
-                    preview_height.saturating_add(10),
-                    rect,
-                );
+                let overlay = centered_rect(rect.width, preview_height.saturating_add(10), rect);
                 frame.render_widget(Clear, overlay);
 
                 let block = Block::default().style(Style::default().bg(palette.panel_alt));
@@ -290,11 +286,7 @@ impl Component for PermissionDialog {
                 );
             }
             Phase::Input { reason, .. } => {
-                let overlay = centered_rect(
-                    rect.width,
-                    preview_height.saturating_add(10),
-                    rect,
-                );
+                let overlay = centered_rect(rect.width, preview_height.saturating_add(10), rect);
                 frame.render_widget(Clear, overlay);
 
                 let block = Block::default().style(Style::default().bg(palette.panel_alt));
@@ -340,9 +332,7 @@ impl Component for PermissionDialog {
                 );
 
                 // Input field
-                let input_style = Style::default()
-                    .bg(palette.background)
-                    .fg(palette.text);
+                let input_style = Style::default().bg(palette.background).fg(palette.text);
                 frame.render_widget(
                     Paragraph::new(reason.clone())
                         .style(input_style)
@@ -352,10 +342,7 @@ impl Component for PermissionDialog {
                 let text_w = UnicodeWidthStr::width(reason.as_str()) as u16;
                 let col = text_w % sections[3].width;
                 let row = text_w / sections[3].width;
-                frame.set_cursor_position((
-                    sections[3].x + col,
-                    sections[3].y + row,
-                ));
+                frame.set_cursor_position((sections[3].x + col, sections[3].y + row));
 
                 // Help
                 frame.render_widget(

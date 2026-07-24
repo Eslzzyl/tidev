@@ -8,20 +8,24 @@
 //! main event loop async for multiplexing with backend/request events.
 
 use std::io;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use crossterm::cursor::{Show, self as cursor};
-use crossterm::event::{DisableBracketedPaste, DisableFocusChange, DisableMouseCapture,
-    EnableBracketedPaste, EnableFocusChange, EnableMouseCapture, Event, KeyEventKind};
-use crossterm::terminal::{DisableLineWrap, EnableLineWrap, EnterAlternateScreen,
-    LeaveAlternateScreen, disable_raw_mode, enable_raw_mode};
+use crossterm::cursor::{self as cursor, Show};
+use crossterm::event::{
+    DisableBracketedPaste, DisableFocusChange, DisableMouseCapture, EnableBracketedPaste,
+    EnableFocusChange, EnableMouseCapture, Event, KeyEventKind,
+};
 use crossterm::execute;
-use ratatui::backend::{Backend, ClearType, CrosstermBackend};
+use crossterm::terminal::{
+    DisableLineWrap, EnableLineWrap, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
+    enable_raw_mode,
+};
 use ratatui::Terminal;
+use ratatui::backend::{Backend, ClearType, CrosstermBackend};
 use tidev_types::message::BackendEvent;
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -114,10 +118,9 @@ impl Tui {
                             // key events.  Release events are filtered
                             // out at the source.
                             let should_send = match &event {
-                                Event::Key(key) => matches!(
-                                    key.kind,
-                                    KeyEventKind::Press | KeyEventKind::Repeat
-                                ),
+                                Event::Key(key) => {
+                                    matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat)
+                                }
                                 _ => true,
                             };
 
@@ -218,11 +221,33 @@ impl Tui {
                 }
 
                 match event {
-                    BackendEvent::Delta { session_id, request_id, content } => {
-                        coalesce_or_flush(&mut cd_delta, session_id, request_id, content, false, app);
+                    BackendEvent::Delta {
+                        session_id,
+                        request_id,
+                        content,
+                    } => {
+                        coalesce_or_flush(
+                            &mut cd_delta,
+                            session_id,
+                            request_id,
+                            content,
+                            false,
+                            app,
+                        );
                     }
-                    BackendEvent::ReasoningDelta { session_id, request_id, content } => {
-                        coalesce_or_flush(&mut cd_reasoning, session_id, request_id, content, true, app);
+                    BackendEvent::ReasoningDelta {
+                        session_id,
+                        request_id,
+                        content,
+                    } => {
+                        coalesce_or_flush(
+                            &mut cd_reasoning,
+                            session_id,
+                            request_id,
+                            content,
+                            true,
+                            app,
+                        );
                     }
                     _ => {
                         // Non-delta: flush before processing to preserve ordering.
@@ -269,9 +294,10 @@ impl Tui {
             if app.has_active_request() || app.is_compacting() {
                 let frame = (app.spinner_elapsed().as_millis() / 100) as u64;
                 if frame != app.last_spinner_frame
-                    && let Some(ml) = &mut app.message_list {
-                        ml.dirty = true;
-                    }
+                    && let Some(ml) = &mut app.message_list
+                {
+                    ml.dirty = true;
+                }
             }
 
             // Render if:
@@ -348,24 +374,26 @@ fn coalesce_or_flush(
 ) {
     // Try to extend the existing coalesced slot.
     if let Some(cd) = slot
-        && cd.session_id == session_id && cd.request_id == request_id {
-            cd.content.push_str(&content);
-            return;
-        }
+        && cd.session_id == session_id
+        && cd.request_id == request_id
+    {
+        cd.content.push_str(&content);
+        return;
+    }
 
     // Different request or empty slot: flush old, start new.
     if let Some(cd) = slot.take() {
         emit_delta(cd, is_reasoning, app);
     }
-    *slot = Some(Coalesced { session_id, request_id, content });
+    *slot = Some(Coalesced {
+        session_id,
+        request_id,
+        content,
+    });
 }
 
 /// Flush both coalesced slots.
-fn flush_delta(
-    delta: &mut Option<Coalesced>,
-    reasoning: &mut Option<Coalesced>,
-    app: &mut App,
-) {
+fn flush_delta(delta: &mut Option<Coalesced>, reasoning: &mut Option<Coalesced>, app: &mut App) {
     if let Some(cd) = delta.take() {
         emit_delta(cd, false, app);
     }
@@ -380,8 +408,16 @@ fn emit_delta(cd: Coalesced, is_reasoning: bool, app: &mut App) {
     let request_id = cd.request_id;
     let content = cd.content;
     if is_reasoning {
-        app.handle_backend_event(BackendEvent::ReasoningDelta { session_id, request_id, content });
+        app.handle_backend_event(BackendEvent::ReasoningDelta {
+            session_id,
+            request_id,
+            content,
+        });
     } else {
-        app.handle_backend_event(BackendEvent::Delta { session_id, request_id, content });
+        app.handle_backend_event(BackendEvent::Delta {
+            session_id,
+            request_id,
+            content,
+        });
     }
 }

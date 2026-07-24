@@ -12,8 +12,9 @@ pub(super) fn classify_apt(args: &[&str]) -> Safety {
 
     match sub {
         // Read-only
-        "list" | "show" | "search" | "policy" | "depends" | "rdepends" | "help"
-        | "version" => Safety::ReadOnly,
+        "list" | "show" | "search" | "policy" | "depends" | "rdepends" | "help" | "version" => {
+            Safety::ReadOnly
+        }
 
         // `apt cache`: sub-subcommand based
         "cache" => {
@@ -21,9 +22,7 @@ pub(super) fn classify_apt(args: &[&str]) -> Safety {
             match action {
                 // `apt cache show/search/policy/dump/...` — read
                 "show" | "search" | "policy" | "dump" | "dumpavail" | "stats" | "madison"
-                | "showpkg" | "showsrc" | "gencaches" | "depends" | "rdepends" => {
-                    Safety::ReadOnly
-                }
+                | "showpkg" | "showsrc" | "gencaches" | "depends" | "rdepends" => Safety::ReadOnly,
                 // `apt cache add` — write (adds package to cache)
                 _ => Safety::WriteOperation,
             }
@@ -39,10 +38,11 @@ pub(super) fn classify_apt(args: &[&str]) -> Safety {
         }
 
         // Explicit write commands
-        "install" | "remove" | "purge" | "update" | "upgrade" | "full-upgrade"
-        | "dist-upgrade" | "autoremove" | "autoclean" | "clean" | "build-dep"
-        | "source" | "download" | "satisfies" | "add" | "delete" | "hold" | "unhold"
-        | "auto" | "manual" => Safety::WriteOperation,
+        "install" | "remove" | "purge" | "update" | "upgrade" | "full-upgrade" | "dist-upgrade"
+        | "autoremove" | "autoclean" | "clean" | "build-dep" | "source" | "download"
+        | "satisfies" | "add" | "delete" | "hold" | "unhold" | "auto" | "manual" => {
+            Safety::WriteOperation
+        }
 
         // Everything else — ambiguous, let through
         _ => Safety::Unknown,
@@ -80,7 +80,10 @@ mod tests {
         assert_eq!(classify_apt(&["full-upgrade"]), Safety::WriteOperation);
         assert_eq!(classify_apt(&["autoremove"]), Safety::WriteOperation);
         assert_eq!(classify_apt(&["autoclean"]), Safety::WriteOperation);
-        assert_eq!(classify_apt(&["build-dep", "package"]), Safety::WriteOperation);
+        assert_eq!(
+            classify_apt(&["build-dep", "package"]),
+            Safety::WriteOperation
+        );
     }
 
     #[test]
@@ -91,8 +94,17 @@ mod tests {
 
     #[test]
     fn apt_mark_write_commands() {
-        assert_eq!(classify_apt(&["mark", "hold", "bash"]), Safety::WriteOperation);
-        assert_eq!(classify_apt(&["mark", "auto", "bash"]), Safety::WriteOperation);
-        assert_eq!(classify_apt(&["mark", "unhold", "bash"]), Safety::WriteOperation);
+        assert_eq!(
+            classify_apt(&["mark", "hold", "bash"]),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            classify_apt(&["mark", "auto", "bash"]),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            classify_apt(&["mark", "unhold", "bash"]),
+            Safety::WriteOperation
+        );
     }
 }

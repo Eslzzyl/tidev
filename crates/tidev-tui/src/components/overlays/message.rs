@@ -3,23 +3,24 @@
 //! Mirrors the old `tidev_tui::ui::message_panel` module with a self-contained
 //! Component implementation.
 
+use crate::utils::shorten;
 use anyhow::Result;
 use chrono::{Local, Utc};
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent,
-    MouseEventKind};
+use crossterm::event::{
+    KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use ratatui::layout::{Constraint, Layout, Margin, Position, Rect};
 use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Cell, Clear, Paragraph, Row, Table, TableState};
 use tidev_types::prompts::SessionMode;
-use crate::utils::shorten;
 use uuid::Uuid;
 
-use unicode_width::UnicodeWidthStr;
 use crate::action::{Action, ChatAction, OverlayAction, OverlayKind};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
 use crate::utils::{centered_rect, strip_system_reminder_tags};
+use unicode_width::UnicodeWidthStr;
 
 // ---------------------------------------------------------------------------
 // MessagePanelMessage
@@ -99,9 +100,7 @@ impl MessagePanel {
             return;
         }
         let len = matches.len() as isize;
-        let current = self
-            .selected_index
-            .min(matches.len().saturating_sub(1)) as isize;
+        let current = self.selected_index.min(matches.len().saturating_sub(1)) as isize;
         let next = (current + delta).rem_euclid(len) as usize;
         self.selected_index = next;
     }
@@ -162,17 +161,17 @@ impl Component for MessagePanel {
                     None
                 }
             }
-            KeyCode::Char('u') => {
-                self.selected_message().map(|message| Action::Overlay(OverlayAction::Open(
-                        OverlayKind::UndoConfirmDialog {
-                            message_id: message.message_id,
-                            content: message.content.clone(),
-                        },
-                    )))
-            }
+            KeyCode::Char('u') => self.selected_message().map(|message| {
+                Action::Overlay(OverlayAction::Open(OverlayKind::UndoConfirmDialog {
+                    message_id: message.message_id,
+                    content: message.content.clone(),
+                }))
+            }),
             KeyCode::Esc | KeyCode::Char('q') => {
                 self.pending_scroll_id = None;
-                Some(Action::Overlay(OverlayAction::Close(OverlayKind::MessagePanel)))
+                Some(Action::Overlay(OverlayAction::Close(
+                    OverlayKind::MessagePanel,
+                )))
             }
             KeyCode::Backspace => {
                 if !self.query.is_empty() {
@@ -196,11 +195,7 @@ impl Component for MessagePanel {
             return None;
         }
 
-        let overlay = centered_rect(
-            area.width.min(112),
-            area.height.min(36),
-            area,
-        );
+        let overlay = centered_rect(area.width.min(112), area.height.min(36), area);
 
         match mouse.kind {
             MouseEventKind::ScrollUp => {
@@ -245,7 +240,9 @@ impl Component for MessagePanel {
             // When Enter / mouse-click closes the panel, also emit ScrollTo to jump
             // to the message. Esc closes without scrolling (pending_scroll_id is None).
             Action::Overlay(OverlayAction::Close(OverlayKind::MessagePanel)) => {
-                let scroll = self.pending_scroll_id.take()
+                let scroll = self
+                    .pending_scroll_id
+                    .take()
                     .map(|id| Action::Chat(ChatAction::ScrollTo(id)));
                 scroll.into_iter().collect()
             }
@@ -255,11 +252,7 @@ impl Component for MessagePanel {
 
     fn draw(&mut self, frame: &mut Frame, rect: Rect, ctx: &DrawContext) {
         let palette = ctx.palette;
-        let overlay = centered_rect(
-            rect.width.min(112),
-            rect.height.min(36),
-            rect,
-        );
+        let overlay = centered_rect(rect.width.min(112), rect.height.min(36), rect);
         frame.render_widget(Clear, overlay);
 
         let title = Block::default().style(Style::default().bg(palette.panel_alt));
@@ -323,11 +316,7 @@ impl Component for MessagePanel {
             frame.render_widget(
                 Paragraph::new("No user messages match this search.")
                     .alignment(ratatui::layout::Alignment::Center)
-                    .style(
-                        Style::default()
-                            .bg(palette.panel_alt)
-                            .fg(palette.muted),
-                    ),
+                    .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                 sections[3],
             );
         } else {
@@ -360,9 +349,7 @@ impl Component for MessagePanel {
                 });
                 let mode_cell = Cell::from(Line::from(vec![Span::styled(
                     mode_str,
-                    Style::default()
-                        .fg(mode_color)
-                        .add_modifier(Modifier::BOLD),
+                    Style::default().fg(mode_color).add_modifier(Modifier::BOLD),
                 )]));
 
                 // Content column
@@ -390,11 +377,7 @@ impl Component for MessagePanel {
                     Constraint::Fill(1),
                 ],
             )
-            .style(
-                Style::default()
-                    .bg(palette.panel_alt)
-                    .fg(palette.text),
-            )
+            .style(Style::default().bg(palette.panel_alt).fg(palette.text))
             .row_highlight_style(
                 Style::default()
                     .bg(palette.selection_bg)
@@ -409,11 +392,7 @@ impl Component for MessagePanel {
         frame.render_widget(
             Paragraph::new("Enter: jump · Esc: close · Ctrl+P/N: nav")
                 .alignment(ratatui::layout::Alignment::Center)
-                .style(
-                    Style::default()
-                        .bg(palette.panel_alt)
-                        .fg(palette.muted),
-                ),
+                .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
             sections[4],
         );
     }

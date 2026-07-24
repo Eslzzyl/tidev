@@ -33,7 +33,8 @@ pub(crate) fn paste_image_from_clipboard() -> Option<(String, String, Vec<u8>, u
     let img = clipboard.get_image().ok()?;
 
     // Encode RGBA bytes as PNG.
-    let rgba = image::RgbaImage::from_raw(img.width as u32, img.height as u32, img.bytes.into_owned())?;
+    let rgba =
+        image::RgbaImage::from_raw(img.width as u32, img.height as u32, img.bytes.into_owned())?;
     let mut png_bytes = Vec::new();
     rgba.write_to(
         &mut std::io::Cursor::new(&mut png_bytes),
@@ -161,9 +162,7 @@ pub(crate) fn render_scrollbar(
 /// Pretty-print JSON tool arguments for display in the permission dialog.
 pub(crate) fn pretty_tool_arguments(arguments: &str) -> String {
     match serde_json::from_str::<serde_json::Value>(arguments) {
-        Ok(value) => {
-            serde_json::to_string_pretty(&value).unwrap_or_else(|_| arguments.to_string())
-        }
+        Ok(value) => serde_json::to_string_pretty(&value).unwrap_or_else(|_| arguments.to_string()),
         Err(_) => arguments.to_string(),
     }
 }

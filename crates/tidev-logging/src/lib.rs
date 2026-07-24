@@ -85,8 +85,7 @@ impl Log for TidevLogger {
 
         // ── Write to file (always uncolored) ──
         if let Some(ref mut file) = guard.file {
-            let file_line =
-                format!("[{} {} {}] {}", formatted_timestamp, level, target, message);
+            let file_line = format!("[{} {} {}] {}", formatted_timestamp, level, target, message);
             let _ = file.write_all(file_line.as_bytes());
             let _ = file.write_all(b"\n");
             let _ = file.flush();

@@ -14,8 +14,8 @@ pub(super) fn classify_gem(args: &[&str]) -> Safety {
 
     match sub {
         // Read-only
-        "list" | "which" | "environment" | "contents" | "dependency" | "search"
-        | "help" | "version" | "outdated" => Safety::ReadOnly,
+        "list" | "which" | "environment" | "contents" | "dependency" | "search" | "help"
+        | "version" | "outdated" => Safety::ReadOnly,
 
         // `gem pristine --check` is read-only; `gem pristine` without --check is write
         "pristine" => {
@@ -36,9 +36,9 @@ pub(super) fn classify_gem(args: &[&str]) -> Safety {
         }
 
         // Explicit write commands
-        "install" | "uninstall" | "update" | "build" | "push" | "owner" | "cleanup"
-        | "sources" | "generate_index" | "server" | "unpack" | "fetch" | "sign"
-        | "specification" | "signin" | "signout" => Safety::WriteOperation,
+        "install" | "uninstall" | "update" | "build" | "push" | "owner" | "cleanup" | "sources"
+        | "generate_index" | "server" | "unpack" | "fetch" | "sign" | "specification"
+        | "signin" | "signout" => Safety::WriteOperation,
 
         // Everything else — ambiguous, let through
         _ => Safety::Unknown,
@@ -66,15 +66,36 @@ mod tests {
     #[test]
     fn gem_write_commands() {
         assert_eq!(classify_gem(&["install", "rails"]), Safety::WriteOperation);
-        assert_eq!(classify_gem(&["install", "--no-doc", "rails"]), Safety::WriteOperation);
-        assert_eq!(classify_gem(&["uninstall", "rails"]), Safety::WriteOperation);
+        assert_eq!(
+            classify_gem(&["install", "--no-doc", "rails"]),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            classify_gem(&["uninstall", "rails"]),
+            Safety::WriteOperation
+        );
         assert_eq!(classify_gem(&["update"]), Safety::WriteOperation);
-        assert_eq!(classify_gem(&["build", "mygem.gemspec"]), Safety::WriteOperation);
-        assert_eq!(classify_gem(&["push", "mygem-1.0.gem"]), Safety::WriteOperation);
-        assert_eq!(classify_gem(&["owner", "-a", "gem", "email"]), Safety::WriteOperation);
+        assert_eq!(
+            classify_gem(&["build", "mygem.gemspec"]),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            classify_gem(&["push", "mygem-1.0.gem"]),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            classify_gem(&["owner", "-a", "gem", "email"]),
+            Safety::WriteOperation
+        );
         assert_eq!(classify_gem(&["cleanup"]), Safety::WriteOperation);
         assert_eq!(classify_gem(&["pristine", "rails"]), Safety::WriteOperation);
-        assert_eq!(classify_gem(&["cert", "--build", "email"]), Safety::WriteOperation);
-        assert_eq!(classify_gem(&["sources", "-a", "url"]), Safety::WriteOperation);
+        assert_eq!(
+            classify_gem(&["cert", "--build", "email"]),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            classify_gem(&["sources", "-a", "url"]),
+            Safety::WriteOperation
+        );
     }
 }

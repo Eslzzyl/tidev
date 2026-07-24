@@ -27,7 +27,10 @@ mod tests {
 
     #[test]
     fn tar_write_commands() {
-        assert_eq!(classify_tar(&["-cf", "archive.tar", "files/"]), Safety::Unknown);
+        assert_eq!(
+            classify_tar(&["-cf", "archive.tar", "files/"]),
+            Safety::Unknown
+        );
         assert_eq!(classify_tar(&["-xf", "archive.tar"]), Safety::Unknown);
     }
 }

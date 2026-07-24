@@ -310,8 +310,7 @@ pub fn extract_boundary_violation_path(
         return None;
     }
 
-    let resolved = resolve_path_unchecked(workspace_root, &path_buf)
-        .unwrap_or(path_buf);
+    let resolved = resolve_path_unchecked(workspace_root, &path_buf).unwrap_or(path_buf);
 
     Some(canonicalize_for_comparison(&resolved))
 }
@@ -339,8 +338,7 @@ pub fn extract_sensitive_file_path(
         _ => return None,
     };
 
-    let resolved = resolve_path_unchecked(workspace_root, &path_buf)
-        .unwrap_or(path_buf);
+    let resolved = resolve_path_unchecked(workspace_root, &path_buf).unwrap_or(path_buf);
 
     // Check against sensitive patterns using the existing logic.
     let resolved_str = resolved.to_string_lossy();
@@ -530,7 +528,10 @@ mod tests {
         let ws = PathBuf::from("C:\\Users\\test\\project");
         let candidate = Path::new("C:\\Users\\test\\project\\sub\\file.txt");
         let result = resolve_path_unchecked(&ws, candidate).unwrap();
-        assert_eq!(result, PathBuf::from("C:\\Users\\test\\project\\sub\\file.txt"));
+        assert_eq!(
+            result,
+            PathBuf::from("C:\\Users\\test\\project\\sub\\file.txt")
+        );
     }
 
     #[cfg(windows)]
@@ -575,7 +576,10 @@ mod tests {
         let ws = PathBuf::from("C:\\Users\\test\\project");
         let candidate = Path::new(".\\sub\\file.txt");
         let result = resolve_path_unchecked(&ws, candidate).unwrap();
-        assert_eq!(result, PathBuf::from("C:\\Users\\test\\project\\sub\\file.txt"));
+        assert_eq!(
+            result,
+            PathBuf::from("C:\\Users\\test\\project\\sub\\file.txt")
+        );
     }
 
     #[cfg(windows)]
@@ -583,7 +587,8 @@ mod tests {
     fn test_resolve_workspace_path_windows_outside_different_drive_rejected() {
         let dir = tempdir().unwrap();
         // Use the temp dir as workspace — it lives on the system drive.
-        let result = resolve_workspace_path(dir.path(), Path::new("Z:\\totally\\fake\\path"), false);
+        let result =
+            resolve_workspace_path(dir.path(), Path::new("Z:\\totally\\fake\\path"), false);
         assert!(
             result.is_err(),
             "different-drive absolute path should be rejected when allow_outside=false"

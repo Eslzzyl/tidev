@@ -46,9 +46,15 @@ mod tests {
     fn go_write_commands() {
         assert_eq!(classify_go(&["build", "./..."]), Safety::WriteOperation);
         assert_eq!(classify_go(&["run", "main.go"]), Safety::WriteOperation);
-        assert_eq!(classify_go(&["install", "./cmd/..."]), Safety::WriteOperation);
+        assert_eq!(
+            classify_go(&["install", "./cmd/..."]),
+            Safety::WriteOperation
+        );
         assert_eq!(classify_go(&["mod", "tidy"]), Safety::WriteOperation);
         assert_eq!(classify_go(&["mod", "download"]), Safety::WriteOperation);
-        assert_eq!(classify_go(&["get", "example.com/pkg"]), Safety::WriteOperation);
+        assert_eq!(
+            classify_go(&["get", "example.com/pkg"]),
+            Safety::WriteOperation
+        );
     }
 }

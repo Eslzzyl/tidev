@@ -584,7 +584,10 @@ fn build_indexed_entry(rel: &Path, path: &Path, is_dir: bool) -> Option<IndexedE
             .map(|value| value.to_string_lossy().to_ascii_lowercase())
             .unwrap_or_default(),
         basename_char_offset: basename_char_offset(&path_text),
-        depth: path_text.chars().filter(|&c| std::path::is_separator(c)).count() as u32,
+        depth: path_text
+            .chars()
+            .filter(|&c| std::path::is_separator(c))
+            .count() as u32,
         is_dotfile: rel
             .file_name()
             .is_some_and(|name| name.to_string_lossy().starts_with('.')),

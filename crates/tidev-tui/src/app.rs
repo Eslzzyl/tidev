@@ -7,27 +7,31 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+use crate::theme::{ThemeName, ThemePalette};
 use chrono::Utc;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent};
 use ratatui::layout::{Alignment, Constraint, Layout, Margin, Rect};
 use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph};
-use tidev_core::{ApprovedTool, ToolCallWithViolations};
 use tidev_core::TuiResponse;
+use tidev_core::{ApprovedTool, ToolCallWithViolations};
 use tidev_types::agent_type::AgentType;
-use tidev_types::message::{BackendEvent, Message, MessageAttachment, MessageRole, ToolExecutionResult, COMPACTION_MESSAGE_LABEL};
-use tidev_types::tools::QuestionArgs;
-use unicode_width::UnicodeWidthStr;
-use crate::theme::{ThemeName, ThemePalette};
+use tidev_types::message::{
+    BackendEvent, COMPACTION_MESSAGE_LABEL, Message, MessageAttachment, MessageRole,
+    ToolExecutionResult,
+};
 use tidev_types::prompts::SessionMode;
 use tidev_types::reasoning::ThinkingLevelType;
+use tidev_types::tools::QuestionArgs;
 use tidev_types::tools::TodoItem;
+use unicode_width::UnicodeWidthStr;
 use uuid::Uuid;
 
-use crate::action::{Action, BoundaryDecision, ChatAction, ConnectAction, OverlayAction,
-    OverlayKind, PermissionDecision, SearchAction, SensitiveFileDecision, SessionAction,
-    ThemeAction};
+use crate::action::{
+    Action, BoundaryDecision, ChatAction, ConnectAction, OverlayAction, OverlayKind,
+    PermissionDecision, SearchAction, SensitiveFileDecision, SessionAction, ThemeAction,
+};
 use crate::component::Component;
 use crate::components::overlay_stack::OverlayStack;
 use crate::components::overlays::agents::AgentsPanel;
@@ -35,6 +39,11 @@ use crate::components::overlays::connect::ConnectDialog;
 use crate::components::overlays::fork::ForkConfirmDialog;
 use crate::components::overlays::image::ImageViewer;
 
+use crate::components::chat::MessageList;
+use crate::components::chat::render::wrap_text_lines;
+use crate::components::composer::Composer;
+use crate::components::desktop_notification::NotificationManager;
+use crate::components::notification::NotificationState;
 use crate::components::overlays::message::{MessagePanel, MessagePanelMessage};
 use crate::components::overlays::model::ModelPanel;
 use crate::components::overlays::panel_launcher::PanelLauncher;
@@ -49,16 +58,11 @@ use crate::components::overlays::skills::{SkillItem, SkillsPanel};
 use crate::components::overlays::theme::ThemePanel;
 use crate::components::overlays::undo::UndoConfirmDialog;
 use crate::components::overlays::workspace::WorkspaceBoundaryDialog;
-use crate::components::chat::MessageList;
-use crate::components::chat::render::wrap_text_lines;
-use crate::components::composer::Composer;
-use crate::components::sidebar::Sidebar;
-use crate::components::desktop_notification::NotificationManager;
-use crate::components::notification::NotificationState;
 use crate::components::selection::{MouseSelection, copy_to_clipboard};
+use crate::components::sidebar::Sidebar;
 use crate::context::{DrawContext, InitContext, UpdateContext};
-use ratatui_image::picker::Picker;
 use crate::utils::strip_system_reminder_tags;
+use ratatui_image::picker::Picker;
 
 /// Token usage statistics for the current/last request.
 #[derive(Clone, Debug)]
@@ -150,14 +154,12 @@ pub struct App {
     pending_instruction_sources: HashMap<Uuid, Vec<String>>,
 
     // ── Tool approval pipeline (per-session) ──
-
     /// Per-session pending tool approval states.
     pending_approvals: HashMap<Uuid, PendingApproval>,
     /// Which session's approval dialog is currently active.
     active_approval_session: Option<Uuid>,
 
     // ── In-memory permission caches ──
-
     /// allowlist for workspace boundary (canonical path → allowed).
     /// Uses prefix matching so allowing a directory allows all files under it.
     boundary_permissions: HashMap<String, bool>,
@@ -290,7 +292,11 @@ impl App {
             image_picker: {
                 log::info!("[img] from_query_stdio START");
                 let r = Picker::from_query_stdio();
-                log::info!("[img] from_query_stdio END: {:?}", r.as_ref().map(|p| (p.protocol_type(), p.font_size(), p.capabilities())));
+                log::info!(
+                    "[img] from_query_stdio END: {:?}",
+                    r.as_ref()
+                        .map(|p| (p.protocol_type(), p.font_size(), p.capabilities()))
+                );
                 r.ok()
             },
             composer: {
@@ -367,10 +373,7 @@ impl App {
                 .display()
                 .to_string()
         };
-        let display_paths: Vec<String> = new_sources
-            .iter()
-            .map(|s| to_rel(s))
-            .collect();
+        let display_paths: Vec<String> = new_sources.iter().map(|s| to_rel(s)).collect();
 
         // Build the display text matching the old v0.6.x format.
         let content = if display_paths.len() == 1 {
@@ -507,7 +510,13 @@ impl App {
             let rt = self.runtime.clone();
             tokio::spawn(async move {
                 if let Err(e) = rt
-                    .submit_prompt_with_attachments(session_id, mode, text, attachments, Some(thinking_level))
+                    .submit_prompt_with_attachments(
+                        session_id,
+                        mode,
+                        text,
+                        attachments,
+                        Some(thinking_level),
+                    )
                     .await
                 {
                     log::error!("flush queued prompt failed: {e}");
@@ -621,7 +630,9 @@ impl App {
                         Some(total_tokens),
                         Some(cache_read_tokens),
                         Some(cache_write_tokens),
-                        self.context_usage.as_ref().and_then(|u| u.tokens_per_second),
+                        self.context_usage
+                            .as_ref()
+                            .and_then(|u| u.tokens_per_second),
                         Some(model_id.clone()),
                         Some(Utc::now()),
                         Some(self.mode),
@@ -631,7 +642,10 @@ impl App {
                 // Persist to store (record_usage API not yet available in new storage).
                 // TODO: add record_usage to tidev-storage if needed later.
             }
-            BackendEvent::InstructionsLoaded { session_id, sources } => {
+            BackendEvent::InstructionsLoaded {
+                session_id,
+                sources,
+            } => {
                 log::info!("Instructions loaded: {sources:?}");
                 if Some(session_id) == self.current_session_id && !sources.is_empty() {
                     self.show_instruction_sources(&sources);
@@ -653,9 +667,7 @@ impl App {
                 }
             }
             BackendEvent::Failed {
-                session_id,
-                error,
-                ..
+                session_id, error, ..
             } => {
                 log::error!("Request failed for session {session_id}: {error}");
                 // Clean up pending state for this session.
@@ -676,12 +688,11 @@ impl App {
                         std::time::Duration::from_secs(8),
                     );
                 }
-                self.desktop_notifications.notify(&format!("Request failed: {error}"));
+                self.desktop_notifications
+                    .notify(&format!("Request failed: {error}"));
             }
             BackendEvent::Finished {
-                session_id,
-                turn,
-                ..
+                session_id, turn, ..
             } => {
                 // Apply pending mode switch on final turn (no tool calls).
                 if turn.tool_calls.is_empty() {
@@ -703,20 +714,32 @@ impl App {
                     }
                 }
             }
-            BackendEvent::ContextCompacted { session_id, error: Some(ref msg), .. } => {
+            BackendEvent::ContextCompacted {
+                session_id,
+                error: Some(ref msg),
+                ..
+            } => {
                 self.compacting_sessions.remove(&session_id);
                 self.set_notice(format!("Compaction failed: {msg}"));
             }
-            BackendEvent::ContextCompacted { session_id, error: None, .. } => {
+            BackendEvent::ContextCompacted {
+                session_id,
+                error: None,
+                ..
+            } => {
                 self.compacting_sessions.remove(&session_id);
                 self.set_notice("Context compacted");
             }
-            BackendEvent::UserMessageCreated { session_id, message } => {
+            BackendEvent::UserMessageCreated {
+                session_id,
+                message,
+            } => {
                 if let Some(ref mut chat) = self.message_list {
                     if let Some(ref mut ctx) = chat.active_chat_context_mut()
-                        && ctx.session_id == session_id {
-                            ctx.push(message);
-                        }
+                        && ctx.session_id == session_id
+                    {
+                        ctx.push(message);
+                    }
                     chat.invalidate_layout();
                 }
             }
@@ -724,22 +747,25 @@ impl App {
                 if Some(session_id) == self.current_session_id {
                     if let Some(ref mut chat) = self.message_list {
                         if let Some(ref mut ctx) = chat.active_chat_context_mut()
-                            && ctx.session_id == session_id {
-                                // Use the locally-held revert_message_id to determine the
-                                // truncation point instead of relying on `kept_count` from
-                                // the runtime buffer.  The buffer and ctx.messages are
-                                // independent Vecs; their positions can diverge (e.g. when
-                                // set_message_buffer overwrites the buffer with stale data
-                                // or when the agent loop appends messages between undo and
-                                // send).  Truncating by revert_message_id is always correct
-                                // for the TUI's own message list.
-                                if let Some(revert_id) = ctx.revert_message_id {
-                                    if let Some(pos) = ctx.messages.iter().position(|m| m.id == revert_id) {
-                                        ctx.messages.truncate(pos);
-                                    }
+                            && ctx.session_id == session_id
+                        {
+                            // Use the locally-held revert_message_id to determine the
+                            // truncation point instead of relying on `kept_count` from
+                            // the runtime buffer.  The buffer and ctx.messages are
+                            // independent Vecs; their positions can diverge (e.g. when
+                            // set_message_buffer overwrites the buffer with stale data
+                            // or when the agent loop appends messages between undo and
+                            // send).  Truncating by revert_message_id is always correct
+                            // for the TUI's own message list.
+                            if let Some(revert_id) = ctx.revert_message_id {
+                                if let Some(pos) =
+                                    ctx.messages.iter().position(|m| m.id == revert_id)
+                                {
+                                    ctx.messages.truncate(pos);
                                 }
-                                ctx.revert_message_id = None;
                             }
+                            ctx.revert_message_id = None;
+                        }
                         chat.invalidate_layout();
                     }
                 }
@@ -769,7 +795,12 @@ impl App {
                 }
                 self.set_notice("Undo complete");
             }
-            BackendEvent::ToolCompleted { session_id, ref tool_call, result, .. } => {
+            BackendEvent::ToolCompleted {
+                session_id,
+                ref tool_call,
+                result,
+                ..
+            } => {
                 // Buffer instruction sources discovered during tool execution.
                 // They will be flushed on StreamEnd, after all tool results in
                 // this turn are placed into the chat_context (which guarantees
@@ -785,23 +816,23 @@ impl App {
 
                 // todowrite-specific: reload todos from database.
                 if tool_call.name == "todowrite" {
-                    if let Ok(todos) = self.runtime.session_manager().store().load_todos(session_id) {
+                    if let Ok(todos) = self
+                        .runtime
+                        .session_manager()
+                        .store()
+                        .load_todos(session_id)
+                    {
                         self.todos = todos;
                     }
                 }
             }
-            BackendEvent::StreamEnd {
-                session_id,
-                ..
-            } => {
+            BackendEvent::StreamEnd { session_id, .. } => {
                 // Flush pending instruction sources discovered during tool
                 // execution.  Only inserts into the in-memory chat_context —
                 // persistence is handled by the backend (loop_.rs step 11)
                 // so the System message appears after all tool results.
                 if let Some(sources) = self.pending_instruction_sources.remove(&session_id) {
-                    if !sources.is_empty()
-                        && Some(session_id) == self.current_session_id
-                    {
+                    if !sources.is_empty() && Some(session_id) == self.current_session_id {
                         self.show_instruction_sources(&sources);
                     }
                 }
@@ -827,10 +858,7 @@ impl App {
 
     /// Handle a pending tool approval request from the agent loop.
     /// Stores the request per-session.
-    pub(crate) fn handle_tui_request(
-        &mut self,
-        request: tidev_core::TuiRequest,
-    ) {
+    pub(crate) fn handle_tui_request(&mut self, request: tidev_core::TuiRequest) {
         let session_id = request.session_id;
         match request.kind {
             tidev_core::TuiRequestKind::ToolApproval(tools_with_violations) => {
@@ -838,12 +866,15 @@ impl App {
                     "handle_tui_request: session {session_id}, {} tool(s) pending approval",
                     tools_with_violations.len()
                 );
-                self.pending_approvals.insert(session_id, PendingApproval {
-                    response_tx: request.response_tx,
-                    tools: tools_with_violations,
-                    tool_index: 0,
-                    approved_tools: Vec::new(),
-                });
+                self.pending_approvals.insert(
+                    session_id,
+                    PendingApproval {
+                        response_tx: request.response_tx,
+                        tools: tools_with_violations,
+                        tool_index: 0,
+                        approved_tools: Vec::new(),
+                    },
+                );
                 // If no approval dialog is currently active, activate this one.
                 if self.active_approval_session.is_none() {
                     self.active_approval_session = Some(session_id);
@@ -868,9 +899,16 @@ impl App {
         };
 
         while approval.tool_index < approval.tools.len() {
-            let (boundary_path, sensitive_path, is_question, args, perm_key, perm_label,
-                  needs_confirmation, tc)
-                = {
+            let (
+                boundary_path,
+                sensitive_path,
+                is_question,
+                args,
+                perm_key,
+                perm_label,
+                needs_confirmation,
+                tc,
+            ) = {
                 let twv = &approval.tools[approval.tool_index];
                 let tc = &twv.tool_call;
                 (
@@ -900,7 +938,10 @@ impl App {
                         let msg = if let Some(ref r) = reason {
                             format!("Path '{}' was denied. Reason: {}", path_str, r)
                         } else {
-                            format!("Path '{}' was denied by remembered boundary permission.", path_str)
+                            format!(
+                                "Path '{}' was denied by remembered boundary permission.",
+                                path_str
+                            )
                         };
                         approval.approved_tools.push(ApprovedTool {
                             tool_call: tc,
@@ -916,14 +957,12 @@ impl App {
                     None => {
                         log::info!("Opening WorkspaceBoundaryDialog for: {path_str}");
                         self.set_notice("Workspace boundary violation — please make a decision");
-                        self.overlays.push(Box::new(
-                            WorkspaceBoundaryDialog::new(
-                                path.clone(),
-                                self.runtime.workspace_root().clone(),
-                                current_index,
-                                total,
-                            ),
-                        ));
+                        self.overlays.push(Box::new(WorkspaceBoundaryDialog::new(
+                            path.clone(),
+                            self.runtime.workspace_root().clone(),
+                            current_index,
+                            total,
+                        )));
                         return;
                     }
                 }
@@ -942,7 +981,10 @@ impl App {
                         let msg = if let Some(ref r) = reason {
                             format!("Sensitive file '{}' was denied. Reason: {}", path_str, r)
                         } else {
-                            format!("Sensitive file '{}' was denied by remembered sensitive file permission.", path_str)
+                            format!(
+                                "Sensitive file '{}' was denied by remembered sensitive file permission.",
+                                path_str
+                            )
                         };
                         approval.approved_tools.push(ApprovedTool {
                             tool_call: tc,
@@ -958,14 +1000,12 @@ impl App {
                     None => {
                         log::info!("Opening SensitiveFileDialog for: {path_str}");
                         self.set_notice("Sensitive file access — please make a decision");
-                        self.overlays.push(Box::new(
-                            SensitiveFileDialog::new(
-                                path.clone(),
-                                self.runtime.workspace_root().clone(),
-                                current_index,
-                                total,
-                            ),
-                        ));
+                        self.overlays.push(Box::new(SensitiveFileDialog::new(
+                            path.clone(),
+                            self.runtime.workspace_root().clone(),
+                            current_index,
+                            total,
+                        )));
                         return;
                     }
                 }
@@ -976,7 +1016,8 @@ impl App {
                 if let Ok(qa) = serde_json::from_str::<QuestionArgs>(&args) {
                     log::info!("Opening QuestionDialog ({} questions)", qa.questions.len());
                     self.set_notice("LLM has questions — please provide answers");
-                    self.overlays.push(Box::new(QuestionDialog::new(qa.questions)));
+                    self.overlays
+                        .push(Box::new(QuestionDialog::new(qa.questions)));
                     return;
                 } else {
                     log::warn!("Invalid or empty question tool call arguments");
@@ -1148,7 +1189,8 @@ impl App {
             && self.overlays.is_empty()
             && (self.has_active_request() || !self.pending_prompt_queue.is_empty())
         {
-            if self.abort_confirmation_deadline
+            if self
+                .abort_confirmation_deadline
                 .is_some_and(|deadline| deadline > Instant::now())
             {
                 self.abort_current_request();
@@ -1163,10 +1205,11 @@ impl App {
         // 0. Ctrl+C: clear input (overrides quit — Ctrl+D is the quit shortcut).
         if key.code == KeyCode::Char('c') && key.modifiers == KeyModifiers::CONTROL {
             if let Some(ref mut composer) = self.composer
-                && !composer.is_empty() {
-                    composer.clear();
-                    self.set_notice("Input cleared");
-                }
+                && !composer.is_empty()
+            {
+                composer.clear();
+                self.set_notice("Input cleared");
+            }
             return;
         }
 
@@ -1185,10 +1228,11 @@ impl App {
         // 1a. Message scrolling keys work even when overlays are open.
         if matches!(key.code, KeyCode::PageUp | KeyCode::PageDown)
             && let Some(ref mut chat) = self.message_list
-                && let Some(action) = chat.handle_key_event(key) {
-                    self.process_action(action);
-                    return;
-                }
+            && let Some(action) = chat.handle_key_event(key)
+        {
+            self.process_action(action);
+            return;
+        }
 
         // 2. OverlayStack top-first
         if let Some(action) = self.overlays.handle_key_event(key) {
@@ -1199,21 +1243,24 @@ impl App {
         // 2a. Subsession navigation (when parent_session_id is set).
         if let Some(ref chat) = self.message_list
             && let Some(ctx) = chat.active_chat_context()
-                && ctx.parent_session_id.is_some() {
-                    match key.code {
-                        KeyCode::Up | KeyCode::Down | KeyCode::Left | KeyCode::Right => {
-                            self.handle_subsession_navigation(key);
-                            return;
-                        }
-                        _ => {}
-                    }
+            && ctx.parent_session_id.is_some()
+        {
+            match key.code {
+                KeyCode::Up | KeyCode::Down | KeyCode::Left | KeyCode::Right => {
+                    self.handle_subsession_navigation(key);
+                    return;
                 }
-                // 2b. Tab: session mode switch (only when no composer popup is active).
-        if key.code == KeyCode::Tab && key.modifiers.is_empty()
-            && !self.composer.as_ref().is_some_and(|c| c.has_popup()) {
-                self.handle_tab_mode_switch();
-                return;
+                _ => {}
             }
+        }
+        // 2b. Tab: session mode switch (only when no composer popup is active).
+        if key.code == KeyCode::Tab
+            && key.modifiers.is_empty()
+            && !self.composer.as_ref().is_some_and(|c| c.has_popup())
+        {
+            self.handle_tab_mode_switch();
+            return;
+        }
 
         // 2c. Shift+Tab / Ctrl+T: cycle thinking level.
         if (key.code == KeyCode::Tab && key.modifiers.contains(KeyModifiers::SHIFT))
@@ -1236,9 +1283,10 @@ impl App {
 
         // 4. MessageList (only when no overlay/composer consumed the event)
         if let Some(ref mut chat) = self.message_list
-            && let Some(action) = chat.handle_key_event(key) {
-                self.process_action(action);
-            }
+            && let Some(action) = chat.handle_key_event(key)
+        {
+            self.process_action(action);
+        }
     }
 
     /// Handle bracketed paste text from the terminal (⌘V / Shift+Insert).
@@ -1288,9 +1336,9 @@ impl App {
             return;
         }
 
-        let is_busy = self.current_session_id.is_some_and(|sid|
+        let is_busy = self.current_session_id.is_some_and(|sid| {
             self.runtime.is_session_busy(sid) || self.pending_approvals.contains_key(&sid)
-        );
+        });
 
         if is_busy || !self.pending_prompt_queue.is_empty() {
             // Request in progress: defer mode switch until request completes.
@@ -1298,7 +1346,10 @@ impl App {
             if let Some(sid) = self.current_session_id {
                 self.pending_modes.insert(sid, new_mode);
             }
-            self.set_notice(format!("Mode will switch to {} on completion", new_mode.title()));
+            self.set_notice(format!(
+                "Mode will switch to {} on completion",
+                new_mode.title()
+            ));
         } else {
             // Apply immediately.
             self.mode = self.mode.toggle();
@@ -1308,9 +1359,15 @@ impl App {
 
     /// Navigate between subsessions.
     fn handle_subsession_navigation(&mut self, key: KeyEvent) {
-        let Some(ref chat) = self.message_list else { return };
-        let Some(ctx) = chat.active_chat_context() else { return };
-        let Some(parent_id) = ctx.parent_session_id else { return };
+        let Some(ref chat) = self.message_list else {
+            return;
+        };
+        let Some(ctx) = chat.active_chat_context() else {
+            return;
+        };
+        let Some(parent_id) = ctx.parent_session_id else {
+            return;
+        };
         let current_id = ctx.session_id;
 
         // Cache current session's context_usage before navigating away.
@@ -1330,9 +1387,14 @@ impl App {
             }
             KeyCode::Down => {
                 // Switch to the last (most recently delegated) child.
-                let all = self.runtime.session_manager().store()
-                    .list_sessions_unfiltered(1000, 0).unwrap_or_default();
-                let children: Vec<_> = all.into_iter()
+                let all = self
+                    .runtime
+                    .session_manager()
+                    .store()
+                    .list_sessions_unfiltered(1000, 0)
+                    .unwrap_or_default();
+                let children: Vec<_> = all
+                    .into_iter()
                     .filter(|s| s.parent_session_id == Some(parent_id))
                     .collect();
                 if let Some(target) = children.last() {
@@ -1353,14 +1415,26 @@ impl App {
                 }
             }
             KeyCode::Left | KeyCode::Right => {
-                let step = if key.code == KeyCode::Left { -1isize } else { 1 };
-                let all = self.runtime.session_manager().store()
-                    .list_sessions_unfiltered(1000, 0).unwrap_or_default();
-                let children: Vec<_> = all.into_iter()
+                let step = if key.code == KeyCode::Left {
+                    -1isize
+                } else {
+                    1
+                };
+                let all = self
+                    .runtime
+                    .session_manager()
+                    .store()
+                    .list_sessions_unfiltered(1000, 0)
+                    .unwrap_or_default();
+                let children: Vec<_> = all
+                    .into_iter()
                     .filter(|s| s.parent_session_id == Some(parent_id))
                     .collect();
-                if children.is_empty() { return; }
-                let index = children.iter()
+                if children.is_empty() {
+                    return;
+                }
+                let index = children
+                    .iter()
                     .position(|s| s.session_id == current_id)
                     .unwrap_or(usize::MAX);
                 let next_index = if index == usize::MAX {
@@ -1394,8 +1468,8 @@ impl App {
     }
 
     pub fn handle_mouse_event(&mut self, mouse: MouseEvent) {
-        use crossterm::event::MouseEventKind;
         use crossterm::event::MouseButton;
+        use crossterm::event::MouseEventKind;
 
         let position = ratatui::layout::Position::new(mouse.column, mouse.row);
 
@@ -1405,7 +1479,10 @@ impl App {
         // PageUp/PageDown pattern for keyboard events (step 1a).
         if let Some(action) = self.overlays.handle_mouse_event(mouse, self.terminal_area) {
             if matches!(action, Action::Noop)
-                && matches!(mouse.kind, MouseEventKind::ScrollDown | MouseEventKind::ScrollUp)
+                && matches!(
+                    mouse.kind,
+                    MouseEventKind::ScrollDown | MouseEventKind::ScrollUp
+                )
             {
                 // Fall through to chat scroll handling below.
             } else {
@@ -1416,27 +1493,26 @@ impl App {
 
         // Sidebar scroll (scroll events in the sidebar area)
         if let Some(sidebar_area) = self.sidebar_area
-            && sidebar_area.contains(position) {
-        // Auto-scroll runs every frame (~60 fps), much more frequently than
-        // discrete scroll-wheel ticks, so use a fraction of the base speed.
-        let raw = self.runtime.config().ui.scroll_speed as usize;
-        let speed = raw.saturating_div(3).max(1);                match mouse.kind {
-                    MouseEventKind::ScrollDown => {
-                        self.sidebar.scroll_down(speed);
-                    }
-                    MouseEventKind::ScrollUp => {
-                        self.sidebar.scroll_up(speed);
-                    }
-                    _ => {}
+            && sidebar_area.contains(position)
+        {
+            // Auto-scroll runs every frame (~60 fps), much more frequently than
+            // discrete scroll-wheel ticks, so use a fraction of the base speed.
+            let raw = self.runtime.config().ui.scroll_speed as usize;
+            let speed = raw.saturating_div(3).max(1);
+            match mouse.kind {
+                MouseEventKind::ScrollDown => {
+                    self.sidebar.scroll_down(speed);
                 }
-                return;
+                MouseEventKind::ScrollUp => {
+                    self.sidebar.scroll_up(speed);
+                }
+                _ => {}
             }
+            return;
+        }
 
         // Determine the message content area bounds for selection clamping.
-        let msg_bounds = self
-            .message_list
-            .as_ref()
-            .and_then(|ml| ml.content_area);
+        let msg_bounds = self.message_list.as_ref().and_then(|ml| ml.content_area);
 
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
@@ -1456,10 +1532,11 @@ impl App {
                 // MessageList click-to-expand or subsession navigation (non-drag).
                 // Run BEFORE mouse selection so interactive elements get priority.
                 if let Some(ref mut chat) = self.message_list
-                    && let Some(action) = chat.handle_mouse_click(mouse.column, mouse.row) {
-                        self.process_action(action);
-                        return;
-                    }
+                    && let Some(action) = chat.handle_mouse_click(mouse.column, mouse.row)
+                {
+                    self.process_action(action);
+                    return;
+                }
 
                 // Composer input area: set cursor and start selection.
                 if let Some(ref mut composer) = self.composer {
@@ -1482,14 +1559,20 @@ impl App {
                     // Refine bounds to the specific selectable region under the cursor
                     // (mirrors old TUI's selection_bounds_for_position).
                     let area = msg_bounds.unwrap();
-                    let refined = self
-                        .message_list
-                        .as_ref()
-                        .and_then(|ml| {
-                            let hit = ml.selectable_region_rects().iter().find(|r| r.contains(position)).copied();
-                            hit.map(|r| Rect { x: r.x, y: area.y, width: r.width, height: area.height })
-                                .or(Some(area))
-                        });
+                    let refined = self.message_list.as_ref().and_then(|ml| {
+                        let hit = ml
+                            .selectable_region_rects()
+                            .iter()
+                            .find(|r| r.contains(position))
+                            .copied();
+                        hit.map(|r| Rect {
+                            x: r.x,
+                            y: area.y,
+                            width: r.width,
+                            height: area.height,
+                        })
+                        .or(Some(area))
+                    });
 
                     self.mouse_selection.press(position, refined, scroll_offset);
                 }
@@ -1504,7 +1587,8 @@ impl App {
                 }
                 // Check queued prompt card hover.
                 let pos = ratatui::layout::Position::new(mouse.column, mouse.row);
-                self.hovered_queued_index = self.queued_card_bounds
+                self.hovered_queued_index = self
+                    .queued_card_bounds
                     .iter()
                     .find(|(_, rect)| rect.contains(pos))
                     .map(|(i, _)| *i);
@@ -1514,10 +1598,10 @@ impl App {
                 if let Some(ref mut chat) = self.message_list
                     && (chat.scrollbar_area().is_some_and(|a| a.contains(position))
                         || chat.is_scrollbar_dragging())
-                    {
-                        chat.continue_scrollbar_drag(position.y);
-                        return;
-                    }
+                {
+                    chat.continue_scrollbar_drag(position.y);
+                    return;
+                }
                 // Always update pointer position for auto-scroll (must happen
                 // before the composer check so that update_input_area_auto_scroll
                 // can read the latest pointer position).
@@ -1538,43 +1622,40 @@ impl App {
 
                 // Composer input area: finalize selection and queue clipboard copy.
                 if let Some(ref mut composer) = self.composer
-                    && let Some(selected) = composer.handle_mouse_up(position) {
-                        self.pending_input_copy = Some(selected);
-                    }
+                    && let Some(selected) = composer.handle_mouse_up(position)
+                {
+                    self.pending_input_copy = Some(selected);
+                }
 
                 // Composer image badge click: open ImageViewer.
                 if !self.mouse_selection.is_dragging()
-                    && let Some(ref mut composer) = self.composer {
-                        let text_area = composer.last_text_area;
-                        if text_area.contains(position) {
-                            let scroll = composer.input_scroll_offset as u16;
-                            let local_y = position.y.saturating_sub(text_area.y);
-                            let local_x = position.x.saturating_sub(text_area.x);
-                            let target_line = scroll.saturating_add(local_y);
-                            let raw_pos = composer.raw_text_position_at_visual(
-                                text_area.width,
-                                target_line,
-                                local_x,
-                            );
-                            if let Some(span) = composer.span_at(raw_pos)
-                                && let Some(data) = &span.image_data
-                            {
-                                let action = Action::Overlay(OverlayAction::Open(
-                                    OverlayKind::ImageViewer {
-                                        data: data.clone(),
-                                        filename: span
-                                            .image_filename
-                                            .clone()
-                                            .unwrap_or_default(),
-                                    },
-                                ));
-                                self.mouse_selection
-                                    .release(position, 0);
-                                self.process_action(action);
-                                return;
-                            }
+                    && let Some(ref mut composer) = self.composer
+                {
+                    let text_area = composer.last_text_area;
+                    if text_area.contains(position) {
+                        let scroll = composer.input_scroll_offset as u16;
+                        let local_y = position.y.saturating_sub(text_area.y);
+                        let local_x = position.x.saturating_sub(text_area.x);
+                        let target_line = scroll.saturating_add(local_y);
+                        let raw_pos = composer.raw_text_position_at_visual(
+                            text_area.width,
+                            target_line,
+                            local_x,
+                        );
+                        if let Some(span) = composer.span_at(raw_pos)
+                            && let Some(data) = &span.image_data
+                        {
+                            let action =
+                                Action::Overlay(OverlayAction::Open(OverlayKind::ImageViewer {
+                                    data: data.clone(),
+                                    filename: span.image_filename.clone().unwrap_or_default(),
+                                }));
+                            self.mouse_selection.release(position, 0);
+                            self.process_action(action);
+                            return;
                         }
                     }
+                }
 
                 let scroll_offset = self
                     .message_list
@@ -1599,14 +1680,22 @@ impl App {
                 // actually move (e.g. already at the bottom).
                 let old_effective = self.message_list.as_ref().map(|ml| {
                     let max = ml.max_scroll();
-                    if ml.follow_tail { max } else { ml.scroll_offset.min(max) }
+                    if ml.follow_tail {
+                        max
+                    } else {
+                        ml.scroll_offset.min(max)
+                    }
                 });
                 if self.message_list.is_some() {
                     self.process_action(Action::Chat(ChatAction::ScrollDelta(speed)));
                 }
                 let new_effective = self.message_list.as_ref().map(|ml| {
                     let max = ml.max_scroll();
-                    if ml.follow_tail { max } else { ml.scroll_offset.min(max) }
+                    if ml.follow_tail {
+                        max
+                    } else {
+                        ml.scroll_offset.min(max)
+                    }
                 });
                 if old_effective != new_effective {
                     self.mouse_selection.shift_for_scroll(speed);
@@ -1624,14 +1713,22 @@ impl App {
                 let speed = self.runtime.config().ui.scroll_speed as isize;
                 let old_effective = self.message_list.as_ref().map(|ml| {
                     let max = ml.max_scroll();
-                    if ml.follow_tail { max } else { ml.scroll_offset.min(max) }
+                    if ml.follow_tail {
+                        max
+                    } else {
+                        ml.scroll_offset.min(max)
+                    }
                 });
                 if self.message_list.is_some() {
                     self.process_action(Action::Chat(ChatAction::ScrollDelta(-speed)));
                 }
                 let new_effective = self.message_list.as_ref().map(|ml| {
                     let max = ml.max_scroll();
-                    if ml.follow_tail { max } else { ml.scroll_offset.min(max) }
+                    if ml.follow_tail {
+                        max
+                    } else {
+                        ml.scroll_offset.min(max)
+                    }
                 });
                 if old_effective != new_effective {
                     self.mouse_selection.shift_for_scroll(-speed);
@@ -1652,11 +1749,7 @@ impl App {
             self.last_selection_auto_scroll = None;
             return;
         }
-        let Some(area) = self
-            .message_list
-            .as_ref()
-            .and_then(|ml| ml.content_area)
-        else {
+        let Some(area) = self.message_list.as_ref().and_then(|ml| ml.content_area) else {
             return;
         };
         let Some(pointer) = self.mouse_selection.pointer() else {
@@ -1701,10 +1794,16 @@ impl App {
     /// Per-frame auto-scroll while dragging a mouse selection in the
     /// composer input area near the top/bottom edge.
     pub fn update_input_area_auto_scroll(&mut self) {
-        let Some(ref mut composer) = self.composer else { return };
+        let Some(ref mut composer) = self.composer else {
+            return;
+        };
         let text_area = composer.last_text_area;
-        if text_area.width == 0 || text_area.height == 0 { return; }
-        let Some(pointer) = self.mouse_selection.pointer() else { return; };
+        if text_area.width == 0 || text_area.height == 0 {
+            return;
+        }
+        let Some(pointer) = self.mouse_selection.pointer() else {
+            return;
+        };
         composer.update_drag_auto_scroll(pointer, text_area);
     }
 
@@ -1721,17 +1820,33 @@ impl App {
     fn handle_global_key(&self, key: KeyEvent) -> Option<Action> {
         match key.code {
             KeyCode::Char('d') if key.modifiers == KeyModifiers::CONTROL => Some(Action::Quit),
-            KeyCode::F(1) => Some(Action::Overlay(OverlayAction::Open(OverlayKind::ThemePanel))),
-            KeyCode::F(2) => Some(Action::Overlay(OverlayAction::Open(OverlayKind::AgentsPanel))),
-            KeyCode::F(3) => Some(Action::Overlay(OverlayAction::Open(OverlayKind::SkillsPanel))),
-            KeyCode::F(4) => Some(Action::Overlay(OverlayAction::Open(OverlayKind::SettingsPanel))),
-            KeyCode::F(5) => Some(Action::Overlay(OverlayAction::Open(OverlayKind::SearchPanel))),
-            KeyCode::F(6) => Some(Action::Overlay(OverlayAction::Open(OverlayKind::MessagePanel))),
-            KeyCode::F(7) => Some(Action::Overlay(OverlayAction::Open(OverlayKind::ModelPanel))),
-            KeyCode::F(8) => Some(Action::Overlay(OverlayAction::Open(OverlayKind::SessionPanel))),
-            KeyCode::Char('p') if key.modifiers == KeyModifiers::CONTROL => {
-                Some(Action::Overlay(OverlayAction::Open(OverlayKind::PanelLauncher)))
-            }
+            KeyCode::F(1) => Some(Action::Overlay(OverlayAction::Open(
+                OverlayKind::ThemePanel,
+            ))),
+            KeyCode::F(2) => Some(Action::Overlay(OverlayAction::Open(
+                OverlayKind::AgentsPanel,
+            ))),
+            KeyCode::F(3) => Some(Action::Overlay(OverlayAction::Open(
+                OverlayKind::SkillsPanel,
+            ))),
+            KeyCode::F(4) => Some(Action::Overlay(OverlayAction::Open(
+                OverlayKind::SettingsPanel,
+            ))),
+            KeyCode::F(5) => Some(Action::Overlay(OverlayAction::Open(
+                OverlayKind::SearchPanel,
+            ))),
+            KeyCode::F(6) => Some(Action::Overlay(OverlayAction::Open(
+                OverlayKind::MessagePanel,
+            ))),
+            KeyCode::F(7) => Some(Action::Overlay(OverlayAction::Open(
+                OverlayKind::ModelPanel,
+            ))),
+            KeyCode::F(8) => Some(Action::Overlay(OverlayAction::Open(
+                OverlayKind::SessionPanel,
+            ))),
+            KeyCode::Char('p') if key.modifiers == KeyModifiers::CONTROL => Some(Action::Overlay(
+                OverlayAction::Open(OverlayKind::PanelLauncher),
+            )),
             _ => None,
         }
     }
@@ -1752,11 +1867,10 @@ impl App {
                     let is_model_panel = kind == OverlayKind::ModelPanel;
                     let is_settings_panel = kind == OverlayKind::SettingsPanel;
                     self.close_overlay(kind, &mut queue);
-                    if is_model_panel
-                        && let Some(ref mut composer) = self.composer {
-                            let model = self.runtime.active_model();
-                            composer.set_model_supports_images(model.supports_images);
-                        }
+                    if is_model_panel && let Some(ref mut composer) = self.composer {
+                        let model = self.runtime.active_model();
+                        composer.set_model_supports_images(model.supports_images);
+                    }
                     if is_settings_panel {
                         self.subagent_enabled = self.runtime.config().subagent.enabled;
                     }
@@ -1789,10 +1903,7 @@ impl App {
                     });
                     let _ = self.runtime.save_auth();
                 }
-                Action::Connect(ConnectAction::SaveApiKey {
-                    provider_id,
-                    key,
-                }) => {
+                Action::Connect(ConnectAction::SaveApiKey { provider_id, key }) => {
                     if key.trim().is_empty() {
                         self.set_notice("API key was empty");
                         return;
@@ -1826,18 +1937,15 @@ impl App {
                                     .ok()
                                     .flatten()
                                     .is_some()
-                                {
-                                    let _ = self
-                                        .runtime
-                                        .session_manager()
-                                        .update_session_model(
-                                            session_id,
-                                            &model.provider_id,
-                                            &model.provider_display_name,
-                                            &model.model_id,
-                                            &model.display_name,
-                                        );
-                                }
+                            {
+                                let _ = self.runtime.session_manager().update_session_model(
+                                    session_id,
+                                    &model.provider_id,
+                                    &model.provider_display_name,
+                                    &model.model_id,
+                                    &model.display_name,
+                                );
+                            }
 
                             self.set_notice(format!(
                                 "Connected to {}",
@@ -1845,9 +1953,7 @@ impl App {
                             ));
                         }
                         Err(e) => {
-                            self.set_notice(format!(
-                                "Connected, but failed to resolve model: {e}"
-                            ));
+                            self.set_notice(format!("Connected, but failed to resolve model: {e}"));
                         }
                     }
                 }
@@ -1923,13 +2029,23 @@ impl App {
                             self.abort_confirmation_deadline = None;
 
                             // Reload todos for the target session.
-                            if let Ok(todos) = self.runtime.session_manager().store().load_todos(session_id) {
+                            if let Ok(todos) = self
+                                .runtime
+                                .session_manager()
+                                .store()
+                                .load_todos(session_id)
+                            {
                                 self.todos = todos;
                             }
 
                             // Restore instruction sources so that InstructionsLoaded
                             // events emitted on loop restart are de-duplicated.
-                            if let Ok(sources) = self.runtime.session_manager().store().load_instruction_sources(session_id) {
+                            if let Ok(sources) = self
+                                .runtime
+                                .session_manager()
+                                .store()
+                                .load_instruction_sources(session_id)
+                            {
                                 self.shown_instruction_sources = sources;
                             }
 
@@ -1981,11 +2097,13 @@ impl App {
                         .iter()
                         .rev()
                         .find(|m| m.role == MessageRole::Assistant)
-                        .and_then(|m| m.input_tokens.map(|input| ContextUsage {
-                            input_tokens: input,
-                            output_tokens: m.output_tokens.unwrap_or(0),
-                            tokens_per_second: m.tokens_per_second,
-                        }));
+                        .and_then(|m| {
+                            m.input_tokens.map(|input| ContextUsage {
+                                input_tokens: input,
+                                output_tokens: m.output_tokens.unwrap_or(0),
+                                tokens_per_second: m.tokens_per_second,
+                            })
+                        });
                     // Cache it for fast-path restoration on subsequent switches.
                     if let Some(usage) = &self.context_usage {
                         self.context_usage_cache.insert(session_id, usage.clone());
@@ -2021,7 +2139,8 @@ impl App {
                             model_display,
                             provider_display,
                         );
-                        if let Ok(Some(record)) = self.runtime.session_manager().load_session(session_id)
+                        if let Ok(Some(record)) =
+                            self.runtime.session_manager().load_session(session_id)
                         {
                             ctx.title = record.title;
                             ctx.parent_session_id = record.parent_session_id;
@@ -2033,16 +2152,27 @@ impl App {
                     let session_title = chat_context.title.clone();
 
                     // Create or update MessageList
-                    self.message_list.get_or_insert_with(MessageList::new)
+                    self.message_list
+                        .get_or_insert_with(MessageList::new)
                         .set_chat_context(chat_context);
 
                     // Reload todos for the target session.
-                    if let Ok(todos) = self.runtime.session_manager().store().load_todos(session_id) {
+                    if let Ok(todos) = self
+                        .runtime
+                        .session_manager()
+                        .store()
+                        .load_todos(session_id)
+                    {
                         self.todos = todos;
                     }
 
                     // Restore instruction sources for dedup on loop restart.
-                    if let Ok(sources) = self.runtime.session_manager().store().load_instruction_sources(session_id) {
+                    if let Ok(sources) = self
+                        .runtime
+                        .session_manager()
+                        .store()
+                        .load_instruction_sources(session_id)
+                    {
                         self.shown_instruction_sources = sources;
                     }
 
@@ -2126,8 +2256,16 @@ impl App {
                     // Copy parent's system prompt
                     if !active_model.system_prompt.is_empty() {
                         let _ = self.runtime.session_manager().store().update_session(
-                            new_session_id, None, None, None, None,
-                            Some(&active_model.system_prompt), None, None, None, None,
+                            new_session_id,
+                            None,
+                            None,
+                            None,
+                            None,
+                            Some(&active_model.system_prompt),
+                            None,
+                            None,
+                            None,
+                            None,
                         );
                     }
 
@@ -2144,10 +2282,10 @@ impl App {
                         // Update tool_call_id references to new IDs
                         if let Some(ref tool_call_id) = new_message.tool_call_id
                             && let Ok(old_id) = uuid::Uuid::parse_str(tool_call_id)
-                                && let Some(&new_tool_call_id) = id_mapping.get(&old_id) {
-                                    new_message.tool_call_id =
-                                        Some(new_tool_call_id.to_string());
-                                }
+                            && let Some(&new_tool_call_id) = id_mapping.get(&old_id)
+                        {
+                            new_message.tool_call_id = Some(new_tool_call_id.to_string());
+                        }
 
                         if let Err(e) = self
                             .runtime
@@ -2206,7 +2344,9 @@ impl App {
                     });
                 }
                 Action::Session(SessionAction::Compact) => {
-                    let Some(sid) = self.current_session_id else { return };
+                    let Some(sid) = self.current_session_id else {
+                        return;
+                    };
                     // If a request is in progress, queue the compact.
                     if self.has_active_request() {
                         self.pending_compacts.insert(sid);
@@ -2221,11 +2361,11 @@ impl App {
                     } else {
                         title.trim()
                     };
-                    match self
-                        .runtime
-                        .session_manager()
-                        .update_session(session_id, Some(final_title), None)
-                    {
+                    match self.runtime.session_manager().update_session(
+                        session_id,
+                        Some(final_title),
+                        None,
+                    ) {
                         Ok(_) => {
                             self.set_notice("Session title updated");
                             log::info!("Renamed session {} to {}", session_id, final_title);
@@ -2259,8 +2399,14 @@ impl App {
                         String::new(),
                         Vec::new(),
                         None,
-                        active_model.as_ref().map(|m| m.display_name.clone()).unwrap_or_default(),
-                        active_model.as_ref().map(|m| m.provider_display_name.clone()).unwrap_or_default(),
+                        active_model
+                            .as_ref()
+                            .map(|m| m.display_name.clone())
+                            .unwrap_or_default(),
+                        active_model
+                            .as_ref()
+                            .map(|m| m.provider_display_name.clone())
+                            .unwrap_or_default(),
                     );
                     self.message_list
                         .get_or_insert_with(MessageList::new)
@@ -2305,7 +2451,7 @@ impl App {
                                     }
                                     return;
                                 }
-                                // Unknown command — fall through to submit as prompt.
+                            // Unknown command — fall through to submit as prompt.
 
                             // Extract @-reference paths from the text (matching old
                             // `inline_file_references` behaviour).
@@ -2315,8 +2461,10 @@ impl App {
                             // puts accepted @mention paths into the attachments field as
                             // a placeholder — handled below).
                             let workspace_root = self.runtime.workspace_root().clone();
-                            let mut final_attachments =
-                                tidev_core::attachment::build_attachments(&workspace_root, &ref_paths);
+                            let mut final_attachments = tidev_core::attachment::build_attachments(
+                                &workspace_root,
+                                &ref_paths,
+                            );
 
                             // Append any already-built attachments (images, files from
                             // composer spans).
@@ -2325,7 +2473,8 @@ impl App {
                             // If there's already an active request, queue the prompt.
                             if self.has_active_request() {
                                 let sid = self.current_session_id.unwrap_or(uuid::Uuid::nil());
-                                let queued_mode = self.pending_modes.get(&sid).copied().unwrap_or(self.mode);
+                                let queued_mode =
+                                    self.pending_modes.get(&sid).copied().unwrap_or(self.mode);
                                 self.pending_prompt_queue.push(QueuedPrompt {
                                     prompt: text.clone(),
                                     attachments: final_attachments.clone(),
@@ -2354,21 +2503,25 @@ impl App {
                                             // Initialize MessageList for the new session.
                                             let config = self.runtime.config();
                                             let auth = self.runtime.auth();
-                                            let active_model = config.resolve_active_model(&auth)
-                                                .ok();
-                                            let model_display = active_model.as_ref()
-                                                .map(|m| m.display_name.clone()).unwrap_or_default();
-                                            let provider_display = active_model.as_ref()
+                                            let active_model =
+                                                config.resolve_active_model(&auth).ok();
+                                            let model_display = active_model
+                                                .as_ref()
+                                                .map(|m| m.display_name.clone())
+                                                .unwrap_or_default();
+                                            let provider_display = active_model
+                                                .as_ref()
                                                 .map(|m| m.provider_display_name.clone())
                                                 .unwrap_or_default();
-                                            let chat_context = crate::chat_context::ChatContext::new(
-                                                id,
-                                                String::new(),
-                                                Vec::new(),
-                                                None,
-                                                model_display,
-                                                provider_display,
-                                            );
+                                            let chat_context =
+                                                crate::chat_context::ChatContext::new(
+                                                    id,
+                                                    String::new(),
+                                                    Vec::new(),
+                                                    None,
+                                                    model_display,
+                                                    provider_display,
+                                                );
                                             self.message_list
                                                 .get_or_insert_with(MessageList::new)
                                                 .set_chat_context(chat_context);
@@ -2396,7 +2549,13 @@ impl App {
                             }
                             tokio::spawn(async move {
                                 if let Err(e) = rt
-                                    .submit_prompt_with_attachments(sid, mode, text, final_attachments, Some(thinking_level))
+                                    .submit_prompt_with_attachments(
+                                        sid,
+                                        mode,
+                                        text,
+                                        final_attachments,
+                                        Some(thinking_level),
+                                    )
                                     .await
                                 {
                                     log::error!("submit_prompt failed: {e}");
@@ -2406,16 +2565,18 @@ impl App {
                             // Update session title from prompt (matching old behaviour).
                             if let Some(ref mut chat) = self.message_list
                                 && let Some(ref mut ctx) = chat.active_chat_context_mut()
-                                    && (ctx.title.is_empty() || ctx.title == "Untitled session") {
-                                        let title = title_from_prompt(&text_for_title);
-                                        ctx.title = title.clone();
-                                        if let Err(e) = self.runtime
-                                            .session_manager()
-                                            .update_session(sid, Some(&title), None)
-                                        {
-                                            log::error!("Failed to update session title: {e}");
-                                        }
-                                    }
+                                && (ctx.title.is_empty() || ctx.title == "Untitled session")
+                            {
+                                let title = title_from_prompt(&text_for_title);
+                                ctx.title = title.clone();
+                                if let Err(e) = self.runtime.session_manager().update_session(
+                                    sid,
+                                    Some(&title),
+                                    None,
+                                ) {
+                                    log::error!("Failed to update session title: {e}");
+                                }
+                            }
                         }
                         ChatAction::SetInput(text) => {
                             if let Some(ref mut composer) = self.composer {
@@ -2438,7 +2599,11 @@ impl App {
                 }
                 Action::Noop => {}
                 // ── Tool approval pipeline ──
-                Action::WorkspaceBoundaryResponse { path, decision, reason } => {
+                Action::WorkspaceBoundaryResponse {
+                    path,
+                    decision,
+                    reason,
+                } => {
                     self.record_boundary_decision(&path, &decision);
 
                     let allowed = matches!(
@@ -2458,13 +2623,16 @@ impl App {
 
                     self.process_next_tool();
                 }
-                Action::SensitiveFileResponse { path, decision, reason } => {
+                Action::SensitiveFileResponse {
+                    path,
+                    decision,
+                    reason,
+                } => {
                     self.record_sensitive_decision(&path, &decision);
 
                     let allowed = matches!(
                         decision,
-                        SensitiveFileDecision::AllowOnce
-                            | SensitiveFileDecision::AllowUntilExit
+                        SensitiveFileDecision::AllowOnce | SensitiveFileDecision::AllowUntilExit
                     );
                     let path_str = path.to_string_lossy().to_string();
 
@@ -2485,13 +2653,18 @@ impl App {
                     );
                     let remember = matches!(
                         decision,
-                        PermissionDecision::AllowAndRemember
-                            | PermissionDecision::DenyAndRemember
+                        PermissionDecision::AllowAndRemember | PermissionDecision::DenyAndRemember
                     );
 
-                    let Some(session_id) = self.active_approval_session else { break };
-                    let Some(approval) = self.pending_approvals.get_mut(&session_id) else { break };
-                    if approval.tool_index >= approval.tools.len() { break; }
+                    let Some(session_id) = self.active_approval_session else {
+                        break;
+                    };
+                    let Some(approval) = self.pending_approvals.get_mut(&session_id) else {
+                        break;
+                    };
+                    if approval.tool_index >= approval.tools.len() {
+                        break;
+                    }
                     let twv = &approval.tools[approval.tool_index];
 
                     // Persist to DB if remember
@@ -2500,14 +2673,10 @@ impl App {
                             .runtime
                             .session_manager()
                             .store()
-                            .remember_tool_permission(
-                                session_id,
-                                &twv.permission_key,
-                                allow,
-                            )
-                        {
-                            log::warn!("Failed to remember tool permission: {e}");
-                        }
+                            .remember_tool_permission(session_id, &twv.permission_key, allow)
+                    {
+                        log::warn!("Failed to remember tool permission: {e}");
+                    }
 
                     // Build the approved tool
                     let (rejection, allow_outside, sensitive_approved) = if allow {
@@ -2525,7 +2694,9 @@ impl App {
                                 .and_then(|p| Self::is_path_allowed(&self.boundary_permissions, &p))
                                 .unwrap_or(false),
                             sensitive_str
-                                .and_then(|p| Self::is_path_allowed(&self.sensitive_permissions, &p))
+                                .and_then(|p| {
+                                    Self::is_path_allowed(&self.sensitive_permissions, &p)
+                                })
                                 .unwrap_or(false),
                         )
                     } else {
@@ -2539,11 +2710,7 @@ impl App {
                         } else {
                             base
                         };
-                        (
-                            Some(ToolExecutionResult::new(msg)),
-                            false,
-                            false,
-                        )
+                        (Some(ToolExecutionResult::new(msg)), false, false)
                     };
 
                     let child_session_id = if twv.tool_call.name == "task" {
@@ -2565,16 +2732,20 @@ impl App {
                     self.process_next_tool();
                 }
                 Action::QuestionResponse { output } => {
-                    let Some(session_id) = self.active_approval_session else { break };
-                    let Some(approval) = self.pending_approvals.get_mut(&session_id) else { break };
-                    if approval.tool_index >= approval.tools.len() { break; }
+                    let Some(session_id) = self.active_approval_session else {
+                        break;
+                    };
+                    let Some(approval) = self.pending_approvals.get_mut(&session_id) else {
+                        break;
+                    };
+                    if approval.tool_index >= approval.tools.len() {
+                        break;
+                    }
                     let twv = &approval.tools[approval.tool_index];
 
                     let result = match output {
                         Some(answers) => ToolExecutionResult::new(answers),
-                        None => ToolExecutionResult::new(
-                            "Tool 'question' was dismissed by user",
-                        ),
+                        None => ToolExecutionResult::new("Tool 'question' was dismissed by user"),
                     };
 
                     approval.approved_tools.push(ApprovedTool {
@@ -2597,8 +2768,8 @@ impl App {
         let kind_for_update = kind.clone();
         let component: Option<Box<dyn Component>> = match kind {
             OverlayKind::ThemePanel => {
-                let current = ThemeName::parse(self.current_palette.name.as_str())
-                    .unwrap_or(ThemeName::Dark);
+                let current =
+                    ThemeName::parse(self.current_palette.name.as_str()).unwrap_or(ThemeName::Dark);
                 Some(Box::new(ThemePanel::new(current)))
             }
             OverlayKind::AgentsPanel => Some(Box::new(AgentsPanel::new())),
@@ -2672,11 +2843,7 @@ impl App {
                     }
                     let ty = agent_type.display_name();
                     let label = config.agent_model_display(ty);
-                    tabs.push(ModelPanelTab::new(
-                        ty,
-                        agent_type.display_name(),
-                        &label,
-                    ));
+                    tabs.push(ModelPanelTab::new(ty, agent_type.display_name(), &label));
                 }
 
                 let connected_models = config.connected_models(&auth);
@@ -2689,11 +2856,7 @@ impl App {
             OverlayKind::SessionPanel => {
                 use crate::components::overlays::session::SessionViewMode;
                 let store = self.runtime.session_manager().store();
-                let workspace_root = self
-                    .runtime
-                    .workspace_root()
-                    .display()
-                    .to_string();
+                let workspace_root = self.runtime.workspace_root().display().to_string();
                 let sessions = store
                     .list_sessions_for_workspace(&workspace_root, 1000, 0)
                     .unwrap_or_default();
@@ -2737,12 +2900,8 @@ impl App {
                 ImageViewer::from_raw(data, filename, self.image_picker.clone())
                     .map(|v| Box::new(v) as Box<dyn Component>)
             }
-            OverlayKind::ConnectDialog => {
-                Some(Box::new(ConnectDialog::new()))
-            }
-            OverlayKind::PanelLauncher => {
-                Some(Box::new(PanelLauncher::new()))
-            }
+            OverlayKind::ConnectDialog => Some(Box::new(ConnectDialog::new())),
+            OverlayKind::PanelLauncher => Some(Box::new(PanelLauncher::new())),
             // Permission / security dialogs are triggered by handle_tui_request,
             // not by user keystrokes. These branches exist as fallback placeholders.
             OverlayKind::PermissionDialog
@@ -2775,12 +2934,7 @@ impl App {
             let ctx = UpdateContext {
                 runtime: &mut self.runtime,
             };
-            queue.extend(
-                overlay.update(
-                    &Action::Overlay(OverlayAction::Close(kind)),
-                    &ctx,
-                ),
-            );
+            queue.extend(overlay.update(&Action::Overlay(OverlayAction::Close(kind)), &ctx));
         }
     }
 
@@ -2791,7 +2945,8 @@ impl App {
 
         // 1. Esc again to stop (abort confirmation)
         if self.has_active_request()
-            && self.abort_confirmation_deadline
+            && self
+                .abort_confirmation_deadline
                 .is_some_and(|deadline| deadline > Instant::now())
         {
             return "Esc again to stop".to_string();
@@ -2816,17 +2971,22 @@ impl App {
             let spinner = self.loading_spinner();
 
             // Check for subsession
-            let parent_session_id = self.message_list.as_ref()
+            let parent_session_id = self
+                .message_list
+                .as_ref()
                 .and_then(|ml| ml.active_chat_context())
                 .and_then(|ctx| ctx.parent_session_id);
 
             let status = if parent_session_id.is_some() {
                 // Check if this subsession's own subagent is still running.
-                let session_id = self.message_list.as_ref()
+                let session_id = self
+                    .message_list
+                    .as_ref()
                     .and_then(|ml| ml.active_chat_context())
                     .map(|ctx| ctx.session_id);
                 let subagent_running = session_id.is_some_and(|sid| {
-                    self.message_list.as_ref()
+                    self.message_list
+                        .as_ref()
                         .is_some_and(|ml| ml.is_subagent_running(sid))
                 });
                 if subagent_running {
@@ -2837,7 +2997,11 @@ impl App {
             } else if let Some(ref ml) = self.message_list {
                 let sub_count = ml.running_subagents_count();
                 if sub_count > 0 {
-                    let label = if sub_count == 1 { "subagent" } else { "subagents" };
+                    let label = if sub_count == 1 {
+                        "subagent"
+                    } else {
+                        "subagents"
+                    };
                     format!("{spinner} Waiting for {sub_count} {label}")
                 } else if ml.running_tools_count() > 0 {
                     let counts = ml.running_tool_counts();
@@ -2850,44 +3014,70 @@ impl App {
                             format!("{spinner} Running {n}× {name}")
                         }
                     } else {
-                        let items: Vec<String> = counts.iter().map(|(name, n)| {
-                            if *n == 1 { name.clone() } else { format!("{n}× {name}") }
-                        }).collect();
+                        let items: Vec<String> = counts
+                            .iter()
+                            .map(|(name, n)| {
+                                if *n == 1 {
+                                    name.clone()
+                                } else {
+                                    format!("{n}× {name}")
+                                }
+                            })
+                            .collect();
                         format!("{spinner} Running {} tools ({})", total, items.join(", "))
                     }
                 } else if ml.is_streaming() {
-                    let pending_mode = self.current_session_id
+                    let pending_mode = self
+                        .current_session_id
                         .and_then(|sid| self.pending_modes.get(&sid));
                     match pending_mode {
                         Some(pending) => {
-                            format!("{spinner} {} → {} (on completion)", self.mode.title(), pending.title())
+                            format!(
+                                "{spinner} {} → {} (on completion)",
+                                self.mode.title(),
+                                pending.title()
+                            )
                         }
                         None => format!("{spinner} {}", self.mode.title()),
                     }
-                } else if self.current_session_id.is_some_and(|sid| self.pending_approvals.contains_key(&sid)) {
+                } else if self
+                    .current_session_id
+                    .is_some_and(|sid| self.pending_approvals.contains_key(&sid))
+                {
                     format!("{spinner} Running tools")
                 } else {
-                    let pending_mode = self.current_session_id
+                    let pending_mode = self
+                        .current_session_id
                         .and_then(|sid| self.pending_modes.get(&sid));
                     match pending_mode {
                         Some(pending) => {
-                            format!("{spinner} {} → {} (on completion)", self.mode.title(), pending.title())
+                            format!(
+                                "{spinner} {} → {} (on completion)",
+                                self.mode.title(),
+                                pending.title()
+                            )
                         }
                         None => format!("{spinner} {}", self.mode.title()),
                     }
                 }
             } else {
-                let pending_mode = self.current_session_id
+                let pending_mode = self
+                    .current_session_id
                     .and_then(|sid| self.pending_modes.get(&sid));
                 match pending_mode {
                     Some(pending) => {
-                        format!("{spinner} {} → {} (on completion)", self.mode.title(), pending.title())
+                        format!(
+                            "{spinner} {} → {} (on completion)",
+                            self.mode.title(),
+                            pending.title()
+                        )
                     }
                     None => format!("{spinner} {}", self.mode.title()),
                 }
             };
 
-            let is_pending_compact = self.current_session_id
+            let is_pending_compact = self
+                .current_session_id
                 .is_some_and(|sid| self.pending_compacts.contains(&sid));
             let extra = match (queued_count, is_pending_compact) {
                 (0, false) => String::new(),
@@ -2916,11 +3106,18 @@ impl App {
 
         // 4. Queued messages or compact pending (not streaming)
         let has_pending = queued_count > 0
-            || self.current_session_id.is_some_and(|sid| self.pending_compacts.contains(&sid));
-        if has_pending {
-            let is_pending_compact = self.current_session_id
+            || self
+                .current_session_id
                 .is_some_and(|sid| self.pending_compacts.contains(&sid));
-            let compact_part = if is_pending_compact { " · compact pending" } else { "" };
+        if has_pending {
+            let is_pending_compact = self
+                .current_session_id
+                .is_some_and(|sid| self.pending_compacts.contains(&sid));
+            let compact_part = if is_pending_compact {
+                " · compact pending"
+            } else {
+                ""
+            };
             let status = if queued_count == 1 {
                 format!("1 queued message{compact_part}")
             } else if queued_count > 1 {
@@ -2941,12 +3138,15 @@ impl App {
 
         // 6. Last notice
         if let Some((msg, _)) = &self.last_notice
-            && !msg.is_empty() {
-                return msg.clone();
-            }
+            && !msg.is_empty()
+        {
+            return msg.clone();
+        }
 
         // 7. Subsession navigation hint
-        let is_subsession = self.message_list.as_ref()
+        let is_subsession = self
+            .message_list
+            .as_ref()
             .and_then(|ml| ml.active_chat_context())
             .and_then(|ctx| ctx.parent_session_id)
             .is_some();
@@ -2976,26 +3176,26 @@ impl App {
                 palette,
                 focused: true,
                 mode: self.mode,
-                pending_mode: self.current_session_id
+                pending_mode: self
+                    .current_session_id
                     .and_then(|sid| self.pending_modes.get(&sid).copied()),
                 model_display: None,
                 provider_display: None,
                 thinking_level: None,
-                 subagent_disabled: !self.subagent_enabled,
-                 collapse_thinking: self.runtime.config().ui.collapse_thinking,
-                 workspace_root: self.runtime.workspace_root(),
-             };
-             self.overlays.draw(frame, area, &draw_ctx);
-             return;
-         }
-
+                subagent_disabled: !self.subagent_enabled,
+                collapse_thinking: self.runtime.config().ui.collapse_thinking,
+                workspace_root: self.runtime.workspace_root(),
+            };
+            self.overlays.draw(frame, area, &draw_ctx);
+            return;
+        }
 
         // Determine sidebar visibility and split the layout.
         // Use the same threshold as the old TUI.
         const SIDEBAR_GAP: u16 = 2;
         let sidebar_width = self.runtime.config().ui.sidebar_width;
-        let sidebar_visible = area.width
-            >= sidebar_width.saturating_add(70).saturating_add(SIDEBAR_GAP);
+        let sidebar_visible =
+            area.width >= sidebar_width.saturating_add(70).saturating_add(SIDEBAR_GAP);
         let (main_area, sidebar_area) = if sidebar_visible {
             let split = ratatui::layout::Layout::horizontal([
                 ratatui::layout::Constraint::Min(20),
@@ -3010,7 +3210,9 @@ impl App {
         };
 
         // Determine if in a subsession.
-        let is_subsession = self.message_list.as_ref()
+        let is_subsession = self
+            .message_list
+            .as_ref()
             .and_then(|ml| ml.active_chat_context())
             .and_then(|ctx| ctx.parent_session_id)
             .is_some();
@@ -3020,10 +3222,15 @@ impl App {
         let bottom_height = if is_subsession {
             SUBSESSION_NAV_HEIGHT
         } else {
-            self.composer.as_ref().map(|c| {
-                let width = main_area.width.saturating_sub(5);
-                c.preferred_height(width, 6).saturating_add(2).min(main_area.height.saturating_sub(2))
-            }).unwrap_or(0)
+            self.composer
+                .as_ref()
+                .map(|c| {
+                    let width = main_area.width.saturating_sub(5);
+                    c.preferred_height(width, 6)
+                        .saturating_add(2)
+                        .min(main_area.height.saturating_sub(2))
+                })
+                .unwrap_or(0)
         };
 
         // Calculate queued prompts area height (frozen area above input box).
@@ -3043,7 +3250,11 @@ impl App {
                     }
                 }
                 // +1 for "+N more" overflow, +2 for block top/bottom borders
-                let overflow = if count > MAX_VISIBLE_QUEUED_PROMPTS { 1 } else { 0 };
+                let overflow = if count > MAX_VISIBLE_QUEUED_PROMPTS {
+                    1
+                } else {
+                    0
+                };
                 (inner + overflow + 2)
                     .min(main_area.height.saturating_sub(6) as usize / 2)
                     .min(15)
@@ -3066,11 +3277,8 @@ impl App {
             .split(main_area);
             (split[0], split[1], split[2], split[3])
         } else {
-            let split = Layout::vertical([
-                Constraint::Min(1),
-                Constraint::Length(notice_height),
-            ])
-            .split(main_area);
+            let split = Layout::vertical([Constraint::Min(1), Constraint::Length(notice_height)])
+                .split(main_area);
             (split[0], Rect::default(), Rect::default(), split[1])
         };
 
@@ -3080,7 +3288,8 @@ impl App {
                 palette,
                 focused: self.overlays.is_empty(),
                 mode: self.mode,
-                pending_mode: self.current_session_id
+                pending_mode: self
+                    .current_session_id
                     .and_then(|sid| self.pending_modes.get(&sid).copied()),
                 model_display: None,
                 provider_display: None,
@@ -3091,7 +3300,6 @@ impl App {
             };
             chat.draw(frame, content_area, &draw_ctx);
         }
-
 
         // Render queued prompts above the composer
         self.queued_card_bounds.clear();
@@ -3129,7 +3337,9 @@ impl App {
                 height: 1,
             };
             frame.render_widget(
-                Paragraph::new(hint).alignment(Alignment::Center).style(Style::default().fg(palette.text)),
+                Paragraph::new(hint)
+                    .alignment(Alignment::Center)
+                    .style(Style::default().fg(palette.text)),
                 content_rect,
             );
         } else if let Some(ref mut composer) = self.composer {
@@ -3141,33 +3351,34 @@ impl App {
                 palette,
                 focused: self.overlays.is_empty(),
                 mode: self.mode,
-                pending_mode: self.current_session_id
+                pending_mode: self
+                    .current_session_id
                     .and_then(|sid| self.pending_modes.get(&sid).copied()),
                 model_display: Some(&active_model.display_name),
                 provider_display: Some(&active_model.provider_display_name),
                 thinking_level: Some(&active_model.thinking_level),
-                 subagent_disabled: !self.subagent_enabled,
-                 collapse_thinking: self.runtime.config().ui.collapse_thinking,
-                 workspace_root: self.runtime.workspace_root(),
-             };
-             composer.draw(frame, bottom_area, &draw_ctx);
-         }
+                subagent_disabled: !self.subagent_enabled,
+                collapse_thinking: self.runtime.config().ui.collapse_thinking,
+                workspace_root: self.runtime.workspace_root(),
+            };
+            composer.draw(frame, bottom_area, &draw_ctx);
+        }
 
-
-         // Build DrawContext for overlays
-         let draw_ctx = DrawContext {
-             palette,
-             focused: true,
-             mode: self.mode,
-             pending_mode: self.current_session_id
-                 .and_then(|sid| self.pending_modes.get(&sid).copied()),
-             model_display: None,
-             provider_display: None,
-             thinking_level: None,
-             subagent_disabled: !self.subagent_enabled,
-             collapse_thinking: self.runtime.config().ui.collapse_thinking,
-             workspace_root: self.runtime.workspace_root(),
-         };
+        // Build DrawContext for overlays
+        let draw_ctx = DrawContext {
+            palette,
+            focused: true,
+            mode: self.mode,
+            pending_mode: self
+                .current_session_id
+                .and_then(|sid| self.pending_modes.get(&sid).copied()),
+            model_display: None,
+            provider_display: None,
+            thinking_level: None,
+            subagent_disabled: !self.subagent_enabled,
+            collapse_thinking: self.runtime.config().ui.collapse_thinking,
+            workspace_root: self.runtime.workspace_root(),
+        };
         // ── Sidebar ───────────────────────────────────────────────────
         if let Some(sidebar_area) = sidebar_area {
             self.sidebar_area = Some(sidebar_area);
@@ -3192,8 +3403,14 @@ impl App {
 
         // ── Footer status line (right-aligned, matching v0.6.x) ──
         let status_text = self.footer_status_text();
-        let status_width = status_text.width().min(notice_line.width.saturating_sub(2) as usize) as u16;
-        let status_x = notice_line.x + notice_line.width.saturating_sub(2).saturating_sub(status_width);
+        let status_width = status_text
+            .width()
+            .min(notice_line.width.saturating_sub(2) as usize) as u16;
+        let status_x = notice_line.x
+            + notice_line
+                .width
+                .saturating_sub(2)
+                .saturating_sub(status_width);
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 &status_text,
@@ -3208,10 +3425,7 @@ impl App {
         // Mirrors old TUI's render_toast: positioned relative to message content area.
         if let Some((msg, expires_at)) = &self.toast.clone() {
             if Instant::now() < *expires_at {
-                let chat_area = self
-                    .message_list
-                    .as_ref()
-                    .and_then(|ml| ml.content_area);
+                let chat_area = self.message_list.as_ref().and_then(|ml| ml.content_area);
                 if let Some(chat_area) = chat_area {
                     let toast_width = (msg.len() as u16).min(32).saturating_add(2);
                     let toast_rect = Rect::new(
@@ -3221,8 +3435,8 @@ impl App {
                         3,
                     );
                     frame.render_widget(Clear, toast_rect);
-                    let block = Block::default()
-                        .style(Style::default().bg(palette.panel).fg(palette.text));
+                    let block =
+                        Block::default().style(Style::default().bg(palette.panel).fg(palette.text));
                     let centered = format!("\n{}", msg);
                     frame.render_widget(
                         Paragraph::new(centered)
@@ -3264,37 +3478,54 @@ impl App {
         }
 
         // Handle pending clipboard copy (set by mouse up in handle_mouse_event).
-        if self.mouse_selection.take_pending_copy(scroll_offset).is_some()
+        if self
+            .mouse_selection
+            .take_pending_copy(scroll_offset)
+            .is_some()
             && let Some(text) = self.mouse_selection.selected_text(
                 frame.buffer_mut(),
                 scroll_offset,
                 &selectable_rects,
             )
-                && !text.is_empty() {
-                    match copy_to_clipboard(&text) {
-                        Ok(()) => {
-                            self.mouse_selection.clear();
-                            self.set_toast("Selection copied to clipboard", std::time::Duration::from_secs(3));
-                        }
-                        Err(e) => {
-                            self.mouse_selection.clear();
-                            self.set_toast(format!("Copy failed: {e}"), std::time::Duration::from_secs(5));
-                        }
-                    }
+            && !text.is_empty()
+        {
+            match copy_to_clipboard(&text) {
+                Ok(()) => {
+                    self.mouse_selection.clear();
+                    self.set_toast(
+                        "Selection copied to clipboard",
+                        std::time::Duration::from_secs(3),
+                    );
                 }
+                Err(e) => {
+                    self.mouse_selection.clear();
+                    self.set_toast(
+                        format!("Copy failed: {e}"),
+                        std::time::Duration::from_secs(5),
+                    );
+                }
+            }
+        }
 
         // Handle pending clipboard copy from composer input area.
         if let Some(text) = self.pending_input_copy.take()
-            && !text.is_empty() {
-                match copy_to_clipboard(&text) {
-                    Ok(()) => {
-                        self.set_toast("Selection copied to clipboard", std::time::Duration::from_secs(3));
-                    }
-                    Err(e) => {
-                        self.set_toast(format!("Copy failed: {e}"), std::time::Duration::from_secs(5));
-                    }
+            && !text.is_empty()
+        {
+            match copy_to_clipboard(&text) {
+                Ok(()) => {
+                    self.set_toast(
+                        "Selection copied to clipboard",
+                        std::time::Duration::from_secs(3),
+                    );
+                }
+                Err(e) => {
+                    self.set_toast(
+                        format!("Copy failed: {e}"),
+                        std::time::Duration::from_secs(5),
+                    );
                 }
             }
+        }
     }
 
     /// Render the welcome screen with logo, subtitle, and composer.
@@ -3328,11 +3559,8 @@ impl App {
             .composer
             .as_ref()
             .map(|c| {
-                c.preferred_height(
-                    card_inner_width,
-                    self.runtime.config().ui.max_input_lines,
-                )
-                .saturating_add(2)
+                c.preferred_height(card_inner_width, self.runtime.config().ui.max_input_lines)
+                    .saturating_add(2)
             })
             .unwrap_or(5);
 
@@ -3377,14 +3605,16 @@ impl App {
                 palette,
                 focused: true,
                 mode: self.mode,
-                pending_mode: self.current_session_id
+                pending_mode: self
+                    .current_session_id
                     .and_then(|sid| self.pending_modes.get(&sid).copied()),
                 model_display: Some(&active_model.display_name),
                 provider_display: Some(&active_model.provider_display_name),
                 thinking_level: Some(&active_model.thinking_level),
-                 subagent_disabled: !self.subagent_enabled,
-                 collapse_thinking: self.runtime.config().ui.collapse_thinking,
-                 workspace_root: self.runtime.workspace_root(),            };
+                subagent_disabled: !self.subagent_enabled,
+                collapse_thinking: self.runtime.config().ui.collapse_thinking,
+                workspace_root: self.runtime.workspace_root(),
+            };
             composer.draw(frame, sections[2], &draw_ctx);
         }
 
@@ -3410,18 +3640,19 @@ impl App {
 
         // Notice, if any, on the row directly above workspace path
         if let Some((message, _)) = &self.last_notice
-            && !message.is_empty() {
-                let notice_y = area.bottom().saturating_sub(2);
-                if notice_y < workspace_area.y {
-                    frame.render_widget(
-                        Paragraph::new(Line::from(Span::styled(
-                            message,
-                            Style::default().fg(palette.muted),
-                        ))),
-                        Rect::new(area.x + 1, notice_y, area.width.saturating_sub(2), 1),
-                    );
-                }
+            && !message.is_empty()
+        {
+            let notice_y = area.bottom().saturating_sub(2);
+            if notice_y < workspace_area.y {
+                frame.render_widget(
+                    Paragraph::new(Line::from(Span::styled(
+                        message,
+                        Style::default().fg(palette.muted),
+                    ))),
+                    Rect::new(area.x + 1, notice_y, area.width.saturating_sub(2), 1),
+                );
             }
+        }
     }
 
     /// Render a frozen area above the composer showing queued (pending) prompts.
@@ -3582,7 +3813,6 @@ impl App {
     }
 }
 
-
 // ── Inline @-reference extraction ───────────────────────────────────────
 
 /// Extract file/directory paths from `@path` references in the prompt text.
@@ -3624,9 +3854,7 @@ fn extract_inline_refs(prompt: &str) -> Vec<String> {
         let mut end = start;
         while end < len {
             let c = bytes[end];
-            if c == b' ' || c == b'\t' || c == b'\n' || c == b'\r'
-                || c == b'`' || c == b','
-            {
+            if c == b' ' || c == b'\t' || c == b'\n' || c == b'\r' || c == b'`' || c == b',' {
                 break;
             }
             // Comma is allowed in middle of path (not at end).

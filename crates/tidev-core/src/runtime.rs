@@ -29,11 +29,13 @@ use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use tidev_config::{paths::ConfigPaths, AppConfig, AuthStore};
 use tidev_config::auth::ActiveModel;
+use tidev_config::{AppConfig, AuthStore, paths::ConfigPaths};
 use tidev_search::FileSearchIndex;
 use tidev_storage::SessionStore;
-use tidev_types::message::{BackendEvent, Message, MessageAttachment, MessageRole, QueuedUserMessage};
+use tidev_types::message::{
+    BackendEvent, Message, MessageAttachment, MessageRole, QueuedUserMessage,
+};
 use tidev_types::prompts::SessionMode;
 use tidev_types::reasoning::ThinkingLevelType;
 use tidev_types::tools::TodoItem;
@@ -60,11 +62,7 @@ impl tidev_tools::TodoPersistence for TodoStore {
         self.store.load_todos(session_id)
     }
 
-    fn replace_todos(
-        &self,
-        session_id: Uuid,
-        todos: &[TodoItem],
-    ) -> anyhow::Result<()> {
+    fn replace_todos(&self, session_id: Uuid, todos: &[TodoItem]) -> anyhow::Result<()> {
         self.store.save_todos(session_id, todos)
     }
 }
@@ -328,11 +326,11 @@ impl Runtime {
         let mut active = self.active_model.write().unwrap();
         active.thinking_level =
             tidev_types::reasoning::ThinkingLevelType::from_string(thinking_level);
-        if let Err(e) = self
-            .session_manager
-            .store()
-            .save_model_thinking_level(provider_id, model_id, thinking_level)
-        {
+        if let Err(e) = self.session_manager.store().save_model_thinking_level(
+            provider_id,
+            model_id,
+            thinking_level,
+        ) {
             log::warn!("failed to save thinking level preference: {}", e);
         }
         Ok(())
@@ -366,7 +364,11 @@ impl Runtime {
     /// request handler) to add messages to a session — it keeps the
     /// [`MessageBuffer`] and SQLite in sync so that [`continue_session`]
     /// picks up the new data.
-    pub async fn append_message(&self, session_id: Uuid, msg: tidev_types::message::Message) -> Result<()> {
+    pub async fn append_message(
+        &self,
+        session_id: Uuid,
+        msg: tidev_types::message::Message,
+    ) -> Result<()> {
         {
             let buf = self.message_buffer(session_id).await;
             buf.write().await.append(msg.clone());
@@ -414,17 +416,21 @@ impl Runtime {
             let buf = self.message_buffer(session_id).await;
             let pos = {
                 let mut write_buf = buf.write().await;
-                let pos = write_buf.load().iter()
+                let pos = write_buf
+                    .load()
+                    .iter()
                     .position(|m| m.id == revert_msg_id)
                     .unwrap_or(write_buf.len());
                 let to_remove: Vec<Uuid> = write_buf.load()[pos..].iter().map(|m| m.id).collect();
                 write_buf.truncate(pos);
                 if !to_remove.is_empty() {
-                    self.session_manager.delete_messages(session_id, &to_remove)?;
+                    self.session_manager
+                        .delete_messages(session_id, &to_remove)?;
                 };
                 pos
             };
-            self.session_manager.save_revert_state(session_id, Uuid::nil(), None)?;
+            self.session_manager
+                .save_revert_state(session_id, Uuid::nil(), None)?;
             let _ = self.event_tx.send(BackendEvent::MessagesTruncated {
                 session_id,
                 kept_count: pos,
@@ -477,12 +483,15 @@ impl Runtime {
         thinking_level: Option<ThinkingLevelType>,
     ) {
         let mut queue = self.queued_messages.lock().unwrap();
-        queue.entry(session_id).or_default().push_back(QueuedUserMessage {
-            content,
-            attachments,
-            mode,
-            thinking_level,
-        });
+        queue
+            .entry(session_id)
+            .or_default()
+            .push_back(QueuedUserMessage {
+                content,
+                attachments,
+                mode,
+                thinking_level,
+            });
     }
 
     /// Continue an existing session without adding a new user message.
@@ -493,7 +502,11 @@ impl Runtime {
     ///
     /// `mode` should be the session's current mode; it is read from the last
     /// user message's `mode` field if `None` is passed.
-    pub async fn continue_session(&self, session_id: Uuid, mode: Option<SessionMode>) -> Result<()> {
+    pub async fn continue_session(
+        &self,
+        session_id: Uuid,
+        mode: Option<SessionMode>,
+    ) -> Result<()> {
         // Fast path: avoid DB reload if the session is already running.
         // The atomic check in start_agent_loop prevents TOCTOU.
         if self.is_session_busy(session_id) {
@@ -580,7 +593,10 @@ impl Runtime {
 
         // Create a fresh cancellation token for this loop.
         let cancel = CancellationToken::new();
-        self.active_loop_cancels.lock().unwrap().insert(session_id, cancel.clone());
+        self.active_loop_cancels
+            .lock()
+            .unwrap()
+            .insert(session_id, cancel.clone());
         let buffer = self.message_buffer(session_id).await;
         let context_manager = self.context_manager(session_id).await;
 
@@ -596,8 +612,7 @@ impl Runtime {
                         &self.workspace_root,
                     );
                     // Persist system prompt to the session record.
-                    self.session_manager
-                        .update_system_prompt(session_id, &sp)?;
+                    self.session_manager.update_system_prompt(session_id, &sp)?;
                     (sp, ssh)
                 }
             }
@@ -643,7 +658,9 @@ impl Runtime {
         // Extract a per-session queue for this loop to drain.
         let per_session_queue: Arc<std::sync::Mutex<VecDeque<QueuedUserMessage>>> = {
             let mut qmap = self.queued_messages.lock().unwrap();
-            Arc::new(std::sync::Mutex::new(qmap.remove(&session_id).unwrap_or_default()))
+            Arc::new(std::sync::Mutex::new(
+                qmap.remove(&session_id).unwrap_or_default(),
+            ))
         };
 
         let loop_config = tidev_agent::AgentLoopConfig {
@@ -674,7 +691,8 @@ impl Runtime {
             }
             // On normal exit, restore any remaining queued messages back
             // to the per-session map so they aren't lost.
-            let remaining: Vec<QueuedUserMessage> = per_session_queue.lock().unwrap().drain(..).collect();
+            let remaining: Vec<QueuedUserMessage> =
+                per_session_queue.lock().unwrap().drain(..).collect();
             if !remaining.is_empty() {
                 let mut map = qmap_restore.lock().unwrap();
                 let q = map.entry(session_id).or_default();
@@ -685,7 +703,10 @@ impl Runtime {
         });
 
         // Store handle, then mark session busy.
-        self.run_loop_handles.lock().unwrap().insert(session_id, join);
+        self.run_loop_handles
+            .lock()
+            .unwrap()
+            .insert(session_id, join);
         self.busy_sessions.lock().unwrap().insert(session_id);
 
         Ok(())
@@ -702,8 +723,10 @@ impl Runtime {
     /// 3. Kill any remaining child processes (shell).
     pub async fn cancel(&self) {
         // 1. Signal cooperative cancellation for ALL sessions.
-        let tokens: Vec<CancellationToken> = self.active_loop_cancels
-            .lock().unwrap()
+        let tokens: Vec<CancellationToken> = self
+            .active_loop_cancels
+            .lock()
+            .unwrap()
             .drain()
             .map(|(_, t)| t)
             .collect();
@@ -714,8 +737,10 @@ impl Runtime {
         self.busy_sessions.lock().unwrap().clear();
 
         // 2. Force-abort ALL agent loop tasks.
-        let handles: Vec<tokio::task::JoinHandle<()>> = self.run_loop_handles
-            .lock().unwrap()
+        let handles: Vec<tokio::task::JoinHandle<()>> = self
+            .run_loop_handles
+            .lock()
+            .unwrap()
             .drain()
             .map(|(_, h)| h)
             .collect();
@@ -774,9 +799,12 @@ impl Runtime {
             }
             _ => crate::undo::last_visible_user_message(&messages),
         };
-        let Some(target_id) = target_id else { return Ok(()) };
+        let Some(target_id) = target_id else {
+            return Ok(());
+        };
 
-        self.revert_to_message(session_id, &messages, target_id).await?;
+        self.revert_to_message(session_id, &messages, target_id)
+            .await?;
         log::info!("undo completed for session {session_id}, target {target_id}");
         Ok(())
     }
@@ -796,10 +824,12 @@ impl Runtime {
         // Is there a next user message to move forward to?
         if let Some(next_id) = crate::undo::next_user_message_after(&messages, current_id) {
             // Move the undo point FORWARD to the next message.
-            self.revert_to_message(session_id, &messages, next_id).await?;
+            self.revert_to_message(session_id, &messages, next_id)
+                .await?;
         } else {
             // At the end of history — restore the original pre-undo state.
-            self.unrevert(session_id, redo_snapshot.as_deref().unwrap_or_default()).await?;
+            self.unrevert(session_id, redo_snapshot.as_deref().unwrap_or_default())
+                .await?;
         }
 
         log::info!("redo completed for session {session_id}");
@@ -925,23 +955,22 @@ impl Runtime {
     ) -> Result<()> {
         // 1. Reuse existing redo_snapshot if one exists (maintains undo chain),
         //    otherwise capture current workspace as the redo point.
-        let redo_hash: Option<Vec<u8>> =
-            match self.session_manager.load_revert_state(session_id)? {
-                Some((_, Some(existing))) => {
-                    // Restore workspace to the pre-undo state first.
-                    let s = String::from_utf8_lossy(&existing).to_string();
-                    if let Some(ref snap) = self.snapshot {
-                        snap.restore(&s).await?;
-                    }
-                    Some(existing)
+        let redo_hash: Option<Vec<u8>> = match self.session_manager.load_revert_state(session_id)? {
+            Some((_, Some(existing))) => {
+                // Restore workspace to the pre-undo state first.
+                let s = String::from_utf8_lossy(&existing).to_string();
+                if let Some(ref snap) = self.snapshot {
+                    snap.restore(&s).await?;
                 }
-                _ => self
-                    .snapshot
-                    .as_ref()
-                    .and_then(|s| s.track().ok())
-                    .flatten()
-                    .map(|h| h.into_bytes()),
-            };
+                Some(existing)
+            }
+            _ => self
+                .snapshot
+                .as_ref()
+                .and_then(|s| s.track().ok())
+                .flatten()
+                .map(|h| h.into_bytes()),
+        };
 
         // 2. Collect patches after target, then revert to roll files back.
         let patches = crate::undo::collect_patches_after_message(messages, target_id);
@@ -1022,11 +1051,7 @@ impl Runtime {
     }
 
     /// Full unrevert: restore the pre-undo workspace snapshot and clear state.
-    async fn unrevert(
-        &self,
-        session_id: Uuid,
-        redo_snapshot: &[u8],
-    ) -> Result<()> {
+    async fn unrevert(&self, session_id: Uuid, redo_snapshot: &[u8]) -> Result<()> {
         let hash_str = String::from_utf8_lossy(redo_snapshot);
         if let Some(ref snap) = self.snapshot {
             snap.restore(&hash_str).await?;
@@ -1104,10 +1129,7 @@ impl RuntimeBuilder {
 
     /// Resolve the active model, falling back to the first available model
     /// if the default is not configured.
-    fn resolve_fallback_model(
-        config: &AppConfig,
-        auth: &AuthStore,
-    ) -> Result<ActiveModel> {
+    fn resolve_fallback_model(config: &AppConfig, auth: &AuthStore) -> Result<ActiveModel> {
         if let Ok(model) = config.resolve_active_model(auth) {
             return Ok(model);
         }
@@ -1148,7 +1170,10 @@ impl RuntimeBuilder {
 
         // 3. Logging (file + console via custom TidevLogger).
         tidev_logging::init(&paths.data_dir, &config.logging);
-        log::info!("Runtime initialising, workspace={}", workspace_root.display());
+        log::info!(
+            "Runtime initialising, workspace={}",
+            workspace_root.display()
+        );
         log::info!("startup: config + auth loaded in {:?}", _start.elapsed());
 
         // 4. Shell detection (must happen before any tool execution).
@@ -1238,10 +1263,7 @@ impl RuntimeBuilder {
 
         // Load saved thinking level preference from database (if any).
         if let Ok(Some(level_str)) =
-            store.load_model_thinking_level(
-                &active_model.provider_id,
-                &active_model.model_id,
-            )
+            store.load_model_thinking_level(&active_model.provider_id, &active_model.model_id)
         {
             active_model.thinking_level =
                 tidev_types::reasoning::ThinkingLevelType::from_string(&level_str);

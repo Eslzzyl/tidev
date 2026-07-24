@@ -5,15 +5,12 @@ use std::{fs, io::BufRead, path::Path};
 
 use super::apply_patch;
 use super::utils::{display_workspace_relative, read_existing_text, resolve_workspace_path};
-use tidev_instructions::resolve_nearby_instructions;
-use tidev_types::message::{
-    FileChangeInfo, MessageAttachment, ToolExecutionResult, ToolMetadata,
-};
-use tidev_types::tools::{
-    ApplyPatchArgs, EditArgs, ReadArgs, WriteArgs,
-    ToolDefinition, ToolPermission,
-};
 use crate::builtin::utils::decode_tool_args;
+use tidev_instructions::resolve_nearby_instructions;
+use tidev_types::message::{FileChangeInfo, MessageAttachment, ToolExecutionResult, ToolMetadata};
+use tidev_types::tools::{
+    ApplyPatchArgs, EditArgs, ReadArgs, ToolDefinition, ToolPermission, WriteArgs,
+};
 
 const MAX_LINE_LENGTH: usize = 2000;
 const MAX_LINE_SUFFIX: &str = "... (line truncated to 2000 chars)";
@@ -604,14 +601,12 @@ pub(super) fn list_dir(
     }
 
     let mut entries = Vec::new();
-    for entry in
-        fs::read_dir(&path).with_context(|| {
-            format!(
-                "failed to read {}",
-                display_workspace_relative(workspace_root, &path)
-            )
-        })?
-    {
+    for entry in fs::read_dir(&path).with_context(|| {
+        format!(
+            "failed to read {}",
+            display_workspace_relative(workspace_root, &path)
+        )
+    })? {
         let entry = entry.with_context(|| {
             format!(
                 "failed to read entry in {}",
@@ -1240,8 +1235,12 @@ pub fn read_file_for_at_reference(
     }
 
     // Treat as text file with truncation
-    let file = fs::File::open(&path)
-        .with_context(|| format!("failed to read {}", display_workspace_relative(workspace_root, &path)))?;
+    let file = fs::File::open(&path).with_context(|| {
+        format!(
+            "failed to read {}",
+            display_workspace_relative(workspace_root, &path)
+        )
+    })?;
     let mut reader = std::io::BufReader::new(file);
 
     const DEFAULT_READ_LIMIT: i64 = 2000;

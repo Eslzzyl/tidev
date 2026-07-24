@@ -222,29 +222,21 @@ impl SettingsPanel {
     /// Increase value for Number type only.
     fn increase_selected(&mut self) {
         if let Some(item) = self.items.get_mut(self.selected_index)
-            && let SettingType::Number {
-                value,
-                min: _,
-                max,
-            } = &mut item.setting_type
-            {
-                *value = (*value + 1.0).min(*max);
-                item.description = format!("Scroll speed multiplier: {:.1}", *value);
-            }
+            && let SettingType::Number { value, min: _, max } = &mut item.setting_type
+        {
+            *value = (*value + 1.0).min(*max);
+            item.description = format!("Scroll speed multiplier: {:.1}", *value);
+        }
     }
 
     /// Decrease value for Number type only.
     fn decrease_selected(&mut self) {
         if let Some(item) = self.items.get_mut(self.selected_index)
-            && let SettingType::Number {
-                value,
-                min,
-                max: _,
-            } = &mut item.setting_type
-            {
-                *value = (*value - 1.0).max(*min);
-                item.description = format!("Scroll speed multiplier: {:.1}", *value);
-            }
+            && let SettingType::Number { value, min, max: _ } = &mut item.setting_type
+        {
+            *value = (*value - 1.0).max(*min);
+            item.description = format!("Scroll speed multiplier: {:.1}", *value);
+        }
     }
 
     /// Apply current items to an AppConfig.
@@ -266,9 +258,10 @@ impl SettingsPanel {
                         ref options,
                         selected,
                     } = item.setting_type
-                        && selected < options.len() {
-                            config.logging.level = options[selected].clone();
-                        }
+                        && selected < options.len()
+                    {
+                        config.logging.level = options[selected].clone();
+                    }
                 }
                 SettingKey::SaveRequestBody => {
                     if let SettingType::Toggle(val) = item.setting_type {
@@ -340,9 +333,9 @@ impl Component for SettingsPanel {
                 self.increase_selected();
                 None
             }
-            KeyCode::Esc | KeyCode::Char('q') => {
-                Some(Action::Overlay(OverlayAction::Close(OverlayKind::SettingsPanel)))
-            }
+            KeyCode::Esc | KeyCode::Char('q') => Some(Action::Overlay(OverlayAction::Close(
+                OverlayKind::SettingsPanel,
+            ))),
             _ => None,
         }
     }
@@ -423,10 +416,7 @@ impl Component for SettingsPanel {
                     SettingType::Toggle(true) => "[x]".to_string(),
                     SettingType::Toggle(false) => "[ ]".to_string(),
                     SettingType::Number { .. } => "[~]".to_string(),
-                    SettingType::Cycle {
-                        options,
-                        selected,
-                    } => {
+                    SettingType::Cycle { options, selected } => {
                         let current = options.get(*selected).map(|s| s.as_str()).unwrap_or("?");
                         format!("[{current}]")
                     }
@@ -462,11 +452,7 @@ impl Component for SettingsPanel {
             .collect();
 
         let list = List::new(list_items)
-            .style(
-                Style::default()
-                    .bg(palette.panel_alt)
-                    .fg(palette.text),
-            )
+            .style(Style::default().bg(palette.panel_alt).fg(palette.text))
             .highlight_style(
                 Style::default()
                     .bg(palette.selection_bg)

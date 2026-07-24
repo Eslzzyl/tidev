@@ -191,13 +191,13 @@ mod tests {
     #[test]
     #[cfg(windows)]
     fn test_codepage_to_encoding_mapping() {
-        assert!(codepage_to_encoding(936).is_some());  // GBK
-        assert!(codepage_to_encoding(932).is_some());  // Shift-JIS
-        assert!(codepage_to_encoding(949).is_some());  // EUC-KR
-        assert!(codepage_to_encoding(950).is_some());  // Big5
+        assert!(codepage_to_encoding(936).is_some()); // GBK
+        assert!(codepage_to_encoding(932).is_some()); // Shift-JIS
+        assert!(codepage_to_encoding(949).is_some()); // EUC-KR
+        assert!(codepage_to_encoding(950).is_some()); // Big5
         assert!(codepage_to_encoding(1252).is_some()); // Western European
         assert!(codepage_to_encoding(65001).is_some()); // UTF-8
-        assert!(codepage_to_encoding(866).is_some());  // IBM866 (Cyrillic OEM)
+        assert!(codepage_to_encoding(866).is_some()); // IBM866 (Cyrillic OEM)
         assert!(codepage_to_encoding(99999).is_none());
     }
 }

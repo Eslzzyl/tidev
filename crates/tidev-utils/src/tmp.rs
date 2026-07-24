@@ -64,7 +64,10 @@ pub fn scan_temp_files() -> std::io::Result<Vec<CleanEntry>> {
                 Err(_) => 0,
             };
 
-            entries.push(CleanEntry { path, age_secs: age });
+            entries.push(CleanEntry {
+                path,
+                age_secs: age,
+            });
         }
     }
 
@@ -135,8 +138,7 @@ mod tests {
     fn clean_only_removes_old_files() {
         let test_file = create_test_temp("age-test");
         // Use a very large max_age (1 year) so nothing gets removed
-        let removed =
-            clean_temp_files(Duration::from_secs(365 * 24 * 3600), false).unwrap();
+        let removed = clean_temp_files(Duration::from_secs(365 * 24 * 3600), false).unwrap();
         assert!(
             !removed.iter().any(|e| e.path == test_file),
             "new file should not be cleaned with large max_age"

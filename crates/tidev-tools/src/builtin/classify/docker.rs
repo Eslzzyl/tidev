@@ -35,8 +35,14 @@ mod tests {
     #[test]
     fn docker_ambiguous_commands() {
         // exec is ambiguous — inside the container it could be anything
-        assert_eq!(classify_docker(&["exec", "db", "cat", "/etc/hosts"]), Safety::Unknown);
-        assert_eq!(classify_docker(&["exec", "app", "ls", "-la"]), Safety::Unknown);
+        assert_eq!(
+            classify_docker(&["exec", "db", "cat", "/etc/hosts"]),
+            Safety::Unknown
+        );
+        assert_eq!(
+            classify_docker(&["exec", "app", "ls", "-la"]),
+            Safety::Unknown
+        );
     }
 
     #[test]

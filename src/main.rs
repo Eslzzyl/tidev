@@ -6,7 +6,11 @@ use uuid::Uuid;
 mod cli;
 
 #[derive(Parser, Debug)]
-#[command(name = "tidev", version, about = "tidev — A terminal-based AI coding agent")]
+#[command(
+    name = "tidev",
+    version,
+    about = "tidev — A terminal-based AI coding agent"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
@@ -241,9 +245,8 @@ fn run_export(session: Vec<String>, all: bool, output: PathBuf) -> Result<()> {
     }
 
     let paths = tidev_config::paths::ConfigPaths::discover()?;
-    let database =
-        tidev_storage::database::Database::open(&paths.database_file)
-            .context("failed to open database")?;
+    let database = tidev_storage::database::Database::open(&paths.database_file)
+        .context("failed to open database")?;
     let store = database.create_store()?;
 
     let session_ids: Vec<Uuid> = if all {
@@ -255,10 +258,7 @@ fn run_export(session: Vec<String>, all: bool, output: PathBuf) -> Result<()> {
     } else {
         session
             .into_iter()
-            .map(|s| {
-                Uuid::parse_str(&s)
-                    .with_context(|| format!("invalid session UUID: {s}"))
-            })
+            .map(|s| Uuid::parse_str(&s).with_context(|| format!("invalid session UUID: {s}")))
             .collect::<Result<Vec<_>>>()?
     };
 

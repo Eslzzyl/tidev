@@ -398,8 +398,7 @@ fn build_openai_request(
             }
             MessageRole::Tool => {
                 let text = message_text_with_file_references(message);
-                let images: Vec<&MessageAttachment> =
-                    image_attachments(message).collect();
+                let images: Vec<&MessageAttachment> = image_attachments(message).collect();
 
                 // Tool messages must use plain string content per the
                 // Chat Completions API spec — `image_url` parts are only
@@ -416,9 +415,7 @@ fn build_openai_request(
                 if !images.is_empty() && model.supports_images {
                     let mut parts: Vec<serde_json::Value> = Vec::new();
                     for attachment in &images {
-                        if let MessageAttachment::Image { mime, data, .. } =
-                            attachment
-                        {
+                        if let MessageAttachment::Image { mime, data, .. } = attachment {
                             let b64 = BASE64.encode(data);
                             parts.push(serde_json::json!({
                                 "type": "image_url",
@@ -432,8 +429,7 @@ fn build_openai_request(
                         }
                     }
                     if !parts.is_empty() {
-                        request_messages
-                            .push(ChatMessagePayload::synthetic_user(parts));
+                        request_messages.push(ChatMessagePayload::synthetic_user(parts));
                     }
                 }
             }
@@ -561,11 +557,7 @@ impl ChatMessagePayload {
     /// Chat Completions API: tool messages only support `type: "text"` content
     /// parts per the OpenAI spec.  Images are never embedded here — they are
     /// passed via a synthetic user message inserted by `build_openai_request`.
-    fn tool(
-        content: String,
-        tool_call_id: Option<String>,
-        name: Option<String>,
-    ) -> Self {
+    fn tool(content: String, tool_call_id: Option<String>, name: Option<String>) -> Self {
         Self {
             role: "tool".to_string(),
             content: Some(serde_json::Value::String(content)),

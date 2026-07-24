@@ -169,7 +169,12 @@ mod tests {
 
     #[test]
     fn api_type_round_trip() {
-        for v in [ApiType::OpenAiChatCompletions, ApiType::Anthropic, ApiType::OpenAiResponses, ApiType::GoogleGemini] {
+        for v in [
+            ApiType::OpenAiChatCompletions,
+            ApiType::Anthropic,
+            ApiType::OpenAiResponses,
+            ApiType::GoogleGemini,
+        ] {
             assert_eq!(ApiType::parse(v.as_str()), v, "round-trip failed for {v:?}");
         }
     }

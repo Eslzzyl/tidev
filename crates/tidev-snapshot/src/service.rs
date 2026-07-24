@@ -7,8 +7,8 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
-use tidev_config::paths::ConfigPaths;
 use tidev_config::SnapshotConfig;
+use tidev_config::paths::ConfigPaths;
 use tidev_utils::path::canonicalize_display;
 
 use crate::git;
@@ -90,11 +90,8 @@ impl SnapshotService {
 
         let inner = self.track_inner();
         let result = if self.config.track_timeout_ms > 0 {
-            match tokio::time::timeout(
-                Duration::from_millis(self.config.track_timeout_ms),
-                inner,
-            )
-            .await
+            match tokio::time::timeout(Duration::from_millis(self.config.track_timeout_ms), inner)
+                .await
             {
                 Ok(r) => r,
                 Err(_) => {
@@ -554,9 +551,7 @@ mod tests {
         let snapshot = SnapshotService::new(&workspace_root, &paths, default_snapshot_config())
             .expect("snapshot should init");
 
-        let first = snapshot
-            .track()
-            .expect("initial track should succeed");
+        let first = snapshot.track().expect("initial track should succeed");
         assert!(first.is_some(), "initial track should capture a snapshot");
 
         let second = snapshot.track().expect("clean track should succeed");
@@ -583,9 +578,8 @@ mod tests {
         fs::write(workspace_root.join("b.txt"), "world\n").expect("write");
 
         let paths = test_paths(&data_dir);
-        let snapshot =
-            SnapshotService::new(&workspace_root, &paths, default_snapshot_config())
-                .expect("snapshot should init");
+        let snapshot = SnapshotService::new(&workspace_root, &paths, default_snapshot_config())
+            .expect("snapshot should init");
 
         // First track: capture initial state.
         let hash1 = snapshot
@@ -616,21 +610,15 @@ mod tests {
             .await
             .expect("diff_lightweight should succeed");
 
-        assert!(!diffs.is_empty(), "diff_lightweight should return non-empty diffs");
+        assert!(
+            !diffs.is_empty(),
+            "diff_lightweight should return non-empty diffs"
+        );
 
         let file_names: Vec<&str> = diffs.iter().map(|d| d.file.as_str()).collect();
-        assert!(
-            file_names.contains(&"a.txt"),
-            "should detect modified file"
-        );
-        assert!(
-            file_names.contains(&"c.txt"),
-            "should detect new file"
-        );
-        assert!(
-            file_names.contains(&"b.txt"),
-            "should detect deleted file"
-        );
+        assert!(file_names.contains(&"a.txt"), "should detect modified file");
+        assert!(file_names.contains(&"c.txt"), "should detect new file");
+        assert!(file_names.contains(&"b.txt"), "should detect deleted file");
 
         let _ = fs::remove_dir_all(&workspace_root);
         let _ = fs::remove_dir_all(&data_dir);

@@ -32,7 +32,7 @@ static GIT_READ_SUBCOMMANDS: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
         "ls-tree",
         "ls-remote",
         "for-each-ref",
-        "for-each-repo",    // iterates over repos, doesn't modify
+        "for-each-repo", // iterates over repos, doesn't modify
         "count-objects",
         // ── Ref / revision ─────────────────────────────────────────────
         "rev-parse",
@@ -44,30 +44,30 @@ static GIT_READ_SUBCOMMANDS: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
         "verify-tag",
         "verify-pack",
         // ── Config (reading) ───────────────────────────────────────────
-        "config",            // reading config is fine; writes handled separately
+        "config", // reading config is fine; writes handled separately
         // ── Branch/tag list ────────────────────────────────────────────
-        "branch",            // list mode is read-only; create/delete handled separately
-        "tag",               // list mode is read-only; create/delete handled separately
+        "branch", // list mode is read-only; create/delete handled separately
+        "tag",    // list mode is read-only; create/delete handled separately
         // ── Stash list ─────────────────────────────────────────────────
-        "stash",             // `stash show` / `stash list` are read-only
+        "stash", // `stash show` / `stash list` are read-only
         // ── Archive ────────────────────────────────────────────────────
-        "archive",           // outputs to stdout; file redirect is caught separately
+        "archive", // outputs to stdout; file redirect is caught separately
         // ── Fetch (does NOT modify working tree) ───────────────────────
         "fetch",
         // ── Request / fmt ──────────────────────────────────────────────
         "request-pull",
-        "stripspace",        // stdin→stdout
+        "stripspace", // stdin→stdout
         // ── Check-* ────────────────────────────────────────────────────
         "check-attr",
         "check-ignore",
         "check-mailmap",
         "check-ref-format",
-        "checkout-index",    // copies from index to working tree (write-like, but used for read)
+        "checkout-index", // copies from index to working tree (write-like, but used for read)
         // ── Miscellaneous read-only ────────────────────────────────────
         "column",
-        "interpret-trailers",// can be write with --in-place, but redirect catches that
-        "hash-object",       // outputs hash; `-w` writes to object store (not checked here)
-        "symbolic-ref",      // with `--query` is read; default is write — see classify_git
+        "interpret-trailers", // can be write with --in-place, but redirect catches that
+        "hash-object",        // outputs hash; `-w` writes to object store (not checked here)
+        "symbolic-ref",       // with `--query` is read; default is write — see classify_git
         "var",
         "get-tar-commit-id",
         "mailinfo",
@@ -76,11 +76,11 @@ static GIT_READ_SUBCOMMANDS: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
         "merge-file",
         "merge-one-file",
         "merge-index",
-        "notes",             // `notes list` / `notes show` are read-only
-        "worktree",          // `worktree list` is read-only
-        "submodule",         // `submodule status` / `submodule summary` are read-only
-        "remote",            // `remote -v` / `remote show` are read-only
-        "maintenance",       // `maintenance start` is write, but `maintenance run` could be either
+        "notes",       // `notes list` / `notes show` are read-only
+        "worktree",    // `worktree list` is read-only
+        "submodule",   // `submodule status` / `submodule summary` are read-only
+        "remote",      // `remote -v` / `remote show` are read-only
+        "maintenance", // `maintenance start` is write, but `maintenance run` could be either
     ]
 });
 
@@ -91,7 +91,7 @@ static GIT_WRITE_SUBCOMMANDS: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
         "commit",
         "push",
         "pull",
-        "fetch",             // already in read list — doesn't modify working tree
+        "fetch", // already in read list — doesn't modify working tree
         // ── Branching / merging ──────────────────────────────────────────
         "checkout",
         "switch",
@@ -101,7 +101,7 @@ static GIT_WRITE_SUBCOMMANDS: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
         "merge",
         "rebase",
         "cherry-pick",
-        "bisect",            // modifies bisect state
+        "bisect", // modifies bisect state
         // ── File operations ─────────────────────────────────────────────
         "add",
         "rm",
@@ -112,7 +112,7 @@ static GIT_WRITE_SUBCOMMANDS: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
         "prune",
         "repack",
         "pack-refs",
-        "reflog",            // `reflog expire`/`delete` are write
+        "reflog", // `reflog expire`/`delete` are write
         "replace",
         "update-ref",
         "update-index",
@@ -124,7 +124,7 @@ static GIT_WRITE_SUBCOMMANDS: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
         "filter-branch",
         "multi-pack-index",
         "commit-graph",
-        "maintenance",       // handled by classify_maintenance, but listed for clarity
+        "maintenance", // handled by classify_maintenance, but listed for clarity
         // ── Notes / worktree / submodule ────────────────────────────────
         "notes",
         "worktree",
@@ -135,16 +135,16 @@ static GIT_WRITE_SUBCOMMANDS: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
         "config",
         "symbolic-ref",
         "interpret-trailers",
-        "hash-object",       // with -w
-        "diff-files",        // already in read list
+        "hash-object", // with -w
+        "diff-files",  // already in read list
         "diff-index",
         "diff-tree",
         "apply",
-        "am",                // apply mailbox (used in rebase)
-        "format-patch",      // generates patch files
-        "send-email",        // sends emails
-        "request-pull",      // already in read list
-        "archive",           // already in read list
+        "am",           // apply mailbox (used in rebase)
+        "format-patch", // generates patch files
+        "send-email",   // sends emails
+        "request-pull", // already in read list
+        "archive",      // already in read list
     ]
 });
 
@@ -255,9 +255,7 @@ fn classify_stash(args: &[&str]) -> Safety {
     let action = args.get(1).copied().unwrap_or("list");
     match action {
         "list" | "show" => Safety::ReadOnly,
-        "push" | "pop" | "apply" | "drop" | "clear" | "create" | "store" => {
-            Safety::WriteOperation
-        }
+        "push" | "pop" | "apply" | "drop" | "clear" | "create" | "store" => Safety::WriteOperation,
         _ => Safety::Unknown,
     }
 }
@@ -311,9 +309,7 @@ fn classify_submodule(args: &[&str]) -> Safety {
     match action {
         "status" | "summary" | "foreach" => Safety::ReadOnly,
         // Explicit write commands
-        "add" | "update" | "init" | "deinit" | "absorbgitdirs" | "sync" => {
-            Safety::WriteOperation
-        }
+        "add" | "update" | "init" | "deinit" | "absorbgitdirs" | "sync" => Safety::WriteOperation,
         _ => Safety::Unknown,
     }
 }
@@ -341,9 +337,7 @@ fn classify_notes(args: &[&str]) -> Safety {
     match action {
         "list" | "show" | "get-ref" => Safety::ReadOnly,
         // Explicit write commands
-        "add" | "append" | "edit" | "remove" | "prune" | "merge" | "copy" => {
-            Safety::WriteOperation
-        }
+        "add" | "append" | "edit" | "remove" | "prune" | "merge" | "copy" => Safety::WriteOperation,
         _ => Safety::Unknown,
     }
 }
@@ -399,9 +393,15 @@ mod tests {
         assert_eq!(classify_git(&["fetch", "--all"]), Safety::ReadOnly);
         // Archive outputs to stdout by default
         assert_eq!(classify_git(&["archive", "HEAD"]), Safety::ReadOnly);
-        assert_eq!(classify_git(&["archive", "--format=zip", "HEAD"]), Safety::ReadOnly);
+        assert_eq!(
+            classify_git(&["archive", "--format=zip", "HEAD"]),
+            Safety::ReadOnly
+        );
         // Query subcommands
-        assert_eq!(classify_git(&["merge-base", "HEAD", "HEAD~1"]), Safety::ReadOnly);
+        assert_eq!(
+            classify_git(&["merge-base", "HEAD", "HEAD~1"]),
+            Safety::ReadOnly
+        );
         assert_eq!(classify_git(&["cherry", "main"]), Safety::ReadOnly);
         assert_eq!(classify_git(&["name-rev", "HEAD"]), Safety::ReadOnly);
         assert_eq!(classify_git(&["reflog"]), Safety::ReadOnly);
@@ -412,9 +412,15 @@ mod tests {
         assert_eq!(classify_git(&["shortlog"]), Safety::ReadOnly);
         assert_eq!(classify_git(&["whatchanged"]), Safety::ReadOnly);
         assert_eq!(classify_git(&["describe"]), Safety::ReadOnly);
-        assert_eq!(classify_git(&["range-diff", "HEAD~1", "HEAD"]), Safety::ReadOnly);
+        assert_eq!(
+            classify_git(&["range-diff", "HEAD~1", "HEAD"]),
+            Safety::ReadOnly
+        );
         assert_eq!(classify_git(&["for-each-ref"]), Safety::ReadOnly);
-        assert_eq!(classify_git(&["request-pull", "url", "HEAD"]), Safety::ReadOnly);
+        assert_eq!(
+            classify_git(&["request-pull", "url", "HEAD"]),
+            Safety::ReadOnly
+        );
         assert_eq!(classify_git(&["stripspace"]), Safety::ReadOnly);
         assert_eq!(classify_git(&["check-ignore", "file"]), Safety::ReadOnly);
         assert_eq!(classify_git(&["verify-pack", "pack.idx"]), Safety::ReadOnly);
@@ -425,39 +431,84 @@ mod tests {
     #[test]
     fn git_write_commands() {
         assert_eq!(classify_git(&["checkout", "main"]), Safety::WriteOperation);
-        assert_eq!(classify_git(&["checkout", "-b", "feature"]), Safety::WriteOperation);
+        assert_eq!(
+            classify_git(&["checkout", "-b", "feature"]),
+            Safety::WriteOperation
+        );
         assert_eq!(classify_git(&["switch", "main"]), Safety::WriteOperation);
-        assert_eq!(classify_git(&["restore", "src/main.rs"]), Safety::WriteOperation);
-        assert_eq!(classify_git(&["reset", "--hard", "HEAD"]), Safety::WriteOperation);
+        assert_eq!(
+            classify_git(&["restore", "src/main.rs"]),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            classify_git(&["reset", "--hard", "HEAD"]),
+            Safety::WriteOperation
+        );
         assert_eq!(classify_git(&["revert", "HEAD"]), Safety::WriteOperation);
         assert_eq!(classify_git(&["merge", "feature"]), Safety::WriteOperation);
         assert_eq!(classify_git(&["rebase", "main"]), Safety::WriteOperation);
-        assert_eq!(classify_git(&["push", "origin", "main"]), Safety::WriteOperation);
-        assert_eq!(classify_git(&["pull", "origin", "main"]), Safety::WriteOperation);
-        assert_eq!(classify_git(&["commit", "-m", "fix"]), Safety::WriteOperation);
+        assert_eq!(
+            classify_git(&["push", "origin", "main"]),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            classify_git(&["pull", "origin", "main"]),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            classify_git(&["commit", "-m", "fix"]),
+            Safety::WriteOperation
+        );
         assert_eq!(classify_git(&["add", "."]), Safety::WriteOperation);
-        assert_eq!(classify_git(&["branch", "-d", "old"]), Safety::WriteOperation);
-        assert_eq!(classify_git(&["branch", "-D", "old"]), Safety::WriteOperation);
+        assert_eq!(
+            classify_git(&["branch", "-d", "old"]),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            classify_git(&["branch", "-D", "old"]),
+            Safety::WriteOperation
+        );
         assert_eq!(classify_git(&["tag", "-d", "v1.0"]), Safety::WriteOperation);
         assert_eq!(classify_git(&["clean", "-fd"]), Safety::WriteOperation);
         assert_eq!(classify_git(&["rm", "file.rs"]), Safety::WriteOperation);
-        assert_eq!(classify_git(&["mv", "old.rs", "new.rs"]), Safety::WriteOperation);
+        assert_eq!(
+            classify_git(&["mv", "old.rs", "new.rs"]),
+            Safety::WriteOperation
+        );
         assert_eq!(classify_git(&["stash", "push"]), Safety::WriteOperation);
         assert_eq!(classify_git(&["stash", "pop"]), Safety::WriteOperation);
         assert_eq!(classify_git(&["stash", "drop"]), Safety::WriteOperation);
-        assert_eq!(classify_git(&["config", "--set", "user.name", "foo"]), Safety::WriteOperation);
-        assert_eq!(classify_git(&["config", "user.name", "foo"]), Safety::WriteOperation);
+        assert_eq!(
+            classify_git(&["config", "--set", "user.name", "foo"]),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            classify_git(&["config", "user.name", "foo"]),
+            Safety::WriteOperation
+        );
     }
 
     #[test]
     fn git_writes_new() {
-        assert_eq!(classify_git(&["cherry-pick", "abc123"]), Safety::WriteOperation);
+        assert_eq!(
+            classify_git(&["cherry-pick", "abc123"]),
+            Safety::WriteOperation
+        );
         assert_eq!(classify_git(&["bisect", "start"]), Safety::WriteOperation);
         assert_eq!(classify_git(&["gc"]), Safety::WriteOperation);
         assert_eq!(classify_git(&["prune"]), Safety::WriteOperation);
-        assert_eq!(classify_git(&["update-ref", "HEAD", "abc"]), Safety::WriteOperation);
-        assert_eq!(classify_git(&["replace", "abc", "def"]), Safety::WriteOperation);
-        assert_eq!(classify_git(&["notes", "add", "-m", "note"]), Safety::WriteOperation);
+        assert_eq!(
+            classify_git(&["update-ref", "HEAD", "abc"]),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            classify_git(&["replace", "abc", "def"]),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            classify_git(&["notes", "add", "-m", "note"]),
+            Safety::WriteOperation
+        );
     }
 
     // ── Branch/tag ───────────────────────────────────────────────────────
@@ -489,16 +540,34 @@ mod tests {
     fn git_remote_read_commands() {
         assert_eq!(classify_git(&["remote"]), Safety::ReadOnly);
         assert_eq!(classify_git(&["remote", "-v"]), Safety::ReadOnly);
-        assert_eq!(classify_git(&["remote", "show", "origin"]), Safety::ReadOnly);
-        assert_eq!(classify_git(&["remote", "get-url", "origin"]), Safety::ReadOnly);
+        assert_eq!(
+            classify_git(&["remote", "show", "origin"]),
+            Safety::ReadOnly
+        );
+        assert_eq!(
+            classify_git(&["remote", "get-url", "origin"]),
+            Safety::ReadOnly
+        );
     }
 
     #[test]
     fn git_remote_write_commands() {
-        assert_eq!(classify_git(&["remote", "add", "origin", "url"]), Safety::WriteOperation);
-        assert_eq!(classify_git(&["remote", "remove", "origin"]), Safety::WriteOperation);
-        assert_eq!(classify_git(&["remote", "rename", "old", "new"]), Safety::WriteOperation);
-        assert_eq!(classify_git(&["remote", "set-url", "origin", "url"]), Safety::WriteOperation);
+        assert_eq!(
+            classify_git(&["remote", "add", "origin", "url"]),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            classify_git(&["remote", "remove", "origin"]),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            classify_git(&["remote", "rename", "old", "new"]),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            classify_git(&["remote", "set-url", "origin", "url"]),
+            Safety::WriteOperation
+        );
     }
 
     // ── Submodule ────────────────────────────────────────────────────────
@@ -512,9 +581,18 @@ mod tests {
 
     #[test]
     fn git_submodule_write_commands() {
-        assert_eq!(classify_git(&["submodule", "add", "url"]), Safety::WriteOperation);
-        assert_eq!(classify_git(&["submodule", "update"]), Safety::WriteOperation);
-        assert_eq!(classify_git(&["submodule", "deinit", "."]), Safety::WriteOperation);
+        assert_eq!(
+            classify_git(&["submodule", "add", "url"]),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            classify_git(&["submodule", "update"]),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            classify_git(&["submodule", "deinit", "."]),
+            Safety::WriteOperation
+        );
     }
 
     // ── Worktree ─────────────────────────────────────────────────────────
@@ -527,8 +605,14 @@ mod tests {
 
     #[test]
     fn git_worktree_write_commands() {
-        assert_eq!(classify_git(&["worktree", "add", "../path"]), Safety::WriteOperation);
-        assert_eq!(classify_git(&["worktree", "remove", "name"]), Safety::WriteOperation);
+        assert_eq!(
+            classify_git(&["worktree", "add", "../path"]),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            classify_git(&["worktree", "remove", "name"]),
+            Safety::WriteOperation
+        );
     }
 
     // ── Notes ────────────────────────────────────────────────────────────
@@ -542,7 +626,10 @@ mod tests {
 
     #[test]
     fn git_notes_write_commands() {
-        assert_eq!(classify_git(&["notes", "add", "-m", "note"]), Safety::WriteOperation);
+        assert_eq!(
+            classify_git(&["notes", "add", "-m", "note"]),
+            Safety::WriteOperation
+        );
         assert_eq!(classify_git(&["notes", "remove"]), Safety::WriteOperation);
         assert_eq!(classify_git(&["notes", "prune"]), Safety::WriteOperation);
     }
@@ -556,9 +643,18 @@ mod tests {
 
     #[test]
     fn git_maintenance_start_stop_is_write() {
-        assert_eq!(classify_git(&["maintenance", "start"]), Safety::WriteOperation);
-        assert_eq!(classify_git(&["maintenance", "stop"]), Safety::WriteOperation);
-        assert_eq!(classify_git(&["maintenance", "register"]), Safety::WriteOperation);
+        assert_eq!(
+            classify_git(&["maintenance", "start"]),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            classify_git(&["maintenance", "stop"]),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            classify_git(&["maintenance", "register"]),
+            Safety::WriteOperation
+        );
     }
 
     // ── hash-object ──────────────────────────────────────────────────────
@@ -570,6 +666,9 @@ mod tests {
 
     #[test]
     fn git_hash_object_with_w_is_write() {
-        assert_eq!(classify_git(&["hash-object", "-w", "file.txt"]), Safety::WriteOperation);
+        assert_eq!(
+            classify_git(&["hash-object", "-w", "file.txt"]),
+            Safety::WriteOperation
+        );
     }
 }

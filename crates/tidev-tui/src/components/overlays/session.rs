@@ -7,17 +7,16 @@
 use std::collections::HashSet;
 use std::path::Path;
 
+use crate::utils::shorten;
 use anyhow::Result;
 use chrono::{Duration as ChronoDuration, Local};
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent,
-    MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::layout::{Alignment, Constraint, Layout, Margin, Position, Rect};
 use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Cell, Clear, Paragraph, Row, Table, TableState};
 use tidev_core::SessionRecord;
 use unicode_width::UnicodeWidthStr;
-use crate::utils::shorten;
 use uuid::Uuid;
 
 use crate::action::{Action, OverlayAction, OverlayKind, SessionAction};
@@ -172,9 +171,7 @@ impl SessionPanel {
             return;
         }
         let len = matches.len() as isize;
-        let current = self
-            .selected_index
-            .min(matches.len().saturating_sub(1)) as isize;
+        let current = self.selected_index.min(matches.len().saturating_sub(1)) as isize;
         let next = (current + delta).rem_euclid(len) as usize;
         self.selected_index = next;
     }
@@ -193,7 +190,11 @@ impl SessionPanel {
         }
         let matches = self.matching_indices();
         if let Some(&session_index) = matches.get(self.selected_index) {
-            if let Some(pos) = self.selected_indices.iter().position(|&i| i == session_index) {
+            if let Some(pos) = self
+                .selected_indices
+                .iter()
+                .position(|&i| i == session_index)
+            {
                 self.selected_indices.remove(pos);
             } else {
                 self.selected_indices.push(session_index);
@@ -206,8 +207,7 @@ impl SessionPanel {
     }
 
     fn get_selected_session_ids(&self) -> Vec<Uuid> {
-        if self.operation_mode == OperationMode::MultiSelect && !self.selected_indices.is_empty()
-        {
+        if self.operation_mode == OperationMode::MultiSelect && !self.selected_indices.is_empty() {
             self.selected_indices
                 .iter()
                 .filter_map(|&i| self.sessions.get(i).map(|s| s.session_id))
@@ -220,8 +220,7 @@ impl SessionPanel {
     }
 
     fn get_selected_session_titles(&self) -> Vec<String> {
-        if self.operation_mode == OperationMode::MultiSelect && !self.selected_indices.is_empty()
-        {
+        if self.operation_mode == OperationMode::MultiSelect && !self.selected_indices.is_empty() {
             self.selected_indices
                 .iter()
                 .filter_map(|&i| self.sessions.get(i).map(|s| s.title.clone()))
@@ -248,9 +247,9 @@ impl Component for SessionPanel {
         match &self.dialog {
             SessionPanelDialog::DeleteConfirm { .. } => {
                 return match key.code {
-                    KeyCode::Enter => {
-                        Some(Action::Overlay(OverlayAction::Close(OverlayKind::SessionPanel)))
-                    }
+                    KeyCode::Enter => Some(Action::Overlay(OverlayAction::Close(
+                        OverlayKind::SessionPanel,
+                    ))),
                     KeyCode::Esc => {
                         self.dialog = SessionPanelDialog::None;
                         None
@@ -318,9 +317,9 @@ impl Component for SessionPanel {
                         }
                         None
                     }
-                    KeyCode::Enter => {
-                        Some(Action::Overlay(OverlayAction::Close(OverlayKind::SessionPanel)))
-                    }
+                    KeyCode::Enter => Some(Action::Overlay(OverlayAction::Close(
+                        OverlayKind::SessionPanel,
+                    ))),
                     KeyCode::Esc => {
                         self.dialog = SessionPanelDialog::None;
                         None
@@ -330,9 +329,9 @@ impl Component for SessionPanel {
             }
             SessionPanelDialog::ExportConfirm { .. } => {
                 return match key.code {
-                    KeyCode::Enter => {
-                        Some(Action::Overlay(OverlayAction::Close(OverlayKind::SessionPanel)))
-                    }
+                    KeyCode::Enter => Some(Action::Overlay(OverlayAction::Close(
+                        OverlayKind::SessionPanel,
+                    ))),
                     KeyCode::Esc => {
                         self.dialog = SessionPanelDialog::None;
                         None
@@ -361,10 +360,9 @@ impl Component for SessionPanel {
                 self.move_selection(1);
                 None
             }
-            KeyCode::Enter => {
-                self.selected_session()
-                    .map(|s| Action::Session(SessionAction::Select(s.session_id)))
-            }
+            KeyCode::Enter => self
+                .selected_session()
+                .map(|s| Action::Session(SessionAction::Select(s.session_id))),
             KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.operation_mode = if self.operation_mode == OperationMode::MultiSelect {
                     OperationMode::Select
@@ -426,9 +424,9 @@ impl Component for SessionPanel {
                 };
                 Some(Action::Session(SessionAction::Reload))
             }
-            KeyCode::Esc | KeyCode::Char('q') => {
-                Some(Action::Overlay(OverlayAction::Close(OverlayKind::SessionPanel)))
-            }
+            KeyCode::Esc | KeyCode::Char('q') => Some(Action::Overlay(OverlayAction::Close(
+                OverlayKind::SessionPanel,
+            ))),
             KeyCode::Backspace => {
                 if !self.query.is_empty() {
                     self.query.pop();
@@ -469,11 +467,7 @@ impl Component for SessionPanel {
                 let session_store = ctx.runtime.session_manager().store();
                 let sessions = match self.view_mode {
                     SessionViewMode::CurrentWorkspace => {
-                        let workspace_root = ctx
-                            .runtime
-                            .workspace_root()
-                            .display()
-                            .to_string();
+                        let workspace_root = ctx.runtime.workspace_root().display().to_string();
                         session_store
                             .list_sessions_for_workspace(&workspace_root, 1000, 0)
                             .unwrap_or_default()
@@ -491,13 +485,10 @@ impl Component for SessionPanel {
             Action::Overlay(OverlayAction::Close(OverlayKind::SessionPanel)) => {
                 // Determine what action to perform based on dialog state
                 match &self.dialog {
-                    SessionPanelDialog::DeleteConfirm {
-                        session_ids, ..
-                    } => {
+                    SessionPanelDialog::DeleteConfirm { session_ids, .. } => {
                         // Execute deletion (sync)
                         let ids = session_ids.clone();
-                        if let Err(e) =
-                            ctx.runtime.session_manager().store().delete_sessions(&ids)
+                        if let Err(e) = ctx.runtime.session_manager().store().delete_sessions(&ids)
                         {
                             log::error!("Failed to delete sessions: {e}");
                         }
@@ -524,14 +515,12 @@ impl Component for SessionPanel {
                                 .session_manager()
                                 .store()
                                 .delete_sessions_older_than(*duration)
-                            {
-                                log::error!("Failed to cleanup sessions: {e}");
-                            }
+                        {
+                            log::error!("Failed to cleanup sessions: {e}");
+                        }
                         vec![]
                     }
-                    SessionPanelDialog::ExportConfirm {
-                        session_ids, ..
-                    } => {
+                    SessionPanelDialog::ExportConfirm { session_ids, .. } => {
                         let export_dir = ctx.runtime.paths().data_dir.join("export");
                         for session_id in session_ids {
                             if let Err(e) = ctx
@@ -607,11 +596,9 @@ impl Component for SessionPanel {
 
         // Instruction
         frame.render_widget(
-            Paragraph::new(
-                "Type to filter by title, model, provider, or session id.",
-            )
-            .alignment(Alignment::Center)
-            .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
+            Paragraph::new("Type to filter by title, model, provider, or session id.")
+                .alignment(Alignment::Center)
+                .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
             sections[1],
         );
 
@@ -627,7 +614,9 @@ impl Component for SessionPanel {
             sections[2],
         );
         frame.set_cursor_position((
-            sections[2].x + UnicodeWidthStr::width(prefix) as u16 + self.query.as_str().width() as u16,
+            sections[2].x
+                + UnicodeWidthStr::width(prefix) as u16
+                + self.query.as_str().width() as u16,
             sections[2].y,
         ));
 
@@ -639,11 +628,7 @@ impl Component for SessionPanel {
             frame.render_widget(
                 Paragraph::new("No sessions match this search.")
                     .alignment(Alignment::Center)
-                    .style(
-                        Style::default()
-                            .bg(palette.panel_alt)
-                            .fg(palette.muted),
-                    ),
+                    .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                 sections[3],
             );
         } else {
@@ -720,10 +705,7 @@ impl Component for SessionPanel {
                     Span::styled(
                         shorten(
                             &session.title,
-                            sections[3]
-                                .width
-                                .saturating_sub(max_right_width + 4)
-                                as usize,
+                            sections[3].width.saturating_sub(max_right_width + 4) as usize,
                         ),
                         Style::default()
                             .fg(palette.text)
@@ -759,10 +741,7 @@ impl Component for SessionPanel {
                 }
                 if self.active_sessions.contains(&session.session_id) {
                     right_spans.push(Span::raw("  "));
-                    right_spans.push(Span::styled(
-                        "active",
-                        Style::default().fg(palette.warning),
-                    ));
+                    right_spans.push(Span::styled("active", Style::default().fg(palette.warning)));
                 }
 
                 let right_line = Line::from(right_spans).alignment(Alignment::Right);
@@ -782,11 +761,7 @@ impl Component for SessionPanel {
                 rows,
                 [Constraint::Fill(1), Constraint::Min(max_right_width)],
             )
-            .style(
-                Style::default()
-                    .bg(palette.panel_alt)
-                    .fg(palette.text),
-            )
+            .style(Style::default().bg(palette.panel_alt).fg(palette.text))
             .row_highlight_style(
                 Style::default()
                     .bg(palette.selection_bg)
@@ -806,11 +781,7 @@ impl Component for SessionPanel {
         frame.render_widget(
             Paragraph::new(help_text)
                 .alignment(Alignment::Center)
-                .style(
-                    Style::default()
-                        .bg(palette.panel_alt)
-                        .fg(palette.muted),
-                ),
+                .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
             sections[4],
         );
     }
@@ -875,11 +846,7 @@ impl SessionPanel {
                 frame.render_widget(
                     Paragraph::new(format!("Delete {} session(s)?", session_ids.len()))
                         .alignment(Alignment::Center)
-                        .style(
-                            Style::default()
-                                .bg(palette.panel_alt)
-                                .fg(palette.text),
-                        ),
+                        .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
                     sections[1],
                 );
 
@@ -889,18 +856,11 @@ impl SessionPanel {
                     content.push_str(&format!("  • {}\n", title));
                 }
                 if session_titles.len() > 5 {
-                    content.push_str(&format!(
-                        "  ... and {} more\n",
-                        session_titles.len() - 5
-                    ));
+                    content.push_str(&format!("  ... and {} more\n", session_titles.len() - 5));
                 }
                 frame.render_widget(
                     Paragraph::new(content)
-                        .style(
-                            Style::default()
-                                .bg(palette.panel_alt)
-                                .fg(palette.muted),
-                        ),
+                        .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                     sections[2],
                 );
 
@@ -951,16 +911,9 @@ impl SessionPanel {
 
                 // Message
                 frame.render_widget(
-                    Paragraph::new(format!(
-                        "Export {} session(s) to JSONL?",
-                        session_ids.len()
-                    ))
-                    .alignment(Alignment::Center)
-                    .style(
-                        Style::default()
-                            .bg(palette.panel_alt)
-                            .fg(palette.text),
-                    ),
+                    Paragraph::new(format!("Export {} session(s) to JSONL?", session_ids.len()))
+                        .alignment(Alignment::Center)
+                        .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
                     sections[1],
                 );
 
@@ -970,18 +923,11 @@ impl SessionPanel {
                     content.push_str(&format!("  • {}\n", title));
                 }
                 if session_titles.len() > 5 {
-                    content.push_str(&format!(
-                        "  ... and {} more\n",
-                        session_titles.len() - 5
-                    ));
+                    content.push_str(&format!("  ... and {} more\n", session_titles.len() - 5));
                 }
                 frame.render_widget(
                     Paragraph::new(content)
-                        .style(
-                            Style::default()
-                                .bg(palette.panel_alt)
-                                .fg(palette.muted),
-                        ),
+                        .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                     sections[2],
                 );
 
@@ -1058,11 +1004,7 @@ impl SessionPanel {
                 frame.render_widget(
                     Paragraph::new(title_text)
                         .alignment(Alignment::Center)
-                        .style(
-                            Style::default()
-                                .bg(palette.panel_alt)
-                                .fg(palette.text),
-                        ),
+                        .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
                     sections[1],
                 );
                 frame.render_widget(
@@ -1078,20 +1020,13 @@ impl SessionPanel {
 
                 // Preview counts
                 let mut preview_text = String::new();
-                preview_text.push_str(&format!(
-                    "Total: {} session(s)\n",
-                    preview.total_count
-                ));
+                preview_text.push_str(&format!("Total: {} session(s)\n", preview.total_count));
                 for (ws, count) in &preview.workspace_counts {
                     preview_text.push_str(&format!("  • {}: {}\n", ws, count));
                 }
                 frame.render_widget(
                     Paragraph::new(preview_text)
-                        .style(
-                            Style::default()
-                                .bg(palette.panel_alt)
-                                .fg(palette.muted),
-                        ),
+                        .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                     sections[4],
                 );
 

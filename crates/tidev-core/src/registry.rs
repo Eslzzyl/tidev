@@ -145,8 +145,7 @@ impl ToolRegistry {
     /// Return a stable key for a tool call (used for permission memoization).
     pub fn permission_key_for_call(&self, call: &ToolCall) -> String {
         if call.name == "skill" {
-            if let Ok(args) =
-                serde_json::from_str::<tidev_types::tools::SkillArgs>(&call.arguments)
+            if let Ok(args) = serde_json::from_str::<tidev_types::tools::SkillArgs>(&call.arguments)
                 && !args.name.trim().is_empty()
             {
                 return SkillCatalog::permission_key_for_name(args.name.trim());
@@ -167,8 +166,7 @@ impl ToolRegistry {
     /// Return a human-readable label for a tool call (used for permission UI).
     pub fn permission_label_for_call(&self, call: &ToolCall) -> String {
         if call.name == "skill" {
-            if let Ok(args) =
-                serde_json::from_str::<tidev_types::tools::SkillArgs>(&call.arguments)
+            if let Ok(args) = serde_json::from_str::<tidev_types::tools::SkillArgs>(&call.arguments)
                 && !args.name.trim().is_empty()
             {
                 return format!("skill '{}'", args.name.trim());
@@ -195,16 +193,23 @@ impl ToolRegistry {
 mod tests {
     use super::*;
     use std::path::PathBuf;
-    use tidev_config::auth::ActiveModel;
     use tidev_config::ApiType;
+    use tidev_config::auth::ActiveModel;
 
     /// Stub TodoPersistence for tests.
     struct StubTodoStore;
     impl TodoPersistence for StubTodoStore {
-        fn load_todos(&self, _session_id: Uuid) -> anyhow::Result<Vec<tidev_types::tools::TodoItem>> {
+        fn load_todos(
+            &self,
+            _session_id: Uuid,
+        ) -> anyhow::Result<Vec<tidev_types::tools::TodoItem>> {
             Ok(Vec::new())
         }
-        fn replace_todos(&self, _session_id: Uuid, _todos: &[tidev_types::tools::TodoItem]) -> anyhow::Result<()> {
+        fn replace_todos(
+            &self,
+            _session_id: Uuid,
+            _todos: &[tidev_types::tools::TodoItem],
+        ) -> anyhow::Result<()> {
             Ok(())
         }
     }

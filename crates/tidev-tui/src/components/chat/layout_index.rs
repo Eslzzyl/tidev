@@ -79,11 +79,7 @@ impl MessageLayoutIndex {
     }
 
     /// Whether a full rebuild is needed given the current state.
-    pub fn needs_full_rebuild(
-        &self,
-        message_count: usize,
-        width: usize,
-    ) -> bool {
+    pub fn needs_full_rebuild(&self, message_count: usize, width: usize) -> bool {
         if !self.valid {
             return true;
         }
@@ -171,7 +167,9 @@ impl MessageLayoutIndex {
 
         const BUFFER: usize = 5;
         let visible_start = clamped_scroll.saturating_sub(BUFFER);
-        let visible_end = clamped_scroll.saturating_add(viewport_height).saturating_add(BUFFER);
+        let visible_end = clamped_scroll
+            .saturating_add(viewport_height)
+            .saturating_add(BUFFER);
 
         // Binary search for the first block that could be visible.
         let first_visible = self

@@ -5,11 +5,11 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::prelude::{Frame, Modifier, Style};
 
-use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
 use anyhow::Result;
+use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
 use textwrap::wrap;
-use unicode_width::UnicodeWidthStr;
 use tidev_types::tools::QuestionInfo;
+use unicode_width::UnicodeWidthStr;
 
 use crate::action::{Action, OverlayAction, OverlayKind};
 use crate::component::Component;
@@ -101,11 +101,8 @@ impl QuestionDialog {
     }
 
     fn custom_option_index(&self) -> Option<usize> {
-        self.current_question().and_then(|q| {
-            q.custom
-                .unwrap_or(true)
-                .then_some(q.options.len())
-        })
+        self.current_question()
+            .and_then(|q| q.custom.unwrap_or(true).then_some(q.options.len()))
     }
 
     fn selected_index(&self) -> usize {
@@ -194,8 +191,12 @@ impl QuestionDialog {
     }
 
     fn toggle_regular_option(&mut self, option_index: usize) {
-        let Some(question) = self.current_question() else { return };
-        let Some(option) = question.options.get(option_index) else { return };
+        let Some(question) = self.current_question() else {
+            return;
+        };
+        let Some(option) = question.options.get(option_index) else {
+            return;
+        };
 
         let value = option.label.trim().to_string();
         let allow_multiple = question.multiple.unwrap_or(false);
@@ -336,7 +337,9 @@ impl QuestionDialog {
     }
 
     fn custom_option_lines(&self, width: u16) -> Vec<String> {
-        let Some(question) = self.current_question() else { return Vec::new() };
+        let Some(question) = self.current_question() else {
+            return Vec::new();
+        };
         if !question.custom.unwrap_or(true) {
             return Vec::new();
         }
@@ -404,8 +407,9 @@ impl Component for QuestionDialog {
                     self.editing_custom = false;
                     return None;
                 }
-                KeyCode::Enter if !key.modifiers.contains(KeyModifiers::SHIFT)
-                    && !key.modifiers.contains(KeyModifiers::ALT) =>
+                KeyCode::Enter
+                    if !key.modifiers.contains(KeyModifiers::SHIFT)
+                        && !key.modifiers.contains(KeyModifiers::ALT) =>
                 {
                     // Save current custom input
                     let current_text = self.current_custom_input().to_string();
@@ -477,11 +481,12 @@ impl Component for QuestionDialog {
             KeyCode::Enter => {
                 let selected = self.selected_index();
                 if let Some(custom_idx) = self.custom_option_index()
-                    && selected == custom_idx {
-                        // Start editing custom answer
-                        self.editing_custom = true;
-                        return None;
-                    }
+                    && selected == custom_idx
+                {
+                    // Start editing custom answer
+                    self.editing_custom = true;
+                    return None;
+                }
                 if let Some(question) = self.current_question() {
                     if question.multiple.unwrap_or(false) {
                         // In multi-select mode, Enter toggles the option
@@ -625,9 +630,7 @@ impl Component for QuestionDialog {
 
         // Custom input area (editing mode)
         if self.editing_custom {
-            let input_style = Style::default()
-                .bg(palette.background)
-                .fg(palette.text);
+            let input_style = Style::default().bg(palette.background).fg(palette.text);
             frame.render_widget(
                 Paragraph::new(self.current_custom_input())
                     .style(input_style)
@@ -638,10 +641,7 @@ impl Component for QuestionDialog {
             let text_w = UnicodeWidthStr::width(input) as u16;
             let col = text_w % sections[3].width;
             let row = text_w / sections[3].width;
-            frame.set_cursor_position((
-                sections[3].x + col,
-                sections[3].y + row,
-            ));
+            frame.set_cursor_position((sections[3].x + col, sections[3].y + row));
         }
 
         // Footer

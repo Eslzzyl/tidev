@@ -52,9 +52,7 @@ impl AgentType {
     /// Short description shown to the LLM and in UI panels.
     pub fn description(self) -> &'static str {
         match self {
-            Self::General => {
-                "General-purpose assistant with multi-agent delegation"
-            }
+            Self::General => "General-purpose assistant with multi-agent delegation",
             Self::Explorer => {
                 "Fast codebase search specialist: grep, glob, and read to discover code patterns"
             }
@@ -81,15 +79,17 @@ impl AgentType {
     pub fn default_tool_restrictions(self) -> Option<&'static [&'static str]> {
         match self {
             Self::General => None,
-            Self::Explorer => Some(&[
-                "read", "glob", "grep", "shell", "websearch", "webfetch",
-            ]),
+            Self::Explorer => Some(&["read", "glob", "grep", "shell", "websearch", "webfetch"]),
             Self::Librarian => Some(&[
-                "read", "glob", "grep", "shell", "websearch", "webfetch", "question",
+                "read",
+                "glob",
+                "grep",
+                "shell",
+                "websearch",
+                "webfetch",
+                "question",
             ]),
-            Self::Oracle => Some(&[
-                "read", "glob", "grep", "websearch", "webfetch", "question",
-            ]),
+            Self::Oracle => Some(&["read", "glob", "grep", "websearch", "webfetch", "question"]),
             Self::Fixer => None,
         }
     }

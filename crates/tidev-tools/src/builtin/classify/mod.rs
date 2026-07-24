@@ -123,24 +123,25 @@ impl Classifier {
                 continue;
             }
 
-        // ── 4. Strip privilege-escalation / env wrappers ────────
-        let cmd_index = find_cmd_index(&parts);
-        let Some(cmd) = parts.get(cmd_index).copied() else {
-            continue;
-        };
-        let args = &parts[cmd_index + 1..];
+            // ── 4. Strip privilege-escalation / env wrappers ────────
+            let cmd_index = find_cmd_index(&parts);
+            let Some(cmd) = parts.get(cmd_index).copied() else {
+                continue;
+            };
+            let args = &parts[cmd_index + 1..];
 
-        let seg_safety = classify_command(cmd, args);
-        // Take the strictest: WriteOperation > ReadOnly > Unknown
-        if seg_safety == Safety::WriteOperation {
-            return Safety::WriteOperation; // short-circuit
+            let seg_safety = classify_command(cmd, args);
+            // Take the strictest: WriteOperation > ReadOnly > Unknown
+            if seg_safety == Safety::WriteOperation {
+                return Safety::WriteOperation; // short-circuit
+            }
+            if seg_safety == Safety::ReadOnly {
+                result = Safety::ReadOnly;
+            }
         }
-        if seg_safety == Safety::ReadOnly {
-            result = Safety::ReadOnly;
-        }
+
+        result
     }
-
-    result    }
 }
 
 // ---------------------------------------------------------------------------
@@ -402,8 +403,7 @@ fn is_dev_null(tail: &[u8]) -> bool {
 /// Characters that can follow a redirect target path without it being part
 /// of a longer name (e.g. `/dev/null2` should NOT match `/dev/null`).
 fn is_boundary_char(b: u8) -> bool {
-    b.is_ascii_whitespace()
-        || matches!(b, b'&' | b'|' | b'>' | b';' | b'<' | b'(' | b')')
+    b.is_ascii_whitespace() || matches!(b, b'&' | b'|' | b'>' | b';' | b'<' | b'(' | b')')
 }
 
 // ---------------------------------------------------------------------------
@@ -749,10 +749,7 @@ mod tests {
     fn network_write_commands() {
         let cl = c();
         // curl/wget without write flags output to stdout (Unknown)
-        assert_eq!(
-            cl.classify("curl https://example.com"),
-            Safety::Unknown
-        );
+        assert_eq!(cl.classify("curl https://example.com"), Safety::Unknown);
         assert_eq!(
             cl.classify("wget https://example.com/file"),
             Safety::Unknown
@@ -767,10 +764,7 @@ mod tests {
             Safety::WriteOperation
         );
         // scp/rsync always transfer files
-        assert_eq!(
-            cl.classify("scp file.txt user@host:/path"),
-            Safety::Unknown
-        );
+        assert_eq!(cl.classify("scp file.txt user@host:/path"), Safety::Unknown);
         assert_eq!(cl.classify("rsync -a src/ dst/"), Safety::Unknown);
     }
 
@@ -865,7 +859,10 @@ mod tests {
             Safety::WriteOperation
         );
         assert_eq!(cl.classify("unzip archive.zip"), Safety::WriteOperation);
-        assert_eq!(cl.classify("zip archive.zip file.txt"), Safety::WriteOperation);
+        assert_eq!(
+            cl.classify("zip archive.zip file.txt"),
+            Safety::WriteOperation
+        );
         assert_eq!(cl.classify("gzip file.txt"), Safety::WriteOperation);
         // Windows cmd/powershell commands
         assert_eq!(cl.classify("copy a b"), Safety::WriteOperation);
@@ -966,9 +963,14 @@ mod tests {
     #[test]
     fn docker_exec_ambiguous() {
         let cl = c();
-        assert_eq!(cl.classify("docker exec db cat /etc/hosts"), Safety::Unknown);
         assert_eq!(
-            cl.classify("docker exec paper-postgres psql -U paper -d paper -c '\\d revision_versions' 2>&1"),
+            cl.classify("docker exec db cat /etc/hosts"),
+            Safety::Unknown
+        );
+        assert_eq!(
+            cl.classify(
+                "docker exec paper-postgres psql -U paper -d paper -c '\\d revision_versions' 2>&1"
+            ),
             Safety::Unknown
         );
     }
@@ -1026,7 +1028,10 @@ mod tests {
     fn pip_write_commands() {
         let cl = c();
         assert_eq!(cl.classify("pip install requests"), Safety::WriteOperation);
-        assert_eq!(cl.classify("pip uninstall requests"), Safety::WriteOperation);
+        assert_eq!(
+            cl.classify("pip uninstall requests"),
+            Safety::WriteOperation
+        );
         assert_eq!(cl.classify("pip download requests"), Safety::WriteOperation);
         assert_eq!(cl.classify("pip3 install requests"), Safety::WriteOperation);
     }
@@ -1091,8 +1096,14 @@ mod tests {
         assert_eq!(cl.classify("brew uninstall bash"), Safety::WriteOperation);
         assert_eq!(cl.classify("brew upgrade"), Safety::WriteOperation);
         assert_eq!(cl.classify("brew update"), Safety::WriteOperation);
-        assert_eq!(cl.classify("brew services start nginx"), Safety::WriteOperation);
-        assert_eq!(cl.classify("brew tap homebrew/core"), Safety::WriteOperation);
+        assert_eq!(
+            cl.classify("brew services start nginx"),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            cl.classify("brew tap homebrew/core"),
+            Safety::WriteOperation
+        );
     }
 
     // ── Gem ────────────────────────────────────────────────────────────────
@@ -1111,8 +1122,14 @@ mod tests {
         let cl = c();
         assert_eq!(cl.classify("gem install rails"), Safety::WriteOperation);
         assert_eq!(cl.classify("gem uninstall rails"), Safety::WriteOperation);
-        assert_eq!(cl.classify("gem build mygem.gemspec"), Safety::WriteOperation);
-        assert_eq!(cl.classify("gem push mygem-1.0.gem"), Safety::WriteOperation);
+        assert_eq!(
+            cl.classify("gem build mygem.gemspec"),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            cl.classify("gem push mygem-1.0.gem"),
+            Safety::WriteOperation
+        );
     }
 
     // ── Kubectl ────────────────────────────────────────────────────────────
@@ -1126,17 +1143,32 @@ mod tests {
         assert_eq!(cl.classify("kubectl top pod"), Safety::ReadOnly);
         assert_eq!(cl.classify("kubectl version"), Safety::ReadOnly);
         assert_eq!(cl.classify("kubectl config view"), Safety::ReadOnly);
-        assert_eq!(cl.classify("kubectl config current-context"), Safety::ReadOnly);
+        assert_eq!(
+            cl.classify("kubectl config current-context"),
+            Safety::ReadOnly
+        );
     }
 
     #[test]
     fn kubectl_write_commands() {
         let cl = c();
-        assert_eq!(cl.classify("kubectl apply -f file.yaml"), Safety::WriteOperation);
-        assert_eq!(cl.classify("kubectl delete pod nginx"), Safety::WriteOperation);
-        assert_eq!(cl.classify("kubectl create deployment nginx"), Safety::WriteOperation);
+        assert_eq!(
+            cl.classify("kubectl apply -f file.yaml"),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            cl.classify("kubectl delete pod nginx"),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            cl.classify("kubectl create deployment nginx"),
+            Safety::WriteOperation
+        );
         assert_eq!(cl.classify("kubectl exec -it pod -- bash"), Safety::Unknown);
-        assert_eq!(cl.classify("kubectl config set-context prod"), Safety::WriteOperation);
+        assert_eq!(
+            cl.classify("kubectl config set-context prod"),
+            Safety::WriteOperation
+        );
     }
 
     // ── Systemctl ──────────────────────────────────────────────────────────
@@ -1156,9 +1188,15 @@ mod tests {
         let cl = c();
         assert_eq!(cl.classify("systemctl start nginx"), Safety::WriteOperation);
         assert_eq!(cl.classify("systemctl stop nginx"), Safety::WriteOperation);
-        assert_eq!(cl.classify("systemctl enable nginx"), Safety::WriteOperation);
+        assert_eq!(
+            cl.classify("systemctl enable nginx"),
+            Safety::WriteOperation
+        );
         assert_eq!(cl.classify("systemctl mask nginx"), Safety::WriteOperation);
-        assert_eq!(cl.classify("systemctl set-default multi-user.target"), Safety::WriteOperation);
+        assert_eq!(
+            cl.classify("systemctl set-default multi-user.target"),
+            Safety::WriteOperation
+        );
     }
 
     // ── Journalctl ─────────────────────────────────────────────────────────
@@ -1167,7 +1205,10 @@ mod tests {
     fn journalctl_is_read_only() {
         let cl = c();
         assert_eq!(cl.classify("journalctl -u nginx"), Safety::ReadOnly);
-        assert_eq!(cl.classify("journalctl --since yesterday"), Safety::ReadOnly);
+        assert_eq!(
+            cl.classify("journalctl --since yesterday"),
+            Safety::ReadOnly
+        );
     }
 
     // ── Deno ───────────────────────────────────────────────────────────────
@@ -1213,7 +1254,10 @@ mod tests {
         assert_eq!(cl.classify("terraform destroy"), Safety::WriteOperation);
         assert_eq!(cl.classify("terraform init"), Safety::WriteOperation);
         assert_eq!(cl.classify("terraform fmt"), Safety::WriteOperation);
-        assert_eq!(cl.classify("terraform state mv old new"), Safety::WriteOperation);
+        assert_eq!(
+            cl.classify("terraform state mv old new"),
+            Safety::WriteOperation
+        );
     }
 
     #[test]
@@ -1246,10 +1290,22 @@ mod tests {
     #[test]
     fn helm_write_commands() {
         let cl = c();
-        assert_eq!(cl.classify("helm install release ./chart"), Safety::WriteOperation);
-        assert_eq!(cl.classify("helm upgrade release ./chart"), Safety::WriteOperation);
-        assert_eq!(cl.classify("helm uninstall release"), Safety::WriteOperation);
-        assert_eq!(cl.classify("helm repo add stable url"), Safety::WriteOperation);
+        assert_eq!(
+            cl.classify("helm install release ./chart"),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            cl.classify("helm upgrade release ./chart"),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            cl.classify("helm uninstall release"),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            cl.classify("helm repo add stable url"),
+            Safety::WriteOperation
+        );
         assert_eq!(cl.classify("helm dependency build"), Safety::WriteOperation);
     }
 
@@ -1260,7 +1316,10 @@ mod tests {
         let cl = c();
         assert_eq!(cl.classify("nix show config"), Safety::ReadOnly);
         assert_eq!(cl.classify("nix search nixpkgs hello"), Safety::ReadOnly);
-        assert_eq!(cl.classify("nix eval -f default.nix name"), Safety::ReadOnly);
+        assert_eq!(
+            cl.classify("nix eval -f default.nix name"),
+            Safety::ReadOnly
+        );
         assert_eq!(cl.classify("nix flake show ."), Safety::ReadOnly);
         assert_eq!(cl.classify("nix registry list"), Safety::ReadOnly);
         assert_eq!(cl.classify("nix profile list"), Safety::ReadOnly);
@@ -1272,9 +1331,15 @@ mod tests {
         let cl = c();
         assert_eq!(cl.classify("nix build .#hello"), Safety::WriteOperation);
         assert_eq!(cl.classify("nix run .#app"), Safety::WriteOperation);
-        assert_eq!(cl.classify("nix develop .#devShell"), Safety::WriteOperation);
+        assert_eq!(
+            cl.classify("nix develop .#devShell"),
+            Safety::WriteOperation
+        );
         assert_eq!(cl.classify("nix flake update"), Safety::WriteOperation);
-        assert_eq!(cl.classify("nix profile install nixpkgs#hello"), Safety::WriteOperation);
+        assert_eq!(
+            cl.classify("nix profile install nixpkgs#hello"),
+            Safety::WriteOperation
+        );
     }
 
     // ── Nix-env / Nix-shell ────────────────────────────────────────────────
@@ -1297,7 +1362,10 @@ mod tests {
     fn nix_shell_is_write() {
         let cl = c();
         assert_eq!(cl.classify("nix-shell -p hello"), Safety::Unknown);
-        assert_eq!(cl.classify("nix-shell --command 'echo hi'"), Safety::Unknown);
+        assert_eq!(
+            cl.classify("nix-shell --command 'echo hi'"),
+            Safety::Unknown
+        );
     }
 
     // ── Additional deterministic writes ────────────────────────────────────
@@ -1309,7 +1377,10 @@ mod tests {
         assert_eq!(cl.classify("fallocate -l 1M file"), Safety::WriteOperation);
         assert_eq!(cl.classify("mktemp"), Safety::WriteOperation);
         assert_eq!(cl.classify("mkfifo mypipe"), Safety::WriteOperation);
-        assert_eq!(cl.classify("setfacl -m u:user:rwx file"), Safety::WriteOperation);
+        assert_eq!(
+            cl.classify("setfacl -m u:user:rwx file"),
+            Safety::WriteOperation
+        );
         assert_eq!(cl.classify("wipefs /dev/sda1"), Safety::WriteOperation);
         assert_eq!(cl.classify("swapon /dev/sda2"), Safety::WriteOperation);
         assert_eq!(cl.classify("patch < diff.patch"), Safety::WriteOperation);
@@ -1318,9 +1389,18 @@ mod tests {
     #[test]
     fn media_write_commands() {
         let cl = c();
-        assert_eq!(cl.classify("ffmpeg -i input.mp4 output.avi"), Safety::Unknown);
-        assert_eq!(cl.classify("convert input.png output.jpg"), Safety::WriteOperation);
-        assert_eq!(cl.classify("mogrify -resize 50% *.jpg"), Safety::WriteOperation);
+        assert_eq!(
+            cl.classify("ffmpeg -i input.mp4 output.avi"),
+            Safety::Unknown
+        );
+        assert_eq!(
+            cl.classify("convert input.png output.jpg"),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            cl.classify("mogrify -resize 50% *.jpg"),
+            Safety::WriteOperation
+        );
     }
 
     #[test]
@@ -1336,9 +1416,18 @@ mod tests {
     #[test]
     fn openssl_write_commands() {
         let cl = c();
-        assert_eq!(cl.classify("openssl genrsa -out key.pem 2048"), Safety::WriteOperation);
-        assert_eq!(cl.classify("openssl req -new -key key.pem -out csr.pem"), Safety::WriteOperation);
-        assert_eq!(cl.classify("openssl enc -aes-256-cbc -in file -out file.enc"), Safety::WriteOperation);
+        assert_eq!(
+            cl.classify("openssl genrsa -out key.pem 2048"),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            cl.classify("openssl req -new -key key.pem -out csr.pem"),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            cl.classify("openssl enc -aes-256-cbc -in file -out file.enc"),
+            Safety::WriteOperation
+        );
     }
 
     #[test]
@@ -1364,9 +1453,15 @@ mod tests {
         let cl = c();
         assert_eq!(cl.classify("ip link set eth0 up"), Safety::Unknown);
         assert_eq!(cl.classify("ifconfig eth0 up"), Safety::Unknown);
-        assert_eq!(cl.classify("firewall-cmd --add-port=80/tcp"), Safety::Unknown);
+        assert_eq!(
+            cl.classify("firewall-cmd --add-port=80/tcp"),
+            Safety::Unknown
+        );
         assert_eq!(cl.classify("ufw enable"), Safety::Unknown);
-        assert_eq!(cl.classify("iptables -A INPUT -p tcp --dport 80 -j ACCEPT"), Safety::Unknown);
+        assert_eq!(
+            cl.classify("iptables -A INPUT -p tcp --dport 80 -j ACCEPT"),
+            Safety::Unknown
+        );
     }
 
     #[test]
@@ -1401,8 +1496,14 @@ mod tests {
         let cl = c();
         assert_eq!(cl.classify("sysctl -a"), Safety::ReadOnly);
         assert_eq!(cl.classify("sysctl net.ipv4.ip_forward"), Safety::ReadOnly);
-        assert_eq!(cl.classify("sysctl -w net.ipv4.ip_forward=1"), Safety::WriteOperation);
-        assert_eq!(cl.classify("sysctl --write net.ipv4.ip_forward=1"), Safety::WriteOperation);
+        assert_eq!(
+            cl.classify("sysctl -w net.ipv4.ip_forward=1"),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            cl.classify("sysctl --write net.ipv4.ip_forward=1"),
+            Safety::WriteOperation
+        );
     }
 
     // ── SELinux ────────────────────────────────────────────────────────────
@@ -1426,9 +1527,15 @@ mod tests {
     #[test]
     fn datetime_is_write() {
         let cl = c();
-        assert_eq!(cl.classify("timedatectl set-time '2024-01-01 12:00:00'"), Safety::Unknown);
+        assert_eq!(
+            cl.classify("timedatectl set-time '2024-01-01 12:00:00'"),
+            Safety::Unknown
+        );
         assert_eq!(cl.classify("date -s '2024-01-01'"), Safety::Unknown);
-        assert_eq!(cl.classify("hwclock --set --date '2024-01-01'"), Safety::Unknown);
+        assert_eq!(
+            cl.classify("hwclock --set --date '2024-01-01'"),
+            Safety::Unknown
+        );
     }
 
     // ── User management ────────────────────────────────────────────────────
@@ -1464,15 +1571,24 @@ mod tests {
     fn flatpak_read_commands() {
         let cl = c();
         assert_eq!(cl.classify("flatpak list"), Safety::ReadOnly);
-        assert_eq!(cl.classify("flatpak info org.gnome.Epiphany"), Safety::ReadOnly);
+        assert_eq!(
+            cl.classify("flatpak info org.gnome.Epiphany"),
+            Safety::ReadOnly
+        );
         assert_eq!(cl.classify("flatpak search browser"), Safety::ReadOnly);
     }
 
     #[test]
     fn flatpak_write_commands() {
         let cl = c();
-        assert_eq!(cl.classify("flatpak install org.gnome.Epiphany"), Safety::WriteOperation);
-        assert_eq!(cl.classify("flatpak uninstall org.gnome.Epiphany"), Safety::WriteOperation);
+        assert_eq!(
+            cl.classify("flatpak install org.gnome.Epiphany"),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            cl.classify("flatpak uninstall org.gnome.Epiphany"),
+            Safety::WriteOperation
+        );
         assert_eq!(cl.classify("flatpak update"), Safety::WriteOperation);
     }
 
@@ -1532,13 +1648,19 @@ mod tests {
     #[test]
     fn kustomize_read_commands() {
         let cl = c();
-        assert_eq!(cl.classify("kustomize build ./overlays/prod"), Safety::ReadOnly);
+        assert_eq!(
+            cl.classify("kustomize build ./overlays/prod"),
+            Safety::ReadOnly
+        );
     }
 
     #[test]
     fn kustomize_write_commands() {
         let cl = c();
-        assert_eq!(cl.classify("kustomize edit set image nginx:latest"), Safety::WriteOperation);
+        assert_eq!(
+            cl.classify("kustomize edit set image nginx:latest"),
+            Safety::WriteOperation
+        );
     }
 
     // ── Ansible ────────────────────────────────────────────────────────────
@@ -1557,7 +1679,10 @@ mod tests {
     fn windows_system_write() {
         let cl = c();
         assert_eq!(cl.classify("sc create MyService"), Safety::WriteOperation);
-        assert_eq!(cl.classify("reg add HKLM\\Software\\MyApp"), Safety::WriteOperation);
+        assert_eq!(
+            cl.classify("reg add HKLM\\Software\\MyApp"),
+            Safety::WriteOperation
+        );
     }
 
     // ── Empty / edge cases ───────────────────────────────────────────────
@@ -1654,7 +1779,10 @@ mod tests {
     fn test_stderr_redirect_not_blocked() {
         // Full classification: commands with stderr redirect should not be blocked
         let cl = c();
-        assert_eq!(cl.classify("find / -name '*.rs' 2>/dev/null"), Safety::Unknown);
+        assert_eq!(
+            cl.classify("find / -name '*.rs' 2>/dev/null"),
+            Safety::Unknown
+        );
         assert_eq!(
             cl.classify("find / -name '*.rs' 2>/dev/null | head -3"),
             Safety::Unknown
@@ -1664,13 +1792,22 @@ mod tests {
             cl.classify("pip show rich 2>/dev/null | head -5"),
             Safety::ReadOnly
         );
-        assert_eq!(cl.classify("grep -r 'TODO' src/ 2>/dev/null"), Safety::Unknown);
+        assert_eq!(
+            cl.classify("grep -r 'TODO' src/ 2>/dev/null"),
+            Safety::Unknown
+        );
         assert_eq!(cl.classify("ls -la 2>/dev/null"), Safety::Unknown);
         assert_eq!(cl.classify("cat foo.txt 2>/dev/null"), Safety::Unknown);
 
         // But a genuinely write command with stderr redirect must still be blocked
-        assert_eq!(cl.classify("pip install requests 2>/dev/null"), Safety::WriteOperation);
-        assert_eq!(cl.classify("cargo build 2>/dev/null"), Safety::WriteOperation);
+        assert_eq!(
+            cl.classify("pip install requests 2>/dev/null"),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            cl.classify("cargo build 2>/dev/null"),
+            Safety::WriteOperation
+        );
 
         // Mixed: stdout redirect + stderr redirect should still be caught
         assert_eq!(
@@ -1688,18 +1825,9 @@ mod tests {
             strip_redirects(&["git", "branch", "-a", "2>/dev/null"]),
             vec!["git", "branch", "-a"]
         );
-        assert_eq!(
-            strip_redirects(&["cmd", ">file"]),
-            vec!["cmd"]
-        );
-        assert_eq!(
-            strip_redirects(&["cmd", ">>file"]),
-            vec!["cmd"]
-        );
-        assert_eq!(
-            strip_redirects(&["cmd", "&>file"]),
-            vec!["cmd"]
-        );
+        assert_eq!(strip_redirects(&["cmd", ">file"]), vec!["cmd"]);
+        assert_eq!(strip_redirects(&["cmd", ">>file"]), vec!["cmd"]);
+        assert_eq!(strip_redirects(&["cmd", "&>file"]), vec!["cmd"]);
     }
 
     #[test]
@@ -1709,26 +1837,14 @@ mod tests {
             strip_redirects(&["echo", "hello", ">", "file"]),
             vec!["echo", "hello"]
         );
-        assert_eq!(
-            strip_redirects(&["cat", ">>", "file"]),
-            vec!["cat"]
-        );
-        assert_eq!(
-            strip_redirects(&["ls", "&>", "file"]),
-            vec!["ls"]
-        );
+        assert_eq!(strip_redirects(&["cat", ">>", "file"]), vec!["cat"]);
+        assert_eq!(strip_redirects(&["ls", "&>", "file"]), vec!["ls"]);
     }
 
     #[test]
     fn test_filter_redirect_fd_close() {
-        assert_eq!(
-            strip_redirects(&["cmd", "2>&-"]),
-            vec!["cmd"]
-        );
-        assert_eq!(
-            strip_redirects(&["cmd", "3>&-"]),
-            vec!["cmd"]
-        );
+        assert_eq!(strip_redirects(&["cmd", "2>&-"]), vec!["cmd"]);
+        assert_eq!(strip_redirects(&["cmd", "3>&-"]), vec!["cmd"]);
     }
 
     #[test]
@@ -1738,10 +1854,7 @@ mod tests {
             strip_redirects(&["git", "branch", "-a"]),
             vec!["git", "branch", "-a"]
         );
-        assert_eq!(
-            strip_redirects(&["echo", "hello"]),
-            vec!["echo", "hello"]
-        );
+        assert_eq!(strip_redirects(&["echo", "hello"]), vec!["echo", "hello"]);
         // Empty input
         let empty: Vec<&str> = vec![];
         assert_eq!(strip_redirects(&empty), empty);
@@ -1766,34 +1879,22 @@ mod tests {
             Safety::ReadOnly
         );
         // git branch -a with different redirect forms
-        assert_eq!(
-            cl.classify("git branch -a 2>/dev/null"),
-            Safety::ReadOnly
-        );
+        assert_eq!(cl.classify("git branch -a 2>/dev/null"), Safety::ReadOnly);
         assert_eq!(
             cl.classify("git branch -a 2>&1 | head -5"),
             Safety::ReadOnly
         );
         // `git branch -a > /dev/null` — stdout to null device, not a real write
-        assert_eq!(
-            cl.classify("git branch -a > /dev/null"),
-            Safety::ReadOnly
-        );
+        assert_eq!(cl.classify("git branch -a > /dev/null"), Safety::ReadOnly);
     }
 
     #[test]
     fn test_filter_redirect_git_tag_list_with_redirect() {
         let cl = c();
         // git tag -l with stderr redirect should be read-only
-        assert_eq!(
-            cl.classify("git tag -l 2>/dev/null"),
-            Safety::ReadOnly
-        );
+        assert_eq!(cl.classify("git tag -l 2>/dev/null"), Safety::ReadOnly);
         // git tag (without flags) with stderr redirect
-        assert_eq!(
-            cl.classify("git tag 2>/dev/null"),
-            Safety::ReadOnly
-        );
+        assert_eq!(cl.classify("git tag 2>/dev/null"), Safety::ReadOnly);
     }
 
     #[test]
@@ -1814,10 +1915,7 @@ mod tests {
     fn test_filter_redirect_write_redirect_still_caught() {
         let cl = c();
         // Real write redirect via stdout must still be caught
-        assert_eq!(
-            cl.classify("echo hello > file"),
-            Safety::WriteOperation
-        );
+        assert_eq!(cl.classify("echo hello > file"), Safety::WriteOperation);
         assert_eq!(
             cl.classify("echo hello >> /tmp/log"),
             Safety::WriteOperation
@@ -1833,10 +1931,7 @@ mod tests {
     fn test_filter_redirect_non_write_command_through() {
         let cl = c();
         // grep with redirect should be Unknown (not write)
-        assert_eq!(
-            cl.classify("grep -r foo src/ 2>/dev/null"),
-            Safety::Unknown
-        );
+        assert_eq!(cl.classify("grep -r foo src/ 2>/dev/null"), Safety::Unknown);
         // find with redirect
         assert_eq!(
             cl.classify("find . -name '*.rs' 2>/dev/null"),

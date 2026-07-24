@@ -6,28 +6,28 @@
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
+use crate::chat_context::ChatContext;
+use anyhow::Result;
 use chrono::{DateTime, Utc};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
-use ratatui::layout::Rect;
-use ratatui::Frame;
-use anyhow::Result;
 use lru::LruCache;
-use crate::chat_context::ChatContext;
-use uuid::Uuid;
+use ratatui::Frame;
+use ratatui::layout::Rect;
 use tidev_types::message::{BackendEvent, Message, MessageAttachment};
 use tidev_types::prompts::SessionMode;
+use uuid::Uuid;
 
-use tidev_types::tools::canonical_tool_name;
 use crate::action::{Action, ChatAction, OverlayAction, OverlayKind, SessionAction};
 use crate::component::Component;
-use crate::context::{DrawContext, InitContext, UpdateContext};
 use crate::components::chat::layout_index::MessageLayoutIndex;
+use crate::components::chat::render as render_mod;
 use crate::components::chat::render_cache::{
     MessageRenderCacheEntry, MessageRenderCacheKey, SelectableRegionRange,
 };
-use crate::components::chat::render as render_mod;
 use crate::components::chat::streaming::StreamingBuffer;
 use crate::components::chat::tool::tool_call_arguments_are_complete;
+use crate::context::{DrawContext, InitContext, UpdateContext};
+use tidev_types::tools::canonical_tool_name;
 
 // ---------------------------------------------------------------------------
 // ScrollbarDrag
@@ -52,8 +52,8 @@ struct RunningToolInfo {
 }
 
 pub(crate) mod layout_index;
-pub(crate) mod render_cache;
 pub(crate) mod render;
+pub(crate) mod render_cache;
 pub(crate) mod streaming;
 pub(crate) mod tool;
 
@@ -174,11 +174,13 @@ impl MessageList {
 
     /// Access the currently active chat context (public for app.rs).
     pub fn active_chat_context(&self) -> Option<&ChatContext> {
-        self.active_session_id.and_then(|id| self.chat_contexts.get(&id))
+        self.active_session_id
+            .and_then(|id| self.chat_contexts.get(&id))
     }
 
     pub fn active_chat_context_mut(&mut self) -> Option<&mut ChatContext> {
-        self.active_session_id.and_then(|id| self.chat_contexts.get_mut(&id))
+        self.active_session_id
+            .and_then(|id| self.chat_contexts.get_mut(&id))
     }
 
     /// Switch the displayed session without loading from DB.
@@ -201,7 +203,11 @@ impl MessageList {
 
             // Pick up any streaming Assistant message in the target context.
             if let Some(ctx) = self.chat_contexts.get(&session_id) {
-                if ctx.messages.iter().any(|m| m.streaming && m.role == tidev_types::message::MessageRole::Assistant) {
+                if ctx
+                    .messages
+                    .iter()
+                    .any(|m| m.streaming && m.role == tidev_types::message::MessageRole::Assistant)
+                {
                     self.streaming_buffer.recover_or_begin_streaming(
                         &mut self.chat_contexts.get_mut(&session_id).unwrap().messages,
                     );
@@ -235,7 +241,11 @@ impl MessageList {
         // Pick up any streaming Assistant message in the new context
         // (unlikely for DB-loaded contexts, but harmless).
         if let Some(ctx) = self.chat_contexts.get(&session_id) {
-            if ctx.messages.iter().any(|m| m.streaming && m.role == tidev_types::message::MessageRole::Assistant) {
+            if ctx
+                .messages
+                .iter()
+                .any(|m| m.streaming && m.role == tidev_types::message::MessageRole::Assistant)
+            {
                 self.streaming_buffer.recover_or_begin_streaming(
                     &mut self.chat_contexts.get_mut(&session_id).unwrap().messages,
                 );
@@ -252,11 +262,15 @@ impl MessageList {
             Some(id) => id,
             None => return,
         };
-        let Some(ctx) = self.chat_contexts.get(&session_id) else { return };
+        let Some(ctx) = self.chat_contexts.get(&session_id) else {
+            return;
+        };
         let messages = ctx.visible_messages();
 
         // Preserve existing status_text so rebuild doesn't reset it to "Thinking".
-        let old_status: std::collections::HashMap<String, String> = self.running_subagents.iter()
+        let old_status: std::collections::HashMap<String, String> = self
+            .running_subagents
+            .iter()
             .map(|s| (s.tool_call_id.clone(), s.status_text.clone()))
             .collect();
 
@@ -264,7 +278,8 @@ impl MessageList {
         self.completed_subagent_sessions.clear();
         self.hovered_inline_subagent = None;
 
-        let tool_result_ids: std::collections::HashSet<&str> = messages.iter()
+        let tool_result_ids: std::collections::HashSet<&str> = messages
+            .iter()
             .filter(|m| m.role == tidev_types::message::MessageRole::Tool)
             .filter_map(|m| m.tool_call_id.as_deref())
             .collect();
@@ -272,17 +287,23 @@ impl MessageList {
         for msg in messages {
             if msg.role == tidev_types::message::MessageRole::Tool
                 && msg.tool_name.as_deref() == Some("task")
-                && let Some(csid) = msg.metadata.child_session_id {
-                    self.completed_subagent_sessions.insert(msg.id, csid);
-                    // Also map by assistant message ID for click hit-testing.
-                    let assistant_id = messages.iter()
-                        .find(|m| m.role == tidev_types::message::MessageRole::Assistant
-                            && m.tool_calls.iter().any(|tc| Some(tc.id.as_str()) == msg.tool_call_id.as_deref()))
-                        .map(|m| m.id);
-                    if let Some(aid) = assistant_id {
-                        self.completed_subagent_sessions.insert(aid, csid);
-                    }
+                && let Some(csid) = msg.metadata.child_session_id
+            {
+                self.completed_subagent_sessions.insert(msg.id, csid);
+                // Also map by assistant message ID for click hit-testing.
+                let assistant_id = messages
+                    .iter()
+                    .find(|m| {
+                        m.role == tidev_types::message::MessageRole::Assistant
+                            && m.tool_calls
+                                .iter()
+                                .any(|tc| Some(tc.id.as_str()) == msg.tool_call_id.as_deref())
+                    })
+                    .map(|m| m.id);
+                if let Some(aid) = assistant_id {
+                    self.completed_subagent_sessions.insert(aid, csid);
                 }
+            }
 
             if msg.role == tidev_types::message::MessageRole::Assistant {
                 let msg_csid = msg.metadata.child_session_id;
@@ -294,14 +315,15 @@ impl MessageList {
                             .get(tc.id.as_str())
                             .cloned()
                             .unwrap_or_else(|| "Awaiting delegation...".to_string());
-                        self.running_subagents.push(render_mod::RunningSubagentInfo {
-                            tool_call_id: tc.id.clone(),
-                            description: extract_task_description(&tc.arguments),
-                            subagent_type: extract_subagent_type(&tc.arguments),
-                            status_text: status,
-                            child_session_id: msg_csid,
-                            interrupted: false,
-                        });
+                        self.running_subagents
+                            .push(render_mod::RunningSubagentInfo {
+                                tool_call_id: tc.id.clone(),
+                                description: extract_task_description(&tc.arguments),
+                                subagent_type: extract_subagent_type(&tc.arguments),
+                                status_text: status,
+                                child_session_id: msg_csid,
+                                interrupted: false,
+                            });
                     }
                 }
             }
@@ -332,10 +354,15 @@ impl MessageList {
             Some(id) => id,
             None => return,
         };
-        let Some(ref mut chat_context) = self.chat_contexts.get_mut(&session_id) else { return };
-        if let Some(msg) = chat_context.messages.iter_mut().rev().find(|m| {
-            m.role == tidev_types::message::MessageRole::Assistant
-        }) {
+        let Some(ref mut chat_context) = self.chat_contexts.get_mut(&session_id) else {
+            return;
+        };
+        if let Some(msg) = chat_context
+            .messages
+            .iter_mut()
+            .rev()
+            .find(|m| m.role == tidev_types::message::MessageRole::Assistant)
+        {
             let msg_id = msg.id;
             msg.input_tokens = input_tokens;
             msg.output_tokens = output_tokens;
@@ -360,7 +387,9 @@ impl MessageList {
             Some(id) => id,
             None => return,
         };
-        let Some(ref mut chat_context) = self.chat_contexts.get_mut(&session_id) else { return };
+        let Some(ref mut chat_context) = self.chat_contexts.get_mut(&session_id) else {
+            return;
+        };
         let msg_id = self.streaming_buffer.current_message_id;
         if let Some(msg) = chat_context.messages.iter_mut().rev().find(|m| m.streaming) {
             msg.role = tidev_types::message::MessageRole::Error;
@@ -370,7 +399,8 @@ impl MessageList {
                 self.layout_index.mark_dirty(mid);
             }
         }
-        self.streaming_buffer.finalise_message(&mut chat_context.messages);
+        self.streaming_buffer
+            .finalise_message(&mut chat_context.messages);
         self.dirty = true;
     }
 
@@ -381,10 +411,14 @@ impl MessageList {
             Some(id) => id,
             None => return,
         };
-        let Some(ref mut chat_context) = self.chat_contexts.get_mut(&session_id) else { return };
+        let Some(ref mut chat_context) = self.chat_contexts.get_mut(&session_id) else {
+            return;
+        };
 
         // Finalise the streaming message, preserving content and reasoning.
-        let finalized_idx = self.streaming_buffer.finalise_message(&mut chat_context.messages);
+        let finalized_idx = self
+            .streaming_buffer
+            .finalise_message(&mut chat_context.messages);
 
         // Remove the message if it's empty, whether it was just finalized or
         // already finalized by a prior StreamEnd event.
@@ -392,9 +426,7 @@ impl MessageList {
             .filter(|&idx| {
                 // Only remove if the finalized message is actually empty.
                 chat_context.messages.get(idx).map_or(false, |m| {
-                    m.content.is_empty()
-                        && m.reasoning.trim().is_empty()
-                        && m.tool_calls.is_empty()
+                    m.content.is_empty() && m.reasoning.trim().is_empty() && m.tool_calls.is_empty()
                 })
             })
             .or_else(|| {
@@ -451,13 +483,24 @@ impl MessageList {
         let session_id = event.session_id();
         if self.active_session_id == Some(session_id) {
             match event {
-                BackendEvent::ToolCallUpdated { tool_call, request_id: _, .. } => {
+                BackendEvent::ToolCallUpdated {
+                    tool_call,
+                    request_id: _,
+                    ..
+                } => {
                     if tool_call.name == "task" {
                         let desc = extract_task_description(&tool_call.arguments);
                         let sub_type = extract_subagent_type(&tool_call.arguments);
-                        let already_tracking = self.running_subagents.iter().any(|s| s.tool_call_id == tool_call.id);
+                        let already_tracking = self
+                            .running_subagents
+                            .iter()
+                            .any(|s| s.tool_call_id == tool_call.id);
                         if already_tracking {
-                            if let Some(exec) = self.running_subagents.iter_mut().find(|s| s.tool_call_id == tool_call.id) {
+                            if let Some(exec) = self
+                                .running_subagents
+                                .iter_mut()
+                                .find(|s| s.tool_call_id == tool_call.id)
+                            {
                                 if exec.subagent_type.is_empty() && !sub_type.is_empty() {
                                     exec.subagent_type = sub_type;
                                 }
@@ -467,21 +510,25 @@ impl MessageList {
                                 }
                             }
                         } else if tool_call_arguments_are_complete(&tool_call.arguments) {
-                            self.running_subagents.push(render_mod::RunningSubagentInfo {
-                                tool_call_id: tool_call.id.clone(),
-                                description: desc,
-                                subagent_type: sub_type,
-                                status_text: "Awaiting delegation...".to_string(),
-                                child_session_id: None,
-                                interrupted: false,
-                            });
+                            self.running_subagents
+                                .push(render_mod::RunningSubagentInfo {
+                                    tool_call_id: tool_call.id.clone(),
+                                    description: desc,
+                                    subagent_type: sub_type,
+                                    status_text: "Awaiting delegation...".to_string(),
+                                    child_session_id: None,
+                                    interrupted: false,
+                                });
                         }
                     } else {
                         // Non-subagent tools: add to running_tools as soon as the
                         // tool name is known from the stream, so the status bar shows
                         // "Running write/edit/…" immediately rather than only during
                         // the brief execution window.
-                        let already = self.running_tools.iter().any(|t| t.tool_call_id == tool_call.id);
+                        let already = self
+                            .running_tools
+                            .iter()
+                            .any(|t| t.tool_call_id == tool_call.id);
                         if !already {
                             self.running_tools.push(RunningToolInfo {
                                 tool_call_id: tool_call.id.clone(),
@@ -498,13 +545,18 @@ impl MessageList {
                 }
                 BackendEvent::ToolCompleted { tool_call, .. } => {
                     if canonical_tool_name(&tool_call.name) == Some("task") {
-                        self.running_subagents.retain(|s| s.tool_call_id != tool_call.id);
-                        if self.hovered_inline_subagent.is_some_and(|i| i >= self.running_subagents.len()) {
+                        self.running_subagents
+                            .retain(|s| s.tool_call_id != tool_call.id);
+                        if self
+                            .hovered_inline_subagent
+                            .is_some_and(|i| i >= self.running_subagents.len())
+                        {
                             self.hovered_inline_subagent = None;
                         }
                     }
                     // Clean up running_tools for any tool (both task and non-task).
-                    self.running_tools.retain(|t| t.tool_call_id != tool_call.id);
+                    self.running_tools
+                        .retain(|t| t.tool_call_id != tool_call.id);
                 }
                 BackendEvent::SubagentStatus {
                     tool_call_id,
@@ -512,7 +564,9 @@ impl MessageList {
                     child_session_id,
                     ..
                 } => {
-                    if let Some(exec) = self.running_subagents.iter_mut()
+                    if let Some(exec) = self
+                        .running_subagents
+                        .iter_mut()
                         .find(|e| e.tool_call_id == *tool_call_id && !e.interrupted)
                     {
                         exec.status_text = status_text.clone();
@@ -527,7 +581,9 @@ impl MessageList {
         // Run this BEFORE the chat_context routing so that events update
         // the inline card regardless of whether the chat_context exists.
         if let Some(text) = infer_subagent_status(event) {
-            if let Some(exec) = self.running_subagents.iter_mut()
+            if let Some(exec) = self
+                .running_subagents
+                .iter_mut()
                 .find(|e| e.child_session_id == Some(session_id) && !e.interrupted)
             {
                 if exec.status_text != text {
@@ -550,7 +606,8 @@ impl MessageList {
             BackendEvent::TurnStarting { .. } => {
                 self.cancelled = false;
                 if self.active_session_id == Some(session_id) {
-                    self.streaming_buffer.begin_streaming(&mut chat_context.messages);
+                    self.streaming_buffer
+                        .begin_streaming(&mut chat_context.messages);
                 } else {
                     // Background session: just push a streaming placeholder.
                     // The streaming_buffer is reserved for the active session.
@@ -565,9 +622,11 @@ impl MessageList {
             BackendEvent::Delta { content, .. } => {
                 let is_active_session = self.active_session_id == Some(session_id);
                 if is_active_session && self.streaming_buffer.is_streaming {
-                    self.streaming_buffer.push_delta(content, &mut chat_context.messages);
+                    self.streaming_buffer
+                        .push_delta(content, &mut chat_context.messages);
                     if let Some(msg_id) = self.streaming_buffer.current_message_id {
-                        if let Some(msg) = chat_context.messages.iter_mut().find(|m| m.id == msg_id) {
+                        if let Some(msg) = chat_context.messages.iter_mut().find(|m| m.id == msg_id)
+                        {
                             if msg.reasoning_started_at.is_some()
                                 && msg.reasoning_completed_at.is_none()
                             {
@@ -576,22 +635,23 @@ impl MessageList {
                         }
                         self.layout_index.mark_dirty(msg_id);
                     }
-                } else if let Some(msg) = chat_context.messages.iter_mut().rev().find(|m| {
-                    m.streaming
-                }) {
+                } else if let Some(msg) =
+                    chat_context.messages.iter_mut().rev().find(|m| m.streaming)
+                {
                     // Background session or inactive streaming_buffer:
                     // find the streaming message directly in the context.
                     msg.content.push_str(content);
-                    if msg.reasoning_started_at.is_some()
-                        && msg.reasoning_completed_at.is_none()
-                    {
+                    if msg.reasoning_started_at.is_some() && msg.reasoning_completed_at.is_none() {
                         msg.reasoning_completed_at = Some(Utc::now());
                     }
                     self.layout_index.mark_dirty(msg.id);
                 } else if is_active_session && !self.cancelled {
                     // Recovery path for active session: TurnStarting was missed.
-                    let mid = self.streaming_buffer.recover_or_begin_streaming(&mut chat_context.messages);
-                    self.streaming_buffer.push_delta(content, &mut chat_context.messages);
+                    let mid = self
+                        .streaming_buffer
+                        .recover_or_begin_streaming(&mut chat_context.messages);
+                    self.streaming_buffer
+                        .push_delta(content, &mut chat_context.messages);
                     if let Some(msg) = chat_context.messages.iter_mut().find(|m| m.id == mid) {
                         if msg.reasoning_started_at.is_some()
                             && msg.reasoning_completed_at.is_none()
@@ -606,28 +666,33 @@ impl MessageList {
             BackendEvent::ReasoningDelta { content, .. } => {
                 let is_active_session = self.active_session_id == Some(session_id);
                 if is_active_session && self.streaming_buffer.is_streaming {
-                    self.streaming_buffer.push_reasoning_delta(content, &mut chat_context.messages);
+                    self.streaming_buffer
+                        .push_reasoning_delta(content, &mut chat_context.messages);
                     if let Some(msg_id) = self.streaming_buffer.current_message_id {
-                        if let Some(msg) = chat_context.messages.iter_mut().find(|m| m.id == msg_id) {
+                        if let Some(msg) = chat_context.messages.iter_mut().find(|m| m.id == msg_id)
+                        {
                             if msg.reasoning_started_at.is_none() {
                                 msg.reasoning_started_at = Some(Utc::now());
                             }
                         }
                         self.layout_index.mark_dirty(msg_id);
                     }
-                } else if let Some(msg) = chat_context.messages.iter_mut().rev().find(|m| {
-                    m.streaming
-                }) {
+                } else if let Some(msg) =
+                    chat_context.messages.iter_mut().rev().find(|m| m.streaming)
+                {
                     msg.reasoning.push_str(content);
                     if msg.reasoning_started_at.is_none() {
                         msg.reasoning_started_at = Some(Utc::now());
                     }
                     self.layout_index.mark_dirty(msg.id);
                 } else if is_active_session && !self.cancelled {
-                    self.streaming_buffer.recover_or_begin_streaming(&mut chat_context.messages);
-                    self.streaming_buffer.push_reasoning_delta(content, &mut chat_context.messages);
+                    self.streaming_buffer
+                        .recover_or_begin_streaming(&mut chat_context.messages);
+                    self.streaming_buffer
+                        .push_reasoning_delta(content, &mut chat_context.messages);
                     if let Some(msg_id) = self.streaming_buffer.current_message_id {
-                        if let Some(msg) = chat_context.messages.iter_mut().find(|m| m.id == msg_id) {
+                        if let Some(msg) = chat_context.messages.iter_mut().find(|m| m.id == msg_id)
+                        {
                             if msg.reasoning_started_at.is_none() {
                                 msg.reasoning_started_at = Some(Utc::now());
                             }
@@ -637,7 +702,11 @@ impl MessageList {
                 }
                 self.dirty = true;
             }
-            BackendEvent::StreamEnd { reasoning_started_at, reasoning_completed_at, .. } => {
+            BackendEvent::StreamEnd {
+                reasoning_started_at,
+                reasoning_completed_at,
+                ..
+            } => {
                 let is_active_session = self.active_session_id == Some(session_id);
                 let msg_id = if is_active_session {
                     self.streaming_buffer.current_message_id
@@ -645,7 +714,8 @@ impl MessageList {
                     None
                 };
                 if msg_id.is_some() {
-                    self.streaming_buffer.finalise_message(&mut chat_context.messages);
+                    self.streaming_buffer
+                        .finalise_message(&mut chat_context.messages);
                     if let Some(mid) = msg_id {
                         if let Some(msg) = chat_context.messages.iter_mut().find(|m| m.id == mid) {
                             msg.reasoning_started_at = *reasoning_started_at;
@@ -666,14 +736,21 @@ impl MessageList {
                 }
                 self.dirty = true;
             }
-            BackendEvent::ToolCallUpdated { tool_call, request_id: _, .. } => {
+            BackendEvent::ToolCallUpdated {
+                tool_call,
+                request_id: _,
+                ..
+            } => {
                 // Recovery path: if TurnStarting was missed but a streaming
                 // Assistant message exists (created by Delta recovery), pick
                 // it up so we add the tool call to the right message.
                 if !self.streaming_buffer.is_streaming
-                    && chat_context.messages.iter().any(|m| m.streaming && m.role == tidev_types::message::MessageRole::Assistant)
+                    && chat_context.messages.iter().any(|m| {
+                        m.streaming && m.role == tidev_types::message::MessageRole::Assistant
+                    })
                 {
-                    self.streaming_buffer.recover_or_begin_streaming(&mut chat_context.messages);
+                    self.streaming_buffer
+                        .recover_or_begin_streaming(&mut chat_context.messages);
                 }
 
                 // Prefer the currently-streaming message so tool calls from
@@ -683,14 +760,15 @@ impl MessageList {
                 let target = if let Some(mid) = target_id {
                     chat_context.messages.iter_mut().rev().find(|m| m.id == mid)
                 } else {
-                    chat_context.messages.iter_mut().rev()
+                    chat_context
+                        .messages
+                        .iter_mut()
+                        .rev()
                         .find(|m| m.role == tidev_types::message::MessageRole::Assistant)
                 };
                 if let Some(msg) = target {
                     msg.upsert_tool_call(tool_call.clone());
-                    if msg.reasoning_started_at.is_some()
-                        && msg.reasoning_completed_at.is_none()
-                    {
+                    if msg.reasoning_started_at.is_some() && msg.reasoning_completed_at.is_none() {
                         msg.reasoning_completed_at = Some(Utc::now());
                     }
                     self.layout_index.mark_dirty(msg.id);
@@ -701,7 +779,9 @@ impl MessageList {
                 // nested subagents are tracked even when this session's
                 // chat_context hasn't been created yet.
             }
-            BackendEvent::ToolCompleted { tool_call, result, .. } => {
+            BackendEvent::ToolCompleted {
+                tool_call, result, ..
+            } => {
                 if tool_call.name == "shell" {
                     // Shell output was streamed via ShellOutput — find and finalize
                     // the existing streaming Tool message instead of creating a new one.
@@ -738,16 +818,24 @@ impl MessageList {
                     // Track child_session_id for subagent task results.
                     if let Some(csid) = result.metadata.child_session_id {
                         // Map by tool message ID.
-                        let tool_msg_id = chat_context.messages.iter().rev()
+                        let tool_msg_id = chat_context
+                            .messages
+                            .iter()
+                            .rev()
                             .find(|m| m.tool_call_id.as_deref() == Some(&tool_call.id))
                             .map(|m| m.id);
                         if let Some(msg_id) = tool_msg_id {
                             self.completed_subagent_sessions.insert(msg_id, csid);
                         }
                         // Also map by assistant message ID for click hit-testing.
-                        let assistant_msg_id = chat_context.messages.iter().rev()
-                            .find(|m| m.role == tidev_types::message::MessageRole::Assistant
-                                && m.tool_calls.iter().any(|tc| tc.id == tool_call.id))
+                        let assistant_msg_id = chat_context
+                            .messages
+                            .iter()
+                            .rev()
+                            .find(|m| {
+                                m.role == tidev_types::message::MessageRole::Assistant
+                                    && m.tool_calls.iter().any(|tc| tc.id == tool_call.id)
+                            })
                             .map(|m| m.id);
                         if let Some(msg_id) = assistant_msg_id {
                             self.completed_subagent_sessions.insert(msg_id, csid);
@@ -756,10 +844,18 @@ impl MessageList {
                     self.dirty = true;
                 }
             }
-            BackendEvent::ShellOutput { session_id: _, tool_call_id, content, finished, .. } => {
+            BackendEvent::ShellOutput {
+                session_id: _,
+                tool_call_id,
+                content,
+                finished,
+                ..
+            } => {
                 log::debug!(
                     "chat: ShellOutput (tool_call={}, content_len={}, finished={})",
-                    tool_call_id, content.len(), finished,
+                    tool_call_id,
+                    content.len(),
+                    finished,
                 );
                 let existing = chat_context.messages.iter_mut().rev().find(|m| {
                     m.role == tidev_types::message::MessageRole::Tool
@@ -773,7 +869,8 @@ impl MessageList {
                     }
                     // Mark only the affected block as dirty so the layout index
                     // incrementally recomputes it — no full rebuild needed.
-                    self.layout_index.mark_block_dirty(&chat_context.messages, msg_id);
+                    self.layout_index
+                        .mark_block_dirty(&chat_context.messages, msg_id);
                 } else {
                     let mut msg = tidev_types::message::Message::streaming(
                         tidev_types::message::MessageRole::Tool,
@@ -840,14 +937,28 @@ impl MessageList {
                 }
                 self.dirty = true;
             }
-            BackendEvent::SidebarSnapshotReady { tool_call_id, file_diffs_json, .. } => {
-                if let Some(msg) = chat_context.messages.iter_mut().find(|m| m.tool_call_id.as_deref() == Some(tool_call_id)) {
+            BackendEvent::SidebarSnapshotReady {
+                tool_call_id,
+                file_diffs_json,
+                ..
+            } => {
+                if let Some(msg) = chat_context
+                    .messages
+                    .iter_mut()
+                    .find(|m| m.tool_call_id.as_deref() == Some(tool_call_id))
+                {
                     msg.file_diffs = Some(file_diffs_json.clone());
                     self.layout_index.mark_dirty(msg.id);
                     self.dirty = true;
                 }
             }
-            BackendEvent::ContextCompacted { compacted, summary, model_id, completed_at, .. } => {
+            BackendEvent::ContextCompacted {
+                compacted,
+                summary,
+                model_id,
+                completed_at,
+                ..
+            } => {
                 if *compacted {
                     self.follow_tail = true;
                     if let Some(summary) = summary {
@@ -897,7 +1008,8 @@ impl MessageList {
             let session_id = self.active_session_id?;
             let ctx = self.chat_contexts.get(&session_id)?;
             let msg = ctx.visible_messages().iter().find(|m| m.id == *msg_id)?;
-            if let Some(MessageAttachment::Image { data, filename, .. }) = msg.attachments.get(*att_idx)
+            if let Some(MessageAttachment::Image { data, filename, .. }) =
+                msg.attachments.get(*att_idx)
             {
                 return Some(Action::Overlay(OverlayAction::Open(
                     OverlayKind::ImageViewer {
@@ -920,9 +1032,10 @@ impl MessageList {
         {
             let exec_idx = hit.0;
             if let Some(sa) = self.running_subagents.get(exec_idx)
-                && let Some(csid) = sa.child_session_id {
-                    return Some(Action::Session(SessionAction::Select(csid)));
-                }
+                && let Some(csid) = sa.child_session_id
+            {
+                return Some(Action::Session(SessionAction::Select(csid)));
+            }
         }
 
         // Check thinking header bounds (Rect-based hit detection).
@@ -967,7 +1080,11 @@ impl MessageList {
     /// Uses the layout index (which has accurate line counts from the actual
     /// rendering pipeline) instead of computing a simplified line-count formula
     /// that would be wrong for word-wrapped / tool-call-heavy content.
-    fn resolve_scroll_to_message(&self, messages: &[tidev_types::message::Message], target_id: uuid::Uuid) -> Option<usize> {
+    fn resolve_scroll_to_message(
+        &self,
+        messages: &[tidev_types::message::Message],
+        target_id: uuid::Uuid,
+    ) -> Option<usize> {
         self.layout_index.find_scroll_offset(messages, target_id)
     }
 }
@@ -985,11 +1102,17 @@ impl Component for MessageList {
 
         match key.code {
             KeyCode::PageUp => {
-                let page = self.content_area.map(|r| (r.height as isize).max(1)).unwrap_or(10);
+                let page = self
+                    .content_area
+                    .map(|r| (r.height as isize).max(1))
+                    .unwrap_or(10);
                 Some(Action::Chat(ChatAction::ScrollDelta(-page)))
             }
             KeyCode::PageDown => {
-                let page = self.content_area.map(|r| (r.height as isize).max(1)).unwrap_or(10);
+                let page = self
+                    .content_area
+                    .map(|r| (r.height as isize).max(1))
+                    .unwrap_or(10);
                 Some(Action::Chat(ChatAction::ScrollDelta(page)))
             }
             KeyCode::Home => {
@@ -1015,9 +1138,17 @@ impl Component for MessageList {
             Action::Chat(ChatAction::ScrollDelta(delta)) => {
                 if self.active_session_id.is_some() {
                     let total = self.layout_index.total_lines;
-                    let viewport = self.content_area.map(|r| r.height as usize).unwrap_or(20).max(1);
+                    let viewport = self
+                        .content_area
+                        .map(|r| r.height as usize)
+                        .unwrap_or(20)
+                        .max(1);
                     let max_scroll = total.saturating_sub(viewport);
-                    let current = if self.follow_tail { max_scroll } else { self.scroll_offset.min(max_scroll) };
+                    let current = if self.follow_tail {
+                        max_scroll
+                    } else {
+                        self.scroll_offset.min(max_scroll)
+                    };
                     let new_scroll = (current as isize + delta).max(0) as usize;
                     self.scroll_offset = new_scroll.min(max_scroll);
                     self.follow_tail = self.scroll_offset >= max_scroll;
@@ -1049,10 +1180,11 @@ impl Component for MessageList {
 
         // Resolve scroll target if set
         if let Some(target_id) = self.scroll_target.take()
-            && let Some(scroll) = self.resolve_scroll_to_message(&chat_context.messages, target_id) {
-                self.scroll_offset = scroll;
-                self.follow_tail = false;
-            }
+            && let Some(scroll) = self.resolve_scroll_to_message(&chat_context.messages, target_id)
+        {
+            self.scroll_offset = scroll;
+            self.follow_tail = false;
+        }
 
         self.card_bounds.clear();
         self.content_area = None;
@@ -1120,7 +1252,8 @@ impl Component for MessageList {
                     width: render_content_area.width,
                     height: visible_end.saturating_sub(visible_start),
                 };
-                self.inline_subagent_card_bounds.push((card_range.execution_index, card_rect));
+                self.inline_subagent_card_bounds
+                    .push((card_range.execution_index, card_rect));
             }
         }
 
@@ -1149,8 +1282,10 @@ impl Component for MessageList {
             }
             let screen_y = render_content_area.y + screen_line as u16;
             let rect = Rect::new(
-                render_content_area.x, screen_y,
-                render_content_area.width, 1,
+                render_content_area.x,
+                screen_y,
+                render_content_area.width,
+                1,
             );
             self.thinking_header_bounds.push((rect, msg_id));
         }
@@ -1216,13 +1351,17 @@ impl MessageList {
 
     /// Maximum scroll offset.
     pub fn max_scroll(&self) -> usize {
-        self.layout_index.total_lines.saturating_sub(self.content_area.map_or(0, |a| a.height as usize))
+        self.layout_index
+            .total_lines
+            .saturating_sub(self.content_area.map_or(0, |a| a.height as usize))
     }
 
     /// Start a scrollbar drag: call on mouse down on scrollbar.
     /// Jumps to the clicked position first (click-to-jump), then starts drag tracking.
     pub fn start_scrollbar_drag(&mut self, mouse_y: u16) {
-        let Some(sb_area) = self.scrollbar_area() else { return };
+        let Some(sb_area) = self.scrollbar_area() else {
+            return;
+        };
         let max_scroll = self.max_scroll();
         if max_scroll == 0 {
             return;
@@ -1230,7 +1369,8 @@ impl MessageList {
         // Click-to-jump: map click position to scroll offset
         let track_height = sb_area.height as usize;
         let click_y = mouse_y.saturating_sub(sb_area.y) as f32;
-        let target_scroll = ((click_y / track_height.max(1) as f32) * max_scroll as f32).round() as usize;
+        let target_scroll =
+            ((click_y / track_height.max(1) as f32) * max_scroll as f32).round() as usize;
         self.scroll_offset = target_scroll.min(max_scroll);
         self.follow_tail = self.scroll_offset >= max_scroll;
         self.dirty = true;
@@ -1244,17 +1384,18 @@ impl MessageList {
 
     /// Continue a scrollbar drag: call on mouse drag.
     pub fn continue_scrollbar_drag(&mut self, mouse_y: u16) {
-        let Some(ref drag) = self.scrollbar_drag else { return };
+        let Some(ref drag) = self.scrollbar_drag else {
+            return;
+        };
         let track_height = self.content_area.map_or(1, |a| a.height as usize);
         if track_height == 0 {
             return;
         }
         let delta_y = mouse_y as isize - drag.start_mouse_y as isize;
         let scroll_delta = (delta_y as f32 / track_height as f32) * drag.max_scroll as f32;
-        let new_scroll =
-            (drag.start_scroll as isize + scroll_delta.round() as isize)
-                .max(0)
-                .min(drag.max_scroll as isize) as usize;
+        let new_scroll = (drag.start_scroll as isize + scroll_delta.round() as isize)
+            .max(0)
+            .min(drag.max_scroll as isize) as usize;
         self.scroll_offset = new_scroll;
         self.follow_tail = self.scroll_offset >= drag.max_scroll;
     }
@@ -1276,7 +1417,10 @@ impl MessageList {
 
     /// Number of running subagents (excludes interrupted/cancelled ones).
     pub fn running_subagents_count(&self) -> usize {
-        self.running_subagents.iter().filter(|s| !s.interrupted).count()
+        self.running_subagents
+            .iter()
+            .filter(|s| !s.interrupted)
+            .count()
     }
 
     /// Whether a given session_id is currently being run as a subagent.
@@ -1340,7 +1484,10 @@ impl MessageList {
 fn extract_task_description(arguments: &str) -> String {
     serde_json::from_str::<serde_json::Value>(arguments)
         .ok()
-        .and_then(|v| v.get("description").and_then(|d| d.as_str().map(|s| s.to_string())))
+        .and_then(|v| {
+            v.get("description")
+                .and_then(|d| d.as_str().map(|s| s.to_string()))
+        })
         .unwrap_or_default()
 }
 
@@ -1348,7 +1495,10 @@ fn extract_task_description(arguments: &str) -> String {
 fn extract_subagent_type(arguments: &str) -> String {
     serde_json::from_str::<serde_json::Value>(arguments)
         .ok()
-        .and_then(|v| v.get("subagent_type").and_then(|t| t.as_str().map(|s| s.to_string())))
+        .and_then(|v| {
+            v.get("subagent_type")
+                .and_then(|t| t.as_str().map(|s| s.to_string()))
+        })
         .unwrap_or_default()
 }
 
@@ -1363,13 +1513,11 @@ fn infer_subagent_status(event: &BackendEvent) -> Option<String> {
         BackendEvent::Delta { .. } => Some("Writing output".to_string()),
         BackendEvent::ReasoningDelta { .. } => Some("Thinking".to_string()),
         BackendEvent::ToolCallUpdated { tool_call, .. } => {
-            let name = canonical_tool_name(&tool_call.name)
-                .unwrap_or(&tool_call.name);
+            let name = canonical_tool_name(&tool_call.name).unwrap_or(&tool_call.name);
             Some(format!("Tool: {name}"))
         }
         BackendEvent::ToolCompleted { tool_call, .. } => {
-            let name = canonical_tool_name(&tool_call.name)
-                .unwrap_or(&tool_call.name);
+            let name = canonical_tool_name(&tool_call.name).unwrap_or(&tool_call.name);
             Some(format!("Completed: {name}"))
         }
         BackendEvent::Finished { .. }

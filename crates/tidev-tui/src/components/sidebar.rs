@@ -5,15 +5,15 @@
 
 use std::path::Path;
 
+use crate::chat_context::ChatContext;
+use crate::theme::ThemePalette;
+use crate::utils::{TokenUsage, format_token_count};
 use ratatui::layout::{Margin, Rect};
 use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph, Wrap};
 use tidev_core::FileDiff;
 use tidev_types::tools::TodoItem;
-use crate::chat_context::ChatContext;
-use crate::theme::ThemePalette;
-use crate::utils::{TokenUsage, format_token_count};
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::ContextUsage;
@@ -47,8 +47,6 @@ impl Sidebar {
         let max_scroll = self.total_lines.saturating_sub(self.viewport_lines.max(1));
         self.scroll_offset = self.scroll_offset.saturating_add(lines).min(max_scroll);
     }
-
-
 
     /// Render the sidebar into the given area.
     #[allow(clippy::too_many_arguments)]
@@ -123,12 +121,13 @@ impl Sidebar {
                     Style::default().fg(palette.muted),
                 )]));
             } else if let Some(usage) = context_usage
-                && let Some(current_tps) = usage.tokens_per_second {
-                    lines.push(Line::from(vec![Span::styled(
-                        format!("Speed: {:.1} t/s", current_tps),
-                        Style::default().fg(palette.muted),
-                    )]));
-                }
+                && let Some(current_tps) = usage.tokens_per_second
+            {
+                lines.push(Line::from(vec![Span::styled(
+                    format!("Speed: {:.1} t/s", current_tps),
+                    Style::default().fg(palette.muted),
+                )]));
+            }
         }
 
         // Token statistics
@@ -142,7 +141,11 @@ impl Sidebar {
 
         let mut token_usage = TokenUsage::default();
         if let Some(ctx) = chat_context {
-            for m in ctx.messages.iter().filter(|m| matches!(m.role, tidev_types::message::MessageRole::Assistant)) {
+            for m in ctx
+                .messages
+                .iter()
+                .filter(|m| matches!(m.role, tidev_types::message::MessageRole::Assistant))
+            {
                 token_usage.add(TokenUsage::new(
                     m.input_tokens.unwrap_or(0),
                     m.output_tokens.unwrap_or(0),
@@ -178,7 +181,10 @@ impl Sidebar {
             Style::default().fg(palette.muted),
         )]));
         lines.push(Line::from(vec![Span::styled(
-            format!("Out: {}", format_token_count(token_usage.output_tokens as u64)),
+            format!(
+                "Out: {}",
+                format_token_count(token_usage.output_tokens as u64)
+            ),
             Style::default().fg(palette.muted),
         )]));
 
@@ -267,14 +273,10 @@ impl Sidebar {
                 let add_str = format!("+{}", d.additions);
                 let del_str = format!("-{}", d.deletions);
 
-                let file_span =
-                    Span::styled(filename.clone(), Style::default().fg(palette.text));
-                let add_span =
-                    Span::styled(add_str.clone(), Style::default().fg(palette.diff_add));
-                let del_span = Span::styled(
-                    del_str.clone(),
-                    Style::default().fg(palette.diff_delete),
-                );
+                let file_span = Span::styled(filename.clone(), Style::default().fg(palette.text));
+                let add_span = Span::styled(add_str.clone(), Style::default().fg(palette.diff_add));
+                let del_span =
+                    Span::styled(del_str.clone(), Style::default().fg(palette.diff_delete));
 
                 // Right-align counts
                 let fw = UnicodeWidthStr::width(filename.as_str());
@@ -338,13 +340,14 @@ impl Sidebar {
 
         // Undo state
         if let Some(ctx) = chat_context
-            && ctx.is_reverted() {
-                lines.push(Line::from(""));
-                lines.push(Line::from(vec![Span::styled(
-                    "⚠ Undo active",
-                    Style::default().fg(palette.warning),
-                )]));
-            }
+            && ctx.is_reverted()
+        {
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![Span::styled(
+                "⚠ Undo active",
+                Style::default().fg(palette.warning),
+            )]));
+        }
 
         // ── Background ──
         frame.render_widget(
@@ -355,7 +358,10 @@ impl Sidebar {
         // ── Footer: workspace path ──
         let display_path = workspace_root.to_string_lossy().to_string();
         let display_path = display_path.replace(
-            &dirs::home_dir().unwrap_or_default().to_string_lossy().to_string(),
+            &dirs::home_dir()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string(),
             "~",
         );
         let display_path = shorten(&display_path, sidebar_content_width);
@@ -420,7 +426,6 @@ impl Sidebar {
         let footer_paragraph =
             Paragraph::new(footer_lines).style(Style::default().fg(palette.text));
         frame.render_widget(footer_paragraph, footer_area);
-
     }
 }
 

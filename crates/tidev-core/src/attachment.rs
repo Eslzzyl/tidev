@@ -29,10 +29,7 @@ use tidev_types::message::MessageAttachment;
 /// **Text files**    → [`MessageAttachment::FileReference`] with full
 ///                     content for display and a truncated tool-output
 ///                     snippet for the agent context.
-pub fn build_attachments(
-    workspace_root: &Path,
-    paths: &[String],
-) -> Vec<MessageAttachment> {
+pub fn build_attachments(workspace_root: &Path, paths: &[String]) -> Vec<MessageAttachment> {
     let mut attachments = Vec::with_capacity(paths.len());
     let mut seen = std::collections::BTreeSet::new();
 
@@ -189,7 +186,14 @@ fn build_directory_tree(path: &Path, max_depth: usize, max_entries: usize) -> Re
 
     let mut lines = vec![format!("{label}/")];
     let mut entry_count = 0usize;
-    append_directory_tree(path, 1, max_depth, max_entries, &mut entry_count, &mut lines)?;
+    append_directory_tree(
+        path,
+        1,
+        max_depth,
+        max_entries,
+        &mut entry_count,
+        &mut lines,
+    )?;
     Ok(lines.join("\n"))
 }
 
@@ -209,8 +213,7 @@ fn append_directory_tree(
     for entry in std::fs::read_dir(path)
         .with_context(|| format!("failed to read directory {}", path.display()))?
     {
-        let entry =
-            entry.with_context(|| format!("failed to read entry in {}", path.display()))?;
+        let entry = entry.with_context(|| format!("failed to read entry in {}", path.display()))?;
         let file_type = entry
             .file_type()
             .with_context(|| format!("failed to inspect {}", entry.path().display()))?;
@@ -231,7 +234,14 @@ fn append_directory_tree(
         if is_dir {
             lines.push(format!("{indent}{name}/"));
             *entry_count += 1;
-            append_directory_tree(&child_path, depth + 1, max_depth, max_entries, entry_count, lines)?;
+            append_directory_tree(
+                &child_path,
+                depth + 1,
+                max_depth,
+                max_entries,
+                entry_count,
+                lines,
+            )?;
         } else {
             lines.push(format!("{indent}{name}"));
             *entry_count += 1;

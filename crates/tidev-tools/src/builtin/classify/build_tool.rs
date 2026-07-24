@@ -38,8 +38,8 @@ pub(super) fn classify_build_tool(args: &[&str]) -> Safety {
     match target {
         "help" | "list" | "describe" => Safety::ReadOnly,
         // Explicit write targets
-        "install" | "clean" | "uninstall" | "distclean" | "maintainer-clean"
-        | "mostlyclean" | "realclean" | "check" | "test" | "benchmark" => Safety::WriteOperation,
+        "install" | "clean" | "uninstall" | "distclean" | "maintainer-clean" | "mostlyclean"
+        | "realclean" | "check" | "test" | "benchmark" => Safety::WriteOperation,
         // Everything else (including bare target names like `all`, `build`, `debug`, `release`)
         _ => Safety::Unknown,
     }

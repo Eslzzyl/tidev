@@ -48,12 +48,27 @@ mod tests {
 
     #[test]
     fn pip_write_commands() {
-        assert_eq!(classify_pip(&["install", "requests"]), Safety::WriteOperation);
-        assert_eq!(classify_pip(&["install", "-r", "requirements.txt"]), Safety::WriteOperation);
-        assert_eq!(classify_pip(&["uninstall", "requests"]), Safety::WriteOperation);
-        assert_eq!(classify_pip(&["download", "requests"]), Safety::WriteOperation);
+        assert_eq!(
+            classify_pip(&["install", "requests"]),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            classify_pip(&["install", "-r", "requirements.txt"]),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            classify_pip(&["uninstall", "requests"]),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            classify_pip(&["download", "requests"]),
+            Safety::WriteOperation
+        );
         assert_eq!(classify_pip(&["wheel", "requests"]), Safety::WriteOperation);
         assert_eq!(classify_pip(&["cache", "purge"]), Safety::WriteOperation);
-        assert_eq!(classify_pip(&["cache", "remove", "pkg"]), Safety::WriteOperation);
+        assert_eq!(
+            classify_pip(&["cache", "remove", "pkg"]),
+            Safety::WriteOperation
+        );
     }
 }

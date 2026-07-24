@@ -40,7 +40,8 @@ impl NotificationState {
         self.notifications.retain(|n| n.expires_at > now);
         // Keep at most MAX_VISIBLE most recent notifications.
         if self.notifications.len() > MAX_VISIBLE {
-            self.notifications.drain(..self.notifications.len() - MAX_VISIBLE);
+            self.notifications
+                .drain(..self.notifications.len() - MAX_VISIBLE);
         }
     }
 }

@@ -2,8 +2,8 @@
 
 use anyhow::Result;
 use crossterm::event::{KeyEvent, MouseEvent};
-use ratatui::layout::Rect;
 use ratatui::Frame;
+use ratatui::layout::Rect;
 
 use crate::action::Action;
 use crate::context::{DrawContext, InitContext, UpdateContext};

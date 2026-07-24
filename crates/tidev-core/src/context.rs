@@ -124,7 +124,8 @@ impl ContextManager {
                             content, ..
                         } => tokens += Self::estimate_tokens_for_text(content),
                         tidev_types::message::MessageAttachment::DirectoryReference {
-                            tree, ..
+                            tree,
+                            ..
                         } => tokens += Self::estimate_tokens_for_text(tree),
                         _ => {}
                     }
@@ -154,10 +155,7 @@ impl ContextManager {
             .max(4000)
             .clamp(1, context_window - 1);
         let trigger = context_window.saturating_sub(reserved);
-        let retain = self
-            .retain_recent_tokens
-            .max(reserved)
-            .clamp(1, trigger);
+        let retain = self.retain_recent_tokens.max(reserved).clamp(1, trigger);
         (trigger, retain)
     }
 
@@ -180,7 +178,10 @@ impl ContextManager {
             .collect();
 
         // Prefer token counts from the provider when available.
-        let last_tokens = visible.iter().rev().find_map(|m| m.input_tokens.or(m.total_tokens));
+        let last_tokens = visible
+            .iter()
+            .rev()
+            .find_map(|m| m.input_tokens.or(m.total_tokens));
         let (trigger_tokens, _) = self.compaction_budget(context_window, max_output_tokens);
 
         match last_tokens {
@@ -309,8 +310,15 @@ impl ContextManager {
         session_id: Uuid,
         event_tx: Option<tokio::sync::mpsc::UnboundedSender<BackendEvent>>,
     ) -> Result<String> {
-        llm.complete_with_messages(session_id, 0, model.clone(), messages, tools.to_vec(), event_tx)
-            .await
+        llm.complete_with_messages(
+            session_id,
+            0,
+            model.clone(),
+            messages,
+            tools.to_vec(),
+            event_tx,
+        )
+        .await
     }
 
     async fn compact_streaming(
@@ -387,10 +395,7 @@ impl ContextManager {
     /// - Validates and sanitizes assistant tool_call arguments.
     /// - Tracks tool_call / tool_result pairing, injecting synthetic failures
     ///   for orphaned tool_calls.
-    pub fn build_request_messages(
-        &self,
-        buffer: &MessageBuffer,
-    ) -> Vec<Message> {
+    pub fn build_request_messages(&self, buffer: &MessageBuffer) -> Vec<Message> {
         let messages = buffer.load();
         let mut out = Vec::new();
 
@@ -408,10 +413,7 @@ impl ContextManager {
     }
 
     /// Inject synthetic failure tool results for orphaned tool_calls.
-    fn drain_pending_tool_calls(
-        out: &mut Vec<Message>,
-        pending: &mut HashMap<String, String>,
-    ) {
+    fn drain_pending_tool_calls(out: &mut Vec<Message>, pending: &mut HashMap<String, String>) {
         if pending.is_empty() {
             return;
         }
@@ -423,7 +425,8 @@ impl ContextManager {
                 &tool_name,
                 tidev_types::message::ToolExecutionResult::new(
                     "[Tool result was not captured before context compaction. \
-                     The tool may need to be re-run if still relevant.]".to_string(),
+                     The tool may need to be re-run if still relevant.]"
+                        .to_string(),
                 ),
             ));
         }
@@ -437,7 +440,7 @@ impl ContextManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tidev_types::message::{MessageRole, Message, ToolCall, ToolExecutionResult};
+    use tidev_types::message::{Message, MessageRole, ToolCall, ToolExecutionResult};
     use uuid::Uuid;
 
     fn user_msg(content: &str) -> Message {
@@ -524,10 +527,7 @@ mod tests {
             arguments: "{}".into(),
             thought_signature: None,
         };
-        let msgs = vec![
-            assistant_with_tool_calls(vec![tc]),
-            user_msg("never mind"),
-        ];
+        let msgs = vec![assistant_with_tool_calls(vec![tc]), user_msg("never mind")];
         let buf = MessageBuffer::new(msgs);
         let cm = ContextManager::new();
         let result = cm.build_request_messages(&buf);
@@ -618,7 +618,10 @@ mod tests {
         let buf = MessageBuffer::new(msgs);
         let cm = ContextManager::new();
         let result = cm.build_request_messages(&buf);
-        assert_eq!(result[0].tool_calls[0].arguments, r#"{"file_path":"/tmp/x"}"#);
+        assert_eq!(
+            result[0].tool_calls[0].arguments,
+            r#"{"file_path":"/tmp/x"}"#
+        );
     }
 
     #[test]
@@ -643,7 +646,9 @@ mod tests {
     fn build_request_messages_global_ordering() {
         // Complex scenario with summary, retained_from, and interleaved calls.
         let tc1 = ToolCall {
-            id: "c1".into(), name: "read".into(), arguments: "{}".into(),
+            id: "c1".into(),
+            name: "read".into(),
+            arguments: "{}".into(),
             thought_signature: None,
         };
         let msgs = vec![
@@ -703,9 +708,9 @@ mod tests {
 
     #[test]
     fn estimate_tokens_for_messages_sums_content_and_reasoning() {
-        let mut m1 = Message::new(MessageRole::User, "hello world");      // 11 / 4 = 2
-        m1.reasoning = "think".into();                                      // 5 / 4 = 1
-        let m2 = Message::new(MessageRole::Assistant, "a".repeat(40));    // 40 / 4 = 10
+        let mut m1 = Message::new(MessageRole::User, "hello world"); // 11 / 4 = 2
+        m1.reasoning = "think".into(); // 5 / 4 = 1
+        let m2 = Message::new(MessageRole::Assistant, "a".repeat(40)); // 40 / 4 = 10
         let buf = MessageBuffer::new(vec![m1, m2]);
         let tokens = ContextManager::estimate_tokens_for_messages(buf.load());
         assert_eq!(tokens, 2 + 1 + 10);

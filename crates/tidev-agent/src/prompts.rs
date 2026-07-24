@@ -439,10 +439,19 @@ mod tests {
     fn test_plan_reminder_forbids_writing_build_reminder_allows() {
         let plan = plan_mode_reminder();
         let build = build_mode_reminder();
-        assert!(plan.contains("FORBIDDEN"), "Plan reminder must forbid writing");
-        assert!(plan.contains("READ-ONLY"), "Plan reminder must state READ-ONLY");
+        assert!(
+            plan.contains("FORBIDDEN"),
+            "Plan reminder must forbid writing"
+        );
+        assert!(
+            plan.contains("READ-ONLY"),
+            "Plan reminder must state READ-ONLY"
+        );
         assert!(build.contains("write"), "Build reminder must allow write");
         assert!(build.contains("edit"), "Build reminder must allow edit");
-        assert!(!build.contains("FORBIDDEN"), "Build reminder must NOT forbid writing");
+        assert!(
+            !build.contains("FORBIDDEN"),
+            "Build reminder must NOT forbid writing"
+        );
     }
 }

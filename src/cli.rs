@@ -12,11 +12,13 @@ use uuid::Uuid;
 // ---------------------------------------------------------------------------
 
 /// Open the database and return its store together with the resolved paths.
-fn open_store() -> Result<(tidev_config::paths::ConfigPaths, tidev_storage::SessionStore)> {
+fn open_store() -> Result<(
+    tidev_config::paths::ConfigPaths,
+    tidev_storage::SessionStore,
+)> {
     let paths = tidev_config::paths::ConfigPaths::discover()?;
-    let database =
-        tidev_storage::database::Database::open(&paths.database_file)
-            .context("failed to open database")?;
+    let database = tidev_storage::database::Database::open(&paths.database_file)
+        .context("failed to open database")?;
     let store = database.create_store()?;
     Ok((paths, store))
 }
@@ -152,9 +154,7 @@ pub fn import(file: PathBuf, session: Vec<String>, replace: bool) -> Result<()> 
         Some(
             session
                 .iter()
-                .map(|s| {
-                    Uuid::parse_str(s).with_context(|| format!("invalid session UUID: {s}"))
-                })
+                .map(|s| Uuid::parse_str(s).with_context(|| format!("invalid session UUID: {s}")))
                 .collect::<Result<Vec<_>>>()?,
         )
     };
@@ -177,9 +177,8 @@ pub fn import(file: PathBuf, session: Vec<String>, replace: bool) -> Result<()> 
 /// Run database maintenance (VACUUM + ANALYZE).
 pub fn db_maintain() -> Result<()> {
     let (paths, _store) = open_store()?;
-    let database =
-        tidev_storage::database::Database::open(&paths.database_file)
-            .context("failed to open database")?;
+    let database = tidev_storage::database::Database::open(&paths.database_file)
+        .context("failed to open database")?;
     database.maintain()?;
     println!("Database maintenance completed.");
     Ok(())
@@ -247,7 +246,10 @@ pub fn session_prune(older_than_days: u64) -> Result<()> {
     if deleted.is_empty() {
         println!("No sessions older than {older_than_days} days found.");
     } else {
-        println!("Deleted {} session(s) older than {older_than_days} days.", deleted.len());
+        println!(
+            "Deleted {} session(s) older than {older_than_days} days.",
+            deleted.len()
+        );
     }
     Ok(())
 }

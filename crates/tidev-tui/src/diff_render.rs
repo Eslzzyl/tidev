@@ -5,10 +5,10 @@
 
 use std::path::Path;
 
+use crate::theme::{ThemeName, ThemePalette};
 use diffy::{Line as DiffLine, Patch};
 use ratatui::prelude::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use crate::theme::{ThemeName, ThemePalette};
 use unicode_width::UnicodeWidthStr;
 
 use crate::components::chat::render_cache::SelectableRegionRange;
@@ -168,15 +168,27 @@ fn collect_rows(patch: &Patch<'_, str>, tab_width: usize) -> Vec<DiffRow> {
                             new_line_number += 1;
                             rows.push(DiffRow {
                                 kind: RowKind::Context,
-                                left: Some(DiffCell::context(old_line_number - 1, trimmed, tab_width)),
-                                right: Some(DiffCell::context(new_line_number - 1, trimmed, tab_width)),
+                                left: Some(DiffCell::context(
+                                    old_line_number - 1,
+                                    trimmed,
+                                    tab_width,
+                                )),
+                                right: Some(DiffCell::context(
+                                    new_line_number - 1,
+                                    trimmed,
+                                    tab_width,
+                                )),
                             });
                         }
                         DiffLine::Delete(_) => {
                             old_line_number += 1;
                             rows.push(DiffRow {
                                 kind: RowKind::Removed,
-                                left: Some(DiffCell::delete(old_line_number - 1, trimmed.to_string(), tab_width)),
+                                left: Some(DiffCell::delete(
+                                    old_line_number - 1,
+                                    trimmed.to_string(),
+                                    tab_width,
+                                )),
                                 right: None,
                             });
                         }
@@ -185,7 +197,11 @@ fn collect_rows(patch: &Patch<'_, str>, tab_width: usize) -> Vec<DiffRow> {
                             rows.push(DiffRow {
                                 kind: RowKind::Added,
                                 left: None,
-                                right: Some(DiffCell::insert(new_line_number - 1, trimmed.to_string(), tab_width)),
+                                right: Some(DiffCell::insert(
+                                    new_line_number - 1,
+                                    trimmed.to_string(),
+                                    tab_width,
+                                )),
                             });
                         }
                     }
@@ -226,7 +242,13 @@ fn render_wide_rows(
                     .right
                     .as_ref()
                     .map(|cell| {
-                        render_cell_lines(cell, right_width, line_number_width, syntax_path, palette)
+                        render_cell_lines(
+                            cell,
+                            right_width,
+                            line_number_width,
+                            syntax_path,
+                            palette,
+                        )
                     })
                     .unwrap_or_else(|| vec![blank_cell_line(right_width, right_bg.flatten())]);
                 out.extend(merge_columns(
@@ -260,7 +282,13 @@ fn render_wide_rows(
                     .right
                     .as_ref()
                     .map(|cell| {
-                        render_cell_lines(cell, right_width, line_number_width, syntax_path, palette)
+                        render_cell_lines(
+                            cell,
+                            right_width,
+                            line_number_width,
+                            syntax_path,
+                            palette,
+                        )
                     })
                     .unwrap_or_else(|| vec![blank_cell_line(right_width, right_bg.flatten())]);
                 out.extend(merge_columns(
@@ -290,17 +318,35 @@ fn render_narrow_rows(
         match row.kind {
             RowKind::Context => {
                 if let Some(cell) = row.left.as_ref() {
-                    out.extend(render_cell_lines(cell, width, line_number_width, syntax_path, palette));
+                    out.extend(render_cell_lines(
+                        cell,
+                        width,
+                        line_number_width,
+                        syntax_path,
+                        palette,
+                    ));
                 }
             }
             RowKind::Removed => {
                 if let Some(cell) = row.left.as_ref() {
-                    out.extend(render_cell_lines(cell, width, line_number_width, syntax_path, palette));
+                    out.extend(render_cell_lines(
+                        cell,
+                        width,
+                        line_number_width,
+                        syntax_path,
+                        palette,
+                    ));
                 }
             }
             RowKind::Added => {
                 if let Some(cell) = row.right.as_ref() {
-                    out.extend(render_cell_lines(cell, width, line_number_width, syntax_path, palette));
+                    out.extend(render_cell_lines(
+                        cell,
+                        width,
+                        line_number_width,
+                        syntax_path,
+                        palette,
+                    ));
                 }
             }
         }
@@ -608,7 +654,8 @@ index 1111111..2222222 100644
 +fn main() {}
 "#;
 
-        let (lines, _) = render_unified_diff_text(diff, 60, palette(), 4).expect("diff should render");
+        let (lines, _) =
+            render_unified_diff_text(diff, 60, palette(), 4).expect("diff should render");
         let rendered = flatten_lines(&lines);
 
         assert!(
@@ -700,17 +747,15 @@ index 1111111..2222222 100644
             render_unified_diff_text(diff, 120, palette(), 4).expect("diff should render");
         let flat: Vec<String> = lines
             .iter()
-            .map(|l| {
-                l.spans
-                    .iter()
-                    .map(|s| s.content.as_ref())
-                    .collect()
-            })
+            .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
             .collect();
 
         // All lines containing the separator must have it at the same column.
         let positions: Vec<usize> = flat.iter().filter_map(|l| l.find('\u{2502}')).collect();
-        assert!(!positions.is_empty(), "expected at least one separator line");
+        assert!(
+            !positions.is_empty(),
+            "expected at least one separator line"
+        );
         let first = positions[0];
         assert!(
             positions.iter().all(|&p| p == first),
@@ -739,12 +784,7 @@ index 1111111..2222222 100644
             render_unified_diff_text(diff, width, palette(), 4).expect("diff should render");
         let flat: Vec<String> = lines
             .iter()
-            .map(|l| {
-                l.spans
-                    .iter()
-                    .map(|s| s.content.as_ref())
-                    .collect()
-            })
+            .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
             .collect();
 
         // Every non-empty line should have the same display width.
@@ -756,7 +796,8 @@ index 1111111..2222222 100644
         let expected = widths[0];
         for (i, &w) in widths.iter().enumerate() {
             assert_eq!(
-                w, expected,
+                w,
+                expected,
                 "line {i} has width {w}, expected {expected}: {:?}",
                 flat.iter().enumerate().find(|(j, _)| *j == i).unwrap().1
             );

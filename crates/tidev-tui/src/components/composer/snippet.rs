@@ -116,9 +116,10 @@ impl SnippetState {
 
             // Only trigger if the query is a prefix of at least one snippet.
             let query_lower = possible_query.to_lowercase();
-            let is_prefix = self.snippets_cache.iter().any(|snippet| {
-                snippet.to_lowercase().starts_with(&query_lower)
-            });
+            let is_prefix = self
+                .snippets_cache
+                .iter()
+                .any(|snippet| snippet.to_lowercase().starts_with(&query_lower));
 
             if is_prefix && possible_query.len() > best_query.len() {
                 let matched = self.candidates(&possible_query);
@@ -136,13 +137,17 @@ impl SnippetState {
         }
 
         self.visible = !self.snippets.is_empty();
-        self.selected_index = self.selected_index.min(self.snippets.len().saturating_sub(1));
+        self.selected_index = self
+            .selected_index
+            .min(self.snippets.len().saturating_sub(1));
     }
 
     /// Apply the currently selected completion.
     /// Returns the replacement text or `None`.
     pub fn apply_completion(&self) -> Option<String> {
-        self.snippets.get(self.selected_index).map(|s| s.text.clone())
+        self.snippets
+            .get(self.selected_index)
+            .map(|s| s.text.clone())
     }
 
     /// Move the selection by `delta`.
@@ -217,11 +222,7 @@ impl SnippetState {
             .collect();
 
         // Sort by score descending, then alphabetically.
-        results.sort_by(|a, b| {
-            b.score
-                .cmp(&a.score)
-                .then_with(|| a.text.cmp(&b.text))
-        });
+        results.sort_by(|a, b| b.score.cmp(&a.score).then_with(|| a.text.cmp(&b.text)));
 
         results.truncate(MAX_SUGGESTIONS);
         results
@@ -356,10 +357,7 @@ mod tests {
     #[test]
     fn test_parse_snippets() {
         let mut snippets = Vec::new();
-        SnippetState::parse_snippets_from_content(
-            "# comment\nhello\n\nworld\n",
-            &mut snippets,
-        );
+        SnippetState::parse_snippets_from_content("# comment\nhello\n\nworld\n", &mut snippets);
         assert_eq!(snippets, vec!["hello", "world"]);
     }
 }

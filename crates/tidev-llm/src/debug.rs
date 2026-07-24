@@ -20,8 +20,8 @@ pub fn save_request_for_debugging(request_body: &str, enabled: bool, max_files: 
     // Pretty-print the request JSON with trailing newline
     let formatted = match serde_json::from_str::<serde_json::Value>(request_body) {
         Ok(val) => {
-            let mut s = serde_json::to_string_pretty(&val)
-                .unwrap_or_else(|_| request_body.to_string());
+            let mut s =
+                serde_json::to_string_pretty(&val).unwrap_or_else(|_| request_body.to_string());
             s.push('\n');
             s
         }
@@ -48,11 +48,7 @@ pub fn save_request_for_debugging(request_body: &str, enabled: bool, max_files: 
 /// Save a non-streaming (complete) response as a pretty-printed JSON file.
 /// Saves to /tmp/tidev-responses/ when `enabled` is true and `max_files > 0`.
 /// Rotates old files when the count exceeds `max_files`.
-pub fn save_complete_response_for_debugging(
-    response_body: &str,
-    enabled: bool,
-    max_files: usize,
-) {
+pub fn save_complete_response_for_debugging(response_body: &str, enabled: bool, max_files: usize) {
     if !enabled || max_files == 0 || response_body.is_empty() {
         return;
     }
@@ -84,7 +80,11 @@ pub fn save_complete_response_for_debugging(
     );
     let filepath = dir.join(&filename);
     if let Err(e) = std::fs::write(&filepath, &formatted) {
-        log::debug!("save_complete_response: failed to write {}: {}", filename, e);
+        log::debug!(
+            "save_complete_response: failed to write {}: {}",
+            filename,
+            e
+        );
     }
 }
 

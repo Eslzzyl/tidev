@@ -8,7 +8,7 @@ use std::{
     io::Read,
     path::Path,
     process::Stdio,
-    sync::{mpsc, Mutex},
+    sync::{Mutex, mpsc},
     thread,
     time::Duration,
 };
@@ -528,11 +528,7 @@ fn run_shell_inner(
 
         // Prepend shell-specific encoding setup so that Windows programs
         // output UTF-8 instead of the system ANSI code page.
-        let shell_command = prepare_command_for_shell(
-            &actual_command,
-            &shell.program,
-            &shell.arg,
-        );
+        let shell_command = prepare_command_for_shell(&actual_command, &shell.program, &shell.arg);
 
         let mut cmd = std::process::Command::new(&shell.program);
         // arg may contain spaces (e.g. "-NoProfile -Command")

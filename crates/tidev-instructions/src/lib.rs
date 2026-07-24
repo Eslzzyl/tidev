@@ -436,8 +436,7 @@ mod tests {
 
     impl TempDir {
         fn new(prefix: &str) -> Result<Self> {
-            let path =
-                std::env::temp_dir().join(format!("{}-{}", prefix, uuid::Uuid::new_v4()));
+            let path = std::env::temp_dir().join(format!("{}-{}", prefix, uuid::Uuid::new_v4()));
             fs::create_dir_all(&path).context("failed to create temp dir")?;
             Ok(Self { path })
         }

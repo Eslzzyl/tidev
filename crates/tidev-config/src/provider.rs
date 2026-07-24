@@ -136,10 +136,7 @@ mod tests {
     fn resolve_base_url_model_overrides_provider() {
         let provider = provider(None, "https://api.default.com".into());
         let model = model(None, Some("https://api.custom.com".into()));
-        assert_eq!(
-            provider.resolve_base_url(&model),
-            "https://api.custom.com"
-        );
+        assert_eq!(provider.resolve_base_url(&model), "https://api.custom.com");
     }
 
     #[test]

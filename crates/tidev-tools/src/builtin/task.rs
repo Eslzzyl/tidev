@@ -3,18 +3,19 @@ use serde_json::Value;
 use std::path::Path;
 use uuid::Uuid;
 
-use tidev_types::agent_type::AgentType;
-use tidev_types::tools::{TaskArgs, ToolDefinition, ToolPermission};
-use tidev_types::prompts::SessionMode;
 use crate::builtin::utils::decode_tool_args;
 use crate::todo_persistence::TodoPersistence;
+use tidev_types::agent_type::AgentType;
+use tidev_types::prompts::SessionMode;
+use tidev_types::tools::{TaskArgs, ToolDefinition, ToolPermission};
 
 pub fn definitions() -> Vec<ToolDefinition> {
     vec![ToolDefinition::new::<TaskArgs>(
         "task",
-         "Run a subagent task. Use `subagent_type` to delegate to a specialist: \
+        "Run a subagent task. Use `subagent_type` to delegate to a specialist: \
           explorer (code search), librarian (docs), oracle (strategy), \
-          fixer (implementation).",        ToolPermission::Session,
+          fixer (implementation).",
+        ToolPermission::Session,
     )]
 }
 

@@ -5,19 +5,20 @@
 //! Component implementation.
 
 use anyhow::Result;
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent,
-    MouseEventKind};
+use crossterm::event::{
+    KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use ratatui::layout::{Constraint, Layout, Margin, Position, Rect};
 use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, List, ListItem, Paragraph};
 use tidev_config::auth::{ActiveModel, ModelSummary};
 
-use unicode_width::UnicodeWidthStr;
 use crate::action::{Action, OverlayAction, OverlayKind};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
 use crate::utils::centered_rect;
+use unicode_width::UnicodeWidthStr;
 
 // ---------------------------------------------------------------------------
 // Thinking level helpers
@@ -232,9 +233,8 @@ impl ModelPanel {
         };
 
         if let Some(tab) = self.tabs.get_mut(self.selected_tab_index) {
-            tab.selected_index = tab_index.unwrap_or_else(|| {
-                first_selectable_index(&self.items_cache).unwrap_or(0)
-            });
+            tab.selected_index =
+                tab_index.unwrap_or_else(|| first_selectable_index(&self.items_cache).unwrap_or(0));
         }
     }
 
@@ -253,13 +253,11 @@ impl ModelPanel {
 
         // If thinking level is expanded, cycle through thinking options
         if thinking_expanded {
-            let options =
-                thinking_options_for_model(&self.items_cache, selected_index);
+            let options = thinking_options_for_model(&self.items_cache, selected_index);
             if !options.is_empty() {
                 if let Some(tab) = self.tabs.get_mut(self.selected_tab_index) {
                     let len = options.len() as isize;
-                    tab.thinking_level_index =
-                        ((tl_idx as isize + delta).rem_euclid(len)) as usize;
+                    tab.thinking_level_index = ((tl_idx as isize + delta).rem_euclid(len)) as usize;
                 }
                 return;
             }
@@ -354,8 +352,7 @@ impl Component for ModelPanel {
                                     .map(|t| t.selected_index)
                                     .unwrap_or(0),
                             );
-                        let tl_options =
-                            thinking_options_for_model(&self.items_cache, model_pos);
+                        let tl_options = thinking_options_for_model(&self.items_cache, model_pos);
 
                         if tl_options.is_empty() {
                             Some(Action::Overlay(OverlayAction::Close(
@@ -405,8 +402,7 @@ impl Component for ModelPanel {
                 self.reset_selection_for_current_tab();
                 None
             }
-            KeyCode::BackTab
-            | KeyCode::Tab if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            KeyCode::BackTab | KeyCode::Tab if key.modifiers.contains(KeyModifiers::SHIFT) => {
                 self.prev_tab();
                 self.rebuild_items_from_cache();
                 self.reset_selection_for_current_tab();
@@ -492,8 +488,7 @@ impl Component for ModelPanel {
                         .current_tab()
                         .is_some_and(|t| t.thinking_level_expanded && t.selected_index == item_idx);
                     if is_expanded {
-                        let tl_options =
-                            thinking_options_for_model(&self.items_cache, item_idx);
+                        let tl_options = thinking_options_for_model(&self.items_cache, item_idx);
                         rendered_row += tl_options.len();
                     }
                 }
@@ -529,13 +524,9 @@ impl Component for ModelPanel {
                 };
 
                 let tl = if thinking_expanded {
-                    let options =
-                        thinking_options_for_model(&self.items_cache, selected_index);
+                    let options = thinking_options_for_model(&self.items_cache, selected_index);
                     if !options.is_empty() {
-                        Some(
-                            options[tl_idx % options.len()]
-                                .to_string(),
-                        )
+                        Some(options[tl_idx % options.len()].to_string())
                     } else {
                         None
                     }
@@ -553,11 +544,9 @@ impl Component for ModelPanel {
                     // runtime.active_model() returns the correct model immediately.
                     let config = ctx.runtime.config();
                     let auth = ctx.runtime.auth();
-                    if let Ok(model) = config.resolve_model_by_ids(
-                        &auth,
-                        &summary.provider_id,
-                        &summary.model_id,
-                    ) {
+                    if let Ok(model) =
+                        config.resolve_model_by_ids(&auth, &summary.provider_id, &summary.model_id)
+                    {
                         ctx.runtime.set_active_model(model);
                     }
                 } else {
@@ -645,15 +634,9 @@ impl Component for ModelPanel {
                 } else {
                     Style::default().fg(palette.muted)
                 };
-                let mut spans = vec![Span::styled(
-                    format!(" {} ", tab.display_name),
-                    tab_style,
-                )];
+                let mut spans = vec![Span::styled(format!(" {} ", tab.display_name), tab_style)];
                 if idx + 1 < self.tabs.len() {
-                    spans.push(Span::styled(
-                        " │ ",
-                        Style::default().fg(palette.border),
-                    ));
+                    spans.push(Span::styled(" │ ", Style::default().fg(palette.border)));
                 }
                 spans
             })
@@ -704,11 +687,7 @@ impl Component for ModelPanel {
             frame.render_widget(
                 Paragraph::new("No connected models match this search.")
                     .alignment(ratatui::layout::Alignment::Center)
-                    .style(
-                        Style::default()
-                            .bg(palette.panel_alt)
-                            .fg(palette.muted),
-                    ),
+                    .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                 sections[4],
             );
         } else {
@@ -741,22 +720,20 @@ impl Component for ModelPanel {
 
                         // Active checkmark: show if this model is the currently
                         // configured model for the active tab.
-                        let is_active = self
-                            .current_tab()
-                            .is_some_and(|tab| {
-                                if tab.agent_type_str == "general" {
+                        let is_active = self.current_tab().is_some_and(|tab| {
+                            if tab.agent_type_str == "general" {
+                                summary.provider_id == self.active_model.provider_id
+                                    && summary.model_id == self.active_model.model_id
+                            } else {
+                                let label = tab.current_label.to_ascii_lowercase();
+                                if label == "<inherit>" || label.is_empty() {
                                     summary.provider_id == self.active_model.provider_id
                                         && summary.model_id == self.active_model.model_id
                                 } else {
-                                    let label = tab.current_label.to_ascii_lowercase();
-                                    if label == "<inherit>" || label.is_empty() {
-                                        summary.provider_id == self.active_model.provider_id
-                                            && summary.model_id == self.active_model.model_id
-                                    } else {
-                                        summary.label().to_ascii_lowercase() == label
-                                    }
+                                    summary.label().to_ascii_lowercase() == label
                                 }
-                            });
+                            }
+                        });
 
                         let active_marker = if is_active {
                             Span::styled("✓ ", Style::default().fg(palette.accent))
@@ -804,7 +781,11 @@ impl Component for ModelPanel {
                                 && self.active_model.thinking_level.is_supported()
                             {
                                 let name = self.active_model.thinking_level.display_name();
-                                if name.is_empty() { None } else { Some(name.to_string()) }
+                                if name.is_empty() {
+                                    None
+                                } else {
+                                    Some(name.to_string())
+                                }
                             } else {
                                 None
                             }
@@ -864,11 +845,7 @@ impl Component for ModelPanel {
             state.select(Some(sel.min(rows.len().saturating_sub(1))));
 
             let list = List::new(rows)
-                .style(
-                    Style::default()
-                        .bg(palette.panel_alt)
-                        .fg(palette.text),
-                )
+                .style(Style::default().bg(palette.panel_alt).fg(palette.text))
                 .highlight_style(
                     Style::default()
                         .bg(palette.selection_bg)
@@ -891,11 +868,7 @@ impl Component for ModelPanel {
         frame.render_widget(
             Paragraph::new(footer)
                 .alignment(ratatui::layout::Alignment::Center)
-                .style(
-                    Style::default()
-                        .bg(palette.panel_alt)
-                        .fg(palette.muted),
-                ),
+                .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
             sections[5],
         );
     }

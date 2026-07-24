@@ -136,9 +136,14 @@ pub(crate) async fn stream_gemini(
         // Process complete SSE lines
         while let Some(line_end) = buffer.iter().position(|&b| b == b'\n') {
             let tail = &buffer[..line_end];
-            let line = String::from_utf8_lossy(
-                if tail.last() == Some(&b'\r') { &tail[..tail.len() - 1] } else { tail }
-            ).into_owned().trim().to_string();
+            let line = String::from_utf8_lossy(if tail.last() == Some(&b'\r') {
+                &tail[..tail.len() - 1]
+            } else {
+                tail
+            })
+            .into_owned()
+            .trim()
+            .to_string();
             buffer.drain(..=line_end);
 
             if line.is_empty() {
@@ -945,7 +950,9 @@ mod tests {
 
         let messages = vec![Message::new(MessageRole::User, "Hello")];
         let request = build_gemini_request(&model, messages, &[]).expect("build request");
-        let config = request.generation_config.expect("generation_config is present");
+        let config = request
+            .generation_config
+            .expect("generation_config is present");
 
         assert_eq!(config["thinking"]["type"], "enabled");
         assert_eq!(config["reasoning_effort"], "high");
@@ -960,7 +967,9 @@ mod tests {
 
         let messages = vec![Message::new(MessageRole::User, "Hello")];
         let request = build_gemini_request(&model, messages, &[]).expect("build request");
-        let config = request.generation_config.expect("generation_config is present");
+        let config = request
+            .generation_config
+            .expect("generation_config is present");
 
         assert_eq!(config["top_k"], 50);
     }
@@ -975,7 +984,9 @@ mod tests {
 
         let messages = vec![Message::new(MessageRole::User, "Hello")];
         let request = build_gemini_request(&model, messages, &[]).expect("build request");
-        let config = request.generation_config.expect("generation_config is present");
+        let config = request
+            .generation_config
+            .expect("generation_config is present");
 
         assert_eq!(config["top_k"], 50);
         assert_eq!(config["thinking"]["type"], "enabled");

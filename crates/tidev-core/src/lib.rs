@@ -1,25 +1,27 @@
 //! tidev-core: core orchestration layer.
 
+pub mod agent_ctx;
 pub mod attachment;
+pub mod context;
 pub mod message_buf;
 pub mod registry;
-pub mod context;
-pub mod session;
-pub mod agent_ctx;
 pub mod runtime;
+pub mod session;
 pub mod system_info;
 pub mod undo;
 
+pub use agent_ctx::CoreContext;
+pub use context::{CompactionResult, ContextManager};
 pub use message_buf::MessageBuffer;
 pub use registry::ToolRegistry;
-pub use context::{CompactionResult, ContextManager};
-pub use session::SessionManager;
-pub use agent_ctx::CoreContext;
 pub use runtime::Runtime;
+pub use session::SessionManager;
 
 // Re-export approval types from tidev-agent so tidev-tui can access them
 // without depending on tidev-agent directly.
-pub use tidev_agent::{ApprovedTool, ToolCallWithViolations, TuiRequest, TuiRequestKind, TuiResponse};
+pub use tidev_agent::{
+    ApprovedTool, ToolCallWithViolations, TuiRequest, TuiRequestKind, TuiResponse,
+};
 
 // ── Backward compatibility with tidev-tui (old crate) ──────────────────
 // These are deprecated and will be removed when tidev-tui is deleted.
@@ -35,5 +37,5 @@ pub struct PendingToolApproval {
 
 // Re-export storage/snapshot types so tidev-tui can use them
 // without depending on tidev-storage / tidev-snapshot directly.
-pub use tidev_storage::SessionRecord;
 pub use tidev_snapshot::FileDiff;
+pub use tidev_storage::SessionRecord;

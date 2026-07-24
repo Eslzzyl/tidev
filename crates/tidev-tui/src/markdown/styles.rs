@@ -1,4 +1,3 @@
-
 use ratatui::style::Style;
 
 pub(super) struct MarkdownStyles {

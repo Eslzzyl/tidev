@@ -191,21 +191,19 @@ pub(crate) fn draw_composer(
         // · Provider display name
         if let Some(provider) = ctx.provider_display {
             meta_spans.push(Span::styled(" · ", Style::default().fg(palette.muted)));
-            meta_spans.push(Span::styled(
-                provider,
-                Style::default().fg(palette.muted),
-            ));
+            meta_spans.push(Span::styled(provider, Style::default().fg(palette.muted)));
         }
 
         // · thinking level
         if let Some(level) = ctx.thinking_level
-            && level.is_supported() {
-                meta_spans.push(Span::styled(" · ", Style::default().fg(palette.muted)));
-                meta_spans.push(Span::styled(
-                    format!("{}", level.display_name()),
-                    Style::default().fg(palette.accent_soft),
-                ));
-            }
+            && level.is_supported()
+        {
+            meta_spans.push(Span::styled(" · ", Style::default().fg(palette.muted)));
+            meta_spans.push(Span::styled(
+                format!("{}", level.display_name()),
+                Style::default().fg(palette.accent_soft),
+            ));
+        }
 
         // · Subagent strikethrough when disabled
         if ctx.subagent_disabled {
@@ -221,8 +219,7 @@ pub(crate) fn draw_composer(
         // Render on the second row of metadata_area (first row is blank spacer)
         let meta_rect = Rect::new(metadata_area.x, metadata_area.y + 1, metadata_area.width, 1);
         frame.render_widget(
-            Paragraph::new(Line::from(meta_spans))
-                .style(Style::default().bg(palette.panel)),
+            Paragraph::new(Line::from(meta_spans)).style(Style::default().bg(palette.panel)),
             meta_rect,
         );
     }
@@ -260,10 +257,7 @@ pub(crate) fn draw_composer(
                                 .add_modifier(Modifier::BOLD),
                         ),
                         Span::raw("  "),
-                        Span::styled(
-                            s.spec.description,
-                            Style::default().fg(palette.muted),
-                        ),
+                        Span::styled(s.spec.description, Style::default().fg(palette.muted)),
                     ]))
                 })
                 .collect();
@@ -383,12 +377,10 @@ pub(crate) fn draw_composer(
                 .snippets
                 .iter()
                 .map(|s| {
-                    ListItem::new(Line::from(vec![
-                        Span::styled(
-                            &s.text,
-                            Style::default().fg(palette.text),
-                        ),
-                    ]))
+                    ListItem::new(Line::from(vec![Span::styled(
+                        &s.text,
+                        Style::default().fg(palette.text),
+                    )]))
                 })
                 .collect();
 
@@ -417,8 +409,7 @@ pub(crate) fn draw_composer(
         let max_scroll = composer
             .display_line_count(text_area.width as usize)
             .saturating_sub(visible_lines);
-        let effective_scroll =
-            (composer.input_scroll_offset as u16).min(max_scroll as u16);
+        let effective_scroll = (composer.input_scroll_offset as u16).min(max_scroll as u16);
         let mut cursor_line = cursor_line.saturating_sub(effective_scroll);
         let mut cursor_col = cursor_col;
 

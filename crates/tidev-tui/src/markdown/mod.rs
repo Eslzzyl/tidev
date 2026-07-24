@@ -438,10 +438,7 @@ where
         let mut parts = stripped.split('\n').peekable();
         while let Some(part) = parts.next() {
             if !part.is_empty() {
-                self.push_span(Span::styled(
-                    expand_tabs(part, self.tab_width),
-                    style,
-                ));
+                self.push_span(Span::styled(expand_tabs(part, self.tab_width), style));
             }
             if parts.peek().is_some() {
                 self.push_span(Span::from(" "));
@@ -494,9 +491,10 @@ where
         self.line_ends_with_local_link_target = false;
         let stripped = strip_ansi(&code);
         if self.in_table_cell {
-            self.push_span(
-                Span::styled(expand_tabs(&stripped, self.tab_width), self.styles.code),
-            );
+            self.push_span(Span::styled(
+                expand_tabs(&stripped, self.tab_width),
+                self.styles.code,
+            ));
             return;
         }
         if self.pending_marker_line {

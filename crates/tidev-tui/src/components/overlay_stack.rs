@@ -1,8 +1,8 @@
 //! OverlayStack — a z-ordered stack of overlay components.
 
 use crossterm::event::{KeyEvent, MouseEvent};
-use ratatui::layout::Rect;
 use ratatui::Frame;
+use ratatui::layout::Rect;
 
 use crate::action::Action;
 use crate::component::Component;

@@ -11,10 +11,10 @@ pub(crate) mod components;
 pub(crate) mod context;
 pub(crate) mod diff_render;
 pub(crate) mod editor;
-pub(crate) mod utils;
 mod markdown;
 pub(crate) mod theme;
 pub mod tui;
+pub(crate) mod utils;
 
 /// Run the TUI application. Called from the binary entry point.
 pub async fn run() -> anyhow::Result<()> {

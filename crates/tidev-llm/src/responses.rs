@@ -746,8 +746,7 @@ fn build_responses_request(
             MessageRole::Tool => {
                 let text = message_text_with_file_references(message);
                 let call_id = message.tool_call_id.clone().unwrap_or_default();
-                let images: Vec<&MessageAttachment> =
-                    image_attachments(message).collect();
+                let images: Vec<&MessageAttachment> = image_attachments(message).collect();
 
                 // function_call_output.output supports an array of content
                 // parts (input_text, input_image, input_file), so embed
@@ -760,9 +759,7 @@ fn build_responses_request(
                     }));
                 }
                 for attachment in images {
-                    if let MessageAttachment::Image { mime, data, .. } =
-                        attachment
-                    {
+                    if let MessageAttachment::Image { mime, data, .. } = attachment {
                         let b64 = BASE64.encode(data);
                         output_parts.push(serde_json::json!({
                             "type": "input_image",
@@ -1838,7 +1835,9 @@ mod tests {
         );
         assert_eq!(input[2]["type"], "function_call_output");
         // output is now an array of content parts, not a bare string.
-        let output = input[2]["output"].as_array().expect("output should be an array");
+        let output = input[2]["output"]
+            .as_array()
+            .expect("output should be an array");
         assert_eq!(output.len(), 1);
         assert_eq!(output[0]["type"], "input_text");
         assert_eq!(output[0]["text"], "Tool result: success");
@@ -1900,10 +1899,12 @@ mod tests {
         assert_eq!(output.len(), 2);
         assert_eq!(output[0]["type"], "input_text");
         assert_eq!(output[1]["type"], "input_image");
-        assert!(output[1]["image_url"]
-            .as_str()
-            .unwrap()
-            .starts_with("data:image/png;base64,"));
+        assert!(
+            output[1]["image_url"]
+                .as_str()
+                .unwrap()
+                .starts_with("data:image/png;base64,")
+        );
     }
 
     #[test]

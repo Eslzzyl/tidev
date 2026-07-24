@@ -15,8 +15,9 @@ pub(super) fn classify_terraform(args: &[&str]) -> Safety {
 
     match sub {
         // Read-only — no sub-subcommand nuance
-        "plan" | "show" | "output" | "graph" | "version" | "validate" | "metadata"
-        | "console" => Safety::ReadOnly,
+        "plan" | "show" | "output" | "graph" | "version" | "validate" | "metadata" | "console" => {
+            Safety::ReadOnly
+        }
 
         // `terraform fmt -check` / `terraform fmt -list` is read-only
         // `terraform fmt` without flags is write (rewrites files)
@@ -79,29 +80,65 @@ mod tests {
         assert_eq!(classify_terraform(&["fmt", "-check"]), Safety::ReadOnly);
         assert_eq!(classify_terraform(&["fmt", "-list"]), Safety::ReadOnly);
         assert_eq!(classify_terraform(&["state", "list"]), Safety::ReadOnly);
-        assert_eq!(classify_terraform(&["state", "show", "resource"]), Safety::ReadOnly);
+        assert_eq!(
+            classify_terraform(&["state", "show", "resource"]),
+            Safety::ReadOnly
+        );
         assert_eq!(classify_terraform(&["workspace", "list"]), Safety::ReadOnly);
         assert_eq!(classify_terraform(&["workspace", "show"]), Safety::ReadOnly);
         assert_eq!(classify_terraform(&["providers"]), Safety::ReadOnly);
-        assert_eq!(classify_terraform(&["providers", "schema"]), Safety::ReadOnly);
-        assert_eq!(classify_terraform(&["providers", "mirror", "/dir"]), Safety::ReadOnly);
+        assert_eq!(
+            classify_terraform(&["providers", "schema"]),
+            Safety::ReadOnly
+        );
+        assert_eq!(
+            classify_terraform(&["providers", "mirror", "/dir"]),
+            Safety::ReadOnly
+        );
     }
 
     #[test]
     fn terraform_write_commands() {
         assert_eq!(classify_terraform(&["apply"]), Safety::WriteOperation);
-        assert_eq!(classify_terraform(&["apply", "-auto-approve"]), Safety::WriteOperation);
+        assert_eq!(
+            classify_terraform(&["apply", "-auto-approve"]),
+            Safety::WriteOperation
+        );
         assert_eq!(classify_terraform(&["destroy"]), Safety::WriteOperation);
         assert_eq!(classify_terraform(&["init"]), Safety::WriteOperation);
         assert_eq!(classify_terraform(&["fmt"]), Safety::WriteOperation);
-        assert_eq!(classify_terraform(&["import", "resource", "id"]), Safety::WriteOperation);
+        assert_eq!(
+            classify_terraform(&["import", "resource", "id"]),
+            Safety::WriteOperation
+        );
         assert_eq!(classify_terraform(&["refresh"]), Safety::WriteOperation);
-        assert_eq!(classify_terraform(&["taint", "resource"]), Safety::WriteOperation);
-        assert_eq!(classify_terraform(&["untaint", "resource"]), Safety::WriteOperation);
-        assert_eq!(classify_terraform(&["state", "mv", "old", "new"]), Safety::WriteOperation);
-        assert_eq!(classify_terraform(&["state", "rm", "resource"]), Safety::WriteOperation);
-        assert_eq!(classify_terraform(&["workspace", "new", "prod"]), Safety::WriteOperation);
-        assert_eq!(classify_terraform(&["workspace", "delete", "prod"]), Safety::WriteOperation);
-        assert_eq!(classify_terraform(&["providers", "lock"]), Safety::WriteOperation);
+        assert_eq!(
+            classify_terraform(&["taint", "resource"]),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            classify_terraform(&["untaint", "resource"]),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            classify_terraform(&["state", "mv", "old", "new"]),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            classify_terraform(&["state", "rm", "resource"]),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            classify_terraform(&["workspace", "new", "prod"]),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            classify_terraform(&["workspace", "delete", "prod"]),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            classify_terraform(&["providers", "lock"]),
+            Safety::WriteOperation
+        );
     }
 }

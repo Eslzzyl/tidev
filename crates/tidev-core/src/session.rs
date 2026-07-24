@@ -46,10 +46,7 @@ impl SessionManager {
     }
 
     /// Load a session record by ID.
-    pub fn load_session(
-        &self,
-        session_id: Uuid,
-    ) -> Result<Option<tidev_storage::SessionRecord>> {
+    pub fn load_session(&self, session_id: Uuid) -> Result<Option<tidev_storage::SessionRecord>> {
         self.store.load_session(session_id)
     }
 
@@ -113,15 +110,24 @@ impl SessionManager {
         title: Option<&str>,
         status: Option<&str>,
     ) -> Result<()> {
-        self.store
-            .update_session(session_id, title, status, None, None, None, None, None, None, None)
+        self.store.update_session(
+            session_id, title, status, None, None, None, None, None, None, None,
+        )
     }
 
     /// Persist the system prompt for a session.
     pub fn update_system_prompt(&self, session_id: Uuid, system_prompt: &str) -> Result<()> {
         self.store.update_session(
-            session_id, None, None, None, None, Some(system_prompt),
-            None, None, None, None,
+            session_id,
+            None,
+            None,
+            None,
+            None,
+            Some(system_prompt),
+            None,
+            None,
+            None,
+            None,
         )
     }
 
@@ -132,7 +138,8 @@ impl SessionManager {
         message_id: Uuid,
         content: &str,
     ) -> Result<()> {
-        self.store.update_message_content(session_id, message_id, content)
+        self.store
+            .update_message_content(session_id, message_id, content)
     }
 
     /// Update the metadata of a single message in-place in the store.
@@ -142,7 +149,8 @@ impl SessionManager {
         message_id: Uuid,
         metadata: &tidev_types::message::ToolMetadata,
     ) -> Result<()> {
-        self.store.update_message_metadata(session_id, message_id, metadata)
+        self.store
+            .update_message_metadata(session_id, message_id, metadata)
     }
 
     /// Delete specific messages from a session.
@@ -190,10 +198,7 @@ impl SessionManager {
     }
 
     /// Load revert state for undo/redo.
-    pub fn load_revert_state(
-        &self,
-        session_id: Uuid,
-    ) -> Result<Option<(Uuid, Option<Vec<u8>>)>> {
+    pub fn load_revert_state(&self, session_id: Uuid) -> Result<Option<(Uuid, Option<Vec<u8>>)>> {
         self.store.load_revert_state(session_id)
     }
 
@@ -203,6 +208,7 @@ impl SessionManager {
         session_id: Uuid,
         snapshot_start_hash: &str,
     ) -> Result<()> {
-        self.store.update_session_start_hash(session_id, snapshot_start_hash)
+        self.store
+            .update_session_start_hash(session_id, snapshot_start_hash)
     }
 }

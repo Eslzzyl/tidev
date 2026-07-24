@@ -14,7 +14,6 @@ use unicode_width::UnicodeWidthStr;
 
 use base64::Engine as _;
 
-
 /// State tracking an active (or recently-finished) mouse selection.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct MouseSelection {
@@ -95,7 +94,9 @@ impl MouseSelection {
         selectable_regions: &[Rect],
         style: Style,
     ) {
-        let Some(range) = self.compute_range(current_scroll) else { return };
+        let Some(range) = self.compute_range(current_scroll) else {
+            return;
+        };
         apply_selection_style(buffer, range, self.bounds, selectable_regions, style);
     }
 
@@ -107,7 +108,12 @@ impl MouseSelection {
         selectable_regions: &[Rect],
     ) -> Option<String> {
         let range = self.compute_range(current_scroll)?;
-        Some(extract_selected_text(buffer, range, self.bounds, selectable_regions))
+        Some(extract_selected_text(
+            buffer,
+            range,
+            self.bounds,
+            selectable_regions,
+        ))
     }
 
     /// Check if a pending copy is waiting and return the selection range
@@ -159,11 +165,9 @@ impl MouseSelection {
         // (auto-scroll reads pointer against the screen-area bounds).
 
         if delta >= 0 {
-            self.anchor_scroll_offset =
-                self.anchor_scroll_offset.saturating_add(delta as usize);
+            self.anchor_scroll_offset = self.anchor_scroll_offset.saturating_add(delta as usize);
         } else {
-            self.anchor_scroll_offset =
-                self.anchor_scroll_offset.saturating_sub((-delta) as usize);
+            self.anchor_scroll_offset = self.anchor_scroll_offset.saturating_sub((-delta) as usize);
         }
     }
 
@@ -280,9 +284,10 @@ fn apply_selection_style(
                                 }
                             }
                         } else if rstart == row_start
-                            && let Some(cell) = buffer.cell_mut((rstart, y)) {
-                                cell.set_style(style);
-                            }
+                            && let Some(cell) = buffer.cell_mut((rstart, y))
+                        {
+                            cell.set_style(style);
+                        }
                     }
                 }
             }
@@ -408,10 +413,11 @@ fn extract_selected_text(
             let mut merged: Vec<(u16, u16)> = Vec::new();
             for (s, e) in segments {
                 if let Some(last) = merged.last_mut()
-                    && s <= last.1 + 1 {
-                        last.1 = last.1.max(e);
-                        continue;
-                    }
+                    && s <= last.1 + 1
+                {
+                    last.1 = last.1.max(e);
+                    continue;
+                }
                 merged.push((s, e));
             }
 
@@ -451,11 +457,7 @@ fn extract_selected_text(
             if next_trimmed.is_empty() {
                 result.push('\n');
             } else {
-                let first_word_width = next_trimmed
-                    .split(' ')
-                    .next()
-                    .unwrap_or("")
-                    .len();
+                let first_word_width = next_trimmed.split(' ').next().unwrap_or("").len();
                 if trailing_spaces < first_word_width || trailing_spaces == 0 {
                     let last_char = trimmed.chars().last().unwrap_or(' ');
                     let first_next_char = next_trimmed.chars().next().unwrap_or(' ');
