@@ -396,12 +396,47 @@ fn build_openai_request(
                     Some(message.reasoning.clone()),
                 ))
             }
-            MessageRole::Tool => request_messages.push(ChatMessagePayload::tool(
-                message_text_with_file_references(message),
-                image_attachments(message).collect(),
-                message.tool_call_id.clone(),
-                message.tool_name.clone(),
-            )),
+            MessageRole::Tool => {
+                let text = message_text_with_file_references(message);
+                let images: Vec<&MessageAttachment> =
+                    image_attachments(message).collect();
+
+                // Tool messages must use plain string content per the
+                // Chat Completions API spec — `image_url` parts are only
+                // allowed in user messages.
+                request_messages.push(ChatMessagePayload::tool(
+                    text,
+                    message.tool_call_id.clone(),
+                    message.tool_name.clone(),
+                ));
+
+                // If the tool returned image attachments and the model
+                // supports vision, inject a synthetic user message so the
+                // model can actually see the images in context.
+                if !images.is_empty() && model.supports_images {
+                    let mut parts: Vec<serde_json::Value> = Vec::new();
+                    for attachment in &images {
+                        if let MessageAttachment::Image { mime, data, .. } =
+                            attachment
+                        {
+                            let b64 = BASE64.encode(data);
+                            parts.push(serde_json::json!({
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": format!(
+                                        "data:{};base64,{}",
+                                        mime, b64,
+                                    ),
+                                },
+                            }));
+                        }
+                    }
+                    if !parts.is_empty() {
+                        request_messages
+                            .push(ChatMessagePayload::synthetic_user(parts));
+                    }
+                }
+            }
             MessageRole::Error => {}
             MessageRole::Shell => {}
         }
@@ -523,46 +558,36 @@ impl ChatMessagePayload {
         }
     }
 
+    /// Chat Completions API: tool messages only support `type: "text"` content
+    /// parts per the OpenAI spec.  Images are never embedded here — they are
+    /// passed via a synthetic user message inserted by `build_openai_request`.
     fn tool(
         content: String,
-        images: Vec<&MessageAttachment>,
         tool_call_id: Option<String>,
         name: Option<String>,
     ) -> Self {
-        let content = if images.is_empty() {
-            Some(serde_json::Value::String(content))
-        } else {
-            let mut parts = Vec::new();
-            if !content.trim().is_empty() {
-                parts.push(serde_json::json!({
-                    "type": "text",
-                    "text": content,
-                }));
-            }
-            for attachment in images {
-                if let MessageAttachment::Image { mime, data, .. } = attachment {
-                    let b64 = BASE64.encode(data);
-                    parts.push(serde_json::json!({
-                        "type": "image_url",
-                        "image_url": { "url": format!("data:{};base64,{}", mime, b64) },
-                    }));
-                }
-            }
-            if parts.is_empty() {
-                parts.push(serde_json::json!({
-                    "type": "text",
-                    "text": "",
-                }));
-            }
-            Some(serde_json::Value::Array(parts))
-        };
         Self {
             role: "tool".to_string(),
-            content,
+            content: Some(serde_json::Value::String(content)),
             reasoning_content: None,
             tool_calls: None,
             tool_call_id,
             name,
+        }
+    }
+
+    /// Synthetic user message carrying inline images.  Used when a tool result
+    /// contains image attachments and the model supports vision — the Chat
+    /// Completions API does not allow `image_url` parts in tool messages, so
+    /// the images are forwarded as a separate user message.
+    fn synthetic_user(content_parts: Vec<serde_json::Value>) -> Self {
+        Self {
+            role: "user".to_string(),
+            content: Some(serde_json::Value::Array(content_parts)),
+            reasoning_content: None,
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
         }
     }
 }
@@ -700,6 +725,124 @@ mod tests {
         let system_content = request.messages[0].content.as_ref().unwrap();
         let system_text = system_content.as_str().unwrap();
         assert_eq!(system_text, "base system prompt");
+    }
+
+    /// Helper: build a minimal `LlmProviderConfig` for tests.
+    fn test_model(supports_images: bool) -> LlmProviderConfig {
+        LlmProviderConfig {
+            provider_id: "test".to_string(),
+            base_url: "https://api.test.com".to_string(),
+            api_type: ApiType::OpenAiChatCompletions,
+            model_id: "test-model".to_string(),
+            request_model_id: Some("test-model".to_string()),
+            max_output_tokens: 1024,
+            temperature: Some(0.7),
+            supports_images,
+            context_window: 128000,
+            system_prompt: None,
+            api_key: None,
+            extra_body: None,
+            thinking_level: tidev_types::reasoning::ThinkingLevelType::None,
+        }
+    }
+
+    /// Helper: build a Tool message carrying an image attachment.
+    fn tool_message_with_image(tool_call_id: &str) -> Message {
+        use tidev_types::message::ToolExecutionResult;
+        let mut result = ToolExecutionResult::new("Image read successfully.");
+        result.attachments.push(MessageAttachment::Image {
+            filename: "icon.png".to_string(),
+            mime: "image/png".to_string(),
+            data: vec![0x89, 0x50, 0x4E, 0x47], // dummy PNG header bytes
+            file_size: 4,
+        });
+        Message::tool_result(tool_call_id, "read", result)
+    }
+
+    #[test]
+    fn tool_message_with_images_uses_text_only_and_synthetic_user() {
+        let model = test_model(true);
+
+        let mut assistant = Message::new(MessageRole::Assistant, "");
+        assistant.tool_calls.push(ToolCall {
+            id: "call_abc".to_string(),
+            name: "read".to_string(),
+            arguments: r#"{"file_path":"icon.png"}"#.to_string(),
+            thought_signature: None,
+        });
+
+        let messages = vec![
+            Message::new(MessageRole::User, "describe the icon"),
+            assistant,
+            tool_message_with_image("call_abc"),
+        ];
+
+        let request =
+            build_openai_request(&model, messages, false, &[], model.thinking_level.clone())
+                .expect("build request");
+
+        let roles: Vec<_> = request
+            .messages
+            .iter()
+            .map(|msg| msg.role.as_str())
+            .collect();
+        assert_eq!(
+            roles,
+            vec!["user", "assistant", "tool", "user"],
+            "expected synthetic user message after tool"
+        );
+
+        // The tool message must be a plain string, never an array.
+        let tool_msg = &request.messages[2];
+        assert_eq!(tool_msg.role, "tool");
+        let content = tool_msg.content.as_ref().unwrap();
+        assert!(
+            content.is_string(),
+            "tool message content must be a plain string, got: {:?}",
+            content
+        );
+
+        // The synthetic user message must carry image_url parts.
+        let synthetic = &request.messages[3];
+        assert_eq!(synthetic.role, "user");
+        let arr = synthetic.content.as_ref().unwrap().as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["type"], "image_url");
+    }
+
+    #[test]
+    fn tool_message_images_dropped_when_no_vision() {
+        let model = test_model(false);
+
+        let mut assistant = Message::new(MessageRole::Assistant, "");
+        assistant.tool_calls.push(ToolCall {
+            id: "call_abc".to_string(),
+            name: "read".to_string(),
+            arguments: r#"{"file_path":"icon.png"}"#.to_string(),
+            thought_signature: None,
+        });
+
+        let messages = vec![
+            Message::new(MessageRole::User, "describe the icon"),
+            assistant,
+            tool_message_with_image("call_abc"),
+        ];
+
+        let request =
+            build_openai_request(&model, messages, false, &[], model.thinking_level.clone())
+                .expect("build request");
+
+        let roles: Vec<_> = request
+            .messages
+            .iter()
+            .map(|msg| msg.role.as_str())
+            .collect();
+        // No synthetic user message — images silently dropped.
+        assert_eq!(
+            roles,
+            vec!["user", "assistant", "tool"],
+            "no synthetic user when supports_images is false"
+        );
     }
 }
 

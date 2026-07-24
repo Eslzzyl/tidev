@@ -746,40 +746,46 @@ fn build_responses_request(
             MessageRole::Tool => {
                 let text = message_text_with_file_references(message);
                 let call_id = message.tool_call_id.clone().unwrap_or_default();
+                let images: Vec<&MessageAttachment> =
+                    image_attachments(message).collect();
 
-                // FunctionCallOutput only supports a string output, so images
-                // on tool messages cannot be embedded inline. Instead, append
-                // a separate user message with the image content so the model
-                // can see it in context.
-                input_items.push(serde_json::json!({
-                    "type": "function_call_output",
-                    "call_id": call_id,
-                    "output": text,
-                }));
-
-                // If there are image attachments, add them as a user message
-                // following the tool result.
-                let images: Vec<&MessageAttachment> = image_attachments(message).collect();
-                if !images.is_empty() {
-                    let mut image_content = Vec::new();
-                    for attachment in images {
-                        if let MessageAttachment::Image { mime, data, .. } = attachment {
-                            let b64 = BASE64.encode(data);
-                            image_content.push(serde_json::json!({
-                                "type": "input_image",
-                                "image_url": format!("data:{};base64,{}", mime, b64),
-                                "detail": "auto",
-                            }));
-                        }
-                    }
-                    if !image_content.is_empty() {
-                        input_items.push(serde_json::json!({
-                            "type": "message",
-                            "role": "user",
-                            "content": image_content,
+                // function_call_output.output supports an array of content
+                // parts (input_text, input_image, input_file), so embed
+                // images inline — no synthetic user message needed.
+                let mut output_parts: Vec<serde_json::Value> = Vec::new();
+                if !text.trim().is_empty() {
+                    output_parts.push(serde_json::json!({
+                        "type": "input_text",
+                        "text": text,
+                    }));
+                }
+                for attachment in images {
+                    if let MessageAttachment::Image { mime, data, .. } =
+                        attachment
+                    {
+                        let b64 = BASE64.encode(data);
+                        output_parts.push(serde_json::json!({
+                            "type": "input_image",
+                            "image_url": format!(
+                                "data:{};base64,{}",
+                                mime, b64,
+                            ),
+                            "detail": "auto",
                         }));
                     }
                 }
+                if output_parts.is_empty() {
+                    output_parts.push(serde_json::json!({
+                        "type": "input_text",
+                        "text": "",
+                    }));
+                }
+
+                input_items.push(serde_json::json!({
+                    "type": "function_call_output",
+                    "call_id": call_id,
+                    "output": output_parts,
+                }));
             }
             MessageRole::Error => {}
             MessageRole::Shell => {}
@@ -1831,7 +1837,73 @@ mod tests {
             "I'll help you run a command."
         );
         assert_eq!(input[2]["type"], "function_call_output");
-        assert_eq!(input[2]["output"], "Tool result: success");
+        // output is now an array of content parts, not a bare string.
+        let output = input[2]["output"].as_array().expect("output should be an array");
+        assert_eq!(output.len(), 1);
+        assert_eq!(output[0]["type"], "input_text");
+        assert_eq!(output[0]["text"], "Tool result: success");
+    }
+
+    #[test]
+    fn test_responses_tool_message_images_embedded_inline() {
+        let model = LlmProviderConfig {
+            provider_id: "test".to_string(),
+            base_url: "https://api.openai.com".to_string(),
+            api_type: ApiType::OpenAiResponses,
+            model_id: "gpt-4.5".to_string(),
+            request_model_id: Some("gpt-4.5".to_string()),
+            max_output_tokens: 4096,
+            temperature: Some(0.7),
+            supports_images: true,
+            context_window: 128000,
+            system_prompt: None,
+            api_key: None,
+            extra_body: None,
+            thinking_level: tidev_types::reasoning::ThinkingLevelType::None,
+        };
+
+        // Build a tool result message that carries an image attachment.
+        use tidev_types::message::ToolExecutionResult;
+        let mut result = ToolExecutionResult::new("Image read successfully.");
+        result.attachments.push(MessageAttachment::Image {
+            filename: "icon.png".to_string(),
+            mime: "image/png".to_string(),
+            data: vec![0x89, 0x50, 0x4E, 0x47],
+            file_size: 4,
+        });
+        let tool_msg = Message::tool_result("call_xyz", "read", result);
+
+        let mut assistant = Message::new(MessageRole::Assistant, "");
+        assistant.tool_calls.push(tidev_types::message::ToolCall {
+            id: "call_xyz".to_string(),
+            name: "read".to_string(),
+            arguments: r#"{"file_path":"icon.png"}"#.to_string(),
+            thought_signature: None,
+        });
+
+        let messages = vec![
+            Message::new(MessageRole::User, "describe the icon"),
+            assistant,
+            tool_msg,
+        ];
+
+        let request = build_responses_request(&model, messages, false, &[], None).unwrap();
+        let input = request.input.as_array().expect("input should be an array");
+
+        // user, assistant, function_call_output — no synthetic user message.
+        assert_eq!(input.len(), 3);
+        assert_eq!(input[2]["type"], "function_call_output");
+
+        let output = input[2]["output"]
+            .as_array()
+            .expect("output should be an array with text + image");
+        assert_eq!(output.len(), 2);
+        assert_eq!(output[0]["type"], "input_text");
+        assert_eq!(output[1]["type"], "input_image");
+        assert!(output[1]["image_url"]
+            .as_str()
+            .unwrap()
+            .starts_with("data:image/png;base64,"));
     }
 
     #[test]
