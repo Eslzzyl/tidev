@@ -9,7 +9,7 @@
 mod apt;
 mod brew;
 mod build_tool;
-mod cargo;
+mod rust;
 mod deno;
 mod docker;
 mod editor;
@@ -28,7 +28,7 @@ mod terraform;
 use apt::classify_apt;
 use brew::classify_brew;
 use build_tool::classify_build_tool;
-use cargo::classify_cargo;
+use rust::classify_rust;
 use deno::classify_deno;
 use docker::classify_docker;
 use editor::classify_editor;
@@ -417,8 +417,7 @@ fn classify_command(cmd: &str, args: &[&str]) -> Safety {
         "git" => classify_git(args),
 
         // ── Rust tooling ─────────────────────────────────────────────
-        "cargo" => classify_cargo(args),
-        "rustc" | "rustup" => Safety::WriteOperation,
+        "cargo" | "rustc" | "rustup" => classify_rust(cmd, args),
 
         // ── Build tools ──────────────────────────────────────────────
         "make" | "cmake" | "ninja" | "meson" | "just" | "task" => classify_build_tool(args),
