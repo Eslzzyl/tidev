@@ -144,6 +144,7 @@ mod tests {
     fn push_delta_appends_to_correct_message() {
         let mut sb = StreamingBuffer::new();
         let mut msgs = Vec::new();
+        sb.begin_streaming(&mut msgs);
         sb.push_delta("Hello ", &mut msgs);
         sb.push_delta("world", &mut msgs);
         assert_eq!(msgs[0].content, "Hello world");
@@ -169,12 +170,19 @@ mod tests {
 
     #[test]
     fn resolve_idx_fast_path_uses_cache() {
-        let sb = StreamingBuffer::new();
+        let mut sb = StreamingBuffer::new();
         let mut msgs = Vec::new();
-        // Add a message before the streaming one to test cache offset.
+        // Start streaming — creates message at index 0, caches idx = Some(0).
+        let streaming_id = sb.begin_streaming(&mut msgs);
+        assert_eq!(sb.current_message_idx, Some(0));
+        assert_eq!(msgs[0].id, streaming_id);
+
+        // Insert a message before the streaming one to make the cached idx stale.
         let before = Message::new(MessageRole::User, "before");
         msgs.insert(0, before);
-        // After insertion, cached idx (0) is stale — should fall back to linear scan.
+
+        // Cached idx (0) is stale — should fall back to linear scan and find
+        // the streaming message at index 1.
         assert_eq!(sb.resolve_idx(&msgs), Some(1));
     }
 
@@ -188,6 +196,7 @@ mod tests {
     fn finalise_message_clears_state() {
         let mut sb = StreamingBuffer::new();
         let mut msgs = Vec::new();
+        sb.begin_streaming(&mut msgs);
         let idx = sb.finalise_message(&mut msgs);
         assert_eq!(idx, Some(0));
         assert!(!msgs[0].streaming);
@@ -250,6 +259,7 @@ mod tests {
     fn stream_full_lifecycle() {
         let mut sb = StreamingBuffer::new();
         let mut msgs = Vec::new();
+        sb.begin_streaming(&mut msgs);
         sb.push_delta("Hello", &mut msgs);
         sb.push_reasoning_delta("thinking...", &mut msgs);
         sb.push_delta(" world", &mut msgs);

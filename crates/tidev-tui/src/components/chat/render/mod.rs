@@ -381,8 +381,8 @@ mod tests {
         for (i, line) in lines2[1..].iter().enumerate() {
             let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
             assert!(
-                text.starts_with("    "),
-                "continuation line {} should be indented with 4 spaces, got: {:?}",
+                text.starts_with("   "),
+                "continuation line {} should be indented with 3 spaces, got: {:?}",
                 i + 1,
                 text
             );
