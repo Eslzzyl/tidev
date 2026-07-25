@@ -232,7 +232,10 @@ impl App {
                 }
 
                 // todowrite-specific: reload todos from database.
+                // Guard with current_session_id so that a subagent's todowrite
+                // in a child session doesn't overwrite the parent's sidebar.
                 if tool_call.name == "todowrite"
+                    && Some(session_id) == self.current_session_id
                     && let Ok(todos) = self
                         .runtime
                         .session_manager()

@@ -308,15 +308,20 @@ impl Sidebar {
         }
 
         // Todos section
-        if !todos.is_empty() {
-            lines.push(Line::from(""));
-            lines.push(Line::from(vec![Span::styled(
-                format!("Todos ({})", todos.len()),
-                Style::default()
-                    .fg(palette.accent)
-                    .add_modifier(Modifier::BOLD),
-            )]));
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![Span::styled(
+            format!("Todos ({})", todos.len()),
+            Style::default()
+                .fg(palette.accent)
+                .add_modifier(Modifier::BOLD),
+        )]));
 
+        if todos.is_empty() {
+            lines.push(Line::from(vec![Span::styled(
+                "  (no items)",
+                Style::default().fg(palette.muted),
+            )]));
+        } else {
             for todo in todos {
                 let (checkbox, style) = match todo.status.as_str() {
                     "completed" => (
@@ -426,6 +431,111 @@ impl Sidebar {
         let footer_paragraph =
             Paragraph::new(footer_lines).style(Style::default().fg(palette.text));
         frame.render_widget(footer_paragraph, footer_area);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    fn test_palette() -> ThemePalette {
+        ThemePalette {
+            name: crate::theme::ThemeName::Dark,
+            background: ratatui::style::Color::Rgb(0, 0, 0),
+            panel: ratatui::style::Color::Rgb(10, 10, 10),
+            panel_alt: ratatui::style::Color::Rgb(20, 20, 20),
+            panel_light: ratatui::style::Color::Rgb(30, 30, 30),
+            text: ratatui::style::Color::Rgb(255, 255, 255),
+            muted: ratatui::style::Color::Rgb(128, 128, 128),
+            border: ratatui::style::Color::Rgb(64, 64, 64),
+            accent: ratatui::style::Color::Rgb(0, 200, 200),
+            accent_soft: ratatui::style::Color::Rgb(100, 150, 150),
+            success: ratatui::style::Color::Rgb(0, 200, 0),
+            warning: ratatui::style::Color::Rgb(200, 200, 0),
+            error: ratatui::style::Color::Rgb(200, 0, 0),
+            diff_add: ratatui::style::Color::Rgb(0, 200, 0),
+            diff_delete: ratatui::style::Color::Rgb(200, 0, 0),
+            selection_bg: ratatui::style::Color::Rgb(0, 200, 200),
+            selection_fg: ratatui::style::Color::Rgb(255, 255, 255),
+            mode_build: ratatui::style::Color::Rgb(0, 200, 200),
+            mode_plan: ratatui::style::Color::Rgb(100, 150, 150),
+        }
+    }
+
+    /// Render the sidebar with given inputs and return each row as a string.
+    fn render_sidebar(
+        palette: ThemePalette,
+        todos: &[TodoItem],
+        chat_context: Option<&ChatContext>,
+        context_usage: Option<&ContextUsage>,
+    ) -> Vec<String> {
+        let backend = TestBackend::new(60, 80);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut sidebar = Sidebar::new();
+
+        let _ = terminal.draw(|frame| {
+            sidebar.draw(
+                frame,
+                frame.area(),
+                palette,
+                Path::new("/test"),
+                chat_context,
+                context_usage,
+                todos,
+            );
+        });
+
+        let buffer = terminal.backend().buffer();
+        (0..buffer.area.height)
+            .map(|y| {
+                let mut row = String::new();
+                for x in 0..buffer.area.width {
+                    row.push_str(buffer[(x, y)].symbol());
+                }
+                row
+            })
+            .collect()
+    }
+
+    #[test]
+    fn sidebar_todos_empty_shows_no_items() {
+        let palette = test_palette();
+        let rows = render_sidebar(palette, &[], None, None);
+        let text: String = rows.join("\n");
+
+        assert!(text.contains("Todos (0)"), "should show Todos (0) header");
+        assert!(
+            text.contains("(no items)"),
+            "should show (no items) when empty"
+        );
+    }
+
+    #[test]
+    fn sidebar_todos_renders_all_statuses() {
+        let palette = test_palette();
+        let todos = vec![
+            TodoItem {
+                content: "Alpha".into(),
+                status: "completed".into(),
+            },
+            TodoItem {
+                content: "Beta".into(),
+                status: "in_progress".into(),
+            },
+            TodoItem {
+                content: "Gamma".into(),
+                status: "pending".into(),
+            },
+        ];
+        let rows = render_sidebar(palette, &todos, None, None);
+        let text: String = rows.join("\n");
+
+        assert!(text.contains("Todos (3)"), "should show Todos (3) header");
+        assert!(text.contains("Alpha"), "should show completed item");
+        assert!(text.contains("Beta"), "should show in_progress item");
+        assert!(text.contains("Gamma"), "should show pending item");
     }
 }
 
