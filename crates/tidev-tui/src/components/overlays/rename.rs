@@ -196,4 +196,11 @@ impl Component for RenameDialog {
     fn blocks_input(&self) -> bool {
         true
     }
+
+    fn handle_paste(&mut self, text: &str) -> Option<Action> {
+        if !text.is_empty() {
+            self.buffer.push_str(text);
+        }
+        None
+    }
 }

@@ -48,6 +48,19 @@ impl OverlayStack {
         None
     }
 
+    /// Route a paste event to the topmost overlay.
+    pub fn handle_paste(&mut self, text: &str) -> Option<Action> {
+        for overlay in self.overlays.iter_mut().rev() {
+            if let Some(action) = overlay.handle_paste(text) {
+                return Some(action);
+            }
+            if overlay.blocks_input() {
+                return Some(Action::Noop);
+            }
+        }
+        None
+    }
+
     /// Broadcast an Action to all overlays.
     pub fn update_all(&mut self, action: &Action, ctx: &UpdateContext) -> Vec<Action> {
         let mut follow_ups = Vec::new();

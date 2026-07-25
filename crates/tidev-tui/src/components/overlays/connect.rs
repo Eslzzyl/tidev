@@ -35,6 +35,8 @@ pub(crate) struct ConnectDialog {
     query: String,
     /// Currently selected index (into filtered results).
     selected: usize,
+    /// Whether Enter was pressed to confirm the API key.
+    confirmed: bool,
 }
 
 /// Display info for a single provider in the picker list.
@@ -53,6 +55,7 @@ impl ConnectDialog {
             all_providers: Vec::new(),
             query: String::new(),
             selected: 0,
+            confirmed: false,
         }
     }
 
@@ -208,18 +211,10 @@ impl Component for ConnectDialog {
                     if !key.modifiers.contains(KeyModifiers::SHIFT)
                         && !key.modifiers.contains(KeyModifiers::ALT) =>
                 {
-                    let (pid, kv) = match &self.phase {
-                        ConnectPhase::ApiKey {
-                            provider_id,
-                            buffer,
-                            ..
-                        } => (provider_id.clone(), buffer.clone()),
-                        _ => return None,
-                    };
-                    Some(Action::Connect(ConnectAction::SaveApiKey {
-                        provider_id: pid,
-                        key: kv,
-                    }))
+                    self.confirmed = true;
+                    Some(Action::Overlay(OverlayAction::Close(
+                        OverlayKind::ConnectDialog,
+                    )))
                 }
                 KeyCode::Char('v')
                     if (key.modifiers.contains(KeyModifiers::CONTROL)
@@ -248,12 +243,22 @@ impl Component for ConnectDialog {
     fn update(&mut self, action: &Action, ctx: &UpdateContext) -> Vec<Action> {
         match action {
             Action::Overlay(OverlayAction::Close(OverlayKind::ConnectDialog)) => {
+                if self.confirmed {
+                    match &self.phase {
+                        ConnectPhase::ApiKey {
+                            provider_id,
+                            buffer,
+                            ..
+                        } if !buffer.is_empty() => {
+                            return vec![Action::Connect(ConnectAction::SaveApiKey {
+                                provider_id: provider_id.clone(),
+                                key: buffer.clone(),
+                            })];
+                        }
+                        _ => {}
+                    }
+                }
                 vec![]
-            }
-            Action::Connect(ConnectAction::SaveApiKey { .. }) => {
-                vec![Action::Overlay(OverlayAction::Close(
-                    OverlayKind::ConnectDialog,
-                ))]
             }
             Action::Connect(ConnectAction::PruneOrphans) => {
                 // Provider list may have changed; rebuild.
@@ -508,6 +513,15 @@ impl Component for ConnectDialog {
 
     fn blocks_input(&self) -> bool {
         true
+    }
+
+    fn handle_paste(&mut self, text: &str) -> Option<Action> {
+        if !text.is_empty() {
+            if let ConnectPhase::ApiKey { buffer, .. } = &mut self.phase {
+                buffer.push_str(text);
+            }
+        }
+        None
     }
 }
 

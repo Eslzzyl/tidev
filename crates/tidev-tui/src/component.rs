@@ -26,6 +26,15 @@ pub(crate) trait Component {
         None
     }
 
+    /// Handle pasted text from bracketed paste (⌘V / Shift+Insert on macOS).
+    ///
+    /// Only called when this component is the active overlay or the focused
+    /// component. Returns `Some(action)` if the paste triggers an action.
+    fn handle_paste(&mut self, text: &str) -> Option<Action> {
+        let _ = text;
+        None
+    }
+
     /// Handle a mouse event. `area` is the component's layout rect.
     #[allow(dead_code)]
     fn handle_mouse_event(&mut self, mouse: MouseEvent, area: Rect) -> Option<Action> {

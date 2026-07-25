@@ -127,13 +127,16 @@ impl App {
 
     /// Handle bracketed paste text from the terminal (⌘V / Shift+Insert).
     ///
-    /// Routes the pasted content to the composer when no overlay is active.
-    /// When the pasted text is empty (clipboard contains only image data),
-    /// falls back to direct clipboard reading for image paste.
+    /// Routes the pasted content to the active overlay when one is open,
+    /// or to the composer otherwise. When the pasted text is empty
+    /// (clipboard contains only image data), falls back to direct clipboard
+    /// reading for image paste.
     pub(crate) fn handle_paste(&mut self, text: String) {
-        // If an overlay is open, defer paste — the overlay will handle
-        // paste via its own Ctrl+V + arboard logic for now.
+        // If an overlay is open, forward paste to the topmost overlay.
         if !self.overlays.is_empty() {
+            if let Some(action) = self.overlays.handle_paste(&text) {
+                self.process_action(action);
+            }
             return;
         }
         if let Some(ref mut composer) = self.composer
