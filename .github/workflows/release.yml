@@ -38,30 +38,8 @@ jobs:
           echo "version=${REF#v}" >> "$GITHUB_OUTPUT"
           echo "ref=${REF}" >> "$GITHUB_OUTPUT"
 
-  web:
-    needs: [resolve]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ needs.resolve.outputs.ref }}
-      - uses: pnpm/action-setup@v6
-        with:
-          version: latest
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: web/pnpm-lock.yaml
-      - run: pnpm --dir web install --frozen-lockfile && pnpm --dir web build
-      - uses: actions/upload-artifact@v7
-        with:
-          name: web-dist
-          path: web/dist/
-          retention-days: 1
-
   build:
-    needs: [resolve, web]
+    needs: [resolve]
     strategy:
       matrix:
         include:
@@ -91,10 +69,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: release-cache-${{ matrix.target }}
-      - uses: actions/download-artifact@v8
-        with:
-          name: web-dist
-          path: web/dist/
       - name: Install Linux system dependencies
         if: runner.os == 'Linux'
         run: |
