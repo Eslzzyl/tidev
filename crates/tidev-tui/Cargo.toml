@@ -24,6 +24,7 @@ diffy = "0.5"
 dirs = "6"
 image = { version = "0.25", default-features = false, features = ["png"] }
 log = "0.4"
+memchr = "2"
 pulldown-cmark = "0.13"
 ratatui = { version = "0.30", default-features = false, features = ["crossterm", "macros"] }
 ratatui-image = { version = "11", default-features = false, features = ["crossterm"] }

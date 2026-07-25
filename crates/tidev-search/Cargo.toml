@@ -8,6 +8,7 @@ description = "File search indexing for tidev @-mention completion"
 
 [dependencies]
 ignore = "0.4"
+memchr = "2"
 notify = "8"
 rayon = "1"
 log = "0.4"

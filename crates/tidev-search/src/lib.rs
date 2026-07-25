@@ -822,6 +822,14 @@ fn subsequence_match(
 }
 
 fn find_subsequence_indices(haystack: &str, needle: &str) -> Option<Vec<usize>> {
+    // Fast path: both haystack and needle are ASCII-only.
+    // Work directly on bytes (byte index == char index for ASCII),
+    // using SIMD-accelerated memchr to skip ahead quickly.
+    if haystack.is_ascii() && needle.is_ascii() {
+        return find_subsequence_indices_ascii(haystack, needle);
+    }
+
+    // General path: full Unicode support via char-level iteration.
     let haystack_chars: Vec<char> = haystack.chars().collect();
     let needle_chars: Vec<char> = needle.chars().collect();
     if needle_chars.is_empty() {
@@ -832,7 +840,8 @@ fn find_subsequence_indices(haystack: &str, needle: &str) -> Option<Vec<usize>> 
     let mut matched_indices = Vec::with_capacity(needle_chars.len());
 
     for needle_char in needle_chars {
-        while haystack_index < haystack_chars.len() && haystack_chars[haystack_index] != needle_char
+        while haystack_index < haystack_chars.len()
+            && haystack_chars[haystack_index] != needle_char
         {
             haystack_index += 1;
         }
@@ -848,20 +857,57 @@ fn find_subsequence_indices(haystack: &str, needle: &str) -> Option<Vec<usize>> 
     Some(matched_indices)
 }
 
+/// ASCII-only fast path for subsequence matching.
+///
+/// Works directly on `&[u8]` with no heap allocation, using SIMD-accelerated
+/// `memchr` to find each needle byte in the haystack.
+fn find_subsequence_indices_ascii(haystack: &str, needle: &str) -> Option<Vec<usize>> {
+    let haystack_bytes = haystack.as_bytes();
+    let needle_bytes = needle.as_bytes();
+    if needle_bytes.is_empty() {
+        return None;
+    }
+
+    let mut haystack_index = 0usize;
+    let mut matched_indices = Vec::with_capacity(needle_bytes.len());
+
+    for &needle_byte in needle_bytes {
+        match memchr::memchr(needle_byte, &haystack_bytes[haystack_index..]) {
+            Some(offset) => {
+                haystack_index += offset;
+                matched_indices.push(haystack_index);
+                haystack_index += 1;
+            }
+            None => return None,
+        }
+    }
+
+    Some(matched_indices)
+}
+
 fn range_indices(start: usize, len: usize) -> Vec<usize> {
     (start..start.saturating_add(len)).collect()
 }
 
 fn byte_offset_to_char_index(text: &str, byte_offset: usize) -> usize {
-    text[..byte_offset].chars().count()
+    let prefix = &text[..byte_offset];
+    // Fast path: pure ASCII → byte offset == char offset
+    if prefix.is_ascii() {
+        return byte_offset;
+    }
+    prefix.chars().count()
 }
 
 fn basename_char_offset(path: &str) -> usize {
     let Some(byte_offset) = path.bytes().rposition(|byte| byte == b'/' || byte == b'\\') else {
         return 0;
     };
-
-    path[..=byte_offset].chars().count()
+    let prefix = &path[..=byte_offset];
+    // Fast path: pure ASCII → byte offset == char offset
+    if prefix.is_ascii() {
+        return prefix.len(); // same as byte_offset + 1 for ASCII
+    }
+    prefix.chars().count()
 }
 
 fn kind_rank(kind: FileEntryKind) -> usize {
@@ -928,12 +974,43 @@ mod tests {
 
     #[test]
     fn test_find_subsequence_indices() {
+        // ASCII — uses fast path
         assert_eq!(
             find_subsequence_indices("abcdef", "ace"),
             Some(vec![0, 2, 4])
         );
         assert_eq!(find_subsequence_indices("abcdef", "xyz"), None);
         assert_eq!(find_subsequence_indices("abc", ""), None);
+        // Single character
+        assert_eq!(
+            find_subsequence_indices("abcdef", "a"),
+            Some(vec![0])
+        );
+        // All match
+        assert_eq!(
+            find_subsequence_indices("abc", "abc"),
+            Some(vec![0, 1, 2])
+        );
+    }
+
+    #[test]
+    fn test_find_subsequence_indices_non_ascii() {
+        // Non-ASCII haystack — falls back to char-level iteration
+        // "文件搜索" (Chinese: file search)
+        assert_eq!(
+            find_subsequence_indices("文件搜索", "搜索"),
+            Some(vec![2, 3])
+        );
+        // Mixed ASCII and non-ASCII
+        assert_eq!(
+            find_subsequence_indices("src/文件/検索.rs", "s/検"),
+            Some(vec![0, 3, 7])
+        );
+        // Non-ASCII needle ASCII haystack — also falls back
+        assert_eq!(
+            find_subsequence_indices("hello", "hë"),
+            None // ë is not in hello
+        );
     }
 
     #[test]

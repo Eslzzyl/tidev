@@ -820,4 +820,73 @@ index 1111111..2222222 100644
         // Should be a direct to_string() — same content
         assert_eq!(result, text);
     }
+
+    #[test]
+    fn expand_tabs_at_line_start() {
+        // Tab at column 0 → 4 spaces
+        let result = expand_tabs("\thello", 4);
+        assert_eq!(result, "    hello");
+    }
+
+    #[test]
+    fn expand_tabs_at_line_end() {
+        // Tab at end of line
+        let result = expand_tabs("hello\t", 4);
+        assert_eq!(result, "hello   ");
+    }
+
+    #[test]
+    fn expand_tabs_multiple_on_same_line() {
+        let result = expand_tabs("a\tb\tc", 4);
+        // col 0: a, col 1: tab → 3 spaces, col 4: b, col 5: tab → 3 spaces, col 8: c
+        assert_eq!(result, "a   b   c");
+    }
+
+    #[test]
+    fn expand_tabs_with_newlines_reset() {
+        // Tab after newline should start at column 0 again
+        let result = expand_tabs("\tstart\n\tindented", 4);
+        assert_eq!(result, "    start\n    indented");
+    }
+
+    #[test]
+    fn expand_tabs_tab_width_2() {
+        let result = expand_tabs("a\tb", 2);
+        assert_eq!(result, "a b");
+    }
+
+    #[test]
+    fn expand_tabs_tab_width_8() {
+        let result = expand_tabs("a\tb", 8);
+        assert_eq!(result, "a       b");
+    }
+
+    #[test]
+    fn expand_tabs_with_unicode() {
+        // CJK chars have width 2
+        let result = expand_tabs("a\tb\u{4e2d}\tce", 4);
+        // "a" col=0: tab → 3 spaces, col=4: "b" col=5, "中" col=7,
+        // tab → 4-(7%4)=1 space, col=8: "ce" col=10
+        assert_eq!(result, "a   b\u{4e2d} ce");
+    }
+
+    #[test]
+    fn expand_tabs_empty_string() {
+        let result = expand_tabs("", 4);
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn expand_tabs_tab_only() {
+        let result = expand_tabs("\t", 4);
+        assert_eq!(result, "    ");
+    }
+
+    #[test]
+    fn expand_tabs_tab_at_exact_column_multiple() {
+        // When col % tab_width == 0, tab expands to tab_width spaces
+        let result = expand_tabs("abcd\t", 4);
+        // "abcd" is 4 chars, col=4, 4%4=0, so 4 spaces
+        assert_eq!(result, "abcd    ");
+    }
 }

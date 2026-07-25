@@ -3528,6 +3528,7 @@ version = "0.7.0"
 dependencies = [
  "ignore",
  "log",
+ "memchr",
  "notify",
  "rayon",
  "serde",
@@ -3617,6 +3618,7 @@ dependencies = [
  "image",
  "log",
  "lru",
+ "memchr",
  "pulldown-cmark",
  "ratatui",
  "ratatui-image",

@@ -52,32 +52,79 @@ pub(crate) fn paste_image_from_clipboard() -> Option<(String, String, Vec<u8>, u
 }
 
 /// Expand tab characters to spaces.
+///
+/// Uses SIMD-accelerated byte scanning via `memchr` to quickly locate tab
+/// positions, then copies plain-text segments in bulk.
 pub(crate) fn expand_tabs(text: &str, tab_width: usize) -> String {
-    if !text.contains('\t') {
+    // Fast path: no tabs — direct clone
+    let Some(first_tab) = memchr::memchr(b'\t', text.as_bytes()) else {
         return text.to_string();
-    }
+    };
+
     let mut result = String::with_capacity(text.len() + tab_width);
     let mut col = 0usize;
-    for ch in text.chars() {
-        match ch {
-            '\t' => {
-                let spaces = tab_width - (col % tab_width);
-                for _ in 0..spaces {
-                    result.push(' ');
-                }
-                col += spaces;
-            }
-            '\n' => {
-                result.push(ch);
-                col = 0;
-            }
-            _ => {
-                result.push(ch);
-                col += unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
-            }
-        }
+    let mut prev_end = 0usize;
+
+    // Process text before first tab
+    if first_tab > 0 {
+        let prefix = &text[..first_tab];
+        result.push_str(prefix);
+        col = column_width_after_newline(prefix);
+        prev_end = first_tab;
     }
+
+    // Iterate over remaining tab positions
+    for tab_pos in memchr::memchr_iter(b'\t', text.as_bytes()) {
+        if tab_pos < prev_end {
+            // Already handled as part of first_tab processing
+            continue;
+        }
+
+        // Copy text segment before this tab
+        let segment = &text[prev_end..tab_pos];
+        if !segment.is_empty() {
+            result.push_str(segment);
+            col = advance_column(col, segment);
+        }
+
+        // Expand tab to spaces
+        let spaces = tab_width - (col % tab_width);
+        for _ in 0..spaces {
+            result.push(' ');
+        }
+        col += spaces;
+
+        prev_end = tab_pos + 1; // skip '\t' (1 byte in UTF-8)
+    }
+
+    // Copy remaining text after last tab
+    if prev_end < text.len() {
+        result.push_str(&text[prev_end..]);
+    }
+
     result
+}
+
+/// Compute the column position after processing a text segment.
+/// Handles newline resets: column is zero-based from the start of the
+/// current line.
+fn advance_column(col: usize, segment: &str) -> usize {
+    if let Some(last_nl) = segment.rfind('\n') {
+        // Only count width after the last newline
+        unicode_width::UnicodeWidthStr::width(&segment[last_nl + 1..])
+    } else {
+        col + unicode_width::UnicodeWidthStr::width(segment)
+    }
+}
+
+/// Compute the column width of a text segment, counting only the content
+/// after the last newline (since column resets at each newline).
+fn column_width_after_newline(segment: &str) -> usize {
+    if let Some(last_nl) = segment.rfind('\n') {
+        unicode_width::UnicodeWidthStr::width(&segment[last_nl + 1..])
+    } else {
+        unicode_width::UnicodeWidthStr::width(segment)
+    }
 }
 
 /// Compute a centred rect of the given dimensions inside `area`.
