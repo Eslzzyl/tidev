@@ -517,8 +517,7 @@ fn classify_command(cmd: &str, args: &[&str]) -> Safety {
             // `curl -o` / `-O` / `--output` writes to file
             if args.iter().any(|a| a.starts_with("-o") || a == &"-O"
                 || a == &"--output" || a == &"--remote-name"
-                || a == &"--remote-header-name" || a == &"--data"
-                || a == &"-d" || a == &"-F" || a == &"--form")
+                || a == &"--remote-header-name")
             {
                 Safety::WriteOperation
             } else {
@@ -750,6 +749,20 @@ mod tests {
         assert_eq!(cl.classify("curl https://example.com"), Safety::Unknown);
         assert_eq!(
             cl.classify("wget https://example.com/file"),
+            Safety::Unknown
+        );
+        // -d/--data sends HTTP request body, not a local file write
+        assert_eq!(
+            cl.classify("curl -d '{\"key\":\"value\"}' https://example.com/api"),
+            Safety::Unknown
+        );
+        assert_eq!(
+            cl.classify("curl --data '{\"key\":\"value\"}' https://example.com/api"),
+            Safety::Unknown
+        );
+        // -F/--form sends multipart data, not a local file write
+        assert_eq!(
+            cl.classify("curl -F 'file=@photo.jpg' https://example.com/upload"),
             Safety::Unknown
         );
         // With -o/-O, curl/wget writes to file
