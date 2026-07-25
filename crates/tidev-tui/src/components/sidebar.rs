@@ -318,7 +318,7 @@ impl Sidebar {
 
         if todos.is_empty() {
             lines.push(Line::from(vec![Span::styled(
-                "  (no items)",
+                "(no items)",
                 Style::default().fg(palette.muted),
             )]));
         } else {
