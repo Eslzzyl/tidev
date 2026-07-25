@@ -481,4 +481,8 @@ impl Component for SensitiveFileDialog {
     fn blocks_input(&self) -> bool {
         true
     }
+
+    fn overlay_uses_main_area(&self) -> bool {
+        true
+    }
 }

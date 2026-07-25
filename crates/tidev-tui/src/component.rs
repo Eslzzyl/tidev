@@ -74,4 +74,11 @@ pub(crate) trait Component {
     fn blocks_input(&self) -> bool {
         false
     }
+
+    /// Whether this overlay should be drawn in the main area only
+    /// (as opposed to the full terminal area including sidebar).
+    #[allow(dead_code)]
+    fn overlay_uses_main_area(&self) -> bool {
+        false
+    }
 }

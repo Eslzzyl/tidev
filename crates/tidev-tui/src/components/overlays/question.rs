@@ -671,6 +671,10 @@ impl Component for QuestionDialog {
     fn blocks_input(&self) -> bool {
         true
     }
+
+    fn overlay_uses_main_area(&self) -> bool {
+        true
+    }
 }
 
 fn push_wrapped_line(lines: &mut Vec<String>, wrap_width: usize, line: String) {

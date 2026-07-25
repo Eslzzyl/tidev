@@ -259,7 +259,7 @@ impl App {
                 collapse_thinking: self.runtime.config().ui.collapse_thinking,
                 workspace_root: self.runtime.workspace_root(),
             };
-            self.overlays.draw(frame, area, &draw_ctx);
+            self.overlays.draw(frame, area, area, &draw_ctx);
             return;
         }
 
@@ -470,9 +470,12 @@ impl App {
             );
         }
 
-        // Draw overlays on top of the main content area only, so they don't
-        // spill over the sidebar (matching v0.6.x behaviour).
-        self.overlays.draw(frame, main_area, &draw_ctx);
+        // Draw overlays.
+        // - Composer-style overlays (question, sensitive, workspace) use
+        //   main_area so they don't spill over the sidebar.
+        // - Centered panels (session, message, settings, …) use the full
+        //   terminal area so they appear properly centered across the screen.
+        self.overlays.draw(frame, area, main_area, &draw_ctx);
 
         // ── Footer status line (right-aligned, matching v0.6.x) ──
         let status_text = self.footer_status_text();

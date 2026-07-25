@@ -487,4 +487,8 @@ impl Component for WorkspaceBoundaryDialog {
     fn blocks_input(&self) -> bool {
         true
     }
+
+    fn overlay_uses_main_area(&self) -> bool {
+        true
+    }
 }
