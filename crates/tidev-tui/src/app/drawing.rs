@@ -470,9 +470,9 @@ impl App {
             );
         }
 
-        // Draw overlays (on top of everything, including sidebar)
-        // Use full terminal area so panels are truly centered (matching v0.6.x behaviour).
-        self.overlays.draw(frame, area, &draw_ctx);
+        // Draw overlays on top of the main content area only, so they don't
+        // spill over the sidebar (matching v0.6.x behaviour).
+        self.overlays.draw(frame, main_area, &draw_ctx);
 
         // ── Footer status line (right-aligned, matching v0.6.x) ──
         let status_text = self.footer_status_text();
