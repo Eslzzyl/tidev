@@ -135,12 +135,6 @@ jobs:
             npm install -g tidev
             ```
 
-            ### Install via cargo
-
-            ```bash
-            cargo install tidev --locked
-            ```
-
             ### Manual download
 
             | Platform | Binary |
