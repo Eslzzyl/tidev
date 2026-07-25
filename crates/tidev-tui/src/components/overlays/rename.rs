@@ -69,12 +69,12 @@ impl Component for RenameDialog {
                     OverlayKind::RenameDialog,
                 )))
             }
-            // Paste (Ctrl+V)
+            // Paste (Ctrl+V / Cmd+V)
             KeyCode::Char('v')
-                if key.modifiers.contains(KeyModifiers::CONTROL)
+                if (key.modifiers.contains(KeyModifiers::CONTROL)
+                    || key.modifiers.contains(KeyModifiers::SUPER))
                     && !key.modifiers.contains(KeyModifiers::ALT)
-                    && !key.modifiers.contains(KeyModifiers::SHIFT)
-                    && !key.modifiers.contains(KeyModifiers::SUPER) =>
+                    && !key.modifiers.contains(KeyModifiers::SHIFT) =>
             {
                 if let Some(text) = paste_from_clipboard() {
                     self.buffer.push_str(&text);

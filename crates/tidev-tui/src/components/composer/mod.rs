@@ -1366,12 +1366,12 @@ impl Component for Composer {
             return None;
         }
 
-        // ── Ctrl+V: clipboard paste ───────────────────────────────────
+        // ── Ctrl+V / Cmd+V: clipboard paste ──────────────────────
         if matches!(key.code, KeyCode::Char('v'))
-            && key.modifiers.contains(KeyModifiers::CONTROL)
+            && (key.modifiers.contains(KeyModifiers::CONTROL)
+                || key.modifiers.contains(KeyModifiers::SUPER))
             && !key.modifiers.contains(KeyModifiers::ALT)
             && !key.modifiers.contains(KeyModifiers::SHIFT)
-            && !key.modifiers.contains(KeyModifiers::SUPER)
         {
             // 1. Try text paste.
             if let Some(text) = crate::utils::paste_from_clipboard() {
