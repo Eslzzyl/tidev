@@ -916,7 +916,7 @@ struct ResponsesRequest {
     stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     stream_options: Option<StreamOptions>,
-    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "reasoning", skip_serializing_if = "Option::is_none")]
     thinking: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     include: Option<Vec<String>>,
