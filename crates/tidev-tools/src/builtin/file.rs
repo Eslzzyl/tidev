@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, bail};
 use diffy::DiffOptions;
 use serde_json::Value;
-use std::{fs, io::BufRead, path::Path};
+use std::{fs, io::BufRead, path::{Path, PathBuf}};
 
 use super::apply_patch;
 use super::utils::{display_workspace_relative, read_existing_text, resolve_workspace_path};
@@ -322,6 +322,9 @@ pub(super) fn read_path(
         }
     }
 
+    // Load nearby instruction files (for all read types: dir, image, text)
+    let instructions = resolve_nearby_instructions(workspace_root, config_dir, &path)?;
+
     if path.is_dir() {
         let output = list_dir(workspace_root, &relative_path, allow_outside)?;
         let mut result = ToolExecutionResult::new(output);
@@ -331,6 +334,7 @@ pub(super) fn read_path(
                 path: display_workspace_relative(workspace_root, &path),
                 tree: std::sync::Arc::new("".to_string()),
             });
+        attach_instructions(&mut result, instructions);
         return Ok(result);
     }
 
@@ -357,6 +361,7 @@ pub(super) fn read_path(
             data: content,
             file_size,
         });
+        attach_instructions(&mut result, instructions);
         return Ok(result);
     }
 
@@ -490,27 +495,29 @@ pub(super) fn read_path(
         metadata
     );
 
-    // Load nearby instruction files
-    let instructions = resolve_nearby_instructions(workspace_root, config_dir, &path)?;
-
     let mut result = ToolExecutionResult::new(output);
-
-    if !instructions.is_empty() {
-        let mut instruction_sources = Vec::new();
-        let mut reminders = Vec::new();
-        for (path, content) in instructions {
-            instruction_sources.push(path.to_string_lossy().to_string());
-            reminders.push(content);
-        }
-
-        result.output.push_str(&format!(
-            "\n\n<system-reminder>\n{}\n</system-reminder>",
-            reminders.join("\n\n")
-        ));
-        result.instruction_sources = instruction_sources;
-    }
+    attach_instructions(&mut result, instructions);
 
     Ok(result)
+}
+
+/// Attach nearby instruction files to a tool execution result as `<system-reminder>` blocks.
+/// The instructions are appended to the result's output text so they reach the LLM context.
+fn attach_instructions(result: &mut ToolExecutionResult, instructions: Vec<(PathBuf, String)>) {
+    if instructions.is_empty() {
+        return;
+    }
+    let mut instruction_sources = Vec::new();
+    let mut reminders = Vec::new();
+    for (path, content) in instructions {
+        instruction_sources.push(path.to_string_lossy().to_string());
+        reminders.push(content);
+    }
+    result.output.push_str(&format!(
+        "\n\n<system-reminder>\n{}\n</system-reminder>",
+        reminders.join("\n\n")
+    ));
+    result.instruction_sources = instruction_sources;
 }
 
 fn is_binary_file(path: &Path) -> Result<bool> {
@@ -1368,5 +1375,88 @@ mod tests {
         let find = "  a\nb\nc  ";
         let result = trimmed_boundary_replacer(content, find);
         assert!(result.is_empty());
+    }
+
+    /// Reads a directory while an AGENTS.md exists in a parent directory.
+    /// Verifies that nearby instruction files are discovered and attached
+    /// to the tool result (not just for text file reads).
+    #[test]
+    fn test_read_dir_with_nearby_instructions() -> Result<()> {
+        let workspace = tempfile::TempDir::new()?;
+        let config_dir = tempfile::TempDir::new()?;
+        let ws_path = workspace.path();
+        let cf_path = config_dir.path();
+
+        // Create: ws/subdir/AGENTS.md, ws/subdir/nested/
+        // AGENTS.md is NOT at workspace root, so it won't be scooped up
+        // by find_project_instruction into system_set.
+        let subdir = ws_path.join("subdir");
+        std::fs::create_dir(&subdir)?;
+        std::fs::write(subdir.join("AGENTS.md"), "# Subdir Guide")?;
+        let nested = subdir.join("nested");
+        std::fs::create_dir(&nested)?;
+
+        // Read the nested directory — upward traversal finds subdir/AGENTS.md
+        let result = read_path(ws_path, cf_path, "subdir/nested", None, None, false, false)?;
+
+        assert!(
+            !result.instruction_sources.is_empty(),
+            "should discover AGENTS.md when reading a directory"
+        );
+        assert!(
+            result.instruction_sources[0].ends_with("AGENTS.md"),
+            "instruction source should reference AGENTS.md: got {}",
+            result.instruction_sources[0]
+        );
+        assert!(
+            result.output.contains("<system-reminder>"),
+            "output should embed instructions as system-reminder"
+        );
+        assert!(
+            result.output.contains("Instructions from:"),
+            "output should reference instruction source"
+        );
+        assert!(
+            result.output.contains("(empty)"),
+            "output should contain directory listing"
+        );
+        Ok(())
+    }
+
+    /// Reads a text file while an AGENTS.md exists in a parent directory.
+    /// Regression test: the text file path should still discover instructions
+    /// after refactoring.
+    #[test]
+    fn test_read_file_with_nearby_instructions() -> Result<()> {
+        let workspace = tempfile::TempDir::new()?;
+        let config_dir = tempfile::TempDir::new()?;
+        let ws_path = workspace.path();
+        let cf_path = config_dir.path();
+
+        // Same directory structure as above
+        let subdir = ws_path.join("subdir");
+        std::fs::create_dir(&subdir)?;
+        std::fs::write(subdir.join("AGENTS.md"), "# Subdir Guide")?;
+        let nested = subdir.join("nested");
+        std::fs::create_dir(&nested)?;
+        std::fs::write(nested.join("file.txt"), "hello world")?;
+
+        // Read the text file — upward traversal finds subdir/AGENTS.md
+        let result = read_path(ws_path, cf_path, "subdir/nested/file.txt", None, None, false, false)?;
+
+        assert!(
+            !result.instruction_sources.is_empty(),
+            "should discover AGENTS.md when reading a file"
+        );
+        assert!(
+            result.instruction_sources[0].ends_with("AGENTS.md"),
+            "instruction source should reference AGENTS.md: got {}",
+            result.instruction_sources[0]
+        );
+        assert!(
+            result.output.contains("<system-reminder>"),
+            "output should embed instructions as system-reminder"
+        );
+        Ok(())
     }
 }
