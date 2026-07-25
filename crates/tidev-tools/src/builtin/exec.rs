@@ -204,6 +204,7 @@ pub async fn execute_tool_call_with_cancel_async(
 /// Internally uses `tokio::process::Command` so the calling async task is never
 /// blocked by a running shell command. Output is read chunk-by-chunk and
 /// forwarded as [`BackendEvent::ShellOutput`] events.
+#[allow(clippy::too_many_arguments)]
 async fn run_shell_streaming(
     workspace_root: &Path,
     command: &str,
@@ -218,8 +219,8 @@ async fn run_shell_streaming(
     let mut actual_command = command.to_string();
 
     // ── Layer 0: Plan mode command classification ────────────────────
-    if mode == SessionMode::Plan {
-        if Classifier::global().classify(command) >= Safety::WriteOperation {
+    if mode == SessionMode::Plan
+        && Classifier::global().classify(command) >= Safety::WriteOperation {
             log::info!(
                 "plan mode blocked write command: {}",
                 command.lines().next().unwrap_or(command)
@@ -241,13 +242,10 @@ async fn run_shell_streaming(
             }
 
             return Ok(ShellExecutionResult {
-                output: format!(
-                    "[exit 1]\nError: Command blocked in Plan mode — this command appears \
-                     to modify files."
-                ),
+                output: "[exit 1]\nError: Command blocked in Plan mode — this command appears \
+                     to modify files.".to_string(),
             });
         }
-    }
 
     // ── Layer 1: Privilege escalation handling (sudo/doas/pkexec) ──────
     let mut sudo_guard: Option<super::sudo::AskpassGuard> = None;
@@ -479,8 +477,8 @@ fn run_shell_inner(
     let mut actual_command = command.to_string();
 
     // ── Layer 0: Plan mode command classification ────────────────────
-    if mode == SessionMode::Plan {
-        if Classifier::global().classify(command) >= Safety::WriteOperation {
+    if mode == SessionMode::Plan
+        && Classifier::global().classify(command) >= Safety::WriteOperation {
             log::info!(
                 "plan mode blocked write command: {}",
                 command.lines().next().unwrap_or(command)
@@ -502,13 +500,10 @@ fn run_shell_inner(
             }
 
             return Ok(ShellExecutionResult {
-                output: format!(
-                    "[exit 1]\nError: Command blocked in Plan mode — this command appears \
-                     to modify files."
-                ),
+                output: "[exit 1]\nError: Command blocked in Plan mode — this command appears \
+                     to modify files.".to_string(),
             });
         }
-    }
 
     // ── Layer 1: Privilege escalation handling (sudo/doas/pkexec) ──────
     let mut sudo_guard: Option<super::sudo::AskpassGuard> = None;

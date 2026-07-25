@@ -1771,11 +1771,11 @@ impl SessionStore {
         let sid_strs: Vec<String> = if let Some(ids) = session_ids {
             ids.iter().map(|id| id.to_string()).collect()
         } else {
-            let rows = import_conn
+            
+            import_conn
                 .prepare("SELECT id FROM sessions")?
                 .query_map([], |row| row.get::<_, String>(0))?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            rows
+                .collect::<rusqlite::Result<Vec<_>>>()?
         };
         if sid_strs.is_empty() {
             return Ok(Vec::new());

@@ -200,7 +200,7 @@ pub(crate) fn draw_composer(
         {
             meta_spans.push(Span::styled(" · ", Style::default().fg(palette.muted)));
             meta_spans.push(Span::styled(
-                format!("{}", level.display_name()),
+                level.display_name().to_string(),
                 Style::default().fg(palette.accent_soft),
             ));
         }

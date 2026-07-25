@@ -136,11 +136,10 @@ impl App {
         if !self.overlays.is_empty() {
             return;
         }
-        if let Some(ref mut composer) = self.composer {
-            if let Some(action) = composer.handle_paste(&text) {
+        if let Some(ref mut composer) = self.composer
+            && let Some(action) = composer.handle_paste(&text) {
                 self.process_action(action);
             }
-        }
     }
 
     /// Single dispatch point for all crossterm events.
@@ -447,7 +446,6 @@ impl App {
                     && composer.is_input_dragging()
                 {
                     composer.handle_mouse_drag(position, composer.last_text_area);
-                    return;
                 }
             }
             MouseEventKind::Up(MouseButton::Left) => {

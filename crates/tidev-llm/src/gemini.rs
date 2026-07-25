@@ -354,7 +354,7 @@ pub(crate) async fn stream_gemini(
     let _ = tx.send(BackendEvent::Finished {
         session_id,
         request_id,
-        turn,
+        turn: Box::new(turn),
     });
 
     Ok(())

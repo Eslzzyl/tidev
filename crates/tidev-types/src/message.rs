@@ -544,7 +544,7 @@ pub enum BackendEvent {
     Finished {
         session_id: Uuid,
         request_id: u64,
-        turn: AssistantTurn,
+        turn: Box<AssistantTurn>,
     },
     Failed {
         session_id: Uuid,
@@ -572,7 +572,7 @@ pub enum BackendEvent {
         session_id: Uuid,
         request_id: u64,
         tool_call: ToolCall,
-        result: ToolExecutionResult,
+        result: Box<ToolExecutionResult>,
     },
     SubagentStatus {
         session_id: Uuid,
@@ -581,7 +581,7 @@ pub enum BackendEvent {
         child_session_id: Uuid,
         status_text: String,
         current_tool_call: Option<ToolCall>,
-        assistant_message: Option<Message>,
+        assistant_message: Box<Option<Message>>,
         content_delta: Option<String>,
         reasoning_delta: Option<String>,
     },
@@ -590,7 +590,7 @@ pub enum BackendEvent {
         request_id: u64,
         tool_call: ToolCall,
         child_session_id: Uuid,
-        result: ToolExecutionResult,
+        result: Box<ToolExecutionResult>,
     },
     UsageStats {
         session_id: Uuid,
@@ -615,7 +615,7 @@ pub enum BackendEvent {
     },
     UserMessageCreated {
         session_id: Uuid,
-        message: Message,
+        message: Box<Message>,
     },
     UndoCompleted {
         session_id: Uuid,
@@ -1187,7 +1187,7 @@ mod tests {
             BackendEvent::Finished {
                 session_id: sid,
                 request_id: 1,
-                turn: AssistantTurn::default(),
+                turn: Box::new(AssistantTurn::default()),
             },
             BackendEvent::Failed {
                 session_id: sid,
@@ -1215,7 +1215,7 @@ mod tests {
                 session_id: sid,
                 request_id: 1,
                 tool_call: ToolCall::default(),
-                result: ToolExecutionResult::new("ok"),
+                result: Box::new(ToolExecutionResult::new("ok")),
             },
             BackendEvent::SubagentStatus {
                 session_id: sid,
@@ -1224,7 +1224,7 @@ mod tests {
                 child_session_id: Uuid::new_v4(),
                 status_text: "running".into(),
                 current_tool_call: None,
-                assistant_message: None,
+                assistant_message: Box::new(None),
                 content_delta: None,
                 reasoning_delta: None,
             },
@@ -1233,7 +1233,7 @@ mod tests {
                 request_id: 1,
                 tool_call: ToolCall::default(),
                 child_session_id: Uuid::new_v4(),
-                result: ToolExecutionResult::new("ok"),
+                result: Box::new(ToolExecutionResult::new("ok")),
             },
             BackendEvent::UsageStats {
                 session_id: sid,
@@ -1258,7 +1258,7 @@ mod tests {
             },
             BackendEvent::UserMessageCreated {
                 session_id: sid,
-                message: Message::new(MessageRole::User, "hi"),
+                message: Box::new(Message::new(MessageRole::User, "hi")),
             },
             BackendEvent::UndoCompleted {
                 session_id: sid,
@@ -1349,10 +1349,9 @@ mod tests {
         assert_eq!(
             BackendEvent::UserMessageCreated {
                 session_id: sid,
-                message: Message::new(MessageRole::User, "")
+                message: Box::new(Message::new(MessageRole::User, "")),
             }
-            .request_id(),
-            None
+            .request_id(),            None
         );
         assert_eq!(
             BackendEvent::ShellOutput {

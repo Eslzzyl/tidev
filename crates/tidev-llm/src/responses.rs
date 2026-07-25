@@ -153,7 +153,7 @@ pub(crate) async fn stream_responses(
                     let _ = tx.send(BackendEvent::Finished {
                         session_id,
                         request_id,
-                        turn,
+                        turn: Box::new(turn),
                     });
                     return Ok(());
                 }
@@ -536,7 +536,7 @@ pub(crate) async fn stream_responses(
     let _ = tx.send(BackendEvent::Finished {
         session_id,
         request_id,
-        turn,
+        turn: Box::new(turn),
     });
     Ok(())
 }

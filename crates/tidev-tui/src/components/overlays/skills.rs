@@ -472,8 +472,8 @@ impl Component for SkillsPanel {
             list_content_area,
         );
 
-        if let Some(sb_area) = list_scrollbar_area {
-            if self.filtered_indices.len() > list_content_height as usize {
+        if let Some(sb_area) = list_scrollbar_area
+            && self.filtered_indices.len() > list_content_height as usize {
                 render_scrollbar(
                     frame,
                     sb_area,
@@ -483,7 +483,6 @@ impl Component for SkillsPanel {
                     false,
                 );
             }
-        }
 
         // ── Right Pane: Preview ──
         let preview_header_y = right_area.y + 1;
@@ -535,11 +534,11 @@ impl Component for SkillsPanel {
 
         // Populate preview cache from SkillItem.content if it doesn't match the selected skill
         let needs_render = match &self.cached_preview {
-            Some((name, _)) => self.selected_skill().map_or(true, |s| *name != s.name),
+            Some((name, _)) => self.selected_skill().is_none_or(|s| *name != s.name),
             None => true,
         };
-        if needs_render {
-            if let Some(skill) = self.selected_skill() {
+        if needs_render
+            && let Some(skill) = self.selected_skill() {
                 let rendered = render_markdown_text_with_width_and_cwd(
                     &skill.content,
                     Some(self.preview_content_width),
@@ -547,7 +546,6 @@ impl Component for SkillsPanel {
                 );
                 self.cached_preview = Some((skill.name.clone(), rendered));
             }
-        }
 
         if let Some((_, rendered)) = &self.cached_preview {
             let total_preview_lines = rendered.lines.len();
@@ -567,8 +565,8 @@ impl Component for SkillsPanel {
                 preview_content_area,
             );
 
-            if let Some(sb_area) = preview_scrollbar_area {
-                if total_preview_lines > preview_content_height as usize {
+            if let Some(sb_area) = preview_scrollbar_area
+                && total_preview_lines > preview_content_height as usize {
                     render_scrollbar(
                         frame,
                         sb_area,
@@ -578,7 +576,6 @@ impl Component for SkillsPanel {
                         false,
                     );
                 }
-            }
         }
 
         let footer_y = inner.y + inner.height - 1;

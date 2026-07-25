@@ -172,7 +172,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
                     session_id,
                     request_id,
                     tool_call: approved_tool.tool_call.clone(),
-                    result: rejection.clone(),
+                    result: Box::new(rejection.clone()),
                 });
             } else if approved_tool.tool_call.name == "task" {
                 task_calls.push((

@@ -165,8 +165,8 @@ impl App {
                     // Fast path: if the MessageList already has a chat_context for
                     // this session, use switch_to_session to preserve in-memory
                     // streaming state (avoiding DB reload that would lose content).
-                    if let Some(ref mut chat) = self.message_list {
-                        if chat.switch_to_session(session_id) {
+                    if let Some(ref mut chat) = self.message_list
+                        && chat.switch_to_session(session_id) {
                             self.current_session_id = Some(session_id);
                             self.scroll_target = None;
                             self.screen = AppScreen::Chat;
@@ -230,7 +230,6 @@ impl App {
                             )));
                             return;
                         }
-                    }
 
                     // Slow path: first time entering this session — load from DB.
                     self.current_session_id = Some(session_id);
@@ -778,11 +777,10 @@ impl App {
                     // Record in cache regardless of which session.
                     self.boundary_permissions.insert(path_str.clone(), allowed);
 
-                    if let Some(r) = reason {
-                        if !r.is_empty() {
+                    if let Some(r) = reason
+                        && !r.is_empty() {
                             self.boundary_reasons.insert(path_str, r);
                         }
-                    }
 
                     self.process_next_tool();
                 }
@@ -801,11 +799,10 @@ impl App {
 
                     self.sensitive_permissions.insert(path_str.clone(), allowed);
 
-                    if let Some(r) = reason {
-                        if !r.is_empty() {
+                    if let Some(r) = reason
+                        && !r.is_empty() {
                             self.sensitive_reasons.insert(path_str, r);
                         }
-                    }
 
                     self.process_next_tool();
                 }

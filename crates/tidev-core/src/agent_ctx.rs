@@ -788,7 +788,7 @@ impl AgentContext for CoreContext {
                         session_id,
                         request_id,
                         tool_call: tc.clone(),
-                        result: ToolExecutionResult::new("User cancelled the request"),
+                        result: Box::new(ToolExecutionResult::new("User cancelled the request")),
                     });
                     results.push((
                         tc.clone(),
@@ -842,7 +842,7 @@ impl AgentContext for CoreContext {
                                 session_id,
                                 request_id,
                                 tool_call: tc.clone(),
-                                result: ToolExecutionResult::new("User cancelled the request"),
+                                result: Box::new(ToolExecutionResult::new("User cancelled the request")),
                             });
                             results.push((
                                 tc,
@@ -859,7 +859,7 @@ impl AgentContext for CoreContext {
                                     session_id,
                                     request_id,
                                     tool_call: tc.clone(),
-                                    result: result.clone(),
+                                    result: Box::new(result.clone()),
                                 });
                                 results.push((tc, result));
                             }
@@ -876,13 +876,12 @@ impl AgentContext for CoreContext {
         // --- Write tools: serial execution with immediate cancellation ---
         for (tc, allow_outside, sensitive_approved) in write {
             if self.cancel.is_cancelled() {
-                self.emit(BackendEvent::ToolCompleted {
-                    session_id,
-                    request_id,
-                    tool_call: tc.clone(),
-                    result: ToolExecutionResult::new("User cancelled the request"),
-                });
-                results.push((tc, ToolExecutionResult::new("User cancelled the request")));
+                            self.emit(BackendEvent::ToolCompleted {
+                                session_id,
+                                request_id,
+                                tool_call: tc.clone(),
+                                result: Box::new(ToolExecutionResult::new("User cancelled the request")),
+                            });                results.push((tc, ToolExecutionResult::new("User cancelled the request")));
                 continue;
             }
 
@@ -911,7 +910,7 @@ impl AgentContext for CoreContext {
                         session_id,
                         request_id,
                         tool_call: tc.clone(),
-                        result: ToolExecutionResult::new("User cancelled the request"),
+                        result: Box::new(ToolExecutionResult::new("User cancelled the request")),
                     });
                     results.push((
                         tc,
@@ -923,7 +922,7 @@ impl AgentContext for CoreContext {
                         session_id,
                         request_id,
                         tool_call: tc.clone(),
-                        result: result.clone(),
+                        result: Box::new(result.clone()),
                     });
                     results.push((tc, result));
                 }
@@ -941,7 +940,7 @@ impl AgentContext for CoreContext {
                     session_id,
                     request_id,
                     tool_call: tc.clone(),
-                    result: result.clone(),
+                    result: Box::new(result.clone()),
                 });
                 results.push((tc, result));
             }
@@ -1006,7 +1005,7 @@ impl AgentContext for CoreContext {
                                 session_id,
                                 request_id,
                                 tool_call: tc.clone(),
-                                result: ToolExecutionResult::new("User cancelled the request"),
+                                result: Box::new(ToolExecutionResult::new("User cancelled the request")),
                             });
                             results.push((
                                 tc,
@@ -1031,7 +1030,7 @@ impl AgentContext for CoreContext {
                                         session_id,
                                         request_id,
                                         tool_call: tc.clone(),
-                                        result: result.clone(),
+                                        result: Box::new(result.clone()),
                                     });
                                     results.push((tc, result));
                                 }
@@ -1046,9 +1045,9 @@ impl AgentContext for CoreContext {
                                             session_id,
                                             request_id,
                                             tool_call: tc.clone(),
-                                            result: ToolExecutionResult::new(
+                                            result: Box::new(ToolExecutionResult::new(
                                                 "User cancelled the request",
-                                            ),
+                                            )),
                                         });
                                         results.push((
                                             tc,
@@ -1155,7 +1154,7 @@ impl AgentContext for CoreContext {
                         // Use session_start_hash as baseline so the diff
                         // matches `git diff` from session start.
                         let start = { self.session_start_hash.lock().await.clone() };
-                        let baseline = start.as_ref().unwrap_or(&pre);
+                        let baseline = start.as_ref().unwrap_or(pre);
                         if let Ok(cumulative_diffs) =
                             snap.diff_lightweight(baseline, &post_hash).await
                             && let Ok(diffs_json) = serde_json::to_string(&cumulative_diffs)
@@ -1429,7 +1428,7 @@ async fn execute_task_tool(
         child_session_id,
         status_text: format!("Started {:?} subagent", agent_type),
         current_tool_call: None,
-        assistant_message: None,
+        assistant_message: Box::new(None),
         content_delta: None,
         reasoning_delta: None,
     });

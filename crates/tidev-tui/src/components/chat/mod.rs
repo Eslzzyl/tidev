@@ -189,8 +189,8 @@ impl MessageList {
             self.rebuild_subagent_state();
 
             // Pick up any streaming Assistant message in the target context.
-            if let Some(ctx) = self.chat_contexts.get(&session_id) {
-                if ctx
+            if let Some(ctx) = self.chat_contexts.get(&session_id)
+                && ctx
                     .messages
                     .iter()
                     .any(|m| m.streaming && m.role == tidev_types::message::MessageRole::Assistant)
@@ -199,7 +199,6 @@ impl MessageList {
                         &mut self.chat_contexts.get_mut(&session_id).unwrap().messages,
                     );
                 }
-            }
 
             self.dirty = true;
             true
@@ -227,8 +226,8 @@ impl MessageList {
 
         // Pick up any streaming Assistant message in the new context
         // (unlikely for DB-loaded contexts, but harmless).
-        if let Some(ctx) = self.chat_contexts.get(&session_id) {
-            if ctx
+        if let Some(ctx) = self.chat_contexts.get(&session_id)
+            && ctx
                 .messages
                 .iter()
                 .any(|m| m.streaming && m.role == tidev_types::message::MessageRole::Assistant)
@@ -237,7 +236,6 @@ impl MessageList {
                     &mut self.chat_contexts.get_mut(&session_id).unwrap().messages,
                 );
             }
-        }
     }
 
     /// Rebuild subagent state from the current chat_context messages.
@@ -412,7 +410,7 @@ impl MessageList {
         let idx_to_remove = finalized_idx
             .filter(|&idx| {
                 // Only remove if the finalized message is actually empty.
-                chat_context.messages.get(idx).map_or(false, |m| {
+                chat_context.messages.get(idx).is_some_and(|m| {
                     m.content.is_empty() && m.reasoning.trim().is_empty() && m.tool_calls.is_empty()
                 })
             })
@@ -567,18 +565,15 @@ impl MessageList {
         // ── 1. Update running subagent card status ─────────────────────
         // Run this BEFORE the chat_context routing so that events update
         // the inline card regardless of whether the chat_context exists.
-        if let Some(text) = infer_subagent_status(event) {
-            if let Some(exec) = self
+        if let Some(text) = infer_subagent_status(event)
+            && let Some(exec) = self
                 .running_subagents
                 .iter_mut()
                 .find(|e| e.child_session_id == Some(session_id) && !e.interrupted)
-            {
-                if exec.status_text != text {
+                && exec.status_text != text {
                     exec.status_text = text;
                     self.dirty = true;
                 }
-            }
-        }
 
         // ── 2. Route to chat_context ───────────────────────────────────
         let chat_context = match self.chat_contexts.get_mut(&session_id) {
@@ -613,13 +608,11 @@ impl MessageList {
                         .push_delta(content, &mut chat_context.messages);
                     if let Some(msg_id) = self.streaming_buffer.current_message_id {
                         if let Some(msg) = chat_context.messages.iter_mut().find(|m| m.id == msg_id)
-                        {
-                            if msg.reasoning_started_at.is_some()
+                            && msg.reasoning_started_at.is_some()
                                 && msg.reasoning_completed_at.is_none()
                             {
                                 msg.reasoning_completed_at = Some(Utc::now());
                             }
-                        }
                         self.layout_index.mark_dirty(msg_id);
                     }
                 } else if let Some(msg) =
@@ -639,13 +632,12 @@ impl MessageList {
                         .recover_or_begin_streaming(&mut chat_context.messages);
                     self.streaming_buffer
                         .push_delta(content, &mut chat_context.messages);
-                    if let Some(msg) = chat_context.messages.iter_mut().find(|m| m.id == mid) {
-                        if msg.reasoning_started_at.is_some()
+                    if let Some(msg) = chat_context.messages.iter_mut().find(|m| m.id == mid)
+                        && msg.reasoning_started_at.is_some()
                             && msg.reasoning_completed_at.is_none()
                         {
                             msg.reasoning_completed_at = Some(Utc::now());
                         }
-                    }
                     self.layout_index.mark_dirty(mid);
                 }
                 self.dirty = true;
@@ -657,11 +649,9 @@ impl MessageList {
                         .push_reasoning_delta(content, &mut chat_context.messages);
                     if let Some(msg_id) = self.streaming_buffer.current_message_id {
                         if let Some(msg) = chat_context.messages.iter_mut().find(|m| m.id == msg_id)
-                        {
-                            if msg.reasoning_started_at.is_none() {
+                            && msg.reasoning_started_at.is_none() {
                                 msg.reasoning_started_at = Some(Utc::now());
                             }
-                        }
                         self.layout_index.mark_dirty(msg_id);
                     }
                 } else if let Some(msg) =
@@ -679,11 +669,9 @@ impl MessageList {
                         .push_reasoning_delta(content, &mut chat_context.messages);
                     if let Some(msg_id) = self.streaming_buffer.current_message_id {
                         if let Some(msg) = chat_context.messages.iter_mut().find(|m| m.id == msg_id)
-                        {
-                            if msg.reasoning_started_at.is_none() {
+                            && msg.reasoning_started_at.is_none() {
                                 msg.reasoning_started_at = Some(Utc::now());
                             }
-                        }
                         self.layout_index.mark_dirty(msg_id);
                     }
                 }
@@ -794,7 +782,7 @@ impl MessageList {
                         let tool_msg = tidev_types::message::Message::tool_result(
                             tool_call.id.clone(),
                             tool_call.name.clone(),
-                            result.clone(),
+                            (**result).clone(),
                         );
                         chat_context.messages.push(tool_msg);
                     }
@@ -905,7 +893,7 @@ impl MessageList {
                 }) {
                     msg.metadata.child_session_id = Some(*child_session_id);
                 }
-                if let Some(msg) = assistant_message {
+                if let Some(ref msg) = **assistant_message {
                     let existing = chat_context.messages.iter_mut().find(|m| m.id == msg.id);
                     if let Some(existing) = existing {
                         if !msg.content.is_empty() {

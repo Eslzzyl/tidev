@@ -453,7 +453,7 @@ impl Runtime {
         // 3. Notify the TUI so it can display the message.
         let _ = self.event_tx.send(BackendEvent::UserMessageCreated {
             session_id,
-            message: user_msg,
+            message: Box::new(user_msg),
         });
 
         // 4. Check if this session already has a loop running.
@@ -888,7 +888,7 @@ impl Runtime {
                     Some(self.event_tx.clone()),
                 )
                 .await
-                .map_err(|e| {
+                .inspect_err(|e| {
                     let _ = self.event_tx.send(BackendEvent::ContextCompacted {
                         session_id,
                         compacted: false,
@@ -899,7 +899,6 @@ impl Runtime {
                         completed_at: Some(Utc::now()),
                         error: Some(e.to_string()),
                     });
-                    e
                 })?;
             (result, prior_summary, prior_retained_from)
         };

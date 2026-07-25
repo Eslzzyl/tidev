@@ -86,7 +86,7 @@ impl Classifier {
     /// Return a global cached instance.
     pub fn global() -> &'static Self {
         static CLASSIFIER: OnceLock<Classifier> = OnceLock::new();
-        CLASSIFIER.get_or_init(|| Classifier::new())
+        CLASSIFIER.get_or_init(Classifier::new)
     }
 
     /// Classify a shell command string.
@@ -184,7 +184,7 @@ fn find_cmd_index(parts: &[&str]) -> usize {
 /// Split a shell command string into compound segments.
 ///
 /// Segments are separated by `&&`, `||`, `;`, or `|` (simple pipe).
-fn split_compound<'a>(s: &'a str) -> Vec<&'a str> {
+fn split_compound(s: &str) -> Vec<&str> {
     let mut segments = Vec::new();
     let mut start = 0;
     let mut in_single = false;
@@ -696,11 +696,10 @@ fn classify_command(cmd: &str, args: &[&str]) -> Safety {
         // ── crontab / system scheduling ──────────────────────────────
         "crontab" | "at" | "atq" | "atrm" | "batch" => {
             // `crontab -l` is read-only, `crontab -e` / `crontab file` is write
-            if cmd == "crontab" {
-                if args.contains(&"-l") || args.contains(&"--list") {
+            if cmd == "crontab"
+                && (args.contains(&"-l") || args.contains(&"--list")) {
                     return Safety::ReadOnly;
                 }
-            }
             Safety::Unknown
         }
 

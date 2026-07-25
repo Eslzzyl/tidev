@@ -360,8 +360,8 @@ impl App {
 
         // Push as a System message into the current session's chat context
         // for immediate display.
-        if let Some(sid) = self.current_session_id {
-            if let Some(ref mut chat) = self.message_list {
+        if let Some(sid) = self.current_session_id
+            && let Some(ref mut chat) = self.message_list {
                 if let Some(ref mut ctx) = chat.active_chat_context_mut()
                     && ctx.session_id == sid
                 {
@@ -373,7 +373,6 @@ impl App {
                 // follows.
                 chat.invalidate_layout();
             }
-        }
 
         // Mark as shown in memory only — the backend owns `session_instruction_sources`.
         let owned: Vec<String> = new_sources.into_iter().cloned().collect();
