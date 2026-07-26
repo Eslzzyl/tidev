@@ -285,30 +285,21 @@ impl App {
                     });
 
                     let chat_context = {
-                        let config = self.runtime.config();
-                        let active_model = config.resolve_active_model(&self.runtime.auth()).ok();
-                        let model_display = active_model
-                            .as_ref()
-                            .map(|m| m.display_name.clone())
-                            .unwrap_or_default();
-                        let provider_display = active_model
-                            .as_ref()
-                            .map(|m| m.provider_display_name.clone())
-                            .unwrap_or_default();
-
                         let mut ctx = crate::chat_context::ChatContext::new(
                             session_id,
                             String::new(),
                             messages,
                             None,
-                            model_display,
-                            provider_display,
+                            String::new(),
+                            String::new(),
                         );
                         if let Ok(Some(record)) =
                             self.runtime.session_manager().load_session(session_id)
                         {
                             ctx.title = record.title;
                             ctx.parent_session_id = record.parent_session_id;
+                            ctx.model_display_name = record.model_display_name;
+                            ctx.provider_display_name = record.provider_display_name;
                         }
 
                         ctx
