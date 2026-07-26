@@ -43,6 +43,7 @@ use tidev_types::tools::TodoItem;
 use tidev_agent::{AgentDefinition, TuiRequest};
 
 use crate::context::ContextManager;
+use crate::mcp::McpManager;
 use crate::message_buf::MessageBuffer;
 use crate::registry::ToolRegistry;
 use crate::session::SessionManager;
@@ -219,6 +220,11 @@ impl Runtime {
     /// Get the tool registry.
     pub fn tool_registry(&self) -> &ToolRegistry {
         &self.tool_registry
+    }
+
+    /// Get the MCP manager (delegates to tool registry).
+    pub fn mcp_manager(&self) -> &McpManager {
+        self.tool_registry.mcp_manager()
     }
 
     /// Get the LLM client.
@@ -1231,6 +1237,11 @@ impl RuntimeBuilder {
             store: store.clone(),
         });
 
+        // 9b. MCP manager.
+        let _t_mcp = Instant::now();
+        let mcp_manager = McpManager::new(workspace_root.clone(), config.mcp.servers.clone());
+        log::info!("startup: MCP manager ready in {:?}", _t_mcp.elapsed());
+
         // 10. Tool registry.
         let _t_tools = Instant::now();
         let max_output_bytes = active_model.max_output_tokens * 2; // heuristic: 2x output tokens ≈ bytes
@@ -1243,8 +1254,18 @@ impl RuntimeBuilder {
             auth.clone(),
             max_output_bytes,
             config.permissions.clone(),
+            mcp_manager,
         ));
         log::info!("startup: tool registry ready in {:?}", _t_tools.elapsed());
+
+        // 10b. Best-effort MCP server refresh (don't block startup on failures).
+        let _t_mcp_refresh = Instant::now();
+        if !config.mcp.is_empty() {
+            if let Err(e) = tool_registry.mcp_manager().refresh_all().await {
+                log::warn!("MCP server refresh (best-effort): {e:#}");
+            }
+            log::info!("startup: MCP refresh done in {:?}", _t_mcp_refresh.elapsed());
+        }
 
         // 11. Snapshot service.
         let _t_snap = Instant::now();

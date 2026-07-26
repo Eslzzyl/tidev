@@ -3,6 +3,7 @@
 pub mod agent_ctx;
 pub mod attachment;
 pub mod context;
+pub mod mcp;
 pub mod message_buf;
 pub mod registry;
 pub mod runtime;

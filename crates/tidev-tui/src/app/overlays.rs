@@ -9,6 +9,7 @@ use crate::components::overlays::agents::AgentsPanel;
 use crate::components::overlays::connect::ConnectDialog;
 use crate::components::overlays::fork::ForkConfirmDialog;
 use crate::components::overlays::image::ImageViewer;
+use crate::components::overlays::mcp::McpServerPanel;
 
 use crate::components::overlays::message::{MessagePanel, MessagePanelMessage};
 use crate::components::overlays::model::ModelPanel;
@@ -49,6 +50,10 @@ impl App {
             OverlayKind::SettingsPanel => {
                 let config = self.runtime.config();
                 Some(Box::new(SettingsPanel::new(&config)))
+            }
+            OverlayKind::McpServerPanel => {
+                let mcp = self.runtime.tool_registry.mcp_manager();
+                Some(Box::new(McpServerPanel::new(mcp)))
             }
             OverlayKind::SearchPanel => {
                 let config = self.runtime.config();

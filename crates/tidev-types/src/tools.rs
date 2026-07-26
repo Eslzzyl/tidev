@@ -148,18 +148,52 @@ impl PermissionConfig {
 pub enum ToolOrigin {
     /// A built-in tool implemented by tidev itself.
     Local,
+    /// A tool exposed by an MCP server.
+    Mcp(McpTarget),
 }
 
 impl ToolOrigin {
     pub fn permission_key(&self, name: &str) -> String {
         match self {
             Self::Local => name.to_string(),
+            Self::Mcp(target) => format!("mcp:{}:{}", target.server_name, target.tool_name),
         }
     }
 
     pub fn permission_label(&self, display_name: &str, _name: &str) -> String {
         match self {
             Self::Local => display_name.to_string(),
+            Self::Mcp(target) => {
+                format!("{} / {} ({})", target.server_name, target.tool_name, display_name)
+            }
+        }
+    }
+
+    /// If this tool is backed by an MCP server, return the target reference.
+    pub fn as_mcp(&self) -> Option<&McpTarget> {
+        match self {
+            Self::Local => None,
+            Self::Mcp(target) => Some(target),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// McpTarget
+// ---------------------------------------------------------------------------
+
+/// Identifies a specific tool exposed by an MCP server.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct McpTarget {
+    pub server_name: String,
+    pub tool_name: String,
+}
+
+impl McpTarget {
+    pub fn new(server_name: impl Into<String>, tool_name: impl Into<String>) -> Self {
+        Self {
+            server_name: server_name.into(),
+            tool_name: tool_name.into(),
         }
     }
 }
@@ -209,6 +243,79 @@ impl ToolDefinition {
 
     pub fn permission_label(&self) -> String {
         self.origin.permission_label(&self.display_name, &self.name)
+    }
+
+    /// Construct an MCP tool name in the `mcp__{server}__{tool}` format.
+    pub fn mcp_name(server_name: &str, tool_name: &str) -> String {
+        let mut name = String::from("mcp__");
+        name.push_str(&sanitize_mcp_name(server_name));
+        name.push_str("__");
+        name.push_str(&sanitize_mcp_name(tool_name));
+        name
+    }
+
+    /// Create a new MCP-backed tool definition.
+    pub fn mcp(
+        name: String,
+        display_name: String,
+        description: String,
+        parameters: Value,
+        permission: ToolPermission,
+        server_name: String,
+        tool_name: String,
+    ) -> Self {
+        Self {
+            name,
+            display_name,
+            description,
+            parameters,
+            permission,
+            origin: ToolOrigin::Mcp(McpTarget {
+                server_name,
+                tool_name,
+            }),
+        }
+    }
+
+    /// If this tool is backed by an MCP server, return the target info.
+    pub fn mcp_target(&self) -> Option<(&str, &str)> {
+        self.origin
+            .as_mcp()
+            .map(|t| (t.server_name.as_str(), t.tool_name.as_str()))
+    }
+}
+
+/// Sanitize a string for use in `mcp__{sanitized}__{sanitized}` names.
+fn sanitize_mcp_name(value: &str) -> String {
+    let mut sanitized = String::new();
+    let mut last_was_separator = false;
+
+    for ch in value.chars() {
+        let mapped = if ch.is_ascii_alphanumeric() {
+            Some(ch.to_ascii_lowercase())
+        } else if matches!(ch, '-' | '_') {
+            Some(ch)
+        } else {
+            None
+        };
+
+        match mapped {
+            Some(ch) => {
+                sanitized.push(ch);
+                last_was_separator = false;
+            }
+            None if !last_was_separator => {
+                sanitized.push('_');
+                last_was_separator = true;
+            }
+            None => {}
+        }
+    }
+
+    if sanitized.trim_matches('_').is_empty() {
+        "mcp".to_string()
+    } else {
+        sanitized.trim_matches('_').to_string()
     }
 }
 
@@ -633,5 +740,126 @@ mod tests {
             .unwrap();
         assert!(props.contains_key("file_path"));
         assert!(props.contains_key("content"));
+    }
+
+    // ── MCP type tests ────────────────────────────────────────────────
+
+    #[test]
+    fn test_mcp_target_new() {
+        let target = McpTarget::new("my-server", "do-thing");
+        assert_eq!(target.server_name, "my-server");
+        assert_eq!(target.tool_name, "do-thing");
+    }
+
+    #[test]
+    fn test_tool_origin_mcp_permission_key() {
+        let target = McpTarget::new("my-server", "do-thing");
+        let origin = ToolOrigin::Mcp(target);
+        assert_eq!(origin.permission_key("x"), "mcp:my-server:do-thing");
+    }
+
+    #[test]
+    fn test_tool_origin_local_permission_key() {
+        let origin = ToolOrigin::Local;
+        assert_eq!(origin.permission_key("read"), "read");
+    }
+
+    #[test]
+    fn test_tool_origin_mcp_permission_label() {
+        let target = McpTarget::new("my-server", "do-thing");
+        let origin = ToolOrigin::Mcp(target);
+        assert_eq!(
+            origin.permission_label("My Display", "x"),
+            "my-server / do-thing (My Display)"
+        );
+    }
+
+    #[test]
+    fn test_tool_origin_local_permission_label() {
+        let origin = ToolOrigin::Local;
+        assert_eq!(origin.permission_label("read", "read"), "read");
+    }
+
+    #[test]
+    fn test_tool_origin_mcp_as_mcp() {
+        let target = McpTarget::new("srv", "tool");
+        let mcp_origin = ToolOrigin::Mcp(target.clone());
+        let local_origin = ToolOrigin::Local;
+
+        assert_eq!(mcp_origin.as_mcp(), Some(&target));
+        assert_eq!(local_origin.as_mcp(), None);
+    }
+
+    #[test]
+    fn test_tool_definition_mcp_name() {
+        assert_eq!(
+            ToolDefinition::mcp_name("my-server", "do-thing"),
+            "mcp__my-server__do-thing"
+        );
+    }
+
+    #[test]
+    fn test_tool_definition_mcp_name_sanitize() {
+        assert_eq!(
+            ToolDefinition::mcp_name("a b!c", "x@y"),
+            "mcp__a_b_c__x_y"
+        );
+    }
+
+    #[test]
+    fn test_tool_definition_mcp_name_empty() {
+        // Everything sanitized away falls back to "mcp"
+        let name = ToolDefinition::mcp_name("!!!", "@@@");
+        assert_eq!(name, "mcp__mcp__mcp");
+    }
+
+    #[test]
+    fn test_tool_definition_mcp_constructor() {
+        let params = serde_json::json!({"type": "object"});
+        let def = ToolDefinition::mcp(
+            "mcp__srv__tool".into(),
+            "Srv Tool".into(),
+            "Does something".into(),
+            params.clone(),
+            ToolPermission::Execute,
+            "srv".into(),
+            "tool".into(),
+        );
+
+        assert_eq!(def.name, "mcp__srv__tool");
+        assert_eq!(def.display_name, "Srv Tool");
+        assert_eq!(def.description, "Does something");
+        assert_eq!(def.parameters, params);
+        assert_eq!(def.permission, ToolPermission::Execute);
+        assert_eq!(def.mcp_target(), Some(("srv", "tool")));
+        assert_eq!(def.permission_key(), "mcp:srv:tool");
+        assert_eq!(def.permission_label(), "srv / tool (Srv Tool)");
+    }
+
+    #[test]
+    fn test_tool_definition_mcp_target_local() {
+        let def = ToolDefinition::new::<ReadArgs>("read", "Read a file", ToolPermission::Read);
+        assert_eq!(def.mcp_target(), None);
+    }
+
+    #[test]
+    fn test_tool_definition_mcp_target_mcp() {
+        let def = ToolDefinition::mcp(
+            "mcp__s__t".into(),
+            "display".into(),
+            "desc".into(),
+            serde_json::json!({}),
+            ToolPermission::Execute,
+            "s".into(),
+            "t".into(),
+        );
+        assert_eq!(def.mcp_target(), Some(("s", "t")));
+    }
+
+    #[test]
+    fn test_tool_origin_mcp_permission_key_differs_by_server() {
+        let t1 = ToolOrigin::Mcp(McpTarget::new("server-a", "tool"));
+        let t2 = ToolOrigin::Mcp(McpTarget::new("server-b", "tool"));
+        assert_ne!(t1.permission_key("x"), t2.permission_key("x"));
     }
 }

@@ -14,6 +14,7 @@ use tidev_types::message::MessageAttachment;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PanelAction {
     Agents,
+    McpServers,
     Message,
     Model,
     Search,
@@ -98,6 +99,25 @@ pub(crate) enum ConnectAction {
     PruneOrphans,
 }
 
+/// MCP server management actions.
+#[derive(Clone, Debug)]
+pub(crate) enum McpAction {
+    /// Connect or disconnect a server by name.
+    Toggle(String),
+    /// Refresh / reconnect a server.
+    Refresh(String),
+    /// Remove a server entirely (memory + config).
+    Remove(String),
+    /// Add a new server, or update an existing one.
+    /// `original_name` is `Some` when editing and the name hasn't changed,
+    /// or `None` when adding a brand new server.
+    Upsert {
+        name: String,
+        config: tidev_config::mcp::McpServerConfig,
+        original_name: Option<String>,
+    },
+}
+
 // ---------------------------------------------------------------------------
 // Tool approval pipeline types
 // ---------------------------------------------------------------------------
@@ -171,6 +191,7 @@ pub(crate) enum OverlayKind {
     SkillsPanel,
     SearchPanel,
     MessagePanel,
+    McpServerPanel,
 }
 
 // ---------------------------------------------------------------------------
@@ -190,6 +211,7 @@ pub(crate) enum Action {
     Theme(ThemeAction),
     Search(SearchAction),
     Connect(ConnectAction),
+    Mcp(McpAction),
 
     // ── Tool approval pipeline ──
     /// Result from a WorkspaceBoundaryDialog.

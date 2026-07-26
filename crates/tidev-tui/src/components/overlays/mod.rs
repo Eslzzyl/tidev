@@ -2,6 +2,7 @@ pub(crate) mod agents;
 pub(crate) mod connect;
 pub(crate) mod fork;
 pub(crate) mod image;
+pub(crate) mod mcp;
 pub(crate) mod message;
 pub(crate) mod model;
 pub(crate) mod panel_launcher;

@@ -5,6 +5,7 @@
 //! storage, and associated types for provider/model configuration.
 
 pub mod auth;
+pub mod mcp;
 pub mod paths;
 pub mod provider;
 pub mod reasoning;
@@ -18,6 +19,8 @@ use serde::{Deserialize, Serialize};
 
 pub use crate::auth::AuthStore;
 use crate::auth::{ActiveModel, ModelSummary};
+pub use crate::mcp::McpConfig;
+pub use crate::mcp::McpServerConfig;
 use crate::paths::ConfigPaths;
 use crate::provider::{ProviderConfig, ProviderSource};
 use tidev_types::tools::PermissionConfig;
@@ -393,6 +396,8 @@ pub struct AppConfig {
     pub tmp: TmpConfig,
     #[serde(default)]
     pub websearch: WebSearchConfig,
+    #[serde(default, skip_serializing_if = "McpConfig::is_empty")]
+    pub mcp: McpConfig,
     #[serde(default)]
     pub snapshot: SnapshotConfig,
     #[serde(default)]
@@ -423,6 +428,7 @@ impl Default for AppConfig {
             shell: ShellConfig::default(),
             tmp: TmpConfig::default(),
             websearch: WebSearchConfig::default(),
+            mcp: McpConfig::default(),
             snapshot: SnapshotConfig::default(),
             subagent: SubagentConfig::default(),
             bundled_providers: bundled_provider_catalog().unwrap_or_default(),

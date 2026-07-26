@@ -8,7 +8,7 @@ use tidev_types::prompts::SessionMode;
 use uuid::Uuid;
 
 use crate::action::{
-    Action, BoundaryDecision, ChatAction, ConnectAction, OverlayAction, OverlayKind,
+    Action, BoundaryDecision, ChatAction, ConnectAction, McpAction, OverlayAction, OverlayKind,
     PermissionDecision, SearchAction, SensitiveFileDecision, SessionAction, ThemeAction,
 };
 use crate::component::Component;
@@ -134,6 +134,9 @@ impl App {
                     } else {
                         self.set_notice("No orphan auth entries to prune");
                     }
+                }
+                Action::Mcp(action) => {
+                    self.handle_mcp_action(action, &mut queue);
                 }
                 Action::Session(SessionAction::Select(session_id)) => {
                     // Ignore if already on this session
@@ -936,4 +939,78 @@ fn title_from_prompt(prompt: &str) -> String {
         title.push_str("...");
     }
     title
+}
+
+impl App {
+    /// Process an [`McpAction`] — update both the in-memory McpManager and
+    /// the persisted AppConfig, then save to disk.
+    fn handle_mcp_action(&mut self, action: McpAction, queue: &mut Vec<Action>) {
+        match action {
+            McpAction::Toggle(name) => {
+                let mcp = self.runtime.mcp_manager().clone();
+                tokio::spawn(async move {
+                    let _ = mcp.toggle_server(&name).await;
+                });
+                // Queue a refresh so the panel re-reads summaries after the op.
+                queue.push(Action::Overlay(OverlayAction::Open(OverlayKind::McpServerPanel)));
+            }
+            McpAction::Refresh(name) => {
+                let mcp = self.runtime.mcp_manager().clone();
+                tokio::spawn(async move {
+                    let _ = mcp.refresh_server(&name).await;
+                });
+                queue.push(Action::Overlay(OverlayAction::Open(OverlayKind::McpServerPanel)));
+            }
+            McpAction::Remove(name) => {
+                // Remove from McpManager.
+                let mcp = self.runtime.mcp_manager().clone();
+                let name_for_spawn = name.clone();
+                tokio::spawn(async move {
+                    let _ = mcp.remove_server(&name_for_spawn).await;
+                });
+
+                // Remove from persisted config.
+                self.runtime.update_config(|cfg| {
+                    cfg.mcp.servers.remove(&name);
+                });
+                let _ = self.runtime.save_config();
+
+                queue.push(Action::Overlay(OverlayAction::Open(OverlayKind::McpServerPanel)));
+            }
+            McpAction::Upsert {
+                name,
+                config,
+                original_name,
+            } => {
+                // Clone for the async spawn, keep reference for config update.
+                let name_for_spawn = name.clone();
+                let cfg_for_spawn = config.clone();
+                let orig_for_spawn = original_name.clone();
+
+                // Upsert in McpManager.
+                let mcp = self.runtime.mcp_manager().clone();
+                tokio::spawn(async move {
+                    // If renaming, remove the old entry first.
+                    if let Some(ref orig) = orig_for_spawn {
+                        if orig != &name_for_spawn {
+                            let _ = mcp.remove_server(orig).await;
+                        }
+                    }
+                    let _ = mcp.upsert_server(name_for_spawn, cfg_for_spawn).await;
+                });
+
+                // Persist config change.
+                self.runtime.update_config(|cfg| {
+                    // Remove the old name if it changed.
+                    if let Some(ref orig) = original_name {
+                        cfg.mcp.servers.remove(orig);
+                    }
+                    cfg.mcp.servers.insert(name, config);
+                });
+                let _ = self.runtime.save_config();
+
+                queue.push(Action::Overlay(OverlayAction::Open(OverlayKind::McpServerPanel)));
+            }
+        }
+    }
 }

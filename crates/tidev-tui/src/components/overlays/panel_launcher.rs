@@ -31,6 +31,10 @@ static PANEL_ENTRIES: &[PanelEntry] = &[
         action: PanelAction::Model,
     },
     PanelEntry {
+        description: "Manage MCP servers",
+        action: PanelAction::McpServers,
+    },
+    PanelEntry {
         description: "Manage chat sessions",
         action: PanelAction::Session,
     },
@@ -198,6 +202,7 @@ impl Component for PanelLauncher {
                 if let Some(action) = panel_action {
                     let kind = match action {
                         PanelAction::Model => OverlayKind::ModelPanel,
+                        PanelAction::McpServers => OverlayKind::McpServerPanel,
                         PanelAction::Session => OverlayKind::SessionPanel,
                         PanelAction::Theme => OverlayKind::ThemePanel,
                         PanelAction::Settings => OverlayKind::SettingsPanel,

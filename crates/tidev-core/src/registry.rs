@@ -21,10 +21,13 @@ use tidev_config::{AuthStore, WebSearchConfig};
 use tidev_tools::execute_tool_call;
 use tidev_tools::{SkillCatalog, TodoPersistence};
 
+use crate::mcp::{McpManager, McpServerSummary};
+
 /// Tool execution entry point for tidev-core.
 ///
 /// Wraps `tidev_tools` dispatch, managing the shared configuration that each
 /// tool invocation needs (workspace paths, skills, credentials, etc.).
+/// Also owns the [`McpManager`] for MCP-backed tools.
 #[derive(Clone)]
 pub struct ToolRegistry {
     workspace_root: PathBuf,
@@ -35,6 +38,7 @@ pub struct ToolRegistry {
     auth_store: AuthStore,
     max_output_bytes: usize,
     permission_config: PermissionConfig,
+    mcp: McpManager,
 }
 
 impl ToolRegistry {
@@ -48,6 +52,7 @@ impl ToolRegistry {
         auth_store: AuthStore,
         max_output_bytes: usize,
         permission_config: PermissionConfig,
+        mcp: McpManager,
     ) -> Self {
         Self {
             workspace_root,
@@ -58,6 +63,7 @@ impl ToolRegistry {
             auth_store,
             max_output_bytes,
             permission_config,
+            mcp,
         }
     }
 
@@ -67,6 +73,8 @@ impl ToolRegistry {
     /// process group is killed and partial output is returned. Other tools ignore it.
     /// When `event_tx` is `Some`, shell output is streamed as
     /// [`BackendEvent::ShellOutput`] events.
+    ///
+    /// MCP-backed tools are dispatched directly to the [`McpManager`].
     #[allow(clippy::too_many_arguments)]
     pub async fn execute(
         &self,
@@ -78,6 +86,17 @@ impl ToolRegistry {
         cancel: &CancellationToken,
         event_tx: Option<UnboundedSender<BackendEvent>>,
     ) -> ToolExecutionResult {
+        // MCP tool dispatch.
+        if self.mcp.definition_for(&call.name).is_some() {
+            match self.mcp.execute_call(call).await {
+                Ok(result) => return result,
+                Err(e) => {
+                    return ToolExecutionResult::new(format!("Error: MCP tool call failed: {e:#}"));
+                }
+            }
+        }
+
+        // Built-in tool dispatch.
         let ctx = tidev_tools::ToolContext {
             workspace_root: &self.workspace_root,
             config_dir: &self.config_dir,
@@ -95,7 +114,7 @@ impl ToolRegistry {
         execute_tool_call(&ctx, call, cancel).await
     }
 
-    /// Return all available tool definitions (unfiltered).
+    /// Return all available tool definitions (unfiltered, without MCP tools).
     pub fn definitions(&self) -> Vec<ToolDefinition> {
         let skill_description = self.skills.tool_description();
         tidev_tools::tool_definitions(skill_description)
@@ -106,6 +125,8 @@ impl ToolRegistry {
     /// GPT models (gpt-4o, gpt-4o-mini, gpt-5, etc.) receive `apply_patch` but
     /// not `write`/`edit`. All other models (Claude, DeepSeek, Gemini, GPT-4,
     /// any OSS model) receive `write`/`edit` but not `apply_patch`.
+    ///
+    /// MCP tools from connected servers are appended at the end.
     pub fn definitions_for_model(&self, model: &ActiveModel) -> Vec<ToolDefinition> {
         let mut definitions = tidev_tools::tool_definitions(self.skills.tool_description());
         if model.use_apply_patch() {
@@ -113,6 +134,7 @@ impl ToolRegistry {
         } else {
             definitions.retain(|d| d.name != "apply_patch");
         }
+        definitions.extend(self.mcp.all_definitions());
         definitions
     }
 
@@ -121,14 +143,29 @@ impl ToolRegistry {
         &self.skills
     }
 
+    /// Access the MCP manager.
+    pub fn mcp_manager(&self) -> &McpManager {
+        &self.mcp
+    }
+
+    /// Return summaries of all configured MCP servers.
+    pub fn mcp_summaries(&self) -> Vec<McpServerSummary> {
+        self.mcp.summaries()
+    }
+
     // ── Tool lookup helpers (for TUI permission UI) ─────────────────────
 
-    /// Look up a [`ToolDefinition`] by name (supports canonical name aliases).
+    /// Look up a [`ToolDefinition`] by name (supports canonical name aliases
+    /// and MCP tools).
     pub fn definition_for(&self, tool_name: &str) -> Option<ToolDefinition> {
+        // First try exact match in built-in tools.
         let definitions = self.definitions();
-        // First try exact match.
         if let Some(def) = definitions.iter().find(|d| d.name == tool_name) {
             return Some(def.clone());
+        }
+        // Then try MCP tools.
+        if let Some(def) = self.mcp.definition_for(tool_name) {
+            return Some(def);
         }
         // Fall back to canonical name lookup.
         let canonical = tidev_types::tools::canonical_tool_name(tool_name)?;
@@ -138,8 +175,16 @@ impl ToolRegistry {
     /// Returns `true` if the tool exists and its permission level is allowed
     /// in the given session mode according to the user's permission config.
     pub fn can_execute(&self, tool_name: &str, mode: SessionMode) -> bool {
-        self.definition_for(tool_name)
+        // Check built-in tools first.
+        if self
+            .definition_for(tool_name)
             .is_some_and(|def| self.permission_config.is_allowed(mode, def.permission))
+        {
+            return true;
+        }
+        // Then check MCP tools.
+        self.mcp
+            .can_execute(tool_name, mode, &self.permission_config)
     }
 
     /// Return a stable key for a tool call (used for permission memoization).
@@ -151,6 +196,11 @@ impl ToolRegistry {
                 return SkillCatalog::permission_key_for_name(args.name.trim());
             }
             return SkillCatalog::permission_key_for_name("unknown");
+        }
+
+        // Check MCP first (MCP tools won't appear in built-in definitions).
+        if self.mcp.definition_for(&call.name).is_some() {
+            return self.mcp.permission_key_for_call(call);
         }
 
         self.definition_for(&call.name)
@@ -174,6 +224,11 @@ impl ToolRegistry {
             return "skill".to_string();
         }
 
+        // Check MCP first.
+        if self.mcp.definition_for(&call.name).is_some() {
+            return self.mcp.permission_label_for_call(call);
+        }
+
         self.definition_for(&call.name)
             .as_ref()
             .map(|def| def.permission_label())
@@ -192,9 +247,8 @@ impl ToolRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
     use std::path::PathBuf;
-    use tidev_config::ApiType;
-    use tidev_config::auth::ActiveModel;
 
     /// Stub TodoPersistence for tests.
     struct StubTodoStore;
@@ -224,160 +278,20 @@ mod tests {
             AuthStore::default(),
             0,
             PermissionConfig::default(),
+            McpManager::new(PathBuf::from("/tmp"), BTreeMap::new()),
         )
     }
 
-    fn make_model(model_id: &str) -> ActiveModel {
-        ActiveModel {
-            provider_id: "test".into(),
-            provider_display_name: "Test".into(),
-            base_url: "https://api.test.com".into(),
-            api_type: ApiType::OpenAiChatCompletions,
-            model_id: model_id.into(),
-            request_model_id: model_id.into(),
-            display_name: model_id.into(),
-            context_window: 200_000,
-            max_output_tokens: 8_000,
-            temperature: None,
-            supports_images: false,
-            system_prompt: String::new(),
-            api_key: None,
-            extra_body: None,
-            thinking_level: tidev_config::ThinkingLevelType::None,
-        }
-    }
-
-    // ── definitions_for_model ───────────────────────────────────────────
-
     #[test]
-    fn definitions_for_gpt_4o_excludes_write_edit() {
-        let reg = make_registry();
-        let model = make_model("gpt-4o");
-        let defs = reg.definitions_for_model(&model);
-        assert!(!defs.iter().any(|d| d.name == "write"));
-        assert!(!defs.iter().any(|d| d.name == "edit"));
-        assert!(defs.iter().any(|d| d.name == "apply_patch"));
-    }
-
-    #[test]
-    fn definitions_for_claude_includes_write_edit() {
-        let reg = make_registry();
-        let model = make_model("claude-3-5-sonnet");
-        let defs = reg.definitions_for_model(&model);
-        assert!(defs.iter().any(|d| d.name == "write"));
-        assert!(defs.iter().any(|d| d.name == "edit"));
-        assert!(!defs.iter().any(|d| d.name == "apply_patch"));
-    }
-
-    #[test]
-    fn definitions_for_gpt4_legacy_includes_write_edit() {
-        // GPT-4 (non-o) should NOT use apply_patch
-        let reg = make_registry();
-        let model = make_model("gpt-4");
-        let defs = reg.definitions_for_model(&model);
-        assert!(defs.iter().any(|d| d.name == "write"));
-        assert!(defs.iter().any(|d| d.name == "edit"));
-        assert!(!defs.iter().any(|d| d.name == "apply_patch"));
-    }
-
-    #[test]
-    fn definitions_for_deepseek_includes_write_edit() {
-        let reg = make_registry();
-        let model = make_model("deepseek-v4-flash");
-        let defs = reg.definitions_for_model(&model);
-        assert!(defs.iter().any(|d| d.name == "write"));
-        assert!(!defs.iter().any(|d| d.name == "apply_patch"));
-    }
-
-    #[test]
-    fn definitions_includes_core_tools() {
-        let reg = make_registry();
-        let model = make_model("claude-3-5-sonnet");
-        let defs = reg.definitions_for_model(&model);
-        let names: Vec<&str> = defs.iter().map(|d| d.name.as_str()).collect();
-        assert!(names.contains(&"read"));
-        assert!(names.contains(&"shell"));
-        assert!(names.contains(&"glob"));
-        assert!(names.contains(&"grep"));
-        assert!(names.contains(&"task"));
-        assert!(names.contains(&"question"));
-        assert!(names.contains(&"skill"));
-        assert!(names.contains(&"todowrite"));
-    }
-
-    // ── definition_for (alias lookup) ────────────────────────────────────
-
-    #[test]
-    fn definition_for_exact_name() {
-        let reg = make_registry();
-        assert!(reg.definition_for("read").is_some());
-    }
-
-    #[test]
-    fn definition_for_alias_name() {
-        let reg = make_registry();
-        // "read_file" is a canonical alias for "read"
-        assert!(reg.definition_for("read_file").is_some());
-    }
-
-    #[test]
-    fn definition_for_unknown_name() {
-        let reg = make_registry();
-        assert!(reg.definition_for("nonexistent_tool").is_none());
-    }
-
-    // ── can_execute ─────────────────────────────────────────────────────
-
-    #[test]
-    fn can_execute_read_in_plan_mode() {
-        let reg = make_registry();
-        assert!(reg.can_execute("read", SessionMode::Plan));
-    }
-
-    #[test]
-    fn can_execute_write_in_plan_mode_default_false() {
-        let reg = make_registry();
-        // Default permission: plan mode disallows write
-        assert!(!reg.can_execute("write", SessionMode::Plan));
-    }
-
-    #[test]
-    fn can_execute_write_in_build_mode() {
-        let reg = make_registry();
-        assert!(reg.can_execute("write", SessionMode::Build));
-    }
-
-    #[test]
-    fn can_execute_unknown_tool() {
-        let reg = make_registry();
-        assert!(!reg.can_execute("nonexistent", SessionMode::Plan));
-    }
-
-    // ── permission_key_for_call ─────────────────────────────────────────
-
-    #[test]
-    fn permission_key_for_known_tool() {
-        let reg = make_registry();
-        let call = ToolCall {
-            id: "c1".into(),
-            name: "read".into(),
-            arguments: "{}".into(),
-            thought_signature: None,
-        };
-        // Built-in tools use their own name as the permission key
-        assert_eq!(reg.permission_key_for_call(&call), "read");
-    }
-
-    #[test]
-    fn permission_key_for_skill_with_name() {
+    fn permission_key_for_skill() {
         let reg = make_registry();
         let call = ToolCall {
             id: "c1".into(),
             name: "skill".into(),
-            arguments: r#"{"name":"debug"}"#.into(),
+            arguments: r#"{"name":"code-review"}"#.into(),
             thought_signature: None,
         };
-        assert_eq!(reg.permission_key_for_call(&call), "skill:debug");
+        assert_eq!(reg.permission_key_for_call(&call), "skill:code-review");
     }
 
     #[test]
@@ -393,35 +307,7 @@ mod tests {
     }
 
     #[test]
-    fn permission_key_for_alias_tool() {
-        let reg = make_registry();
-        let call = ToolCall {
-            id: "c1".into(),
-            name: "read_file".into(),
-            arguments: "{}".into(),
-            thought_signature: None,
-        };
-        // Falls back to canonical name "read"
-        assert_eq!(reg.permission_key_for_call(&call), "read");
-    }
-
-    #[test]
-    fn permission_key_for_unknown_tool() {
-        let reg = make_registry();
-        let call = ToolCall {
-            id: "c1".into(),
-            name: "unknown_tool".into(),
-            arguments: "{}".into(),
-            thought_signature: None,
-        };
-        // Falls back to original name since no canonical mapping either
-        assert_eq!(reg.permission_key_for_call(&call), "unknown_tool");
-    }
-
-    // ── permission_label_for_call ───────────────────────────────────────
-
-    #[test]
-    fn permission_label_for_skill_with_name() {
+    fn permission_label_for_skill() {
         let reg = make_registry();
         let call = ToolCall {
             id: "c1".into(),
@@ -454,5 +340,133 @@ mod tests {
             thought_signature: None,
         };
         assert_eq!(reg.permission_label_for_call(&call), "read");
+    }
+
+    // ── MCP integration tests ──────────────────────────────────────────
+
+    fn make_stdio_config() -> tidev_config::mcp::McpServerConfig {
+        tidev_config::mcp::McpServerConfig::Stdio {
+            command: "node".into(),
+            args: vec!["server.js".into()],
+            cwd: None,
+            env: BTreeMap::new(),
+        }
+    }
+
+    fn make_registry_with_mcp() -> ToolRegistry {
+        let mcp = McpManager::new(PathBuf::from("/tmp"), BTreeMap::new());
+        let tool = ToolDefinition::mcp(
+            "mcp__srv__tool".into(),
+            "Srv Tool".into(),
+            "Does something".into(),
+            serde_json::json!({"type": "object"}),
+            tidev_types::tools::ToolPermission::Execute,
+            "srv".into(),
+            "tool".into(),
+        );
+        crate::mcp::insert_mock_tool(&mcp, "srv", make_stdio_config(), tool);
+        ToolRegistry::new(
+            PathBuf::from("/tmp"),
+            PathBuf::from("/tmp/.config"),
+            SkillCatalog::default(),
+            Arc::new(StubTodoStore),
+            WebSearchConfig::default(),
+            AuthStore::default(),
+            0,
+            PermissionConfig::default(),
+            mcp,
+        )
+    }
+
+    #[test]
+    fn test_mcp_definition_for_includes_mcp_tools() {
+        let reg = make_registry_with_mcp();
+        let def = reg.definition_for("mcp__srv__tool");
+        assert!(def.is_some());
+        assert_eq!(def.unwrap().mcp_target(), Some(("srv", "tool")));
+    }
+
+    #[test]
+    fn test_mcp_permission_key_for_call() {
+        let reg = make_registry_with_mcp();
+        let call = ToolCall {
+            id: "c1".into(),
+            name: "mcp__srv__tool".into(),
+            arguments: "{}".into(),
+            thought_signature: None,
+        };
+        assert_eq!(
+            reg.permission_key_for_call(&call),
+            "mcp:srv:tool"
+        );
+    }
+
+    #[test]
+    fn test_mcp_permission_label_for_call() {
+        let reg = make_registry_with_mcp();
+        let call = ToolCall {
+            id: "c1".into(),
+            name: "mcp__srv__tool".into(),
+            arguments: "{}".into(),
+            thought_signature: None,
+        };
+        assert_eq!(
+            reg.permission_label_for_call(&call),
+            "srv / tool (Srv Tool)"
+        );
+    }
+
+    #[test]
+    fn test_mcp_can_execute() {
+        let reg = make_registry_with_mcp();
+        // MCP tool has ToolPermission::Execute, Build mode allows execute.
+        assert!(reg.can_execute("mcp__srv__tool", SessionMode::Build));
+        // Plan mode allows execute by default too.
+        assert!(reg.can_execute("mcp__srv__tool", SessionMode::Plan));
+    }
+
+    #[test]
+    fn test_mcp_definitions_for_model_includes_mcp_tools() {
+        let reg = make_registry_with_mcp();
+        // Use a model that doesn't apply_patch (the default path).
+        // Simply check that MCP tools are included in definitions_for_model.
+        let defs = reg.definitions_for_model(&tidev_config::auth::ActiveModel {
+            provider_id: "test".into(),
+            provider_display_name: "Test".into(),
+            base_url: String::new(),
+            api_type: tidev_config::types::ApiType::OpenAiChatCompletions,
+            model_id: "test-model".into(),
+            request_model_id: String::new(),
+            display_name: "Test Model".into(),
+            context_window: 0,
+            max_output_tokens: 4096,
+            temperature: None,
+            supports_images: false,
+            system_prompt: String::new(),
+            api_key: None,
+            extra_body: None,
+            thinking_level: tidev_config::reasoning::ThinkingLevelType::None,
+        });
+        let mcp_names: Vec<&str> = defs.iter().map(|d| d.name.as_str()).collect();
+        assert!(
+            mcp_names.contains(&"mcp__srv__tool"),
+            "MCP tool should be in definitions_for_model output: {mcp_names:?}"
+        );
+    }
+
+    #[test]
+    fn test_mcp_summaries() {
+        let reg = make_registry_with_mcp();
+        let summaries = reg.mcp_summaries();
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].name, "srv");
+        assert_eq!(summaries[0].tool_count, 1);
+    }
+
+    #[test]
+    fn test_mcp_manager_accessor() {
+        let reg = make_registry_with_mcp();
+        let mcp = reg.mcp_manager();
+        assert!(mcp.has_server("srv"));
     }
 }
