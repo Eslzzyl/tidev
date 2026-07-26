@@ -3411,7 +3411,7 @@ dependencies = [
 
 [[package]]
 name = "tidev"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3427,7 +3427,7 @@ dependencies = [
 
 [[package]]
 name = "tidev-agent"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3442,7 +3442,7 @@ dependencies = [
 
 [[package]]
 name = "tidev-config"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "dirs",
@@ -3455,7 +3455,7 @@ dependencies = [
 
 [[package]]
 name = "tidev-core"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3481,7 +3481,7 @@ dependencies = [
 
 [[package]]
 name = "tidev-instructions"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "dirs",
@@ -3496,7 +3496,7 @@ dependencies = [
 
 [[package]]
 name = "tidev-llm"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "base64 0.23.0",
@@ -3514,7 +3514,7 @@ dependencies = [
 
 [[package]]
 name = "tidev-logging"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3524,7 +3524,7 @@ dependencies = [
 
 [[package]]
 name = "tidev-search"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "ignore",
  "log",
@@ -3536,7 +3536,7 @@ dependencies = [
 
 [[package]]
 name = "tidev-snapshot"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "blake3",
@@ -3551,7 +3551,7 @@ dependencies = [
 
 [[package]]
 name = "tidev-storage"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3568,7 +3568,7 @@ dependencies = [
 
 [[package]]
 name = "tidev-tools"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3603,7 +3603,7 @@ dependencies = [
 
 [[package]]
 name = "tidev-tui"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "ansi-to-tui",
  "anyhow",
@@ -3643,7 +3643,7 @@ dependencies = [
 
 [[package]]
 name = "tidev-types"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "chrono",
  "serde",
@@ -3653,7 +3653,7 @@ dependencies = [
 
 [[package]]
 name = "tidev-utils"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "dirs",
