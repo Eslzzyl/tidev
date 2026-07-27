@@ -872,6 +872,29 @@ impl Component for ModelPanel {
             let mut state = ratatui::widgets::ListState::default();
             state.select(Some(sel.min(rows.len().saturating_sub(1))));
 
+            // When thinking level is expanded, adjust the scroll offset so
+            // that the thinking sub-rows are visible even when the selected
+            // model is near the bottom of the visible area.
+            let is_tl_expanded = self
+                .current_tab()
+                .is_some_and(|t| t.thinking_level_expanded);
+            if is_tl_expanded {
+                let tl_options = thinking_options_for_model(items, sel);
+                if !tl_options.is_empty() {
+                    let num_tl = tl_options.len();
+                    let visible_height = sections[4].height as usize;
+                    // The last thinking sub-row in `rows` is at sel + num_tl.
+                    // Ensure offset + visible_height > sel + num_tl.
+                    let min_offset = sel
+                        .saturating_add(num_tl)
+                        .saturating_add(1)
+                        .saturating_sub(visible_height);
+                    // Keep offset <= sel so the model row itself stays visible.
+                    let offset = min_offset.min(sel);
+                    *state.offset_mut() = offset;
+                }
+            }
+
             let list = List::new(rows)
                 .style(Style::default().bg(palette.panel_alt).fg(palette.text))
                 .highlight_style(
