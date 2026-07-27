@@ -67,6 +67,14 @@ fn parse_datetime(value: &str) -> std::result::Result<DateTime<Utc>, chrono::Par
     Ok(DateTime::parse_from_rfc3339(value)?.with_timezone(&Utc))
 }
 
+/// Convert a string to `Some(s)` only if non-empty; otherwise `None`.
+///
+/// Used when reading `NOT NULL DEFAULT ''` columns where the empty string
+/// should be treated as absence (i.e. equivalent to SQL `NULL`).
+fn opt_non_empty(s: String) -> Option<String> {
+    if s.trim().is_empty() { None } else { Some(s) }
+}
+
 /// Raw per-row data from the messages table, collected before
 /// any CPU-intensive decompression or JSON parsing.
 ///
@@ -440,7 +448,7 @@ impl SessionStore {
                     updated_at: 8 => DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?).unwrap().with_timezone(&Utc),
                     status: 9 => row.get::<_, String>(9)?,
                     ended_at: 10 => row.get::<_, Option<String>>(10)?.and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|dt| dt.with_timezone(&Utc))),
-                    context_summary: 11 => row.get::<_, Option<String>>(11)?,
+                    context_summary: 11 => opt_non_empty(row.get::<_, String>(11)?),
                     context_retained_from: 12 => row.get::<_, i64>(12)? as usize,
                     system_prompt: 13 => row.get::<_, String>(13)?,
                     snapshot_start_hash: 15 => row.get::<_, Option<String>>(15)?,
@@ -499,10 +507,10 @@ impl SessionStore {
                 updated_at: 8 => DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?).unwrap().with_timezone(&Utc),
                 status: 9 => row.get::<_, String>(9)?,
                 ended_at: 10 => row.get::<_, Option<String>>(10)?.and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|dt| dt.with_timezone(&Utc))),
-                context_summary: 11 => row.get::<_, Option<String>>(11)?,
+                context_summary: 11 => opt_non_empty(row.get::<_, String>(11)?),
                 context_retained_from: 12 => row.get::<_, i64>(12)? as usize,
                 system_prompt: 13 => row.get::<_, String>(13)?,
-                    snapshot_start_hash: 15 => row.get::<_, Option<String>>(15)?,
+                snapshot_start_hash: 15 => row.get::<_, Option<String>>(15)?,
             ))
         })?;
         let mut sessions = Vec::new();
@@ -537,7 +545,7 @@ impl SessionStore {
                 updated_at: 8 => DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?).unwrap().with_timezone(&Utc),
                 status: 9 => row.get::<_, String>(9)?,
                 ended_at: 10 => row.get::<_, Option<String>>(10)?.and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|dt| dt.with_timezone(&Utc))),
-                context_summary: 11 => row.get::<_, Option<String>>(11)?,
+                context_summary: 11 => opt_non_empty(row.get::<_, String>(11)?),
                 context_retained_from: 12 => row.get::<_, i64>(12)? as usize,
                 system_prompt: 13 => row.get::<_, String>(13)?,
                     snapshot_start_hash: 15 => row.get::<_, Option<String>>(15)?,
@@ -582,7 +590,7 @@ impl SessionStore {
                         updated_at: 8 => DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?).unwrap().with_timezone(&Utc),
                         status: 9 => row.get::<_, String>(9)?,
                         ended_at: 10 => row.get::<_, Option<String>>(10)?.and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|dt| dt.with_timezone(&Utc))),
-                        context_summary: 11 => row.get::<_, Option<String>>(11)?,
+                        context_summary: 11 => opt_non_empty(row.get::<_, String>(11)?),
                         context_retained_from: 12 => row.get::<_, i64>(12)? as usize,
                         system_prompt: 13 => row.get::<_, String>(13)?,
                     snapshot_start_hash: 15 => row.get::<_, Option<String>>(15)?,
@@ -1029,7 +1037,7 @@ impl SessionStore {
                 updated_at: 8 => DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?).unwrap().with_timezone(&Utc),
                 status: 9 => row.get::<_, String>(9)?,
                 ended_at: 10 => row.get::<_, Option<String>>(10)?.and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|dt| dt.with_timezone(&Utc))),
-                context_summary: 11 => row.get::<_, Option<String>>(11)?,
+                context_summary: 11 => opt_non_empty(row.get::<_, String>(11)?),
                 context_retained_from: 12 => row.get::<_, i64>(12)? as usize,
                 system_prompt: 13 => row.get::<_, String>(13)?,
                     snapshot_start_hash: 15 => row.get::<_, Option<String>>(15)?,

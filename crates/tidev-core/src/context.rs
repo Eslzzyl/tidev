@@ -96,7 +96,7 @@ impl ContextManager {
     /// Restore compaction state previously persisted in the database.
     pub fn from_state(summary: Option<String>, retained_from: usize) -> Self {
         Self {
-            summary,
+            summary: summary.filter(|s| !s.trim().is_empty()),
             retained_from,
             ..Default::default()
         }
