@@ -400,6 +400,7 @@ impl Composer {
             KeyCode::Enter => {
                 if key.modifiers.contains(KeyModifiers::SHIFT)
                     || key.modifiers.contains(KeyModifiers::ALT)
+                    || key.modifiers.contains(KeyModifiers::CONTROL)
                 {
                     self.insert_char('\n');
                 } else {
