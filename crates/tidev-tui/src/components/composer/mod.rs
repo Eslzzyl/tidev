@@ -1410,6 +1410,21 @@ impl Component for Composer {
             return None;
         }
 
+        // ── Snapshot image attachments before handle_key (Enter calls
+        //    self.clear() which wipes spans). ──────────────────────────
+        let pending_image_attachments: Vec<MessageAttachment> = self
+            .spans
+            .iter()
+            .filter_map(|s| {
+                s.image_data.as_ref().map(|data| MessageAttachment::Image {
+                    data: data.clone(),
+                    filename: s.image_filename.clone().unwrap_or_default(),
+                    mime: "image/png".to_string(),
+                    file_size: data.len() as u64,
+                })
+            })
+            .collect();
+
         // ── Delegate to internal key handler ──────────────────────────
         let submitted = self.handle_key(key);
 
@@ -1419,19 +1434,10 @@ impl Component for Composer {
         self.dirty = true;
 
         if let Some(text) = submitted {
-            let attachments: Vec<MessageAttachment> = self
-                .spans
-                .iter()
-                .filter_map(|s| {
-                    s.image_data.as_ref().map(|data| MessageAttachment::Image {
-                        data: data.clone(),
-                        filename: s.image_filename.clone().unwrap_or_default(),
-                        mime: "image/png".to_string(),
-                        file_size: data.len() as u64,
-                    })
-                })
-                .collect();
-            return Some(Action::Chat(ChatAction::SendMessage { text, attachments }));
+            return Some(Action::Chat(ChatAction::SendMessage {
+                text,
+                attachments: pending_image_attachments,
+            }));
         }
 
         None
