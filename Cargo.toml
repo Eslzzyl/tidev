@@ -14,6 +14,7 @@ members = [
   "crates/tidev-agent",
   "crates/tidev-core",
   "crates/tidev-tui",
+  "crates/tidev-acp",
 ]
 default-members = ["."]
 resolver = "2"
@@ -50,6 +51,7 @@ tidev-core = { path = "crates/tidev-core" }
 tidev-config = { path = "crates/tidev-config" }
 tidev-storage = { path = "crates/tidev-storage" }
 tidev-tui = { path = "crates/tidev-tui" }
+tidev-acp = { path = "crates/tidev-acp" }
 tidev-utils = { path = "crates/tidev-utils" }
 uuid = { version = "1", features = ["v4"] }
 

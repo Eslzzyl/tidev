@@ -22,6 +22,9 @@ enum Command {
     Tui,
 
     // ── Session portability ─────────────────────────────────────────
+    /// Start as an ACP agent over stdio
+    Acp,
+
     /// Export session(s) to an uncompressed SQLite database
     Export {
         /// Session UUID(s) to export (repeat for multiple)
@@ -178,6 +181,7 @@ async fn main() -> Result<()> {
     match Cli::parse().command {
         None => tidev_tui::run().await,
         Some(Command::Tui) => tidev_tui::run().await,
+        Some(Command::Acp) => tidev_acp::run_acp_agent().await,
 
         // ── Export ──────────────────────────────────────────────
         Some(Command::Export {

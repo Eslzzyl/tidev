@@ -1,0 +1,19 @@
+[package]
+name = "tidev-acp"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "ACP (Agent Client Protocol) adapter for tidev"
+
+[dependencies]
+tidev-core = { path = "../tidev-core" }
+tidev-config = { path = "../tidev-config" }
+tidev-types = { path = "../tidev-types" }
+tidev-agent = { path = "../tidev-agent" }
+agent-client-protocol = "2.0"
+anyhow = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
+log = "0.4"
+uuid = { version = "1", features = ["v4"] }
+serde_json = "1"
