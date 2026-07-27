@@ -942,7 +942,7 @@ mod tests {
     }
 
     #[test]
-    fn gemini_thinking_config_is_merged() {
+    fn gemini_thinking_config_is_not_merged() {
         let model = LlmProviderConfig {
             thinking_level: ThinkingLevelType::DeepSeek(DeepSeekV4ThinkingLevel::High),
             ..base_model()
@@ -954,8 +954,9 @@ mod tests {
             .generation_config
             .expect("generation_config is present");
 
-        assert_eq!(config["thinking"]["type"], "enabled");
-        assert_eq!(config["reasoning_effort"], "high");
+        // Gemini does not participate in the thinking/reasoning system.
+        assert!(config.get("thinking").is_none());
+        assert!(config.get("reasoning_effort").is_none());
     }
 
     #[test]
@@ -989,8 +990,10 @@ mod tests {
             .expect("generation_config is present");
 
         assert_eq!(config["top_k"], 50);
-        assert_eq!(config["thinking"]["type"], "enabled");
-        assert_eq!(config["reasoning_effort"], "high");
+        // Gemini does not participate in the thinking/reasoning system,
+        // so thinking config is not merged.
+        assert!(config.get("thinking").is_none());
+        assert!(config.get("reasoning_effort").is_none());
     }
 }
 

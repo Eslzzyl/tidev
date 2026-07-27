@@ -60,6 +60,18 @@ fn thinking_options_for_model(items: &[ModelPanelItem], index: usize) -> Vec<&'s
             "gpt5:High",
             "gpt5:XHigh",
         ]
+    } else if id.contains("claude") && id.contains("fable")
+        || id.contains("claude") && id.contains("mythos")
+    {
+        // Fable/Mythos: adaptive thinking always on, cannot disable.
+        vec!["claude:Low", "claude:Medium", "claude:High"]
+    } else if id.contains("claude") && id.contains("5") {
+        vec![
+            "claude:Off",
+            "claude:Low",
+            "claude:Medium",
+            "claude:High",
+        ]
     } else {
         vec![]
     }

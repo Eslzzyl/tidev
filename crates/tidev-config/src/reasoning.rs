@@ -3,8 +3,8 @@
 //! The thinking level types themselves live in `tidev-types`.
 
 pub use tidev_types::reasoning::{
-    DeepSeekV4ThinkingLevel, GlmThinkingLevel, Gpt5ThinkingLevel, MiniMaxThinkingLevel,
-    Qwen35ThinkingLevel, ThinkingLevel, ThinkingLevelType,
+    ClaudeEffortLevel, DeepSeekV4ThinkingLevel, GlmThinkingLevel, Gpt5ThinkingLevel,
+    MiniMaxThinkingLevel, Qwen35ThinkingLevel, ThinkingLevel, ThinkingLevelType,
 };
 
 /// Model name pattern matching rules.
@@ -25,6 +25,8 @@ impl ThinkingMatcher {
             ThinkingLevelType::Gpt5(Gpt5ThinkingLevel::Medium)
         } else if model_lower.contains("minimax") && model_lower.contains("m3") {
             ThinkingLevelType::MiniMax(MiniMaxThinkingLevel::High)
+        } else if model_lower.contains("claude") {
+            ThinkingLevelType::Claude(ClaudeEffortLevel::High)
         } else {
             ThinkingLevelType::None
         }
@@ -85,5 +87,29 @@ mod tests {
     fn match_unknown_returns_none() {
         let result = ThinkingMatcher::match_for_model("unknown-model");
         assert_eq!(result, ThinkingLevelType::None);
+    }
+
+    #[test]
+    fn match_claude_opus_5() {
+        let result = ThinkingMatcher::match_for_model("claude-opus-5");
+        assert_eq!(result, ThinkingLevelType::Claude(ClaudeEffortLevel::High));
+    }
+
+    #[test]
+    fn match_claude_fable_5() {
+        let result = ThinkingMatcher::match_for_model("claude-fable-5");
+        assert_eq!(result, ThinkingLevelType::Claude(ClaudeEffortLevel::High));
+    }
+
+    #[test]
+    fn match_claude_sonnet_5() {
+        let result = ThinkingMatcher::match_for_model("claude-sonnet-5");
+        assert_eq!(result, ThinkingLevelType::Claude(ClaudeEffortLevel::High));
+    }
+
+    #[test]
+    fn match_claude_mythos_5() {
+        let result = ThinkingMatcher::match_for_model("claude-mythos-5");
+        assert_eq!(result, ThinkingLevelType::Claude(ClaudeEffortLevel::High));
     }
 }
