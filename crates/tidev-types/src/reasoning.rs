@@ -183,6 +183,8 @@ pub enum Gpt5ThinkingLevel {
     Low,
     Medium,
     High,
+    XHigh,
+    Max,
 }
 
 impl Gpt5ThinkingLevel {
@@ -199,6 +201,12 @@ impl Gpt5ThinkingLevel {
             }),
             Self::High => serde_json::json!({
                 "reasoning": { "effort": "high" }
+            }),
+            Self::XHigh => serde_json::json!({
+                "reasoning": { "effort": "xhigh" }
+            }),
+            Self::Max => serde_json::json!({
+                "reasoning": { "effort": "max" }
             }),
         }
     }
@@ -218,6 +226,14 @@ impl Gpt5ThinkingLevel {
                 "summary": "auto",
                 "effort": "high"
             })),
+            Self::XHigh => Some(serde_json::json!({
+                "summary": "auto",
+                "effort": "xhigh"
+            })),
+            Self::Max => Some(serde_json::json!({
+                "summary": "auto",
+                "effort": "max"
+            })),
         }
     }
 
@@ -227,6 +243,8 @@ impl Gpt5ThinkingLevel {
             Self::Low => "Low",
             Self::Medium => "Medium",
             Self::High => "High",
+            Self::XHigh => "XHigh",
+            Self::Max => "Max",
         }
     }
 
@@ -235,7 +253,9 @@ impl Gpt5ThinkingLevel {
             Self::Off => Self::Low,
             Self::Low => Self::Medium,
             Self::Medium => Self::High,
-            Self::High => Self::Off,
+            Self::High => Self::XHigh,
+            Self::XHigh => Self::Max,
+            Self::Max => Self::Off,
         }
     }
 
@@ -245,6 +265,8 @@ impl Gpt5ThinkingLevel {
             "low" => Self::Low,
             "medium" => Self::Medium,
             "high" => Self::High,
+            "xhigh" => Self::XHigh,
+            "max" => Self::Max,
             _ => Self::Off,
         }
     }

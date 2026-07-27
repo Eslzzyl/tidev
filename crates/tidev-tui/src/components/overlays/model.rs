@@ -36,6 +36,15 @@ fn thinking_options_for_model(items: &[ModelPanelItem], index: usize) -> Vec<&'s
         vec!["qwen:Off", "qwen:On"]
     } else if id.contains("glm") {
         vec!["glm:Off", "glm:On"]
+    } else if id.contains("gpt") && id.contains("5.6") {
+        vec![
+            "gpt5:Off",
+            "gpt5:Low",
+            "gpt5:Medium",
+            "gpt5:High",
+            "gpt5:XHigh",
+            "gpt5:Max",
+        ]
     } else if id.contains("gpt") && id.contains("5") {
         vec![
             "gpt5:Off",
