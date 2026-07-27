@@ -339,18 +339,6 @@ impl SessionStore {
 
         Ok(())
     }
-
-    fn touch_session(&self, session_id: Uuid) -> Result<()> {
-        let now = Utc::now().to_rfc3339();
-        self.write_execute(
-            "UPDATE sessions SET updated_at = :updated_at WHERE id = :id",
-            named_params! {
-                ":updated_at": now,
-                ":id": session_id.to_string(),
-            },
-        )?;
-        Ok(())
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -893,29 +881,6 @@ impl SessionStore {
         });
     }
 
-    /// Remember a tool permission (allow/deny) for a session.
-    pub fn remember_tool_permission(
-        &self,
-        session_id: Uuid,
-        tool_name: &str,
-        allowed: bool,
-    ) -> Result<()> {
-        self.write_execute(
-            "INSERT INTO tool_permissions (session_id, tool_name, allowed, created_at) \
-             VALUES (:session_id, :tool_name, :allowed, :created_at) \
-             ON CONFLICT(session_id, tool_name) DO UPDATE \
-             SET allowed = excluded.allowed, created_at = excluded.created_at",
-            named_params! {
-                ":session_id": session_id.to_string(),
-                ":tool_name": tool_name,
-                ":allowed": if allowed { 1_i64 } else { 0_i64 },
-                ":created_at": Utc::now().to_rfc3339(),
-            },
-        )?;
-        self.touch_session(session_id)?;
-        Ok(())
-    }
-
     /// Save the user's thinking level preference for a specific model.
     pub fn save_model_thinking_level(
         &self,
@@ -954,29 +919,6 @@ impl SessionStore {
             },
             |row| row.get::<_, String>(0),
         )
-    }
-
-    /// Load a single tool permission by permission key (tool_name) for a session.
-    pub fn load_tool_permission(
-        &self,
-        session_id: Uuid,
-        permission_key: &str,
-    ) -> Result<Option<bool>> {
-        self.read(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT allowed FROM tool_permissions \
-                 WHERE session_id = ?1 AND tool_name = ?2 \
-                 ORDER BY created_at DESC LIMIT 1",
-            )?;
-            let mut rows = stmt
-                .query_map(params![session_id.to_string(), permission_key], |row| {
-                    row.get::<_, i64>(0)
-                })?;
-            match rows.next() {
-                Some(Ok(val)) => Ok(Some(val != 0)),
-                _ => Ok(None),
-            }
-        })
     }
 
     /// Count total number of sessions.
@@ -1725,33 +1667,6 @@ impl SessionStore {
             }
         }
 
-        // ── 8. tool_permissions ───────────────────────────────────────────
-        {
-            let sql = format!(
-                "SELECT session_id, tool_name, allowed, created_at FROM tool_permissions \
-                 WHERE session_id IN ({placeholder})"
-            );
-            let params: Vec<&dyn rusqlite::types::ToSql> = sid_strs
-                .iter()
-                .map(|s| s as &dyn rusqlite::types::ToSql)
-                .collect();
-            let rows = self.read_query(&sql, params.as_slice(), |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, i64>(2)?,
-                    row.get::<_, String>(3)?,
-                ))
-            })?;
-            let mut insert = tx.prepare(
-                "INSERT OR REPLACE INTO tool_permissions \
-                 (session_id, tool_name, allowed, created_at) VALUES (?1, ?2, ?3, ?4)",
-            )?;
-            for (sid, name, allowed, created) in &rows {
-                insert.execute(params![sid, name, allowed, created])?;
-            }
-        }
-
         tx.commit()?;
         Ok(())
     }
@@ -2039,34 +1954,6 @@ impl SessionStore {
             }
         }
 
-        // ── 7. tool_permissions ───────────────────────────────────────────
-        {
-            let sql = format!(
-                "SELECT session_id, tool_name, allowed, created_at FROM tool_permissions \
-                 WHERE session_id IN ({imp_placeholder})"
-            );
-            let mut stmt = import_conn.prepare(&sql)?;
-            let rows = stmt
-                .query_map(imp_params.as_slice(), |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, i64>(2)?,
-                        row.get::<_, String>(3)?,
-                    ))
-                })?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-
-            let conn = self.write_conn.lock().unwrap();
-            for (sid, name, allowed, created) in &rows {
-                conn.execute(
-                    "INSERT OR REPLACE INTO tool_permissions \
-                     (session_id, tool_name, allowed, created_at) VALUES (?1, ?2, ?3, ?4)",
-                    params![sid, name, allowed, created],
-                )?;
-            }
-        }
-
         let imported = to_import
             .iter()
             .filter_map(|s| Uuid::parse_str(s).ok())
@@ -2194,46 +2081,9 @@ impl SessionStore {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Tool permissions
-// ---------------------------------------------------------------------------
-
-impl SessionStore {
-    /// Save a tool permission for a session.
-    pub fn save_tool_permission(
-        &self,
-        session_id: Uuid,
-        tool_name: &str,
-        allowed: bool,
-    ) -> Result<()> {
-        let now = Utc::now().to_rfc3339();
-        let conn = self.write_conn.lock().unwrap();
-        conn.execute(
-            "INSERT OR REPLACE INTO tool_permissions (session_id, tool_name, allowed, created_at) \
-             VALUES (?1, ?2, ?3, ?4)",
-            params![session_id.to_string(), tool_name, allowed as i64, now],
-        )?;
-        Ok(())
-    }
-
-    /// Load all tool permissions for a session.
-    pub fn load_tool_permissions(&self, session_id: Uuid) -> Result<Vec<(String, bool)>> {
-        self.read(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT tool_name, allowed FROM tool_permissions \
-                 WHERE session_id = ?1 ORDER BY created_at DESC",
-            )?;
-            let rows = stmt.query_map(params![session_id.to_string()], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? != 0))
-            })?;
-            let mut permissions = Vec::new();
-            for row in rows {
-                permissions.push(row?);
-            }
-            Ok(permissions)
-        })
-    }
-}
+// ===========================================================================
+// End of SessionStore implementation.
+// ===========================================================================
 
 // ---------------------------------------------------------------------------
 // Snapshot storage

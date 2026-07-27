@@ -146,19 +146,6 @@ pub(crate) enum SensitiveFileDecision {
     DenyUntilExit,
 }
 
-/// User decision for the main tool permission dialog.
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) enum PermissionDecision {
-    /// Y — allow this one time.
-    Allow,
-    /// R — allow and persist to DB.
-    AllowAndRemember,
-    /// N / Esc — deny this one time.
-    Deny,
-    /// X — deny and persist to DB.
-    DenyAndRemember,
-}
-
 // ---------------------------------------------------------------------------
 // OverlayKind
 // ---------------------------------------------------------------------------
@@ -171,7 +158,6 @@ pub(crate) enum OverlayKind {
         filename: String,
     },
     PanelLauncher,
-    PermissionDialog,
     QuestionDialog,
     WorkspaceBoundaryDialog,
     SensitiveFileDialog,
@@ -228,12 +214,6 @@ pub(crate) enum Action {
     SensitiveFileResponse {
         path: PathBuf,
         decision: SensitiveFileDecision,
-        reason: Option<String>,
-    },
-    /// Result from a PermissionDialog (final approve / reject).
-    /// `reason` is an optional user-supplied text attached when denying.
-    PermissionResponse {
-        decision: PermissionDecision,
         reason: Option<String>,
     },
     /// Result from a QuestionDialog.

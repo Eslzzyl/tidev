@@ -9,7 +9,6 @@ use tidev_types::tools::QuestionArgs;
 use uuid::Uuid;
 
 use crate::action::{BoundaryDecision, SensitiveFileDecision};
-use crate::components::overlays::permission::PermissionDialog;
 use crate::components::overlays::question::QuestionDialog;
 use crate::components::overlays::sensitive::SensitiveFileDialog;
 use crate::components::overlays::workspace::WorkspaceBoundaryDialog;
@@ -63,9 +62,6 @@ impl App {
                 sensitive_path,
                 is_question,
                 args,
-                perm_key,
-                perm_label,
-                needs_confirmation,
                 tc,
             ) = {
                 let twv = &approval.tools[approval.tool_index];
@@ -75,9 +71,6 @@ impl App {
                     twv.sensitive_file_violation.clone(),
                     tc.name == "question",
                     tc.arguments.clone(),
-                    twv.permission_key.clone(),
-                    twv.permission_label.clone(),
-                    twv.needs_confirmation,
                     tc.clone(),
                 )
             };
@@ -195,58 +188,40 @@ impl App {
                 }
             }
 
-            // Step 4: Check permission level
-            match needs_confirmation {
-                true => {
-                    log::info!(
-                        "Opening PermissionDialog ({current_index}/{total}) for {perm_label}"
-                    );
-                    self.overlays.push(Box::new(PermissionDialog::new(
-                        perm_key,
-                        perm_label,
-                        args,
-                        current_index,
-                        total,
-                    )));
-                    return;
-                }
-                false => {
-                    // Auto-approve (relying on earlier boundary/sensitive checks)
-                    let boundary_str = boundary_path
-                        .as_ref()
-                        .map(|p| p.to_string_lossy().to_string());
-                    let sensitive_str = sensitive_path
-                        .as_ref()
-                        .map(|p| p.to_string_lossy().to_string());
-                    let allow_outside = boundary_str
-                        .as_deref()
-                        .and_then(|p| Self::is_path_allowed(&self.boundary_permissions, p))
-                        .unwrap_or(false);
-                    let sensitive_approved = sensitive_str
-                        .as_deref()
-                        .and_then(|p| Self::is_path_allowed(&self.sensitive_permissions, p))
-                        .unwrap_or(false);
+            // Step 4: Auto-approve (permission check already done by mode filter)
+            {
+                let boundary_str = boundary_path
+                    .as_ref()
+                    .map(|p| p.to_string_lossy().to_string());
+                let sensitive_str = sensitive_path
+                    .as_ref()
+                    .map(|p| p.to_string_lossy().to_string());
+                let allow_outside = boundary_str
+                    .as_deref()
+                    .and_then(|p| Self::is_path_allowed(&self.boundary_permissions, p))
+                    .unwrap_or(false);
+                let sensitive_approved = sensitive_str
+                    .as_deref()
+                    .and_then(|p| Self::is_path_allowed(&self.sensitive_permissions, p))
+                    .unwrap_or(false);
 
-                    log::info!(
-                        "Auto-approving tool {} (no confirmation needed) ({}/{}) \
-                         allow_outside={} sensitive_approved={}",
-                        perm_label,
-                        current_index,
-                        total,
-                        allow_outside,
-                        sensitive_approved,
-                    );
-                    approval.approved_tools.push(ApprovedTool {
-                        tool_call: tc,
-                        rejection: None,
-                        child_session_id: None,
-                        allow_outside,
-                        sensitive_file_approved: sensitive_approved,
-                        user_reason: None,
-                    });
-                    approval.tool_index += 1;
-                    continue;
-                }
+                log::info!(
+                    "Auto-approving tool ({}/{}) allow_outside={} sensitive_approved={}",
+                    current_index,
+                    total,
+                    allow_outside,
+                    sensitive_approved,
+                );
+                approval.approved_tools.push(ApprovedTool {
+                    tool_call: tc,
+                    rejection: None,
+                    child_session_id: None,
+                    allow_outside,
+                    sensitive_file_approved: sensitive_approved,
+                    user_reason: None,
+                });
+                approval.tool_index += 1;
+                continue;
             }
         }
 

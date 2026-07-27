@@ -1253,7 +1253,6 @@ impl RuntimeBuilder {
             config.websearch.clone(),
             auth.clone(),
             max_output_bytes,
-            config.permissions.clone(),
             mcp_manager,
         ));
         log::info!("startup: tool registry ready in {:?}", _t_tools.elapsed());

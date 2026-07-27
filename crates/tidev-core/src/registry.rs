@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use tidev_types::message::{BackendEvent, ToolCall, ToolExecutionResult};
 use tidev_types::prompts::SessionMode;
-use tidev_types::tools::{PermissionConfig, ToolDefinition};
+use tidev_types::tools::ToolDefinition;
 
 use tidev_config::auth::ActiveModel;
 use tidev_config::{AuthStore, WebSearchConfig};
@@ -37,7 +37,6 @@ pub struct ToolRegistry {
     web_search_config: WebSearchConfig,
     auth_store: AuthStore,
     max_output_bytes: usize,
-    permission_config: PermissionConfig,
     mcp: McpManager,
 }
 
@@ -51,7 +50,6 @@ impl ToolRegistry {
         web_search_config: WebSearchConfig,
         auth_store: AuthStore,
         max_output_bytes: usize,
-        permission_config: PermissionConfig,
         mcp: McpManager,
     ) -> Self {
         Self {
@@ -62,7 +60,6 @@ impl ToolRegistry {
             web_search_config,
             auth_store,
             max_output_bytes,
-            permission_config,
             mcp,
         }
     }
@@ -173,70 +170,17 @@ impl ToolRegistry {
     }
 
     /// Returns `true` if the tool exists and its permission level is allowed
-    /// in the given session mode according to the user's permission config.
+    /// in the given session mode (hardcoded per mode).
     pub fn can_execute(&self, tool_name: &str, mode: SessionMode) -> bool {
         // Check built-in tools first.
         if self
             .definition_for(tool_name)
-            .is_some_and(|def| self.permission_config.is_allowed(mode, def.permission))
+            .is_some_and(|def| def.permission.allowed_in_mode(mode))
         {
             return true;
         }
         // Then check MCP tools.
-        self.mcp
-            .can_execute(tool_name, mode, &self.permission_config)
-    }
-
-    /// Return a stable key for a tool call (used for permission memoization).
-    pub fn permission_key_for_call(&self, call: &ToolCall) -> String {
-        if call.name == "skill" {
-            if let Ok(args) = serde_json::from_str::<tidev_types::tools::SkillArgs>(&call.arguments)
-                && !args.name.trim().is_empty()
-            {
-                return SkillCatalog::permission_key_for_name(args.name.trim());
-            }
-            return SkillCatalog::permission_key_for_name("unknown");
-        }
-
-        // Check MCP first (MCP tools won't appear in built-in definitions).
-        if self.mcp.definition_for(&call.name).is_some() {
-            return self.mcp.permission_key_for_call(call);
-        }
-
-        self.definition_for(&call.name)
-            .as_ref()
-            .map(|def| def.permission_key())
-            .unwrap_or_else(|| {
-                tidev_types::tools::canonical_tool_name(&call.name)
-                    .unwrap_or(&call.name)
-                    .to_string()
-            })
-    }
-
-    /// Return a human-readable label for a tool call (used for permission UI).
-    pub fn permission_label_for_call(&self, call: &ToolCall) -> String {
-        if call.name == "skill" {
-            if let Ok(args) = serde_json::from_str::<tidev_types::tools::SkillArgs>(&call.arguments)
-                && !args.name.trim().is_empty()
-            {
-                return format!("skill '{}'", args.name.trim());
-            }
-            return "skill".to_string();
-        }
-
-        // Check MCP first.
-        if self.mcp.definition_for(&call.name).is_some() {
-            return self.mcp.permission_label_for_call(call);
-        }
-
-        self.definition_for(&call.name)
-            .as_ref()
-            .map(|def| def.permission_label())
-            .unwrap_or_else(|| {
-                tidev_types::tools::canonical_tool_name(&call.name)
-                    .unwrap_or(&call.name)
-                    .to_string()
-            })
+        self.mcp.can_execute(tool_name, mode)
     }
 }
 
@@ -266,80 +210,6 @@ mod tests {
         ) -> anyhow::Result<()> {
             Ok(())
         }
-    }
-
-    fn make_registry() -> ToolRegistry {
-        ToolRegistry::new(
-            PathBuf::from("/tmp"),
-            PathBuf::from("/tmp/.config"),
-            SkillCatalog::default(),
-            Arc::new(StubTodoStore),
-            WebSearchConfig::default(),
-            AuthStore::default(),
-            0,
-            PermissionConfig::default(),
-            McpManager::new(PathBuf::from("/tmp"), BTreeMap::new()),
-        )
-    }
-
-    #[test]
-    fn permission_key_for_skill() {
-        let reg = make_registry();
-        let call = ToolCall {
-            id: "c1".into(),
-            name: "skill".into(),
-            arguments: r#"{"name":"code-review"}"#.into(),
-            thought_signature: None,
-        };
-        assert_eq!(reg.permission_key_for_call(&call), "skill:code-review");
-    }
-
-    #[test]
-    fn permission_key_for_skill_without_name() {
-        let reg = make_registry();
-        let call = ToolCall {
-            id: "c1".into(),
-            name: "skill".into(),
-            arguments: "{}".into(),
-            thought_signature: None,
-        };
-        assert_eq!(reg.permission_key_for_call(&call), "skill:unknown");
-    }
-
-    #[test]
-    fn permission_label_for_skill() {
-        let reg = make_registry();
-        let call = ToolCall {
-            id: "c1".into(),
-            name: "skill".into(),
-            arguments: r#"{"name":"code-review"}"#.into(),
-            thought_signature: None,
-        };
-        assert_eq!(reg.permission_label_for_call(&call), "skill 'code-review'");
-    }
-
-    #[test]
-    fn permission_label_for_skill_without_name() {
-        let reg = make_registry();
-        let call = ToolCall {
-            id: "c1".into(),
-            name: "skill".into(),
-            arguments: "{}".into(),
-            thought_signature: None,
-        };
-        assert_eq!(reg.permission_label_for_call(&call), "skill");
-    }
-
-    #[test]
-    fn permission_label_for_known_tool() {
-        let reg = make_registry();
-        let call = ToolCall {
-            id: "c1".into(),
-            name: "read".into(),
-            arguments: "{}".into(),
-            thought_signature: None,
-        };
-        assert_eq!(reg.permission_label_for_call(&call), "read");
     }
 
     // ── MCP integration tests ──────────────────────────────────────────
@@ -373,7 +243,6 @@ mod tests {
             WebSearchConfig::default(),
             AuthStore::default(),
             0,
-            PermissionConfig::default(),
             mcp,
         )
     }
@@ -384,36 +253,6 @@ mod tests {
         let def = reg.definition_for("mcp__srv__tool");
         assert!(def.is_some());
         assert_eq!(def.unwrap().mcp_target(), Some(("srv", "tool")));
-    }
-
-    #[test]
-    fn test_mcp_permission_key_for_call() {
-        let reg = make_registry_with_mcp();
-        let call = ToolCall {
-            id: "c1".into(),
-            name: "mcp__srv__tool".into(),
-            arguments: "{}".into(),
-            thought_signature: None,
-        };
-        assert_eq!(
-            reg.permission_key_for_call(&call),
-            "mcp:srv:tool"
-        );
-    }
-
-    #[test]
-    fn test_mcp_permission_label_for_call() {
-        let reg = make_registry_with_mcp();
-        let call = ToolCall {
-            id: "c1".into(),
-            name: "mcp__srv__tool".into(),
-            arguments: "{}".into(),
-            thought_signature: None,
-        };
-        assert_eq!(
-            reg.permission_label_for_call(&call),
-            "srv / tool (Srv Tool)"
-        );
     }
 
     #[test]

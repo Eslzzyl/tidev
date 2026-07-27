@@ -79,13 +79,6 @@ pub struct ToolCallWithViolations {
     pub workspace_boundary_violation: Option<PathBuf>,
     /// If the tool targets a sensitive file, the resolved path.
     pub sensitive_file_violation: Option<PathBuf>,
-    /// Stable permission key for for DB lookups.
-    pub permission_key: String,
-    /// Human-readable label.
-    pub permission_label: String,
-    /// Whether the tool's permission level requires explicit user confirmation
-    /// (true for Write/Edit/Execute; false for Read/Search/Session).
-    pub needs_confirmation: bool,
 }
 
 /// Request sent by the agent loop to the frontend, requiring user interaction.

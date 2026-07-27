@@ -96,17 +96,6 @@ CREATE TABLE IF NOT EXISTS todos (
 CREATE INDEX IF NOT EXISTS idx_todos_session_position
     ON todos(session_id, position);
 
-CREATE TABLE IF NOT EXISTS tool_permissions (
-    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    tool_name TEXT NOT NULL,
-    allowed INTEGER NOT NULL,
-    created_at TEXT NOT NULL,
-    PRIMARY KEY(session_id, tool_name)
-);
-
-CREATE INDEX IF NOT EXISTS idx_tool_permissions_session_created_at
-    ON tool_permissions(session_id, created_at);
-
 CREATE TABLE IF NOT EXISTS gateway_chat_sessions (
     platform TEXT NOT NULL,
     chat_key TEXT,
@@ -251,17 +240,6 @@ CREATE TABLE IF NOT EXISTS todos (
 
 CREATE INDEX IF NOT EXISTS idx_todos_session_position
     ON todos(session_id, position);
-
-CREATE TABLE IF NOT EXISTS tool_permissions (
-    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    tool_name TEXT NOT NULL,
-    allowed INTEGER NOT NULL,
-    created_at TEXT NOT NULL,
-    PRIMARY KEY(session_id, tool_name)
-);
-
-CREATE INDEX IF NOT EXISTS idx_tool_permissions_session_created_at
-    ON tool_permissions(session_id, created_at);
 
 CREATE TABLE IF NOT EXISTS gateway_chat_sessions (
     platform TEXT NOT NULL,

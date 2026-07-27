@@ -128,7 +128,6 @@ mod tests {
     use crate::components::overlays::message::MessagePanel;
     use crate::components::overlays::model::ModelPanel;
     use crate::components::overlays::panel_launcher::PanelLauncher;
-    use crate::components::overlays::permission::PermissionDialog;
     use crate::components::overlays::question::QuestionDialog;
     use crate::components::overlays::rename::RenameDialog;
     use crate::components::overlays::sensitive::SensitiveFileDialog;
@@ -487,13 +486,6 @@ mod tests {
     #[test]
     fn rename_dialog_does_not_use_main_area() {
         let dialog = RenameDialog::new(Uuid::nil(), String::new());
-        assert!(!dialog.overlay_uses_main_area());
-    }
-
-    #[test]
-    fn permission_dialog_does_not_use_main_area() {
-        let dialog =
-            PermissionDialog::new("key".into(), "name".into(), "args".into(), 0, 1);
         assert!(!dialog.overlay_uses_main_area());
     }
 

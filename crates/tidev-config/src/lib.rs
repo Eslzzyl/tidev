@@ -23,7 +23,6 @@ pub use crate::mcp::McpConfig;
 pub use crate::mcp::McpServerConfig;
 use crate::paths::ConfigPaths;
 use crate::provider::{ProviderConfig, ProviderSource};
-use tidev_types::tools::PermissionConfig;
 
 /// Bundled provider presets directory embedded at compile time.
 static PRESETS_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/../../presets");
@@ -383,8 +382,6 @@ pub struct AppConfig {
     #[serde(default)]
     pub skills: Vec<String>,
     #[serde(default)]
-    pub permissions: PermissionConfig,
-    #[serde(default)]
     pub access_control: AccessControlConfig,
     #[serde(default)]
     pub notifications: NotificationConfig,
@@ -421,7 +418,6 @@ impl Default for AppConfig {
             providers: BTreeMap::new(),
             instructions: Vec::new(),
             skills: Vec::new(),
-            permissions: PermissionConfig::default(),
             access_control: AccessControlConfig::default(),
             notifications: NotificationConfig::default(),
             agent: AgentConfig::default(),
@@ -514,9 +510,6 @@ impl AppConfig {
         }
         if has("logging") {
             self.logging = overlay.logging;
-        }
-        if has("permissions") {
-            self.permissions = overlay.permissions;
         }
         if has("access_control") {
             self.access_control = overlay.access_control;

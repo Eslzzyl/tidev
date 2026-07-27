@@ -26,7 +26,7 @@ use tokio::process::Command;
 use tidev_config::mcp::McpServerConfig;
 use tidev_types::message::{MessageAttachment, ToolCall, ToolExecutionResult, ToolMetadata};
 use tidev_types::prompts::SessionMode;
-use tidev_types::tools::{PermissionConfig, ToolDefinition, ToolPermission};
+use tidev_types::tools::{ToolDefinition, ToolPermission};
 
 // ---------------------------------------------------------------------------
 // Type aliases
@@ -298,13 +298,8 @@ impl McpManager {
             .collect()
     }
 
-    /// Return tool definitions from all connected servers, filtered by
-    /// the current mode and permission config.
-    pub fn available_definitions(
-        &self,
-        mode: SessionMode,
-        permission_config: &PermissionConfig,
-    ) -> Vec<ToolDefinition> {
+    /// Return tool definitions from all connected servers, filtered by mode.
+    pub fn available_definitions(&self, mode: SessionMode) -> Vec<ToolDefinition> {
         let inner = self.inner.lock().unwrap();
         inner
             .servers
@@ -314,9 +309,7 @@ impl McpManager {
                 state
                     .tools
                     .iter()
-                    .filter(|definition| {
-                        permission_config.is_allowed(mode, definition.permission)
-                    })
+                    .filter(|definition| definition.permission.allowed_in_mode(mode))
                     .cloned()
                     .collect::<Vec<_>>()
             })
@@ -347,28 +340,13 @@ impl McpManager {
 
     // ── Permission helpers ──────────────────────────────────────────────
 
-    pub fn permission_key_for_call(&self, call: &ToolCall) -> String {
-        if let Some(definition) = self.definition_for(&call.name) {
-            return definition.permission_key();
-        }
-        call.name.clone()
-    }
-
-    pub fn permission_label_for_call(&self, call: &ToolCall) -> String {
-        if let Some(definition) = self.definition_for(&call.name) {
-            return definition.permission_label();
-        }
-        call.name.clone()
-    }
-
     pub fn can_execute(
         &self,
         tool_name: &str,
         mode: SessionMode,
-        permission_config: &PermissionConfig,
     ) -> bool {
         self.definition_for(tool_name)
-            .is_some_and(|definition| permission_config.is_allowed(mode, definition.permission))
+            .is_some_and(|definition| definition.permission.allowed_in_mode(mode))
     }
 
     // ── Execution ───────────────────────────────────────────────────────
@@ -858,7 +836,7 @@ mod tests {
         assert!(mgr.all_definitions().is_empty());
         assert!(mgr.definition_for("anything").is_none());
         assert!(mgr
-            .available_definitions(SessionMode::Build, &PermissionConfig::default())
+            .available_definitions(SessionMode::Build)
             .is_empty());
     }
 
@@ -919,39 +897,18 @@ mod tests {
         insert_mock_tool(&mgr, "srv", make_stdio_config(), write_tool);
         insert_mock_tool(&mgr, "srv", make_stdio_config(), read_tool);
 
-        let plan_permissions = PermissionConfig {
-            plan: tidev_types::tools::PermissionSettings {
-                read: true,
-                write: false,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-
-        let plan_tools = mgr.available_definitions(SessionMode::Plan, &plan_permissions);
+        let plan_tools = mgr.available_definitions(SessionMode::Plan);
         assert_eq!(plan_tools.len(), 1);
         assert_eq!(plan_tools[0].name, "read");
 
-        let build_tools = mgr.available_definitions(
-            SessionMode::Build,
-            &PermissionConfig::default(),
-        );
+        let build_tools = mgr.available_definitions(SessionMode::Build);
         assert_eq!(build_tools.len(), 2);
     }
 
     #[test]
-    fn test_mcp_manager_permission_helpers_for_unknown() {
+    fn test_mcp_manager_can_execute_for_unknown() {
         let mgr = McpManager::new(PathBuf::from("/tmp"), BTreeMap::new());
-        let call = tidev_types::message::ToolCall {
-            id: "c1".into(),
-            name: "nonexistent".into(),
-            arguments: "{}".into(),
-            thought_signature: None,
-        };
-
-        assert_eq!(mgr.permission_key_for_call(&call), "nonexistent");
-        assert_eq!(mgr.permission_label_for_call(&call), "nonexistent");
-        assert!(!mgr.can_execute("nonexistent", SessionMode::Build, &PermissionConfig::default()));
+        assert!(!mgr.can_execute("nonexistent", SessionMode::Build));
     }
 
     #[test]

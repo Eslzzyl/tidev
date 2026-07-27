@@ -167,10 +167,9 @@ impl App {
             }
             OverlayKind::ConnectDialog => Some(Box::new(ConnectDialog::new())),
             OverlayKind::PanelLauncher => Some(Box::new(PanelLauncher::new())),
-            // Permission / security dialogs are triggered by handle_tui_request,
+            // Permission/security dialogs are triggered by handle_tui_request,
             // not by user keystrokes. These branches exist as fallback placeholders.
-            OverlayKind::PermissionDialog
-            | OverlayKind::QuestionDialog
+            OverlayKind::QuestionDialog
             | OverlayKind::WorkspaceBoundaryDialog
             | OverlayKind::SensitiveFileDialog => None,
         };

@@ -5,11 +5,10 @@ use crate::theme::ThemePalette;
 use tidev_core::ApprovedTool;
 use tidev_types::message::{MessageRole, ToolExecutionResult};
 use tidev_types::prompts::SessionMode;
-use uuid::Uuid;
 
 use crate::action::{
     Action, BoundaryDecision, ChatAction, ConnectAction, McpAction, OverlayAction, OverlayKind,
-    PermissionDecision, SearchAction, SensitiveFileDecision, SessionAction, ThemeAction,
+    SearchAction, SensitiveFileDecision, SessionAction, ThemeAction,
 };
 use crate::component::Component;
 
@@ -865,91 +864,6 @@ impl App {
                             self.sensitive_reasons.insert(path_str, r);
                         }
 
-                    self.process_next_tool();
-                }
-                Action::PermissionResponse { decision, reason } => {
-                    let allow = matches!(
-                        decision,
-                        PermissionDecision::Allow | PermissionDecision::AllowAndRemember
-                    );
-                    let remember = matches!(
-                        decision,
-                        PermissionDecision::AllowAndRemember | PermissionDecision::DenyAndRemember
-                    );
-
-                    let Some(session_id) = self.active_approval_session else {
-                        break;
-                    };
-                    let Some(approval) = self.pending_approvals.get_mut(&session_id) else {
-                        break;
-                    };
-                    if approval.tool_index >= approval.tools.len() {
-                        break;
-                    }
-                    let twv = &approval.tools[approval.tool_index];
-
-                    // Persist to DB if remember
-                    if remember
-                        && let Err(e) = self
-                            .runtime
-                            .session_manager()
-                            .store()
-                            .remember_tool_permission(session_id, &twv.permission_key, allow)
-                    {
-                        log::warn!("Failed to remember tool permission: {e}");
-                    }
-
-                    // Build the approved tool
-                    let (rejection, allow_outside, sensitive_approved) = if allow {
-                        let path_str = twv
-                            .workspace_boundary_violation
-                            .as_ref()
-                            .map(|p| p.to_string_lossy().to_string());
-                        let sensitive_str = twv
-                            .sensitive_file_violation
-                            .as_ref()
-                            .map(|p| p.to_string_lossy().to_string());
-                        (
-                            None,
-                            path_str
-                                .and_then(|p| Self::is_path_allowed(&self.boundary_permissions, &p))
-                                .unwrap_or(false),
-                            sensitive_str
-                                .and_then(|p| {
-                                    Self::is_path_allowed(&self.sensitive_permissions, &p)
-                                })
-                                .unwrap_or(false),
-                        )
-                    } else {
-                        let base = if remember {
-                            format!("Tool '{}' was denied and remembered", twv.permission_label)
-                        } else {
-                            format!("Tool '{}' was denied", twv.permission_label)
-                        };
-                        let msg = if let Some(ref r) = reason {
-                            format!("{}. Reason: {}", base, r)
-                        } else {
-                            base
-                        };
-                        (Some(ToolExecutionResult::new(msg)), false, false)
-                    };
-
-                    let child_session_id = if twv.tool_call.name == "task" {
-                        Some(Uuid::new_v4())
-                    } else {
-                        None
-                    };
-
-                    approval.approved_tools.push(ApprovedTool {
-                        tool_call: twv.tool_call.clone(),
-                        rejection,
-                        child_session_id,
-                        allow_outside,
-                        sensitive_file_approved: sensitive_approved,
-                        user_reason: reason.clone(),
-                    });
-
-                    approval.tool_index += 1;
                     self.process_next_tool();
                 }
                 Action::QuestionResponse { output } => {

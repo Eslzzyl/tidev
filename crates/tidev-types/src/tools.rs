@@ -3,7 +3,7 @@
 //! This module defines the core types for the tool system:
 //! - [`ToolDefinition`]: metadata describing a tool (name, description, parameters, permissions)
 //! - [`ToolOrigin`]: whether a tool is local or comes from MCP
-//! - [`ToolPermission`]: permission level required by a tool
+//! - [`ToolPermission`]: permission level required by a tool (hardcoded per mode)
 //! - [`ToolArgs`] trait + `tool_args!` macro: parameter schema definition
 //! - [`FileReadStamp`]: records a file read for edit-before-read enforcement
 //! - [`canonical_tool_name()`]: normalizes tool name aliases
@@ -54,87 +54,17 @@ pub enum ToolPermission {
 }
 
 impl ToolPermission {
-    /// Returns true if this permission should prompt for user confirmation.
-    pub fn needs_confirmation(&self) -> bool {
-        matches!(self, Self::Write | Self::Edit | Self::Execute)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// PermissionSettings / PermissionConfig
-// ---------------------------------------------------------------------------
-
-/// A set of permission booleans for a single mode (Plan / Build).
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
-pub struct PermissionSettings {
-    #[serde(default)]
-    pub read: bool,
-    #[serde(default)]
-    pub search: bool,
-    #[serde(default)]
-    pub write: bool,
-    #[serde(default)]
-    pub edit: bool,
-    #[serde(default)]
-    pub execute: bool,
-    #[serde(default)]
-    pub session: bool,
-}
-
-impl PermissionSettings {
-    pub fn is_allowed(&self, permission: ToolPermission) -> bool {
-        match permission {
-            ToolPermission::Read => self.read,
-            ToolPermission::Search => self.search,
-            ToolPermission::Write => self.write,
-            ToolPermission::Edit => self.edit,
-            ToolPermission::Execute => self.execute,
-            ToolPermission::Session => self.session,
-        }
-    }
-}
-
-/// Maps each [`SessionMode`](crate::prompts::SessionMode) to its permission set.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct PermissionConfig {
-    #[serde(default)]
-    pub plan: PermissionSettings,
-    #[serde(default)]
-    pub build: PermissionSettings,
-}
-
-impl Default for PermissionConfig {
-    fn default() -> Self {
-        Self {
-            plan: PermissionSettings {
-                read: true,
-                search: true,
-                write: false,
-                edit: false,
-                execute: true,
-                session: true,
-            },
-            build: PermissionSettings {
-                read: true,
-                search: true,
-                write: true,
-                edit: true,
-                execute: true,
-                session: true,
-            },
-        }
-    }
-}
-
-impl PermissionConfig {
-    pub fn is_allowed(
-        &self,
-        mode: crate::prompts::SessionMode,
-        permission: ToolPermission,
-    ) -> bool {
+    /// Returns whether this permission level is allowed in the given session mode.
+    ///
+    /// Hardcoded: Plan mode only allows read-only and non-destructive tools;
+    /// Build mode allows everything.
+    pub fn allowed_in_mode(&self, mode: crate::prompts::SessionMode) -> bool {
         match mode {
-            crate::prompts::SessionMode::Plan => self.plan.is_allowed(permission),
-            crate::prompts::SessionMode::Build => self.build.is_allowed(permission),
+            crate::prompts::SessionMode::Plan => matches!(
+                self,
+                Self::Read | Self::Search | Self::Execute | Self::Session
+            ),
+            crate::prompts::SessionMode::Build => true,
         }
     }
 }
@@ -153,22 +83,6 @@ pub enum ToolOrigin {
 }
 
 impl ToolOrigin {
-    pub fn permission_key(&self, name: &str) -> String {
-        match self {
-            Self::Local => name.to_string(),
-            Self::Mcp(target) => format!("mcp:{}:{}", target.server_name, target.tool_name),
-        }
-    }
-
-    pub fn permission_label(&self, display_name: &str, _name: &str) -> String {
-        match self {
-            Self::Local => display_name.to_string(),
-            Self::Mcp(target) => {
-                format!("{} / {} ({})", target.server_name, target.tool_name, display_name)
-            }
-        }
-    }
-
     /// If this tool is backed by an MCP server, return the target reference.
     pub fn as_mcp(&self) -> Option<&McpTarget> {
         match self {
@@ -231,18 +145,6 @@ impl ToolDefinition {
             permission,
             origin: ToolOrigin::Local,
         }
-    }
-
-    pub fn needs_confirmation(&self) -> bool {
-        self.permission.needs_confirmation()
-    }
-
-    pub fn permission_key(&self) -> String {
-        self.origin.permission_key(&self.name)
-    }
-
-    pub fn permission_label(&self) -> String {
-        self.origin.permission_label(&self.display_name, &self.name)
     }
 
     /// Construct an MCP tool name in the `mcp__{server}__{tool}` format.
@@ -709,11 +611,18 @@ mod tests {
     }
 
     #[test]
-    fn test_permission_config_default() {
-        let config = PermissionConfig::default();
-        assert!(config.is_allowed(crate::prompts::SessionMode::Plan, ToolPermission::Read));
-        assert!(!config.is_allowed(crate::prompts::SessionMode::Plan, ToolPermission::Write));
-        assert!(config.is_allowed(crate::prompts::SessionMode::Build, ToolPermission::Write));
+    fn test_allowed_in_mode() {
+        assert!(ToolPermission::Read.allowed_in_mode(crate::prompts::SessionMode::Plan));
+        assert!(ToolPermission::Search.allowed_in_mode(crate::prompts::SessionMode::Plan));
+        assert!(ToolPermission::Execute.allowed_in_mode(crate::prompts::SessionMode::Plan));
+        assert!(ToolPermission::Session.allowed_in_mode(crate::prompts::SessionMode::Plan));
+        assert!(!ToolPermission::Write.allowed_in_mode(crate::prompts::SessionMode::Plan));
+        assert!(!ToolPermission::Edit.allowed_in_mode(crate::prompts::SessionMode::Plan));
+
+        assert!(ToolPermission::Read.allowed_in_mode(crate::prompts::SessionMode::Build));
+        assert!(ToolPermission::Write.allowed_in_mode(crate::prompts::SessionMode::Build));
+        assert!(ToolPermission::Edit.allowed_in_mode(crate::prompts::SessionMode::Build));
+        assert!(ToolPermission::Execute.allowed_in_mode(crate::prompts::SessionMode::Build));
     }
 
     #[test]
@@ -749,35 +658,6 @@ mod tests {
         let target = McpTarget::new("my-server", "do-thing");
         assert_eq!(target.server_name, "my-server");
         assert_eq!(target.tool_name, "do-thing");
-    }
-
-    #[test]
-    fn test_tool_origin_mcp_permission_key() {
-        let target = McpTarget::new("my-server", "do-thing");
-        let origin = ToolOrigin::Mcp(target);
-        assert_eq!(origin.permission_key("x"), "mcp:my-server:do-thing");
-    }
-
-    #[test]
-    fn test_tool_origin_local_permission_key() {
-        let origin = ToolOrigin::Local;
-        assert_eq!(origin.permission_key("read"), "read");
-    }
-
-    #[test]
-    fn test_tool_origin_mcp_permission_label() {
-        let target = McpTarget::new("my-server", "do-thing");
-        let origin = ToolOrigin::Mcp(target);
-        assert_eq!(
-            origin.permission_label("My Display", "x"),
-            "my-server / do-thing (My Display)"
-        );
-    }
-
-    #[test]
-    fn test_tool_origin_local_permission_label() {
-        let origin = ToolOrigin::Local;
-        assert_eq!(origin.permission_label("read", "read"), "read");
     }
 
     #[test]
@@ -832,8 +712,6 @@ mod tests {
         assert_eq!(def.parameters, params);
         assert_eq!(def.permission, ToolPermission::Execute);
         assert_eq!(def.mcp_target(), Some(("srv", "tool")));
-        assert_eq!(def.permission_key(), "mcp:srv:tool");
-        assert_eq!(def.permission_label(), "srv / tool (Srv Tool)");
     }
 
     #[test]
@@ -854,12 +732,5 @@ mod tests {
             "t".into(),
         );
         assert_eq!(def.mcp_target(), Some(("s", "t")));
-    }
-
-    #[test]
-    fn test_tool_origin_mcp_permission_key_differs_by_server() {
-        let t1 = ToolOrigin::Mcp(McpTarget::new("server-a", "tool"));
-        let t2 = ToolOrigin::Mcp(McpTarget::new("server-b", "tool"));
-        assert_ne!(t1.permission_key("x"), t2.permission_key("x"));
     }
 }

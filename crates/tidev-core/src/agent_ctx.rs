@@ -608,40 +608,7 @@ impl AgentContext for CoreContext {
                 continue;
             }
 
-            // 2. Check remembered DB permission.
-            let permission_key = self.tool_registry.permission_key_for_call(tc);
-            let remembered = self
-                .session_manager
-                .store()
-                .load_tool_permission(self.session_id, &permission_key)?;
-
-            if let Some(allowed) = remembered {
-                if allowed {
-                    approved.push(ApprovedTool {
-                        tool_call: tc.clone(),
-                        rejection: None,
-                        child_session_id: None,
-                        allow_outside: access_control.allow_outside_workspace_access,
-                        sensitive_file_approved: access_control.allow_sensitive_file_access,
-                        user_reason: None,
-                    });
-                } else {
-                    approved.push(ApprovedTool {
-                        tool_call: tc.clone(),
-                        rejection: Some(ToolExecutionResult::new(format!(
-                            "Tool '{}' was denied by remembered permission.",
-                            tc.name,
-                        ))),
-                        child_session_id: None,
-                        allow_outside: access_control.allow_outside_workspace_access,
-                        sensitive_file_approved: access_control.allow_sensitive_file_access,
-                        user_reason: None,
-                    });
-                }
-                continue;
-            }
-
-            // 3. Check workspace boundary & sensitive file violations.
+            // 2. Check workspace boundary & sensitive file violations.
             let arguments: Value = serde_json::from_str(&tc.arguments).unwrap_or(Value::Null);
             let boundary_violation = if access_control.allow_outside_workspace_access {
                 None
@@ -662,29 +629,15 @@ impl AgentContext for CoreContext {
             // The question tool must always be routed to the TUI for user
             // interaction — it is never executed on the backend.
             if tidev_types::tools::canonical_tool_name(&tc.name) == Some("question") {
-                let needs_confirmation = self
-                    .tool_registry
-                    .definition_for(&tc.name)
-                    .map(|def| def.permission.needs_confirmation())
-                    .unwrap_or(false);
                 pending.push(ToolCallWithViolations {
                     tool_call: tc.clone(),
                     workspace_boundary_violation: None,
                     sensitive_file_violation: None,
-                    permission_key,
-                    permission_label: self.tool_registry.permission_label_for_call(tc),
-                    needs_confirmation,
                 });
                 continue;
             }
 
-            // 4. If no violations → auto-approve (fast path).
-            //
-            // When the user has enabled `allow_outside_workspace_access` or
-            // `allow_sensitive_file_access` in settings, the corresponding
-            // violation is suppressed (None) above.  We must propagate those
-            // config values here so the backend doesn't reject the tool call
-            // a second time.
+            // 3. If no violations → auto-approve (fast path).
             if boundary_violation.is_none() && sensitive_violation.is_none() {
                 approved.push(ApprovedTool {
                     tool_call: tc.clone(),
@@ -697,19 +650,11 @@ impl AgentContext for CoreContext {
                 continue;
             }
 
-            // 5. Has violations → needs user input.
-            let needs_confirmation = self
-                .tool_registry
-                .definition_for(&tc.name)
-                .map(|def| def.permission.needs_confirmation())
-                .unwrap_or(false);
+            // 4. Has violations → needs user input.
             pending.push(ToolCallWithViolations {
                 tool_call: tc.clone(),
                 workspace_boundary_violation: boundary_violation,
                 sensitive_file_violation: sensitive_violation,
-                permission_key,
-                permission_label: self.tool_registry.permission_label_for_call(tc),
-                needs_confirmation,
             });
         }
 

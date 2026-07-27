@@ -210,10 +210,6 @@ impl SkillCatalog {
         description.trim_end().to_string()
     }
 
-    pub fn permission_key_for_name(name: &str) -> String {
-        format!("skill:{name}")
-    }
-
     pub fn render_skill(&self, name: &str) -> Result<String> {
         let skill = self
             .get(name)
