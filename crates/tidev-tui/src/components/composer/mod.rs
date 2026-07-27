@@ -1375,7 +1375,8 @@ impl Component for Composer {
         {
             // 1. Try text paste.
             if let Some(text) = crate::utils::paste_from_clipboard() {
-                self.insert_str(&text);
+                let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+                self.insert_str(&normalized);
                 self.sync_autocomplete();
                 self.ensure_input_cursor_visible();
                 self.dirty = true;
