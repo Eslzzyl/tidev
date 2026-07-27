@@ -30,3 +30,60 @@ impl ThinkingMatcher {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn match_gpt_5_6_sol() {
+        let result = ThinkingMatcher::match_for_model("gpt-5.6-sol");
+        assert_eq!(result, ThinkingLevelType::Gpt5(Gpt5ThinkingLevel::Medium));
+    }
+
+    #[test]
+    fn match_gpt_5_4() {
+        let result = ThinkingMatcher::match_for_model("gpt-5.4");
+        assert_eq!(result, ThinkingLevelType::Gpt5(Gpt5ThinkingLevel::Medium));
+    }
+
+    #[test]
+    fn match_gpt_5_with_dashes() {
+        // TOML model_id keys use dashes instead of dots (e.g. "gpt-5-6-luna")
+        let result = ThinkingMatcher::match_for_model("gpt-5-6-luna");
+        assert_eq!(result, ThinkingLevelType::Gpt5(Gpt5ThinkingLevel::Medium));
+    }
+
+    #[test]
+    fn match_deepseek_v4() {
+        let result = ThinkingMatcher::match_for_model("deepseek-v4-flash");
+        assert_eq!(
+            result,
+            ThinkingLevelType::DeepSeek(DeepSeekV4ThinkingLevel::High)
+        );
+    }
+
+    #[test]
+    fn match_qwen_3_5() {
+        let result = ThinkingMatcher::match_for_model("qwen-3.5-turbo");
+        assert_eq!(result, ThinkingLevelType::Qwen(Qwen35ThinkingLevel::On));
+    }
+
+    #[test]
+    fn match_glm() {
+        let result = ThinkingMatcher::match_for_model("glm-4");
+        assert_eq!(result, ThinkingLevelType::Glm(GlmThinkingLevel::High));
+    }
+
+    #[test]
+    fn match_gpt_4o_returns_none() {
+        let result = ThinkingMatcher::match_for_model("gpt-4o");
+        assert_eq!(result, ThinkingLevelType::None);
+    }
+
+    #[test]
+    fn match_unknown_returns_none() {
+        let result = ThinkingMatcher::match_for_model("unknown-model");
+        assert_eq!(result, ThinkingLevelType::None);
+    }
+}

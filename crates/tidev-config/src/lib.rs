@@ -598,6 +598,10 @@ impl AppConfig {
                     provider_id: provider_id.clone(),
                     provider_display_name: provider.display_name.clone(),
                     model_id: model_id.clone(),
+                    request_model_id: model
+                        .request_model_id
+                        .clone()
+                        .unwrap_or_else(|| model_id.clone()),
                     model_display_name: model.display_name.clone(),
                     base_url: provider.base_url.clone(),
                     context_window: model.context_window,
@@ -677,8 +681,14 @@ impl AppConfig {
             .clone()
             .unwrap_or_else(|| model_id.to_string());
 
+        // Determine thinking level with cascade fallback:
+        // 1. Try request_model_id first (if present)
+        // 2. Then try display_name (if request_model_id is None)
+        // 3. Finally try model_id (if display_name is empty)
         let thinking_level = if let Some(ref rid) = model.request_model_id {
             ThinkingMatcher::match_for_model(rid)
+        } else if !model.display_name.is_empty() {
+            ThinkingMatcher::match_for_model(&model.display_name)
         } else {
             ThinkingMatcher::match_for_model(model_id)
         };

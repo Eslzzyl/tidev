@@ -29,7 +29,14 @@ fn thinking_options_for_model(items: &[ModelPanelItem], index: usize) -> Vec<&'s
     let Some(ModelPanelItem::Model { summary }) = items.get(index) else {
         return vec![];
     };
-    let id = summary.model_id.to_ascii_lowercase();
+    // Match against request_model_id first, then display_name — model_id
+    // (the TOML key) is an arbitrary user choice and may use dashes instead
+    // of dots (e.g. "gpt-5-6-luna" vs "gpt-5.6-luna").
+    let id = if !summary.request_model_id.is_empty() {
+        summary.request_model_id.to_ascii_lowercase()
+    } else {
+        summary.model_display_name.to_ascii_lowercase()
+    };
     if id.contains("deepseek") && id.contains("4") {
         vec!["deepseek:Off", "deepseek:High", "deepseek:Max"]
     } else if id.contains("qwen") && id.contains("3.") {
@@ -892,5 +899,136 @@ impl Component for ModelPanel {
 
     fn blocks_input(&self) -> bool {
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tidev_config::auth::ModelSummary;
+
+    fn make_model_item(
+        model_id: &str,
+        request_model_id: &str,
+        model_display_name: &str,
+    ) -> ModelPanelItem {
+        ModelPanelItem::Model {
+            summary: ModelSummary {
+                provider_id: "test".into(),
+                provider_display_name: "Test".into(),
+                model_id: model_id.into(),
+                request_model_id: request_model_id.into(),
+                model_display_name: model_display_name.into(),
+                base_url: "https://test.com".into(),
+                context_window: 128000,
+                max_output_tokens: 4096,
+            },
+        }
+    }
+
+    fn assert_options(items: &[ModelPanelItem], index: usize, expected: &[&str]) {
+        let opts = thinking_options_for_model(items, index);
+        assert_eq!(opts, expected);
+    }
+
+    // -----------------------------------------------------------------------
+    // GPT-5.6
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn gpt_5_6_via_request_model_id() {
+        // request_model_id contains "5.6" → should include Max
+        let item = make_model_item("gpt-5-6-luna", "gpt-5.6-luna", "GPT-5.6 Luna");
+        let items = vec![item];
+        assert_options(&items, 0, &[
+            "gpt5:Off",
+            "gpt5:Low",
+            "gpt5:Medium",
+            "gpt5:High",
+            "gpt5:XHigh",
+            "gpt5:Max",
+        ]);
+    }
+
+    #[test]
+    fn gpt_5_6_via_display_name_fallback() {
+        // Empty request_model_id → falls back to display_name "GPT-5.6 Luna"
+        let item = make_model_item("gpt-5-6-luna", "", "GPT-5.6 Luna");
+        let items = vec![item];
+        assert_options(&items, 0, &[
+            "gpt5:Off",
+            "gpt5:Low",
+            "gpt5:Medium",
+            "gpt5:High",
+            "gpt5:XHigh",
+            "gpt5:Max",
+        ]);
+    }
+
+    // -----------------------------------------------------------------------
+    // Older GPT-5 (5.4, 5.5)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn gpt_5_4_no_max() {
+        let item = make_model_item("gpt-5-4", "gpt-5.4", "GPT-5.4");
+        let items = vec![item];
+        assert_options(&items, 0, &[
+            "gpt5:Off",
+            "gpt5:Low",
+            "gpt5:Medium",
+            "gpt5:High",
+            "gpt5:XHigh",
+        ]);
+    }
+
+    #[test]
+    fn gpt_5_5_no_max() {
+        let item = make_model_item("gpt-5-5", "gpt-5.5", "GPT-5.5");
+        let items = vec![item];
+        assert_options(&items, 0, &[
+            "gpt5:Off",
+            "gpt5:Low",
+            "gpt5:Medium",
+            "gpt5:High",
+            "gpt5:XHigh",
+        ]);
+    }
+
+    // -----------------------------------------------------------------------
+    // Other providers
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn deepseek_v4() {
+        let item = make_model_item("deepseek-v4-flash", "deepseek-v4-flash", "DeepSeek V4 Flash");
+        let items = vec![item];
+        assert_options(&items, 0, &["deepseek:Off", "deepseek:High", "deepseek:Max"]);
+    }
+
+    #[test]
+    fn unsupported_model_returns_empty() {
+        let item = make_model_item("claude-opus-4-8", "claude-opus-4-8", "Claude Opus 4.8");
+        let items = vec![item];
+        let opts = thinking_options_for_model(&items, 0);
+        assert!(opts.is_empty());
+    }
+
+    #[test]
+    fn out_of_range_index_returns_empty() {
+        let item = make_model_item("gpt-5.6-sol", "gpt-5.6-sol", "GPT-5.6 Sol");
+        let items = vec![item];
+        let opts = thinking_options_for_model(&items, 1);
+        assert!(opts.is_empty());
+    }
+
+    #[test]
+    fn provider_header_returns_empty() {
+        let items = vec![ModelPanelItem::ProviderHeader {
+            provider_id: "test".into(),
+            display_name: "Test".into(),
+        }];
+        let opts = thinking_options_for_model(&items, 0);
+        assert!(opts.is_empty());
     }
 }

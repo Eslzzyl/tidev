@@ -228,6 +228,7 @@ pub struct ModelSummary {
     pub provider_id: String,
     pub provider_display_name: String,
     pub model_id: String,
+    pub request_model_id: String,
     pub model_display_name: String,
     pub base_url: String,
     pub context_window: usize,
