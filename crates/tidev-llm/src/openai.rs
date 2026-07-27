@@ -219,7 +219,9 @@ pub(crate) async fn stream_openai(
                             }
 
                             if let Some(function) = &tool_call.function {
-                                if let Some(name) = &function.name {
+                                if let Some(name) = &function.name
+                                    && !name.is_empty()
+                                {
                                     entry.name = name.clone();
                                 }
 
