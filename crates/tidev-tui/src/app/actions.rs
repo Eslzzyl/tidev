@@ -120,6 +120,16 @@ impl App {
                         }
                     }
                 }
+                Action::Connect(ConnectAction::Disconnect { provider_id, display_name }) => {
+                    let mut removed = false;
+                    self.runtime.update_auth(|auth| {
+                        removed = auth.remove_api_key(&provider_id);
+                    });
+                    if removed {
+                        let _ = self.runtime.save_auth();
+                        self.set_notice(format!("Disconnected: {display_name}"));
+                    }
+                }
                 Action::Connect(ConnectAction::PruneOrphans) => {
                     let known_ids = self.runtime.config().provider_ids();
                     let mut pruned = 0usize;

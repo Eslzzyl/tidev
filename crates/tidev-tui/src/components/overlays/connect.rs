@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use ratatui::layout::{Constraint, Layout, Margin, Rect};
+use ratatui::layout::{Alignment, Constraint, Layout, Margin, Rect};
 use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
@@ -24,6 +24,11 @@ enum ConnectPhase {
         display_name: String,
         /// The API key being typed.
         buffer: String,
+    },
+    /// Confirm before disconnecting a provider.
+    DisconnectConfirm {
+        provider_id: String,
+        display_name: String,
     },
 }
 
@@ -116,6 +121,7 @@ impl ConnectDialog {
         match self.phase {
             ConnectPhase::ProviderPicker => " Connect to provider ",
             ConnectPhase::ApiKey { .. } => " API Key ",
+            ConnectPhase::DisconnectConfirm { .. } => " Disconnect Provider ",
         }
     }
 
@@ -184,6 +190,19 @@ impl Component for ConnectDialog {
                 KeyCode::Char(c) if key.modifiers.contains(KeyModifiers::CONTROL) && c == 'p' => {
                     Some(Action::Connect(ConnectAction::PruneOrphans))
                 }
+                KeyCode::Char('d') | KeyCode::Char('D')
+                    if !key.modifiers.contains(KeyModifiers::CONTROL) =>
+                {
+                    if let Some(item) = self.visible_provider(self.selected) {
+                        if item.connected {
+                            self.phase = ConnectPhase::DisconnectConfirm {
+                                provider_id: item.provider_id.clone(),
+                                display_name: item.display_name.clone(),
+                            };
+                        }
+                    }
+                    None
+                }
                 KeyCode::Char(c) if !c.is_control() => {
                     self.query.push(c);
                     self.selected = 0;
@@ -237,6 +256,22 @@ impl Component for ConnectDialog {
                 }
                 _ => None,
             },
+            ConnectPhase::DisconnectConfirm {
+                provider_id: _,
+                display_name: _,
+            } => match key.code {
+                KeyCode::Enter => {
+                    self.confirmed = true;
+                    Some(Action::Overlay(OverlayAction::Close(
+                        OverlayKind::ConnectDialog,
+                    )))
+                }
+                KeyCode::Esc => {
+                    self.phase = ConnectPhase::ProviderPicker;
+                    None
+                }
+                _ => None,
+            },
         }
     }
 
@@ -255,12 +290,26 @@ impl Component for ConnectDialog {
                                 key: buffer.clone(),
                             })];
                         }
+                        ConnectPhase::DisconnectConfirm { provider_id, display_name } => {
+                            return vec![Action::Connect(ConnectAction::Disconnect {
+                                provider_id: provider_id.clone(),
+                                display_name: display_name.clone(),
+                            })];
+                        }
                         _ => {}
                     }
                 }
                 vec![]
             }
             Action::Connect(ConnectAction::PruneOrphans) => {
+                // Provider list may have changed; rebuild.
+                let config = ctx.runtime.config();
+                let auth = ctx.runtime.auth();
+                self.rebuild_all_providers(&config, &auth);
+                self.selected = 0;
+                vec![]
+            }
+            Action::Connect(ConnectAction::Disconnect { .. }) => {
                 // Provider list may have changed; rebuild.
                 let config = ctx.runtime.config();
                 let auth = ctx.runtime.auth();
@@ -285,6 +334,7 @@ impl Component for ConnectDialog {
         let (overlay_width, overlay_height) = match &self.phase {
             ConnectPhase::ProviderPicker => (rect.width.min(92), rect.height.min(28)),
             ConnectPhase::ApiKey { .. } => (rect.width.min(80), rect.height.min(24)),
+            ConnectPhase::DisconnectConfirm { .. } => (rect.width.min(60), rect.height.min(12)),
         };
         let overlay = centered_rect(overlay_width, overlay_height, rect);
         frame.render_widget(Clear, overlay);
@@ -436,7 +486,7 @@ impl Component for ConnectDialog {
 
                 // Help footer
                 frame.render_widget(
-                    Paragraph::new("↑↓ navigate · Enter select · Esc cancel · type to filter")
+                    Paragraph::new("↑↓ navigate · Enter select · D disconnect · Esc cancel · type to filter")
                         .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                     sections[3],
                 );
@@ -498,6 +548,40 @@ impl Component for ConnectDialog {
                     Paragraph::new("Enter save · Esc back · type to enter key")
                         .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                     sections[3],
+                );
+            }
+            ConnectPhase::DisconnectConfirm {
+                provider_id: _,
+                display_name,
+            } => {
+                let sections = Layout::vertical([
+                    Constraint::Length(1),
+                    Constraint::Min(1),
+                    Constraint::Length(1),
+                ])
+                .split(body);
+
+                // Confirmation message
+                frame.render_widget(
+                    Paragraph::new(format!(
+                        "Disconnect from {}?",
+                        display_name,
+                    ))
+                    .alignment(Alignment::Center)
+                    .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
+                    sections[0],
+                );
+
+                // Hint
+                frame.render_widget(
+                    Paragraph::new("Enter: confirm · Esc: cancel")
+                        .alignment(Alignment::Center)
+                        .style(
+                            Style::default()
+                                .bg(palette.panel_alt)
+                                .fg(palette.accent_soft),
+                        ),
+                    sections[1],
                 );
             }
         }

@@ -60,6 +60,17 @@ impl AuthStore {
             .filter(|value| !value.trim().is_empty())
     }
 
+    /// Remove the API key for a single provider, effectively disconnecting it.
+    /// Returns `true` if a key was actually removed.
+    pub fn remove_api_key(&mut self, provider_id: &str) -> bool {
+        if let Some(auth) = self.providers.get_mut(provider_id) {
+            if auth.api_key.take().is_some() {
+                return true;
+            }
+        }
+        false
+    }
+
     /// Remove all provider entries whose ID does not appear in `known_ids`.
     pub fn prune_orphan_providers(&mut self, known_ids: &[String]) -> usize {
         let before = self.providers.len();

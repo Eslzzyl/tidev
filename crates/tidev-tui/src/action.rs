@@ -95,6 +95,8 @@ pub(crate) enum SearchAction {
 pub(crate) enum ConnectAction {
     /// Save an API key for the given LLM provider.
     SaveApiKey { provider_id: String, key: String },
+    /// Remove a provider's API key (disconnect).
+    Disconnect { provider_id: String, display_name: String },
     /// Prune orphan auth entries whose provider is no longer in config.
     PruneOrphans,
 }
