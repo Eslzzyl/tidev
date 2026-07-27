@@ -235,6 +235,28 @@ impl App {
                                 });
                             }
 
+                            // Switch the runtime's active model to match this
+                            // session's model so the composer displays the
+                            // correct provider/model instead of the default.
+                            if let Ok(Some(record)) =
+                                self.runtime.session_manager().load_session(session_id)
+                            {
+                                let config = self.runtime.config();
+                                let auth = self.runtime.auth();
+                                if let Ok(model) = config.resolve_model_by_ids(
+                                    &auth,
+                                    &record.provider_id,
+                                    &record.model_id,
+                                ) {
+                                    self.runtime.set_active_model(model.clone());
+                                    if let Some(ref mut composer) = self.composer {
+                                        composer.set_model_supports_images(
+                                            model.supports_images,
+                                        );
+                                    }
+                                }
+                            }
+
                             log::info!("Switching to session: existing context (fast path)");
 
                             // Close the session panel overlay.
@@ -314,6 +336,30 @@ impl App {
 
                         ctx
                     };
+
+                    // Switch the runtime's active model to match this
+                    // session's model so the composer displays the correct
+                    // provider/model instead of the default.
+                    {
+                        let config = self.runtime.config();
+                        let auth = self.runtime.auth();
+                        if let Ok(Some(record)) =
+                            self.runtime.session_manager().load_session(session_id)
+                        {
+                            if let Ok(model) = config.resolve_model_by_ids(
+                                &auth,
+                                &record.provider_id,
+                                &record.model_id,
+                            ) {
+                                self.runtime.set_active_model(model.clone());
+                                if let Some(ref mut composer) = self.composer {
+                                    composer.set_model_supports_images(
+                                        model.supports_images,
+                                    );
+                                }
+                            }
+                        }
+                    }
 
                     let session_title = chat_context.title.clone();
 
@@ -560,6 +606,17 @@ impl App {
                     let config = self.runtime.config();
                     let auth = self.runtime.auth();
                     let active_model = config.resolve_active_model(&auth).ok();
+
+                    // Restore the runtime's active model to the default so
+                    // the composer/header no longer shows the previous
+                    // session's model.
+                    if let Some(ref model) = active_model {
+                        self.runtime.set_active_model(model.clone());
+                        if let Some(ref mut composer) = self.composer {
+                            composer.set_model_supports_images(model.supports_images);
+                        }
+                    }
+
                     let chat_context = crate::chat_context::ChatContext::new(
                         uuid::Uuid::nil(),
                         String::new(),
