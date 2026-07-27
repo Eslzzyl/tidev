@@ -334,7 +334,7 @@ fn is_fused_redirect(token: &str) -> bool {
 /// to tokenize the command. It only catches bare stdout redirects — fd-prefixed
 /// redirects to real files (e.g. `2>/tmp/log`) are also caught, but fd-to-fd
 /// redirects (`2>&1`, `>&2`) are exempted since they duplicate an fd rather
-/// than opening a file. Redirects to `/dev/null`/`nul` are always exempted.
+/// than opening a file. Redirects to `/dev/null`/`nul`/`$null` are always exempted.
 fn has_write_redirect(s: &str) -> bool {
     let bytes = s.as_bytes();
     let mut in_single = false;
@@ -383,7 +383,8 @@ fn has_write_redirect(s: &str) -> bool {
 }
 
 /// Check if the byte slice (starting at a potential target path) matches
-/// `/dev/null` (Unix) or `nul` (Windows), with a word boundary after.
+/// `/dev/null` (Unix), `nul` (Windows), or `$null` (PowerShell), with a
+/// word boundary after.
 fn is_dev_null(tail: &[u8]) -> bool {
     // Check /dev/null (Unix)
     if tail.starts_with(b"/dev/null") {
@@ -394,6 +395,12 @@ fn is_dev_null(tail: &[u8]) -> bool {
     // Check nul (Windows) — case-insensitive
     if tail.len() >= 3 && tail[..3].eq_ignore_ascii_case(b"nul") {
         let end = 3;
+        return end >= tail.len() || is_boundary_char(tail[end]);
+    }
+
+    // Check $null (PowerShell) — discard target like /dev/null
+    if tail.starts_with(b"$null") {
+        let end = b"$null".len();
         return end >= tail.len() || is_boundary_char(tail[end]);
     }
 
@@ -1784,6 +1791,17 @@ mod tests {
         assert!(has_write_redirect("cmd 2>/tmp/log.txt"));
         // fd-closing redirect — not a file write
         assert!(!has_write_redirect("cmd 3>&-"));
+
+        // PowerShell $null — discard target like /dev/null
+        assert!(!has_write_redirect("cmd 2>$null"));
+        assert!(!has_write_redirect("cmd >$null"));
+        assert!(!has_write_redirect("Get-ChildItem -Recurse 2>$null"));
+        // PowerShell $null with surrounding context
+        assert!(!has_write_redirect(
+            "Get-ChildItem -Path foo -Recurse 2>$null | Select-Object Name"
+        ));
+        // $nullfile should NOT match (boundary check)
+        assert!(has_write_redirect("cmd >$nullfile"));
     }
 
     #[test]
@@ -1823,6 +1841,26 @@ mod tests {
         // Mixed: stdout redirect + stderr redirect should still be caught
         assert_eq!(
             cl.classify("echo hello > file.txt 2>/dev/null"),
+            Safety::WriteOperation
+        );
+    }
+
+    #[test]
+    fn test_powershell_null_redirect_not_blocked() {
+        // PowerShell $null is the equivalent of /dev/null — should not be blocked
+        let cl = c();
+        assert_eq!(
+            cl.classify("Get-ChildItem -Recurse 2>$null"),
+            Safety::Unknown
+        );
+        assert_eq!(
+            cl.classify("Get-ChildItem -Path foo -Recurse 2>$null | Select-Object Name"),
+            Safety::Unknown
+        );
+        assert_eq!(cl.classify("cmd >$null"), Safety::Unknown);
+        // But a write command with $null redirect must still be blocked
+        assert_eq!(
+            cl.classify("Remove-Item -Recurse foo 2>$null"),
             Safety::WriteOperation
         );
     }
