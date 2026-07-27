@@ -34,6 +34,14 @@ max_output_tokens = 32768
 supports_streaming = true
 supports_images = true
 
+[providers.opencode-go.models.hy-3]
+request_model_id = "hy3"
+display_name = "Hy3"
+context_window = 254560
+max_output_tokens = 32768
+supports_streaming = true
+supports_images = false
+
 [providers.opencode-go.models.deepseek-v4-pro]
 request_model_id = "deepseek-v4-pro"
 display_name = "DeepSeek V4 Pro"
