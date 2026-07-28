@@ -15,6 +15,7 @@ use uuid::Uuid;
 use tidev_core::Runtime;
 use tidev_types::prompts::SessionMode;
 use tidev_utils::session::title_from_prompt;
+use tidev_config::{auth::ActiveModel, AppConfig, AuthStore, ThinkingMatcher};
 
 /// Shared state accessible from all ACP request handlers.
 struct AcpState {
@@ -31,6 +32,61 @@ struct AcpState {
     session_named: RwLock<bool>,
     /// Current session mode (Plan or Build).
     current_mode: RwLock<SessionMode>,
+    /// Cached config options for the active session.
+    config_options: RwLock<Vec<acp::SessionConfigOption>>,
+}
+
+// ---------------------------------------------------------------------------
+// Config option helpers
+// ---------------------------------------------------------------------------
+
+/// Build the full set of session config options from runtime state.
+fn build_config_options(runtime: &Runtime) -> Vec<acp::SessionConfigOption> {
+    let config = runtime.config();
+    let auth = runtime.auth();
+    let active = runtime.active_model();
+    vec![
+        build_model_config_option(&config, &auth, &active),
+        build_thought_level_config_option(&active),
+    ]
+}
+
+/// Build the "model" config option listing all connected models.
+fn build_model_config_option(
+    config: &AppConfig,
+    auth: &AuthStore,
+    active: &ActiveModel,
+) -> acp::SessionConfigOption {
+    let connected = config.connected_models(auth);
+    let options: Vec<acp::SessionConfigSelectOption> = connected
+        .iter()
+        .map(|m| {
+            let val = format!("{}/{}", m.provider_id, m.model_id);
+            let display = format!("{} ({})", m.model_display_name, m.provider_display_name);
+            acp::SessionConfigSelectOption::new(val, display)
+        })
+        .collect();
+
+    let current = format!("{}/{}", active.provider_id, active.model_id);
+
+    acp::SessionConfigOption::select("model", "Model", current, options)
+        .category(acp::SessionConfigOptionCategory::Model)
+}
+
+/// Build the "thought_level" config option based on the active model.
+fn build_thought_level_config_option(active: &ActiveModel) -> acp::SessionConfigOption {
+    let supported = ThinkingMatcher::supported_levels(&active.model_id);
+
+    let options: Vec<acp::SessionConfigSelectOption> = supported
+        .iter()
+        .map(|tl| acp::SessionConfigSelectOption::new(tl.to_string(), tl.display_name()))
+        .collect();
+
+    let current = active.thinking_level.to_string();
+
+    acp::SessionConfigOption::select("thought_level", "Thinking Level", current, options)
+        .description("Controls how much reasoning effort the model applies")
+        .category(acp::SessionConfigOptionCategory::ThoughtLevel)
 }
 
 /// Run tidev as an ACP agent over stdio.
@@ -58,6 +114,7 @@ pub async fn run_acp_agent() -> Result<()> {
         pending_prompt: RwLock::new(None),
         session_named: RwLock::new(false),
         current_mode: RwLock::new(SessionMode::Build),
+        config_options: RwLock::new(Vec::new()),
     });
 
     Agent.builder()
@@ -164,6 +221,12 @@ pub async fn run_acp_agent() -> Result<()> {
                         );
                         let response = acp::NewSessionResponse::new(session_id.to_string())
                             .modes(mode_state);
+
+                        // Cache and attach config options.
+                        let config_opts = build_config_options(&state.runtime);
+                        *state.config_options.write().await = config_opts.clone();
+                        let response = response.config_options(config_opts);
+
                         let _ = responder.respond(response);
                         Ok(agent_client_protocol::Handled::Yes)
                     }
@@ -285,6 +348,12 @@ pub async fn run_acp_agent() -> Result<()> {
 
                         let response =
                             acp::LoadSessionResponse::new().modes(mode_state);
+
+                        // Cache and attach config options.
+                        let config_opts = build_config_options(&state.runtime);
+                        *state.config_options.write().await = config_opts.clone();
+                        let response = response.config_options(config_opts);
+
                         let _ = responder.respond(response);
                         Ok(agent_client_protocol::Handled::Yes)
                     }
@@ -528,6 +597,110 @@ pub async fn run_acp_agent() -> Result<()> {
             },
             on_receive_request!(),
         )
+        // ── session/set_config_option ────────────────────────────
+        .on_receive_request(
+            {
+                let state = &state;
+                move |req: acp::SetSessionConfigOptionRequest,
+                      responder: agent_client_protocol::Responder<acp::SetSessionConfigOptionResponse>,
+                      cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>| {
+                    let state = state.clone();
+                    async move {
+                        let session_id = validate_session_id(&state, &req.session_id)
+                            .await
+                            .ok_or_else(|| {
+                                agent_client_protocol::Error::invalid_request()
+                                    .data("session ID mismatch or no active session")
+                            })?;
+
+                        let config_id = req.config_id.to_string();
+                        let value = req.value;
+
+                        match config_id.as_str() {
+                            "model" => {
+                                let val_str = value.as_value_id()
+                                    .ok_or_else(|| invalid_value("model", "must be a string value ID"))?;
+                                let val_str = val_str.to_string();
+                                let parts: Vec<&str> = val_str.splitn(2, '/').collect();
+                                let (provider_id, model_id) = match parts.as_slice() {
+                                    [p, m] => (*p, *m),
+                                    _ => return Err(invalid_value("model",
+                                        "format must be 'provider_id/model_id'")),
+                                };
+
+                                let config = state.runtime.config();
+                                let auth = state.runtime.auth();
+                                let model = config.resolve_model_by_ids(&auth, provider_id, model_id)
+                                    .map_err(|e| {
+                                        agent_client_protocol::Error::invalid_request()
+                                            .data(format!("failed to resolve model: {e}"))
+                                    })?;
+
+                                state.runtime.set_active_model(model);
+                                state.runtime.update_config(|cfg| {
+                                    cfg.default_provider = provider_id.to_string();
+                                    cfg.default_model = model_id.to_string();
+                                });
+                                let _ = state.runtime.save_config();
+
+                                log::info!("ACP: model changed to {provider_id}/{model_id}");
+                            }
+                            "thought_level" => {
+                                let val_str = value.as_value_id()
+                                    .ok_or_else(|| invalid_value("thought_level", "must be a string value ID"))?;
+                                let tl_str = val_str.to_string();
+
+                                let tl = ThinkingMatcher::match_for_model(&tl_str);
+                                // Accept off/none values even if they don't match a known variant.
+                                let is_off = tl_str.eq_ignore_ascii_case("none")
+                                    || tl_str.ends_with(":Off")
+                                    || tl_str.ends_with(":off");
+                                if tl.is_none() && !is_off {
+                                    // Still need to validate that the string is parseable.
+                                    let parsed = tidev_types::reasoning::ThinkingLevelType::from_string(&tl_str);
+                                    if parsed.is_none() && tl_str != "none" {
+                                        return Err(invalid_value("thought_level",
+                                            &format!("unknown thinking level: {tl_str}")));
+                                    }
+                                }
+
+                                let active = state.runtime.active_model();
+                                state.runtime.set_model_thinking_level(
+                                    &active.provider_id,
+                                    &active.model_id,
+                                    &tl_str,
+                                )?;
+
+                                log::info!("ACP: thought_level changed to {tl_str}");
+                            }
+                            _ => {
+                                return Err(agent_client_protocol::Error::invalid_request()
+                                    .data(format!("unknown config option: {config_id}")));
+                            }
+                        }
+
+                        // Rebuild config options (thought_level options may change after model switch).
+                        let new_opts = build_config_options(&state.runtime);
+                        *state.config_options.write().await = new_opts.clone();
+
+                        // Respond with the full set of config options.
+                        let response = acp::SetSessionConfigOptionResponse::new(new_opts.clone());
+                        let _ = responder.respond(response);
+
+                        // Notify the client of the config change.
+                        let update = acp::ConfigOptionUpdate::new(new_opts);
+                        let notif = acp::SessionNotification::new(
+                            session_id.to_string(),
+                            acp::SessionUpdate::ConfigOptionUpdate(update),
+                        );
+                        let _ = cx.send_notification(notif);
+
+                        Ok(agent_client_protocol::Handled::Yes)
+                    }
+                }
+            },
+            on_receive_request!(),
+        )
         .connect_with(Stdio::new(), async |cx| {
             // Spawn the event translator task.
             let translator_handle = {
@@ -679,6 +852,12 @@ fn acp_mcp_server_to_config(
             None
         }
     }
+}
+
+/// Build an ACP error for an invalid config option value.
+fn invalid_value(config_id: &str, detail: &str) -> agent_client_protocol::Error {
+    agent_client_protocol::Error::invalid_request()
+        .data(format!("invalid value for '{}': {}", config_id, detail))
 }
 
 /// Extract plain text from a slice of ACP [`ContentBlock`]s.
