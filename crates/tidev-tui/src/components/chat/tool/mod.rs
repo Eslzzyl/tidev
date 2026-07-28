@@ -397,6 +397,13 @@ fn render_tool_call_lines(
             if let Some(st) = string_field("search_type") {
                 suffix_parts.push(st);
             }
+            if let Some(off) = parsed
+                .as_ref()
+                .and_then(|v| v.get("offset"))
+                .and_then(|v| v.as_i64())
+            {
+                suffix_parts.push(format!("offset={}", off));
+            }
             if !suffix_parts.is_empty() {
                 title_spans.push(Span::styled(
                     format!("  ({})", suffix_parts.join(", ")),
