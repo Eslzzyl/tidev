@@ -32,8 +32,11 @@ pub(crate) fn strip_think_tags(text: &str) -> String {
             }
         }
         if !found {
-            result.push(bytes[pos] as char);
-            pos += 1;
+            // SAFETY: `text` is a valid `&str`, so it is guaranteed to contain
+            // a valid UTF-8 sequence starting at `pos`.
+            let ch = text[pos..].chars().next().unwrap();
+            result.push(ch);
+            pos += ch.len_utf8();
         }
     }
 
@@ -247,6 +250,19 @@ mod tests {
         assert_eq!(strip_think_tags("hello world"), "hello world");
         assert_eq!(strip_think_tags(""), "");
         assert_eq!(strip_think_tags("no tags here"), "no tags here");
+    }
+
+    #[test]
+    fn strip_think_tags_preserves_non_ascii() {
+        // Non-ASCII characters (Chinese) must survive intact.
+        let input = "错误处理：prompt 提交失败时返回 EndTurn";
+        assert_eq!(strip_think_tags(input), input);
+
+        // Mixed non-ASCII with think tags.
+        assert_eq!(
+            strip_think_tags("<think>错误处理</think>完成"),
+            "错误处理完成"
+        );
     }
 }
 
