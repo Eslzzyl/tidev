@@ -33,11 +33,6 @@ impl EventTranslator {
         }
     }
 
-    /// Return the ACP session ID for this translator.
-    pub fn session_id(&self) -> &acp::SessionId {
-        &self.session_id
-    }
-
     /// Allocate a new ACP message ID for the given backend `request_id`.
     fn next_message_id(&mut self, request_id: u64) -> acp::MessageId {
         self.message_counter += 1;
@@ -317,15 +312,40 @@ impl EventTranslator {
                 )]
             }
 
-            // Events with no ACP representation — silently ignored.
+            // Events that are handled by the event loop's deferred response
+            // logic, or have no ACP representation.
             BackendEvent::Finished { .. }
-            | BackendEvent::Retrying { .. }
+            | BackendEvent::StreamEnd { .. }
             | BackendEvent::InstructionsLoaded { .. }
             | BackendEvent::ContextCompacted { .. }
             | BackendEvent::UndoCompleted { .. }
             | BackendEvent::SidebarSnapshotReady { .. }
-            | BackendEvent::StreamEnd { .. }
             | BackendEvent::MessagesTruncated { .. } => vec![],
+
+            // ── Retrying ─────────────────────────────────────────────
+            BackendEvent::Retrying {
+                session_id: _,
+                request_id: _,
+                attempt,
+                max_attempts,
+                reason,
+                retry_after_secs,
+            } => {
+                let msg = if let Some(delay) = retry_after_secs {
+                    format!(
+                        "[Retry {attempt}/{max_attempts}] {reason} (retrying after {delay}s)"
+                    )
+                } else {
+                    format!("[Retry {attempt}/{max_attempts}] {reason}")
+                };
+                let chunk = acp::ContentChunk::new(acp::ContentBlock::Text(
+                    acp::TextContent::new(&msg),
+                ));
+                vec![acp::SessionNotification::new(
+                    self.session_id.clone(),
+                    acp::SessionUpdate::AgentMessageChunk(chunk),
+                )]
+            }
         }
     }
 }

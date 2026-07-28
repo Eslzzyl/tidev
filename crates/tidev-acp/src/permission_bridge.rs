@@ -16,7 +16,6 @@ use tidev_types::message::ToolExecutionResult;
 /// via the given connection, waits for the response, and sends back a
 /// [`TuiResponse`] through the original oneshot channel.
 pub fn spawn(
-    _session_id: uuid::Uuid,
     mut request_rx: tokio::sync::mpsc::UnboundedReceiver<TuiRequest>,
     cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>,
 ) -> tokio::task::JoinHandle<()> {

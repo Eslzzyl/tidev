@@ -51,19 +51,3 @@ pub fn tool_starting_update(tc: &tidev_types::message::ToolCall) -> acp::ToolCal
 pub fn tool_completed_update(tc: &tidev_types::message::ToolCall) -> acp::ToolCallUpdate {
     tidev_tool_call_to_acp_update(tc, Some(acp::ToolCallStatus::Completed))
 }
-
-/// Build an ACP [`ToolCallUpdate`](acp::ToolCallUpdate) representing a tool
-/// call that has errored.
-pub fn tool_error_update(tc: &tidev_types::message::ToolCall) -> acp::ToolCallUpdate {
-    tidev_tool_call_to_acp_update(tc, Some(acp::ToolCallStatus::Failed))
-}
-
-/// Build an ACP [`ContentChunk`](acp::ContentChunk) for an agent text delta.
-pub fn text_delta_chunk(text: &str) -> acp::ContentChunk {
-    acp::ContentChunk::new(acp::ContentBlock::Text(acp::TextContent::new(text)))
-}
-
-/// Build an ACP [`ContentChunk`](acp::ContentChunk) for a reasoning/thinking delta.
-pub fn reasoning_delta_chunk(text: &str) -> acp::ContentChunk {
-    acp::ContentChunk::new(acp::ContentBlock::Text(acp::TextContent::new(text)))
-}
