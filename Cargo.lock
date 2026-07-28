@@ -3943,7 +3943,6 @@ dependencies = [
  "anyhow",
  "log",
  "serde_json",
- "tidev-agent",
  "tidev-config",
  "tidev-core",
  "tidev-types",

@@ -6,7 +6,7 @@
 //! response, and sends back [`TuiResponse`]s.
 
 use agent_client_protocol::schema::v1 as acp;
-use tidev_agent::{ApprovedTool, TuiRequest, TuiRequestKind, TuiResponse};
+use tidev_core::{ApprovedTool, TuiRequest, TuiRequestKind, TuiResponse};
 use tidev_types::message::ToolExecutionResult;
 
 /// Spawn the permission bridge task.
@@ -127,7 +127,7 @@ pub fn spawn(
 }
 
 /// Build a human-readable reason for why permission is being requested.
-fn build_permission_reason(twv: &tidev_agent::ToolCallWithViolations) -> String {
+fn build_permission_reason(twv: &tidev_core::ToolCallWithViolations) -> String {
     let tc = &twv.tool_call;
 
     if tc.name == "question" {
