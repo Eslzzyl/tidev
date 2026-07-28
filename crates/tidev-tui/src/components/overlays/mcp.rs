@@ -13,8 +13,8 @@ use ratatui::prelude::{Color, Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 
+use tidev_config::mcp::McpServerConfig;
 use tidev_core::mcp::{McpConnectionStatus, McpManager, McpServerSummary};
-use tidev_config::mcp::{McpServerConfig};
 
 use crate::action::{Action, McpAction, OverlayAction, OverlayKind};
 use crate::component::Component;
@@ -55,8 +55,7 @@ impl ServerDraft {
                 if self.command.trim().is_empty() {
                     anyhow::bail!("Command is required for stdio servers");
                 }
-                let args: Vec<String> = shlex::split(&self.args)
-                    .unwrap_or_default();
+                let args: Vec<String> = shlex::split(&self.args).unwrap_or_default();
                 let env: BTreeMap<String, String> = self
                     .env
                     .lines()
@@ -184,7 +183,9 @@ impl McpServerPanel {
         if self.selected_index < self.list_scroll {
             self.list_scroll = self.selected_index;
         } else if self.selected_index >= self.list_scroll + item_count.saturating_sub(1) {
-            self.list_scroll = self.selected_index.saturating_sub(item_count.saturating_sub(2));
+            self.list_scroll = self
+                .selected_index
+                .saturating_sub(item_count.saturating_sub(2));
         }
     }
 
@@ -225,14 +226,14 @@ impl McpServerPanel {
     }
 
     fn start_edit(&mut self) {
-        let summary_entry = self
-            .selected_summary()
-            .map(|s| {
-                let config = self.mcp.server_config(&s.name);
-                (s.name.clone(), s.kind.clone(), config)
-            });
+        let summary_entry = self.selected_summary().map(|s| {
+            let config = self.mcp.server_config(&s.name);
+            (s.name.clone(), s.kind.clone(), config)
+        });
 
-        let Some((summary_name, kind, config)) = summary_entry else { return };
+        let Some((summary_name, kind, config)) = summary_entry else {
+            return;
+        };
 
         let mut draft = ServerDraft::new();
         draft.name = summary_name.clone();
@@ -240,7 +241,11 @@ impl McpServerPanel {
         if let Some(config) = config {
             match config {
                 McpServerConfig::Stdio {
-                    command, args, cwd, env, ..
+                    command,
+                    args,
+                    cwd,
+                    env,
+                    ..
                 } => {
                     draft.command = command;
                     draft.args = args.join(" ");
@@ -380,12 +385,8 @@ impl Component for McpServerPanel {
                 }
                 Some(Action::Noop)
             }
-            KeyCode::Enter => {
-                self.toggle_selected()
-            }
-            KeyCode::Char('r') => {
-                self.refresh_selected()
-            }
+            KeyCode::Enter => self.toggle_selected(),
+            KeyCode::Char('r') => self.refresh_selected(),
             KeyCode::Char('n') => {
                 self.start_add();
                 Some(Action::Noop)
@@ -394,9 +395,7 @@ impl Component for McpServerPanel {
                 self.start_edit();
                 Some(Action::Noop)
             }
-            KeyCode::Char('d') => {
-                self.remove_selected()
-            }
+            KeyCode::Char('d') => self.remove_selected(),
             KeyCode::Char('/') | KeyCode::F(2) => {
                 self.query_active = !self.query_active;
                 if self.query_active {
@@ -430,10 +429,7 @@ impl Component for McpServerPanel {
             horizontal: 2,
             vertical: 3,
         });
-        if mouse.column < inner.x
-            || mouse.column >= inner.x + inner.width
-            || mouse.row < inner.y
-        {
+        if mouse.column < inner.x || mouse.column >= inner.x + inner.width || mouse.row < inner.y {
             return None;
         }
         let item_index = (mouse.row - inner.y) as usize;
@@ -446,8 +442,7 @@ impl Component for McpServerPanel {
 
     fn update(&mut self, action: &Action, _ctx: &UpdateContext) -> Vec<Action> {
         match action {
-            Action::Overlay(OverlayAction::Open(OverlayKind::McpServerPanel))
-            | Action::Mcp(_) => {
+            Action::Overlay(OverlayAction::Open(OverlayKind::McpServerPanel)) | Action::Mcp(_) => {
                 self.refresh_list();
             }
             _ => {}
@@ -479,19 +474,27 @@ impl Component for McpServerPanel {
 
         // ── Query bar ──────────────────────────────────────────────────
         if self.query_active {
-            let query_bar = Paragraph::new(Line::from(Span::raw(format!(
-                "Filter: {}█",
-                self.query
-            ))))
-            .style(Style::default().fg(Color::Cyan));
+            let query_bar =
+                Paragraph::new(Line::from(Span::raw(format!("Filter: {}█", self.query))))
+                    .style(Style::default().fg(Color::Cyan));
             frame.render_widget(query_bar, Rect::new(inner.x, inner.y, inner.width, 1));
         }
 
         // ── Item list ──────────────────────────────────────────────────
         let list_area = if self.query_active {
-            Rect::new(inner.x, inner.y + 1, inner.width, inner.height.saturating_sub(2))
+            Rect::new(
+                inner.x,
+                inner.y + 1,
+                inner.width,
+                inner.height.saturating_sub(2),
+            )
         } else {
-            Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1))
+            Rect::new(
+                inner.x,
+                inner.y,
+                inner.width,
+                inner.height.saturating_sub(1),
+            )
         };
 
         let display_count = list_area.height as usize;
@@ -537,7 +540,9 @@ impl Component for McpServerPanel {
                             .bg(Color::White)
                             .add_modifier(Modifier::BOLD)
                     } else {
-                        Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+                        Style::default()
+                            .fg(Color::White)
+                            .add_modifier(Modifier::BOLD)
                     },
                 ),
                 Span::styled(
@@ -625,7 +630,9 @@ impl McpServerPanel {
             let y = field_start_y + *idx as u16;
             let is_active = self.edit_scroll == *idx;
             let label_style = if is_active {
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::White)
             };
@@ -660,7 +667,10 @@ impl McpServerPanel {
         if let Some(ref err) = self.error_message {
             let err_style = Style::default().fg(Color::Red);
             frame.render_widget(
-                Paragraph::new(Line::from(Span::styled(format!("  Error: {err}"), err_style))),
+                Paragraph::new(Line::from(Span::styled(
+                    format!("  Error: {err}"),
+                    err_style,
+                ))),
                 Rect::new(
                     inner.x,
                     field_start_y + fields.len() as u16 + 1,
@@ -733,7 +743,11 @@ mod tests {
         let config = draft.to_config().unwrap();
         match config {
             McpServerConfig::Stdio {
-                command, args, cwd, env, ..
+                command,
+                args,
+                cwd,
+                env,
+                ..
             } => {
                 assert_eq!(command, "python");
                 assert_eq!(args, vec!["-m", "http.server", "8080"]);

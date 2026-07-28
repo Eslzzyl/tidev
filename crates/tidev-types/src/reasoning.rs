@@ -472,8 +472,12 @@ impl ThinkingLevelType {
             Self::DeepSeek(DeepSeekV4ThinkingLevel::Max)
             | Self::Glm(GlmThinkingLevel::Max)
             | Self::MiniMax(MiniMaxThinkingLevel::Max) => Some("max"),
-            Self::Gpt5(Gpt5ThinkingLevel::Low) | Self::Claude(ClaudeEffortLevel::Low) => Some("low"),
-            Self::Gpt5(Gpt5ThinkingLevel::Medium) | Self::Claude(ClaudeEffortLevel::Medium) => Some("medium"),
+            Self::Gpt5(Gpt5ThinkingLevel::Low) | Self::Claude(ClaudeEffortLevel::Low) => {
+                Some("low")
+            }
+            Self::Gpt5(Gpt5ThinkingLevel::Medium) | Self::Claude(ClaudeEffortLevel::Medium) => {
+                Some("medium")
+            }
             Self::Gpt5(Gpt5ThinkingLevel::High) => Some("high"),
             Self::Gpt5(Gpt5ThinkingLevel::XHigh) => Some("xhigh"),
             Self::Gpt5(Gpt5ThinkingLevel::Max) => Some("max"),
@@ -527,9 +531,7 @@ impl ThinkingLevelType {
                 Self::MiniMax(MiniMaxThinkingLevel::Off) => {
                     Some(serde_json::json!({"thinking": {"type": "disabled"}}))
                 }
-                Self::MiniMax(_) => {
-                    Some(serde_json::json!({"thinking": {"type": "adaptive"}}))
-                }
+                Self::MiniMax(_) => Some(serde_json::json!({"thinking": {"type": "adaptive"}})),
                 _ => match self.effort_str() {
                     None => Some(serde_json::json!({"thinking": {"type": "disabled"}})),
                     Some(e) => Some(serde_json::json!({"output_config": {"effort": e}})),
@@ -691,9 +693,21 @@ mod tests {
 
     #[test]
     fn none_never_produces_anything() {
-        assert!(ThinkingLevelType::None.extra_body_for_api("openai_chat_completions").is_none());
-        assert!(ThinkingLevelType::None.extra_body_for_api("openai_responses").is_none());
-        assert!(ThinkingLevelType::None.extra_body_for_api("anthropic").is_none());
+        assert!(
+            ThinkingLevelType::None
+                .extra_body_for_api("openai_chat_completions")
+                .is_none()
+        );
+        assert!(
+            ThinkingLevelType::None
+                .extra_body_for_api("openai_responses")
+                .is_none()
+        );
+        assert!(
+            ThinkingLevelType::None
+                .extra_body_for_api("anthropic")
+                .is_none()
+        );
     }
 
     #[test]
@@ -819,10 +833,22 @@ mod tests {
 
     #[test]
     fn claude_basic_levels() {
-        assert_eq!(ClaudeEffortLevel::from_display_name("off"), ClaudeEffortLevel::Off);
-        assert_eq!(ClaudeEffortLevel::from_display_name("low"), ClaudeEffortLevel::Low);
-        assert_eq!(ClaudeEffortLevel::from_display_name("medium"), ClaudeEffortLevel::Medium);
-        assert_eq!(ClaudeEffortLevel::from_display_name("high"), ClaudeEffortLevel::High);
+        assert_eq!(
+            ClaudeEffortLevel::from_display_name("off"),
+            ClaudeEffortLevel::Off
+        );
+        assert_eq!(
+            ClaudeEffortLevel::from_display_name("low"),
+            ClaudeEffortLevel::Low
+        );
+        assert_eq!(
+            ClaudeEffortLevel::from_display_name("medium"),
+            ClaudeEffortLevel::Medium
+        );
+        assert_eq!(
+            ClaudeEffortLevel::from_display_name("high"),
+            ClaudeEffortLevel::High
+        );
         assert_eq!(ClaudeEffortLevel::Off.display_name(), "Off");
         assert_eq!(ClaudeEffortLevel::Low.display_name(), "Low");
         assert_eq!(ClaudeEffortLevel::Medium.display_name(), "Medium");

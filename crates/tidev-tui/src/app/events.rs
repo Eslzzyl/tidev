@@ -140,9 +140,10 @@ impl App {
             return;
         }
         if let Some(ref mut composer) = self.composer
-            && let Some(action) = composer.handle_paste(&text) {
-                self.process_action(action);
-            }
+            && let Some(action) = composer.handle_paste(&text)
+        {
+            self.process_action(action);
+        }
     }
 
     /// Single dispatch point for all crossterm events.

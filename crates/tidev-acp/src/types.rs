@@ -46,9 +46,7 @@ pub fn tool_title(tc: &ToolCall) -> String {
         Some("shell") => {
             let desc = s("description");
             let command = s("command");
-            let display = desc
-                .or(command)
-                .unwrap_or_default();
+            let display = desc.or(command).unwrap_or_default();
             if display.is_empty() {
                 "Shell".into()
             } else {
@@ -131,9 +129,7 @@ pub(crate) fn tool_kind(tc: &ToolCall) -> acp::ToolKind {
         Some("read") | Some("glob") | Some("grep") => acp::ToolKind::Read,
         Some("write") | Some("edit") | Some("apply_patch") => acp::ToolKind::Edit,
         Some("websearch") | Some("webfetch") => acp::ToolKind::Fetch,
-        Some("task") | Some("question") | Some("todowrite") | Some("skill") => {
-            acp::ToolKind::Other
-        }
+        Some("task") | Some("question") | Some("todowrite") | Some("skill") => acp::ToolKind::Other,
         _ => acp::ToolKind::Other,
     }
 }
@@ -218,30 +214,24 @@ pub fn tidev_result_to_diff_content(
                 Some(d) => d,
                 None => return vec![],
             };
-            let path = result
-                .metadata
-                .filepath
-                .as_deref()
-                .unwrap_or("<unknown>");
+            let path = result.metadata.filepath.as_deref().unwrap_or("<unknown>");
             let (old_text, new_text) = parse_unified_diff(diff_str);
             vec![acp::ToolCallContent::Diff(
                 acp::Diff::new(path, new_text).old_text(old_text),
             )]
         }
-        "apply_patch" => {
-            result
-                .metadata
-                .file_changes
-                .iter()
-                .filter_map(|fc| {
-                    let diff_str = fc.diff.as_ref()?;
-                    let (old_text, new_text) = parse_unified_diff(diff_str);
-                    Some(acp::ToolCallContent::Diff(
-                        acp::Diff::new(fc.path.clone(), new_text).old_text(old_text),
-                    ))
-                })
-                .collect()
-        }
+        "apply_patch" => result
+            .metadata
+            .file_changes
+            .iter()
+            .filter_map(|fc| {
+                let diff_str = fc.diff.as_ref()?;
+                let (old_text, new_text) = parse_unified_diff(diff_str);
+                Some(acp::ToolCallContent::Diff(
+                    acp::Diff::new(fc.path.clone(), new_text).old_text(old_text),
+                ))
+            })
+            .collect(),
         _ => vec![],
     }
 }
@@ -275,8 +265,7 @@ pub fn tidev_attachments_to_content(
 
 /// Build a `tool_call_update` with full metadata for a just-started tool.
 pub fn tool_starting_update_rich(tc: &ToolCall) -> acp::ToolCallUpdate {
-    let raw_input: Option<serde_json::Value> =
-        serde_json::from_str(&tc.arguments).ok();
+    let raw_input: Option<serde_json::Value> = serde_json::from_str(&tc.arguments).ok();
 
     let fields = acp::ToolCallUpdateFields::new()
         .status(acp::ToolCallStatus::InProgress)
@@ -313,8 +302,7 @@ pub fn tool_completed_update_rich(
 /// Convert a tidev [`ToolCall`] to an ACP [`ToolCall`].
 pub fn tidev_tool_call_to_acp(tc: &ToolCall) -> acp::ToolCall {
     let kind = tool_kind(tc);
-    let raw_input: Option<serde_json::Value> =
-        serde_json::from_str(&tc.arguments).ok();
+    let raw_input: Option<serde_json::Value> = serde_json::from_str(&tc.arguments).ok();
 
     acp::ToolCall::new(tc.id.clone(), &tc.name)
         .kind(kind)
@@ -331,9 +319,7 @@ pub fn tidev_tool_call_to_acp_update(
 }
 
 /// Convert a tidev [`ToolExecutionResult`] to ACP [`ToolCallContent`] items.
-pub fn tidev_tool_result_to_acp_content(
-    result: &ToolExecutionResult,
-) -> Vec<acp::ToolCallContent> {
+pub fn tidev_tool_result_to_acp_content(result: &ToolExecutionResult) -> Vec<acp::ToolCallContent> {
     vec![acp::ToolCallContent::Content(acp::Content::new(
         acp::ContentBlock::Text(acp::TextContent::new(&result.output)),
     ))]
@@ -396,7 +382,10 @@ mod tests {
 
     #[test]
     fn title_shell_with_description() {
-        let tc = make_tc("shell", r#"{"command":"cargo test","description":"Run unit tests"}"#);
+        let tc = make_tc(
+            "shell",
+            r#"{"command":"cargo test","description":"Run unit tests"}"#,
+        );
         assert_eq!(tool_title(&tc), "Shell Run unit tests");
     }
 
@@ -438,7 +427,10 @@ mod tests {
 
     #[test]
     fn title_question_multiple() {
-        let tc = make_tc("question", r#"{"questions":[{"question":"q1"},{"question":"q2"}]}"#);
+        let tc = make_tc(
+            "question",
+            r#"{"questions":[{"question":"q1"},{"question":"q2"}]}"#,
+        );
         assert_eq!(tool_title(&tc), "Ask 2 questions");
     }
 
@@ -576,7 +568,10 @@ mod tests {
 
     #[test]
     fn diff_content_edit() {
-        let tc = make_tc("edit", r#"{"file_path":"src/lib.rs","old_text":"foo","new_text":"bar"}"#);
+        let tc = make_tc(
+            "edit",
+            r#"{"file_path":"src/lib.rs","old_text":"foo","new_text":"bar"}"#,
+        );
         let patch = "\
 @@ -1,1 +1,1 @@
 -foo
@@ -707,7 +702,10 @@ mod tests {
     fn to_acp_raw_input_invalid_json() {
         let tc = make_tc("read", "not-json");
         let acp_tc = tidev_tool_call_to_acp(&tc);
-        assert!(acp_tc.raw_input.is_none(), "invalid JSON should produce None");
+        assert!(
+            acp_tc.raw_input.is_none(),
+            "invalid JSON should produce None"
+        );
     }
 
     #[test]
@@ -721,16 +719,14 @@ mod tests {
     #[test]
     fn to_acp_update_in_progress() {
         let tc = make_tc("read", "{}");
-        let update =
-            tidev_tool_call_to_acp_update(&tc, Some(acp::ToolCallStatus::InProgress));
+        let update = tidev_tool_call_to_acp_update(&tc, Some(acp::ToolCallStatus::InProgress));
         assert_eq!(update.fields.status, Some(acp::ToolCallStatus::InProgress));
     }
 
     #[test]
     fn to_acp_update_completed() {
         let tc = make_tc("read", "{}");
-        let update =
-            tidev_tool_call_to_acp_update(&tc, Some(acp::ToolCallStatus::Completed));
+        let update = tidev_tool_call_to_acp_update(&tc, Some(acp::ToolCallStatus::Completed));
         assert_eq!(update.fields.status, Some(acp::ToolCallStatus::Completed));
     }
 
@@ -754,5 +750,4 @@ mod tests {
         let content = tidev_tool_result_to_acp_content(&result);
         assert_eq!(content.len(), 1);
     }
-
 }

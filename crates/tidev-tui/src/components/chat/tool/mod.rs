@@ -11,8 +11,8 @@ mod subagent;
 mod summary;
 mod todo;
 mod utils;
-mod webfetch;
 mod web;
+mod webfetch;
 
 use std::path::Path;
 
@@ -170,22 +170,20 @@ pub(crate) fn render_tool_call_with_result(
 
         // Compute line-range suffix from webfetch parameters (similar to read)
         let result_suffix = if canonical_name == "webfetch" {
-            serde_json::from_str::<serde_json::Value>(&tool_call.arguments).ok().and_then(|parsed| {
-                let offset = parsed.get("offset").and_then(|v| v.as_i64());
-                let limit = parsed.get("limit").and_then(|v| v.as_i64());
-                match (offset, limit) {
-                    (Some(off), Some(lim)) => {
-                        Some(format!(" → Line {}-{}", off, off + lim - 1))
+            serde_json::from_str::<serde_json::Value>(&tool_call.arguments)
+                .ok()
+                .and_then(|parsed| {
+                    let offset = parsed.get("offset").and_then(|v| v.as_i64());
+                    let limit = parsed.get("limit").and_then(|v| v.as_i64());
+                    match (offset, limit) {
+                        (Some(off), Some(lim)) => {
+                            Some(format!(" → Line {}-{}", off, off + lim - 1))
+                        }
+                        (Some(off), None) => Some(format!(" → Line {}-...", off)),
+                        (None, Some(lim)) => Some(format!(" → Line 1-{}", lim)),
+                        (None, None) => None,
                     }
-                    (Some(off), None) => {
-                        Some(format!(" → Line {}-...", off))
-                    }
-                    (None, Some(lim)) => {
-                        Some(format!(" → Line 1-{}", lim))
-                    }
-                    (None, None) => None,
-                }
-            })
+                })
         } else {
             None
         };

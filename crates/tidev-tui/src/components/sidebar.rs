@@ -437,8 +437,8 @@ impl Sidebar {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ratatui::backend::TestBackend;
     use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
 
     fn test_palette() -> ThemePalette {
         ThemePalette {

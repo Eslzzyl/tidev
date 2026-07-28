@@ -29,13 +29,9 @@ pub enum McpServerConfig {
         env: BTreeMap<String, String>,
     },
     /// A server accessible via HTTP POST.
-    Http {
-        url: String,
-    },
+    Http { url: String },
     /// A server accessible via Server-Sent Events.
-    Sse {
-        url: String,
-    },
+    Sse { url: String },
 }
 
 impl McpServerConfig {
@@ -87,7 +83,11 @@ mod tests {
 
         match parsed {
             McpServerConfig::Stdio {
-                command, args, cwd, env, ..
+                command,
+                args,
+                cwd,
+                env,
+                ..
             } => {
                 assert_eq!(command, "python");
                 assert_eq!(args, vec!["-m", "mcp_server"]);

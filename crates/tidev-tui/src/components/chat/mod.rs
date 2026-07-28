@@ -194,11 +194,11 @@ impl MessageList {
                     .messages
                     .iter()
                     .any(|m| m.streaming && m.role == tidev_types::message::MessageRole::Assistant)
-                {
-                    self.streaming_buffer.recover_or_begin_streaming(
-                        &mut self.chat_contexts.get_mut(&session_id).unwrap().messages,
-                    );
-                }
+            {
+                self.streaming_buffer.recover_or_begin_streaming(
+                    &mut self.chat_contexts.get_mut(&session_id).unwrap().messages,
+                );
+            }
 
             self.dirty = true;
             true
@@ -231,11 +231,11 @@ impl MessageList {
                 .messages
                 .iter()
                 .any(|m| m.streaming && m.role == tidev_types::message::MessageRole::Assistant)
-            {
-                self.streaming_buffer.recover_or_begin_streaming(
-                    &mut self.chat_contexts.get_mut(&session_id).unwrap().messages,
-                );
-            }
+        {
+            self.streaming_buffer.recover_or_begin_streaming(
+                &mut self.chat_contexts.get_mut(&session_id).unwrap().messages,
+            );
+        }
     }
 
     /// Rebuild subagent state from the current chat_context messages.
@@ -577,10 +577,11 @@ impl MessageList {
                 .running_subagents
                 .iter_mut()
                 .find(|e| e.child_session_id == Some(session_id) && !e.interrupted)
-                && exec.status_text != text {
-                    exec.status_text = text;
-                    self.dirty = true;
-                }
+            && exec.status_text != text
+        {
+            exec.status_text = text;
+            self.dirty = true;
+        }
 
         // ── 2. Route to chat_context ───────────────────────────────────
         let chat_context = match self.chat_contexts.get_mut(&session_id) {
@@ -616,10 +617,10 @@ impl MessageList {
                     if let Some(msg_id) = self.streaming_buffer.current_message_id {
                         if let Some(msg) = chat_context.messages.iter_mut().find(|m| m.id == msg_id)
                             && msg.reasoning_started_at.is_some()
-                                && msg.reasoning_completed_at.is_none()
-                            {
-                                msg.reasoning_completed_at = Some(Utc::now());
-                            }
+                            && msg.reasoning_completed_at.is_none()
+                        {
+                            msg.reasoning_completed_at = Some(Utc::now());
+                        }
                         self.layout_index.mark_dirty(msg_id);
                     }
                 } else if let Some(msg) =
@@ -641,10 +642,10 @@ impl MessageList {
                         .push_delta(content, &mut chat_context.messages);
                     if let Some(msg) = chat_context.messages.iter_mut().find(|m| m.id == mid)
                         && msg.reasoning_started_at.is_some()
-                            && msg.reasoning_completed_at.is_none()
-                        {
-                            msg.reasoning_completed_at = Some(Utc::now());
-                        }
+                        && msg.reasoning_completed_at.is_none()
+                    {
+                        msg.reasoning_completed_at = Some(Utc::now());
+                    }
                     self.layout_index.mark_dirty(mid);
                 }
                 self.dirty = true;
@@ -656,9 +657,10 @@ impl MessageList {
                         .push_reasoning_delta(content, &mut chat_context.messages);
                     if let Some(msg_id) = self.streaming_buffer.current_message_id {
                         if let Some(msg) = chat_context.messages.iter_mut().find(|m| m.id == msg_id)
-                            && msg.reasoning_started_at.is_none() {
-                                msg.reasoning_started_at = Some(Utc::now());
-                            }
+                            && msg.reasoning_started_at.is_none()
+                        {
+                            msg.reasoning_started_at = Some(Utc::now());
+                        }
                         self.layout_index.mark_dirty(msg_id);
                     }
                 } else if let Some(msg) =
@@ -676,9 +678,10 @@ impl MessageList {
                         .push_reasoning_delta(content, &mut chat_context.messages);
                     if let Some(msg_id) = self.streaming_buffer.current_message_id {
                         if let Some(msg) = chat_context.messages.iter_mut().find(|m| m.id == msg_id)
-                            && msg.reasoning_started_at.is_none() {
-                                msg.reasoning_started_at = Some(Utc::now());
-                            }
+                            && msg.reasoning_started_at.is_none()
+                        {
+                            msg.reasoning_started_at = Some(Utc::now());
+                        }
                         self.layout_index.mark_dirty(msg_id);
                     }
                 }

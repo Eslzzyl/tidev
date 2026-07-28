@@ -340,11 +340,7 @@ impl McpManager {
 
     // ── Permission helpers ──────────────────────────────────────────────
 
-    pub fn can_execute(
-        &self,
-        tool_name: &str,
-        mode: SessionMode,
-    ) -> bool {
+    pub fn can_execute(&self, tool_name: &str, mode: SessionMode) -> bool {
         self.definition_for(tool_name)
             .is_some_and(|definition| definition.permission.allowed_in_mode(mode))
     }
@@ -357,9 +353,9 @@ impl McpManager {
             .definition_for(&call.name)
             .with_context(|| format!("unknown MCP tool '{}'", call.name))?;
 
-        let target = definition
-            .mcp_target()
-            .with_context(|| format!("tool '{}' is not backed by an MCP server", definition.name))?;
+        let target = definition.mcp_target().with_context(|| {
+            format!("tool '{}' is not backed by an MCP server", definition.name)
+        })?;
         let (server_name, tool_name) = (target.0.to_string(), target.1.to_string());
 
         let arguments = parse_arguments(&call.arguments)?;
@@ -443,10 +439,7 @@ impl McpManager {
         }
     }
 
-    async fn load_tools(
-        server_name: &str,
-        client: &McpClient,
-    ) -> Result<Vec<ToolDefinition>> {
+    async fn load_tools(server_name: &str, client: &McpClient) -> Result<Vec<ToolDefinition>> {
         let tools = client
             .peer()
             .list_all_tools()
@@ -484,11 +477,7 @@ impl McpManager {
         }
     }
 
-    fn restore_client(
-        inner: &Arc<Mutex<McpManagerInner>>,
-        name: &str,
-        client: McpClient,
-    ) {
+    fn restore_client(inner: &Arc<Mutex<McpManagerInner>>, name: &str, client: McpClient) {
         let mut inner = inner.lock().unwrap();
         if let Some(state) = inner.servers.get_mut(name) {
             state.client = Some(client);
@@ -569,8 +558,7 @@ fn call_tool_result_data(
 ) -> ToolExecutionResult {
     if let Some(structured) = &result.structured_content {
         return ToolExecutionResult::new(
-            serde_json::to_string_pretty(structured)
-                .unwrap_or_else(|_| structured.to_string()),
+            serde_json::to_string_pretty(structured).unwrap_or_else(|_| structured.to_string()),
         );
     }
 
@@ -715,10 +703,8 @@ mod tests {
 
     #[test]
     fn test_call_tool_result_image_attachment_only() {
-        let result = CallToolResult::success(vec![rmcp::model::Content::image(
-            "aGVsbG8=",
-            "image/png",
-        )]);
+        let result =
+            CallToolResult::success(vec![rmcp::model::Content::image("aGVsbG8=", "image/png")]);
         let converted = call_tool_result_data(&result, "img-tool");
         assert_eq!(converted.output, "MCP tool returned image attachment(s)");
         assert_eq!(converted.attachments.len(), 1);
@@ -835,9 +821,7 @@ mod tests {
         let mgr = McpManager::new(PathBuf::from("/tmp"), BTreeMap::new());
         assert!(mgr.all_definitions().is_empty());
         assert!(mgr.definition_for("anything").is_none());
-        assert!(mgr
-            .available_definitions(SessionMode::Build)
-            .is_empty());
+        assert!(mgr.available_definitions(SessionMode::Build).is_empty());
     }
 
     #[test]

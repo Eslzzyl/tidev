@@ -1,5 +1,5 @@
-use super::*;
 use super::webfetch::strip_webfetch_content;
+use super::*;
 
 // ---------------------------------------------------------------------------
 // Web search result rendering

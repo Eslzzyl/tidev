@@ -189,7 +189,10 @@ mod tests {
         assert_eq!(classify_rustc(&["--explain", "E0308"]), Safety::ReadOnly);
         assert_eq!(classify_rustc(&["--edition", "2021"]), Safety::ReadOnly);
         assert_eq!(classify_rustc(&["-Z", "help"]), Safety::ReadOnly);
-        assert_eq!(classify_rustc(&["--cfg", "feature=\"foo\""]), Safety::ReadOnly);
+        assert_eq!(
+            classify_rustc(&["--cfg", "feature=\"foo\""]),
+            Safety::ReadOnly
+        );
         assert_eq!(classify_rustc(&["--crate-type", "lib"]), Safety::ReadOnly);
         // No args at all — just prints help/error, no writes
         assert_eq!(classify_rustc(&[]), Safety::ReadOnly);
@@ -242,10 +245,7 @@ mod tests {
             cl.classify("rustc --edition 2021 main.rs"),
             Safety::WriteOperation
         );
-        assert_eq!(
-            cl.classify("rustc src/lib.rs"),
-            Safety::WriteOperation
-        );
+        assert_eq!(cl.classify("rustc src/lib.rs"), Safety::WriteOperation);
     }
 
     // ── Rustup ───────────────────────────────────────────────────────────
@@ -270,14 +270,23 @@ mod tests {
 
     #[test]
     fn rustup_write_commands() {
-        assert_eq!(classify_rustup(&["install", "stable"]), Safety::WriteOperation);
+        assert_eq!(
+            classify_rustup(&["install", "stable"]),
+            Safety::WriteOperation
+        );
         assert_eq!(
             classify_rustup(&["uninstall", "stable"]),
             Safety::WriteOperation
         );
         assert_eq!(classify_rustup(&["update"]), Safety::WriteOperation);
-        assert_eq!(classify_rustup(&["default", "stable"]), Safety::WriteOperation);
-        assert_eq!(classify_rustup(&["set", "profile", "default"]), Safety::WriteOperation);
+        assert_eq!(
+            classify_rustup(&["default", "stable"]),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            classify_rustup(&["set", "profile", "default"]),
+            Safety::WriteOperation
+        );
         // Composite write sub-subcommands
         assert_eq!(
             classify_rustup(&["toolchain", "install", "stable"]),
@@ -324,10 +333,7 @@ mod tests {
         // Unknown subcommands should be let through
         assert_eq!(classify_rustup(&["unknown"]), Safety::Unknown);
         // Composite with unknown sub-subcommand
-        assert_eq!(
-            classify_rustup(&["toolchain", "unknown"]),
-            Safety::Unknown
-        );
+        assert_eq!(classify_rustup(&["toolchain", "unknown"]), Safety::Unknown);
         // Self with unknown sub-subcommand
         assert_eq!(classify_rustup(&["self", "unknown"]), Safety::Unknown);
     }

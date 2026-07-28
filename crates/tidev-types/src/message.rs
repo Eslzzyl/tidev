@@ -1351,7 +1351,8 @@ mod tests {
                 session_id: sid,
                 message: Box::new(Message::new(MessageRole::User, "")),
             }
-            .request_id(),            None
+            .request_id(),
+            None
         );
         assert_eq!(
             BackendEvent::ShellOutput {

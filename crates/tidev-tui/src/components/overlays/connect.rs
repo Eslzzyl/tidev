@@ -290,7 +290,10 @@ impl Component for ConnectDialog {
                                 key: buffer.clone(),
                             })];
                         }
-                        ConnectPhase::DisconnectConfirm { provider_id, display_name } => {
+                        ConnectPhase::DisconnectConfirm {
+                            provider_id,
+                            display_name,
+                        } => {
                             return vec![Action::Connect(ConnectAction::Disconnect {
                                 provider_id: provider_id.clone(),
                                 display_name: display_name.clone(),
@@ -486,8 +489,10 @@ impl Component for ConnectDialog {
 
                 // Help footer
                 frame.render_widget(
-                    Paragraph::new("↑↓ navigate · Enter select · D disconnect · Esc cancel · type to filter")
-                        .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
+                    Paragraph::new(
+                        "↑↓ navigate · Enter select · D disconnect · Esc cancel · type to filter",
+                    )
+                    .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                     sections[3],
                 );
             }
@@ -563,12 +568,9 @@ impl Component for ConnectDialog {
 
                 // Confirmation message
                 frame.render_widget(
-                    Paragraph::new(format!(
-                        "Disconnect from {}?",
-                        display_name,
-                    ))
-                    .alignment(Alignment::Center)
-                    .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
+                    Paragraph::new(format!("Disconnect from {}?", display_name,))
+                        .alignment(Alignment::Center)
+                        .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
                     sections[0],
                 );
 

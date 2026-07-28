@@ -840,8 +840,7 @@ fn find_subsequence_indices(haystack: &str, needle: &str) -> Option<Vec<usize>> 
     let mut matched_indices = Vec::with_capacity(needle_chars.len());
 
     for needle_char in needle_chars {
-        while haystack_index < haystack_chars.len()
-            && haystack_chars[haystack_index] != needle_char
+        while haystack_index < haystack_chars.len() && haystack_chars[haystack_index] != needle_char
         {
             haystack_index += 1;
         }
@@ -982,15 +981,9 @@ mod tests {
         assert_eq!(find_subsequence_indices("abcdef", "xyz"), None);
         assert_eq!(find_subsequence_indices("abc", ""), None);
         // Single character
-        assert_eq!(
-            find_subsequence_indices("abcdef", "a"),
-            Some(vec![0])
-        );
+        assert_eq!(find_subsequence_indices("abcdef", "a"), Some(vec![0]));
         // All match
-        assert_eq!(
-            find_subsequence_indices("abc", "abc"),
-            Some(vec![0, 1, 2])
-        );
+        assert_eq!(find_subsequence_indices("abc", "abc"), Some(vec![0, 1, 2]));
     }
 
     #[test]

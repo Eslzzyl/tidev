@@ -57,13 +57,7 @@ impl App {
         };
 
         while approval.tool_index < approval.tools.len() {
-            let (
-                boundary_path,
-                sensitive_path,
-                is_question,
-                args,
-                tc,
-            ) = {
+            let (boundary_path, sensitive_path, is_question, args, tc) = {
                 let twv = &approval.tools[approval.tool_index];
                 let tc = &twv.tool_call;
                 (

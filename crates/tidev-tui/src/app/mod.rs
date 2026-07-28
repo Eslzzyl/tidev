@@ -361,18 +361,19 @@ impl App {
         // Push as a System message into the current session's chat context
         // for immediate display.
         if let Some(sid) = self.current_session_id
-            && let Some(ref mut chat) = self.message_list {
-                if let Some(ref mut ctx) = chat.active_chat_context_mut()
-                    && ctx.session_id == sid
-                {
-                    let system_msg = Message::new(MessageRole::System, &content);
-                    ctx.push(system_msg);
-                }
-                // Force a layout rebuild so the new message is rendered on
-                // the next frame, even if no other dirty-triggering event
-                // follows.
-                chat.invalidate_layout();
+            && let Some(ref mut chat) = self.message_list
+        {
+            if let Some(ref mut ctx) = chat.active_chat_context_mut()
+                && ctx.session_id == sid
+            {
+                let system_msg = Message::new(MessageRole::System, &content);
+                ctx.push(system_msg);
             }
+            // Force a layout rebuild so the new message is rendered on
+            // the next frame, even if no other dirty-triggering event
+            // follows.
+            chat.invalidate_layout();
+        }
 
         // Mark as shown in memory only — the backend owns `session_instruction_sources`.
         let owned: Vec<String> = new_sources.into_iter().cloned().collect();

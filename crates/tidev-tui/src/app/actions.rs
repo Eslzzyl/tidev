@@ -120,7 +120,10 @@ impl App {
                         }
                     }
                 }
-                Action::Connect(ConnectAction::Disconnect { provider_id, display_name }) => {
+                Action::Connect(ConnectAction::Disconnect {
+                    provider_id,
+                    display_name,
+                }) => {
                     let mut removed = false;
                     self.runtime.update_auth(|auth| {
                         removed = auth.remove_api_key(&provider_id);
@@ -179,92 +182,91 @@ impl App {
                     // this session, use switch_to_session to preserve in-memory
                     // streaming state (avoiding DB reload that would lose content).
                     if let Some(ref mut chat) = self.message_list
-                        && chat.switch_to_session(session_id) {
-                            self.current_session_id = Some(session_id);
-                            self.scroll_target = None;
-                            self.screen = AppScreen::Chat;
+                        && chat.switch_to_session(session_id)
+                    {
+                        self.current_session_id = Some(session_id);
+                        self.scroll_target = None;
+                        self.screen = AppScreen::Chat;
 
-                            // Restore cached context_usage for the target session.
-                            self.context_usage = self.context_usage_cache.remove(&session_id);
+                        // Restore cached context_usage for the target session.
+                        self.context_usage = self.context_usage_cache.remove(&session_id);
 
-                            // Resolve session mode from the existing context.
-                            // Keep pending_mode intact so a deferred mode switch
-                            // survives session navigation.
-                            if let Some(ctx) = chat.active_chat_context() {
-                                self.mode = ctx
-                                    .messages
-                                    .iter()
-                                    .rev()
-                                    .find(|m| m.role == MessageRole::User)
-                                    .and_then(|m| m.mode)
-                                    .unwrap_or(SessionMode::Build);
-                            }
+                        // Resolve session mode from the existing context.
+                        // Keep pending_mode intact so a deferred mode switch
+                        // survives session navigation.
+                        if let Some(ctx) = chat.active_chat_context() {
+                            self.mode = ctx
+                                .messages
+                                .iter()
+                                .rev()
+                                .find(|m| m.role == MessageRole::User)
+                                .and_then(|m| m.mode)
+                                .unwrap_or(SessionMode::Build);
+                        }
 
-                            // Clear stale interaction state on session switch.
-                            self.mouse_selection.clear();
-                            self.abort_confirmation_deadline = None;
+                        // Clear stale interaction state on session switch.
+                        self.mouse_selection.clear();
+                        self.abort_confirmation_deadline = None;
 
-                            // Reload todos for the target session.
-                            if let Ok(todos) = self
-                                .runtime
-                                .session_manager()
-                                .store()
-                                .load_todos(session_id)
-                            {
-                                self.todos = todos;
-                            }
+                        // Reload todos for the target session.
+                        if let Ok(todos) = self
+                            .runtime
+                            .session_manager()
+                            .store()
+                            .load_todos(session_id)
+                        {
+                            self.todos = todos;
+                        }
 
-                            // Restore instruction sources so that InstructionsLoaded
-                            // events emitted on loop restart are de-duplicated.
-                            if let Ok(sources) = self
-                                .runtime
-                                .session_manager()
-                                .store()
-                                .load_instruction_sources(session_id)
-                            {
-                                self.shown_instruction_sources = sources;
-                            }
+                        // Restore instruction sources so that InstructionsLoaded
+                        // events emitted on loop restart are de-duplicated.
+                        if let Ok(sources) = self
+                            .runtime
+                            .session_manager()
+                            .store()
+                            .load_instruction_sources(session_id)
+                        {
+                            self.shown_instruction_sources = sources;
+                        }
 
-                            // Refresh the Runtime's in-memory message buffer.
-                            // Use the already-cached messages to avoid a redundant DB read.
-                            if let Some(ctx) = chat.active_chat_context() {
-                                let buf_messages = ctx.messages.clone();
-                                let rt = self.runtime.clone();
-                                tokio::spawn(async move {
-                                    rt.set_message_buffer(session_id, buf_messages).await;
-                                });
-                            }
+                        // Refresh the Runtime's in-memory message buffer.
+                        // Use the already-cached messages to avoid a redundant DB read.
+                        if let Some(ctx) = chat.active_chat_context() {
+                            let buf_messages = ctx.messages.clone();
+                            let rt = self.runtime.clone();
+                            tokio::spawn(async move {
+                                rt.set_message_buffer(session_id, buf_messages).await;
+                            });
+                        }
 
-                            // Switch the runtime's active model to match this
-                            // session's model so the composer displays the
-                            // correct provider/model instead of the default.
-                            if let Ok(Some(record)) =
-                                self.runtime.session_manager().load_session(session_id)
-                            {
-                                let config = self.runtime.config();
-                                let auth = self.runtime.auth();
-                                if let Ok(model) = config.resolve_model_by_ids(
-                                    &auth,
-                                    &record.provider_id,
-                                    &record.model_id,
-                                ) {
-                                    self.runtime.set_active_model(model.clone());
-                                    if let Some(ref mut composer) = self.composer {
-                                        composer.set_model_supports_images(
-                                            model.supports_images,
-                                        );
-                                    }
+                        // Switch the runtime's active model to match this
+                        // session's model so the composer displays the
+                        // correct provider/model instead of the default.
+                        if let Ok(Some(record)) =
+                            self.runtime.session_manager().load_session(session_id)
+                        {
+                            let config = self.runtime.config();
+                            let auth = self.runtime.auth();
+                            if let Ok(model) = config.resolve_model_by_ids(
+                                &auth,
+                                &record.provider_id,
+                                &record.model_id,
+                            ) {
+                                self.runtime.set_active_model(model.clone());
+                                if let Some(ref mut composer) = self.composer {
+                                    composer.set_model_supports_images(model.supports_images);
                                 }
                             }
-
-                            log::info!("Switching to session: existing context (fast path)");
-
-                            // Close the session panel overlay.
-                            queue.push(Action::Overlay(OverlayAction::Close(
-                                OverlayKind::SessionPanel,
-                            )));
-                            return;
                         }
+
+                        log::info!("Switching to session: existing context (fast path)");
+
+                        // Close the session panel overlay.
+                        queue.push(Action::Overlay(OverlayAction::Close(
+                            OverlayKind::SessionPanel,
+                        )));
+                        return;
+                    }
 
                     // Slow path: first time entering this session — load from DB.
                     self.current_session_id = Some(session_id);
@@ -353,9 +355,7 @@ impl App {
                             ) {
                                 self.runtime.set_active_model(model.clone());
                                 if let Some(ref mut composer) = self.composer {
-                                    composer.set_model_supports_images(
-                                        model.supports_images,
-                                    );
+                                    composer.set_model_supports_images(model.supports_images);
                                 }
                             }
                         }
@@ -825,9 +825,10 @@ impl App {
                     self.boundary_permissions.insert(path_str.clone(), allowed);
 
                     if let Some(r) = reason
-                        && !r.is_empty() {
-                            self.boundary_reasons.insert(path_str, r);
-                        }
+                        && !r.is_empty()
+                    {
+                        self.boundary_reasons.insert(path_str, r);
+                    }
 
                     self.process_next_tool();
                 }
@@ -847,9 +848,10 @@ impl App {
                     self.sensitive_permissions.insert(path_str.clone(), allowed);
 
                     if let Some(r) = reason
-                        && !r.is_empty() {
-                            self.sensitive_reasons.insert(path_str, r);
-                        }
+                        && !r.is_empty()
+                    {
+                        self.sensitive_reasons.insert(path_str, r);
+                    }
 
                     self.process_next_tool();
                 }
@@ -898,14 +900,18 @@ impl App {
                     let _ = mcp.toggle_server(&name).await;
                 });
                 // Queue a refresh so the panel re-reads summaries after the op.
-                queue.push(Action::Overlay(OverlayAction::Open(OverlayKind::McpServerPanel)));
+                queue.push(Action::Overlay(OverlayAction::Open(
+                    OverlayKind::McpServerPanel,
+                )));
             }
             McpAction::Refresh(name) => {
                 let mcp = self.runtime.mcp_manager().clone();
                 tokio::spawn(async move {
                     let _ = mcp.refresh_server(&name).await;
                 });
-                queue.push(Action::Overlay(OverlayAction::Open(OverlayKind::McpServerPanel)));
+                queue.push(Action::Overlay(OverlayAction::Open(
+                    OverlayKind::McpServerPanel,
+                )));
             }
             McpAction::Remove(name) => {
                 // Remove from McpManager.
@@ -921,7 +927,9 @@ impl App {
                 });
                 let _ = self.runtime.save_config();
 
-                queue.push(Action::Overlay(OverlayAction::Open(OverlayKind::McpServerPanel)));
+                queue.push(Action::Overlay(OverlayAction::Open(
+                    OverlayKind::McpServerPanel,
+                )));
             }
             McpAction::Upsert {
                 name,
@@ -955,7 +963,9 @@ impl App {
                 });
                 let _ = self.runtime.save_config();
 
-                queue.push(Action::Overlay(OverlayAction::Open(OverlayKind::McpServerPanel)));
+                queue.push(Action::Overlay(OverlayAction::Open(
+                    OverlayKind::McpServerPanel,
+                )));
             }
         }
     }

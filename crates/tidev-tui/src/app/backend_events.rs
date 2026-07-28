@@ -118,10 +118,11 @@ impl App {
                 // Apply pending mode switch on final turn (no tool calls).
                 if turn.tool_calls.is_empty() {
                     if let Some(new_mode) = self.pending_modes.remove(&session_id)
-                        && Some(session_id) == self.current_session_id {
-                            self.mode = new_mode;
-                            self.set_notice(format!("Mode switched to {}", self.mode.title()));
-                        }
+                        && Some(session_id) == self.current_session_id
+                    {
+                        self.mode = new_mode;
+                        self.set_notice(format!("Mode switched to {}", self.mode.title()));
+                    }
                     if Some(session_id) == self.current_session_id {
                         self.desktop_notifications.notify("Response complete");
                     }
@@ -129,9 +130,11 @@ impl App {
 
                 // If a compact was queued and no request is active, run it now.
                 if self.pending_compacts.remove(&session_id)
-                    && Some(session_id) == self.current_session_id && !self.has_active_request() {
-                        self.execute_compact();
-                    }
+                    && Some(session_id) == self.current_session_id
+                    && !self.has_active_request()
+                {
+                    self.execute_compact();
+                }
             }
             BackendEvent::ContextCompacted {
                 session_id,
@@ -164,28 +167,28 @@ impl App {
             }
             BackendEvent::MessagesTruncated { session_id, .. } => {
                 if Some(session_id) == self.current_session_id
-                    && let Some(ref mut chat) = self.message_list {
-                        if let Some(ref mut ctx) = chat.active_chat_context_mut()
-                            && ctx.session_id == session_id
+                    && let Some(ref mut chat) = self.message_list
+                {
+                    if let Some(ref mut ctx) = chat.active_chat_context_mut()
+                        && ctx.session_id == session_id
+                    {
+                        // Use the locally-held revert_message_id to determine the
+                        // truncation point instead of relying on `kept_count` from
+                        // the runtime buffer.  The buffer and ctx.messages are
+                        // independent Vecs; their positions can diverge (e.g. when
+                        // set_message_buffer overwrites the buffer with stale data
+                        // or when the agent loop appends messages between undo and
+                        // send).  Truncating by revert_message_id is always correct
+                        // for the TUI's own message list.
+                        if let Some(revert_id) = ctx.revert_message_id
+                            && let Some(pos) = ctx.messages.iter().position(|m| m.id == revert_id)
                         {
-                            // Use the locally-held revert_message_id to determine the
-                            // truncation point instead of relying on `kept_count` from
-                            // the runtime buffer.  The buffer and ctx.messages are
-                            // independent Vecs; their positions can diverge (e.g. when
-                            // set_message_buffer overwrites the buffer with stale data
-                            // or when the agent loop appends messages between undo and
-                            // send).  Truncating by revert_message_id is always correct
-                            // for the TUI's own message list.
-                            if let Some(revert_id) = ctx.revert_message_id
-                                && let Some(pos) =
-                                    ctx.messages.iter().position(|m| m.id == revert_id)
-                                {
-                                    ctx.messages.truncate(pos);
-                                }
-                            ctx.revert_message_id = None;
+                            ctx.messages.truncate(pos);
                         }
-                        chat.invalidate_layout();
+                        ctx.revert_message_id = None;
                     }
+                    chat.invalidate_layout();
+                }
             }
             BackendEvent::UndoCompleted {
                 target_id,
@@ -241,9 +244,9 @@ impl App {
                         .session_manager()
                         .store()
                         .load_todos(session_id)
-                    {
-                        self.todos = todos;
-                    }
+                {
+                    self.todos = todos;
+                }
             }
             BackendEvent::StreamEnd { session_id, .. } => {
                 // Flush pending instruction sources discovered during tool
@@ -251,18 +254,19 @@ impl App {
                 // persistence is handled by the backend (loop_.rs step 11)
                 // so the System message appears after all tool results.
                 if let Some(sources) = self.pending_instruction_sources.remove(&session_id)
-                    && !sources.is_empty() && Some(session_id) == self.current_session_id {
-                        self.show_instruction_sources(&sources);
-                    }
+                    && !sources.is_empty()
+                    && Some(session_id) == self.current_session_id
+                {
+                    self.show_instruction_sources(&sources);
+                }
 
                 // Flush queued prompts for sessions that are no longer busy.
                 self.flush_pending_prompt_queue();
 
                 // If a compact was queued and no request is active, run it now.
-                if self.pending_compacts.remove(&session_id)
-                    && !self.has_active_request() {
-                        self.execute_compact();
-                    }
+                if self.pending_compacts.remove(&session_id) && !self.has_active_request() {
+                    self.execute_compact();
+                }
             }
             _ => {
                 // Events already forwarded to MessageList above:

@@ -473,16 +473,17 @@ impl Component for SkillsPanel {
         );
 
         if let Some(sb_area) = list_scrollbar_area
-            && self.filtered_indices.len() > list_content_height as usize {
-                render_scrollbar(
-                    frame,
-                    sb_area,
-                    self.list_scroll,
-                    self.filtered_indices.len(),
-                    palette,
-                    false,
-                );
-            }
+            && self.filtered_indices.len() > list_content_height as usize
+        {
+            render_scrollbar(
+                frame,
+                sb_area,
+                self.list_scroll,
+                self.filtered_indices.len(),
+                palette,
+                false,
+            );
+        }
 
         // ── Right Pane: Preview ──
         let preview_header_y = right_area.y + 1;
@@ -537,15 +538,14 @@ impl Component for SkillsPanel {
             Some((name, _)) => self.selected_skill().is_none_or(|s| *name != s.name),
             None => true,
         };
-        if needs_render
-            && let Some(skill) = self.selected_skill() {
-                let rendered = render_markdown_text_with_width_and_cwd(
-                    &skill.content,
-                    Some(self.preview_content_width),
-                    None,
-                );
-                self.cached_preview = Some((skill.name.clone(), rendered));
-            }
+        if needs_render && let Some(skill) = self.selected_skill() {
+            let rendered = render_markdown_text_with_width_and_cwd(
+                &skill.content,
+                Some(self.preview_content_width),
+                None,
+            );
+            self.cached_preview = Some((skill.name.clone(), rendered));
+        }
 
         if let Some((_, rendered)) = &self.cached_preview {
             let total_preview_lines = rendered.lines.len();
@@ -566,16 +566,17 @@ impl Component for SkillsPanel {
             );
 
             if let Some(sb_area) = preview_scrollbar_area
-                && total_preview_lines > preview_content_height as usize {
-                    render_scrollbar(
-                        frame,
-                        sb_area,
-                        self.preview_scroll,
-                        total_preview_lines,
-                        palette,
-                        false,
-                    );
-                }
+                && total_preview_lines > preview_content_height as usize
+            {
+                render_scrollbar(
+                    frame,
+                    sb_area,
+                    self.preview_scroll,
+                    total_preview_lines,
+                    palette,
+                    false,
+                );
+            }
         }
 
         let footer_y = inner.y + inner.height - 1;

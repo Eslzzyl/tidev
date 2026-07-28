@@ -9,14 +9,14 @@ use std::sync::Arc;
 use agent_client_protocol::schema::v1 as acp;
 use agent_client_protocol::{Agent, Stdio, on_receive_request};
 use anyhow::Result;
-use tokio::sync::{oneshot, RwLock};
+use tokio::sync::{RwLock, oneshot};
 use uuid::Uuid;
 
+use tidev_config::{AppConfig, AuthStore, ThinkingMatcher, auth::ActiveModel};
 use tidev_core::Runtime;
 use tidev_types::message::MessageRole;
 use tidev_types::prompts::SessionMode;
 use tidev_utils::session::title_from_prompt;
-use tidev_config::{auth::ActiveModel, AppConfig, AuthStore, ThinkingMatcher};
 
 /// Shared state accessible from all ACP request handlers.
 struct AcpState {
@@ -790,7 +790,10 @@ async fn run_event_loop(
     use tidev_types::message::BackendEvent;
 
     while let Some(event) = event_rx.recv().await {
-        log::debug!("ACP: event loop received event: {:?}", std::mem::discriminant(&event));
+        log::debug!(
+            "ACP: event loop received event: {:?}",
+            std::mem::discriminant(&event)
+        );
 
         // ── Update cumulative token counts ──────────────────
         // Before translation, update per-session cumulative values from UsageStats.
@@ -836,14 +839,11 @@ async fn run_event_loop(
             let cum_cache = *state.cumulative_cache_read.read().await;
             let total = cum_in + cum_out;
 
-            let usage = acp::Usage::new(total, cum_in, cum_out)
-                .cached_read_tokens(cum_cache);
+            let usage = acp::Usage::new(total, cum_in, cum_out).cached_read_tokens(cum_cache);
 
             if let Some(tx) = state.pending_prompt.write().await.take() {
                 log::info!("ACP: turn completed, sending PromptResponse with usage");
-                let _ = tx.send(
-                    acp::PromptResponse::new(acp::StopReason::EndTurn).usage(usage),
-                );
+                let _ = tx.send(acp::PromptResponse::new(acp::StopReason::EndTurn).usage(usage));
             }
         } else if matches!(&event, BackendEvent::Failed { .. }) {
             if let Some(tx) = state.pending_prompt.write().await.take() {
@@ -905,15 +905,11 @@ fn acp_mcp_server_to_config(
         }
         acp::McpServer::Http(s) => Some((
             s.name.clone(),
-            tidev_config::mcp::McpServerConfig::Http {
-                url: s.url.clone(),
-            },
+            tidev_config::mcp::McpServerConfig::Http { url: s.url.clone() },
         )),
         acp::McpServer::Sse(s) => Some((
             s.name.clone(),
-            tidev_config::mcp::McpServerConfig::Sse {
-                url: s.url.clone(),
-            },
+            tidev_config::mcp::McpServerConfig::Sse { url: s.url.clone() },
         )),
         _ => {
             log::warn!("ACP: unsupported MCP server type, skipping");

@@ -34,9 +34,7 @@ pub fn strip_webfetch_content(output: &str) -> String {
         let trimmed = line.trim_start();
 
         // Skip metadata footer lines
-        if trimmed.starts_with("(Showing lines ")
-            || trimmed.starts_with("(End of page - total ")
-        {
+        if trimmed.starts_with("(Showing lines ") || trimmed.starts_with("(End of page - total ") {
             continue;
         }
 

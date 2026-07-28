@@ -70,10 +70,9 @@ impl EventTranslator {
             } => {
                 let message_id = self.next_message_id(*request_id);
                 // Send an empty agent_message_chunk to signal the start of a new message.
-                let chunk = acp::ContentChunk::new(acp::ContentBlock::Text(
-                    acp::TextContent::new(""),
-                ))
-                .message_id(message_id);
+                let chunk =
+                    acp::ContentChunk::new(acp::ContentBlock::Text(acp::TextContent::new("")))
+                        .message_id(message_id);
                 vec![acp::SessionNotification::new(
                     self.session_id.clone(),
                     acp::SessionUpdate::AgentMessageChunk(chunk),
@@ -86,10 +85,9 @@ impl EventTranslator {
                 content,
             } => {
                 let message_id = self.message_id_for(*request_id);
-                let chunk = acp::ContentChunk::new(acp::ContentBlock::Text(
-                    acp::TextContent::new(content),
-                ))
-                .message_id(message_id);
+                let chunk =
+                    acp::ContentChunk::new(acp::ContentBlock::Text(acp::TextContent::new(content)))
+                        .message_id(message_id);
                 vec![acp::SessionNotification::new(
                     self.session_id.clone(),
                     acp::SessionUpdate::AgentMessageChunk(chunk),
@@ -102,10 +100,9 @@ impl EventTranslator {
                 content,
             } => {
                 let message_id = self.message_id_for(*request_id);
-                let chunk = acp::ContentChunk::new(acp::ContentBlock::Text(
-                    acp::TextContent::new(content),
-                ))
-                .message_id(message_id);
+                let chunk =
+                    acp::ContentChunk::new(acp::ContentBlock::Text(acp::TextContent::new(content)))
+                        .message_id(message_id);
                 vec![acp::SessionNotification::new(
                     self.session_id.clone(),
                     acp::SessionUpdate::AgentThoughtChunk(chunk),
@@ -171,19 +168,19 @@ impl EventTranslator {
                 } else {
                     // Fallback: text content + any image attachments.
                     let mut c = crate::types::tidev_tool_result_to_acp_content(result);
-                    c.extend(crate::types::tidev_attachments_to_content(&result.attachments));
+                    c.extend(crate::types::tidev_attachments_to_content(
+                        &result.attachments,
+                    ));
                     c
                 };
 
                 if !content.is_empty() {
                     notifs.push(acp::SessionNotification::new(
                         self.session_id.clone(),
-                        acp::SessionUpdate::ToolCallUpdate(
-                            acp::ToolCallUpdate::new(
-                                tool_call.id.clone(),
-                                acp::ToolCallUpdateFields::new().content(Some(content)),
-                            ),
-                        ),
+                        acp::SessionUpdate::ToolCallUpdate(acp::ToolCallUpdate::new(
+                            tool_call.id.clone(),
+                            acp::ToolCallUpdateFields::new().content(Some(content)),
+                        )),
                     ));
                 }
 
@@ -219,16 +216,16 @@ impl EventTranslator {
                 // tool call update on the parent tool.
                 if let Some(child_tc) = current_tool_call {
                     let child_content = acp::ToolCallContent::Content(acp::Content::new(
-                        acp::ContentBlock::Text(acp::TextContent::new(
-                            format!("[subagent] {}: {}", child_tc.name, status_text),
-                        )),
+                        acp::ContentBlock::Text(acp::TextContent::new(format!(
+                            "[subagent] {}: {}",
+                            child_tc.name, status_text
+                        ))),
                     ));
                     notifs.push(acp::SessionNotification::new(
                         self.session_id.clone(),
                         acp::SessionUpdate::ToolCallUpdate(acp::ToolCallUpdate::new(
                             tool_call_id.clone(),
-                            acp::ToolCallUpdateFields::new()
-                                .content(Some(vec![child_content])),
+                            acp::ToolCallUpdateFields::new().content(Some(vec![child_content])),
                         )),
                     ));
                 }
@@ -301,9 +298,9 @@ impl EventTranslator {
                 session_id: _,
                 message,
             } => {
-                let chunk = acp::ContentChunk::new(acp::ContentBlock::Text(
-                    acp::TextContent::new(&message.content),
-                ));
+                let chunk = acp::ContentChunk::new(acp::ContentBlock::Text(acp::TextContent::new(
+                    &message.content,
+                )));
                 vec![acp::SessionNotification::new(
                     self.session_id.clone(),
                     acp::SessionUpdate::UserMessageChunk(chunk),
@@ -316,9 +313,9 @@ impl EventTranslator {
                 error,
             } => {
                 // Send an error as an agent message chunk.
-                let chunk = acp::ContentChunk::new(acp::ContentBlock::Text(
-                    acp::TextContent::new(format!("Error: {error}")),
-                ));
+                let chunk = acp::ContentChunk::new(acp::ContentBlock::Text(acp::TextContent::new(
+                    format!("Error: {error}"),
+                )));
                 vec![acp::SessionNotification::new(
                     self.session_id.clone(),
                     acp::SessionUpdate::AgentMessageChunk(chunk),
@@ -345,15 +342,12 @@ impl EventTranslator {
                 retry_after_secs,
             } => {
                 let msg = if let Some(delay) = retry_after_secs {
-                    format!(
-                        "[Retry {attempt}/{max_attempts}] {reason} (retrying after {delay}s)"
-                    )
+                    format!("[Retry {attempt}/{max_attempts}] {reason} (retrying after {delay}s)")
                 } else {
                     format!("[Retry {attempt}/{max_attempts}] {reason}")
                 };
-                let chunk = acp::ContentChunk::new(acp::ContentBlock::Text(
-                    acp::TextContent::new(&msg),
-                ));
+                let chunk =
+                    acp::ContentChunk::new(acp::ContentBlock::Text(acp::TextContent::new(&msg)));
                 vec![acp::SessionNotification::new(
                     self.session_id.clone(),
                     acp::SessionUpdate::AgentMessageChunk(chunk),
@@ -438,12 +432,10 @@ mod tests {
         assert_eq!(notifs.len(), 1);
         assert_session_id(&notifs);
         match &notifs[0].update {
-            acp::SessionUpdate::AgentMessageChunk(chunk) => {
-                match &chunk.content {
-                    acp::ContentBlock::Text(t) => assert_eq!(t.text, ""),
-                    _ => panic!("expected Text content block"),
-                }
-            }
+            acp::SessionUpdate::AgentMessageChunk(chunk) => match &chunk.content {
+                acp::ContentBlock::Text(t) => assert_eq!(t.text, ""),
+                _ => panic!("expected Text content block"),
+            },
             _ => panic!("expected AgentMessageChunk"),
         }
     }
@@ -475,12 +467,10 @@ mod tests {
         });
         assert_eq!(notifs.len(), 1);
         match &notifs[0].update {
-            acp::SessionUpdate::AgentMessageChunk(chunk) => {
-                match &chunk.content {
-                    acp::ContentBlock::Text(t) => assert_eq!(t.text, "Hello world"),
-                    _ => panic!("expected Text"),
-                }
-            }
+            acp::SessionUpdate::AgentMessageChunk(chunk) => match &chunk.content {
+                acp::ContentBlock::Text(t) => assert_eq!(t.text, "Hello world"),
+                _ => panic!("expected Text"),
+            },
             _ => panic!("expected AgentMessageChunk"),
         }
     }
@@ -496,12 +486,10 @@ mod tests {
         });
         assert_eq!(notifs.len(), 1);
         match &notifs[0].update {
-            acp::SessionUpdate::AgentThoughtChunk(chunk) => {
-                match &chunk.content {
-                    acp::ContentBlock::Text(t) => assert_eq!(t.text, "thinking..."),
-                    _ => panic!("expected Text"),
-                }
-            }
+            acp::SessionUpdate::AgentThoughtChunk(chunk) => match &chunk.content {
+                acp::ContentBlock::Text(t) => assert_eq!(t.text, "thinking..."),
+                _ => panic!("expected Text"),
+            },
             _ => panic!("expected AgentThoughtChunk"),
         }
     }
@@ -681,10 +669,8 @@ mod tests {
     #[test]
     fn user_message_created_sends_user_message_chunk() {
         let mut tr = make_translator();
-        let mut msg = tidev_types::message::Message::new(
-            tidev_types::message::MessageRole::User,
-            "hello",
-        );
+        let mut msg =
+            tidev_types::message::Message::new(tidev_types::message::MessageRole::User, "hello");
         msg.id = Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
         let notifs = tr.translate(&BackendEvent::UserMessageCreated {
             session_id: sid(),
@@ -692,12 +678,10 @@ mod tests {
         });
         assert_eq!(notifs.len(), 1);
         match &notifs[0].update {
-            acp::SessionUpdate::UserMessageChunk(chunk) => {
-                match &chunk.content {
-                    acp::ContentBlock::Text(t) => assert_eq!(t.text, "hello"),
-                    _ => panic!("expected Text"),
-                }
-            }
+            acp::SessionUpdate::UserMessageChunk(chunk) => match &chunk.content {
+                acp::ContentBlock::Text(t) => assert_eq!(t.text, "hello"),
+                _ => panic!("expected Text"),
+            },
             _ => panic!("expected UserMessageChunk"),
         }
     }
@@ -713,14 +697,12 @@ mod tests {
         });
         assert_eq!(notifs.len(), 1);
         match &notifs[0].update {
-            acp::SessionUpdate::AgentMessageChunk(chunk) => {
-                match &chunk.content {
-                    acp::ContentBlock::Text(t) => {
-                        assert!(t.text.contains("API error"));
-                    }
-                    _ => panic!("expected Text"),
+            acp::SessionUpdate::AgentMessageChunk(chunk) => match &chunk.content {
+                acp::ContentBlock::Text(t) => {
+                    assert!(t.text.contains("API error"));
                 }
-            }
+                _ => panic!("expected Text"),
+            },
             _ => panic!("expected AgentMessageChunk"),
         }
     }
@@ -739,16 +721,14 @@ mod tests {
         });
         assert_eq!(notifs.len(), 1);
         match &notifs[0].update {
-            acp::SessionUpdate::AgentMessageChunk(chunk) => {
-                match &chunk.content {
-                    acp::ContentBlock::Text(t) => {
-                        assert!(t.text.contains("[Retry 2/3]"));
-                        assert!(t.text.contains("rate limited"));
-                        assert!(t.text.contains("5s"));
-                    }
-                    _ => panic!("expected Text"),
+            acp::SessionUpdate::AgentMessageChunk(chunk) => match &chunk.content {
+                acp::ContentBlock::Text(t) => {
+                    assert!(t.text.contains("[Retry 2/3]"));
+                    assert!(t.text.contains("rate limited"));
+                    assert!(t.text.contains("5s"));
                 }
-            }
+                _ => panic!("expected Text"),
+            },
             _ => panic!("expected AgentMessageChunk"),
         }
     }
@@ -766,15 +746,13 @@ mod tests {
         });
         assert_eq!(notifs.len(), 1);
         match &notifs[0].update {
-            acp::SessionUpdate::AgentMessageChunk(chunk) => {
-                match &chunk.content {
-                    acp::ContentBlock::Text(t) => {
-                        assert!(t.text.contains("[Retry 1/5]"));
-                        assert!(!t.text.contains("retrying after"));
-                    }
-                    _ => panic!("expected Text"),
+            acp::SessionUpdate::AgentMessageChunk(chunk) => match &chunk.content {
+                acp::ContentBlock::Text(t) => {
+                    assert!(t.text.contains("[Retry 1/5]"));
+                    assert!(!t.text.contains("retrying after"));
                 }
-            }
+                _ => panic!("expected Text"),
+            },
             _ => panic!("expected AgentMessageChunk"),
         }
     }
@@ -792,7 +770,10 @@ mod tests {
             request_id: 1,
             turn: Box::new(turn),
         });
-        assert!(notifs.is_empty(), "Finished should be ignored by translator");
+        assert!(
+            notifs.is_empty(),
+            "Finished should be ignored by translator"
+        );
     }
 
     #[test]

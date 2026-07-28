@@ -821,12 +821,13 @@ impl AgentContext for CoreContext {
         // --- Write tools: serial execution with immediate cancellation ---
         for (tc, allow_outside, sensitive_approved) in write {
             if self.cancel.is_cancelled() {
-                            self.emit(BackendEvent::ToolCompleted {
-                                session_id,
-                                request_id,
-                                tool_call: tc.clone(),
-                                result: Box::new(ToolExecutionResult::new("User cancelled the request")),
-                            });                results.push((tc, ToolExecutionResult::new("User cancelled the request")));
+                self.emit(BackendEvent::ToolCompleted {
+                    session_id,
+                    request_id,
+                    tool_call: tc.clone(),
+                    result: Box::new(ToolExecutionResult::new("User cancelled the request")),
+                });
+                results.push((tc, ToolExecutionResult::new("User cancelled the request")));
                 continue;
             }
 
@@ -850,11 +851,8 @@ impl AgentContext for CoreContext {
             // Guard ensures ToolCompleted is sent if this future is
             // force-dropped (e.g. by JoinHandle::abort()), preventing the
             // TUI's running_tools from leaking.
-            let mut guard = ToolCompletedGuard::new(
-                session_id,
-                Some(self.event_tx.clone()),
-                tc.clone(),
-            );
+            let mut guard =
+                ToolCompletedGuard::new(session_id, Some(self.event_tx.clone()), tc.clone());
 
             // Directly await the tool. We do NOT use a select! with a cancel
             // branch here because doing so would drop the in-flight JoinHandle
@@ -1291,9 +1289,7 @@ impl Drop for ToolCompletedGuard {
                     session_id: self.session_id,
                     request_id: 0,
                     tool_call: self.tool_call.clone(),
-                    result: Box::new(ToolExecutionResult::new(
-                        "User cancelled the request",
-                    )),
+                    result: Box::new(ToolExecutionResult::new("User cancelled the request")),
                 });
             }
         }

@@ -219,33 +219,34 @@ async fn run_shell_streaming(
     let mut actual_command = command.to_string();
 
     // ── Layer 0: Plan mode command classification ────────────────────
-    if mode == SessionMode::Plan
-        && Classifier::global().classify(command) >= Safety::WriteOperation {
-            log::info!(
-                "plan mode blocked write command: {}",
-                command.lines().next().unwrap_or(command)
-            );
+    if mode == SessionMode::Plan && Classifier::global().classify(command) >= Safety::WriteOperation
+    {
+        log::info!(
+            "plan mode blocked write command: {}",
+            command.lines().next().unwrap_or(command)
+        );
 
-            // Emit ShellOutput so the TUI creates a streaming message
-            // that ToolCompleted can finalize; otherwise the result is lost
-            // because shell results rely on ShellOutput for display.
-            if let Some(ref tx) = event_tx {
-                let _ = tx.send(BackendEvent::ShellOutput {
-                    session_id,
-                    tool_call_id: tool_call_id.to_string(),
-                    content: "Error: Command blocked in Plan mode — this command appears \
+        // Emit ShellOutput so the TUI creates a streaming message
+        // that ToolCompleted can finalize; otherwise the result is lost
+        // because shell results rely on ShellOutput for display.
+        if let Some(ref tx) = event_tx {
+            let _ = tx.send(BackendEvent::ShellOutput {
+                session_id,
+                tool_call_id: tool_call_id.to_string(),
+                content: "Error: Command blocked in Plan mode — this command appears \
                               to modify files."
-                        .to_string(),
-                    finished: true,
-                    exit_code: Some(1),
-                });
-            }
-
-            return Ok(ShellExecutionResult {
-                output: "[exit 1]\nError: Command blocked in Plan mode — this command appears \
-                     to modify files.".to_string(),
+                    .to_string(),
+                finished: true,
+                exit_code: Some(1),
             });
         }
+
+        return Ok(ShellExecutionResult {
+            output: "[exit 1]\nError: Command blocked in Plan mode — this command appears \
+                     to modify files."
+                .to_string(),
+        });
+    }
 
     // ── Layer 1: Privilege escalation handling (sudo/doas/pkexec) ──────
     let mut sudo_guard: Option<super::sudo::AskpassGuard> = None;
@@ -477,33 +478,34 @@ fn run_shell_inner(
     let mut actual_command = command.to_string();
 
     // ── Layer 0: Plan mode command classification ────────────────────
-    if mode == SessionMode::Plan
-        && Classifier::global().classify(command) >= Safety::WriteOperation {
-            log::info!(
-                "plan mode blocked write command: {}",
-                command.lines().next().unwrap_or(command)
-            );
+    if mode == SessionMode::Plan && Classifier::global().classify(command) >= Safety::WriteOperation
+    {
+        log::info!(
+            "plan mode blocked write command: {}",
+            command.lines().next().unwrap_or(command)
+        );
 
-            // Emit ShellOutput so the TUI creates a streaming message
-            // that ToolCompleted can finalize; otherwise the result is lost
-            // because shell results rely on ShellOutput for display.
-            if let Some(ref tx) = event_tx {
-                let _ = tx.send(BackendEvent::ShellOutput {
-                    session_id,
-                    tool_call_id: tool_call_id.to_string(),
-                    content: "Error: Command blocked in Plan mode — this command appears \
+        // Emit ShellOutput so the TUI creates a streaming message
+        // that ToolCompleted can finalize; otherwise the result is lost
+        // because shell results rely on ShellOutput for display.
+        if let Some(ref tx) = event_tx {
+            let _ = tx.send(BackendEvent::ShellOutput {
+                session_id,
+                tool_call_id: tool_call_id.to_string(),
+                content: "Error: Command blocked in Plan mode — this command appears \
                               to modify files."
-                        .to_string(),
-                    finished: true,
-                    exit_code: Some(1),
-                });
-            }
-
-            return Ok(ShellExecutionResult {
-                output: "[exit 1]\nError: Command blocked in Plan mode — this command appears \
-                     to modify files.".to_string(),
+                    .to_string(),
+                finished: true,
+                exit_code: Some(1),
             });
         }
+
+        return Ok(ShellExecutionResult {
+            output: "[exit 1]\nError: Command blocked in Plan mode — this command appears \
+                     to modify files."
+                .to_string(),
+        });
+    }
 
     // ── Layer 1: Privilege escalation handling (sudo/doas/pkexec) ──────
     let mut sudo_guard: Option<super::sudo::AskpassGuard> = None;

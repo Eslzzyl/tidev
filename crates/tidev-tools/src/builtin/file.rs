@@ -1,7 +1,11 @@
 use anyhow::{Context, Result, bail};
 use diffy::DiffOptions;
 use serde_json::Value;
-use std::{fs, io::BufRead, path::{Path, PathBuf}};
+use std::{
+    fs,
+    io::BufRead,
+    path::{Path, PathBuf},
+};
 
 use super::apply_patch;
 use super::utils::{display_workspace_relative, read_existing_text, resolve_workspace_path};
@@ -1442,7 +1446,15 @@ mod tests {
         std::fs::write(nested.join("file.txt"), "hello world")?;
 
         // Read the text file — upward traversal finds subdir/AGENTS.md
-        let result = read_path(ws_path, cf_path, "subdir/nested/file.txt", None, None, false, false)?;
+        let result = read_path(
+            ws_path,
+            cf_path,
+            "subdir/nested/file.txt",
+            None,
+            None,
+            false,
+            false,
+        )?;
 
         assert!(
             !result.instruction_sources.is_empty(),

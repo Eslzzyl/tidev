@@ -1694,7 +1694,6 @@ impl SessionStore {
         let sid_strs: Vec<String> = if let Some(ids) = session_ids {
             ids.iter().map(|id| id.to_string()).collect()
         } else {
-            
             import_conn
                 .prepare("SELECT id FROM sessions")?
                 .query_map([], |row| row.get::<_, String>(0))?

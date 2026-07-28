@@ -12,8 +12,8 @@ use ratatui::layout::{Constraint, Layout, Margin, Position, Rect};
 use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, List, ListItem, Paragraph};
-use tidev_config::auth::{ActiveModel, ModelSummary};
 use tidev_config::ThinkingMatcher;
+use tidev_config::auth::{ActiveModel, ModelSummary};
 
 use crate::action::{Action, OverlayAction, OverlayKind};
 use crate::component::Component;
@@ -809,8 +809,10 @@ impl Component for ModelPanel {
                                     .unwrap_or(0);
                                 for (oi, opt) in tl_options.iter().enumerate() {
                                     let is_tl_selected = oi == tl_idx % tl_options.len();
-                                    let level_name =
-                                        opt.rsplit_once(':').map(|(_, v)| v.to_string()).unwrap_or_else(|| opt.clone());
+                                    let level_name = opt
+                                        .rsplit_once(':')
+                                        .map(|(_, v)| v.to_string())
+                                        .unwrap_or_else(|| opt.clone());
                                     let bullet = if is_tl_selected { " ● " } else { " ○ " };
                                     let tl_style = if is_tl_selected {
                                         Style::default()
@@ -943,14 +945,18 @@ mod tests {
         // request_model_id contains "5.6" → should include Max
         let item = make_model_item("gpt-5-6-luna", "gpt-5.6-luna", "GPT-5.6 Luna");
         let items = vec![item];
-        assert_options(&items, 0, &[
-            "gpt5:off",
-            "gpt5:low",
-            "gpt5:medium",
-            "gpt5:high",
-            "gpt5:xhigh",
-            "gpt5:max",
-        ]);
+        assert_options(
+            &items,
+            0,
+            &[
+                "gpt5:off",
+                "gpt5:low",
+                "gpt5:medium",
+                "gpt5:high",
+                "gpt5:xhigh",
+                "gpt5:max",
+            ],
+        );
     }
 
     #[test]
@@ -958,14 +964,18 @@ mod tests {
         // Empty request_model_id → falls back to display_name "GPT-5.6 Luna"
         let item = make_model_item("gpt-5-6-luna", "", "GPT-5.6 Luna");
         let items = vec![item];
-        assert_options(&items, 0, &[
-            "gpt5:off",
-            "gpt5:low",
-            "gpt5:medium",
-            "gpt5:high",
-            "gpt5:xhigh",
-            "gpt5:max",
-        ]);
+        assert_options(
+            &items,
+            0,
+            &[
+                "gpt5:off",
+                "gpt5:low",
+                "gpt5:medium",
+                "gpt5:high",
+                "gpt5:xhigh",
+                "gpt5:max",
+            ],
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -976,26 +986,34 @@ mod tests {
     fn gpt_5_4_no_max() {
         let item = make_model_item("gpt-5-4", "gpt-5.4", "GPT-5.4");
         let items = vec![item];
-        assert_options(&items, 0, &[
-            "gpt5:off",
-            "gpt5:low",
-            "gpt5:medium",
-            "gpt5:high",
-            "gpt5:xhigh",
-        ]);
+        assert_options(
+            &items,
+            0,
+            &[
+                "gpt5:off",
+                "gpt5:low",
+                "gpt5:medium",
+                "gpt5:high",
+                "gpt5:xhigh",
+            ],
+        );
     }
 
     #[test]
     fn gpt_5_5_no_max() {
         let item = make_model_item("gpt-5-5", "gpt-5.5", "GPT-5.5");
         let items = vec![item];
-        assert_options(&items, 0, &[
-            "gpt5:off",
-            "gpt5:low",
-            "gpt5:medium",
-            "gpt5:high",
-            "gpt5:xhigh",
-        ]);
+        assert_options(
+            &items,
+            0,
+            &[
+                "gpt5:off",
+                "gpt5:low",
+                "gpt5:medium",
+                "gpt5:high",
+                "gpt5:xhigh",
+            ],
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1004,11 +1022,17 @@ mod tests {
 
     #[test]
     fn deepseek_v4() {
-        let item = make_model_item("deepseek-v4-flash", "deepseek-v4-flash", "DeepSeek V4 Flash");
+        let item = make_model_item(
+            "deepseek-v4-flash",
+            "deepseek-v4-flash",
+            "DeepSeek V4 Flash",
+        );
         let items = vec![item];
-        assert_options(&items, 0, &[
-            "deepseek:off", "deepseek:high", "deepseek:max"
-        ]);
+        assert_options(
+            &items,
+            0,
+            &["deepseek:off", "deepseek:high", "deepseek:max"],
+        );
     }
 
     #[test]

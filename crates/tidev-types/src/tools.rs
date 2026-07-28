@@ -680,10 +680,7 @@ mod tests {
 
     #[test]
     fn test_tool_definition_mcp_name_sanitize() {
-        assert_eq!(
-            ToolDefinition::mcp_name("a b!c", "x@y"),
-            "mcp__a_b_c__x_y"
-        );
+        assert_eq!(ToolDefinition::mcp_name("a b!c", "x@y"), "mcp__a_b_c__x_y");
     }
 
     #[test]

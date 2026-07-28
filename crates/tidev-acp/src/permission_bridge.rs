@@ -25,8 +25,7 @@ pub fn spawn(
         while let Some(request) = request_rx.recv().await {
             match request.kind {
                 TuiRequestKind::ToolApproval(tools_with_violations) => {
-                    let acp_session_id =
-                        acp::SessionId::new(request.session_id.to_string());
+                    let acp_session_id = acp::SessionId::new(request.session_id.to_string());
                     let mut approved_tools = Vec::new();
 
                     for twv in &tools_with_violations {
@@ -65,10 +64,7 @@ pub fn spawn(
                         );
 
                         // Send the request and wait for the client's response.
-                        let response = cx
-                            .send_request(permission_request)
-                            .block_task()
-                            .await;
+                        let response = cx.send_request(permission_request).block_task().await;
 
                         match response {
                             Ok(resp) => {
@@ -83,9 +79,7 @@ pub fn spawn(
                                         tool_call: tc.clone(),
                                         rejection: None,
                                         child_session_id: None,
-                                        allow_outside: twv
-                                            .workspace_boundary_violation
-                                            .is_some(),
+                                        allow_outside: twv.workspace_boundary_violation.is_some(),
                                         sensitive_file_approved: twv
                                             .sensitive_file_violation
                                             .is_some(),
@@ -94,11 +88,9 @@ pub fn spawn(
                                 } else {
                                     approved_tools.push(ApprovedTool {
                                         tool_call: tc.clone(),
-                                        rejection: Some(
-                                            ToolExecutionResult::new(format!(
-                                                "Denied by user: {reason}"
-                                            )),
-                                        ),
+                                        rejection: Some(ToolExecutionResult::new(format!(
+                                            "Denied by user: {reason}"
+                                        ))),
                                         child_session_id: None,
                                         allow_outside: false,
                                         sensitive_file_approved: false,
@@ -110,9 +102,10 @@ pub fn spawn(
                                 // Request failed — treat as rejection.
                                 approved_tools.push(ApprovedTool {
                                     tool_call: tc.clone(),
-                                    rejection: Some(ToolExecutionResult::new(
-                                        format!("Permission request failed for: {}", tc.name),
-                                    )),
+                                    rejection: Some(ToolExecutionResult::new(format!(
+                                        "Permission request failed for: {}",
+                                        tc.name
+                                    ))),
                                     child_session_id: None,
                                     allow_outside: false,
                                     sensitive_file_approved: false,

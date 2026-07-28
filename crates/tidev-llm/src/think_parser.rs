@@ -223,18 +223,14 @@ mod tests {
     #[test]
     fn multiple_mixed_think_thinking_tags() {
         let mut p = ThinkParser::default();
-        let (v, r) =
-            p.push("<think>first</think> visible <thinking>second</thinking> end");
+        let (v, r) = p.push("<think>first</think> visible <thinking>second</thinking> end");
         assert_eq!(v, " visible  end");
         assert_eq!(r, "firstsecond");
     }
 
     #[test]
     fn strip_think_tags_removes_think_and_thinking() {
-        assert_eq!(
-            strip_think_tags("<think>some text</think>"),
-            "some text"
-        );
+        assert_eq!(strip_think_tags("<think>some text</think>"), "some text");
         assert_eq!(
             strip_think_tags("<thinking>some text</thinking>"),
             "some text"

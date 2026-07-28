@@ -1280,7 +1280,10 @@ impl RuntimeBuilder {
             if let Err(e) = tool_registry.mcp_manager().refresh_all().await {
                 log::warn!("MCP server refresh (best-effort): {e:#}");
             }
-            log::info!("startup: MCP refresh done in {:?}", _t_mcp_refresh.elapsed());
+            log::info!(
+                "startup: MCP refresh done in {:?}",
+                _t_mcp_refresh.elapsed()
+            );
         }
 
         // 11. Snapshot service.

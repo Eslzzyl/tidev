@@ -18,8 +18,8 @@ use crate::debug::{
     save_request_for_debugging,
 };
 use crate::error::classify_response_status;
-use crate::think_parser::strip_think_tags;
 use crate::think_parser::ThinkParser;
+use crate::think_parser::strip_think_tags;
 use crate::tool_call_format::ToolCallBuilder;
 use crate::turn::finalize_turn;
 
@@ -925,10 +925,7 @@ mod tests {
         });
         let detail: ReasoningDetail = serde_json::from_value(json).unwrap();
         assert_eq!(detail.detail_type, "reasoning.text");
-        assert_eq!(
-            detail.text.as_deref(),
-            Some("Let me think step by step...")
-        );
+        assert_eq!(detail.text.as_deref(), Some("Let me think step by step..."));
         assert!(detail.summary.is_none());
     }
 

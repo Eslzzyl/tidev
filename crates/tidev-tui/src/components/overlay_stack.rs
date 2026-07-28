@@ -111,12 +111,12 @@ mod tests {
     use std::path::PathBuf;
     use std::rc::Rc;
 
+    use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::style::Color;
-    use ratatui::Terminal;
+    use tidev_config::AppConfig;
     use tidev_config::auth::{ActiveModel, AuthStore};
     use tidev_config::types::ApiType;
-    use tidev_config::AppConfig;
     use tidev_types::prompts::SessionMode;
     use tidev_types::reasoning::ThinkingLevelType;
     use uuid::Uuid;
@@ -130,6 +130,7 @@ mod tests {
     use crate::components::overlays::panel_launcher::PanelLauncher;
     use crate::components::overlays::question::QuestionDialog;
     use crate::components::overlays::rename::RenameDialog;
+    use crate::components::overlays::search::SearchPanel;
     use crate::components::overlays::sensitive::SensitiveFileDialog;
     use crate::components::overlays::session::{SessionPanel, SessionViewMode};
     use crate::components::overlays::settings::SettingsPanel;
@@ -137,7 +138,6 @@ mod tests {
     use crate::components::overlays::theme::ThemePanel;
     use crate::components::overlays::undo::UndoConfirmDialog;
     use crate::components::overlays::workspace::WorkspaceBoundaryDialog;
-    use crate::components::overlays::search::SearchPanel;
     use crate::theme::{ThemeName, ThemePalette};
 
     // ---------------------------------------------------------------------------
@@ -379,15 +379,13 @@ mod tests {
 
     #[test]
     fn sensitive_file_dialog_uses_main_area() {
-        let dialog =
-            SensitiveFileDialog::new(PathBuf::from("/f"), PathBuf::from("/w"), 0, 1);
+        let dialog = SensitiveFileDialog::new(PathBuf::from("/f"), PathBuf::from("/w"), 0, 1);
         assert!(dialog.overlay_uses_main_area());
     }
 
     #[test]
     fn workspace_boundary_dialog_uses_main_area() {
-        let dialog =
-            WorkspaceBoundaryDialog::new(PathBuf::from("/f"), PathBuf::from("/w"), 0, 1);
+        let dialog = WorkspaceBoundaryDialog::new(PathBuf::from("/f"), PathBuf::from("/w"), 0, 1);
         assert!(dialog.overlay_uses_main_area());
     }
 
@@ -499,16 +497,15 @@ mod tests {
     fn image_viewer_does_not_use_main_area() {
         // Create a minimal 1x1 black PNG in-memory.
         let png_bytes = make_test_png();
-        let viewer =
-            ImageViewer::from_raw(png_bytes, "test.png".into(), None).unwrap();
+        let viewer = ImageViewer::from_raw(png_bytes, "test.png".into(), None).unwrap();
         assert!(!viewer.overlay_uses_main_area());
     }
 
     /// Produce a valid 1×1 RGB PNG in memory.
     fn make_test_png() -> Vec<u8> {
-        use image::codecs::png::PngEncoder;
         use image::ExtendedColorType;
         use image::ImageEncoder;
+        use image::codecs::png::PngEncoder;
         let mut buf = std::io::Cursor::new(Vec::new());
         let encoder = PngEncoder::new(&mut buf);
         // One black pixel (R=0, G=0, B=0).
