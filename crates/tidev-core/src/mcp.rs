@@ -577,17 +577,17 @@ fn call_tool_result_data(
     let mut chunks = Vec::new();
     let mut attachments = Vec::new();
     for content in &result.content {
-        if let Some(text) = content.raw.as_text() {
+        if let Some(text) = content.as_text() {
             chunks.push(text.text.clone());
             continue;
         }
 
-        if let Some(resource) = content.raw.as_resource_link() {
+        if let Some(resource) = content.as_resource_link() {
             chunks.push(format!("[resource:{}]", resource.uri));
             continue;
         }
 
-        if let Some(image) = content.raw.as_image() {
+        if let Some(image) = content.as_image() {
             // Decode base64 data into raw bytes.
             use base64::Engine as _;
             let decoded = base64::engine::general_purpose::STANDARD
@@ -603,7 +603,7 @@ fn call_tool_result_data(
             continue;
         }
 
-        chunks.push(format!("[mcp-content:{:?}]", content.raw));
+        chunks.push(format!("[mcp-content:{:?}]", content));
     }
 
     let joined = chunks.join("\n");
