@@ -421,17 +421,9 @@ fn render_tool_call_lines(
             ));
         }
         "apply_patch" => {
-            let patch_text = string_field("patch_text").unwrap_or_default();
-            let file_paths: Vec<&str> = patch_text
-                .lines()
-                .filter_map(|line| {
-                    let trimmed = line.trim();
-                    trimmed
-                        .strip_prefix("*** Add File: ")
-                        .or_else(|| trimmed.strip_prefix("*** Update File: "))
-                        .or_else(|| trimmed.strip_prefix("*** Delete File: "))
-                })
-                .collect();
+            let file_paths = string_field("patch_text")
+                .map(|patch_text| patch_file_paths(&patch_text))
+                .unwrap_or_else(|| partial_patch_file_paths(&tool_call.arguments));
             let title = if file_paths.is_empty() {
                 "Apply patch".to_string()
             } else if file_paths.len() == 1 {
@@ -875,6 +867,71 @@ fn count_patch_changes(args: &str) -> (usize, usize, usize) {
     (adds, dels, ops)
 }
 
+/// Extract file paths from completed or partially streamed `patch_text` input.
+///
+/// The tool arguments are JSON, so `patch_text` commonly arrives with newline
+/// escapes while the overall JSON object is still incomplete. Decode only the
+/// string value that has arrived so the patch title can update immediately.
+fn partial_patch_file_paths(args: &str) -> Vec<String> {
+    const KEY: &str = "\"patch_text\":";
+
+    let Some(start) = args.find(KEY) else {
+        return Vec::new();
+    };
+    let value_start = args[start + KEY.len()..].trim_start();
+    let Some(value_start) = value_start.strip_prefix('"') else {
+        return Vec::new();
+    };
+
+    let mut patch_text = String::new();
+    let mut chars = value_start.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '"' {
+            break;
+        }
+        if ch != '\\' {
+            patch_text.push(ch);
+            continue;
+        }
+
+        match chars.next() {
+            Some('n') => patch_text.push('\n'),
+            Some('r') => patch_text.push('\r'),
+            Some('t') => patch_text.push('\t'),
+            Some('"') => patch_text.push('"'),
+            Some('\\') => patch_text.push('\\'),
+            Some('b') => patch_text.push('\u{0008}'),
+            Some('f') => patch_text.push('\u{000C}'),
+            Some('u') => {
+                let hex: String = chars.by_ref().take(4).collect();
+                if let Ok(codepoint) = u32::from_str_radix(&hex, 16)
+                    && let Some(decoded) = char::from_u32(codepoint)
+                {
+                    patch_text.push(decoded);
+                }
+            }
+            Some(other) => patch_text.push(other),
+            None => break,
+        }
+    }
+
+    patch_file_paths(&patch_text)
+}
+
+fn patch_file_paths(patch_text: &str) -> Vec<String> {
+    patch_text
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            trimmed
+                .strip_prefix("*** Add File: ")
+                .or_else(|| trimmed.strip_prefix("*** Update File: "))
+                .or_else(|| trimmed.strip_prefix("*** Delete File: "))
+        })
+        .map(str::to_string)
+        .collect()
+}
+
 pub(crate) fn tool_call_arguments_are_complete(arguments: &str) -> bool {
     if arguments.trim().is_empty() {
         return false;
@@ -1054,5 +1111,27 @@ mod tests {
             !rendered2.contains("<content>"),
             "Should NOT leak content tag"
         );
+    }
+
+    #[test]
+    fn partial_patch_file_paths_extracts_streamed_filename() {
+        let args = r#"{"patch_text":"*** Begin Patch\n*** Update File: src/main.rs"#;
+
+        assert_eq!(partial_patch_file_paths(args), vec!["src/main.rs"]);
+    }
+
+    #[test]
+    fn partial_patch_file_paths_handles_multiple_operations() {
+        let args = r#"{"patch_text":"*** Begin Patch\n*** Add File: src/new.rs\n*** Update File: src/main.rs\n*** Delete File: src/old.rs\n"#;
+
+        assert_eq!(
+            partial_patch_file_paths(args),
+            vec!["src/new.rs", "src/main.rs", "src/old.rs"]
+        );
+    }
+
+    #[test]
+    fn partial_patch_file_paths_ignores_non_patch_arguments() {
+        assert!(partial_patch_file_paths(r#"{"file_path":"src/main.rs"#).is_empty());
     }
 }
