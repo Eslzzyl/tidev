@@ -98,6 +98,10 @@ pub(crate) async fn stream_openai(
     let mut think_parser = ThinkParser::default();
     let mut first_delta_time: Option<std::time::Instant> = None;
     let mut raw_payloads: Vec<String> = Vec::new();
+    // When the API already provides reasoning through separate fields
+    // (reasoning_content / reasoning_details), skip ThinkParser on the
+    // text content — it is guaranteed to be visible text only.
+    let mut has_reasoning_channel = false;
 
     use futures_util::StreamExt;
 
@@ -171,6 +175,7 @@ pub(crate) async fn stream_openai(
 
                 for choice in event.choices {
                     if let Some(reasoning) = choice.delta.reasoning_content {
+                        has_reasoning_channel = true;
                         if first_delta_time.is_none() {
                             first_delta_time = Some(std::time::Instant::now());
                         }
@@ -188,6 +193,7 @@ pub(crate) async fn stream_openai(
                     // Handle reasoning_details: structured multi-section reasoning
                     // from newer OpenAI Chat Completions API (e.g. gpt-5.6-luna).
                     if let Some(details) = &choice.delta.reasoning_details {
+                        has_reasoning_channel = true;
                         if first_delta_time.is_none() {
                             first_delta_time = Some(std::time::Instant::now());
                         }
@@ -218,24 +224,42 @@ pub(crate) async fn stream_openai(
                         if first_delta_time.is_none() {
                             first_delta_time = Some(std::time::Instant::now());
                         }
-                        let (visible, reasoning) = think_parser.push(&content);
 
-                        if !visible.is_empty() {
-                            assistant_text.push_str(&visible);
+                        if has_reasoning_channel {
+                            // Reasoning already provided through separate fields
+                            // (reasoning_content / reasoning_details).  Send
+                            // content directly as visible text — the ThinkParser
+                            // must not see it, otherwise literal <think> or
+                            // <thinking> text in the visible output would be
+                            // misclassified as reasoning.
+                            assistant_text.push_str(&content);
                             let _ = tx.send(BackendEvent::Delta {
                                 session_id,
                                 request_id,
-                                content: visible,
+                                content,
                             });
-                        }
+                        } else {
+                            // No separate reasoning channel — use ThinkParser to
+                            // extract any <think> / <thinking> tags from the text.
+                            let (visible, reasoning) = think_parser.push(&content);
 
-                        if !reasoning.is_empty() {
-                            reasoning_text.push_str(&reasoning);
-                            let _ = tx.send(BackendEvent::ReasoningDelta {
-                                session_id,
-                                request_id,
-                                content: reasoning,
-                            });
+                            if !visible.is_empty() {
+                                assistant_text.push_str(&visible);
+                                let _ = tx.send(BackendEvent::Delta {
+                                    session_id,
+                                    request_id,
+                                    content: visible,
+                                });
+                            }
+
+                            if !reasoning.is_empty() {
+                                reasoning_text.push_str(&reasoning);
+                                let _ = tx.send(BackendEvent::ReasoningDelta {
+                                    session_id,
+                                    request_id,
+                                    content: reasoning,
+                                });
+                            }
                         }
                     }
 
