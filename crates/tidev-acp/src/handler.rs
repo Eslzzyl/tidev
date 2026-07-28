@@ -13,6 +13,7 @@ use tokio::sync::{oneshot, RwLock};
 use uuid::Uuid;
 
 use tidev_core::Runtime;
+use tidev_types::message::MessageRole;
 use tidev_types::prompts::SessionMode;
 use tidev_utils::session::title_from_prompt;
 use tidev_config::{auth::ActiveModel, AppConfig, AuthStore, ThinkingMatcher};
@@ -34,6 +35,12 @@ struct AcpState {
     current_mode: RwLock<SessionMode>,
     /// Cached config options for the active session.
     config_options: RwLock<Vec<acp::SessionConfigOption>>,
+    /// Cumulative input tokens across all turns (for PromptResponse.usage).
+    cumulative_input: RwLock<u64>,
+    /// Cumulative output tokens across all turns.
+    cumulative_output: RwLock<u64>,
+    /// Cumulative cache read tokens across all turns.
+    cumulative_cache_read: RwLock<u64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -115,6 +122,9 @@ pub async fn run_acp_agent() -> Result<()> {
         session_named: RwLock::new(false),
         current_mode: RwLock::new(SessionMode::Build),
         config_options: RwLock::new(Vec::new()),
+        cumulative_input: RwLock::new(0),
+        cumulative_output: RwLock::new(0),
+        cumulative_cache_read: RwLock::new(0),
     });
 
     Agent.builder()
@@ -197,10 +207,14 @@ pub async fn run_acp_agent() -> Result<()> {
 
                         log::info!("ACP: created session {session_id}");
 
+                        let context_window = state.runtime.active_model().context_window;
                         let translator =
-                            crate::event_translator::EventTranslator::new(session_id);
+                            crate::event_translator::EventTranslator::new(session_id, context_window);
                         *state.translator.write().await = Some(translator);
                         *state.active_session.write().await = Some(session_id);
+                        *state.cumulative_input.write().await = 0;
+                        *state.cumulative_output.write().await = 0;
+                        *state.cumulative_cache_read.write().await = 0;
                         log::info!("ACP: translator set for session {session_id}");
 
                         // Reset mode to default for the new session.
@@ -295,6 +309,31 @@ pub async fn run_acp_agent() -> Result<()> {
                                 agent_client_protocol::Error::internal_error()
                                     .data(format!("failed to load messages: {e}"))
                             })?;
+
+                        // Compute cumulative token usage from stored messages
+                        // (same as TUI sidebar "Total").
+                        let (cum_in, cum_out, cum_cache) = messages
+                            .iter()
+                            .filter(|m| m.role == MessageRole::Assistant)
+                            .fold((0u64, 0u64, 0u64), |(ci, co, ccr), m| {
+                                (
+                                    ci + m.input_tokens.unwrap_or(0) as u64,
+                                    co + m.output_tokens.unwrap_or(0) as u64,
+                                    ccr + m.cache_read_tokens.unwrap_or(0) as u64,
+                                )
+                            });
+
+                        // Compute context_used from the last assistant message.
+                        let _context_used = messages
+                            .iter()
+                            .filter(|m| m.role == MessageRole::Assistant)
+                            .last()
+                            .map(|m| {
+                                m.input_tokens.unwrap_or(0) as u64
+                                    + m.output_tokens.unwrap_or(0) as u64
+                            })
+                            .unwrap_or(0);
+
                         state
                             .runtime
                             .set_message_buffer(session_id, messages)
@@ -321,10 +360,14 @@ pub async fn run_acp_agent() -> Result<()> {
                         }
 
                         // Set up translator and mark session as active.
+                        let context_window = state.runtime.active_model().context_window;
                         let translator =
-                            crate::event_translator::EventTranslator::new(session_id);
+                            crate::event_translator::EventTranslator::new(session_id, context_window);
                         *state.translator.write().await = Some(translator);
                         *state.active_session.write().await = Some(session_id);
+                        *state.cumulative_input.write().await = cum_in;
+                        *state.cumulative_output.write().await = cum_out;
+                        *state.cumulative_cache_read.write().await = cum_cache;
 
                         // Reset mode to default for the loaded session.
                         *state.current_mode.write().await = SessionMode::Build;
@@ -643,6 +686,12 @@ pub async fn run_acp_agent() -> Result<()> {
                                 });
                                 let _ = state.runtime.save_config();
 
+                                // Update translator's context_window for UsageUpdate.size.
+                                let new_window = state.runtime.active_model().context_window;
+                                if let Some(ref mut t) = *state.translator.write().await {
+                                    t.set_context_window(new_window);
+                                }
+
                                 log::info!("ACP: model changed to {provider_id}/{model_id}");
                             }
                             "thought_level" => {
@@ -743,6 +792,20 @@ async fn run_event_loop(
     while let Some(event) = event_rx.recv().await {
         log::debug!("ACP: event loop received event: {:?}", std::mem::discriminant(&event));
 
+        // ── Update cumulative token counts ──────────────────
+        // Before translation, update per-session cumulative values from UsageStats.
+        if let BackendEvent::UsageStats {
+            input_tokens,
+            output_tokens,
+            cache_read_tokens,
+            ..
+        } = &event
+        {
+            *state.cumulative_input.write().await += *input_tokens as u64;
+            *state.cumulative_output.write().await += *output_tokens as u64;
+            *state.cumulative_cache_read.write().await += *cache_read_tokens as u64;
+        }
+
         // Translate the event into ACP notifications.
         let notifications = {
             let mut guard = state.translator.write().await;
@@ -767,15 +830,20 @@ async fn run_event_loop(
         // When the LLM turn finishes (BackendEvent::Finished) or fails
         // (BackendEvent::Failed), resolve the pending `session/prompt`
         // response with the actual stop reason.
-        if let BackendEvent::Finished { turn, .. } = &event {
-            let stop_reason = match turn.finish_reason.as_deref() {
-                Some("stop") | Some("end_turn") => acp::StopReason::EndTurn,
-                Some("max_tokens") | Some("length") => acp::StopReason::MaxTokens,
-                _ => acp::StopReason::EndTurn,
-            };
+        if let BackendEvent::Finished { .. } = &event {
+            let cum_in = *state.cumulative_input.read().await;
+            let cum_out = *state.cumulative_output.read().await;
+            let cum_cache = *state.cumulative_cache_read.read().await;
+            let total = cum_in + cum_out;
+
+            let usage = acp::Usage::new(total, cum_in, cum_out)
+                .cached_read_tokens(cum_cache);
+
             if let Some(tx) = state.pending_prompt.write().await.take() {
-                log::info!("ACP: turn completed, sending PromptResponse({stop_reason:?})");
-                let _ = tx.send(acp::PromptResponse::new(stop_reason));
+                log::info!("ACP: turn completed, sending PromptResponse with usage");
+                let _ = tx.send(
+                    acp::PromptResponse::new(acp::StopReason::EndTurn).usage(usage),
+                );
             }
         } else if matches!(&event, BackendEvent::Failed { .. }) {
             if let Some(tx) = state.pending_prompt.write().await.take() {

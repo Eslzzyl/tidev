@@ -21,16 +21,24 @@ pub struct EventTranslator {
     message_counter: u64,
     /// Map from tidev `request_id` to ACP `MessageId`.
     request_message_ids: HashMap<u64, acp::MessageId>,
+    /// Model's maximum context window size in tokens (for UsageUpdate.size).
+    context_window: usize,
 }
 
 impl EventTranslator {
-    /// Create a new translator for the given session.
-    pub fn new(session_id: Uuid) -> Self {
+    /// Create a new translator for the given session and context window.
+    pub fn new(session_id: Uuid, context_window: usize) -> Self {
         Self {
             session_id: acp::SessionId::new(session_id.to_string()),
             message_counter: 0,
             request_message_ids: HashMap::new(),
+            context_window,
         }
+    }
+
+    /// Update the context window size (e.g. after a model switch).
+    pub fn set_context_window(&mut self, window: usize) {
+        self.context_window = window;
     }
 
     /// Allocate a new ACP message ID for the given backend `request_id`.
@@ -283,13 +291,11 @@ impl EventTranslator {
                 request_id: _,
                 input_tokens,
                 output_tokens,
-                total_tokens,
                 ..
             } => {
-                let usage = acp::UsageUpdate::new(
-                    *total_tokens as u64,
-                    (*input_tokens + *output_tokens) as u64,
-                );
+                let used = (*input_tokens + *output_tokens) as u64;
+                let size = self.context_window as u64;
+                let usage = acp::UsageUpdate::new(used, size);
                 vec![acp::SessionNotification::new(
                     self.session_id.clone(),
                     acp::SessionUpdate::UsageUpdate(usage),
@@ -409,7 +415,7 @@ mod tests {
     }
 
     fn make_translator() -> EventTranslator {
-        EventTranslator::new(sid())
+        EventTranslator::new(sid(), 200000)
     }
 
     fn make_tc(name: &str, args: &str) -> tidev_types::message::ToolCall {
@@ -663,17 +669,18 @@ mod tests {
             input_tokens: 100,
             output_tokens: 50,
             total_tokens: 150,
-            cache_read_tokens: 0,
-            cache_write_tokens: 0,
+            cache_read_tokens: 30,
+            cache_write_tokens: 10,
             model_id: "gpt-4".into(),
             duration_ms: Some(1234),
         });
         assert_eq!(notifs.len(), 1);
         match &notifs[0].update {
             acp::SessionUpdate::UsageUpdate(usage) => {
-                // UsageUpdate::new(used = total_tokens, size = input + output)
+                // used = input + output (current context fill)
                 assert_eq!(usage.used, 150);
-                assert_eq!(usage.size, 150);
+                // size = context_window from make_translator
+                assert_eq!(usage.size, 200000);
             }
             _ => panic!("expected UsageUpdate"),
         }
