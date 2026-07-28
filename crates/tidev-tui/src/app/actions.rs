@@ -437,9 +437,7 @@ impl App {
 
                     let workspace_root =
                         self.runtime.workspace_root().to_string_lossy().to_string();
-                    let config = self.runtime.config();
-                    let auth = self.runtime.auth();
-                    let active_model = match config.resolve_active_model(&auth) {
+                    let active_model = match self.runtime.resolve_active_model() {
                         Ok(m) => m,
                         Err(e) => {
                             log::error!("Failed to resolve active model for fork: {e}");
@@ -602,9 +600,7 @@ impl App {
                 Action::Session(SessionAction::Create) => {
                     self.current_session_id = None;
 
-                    let config = self.runtime.config();
-                    let auth = self.runtime.auth();
-                    let active_model = config.resolve_active_model(&auth).ok();
+                    let active_model = self.runtime.resolve_active_model().ok();
 
                     // Restore the runtime's active model to the default so
                     // the composer/header no longer shows the previous
@@ -723,10 +719,8 @@ impl App {
                                             self.shown_instruction_sources.clear();
 
                                             // Initialize MessageList for the new session.
-                                            let config = self.runtime.config();
-                                            let auth = self.runtime.auth();
                                             let active_model =
-                                                config.resolve_active_model(&auth).ok();
+                                                self.runtime.resolve_active_model().ok();
                                             let model_display = active_model
                                                 .as_ref()
                                                 .map(|m| m.display_name.clone())

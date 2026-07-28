@@ -89,7 +89,7 @@ impl App {
                 use crate::components::overlays::model::ModelPanelTab;
                 let config = self.runtime.config();
                 let auth = self.runtime.auth();
-                let active_model = match config.resolve_active_model(&auth) {
+                let active_model = match self.runtime.resolve_active_model() {
                     Ok(m) => m,
                     Err(e) => {
                         log::error!("Failed to resolve active model: {e}");

@@ -302,6 +302,25 @@ impl Runtime {
         self.active_model.read().unwrap().clone()
     }
 
+    /// Resolve the configured active model with its persisted thinking level.
+    pub fn resolve_active_model(&self) -> Result<ActiveModel> {
+        let config = self.config();
+        let auth = self.auth();
+        let mut model = config.resolve_active_model(&auth)?;
+        self.apply_saved_thinking_level(&mut model);
+        Ok(model)
+    }
+
+    fn apply_saved_thinking_level(&self, model: &mut ActiveModel) {
+        if let Ok(Some(level)) = self
+            .session_manager
+            .store()
+            .load_model_thinking_level(&model.provider_id, &model.model_id)
+        {
+            model.thinking_level = ThinkingLevelType::from_string(&level);
+        }
+    }
+
     /// Update the active model (called by TUI on provider/model switch).
     pub fn set_active_model(&self, model: tidev_config::auth::ActiveModel) {
         *self.active_model.write().unwrap() = model;
@@ -1284,8 +1303,7 @@ impl RuntimeBuilder {
         if let Ok(Some(level_str)) =
             store.load_model_thinking_level(&active_model.provider_id, &active_model.model_id)
         {
-            active_model.thinking_level =
-                tidev_types::reasoning::ThinkingLevelType::from_string(&level_str);
+            active_model.thinking_level = ThinkingLevelType::from_string(&level_str);
         }
 
         // Store active model for loop construction.
