@@ -739,13 +739,15 @@ impl Runtime {
 
     /// Cancel the current operation.
     ///
-    /// This performs a two-phase shutdown:
-    /// 1. Fire the cancellation token (cooperative signal for loops at await
-    ///    points).
-    /// 2. Force-abort the agent loop task, which cascades through JoinSet
-    ///    drops to abort every spawned tool task — including subagents and
-    ///    their nested tools at any depth.
-    /// 3. Kill any remaining child processes (shell).
+    /// Signals cooperative cancellation for all sessions via their cancellation
+    /// tokens. Agent loops detect this at the next checkpoint and shut down
+    /// gracefully, allowing in-flight tools to persist their results and emit
+    /// final events before the loop exits.
+    ///
+    /// The `run_loop_handles` entries are dropped (not aborted), so the spawned
+    /// tasks remain alive long enough to complete their cleanup. The RAII
+    /// guard in `execute_tools` ensures `ToolCompleted` events are sent even
+    /// if the task is unexpectedly dropped during shutdown.
     pub async fn cancel(&self) {
         // 1. Signal cooperative cancellation for ALL sessions.
         let tokens: Vec<CancellationToken> = self
@@ -761,20 +763,12 @@ impl Runtime {
 
         self.busy_sessions.lock().unwrap().clear();
 
-        // 2. Force-abort ALL agent loop tasks.
-        let handles: Vec<tokio::task::JoinHandle<()>> = self
-            .run_loop_handles
-            .lock()
-            .unwrap()
-            .drain()
-            .map(|(_, h)| h)
-            .collect();
-        for h in handles {
-            h.abort();
-            let _ = tokio::time::timeout(Duration::from_millis(200), h).await;
-        }
+        // 2. Drop handles without aborting — the loops will exit naturally
+        //    after detecting the cancellation token.
+        self.run_loop_handles.lock().unwrap().clear();
 
-        // 3. Force-kill any lingering child processes (shell).
+        // 3. Force-kill any lingering child processes whose session's loop
+        //    may have exited without cleaning them up.
         tidev_tools::kill_all_children();
     }
 
@@ -790,12 +784,10 @@ impl Runtime {
 
         self.busy_sessions.lock().unwrap().remove(&session_id);
 
-        // 2. Force-abort this session's agent loop task.
-        let handle = self.run_loop_handles.lock().unwrap().remove(&session_id);
-        if let Some(h) = handle {
-            h.abort();
-            let _ = tokio::time::timeout(Duration::from_millis(200), h).await;
-        }
+        // 2. Drop the handle without aborting — the loop will detect the
+        //    cancellation token and shut down gracefully, letting in-flight
+        //    tools persist results and emit final events.
+        self.run_loop_handles.lock().unwrap().remove(&session_id);
         // Note: child processes for THIS session are handled by the
         // CancellationToken chain inside the shell tool. We don't call
         // kill_all_children() here because that would kill other sessions'

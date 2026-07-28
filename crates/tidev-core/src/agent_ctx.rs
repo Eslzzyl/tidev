@@ -847,31 +847,32 @@ impl AgentContext for CoreContext {
                 Some(self.event_tx.clone()),
             );
 
-            tokio::select! {
-                _ = self.cancel.cancelled() => {
-                    // The in-flight tool future is dropped here, aborting
-                    // any blocking I/O or network request inside.
-                    self.emit(BackendEvent::ToolCompleted {
-                        session_id,
-                        request_id,
-                        tool_call: tc.clone(),
-                        result: Box::new(ToolExecutionResult::new("User cancelled the request")),
-                    });
-                    results.push((
-                        tc,
-                        ToolExecutionResult::new("User cancelled the request"),
-                    ));
-                }
-                result = tool_fut => {
-                    self.emit(BackendEvent::ToolCompleted {
-                        session_id,
-                        request_id,
-                        tool_call: tc.clone(),
-                        result: Box::new(result.clone()),
-                    });
-                    results.push((tc, result));
-                }
-            }
+            // Guard ensures ToolCompleted is sent if this future is
+            // force-dropped (e.g. by JoinHandle::abort()), preventing the
+            // TUI's running_tools from leaking.
+            let mut guard = ToolCompletedGuard::new(
+                session_id,
+                Some(self.event_tx.clone()),
+                tc.clone(),
+            );
+
+            // Directly await the tool. We do NOT use a select! with a cancel
+            // branch here because doing so would drop the in-flight JoinHandle
+            // for spawned tools (shell), causing the spawned task's result
+            // to be lost. Instead, the tool receives the CancellationToken
+            // internally and responds to cancellation itself (shell kills
+            // the child process and returns partial output). Other write tools
+            // (write/edit/apply_patch/todowrite) are fast spawn_blocking
+            // operations that complete in milliseconds anyway.
+            let result = tool_fut.await;
+            guard.disarm();
+            self.emit(BackendEvent::ToolCompleted {
+                session_id,
+                request_id,
+                tool_call: tc.clone(),
+                result: Box::new(result.clone()),
+            });
+            results.push((tc, result));
         }
 
         // --- Task tools (subagents): parallel with immediate cancellation ---
@@ -1245,6 +1246,57 @@ impl AgentContext for CoreContext {
         self.session_manager
             .store()
             .append_instruction_sources(session_id, sources)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// RAII guard that ensures ToolCompleted is always emitted on abort.
+// ---------------------------------------------------------------------------
+
+/// RAII guard: sends `BackendEvent::ToolCompleted` on drop if not disarmed.
+///
+/// Ensures the TUI is always notified that a tool has completed, even when
+/// the `execute_tools` future is force-dropped (e.g. by `JoinHandle::abort()`).
+struct ToolCompletedGuard {
+    session_id: Uuid,
+    event_tx: Option<UnboundedSender<BackendEvent>>,
+    tool_call: ToolCall,
+    disarmed: bool,
+}
+
+impl ToolCompletedGuard {
+    fn new(
+        session_id: Uuid,
+        event_tx: Option<UnboundedSender<BackendEvent>>,
+        tool_call: ToolCall,
+    ) -> Self {
+        Self {
+            session_id,
+            event_tx,
+            tool_call,
+            disarmed: false,
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.disarmed = true;
+    }
+}
+
+impl Drop for ToolCompletedGuard {
+    fn drop(&mut self) {
+        if !self.disarmed {
+            if let Some(ref tx) = self.event_tx {
+                let _ = tx.send(BackendEvent::ToolCompleted {
+                    session_id: self.session_id,
+                    request_id: 0,
+                    tool_call: self.tool_call.clone(),
+                    result: Box::new(ToolExecutionResult::new(
+                        "User cancelled the request",
+                    )),
+                });
+            }
+        }
     }
 }
 

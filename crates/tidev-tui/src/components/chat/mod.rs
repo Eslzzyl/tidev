@@ -442,6 +442,13 @@ impl MessageList {
             exec.interrupted = true;
         }
 
+        // Safety net: clear running_tools for non-subagent tools (shell,
+        // write, edit, etc.). Under normal conditions ToolCompleted events
+        // clean these up, but if the agent loop is force-aborted before the
+        // event is emitted (see ToolCompletedGuard in agent_ctx.rs), this
+        // prevents "Running Shell" from leaking into subsequent turns.
+        self.running_tools.clear();
+
         // Append an error message to indicate the interruption.
         let mut err_msg = tidev_types::message::Message::new(
             tidev_types::message::MessageRole::Error,
