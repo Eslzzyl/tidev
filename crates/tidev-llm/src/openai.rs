@@ -18,6 +18,7 @@ use crate::debug::{
     save_request_for_debugging,
 };
 use crate::error::classify_response_status;
+use crate::think_parser::strip_think_tags;
 use crate::think_parser::ThinkParser;
 use crate::tool_call_format::ToolCallBuilder;
 use crate::turn::finalize_turn;
@@ -173,12 +174,44 @@ pub(crate) async fn stream_openai(
                         if first_delta_time.is_none() {
                             first_delta_time = Some(std::time::Instant::now());
                         }
-                        reasoning_text.push_str(&reasoning);
-                        let _ = tx.send(BackendEvent::ReasoningDelta {
-                            session_id,
-                            request_id,
-                            content: reasoning,
-                        });
+                        let cleaned = strip_think_tags(&reasoning);
+                        if !cleaned.is_empty() {
+                            reasoning_text.push_str(&cleaned);
+                            let _ = tx.send(BackendEvent::ReasoningDelta {
+                                session_id,
+                                request_id,
+                                content: cleaned,
+                            });
+                        }
+                    }
+
+                    // Handle reasoning_details: structured multi-section reasoning
+                    // from newer OpenAI Chat Completions API (e.g. gpt-5.6-luna).
+                    if let Some(details) = &choice.delta.reasoning_details {
+                        if first_delta_time.is_none() {
+                            first_delta_time = Some(std::time::Instant::now());
+                        }
+                        for detail in details {
+                            // Pick the content field based on the type indicator.
+                            let text = match detail.detail_type.as_str() {
+                                "reasoning.summary" => detail.summary.as_deref(),
+                                "reasoning.text" => detail.text.as_deref(),
+                                _ => None,
+                            };
+                            if let Some(text) = text {
+                                if !text.is_empty() {
+                                    let cleaned = strip_think_tags(text);
+                                    if !cleaned.is_empty() {
+                                        reasoning_text.push_str(&cleaned);
+                                        let _ = tx.send(BackendEvent::ReasoningDelta {
+                                            session_id,
+                                            request_id,
+                                            content: cleaned,
+                                        });
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     if let Some(content) = choice.delta.content {
@@ -838,6 +871,112 @@ mod tests {
             "no synthetic user when supports_images is false"
         );
     }
+
+    #[test]
+    fn reasoning_detail_summary_type_uses_summary_field() {
+        let json = serde_json::json!({
+            "type": "reasoning.summary",
+            "summary": "## Planning\nDetermine the approach",
+            "format": "openai-responses-v1",
+            "index": 0
+        });
+        let detail: ReasoningDetail = serde_json::from_value(json).unwrap();
+        assert_eq!(detail.detail_type, "reasoning.summary");
+        assert_eq!(
+            detail.summary.as_deref(),
+            Some("## Planning\nDetermine the approach")
+        );
+        assert!(detail.text.is_none());
+        assert_eq!(detail.format.as_deref(), Some("openai-responses-v1"));
+        assert_eq!(detail.index, Some(0));
+    }
+
+    #[test]
+    fn reasoning_detail_text_type_uses_text_field() {
+        let json = serde_json::json!({
+            "type": "reasoning.text",
+            "text": "Let me think step by step...",
+            "format": "anthropic-claude-v1",
+            "index": 1
+        });
+        let detail: ReasoningDetail = serde_json::from_value(json).unwrap();
+        assert_eq!(detail.detail_type, "reasoning.text");
+        assert_eq!(
+            detail.text.as_deref(),
+            Some("Let me think step by step...")
+        );
+        assert!(detail.summary.is_none());
+    }
+
+    #[test]
+    fn reasoning_detail_encrypted_type_has_no_readable_content() {
+        let json = serde_json::json!({
+            "type": "reasoning.encrypted",
+            "data": "encrypted-blob",
+            "format": "openai-responses-v1",
+            "index": 0
+        });
+        let detail: ReasoningDetail = serde_json::from_value(json).unwrap();
+        assert_eq!(detail.detail_type, "reasoning.encrypted");
+        assert!(detail.summary.is_none());
+        assert!(detail.text.is_none());
+    }
+
+    #[test]
+    fn reasoning_detail_delta_with_reasoning_content_tag_stripped() {
+        // Simulate a streaming delta where reasoning_content contains <thinking> tags.
+        let json = serde_json::json!({
+            "choices": [{
+                "index": 0,
+                "delta": {
+                    "reasoning_content": "<thinking>## Step 2</thinking>"
+                },
+                "finish_reason": null
+            }]
+        });
+        let event: ChatCompletionStreamResponse = serde_json::from_value(json).unwrap();
+        let reasoning = event.choices[0]
+            .delta
+            .reasoning_content
+            .as_deref()
+            .unwrap_or("");
+        let cleaned = crate::think_parser::strip_think_tags(reasoning);
+        assert_eq!(cleaned, "## Step 2");
+    }
+
+    #[test]
+    fn reasoning_details_delta_extracts_content_by_type() {
+        // Simulate a streaming delta with reasoning_details array.
+        let json = serde_json::json!({
+            "choices": [{
+                "index": 0,
+                "delta": {
+                    "reasoning_details": [
+                        {
+                            "type": "reasoning.summary",
+                            "summary": "## Planning",
+                            "format": "openai-responses-v1",
+                            "index": 0
+                        },
+                        {
+                            "type": "reasoning.summary",
+                            "summary": "## Implementation",
+                            "format": "openai-responses-v1",
+                            "index": 1
+                        }
+                    ]
+                },
+                "finish_reason": null
+            }]
+        });
+        let event: ChatCompletionStreamResponse = serde_json::from_value(json).unwrap();
+        let details = event.choices[0].delta.reasoning_details.as_ref().unwrap();
+        assert_eq!(details.len(), 2);
+        assert_eq!(details[0].detail_type, "reasoning.summary");
+        assert_eq!(details[0].summary.as_deref(), Some("## Planning"));
+        assert_eq!(details[1].detail_type, "reasoning.summary");
+        assert_eq!(details[1].summary.as_deref(), Some("## Implementation"));
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -882,8 +1021,34 @@ struct ChatCompletionDelta {
     /// `reasoning_content` (DeepSeek, standard) field names.
     #[serde(default, alias = "reasoning")]
     reasoning_content: Option<String>,
+    /// Newer OpenAI Chat Completions API returns structured reasoning
+    /// sections in this array (e.g. gpt-5.6-luna interleaved thinking).
+    #[serde(default)]
+    reasoning_details: Option<Vec<ReasoningDetail>>,
     #[serde(default)]
     tool_calls: Option<Vec<ChatCompletionToolCallDelta>>,
+}
+
+/// A single reasoning section from the `reasoning_details` array.
+#[derive(Clone, Debug, Default, Deserialize)]
+struct ReasoningDetail {
+    /// `reasoning.summary` → content in `summary` field,
+    /// `reasoning.text` → content in `text` field,
+    /// `reasoning.encrypted` → encrypted content, cannot be read.
+    #[serde(rename = "type")]
+    detail_type: String,
+    #[serde(default)]
+    summary: Option<String>,
+    #[serde(default)]
+    text: Option<String>,
+    /// Provider format identifier, e.g. `"openai-responses-v1"`.
+    #[serde(default)]
+    #[allow(dead_code)]
+    format: Option<String>,
+    /// Position in the reasoning sequence for interleaved thinking.
+    #[serde(default)]
+    #[allow(dead_code)]
+    index: Option<usize>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]

@@ -1,9 +1,43 @@
-/// Stream-aware `<think>…</think>` tag parser used to separate chain-of-thought
-/// reasoning from visible assistant text in streaming LLM responses.
+/// Stream-aware `<think>…</think>` / `<thinking>…</thinking>` tag parser used to
+/// separate chain-of-thought reasoning from visible assistant text in streaming
+/// LLM responses.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ThinkParser {
     in_think: bool,
     buffer: String,
+}
+
+// Tags to match (longer first so suffix detection works correctly).
+const OPEN_TAGS: &[&str] = &["<thinking>", "<think>"];
+const CLOSE_TAGS: &[&str] = &["</thinking>", "</think>"];
+
+/// Strip all `<think>`, `</think>`, `<thinking>`, `</thinking>` tags from `text`.
+///
+/// This is used for `reasoning_content` that bypasses the streaming parser but
+/// may still contain tag-delimited sections (e.g. interleaved thinking).
+pub(crate) fn strip_think_tags(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    let mut pos = 0;
+    let bytes = text.as_bytes();
+
+    while pos < bytes.len() {
+        // Look for any opening or closing tag at current position
+        let mut found = false;
+        for tag in OPEN_TAGS.iter().chain(CLOSE_TAGS) {
+            let tag_bytes = tag.as_bytes();
+            if bytes[pos..].starts_with(tag_bytes) {
+                pos += tag_bytes.len();
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            result.push(bytes[pos] as char);
+            pos += 1;
+        }
+    }
+
+    result
 }
 
 impl ThinkParser {
@@ -16,9 +50,11 @@ impl ThinkParser {
 
         loop {
             if self.in_think {
-                if let Some(end) = self.buffer.find("</think>") {
+                if let Some(end) = find_any_tag(&self.buffer, CLOSE_TAGS) {
                     reasoning.push_str(&self.buffer[..end]);
-                    self.buffer.drain(..end + "</think>".len());
+                    // Drain past the matched close tag
+                    let tag = close_tag_at(&self.buffer[end..]);
+                    self.buffer.drain(..end + tag.len());
                     self.in_think = false;
                     continue;
                 }
@@ -30,9 +66,11 @@ impl ThinkParser {
                 break;
             }
 
-            if let Some(start) = self.buffer.find("<think>") {
+            if let Some(start) = find_any_tag(&self.buffer, OPEN_TAGS) {
                 visible.push_str(&self.buffer[..start]);
-                self.buffer.drain(..start + "<think>".len());
+                // Drain past the matched open tag
+                let tag = open_tag_at(&self.buffer[start..]);
+                self.buffer.drain(..start + tag.len());
                 self.in_think = true;
                 continue;
             }
@@ -154,12 +192,66 @@ mod tests {
         assert_eq!(v, "</think>");
         assert!(r.is_empty());
     }
+
+    #[test]
+    fn thinking_tag_in_one_chunk() {
+        let mut p = ThinkParser::default();
+        let (v, r) = p.push("before <thinking>reasoning text</thinking> after");
+        assert_eq!(v, "before  after");
+        assert_eq!(r, "reasoning text");
+    }
+
+    #[test]
+    fn thinking_tag_split_across_chunks() {
+        let mut p = ThinkParser::default();
+        let (v, r) = p.push("before <thin");
+        assert_eq!(v, "before ");
+        assert!(r.is_empty());
+
+        let (v, r) = p.push("king>thinking text</thin");
+        assert!(v.is_empty());
+        assert_eq!(r, "thinking text");
+
+        let (v, r) = p.push("king> after");
+        assert_eq!(v, " after");
+        assert!(r.is_empty());
+    }
+
+    #[test]
+    fn multiple_mixed_think_thinking_tags() {
+        let mut p = ThinkParser::default();
+        let (v, r) =
+            p.push("<think>first</think> visible <thinking>second</thinking> end");
+        assert_eq!(v, " visible  end");
+        assert_eq!(r, "firstsecond");
+    }
+
+    #[test]
+    fn strip_think_tags_removes_think_and_thinking() {
+        assert_eq!(
+            strip_think_tags("<think>some text</think>"),
+            "some text"
+        );
+        assert_eq!(
+            strip_think_tags("<thinking>some text</thinking>"),
+            "some text"
+        );
+        assert_eq!(
+            strip_think_tags("before <think>a</think> after <thinking>b</thinking> end"),
+            "before a after b end"
+        );
+    }
+
+    #[test]
+    fn strip_think_tags_preserves_plain_text() {
+        assert_eq!(strip_think_tags("hello world"), "hello world");
+        assert_eq!(strip_think_tags(""), "");
+        assert_eq!(strip_think_tags("no tags here"), "no tags here");
+    }
 }
 
 fn think_tag_suffix_len(text: &str) -> usize {
-    const TAGS: [&str; 2] = ["</think>", "<think>"];
-
-    for tag in TAGS {
+    for tag in OPEN_TAGS.iter().chain(CLOSE_TAGS) {
         let max = tag.len().saturating_sub(1);
         for keep in (1..=max).rev() {
             if text.ends_with(&tag[..keep]) {
@@ -169,4 +261,40 @@ fn think_tag_suffix_len(text: &str) -> usize {
     }
 
     0
+}
+
+/// Find the earliest occurrence of any of the given `tags` in `text`.
+/// Returns the byte offset of the match, or `None`.
+fn find_any_tag(text: &str, tags: &[&str]) -> Option<usize> {
+    let mut earliest: Option<usize> = None;
+    for tag in tags {
+        if let Some(pos) = text.find(tag) {
+            match earliest {
+                None => earliest = Some(pos),
+                Some(prev) if pos < prev => earliest = Some(pos),
+                _ => {}
+            }
+        }
+    }
+    earliest
+}
+
+/// Return which close tag is at the start of `text` (assumes one matches).
+fn close_tag_at(text: &str) -> &'static str {
+    for tag in CLOSE_TAGS {
+        if text.starts_with(tag) {
+            return tag;
+        }
+    }
+    CLOSE_TAGS[0] // fallback, should never reach here
+}
+
+/// Return which open tag is at the start of `text` (assumes one matches).
+fn open_tag_at(text: &str) -> &'static str {
+    for tag in OPEN_TAGS {
+        if text.starts_with(tag) {
+            return tag;
+        }
+    }
+    OPEN_TAGS[0] // fallback, should never reach here
 }

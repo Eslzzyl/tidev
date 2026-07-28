@@ -17,6 +17,7 @@ use crate::debug::{
     save_request_for_debugging,
 };
 use crate::error::classify_response_status;
+use crate::think_parser::strip_think_tags;
 
 /// Responses API endpoint
 const RESPONSES_ENDPOINT: &str = "/responses";
@@ -204,12 +205,15 @@ pub(crate) async fn stream_responses(
                         if first_delta_time.is_none() {
                             first_delta_time = Some(std::time::Instant::now());
                         }
-                        reasoning_text.push_str(&delta);
-                        let _ = tx.send(BackendEvent::ReasoningDelta {
-                            session_id,
-                            request_id,
-                            content: delta,
-                        });
+                        let cleaned = strip_think_tags(&delta);
+                        if !cleaned.is_empty() {
+                            reasoning_text.push_str(&cleaned);
+                            let _ = tx.send(BackendEvent::ReasoningDelta {
+                                session_id,
+                                request_id,
+                                content: cleaned,
+                            });
+                        }
                     }
                     ResponseStreamEvent::ReasoningTextDelta {
                         delta,
@@ -221,12 +225,15 @@ pub(crate) async fn stream_responses(
                         if first_delta_time.is_none() {
                             first_delta_time = Some(std::time::Instant::now());
                         }
-                        reasoning_text.push_str(&delta);
-                        let _ = tx.send(BackendEvent::ReasoningDelta {
-                            session_id,
-                            request_id,
-                            content: delta,
-                        });
+                        let cleaned = strip_think_tags(&delta);
+                        if !cleaned.is_empty() {
+                            reasoning_text.push_str(&cleaned);
+                            let _ = tx.send(BackendEvent::ReasoningDelta {
+                                session_id,
+                                request_id,
+                                content: cleaned,
+                            });
+                        }
                     }
                     ResponseStreamEvent::ReasoningSummaryTextDelta {
                         summary_delta,
@@ -235,12 +242,15 @@ pub(crate) async fn stream_responses(
                         output_index: _,
                         summary_index: _,
                     } => {
-                        reasoning_text.push_str(&summary_delta);
-                        let _ = tx.send(BackendEvent::ReasoningDelta {
-                            session_id,
-                            request_id,
-                            content: summary_delta,
-                        });
+                        let cleaned = strip_think_tags(&summary_delta);
+                        if !cleaned.is_empty() {
+                            reasoning_text.push_str(&cleaned);
+                            let _ = tx.send(BackendEvent::ReasoningDelta {
+                                session_id,
+                                request_id,
+                                content: cleaned,
+                            });
+                        }
                     }
                     ResponseStreamEvent::ReasoningSummaryTextDone {
                         text,
@@ -249,12 +259,15 @@ pub(crate) async fn stream_responses(
                         output_index: _,
                         summary_index: _,
                     } => {
-                        reasoning_text.push_str(&text);
-                        let _ = tx.send(BackendEvent::ReasoningDelta {
-                            session_id,
-                            request_id,
-                            content: text,
-                        });
+                        let cleaned = strip_think_tags(&text);
+                        if !cleaned.is_empty() {
+                            reasoning_text.push_str(&cleaned);
+                            let _ = tx.send(BackendEvent::ReasoningDelta {
+                                session_id,
+                                request_id,
+                                content: cleaned,
+                            });
+                        }
                     }
                     ResponseStreamEvent::OutputItemAdded {
                         item,

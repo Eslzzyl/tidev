@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use tidev_types::message::AssistantTurn;
 
 use crate::think_parser::ThinkParser;
+use crate::think_parser::strip_think_tags;
 use crate::tool_call_format::{ToolCallBuilder, parse_invoke_xml};
 
 /// Build the final [`AssistantTurn`] from the accumulated streaming data.
@@ -19,7 +20,7 @@ pub(crate) fn finalize_turn(
 ) -> AssistantTurn {
     let (visible, reasoning) = think_parser.finish();
     let assistant_text = assistant_text + &visible;
-    let reasoning_text = reasoning_text + &reasoning;
+    let reasoning_text = strip_think_tags(&(reasoning_text + &reasoning));
 
     // Convert native tool calls from the streaming delta
     let tool_calls = tool_calls
