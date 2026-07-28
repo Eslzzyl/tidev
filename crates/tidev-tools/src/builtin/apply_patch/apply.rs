@@ -274,9 +274,10 @@ fn compute_replacements(
                 line_index = idx + 1;
             } else {
                 return Err(format!(
-                    "Failed to find context '{}' in {}",
-                    ctx_line,
-                    display_workspace_relative(workspace_root, path)
+                    "Failed to find context at position {} in {}. \
+                     The file may have changed since the patch was generated.",
+                    line_index,
+                    display_workspace_relative(workspace_root, path),
                 ));
             }
         }
@@ -311,11 +312,12 @@ fn compute_replacements(
             replacements.push((start_idx, pattern.len(), new_slice.to_vec()));
             line_index = start_idx + pattern.len();
         } else {
-            let truncated = truncate_lines(&chunk.old_lines, 5);
             return Err(format!(
-                "Failed to find expected lines in {}:\n{}",
+                "Failed to find text to replace ({} lines, starting at position {}) in {}. \
+                 The file may have changed since the patch was generated.",
+                chunk.old_lines.len(),
+                line_index,
                 display_workspace_relative(workspace_root, path),
-                truncated,
             ));
         }
     }
@@ -323,16 +325,6 @@ fn compute_replacements(
     // Sort by position (should already be in order, but be safe)
     replacements.sort_by_key(|(a, _, _)| *a);
     Ok(replacements)
-}
-
-/// Truncate lines to at most `max` items, appending a summary if truncated.
-fn truncate_lines(lines: &[String], max: usize) -> String {
-    if lines.len() <= max {
-        lines.join("\n")
-    } else {
-        let shown = lines[..max].join("\n");
-        format!("{}\n... ({} more lines)", shown, lines.len() - max)
-    }
 }
 
 /// Apply replacements in reverse order so indices stay valid.
