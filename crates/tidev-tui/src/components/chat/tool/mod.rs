@@ -11,6 +11,7 @@ mod subagent;
 mod summary;
 mod todo;
 mod utils;
+mod webfetch;
 mod web;
 
 use std::path::Path;
@@ -166,12 +167,36 @@ pub(crate) fn render_tool_call_with_result(
         ]));
     } else {
         // Arguments complete or write/edit with live progress: show header
+
+        // Compute line-range suffix from webfetch parameters (similar to read)
+        let result_suffix = if canonical_name == "webfetch" {
+            serde_json::from_str::<serde_json::Value>(&tool_call.arguments).ok().and_then(|parsed| {
+                let offset = parsed.get("offset").and_then(|v| v.as_i64());
+                let limit = parsed.get("limit").and_then(|v| v.as_i64());
+                match (offset, limit) {
+                    (Some(off), Some(lim)) => {
+                        Some(format!(" → Line {}-{}", off, off + lim - 1))
+                    }
+                    (Some(off), None) => {
+                        Some(format!(" → Line {}-...", off))
+                    }
+                    (None, Some(lim)) => {
+                        Some(format!(" → Line 1-{}", lim))
+                    }
+                    (None, None) => None,
+                }
+            })
+        } else {
+            None
+        };
+
         let call_lines = render_tool_call_lines(
             tool_call,
             content_width,
             palette,
             exit_code,
             ctx.workspace_root,
+            result_suffix,
         );
         lines.extend(call_lines);
     }
@@ -249,6 +274,7 @@ fn render_tool_call_lines(
     palette: ThemePalette,
     exit_code: Option<i32>,
     workspace_root: &Path,
+    result_suffix: Option<String>,
 ) -> Vec<Line<'static>> {
     let parsed = serde_json::from_str::<serde_json::Value>(&tool_call.arguments).ok();
 
@@ -408,9 +434,30 @@ fn render_tool_call_lines(
             {
                 suffix_parts.push(format!("{}s", to));
             }
+            if let Some(off) = parsed
+                .as_ref()
+                .and_then(|v| v.get("offset"))
+                .and_then(|v| v.as_i64())
+            {
+                suffix_parts.push(format!("offset={}", off));
+            }
+            if let Some(lim) = parsed
+                .as_ref()
+                .and_then(|v| v.get("limit"))
+                .and_then(|v| v.as_i64())
+            {
+                suffix_parts.push(format!("limit={}", lim));
+            }
             if !suffix_parts.is_empty() {
                 title_spans.push(Span::styled(
                     format!("  ({})", suffix_parts.join(", ")),
+                    Style::default().fg(palette.muted),
+                ));
+            }
+            // Append line-range suffix (computed from offset/limit params)
+            if let Some(ref suffix) = result_suffix {
+                title_spans.push(Span::styled(
+                    suffix.clone(),
                     Style::default().fg(palette.muted),
                 ));
             }

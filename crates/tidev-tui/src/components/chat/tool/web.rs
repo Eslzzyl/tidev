@@ -1,4 +1,5 @@
 use super::*;
+use super::webfetch::strip_webfetch_content;
 
 // ---------------------------------------------------------------------------
 // Web search result rendering
@@ -94,7 +95,9 @@ pub(super) fn render_webfetch_result_lines(
     )]));
     lines.push(Line::from(""));
 
-    let rendered = render_markdown_text_with_width_and_cwd(output, Some(content_width), None);
+    // Strip line-number prefixes and metadata footers for clean TUI display
+    let clean = strip_webfetch_content(output);
+    let rendered = render_markdown_text_with_width_and_cwd(&clean, Some(content_width), None);
     let md_lines: Vec<Line<'static>> = rendered.lines.clone();
 
     if is_expanded {
