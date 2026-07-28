@@ -13,6 +13,7 @@ use crate::action::{
 use crate::component::Component;
 
 use crate::components::chat::MessageList;
+use tidev_utils::session::title_from_prompt;
 
 impl App {
     pub(crate) fn process_action(&mut self, action: Action) {
@@ -570,11 +571,7 @@ impl App {
                     } else {
                         title.trim()
                     };
-                    match self.runtime.session_manager().update_session(
-                        session_id,
-                        Some(final_title),
-                        None,
-                    ) {
+                    match self.runtime.update_session_title(session_id, final_title) {
                         Ok(_) => {
                             self.set_notice("Session title updated");
                             log::info!("Renamed session {} to {}", session_id, final_title);
@@ -785,11 +782,7 @@ impl App {
                             {
                                 let title = title_from_prompt(&text_for_title);
                                 ctx.title = title.clone();
-                                if let Err(e) = self.runtime.session_manager().update_session(
-                                    sid,
-                                    Some(&title),
-                                    None,
-                                ) {
+                                if let Err(e) = self.runtime.update_session_title(sid, &title) {
                                     log::error!("Failed to update session title: {e}");
                                 }
                             }
@@ -892,19 +885,6 @@ impl App {
             }
         }
     }
-}
-
-/// Extract a session title from a user prompt (first line, trimmed, max 48 chars).
-fn title_from_prompt(prompt: &str) -> String {
-    let first_line = prompt.lines().next().unwrap_or("Untitled session").trim();
-    if first_line.is_empty() {
-        return "Untitled session".to_string();
-    }
-    let mut title: String = first_line.chars().take(48).collect();
-    if first_line.chars().count() > 48 {
-        title.push_str("...");
-    }
-    title
 }
 
 impl App {

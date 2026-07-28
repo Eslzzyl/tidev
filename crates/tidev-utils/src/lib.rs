@@ -10,4 +10,5 @@
 
 pub mod encoding;
 pub mod path;
+pub mod session;
 pub mod tmp;

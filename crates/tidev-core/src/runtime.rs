@@ -379,6 +379,12 @@ impl Runtime {
         Ok(session_id)
     }
 
+    /// Update the title of an existing session.
+    pub fn update_session_title(&self, session_id: Uuid, title: &str) -> Result<()> {
+        self.session_manager
+            .update_session(session_id, Some(title), None)
+    }
+
     // -----------------------------------------------------------------------
     // Operations
     // -----------------------------------------------------------------------

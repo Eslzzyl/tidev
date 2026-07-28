@@ -14,6 +14,7 @@ use uuid::Uuid;
 
 use tidev_core::Runtime;
 use tidev_types::prompts::SessionMode;
+use tidev_utils::session::title_from_prompt;
 
 /// Shared state accessible from all ACP request handlers.
 struct AcpState {
@@ -26,6 +27,8 @@ struct AcpState {
     /// When set, the event loop will send the `PromptResponse` through this
     /// channel once the LLM turn completes (or fails).
     pending_prompt: RwLock<Option<oneshot::Sender<acp::PromptResponse>>>,
+    /// Whether the session title has been set from the first prompt.
+    session_named: RwLock<bool>,
 }
 
 /// Run tidev as an ACP agent over stdio.
@@ -51,6 +54,7 @@ pub async fn run_acp_agent() -> Result<()> {
         active_session: RwLock::new(None),
         translator: RwLock::new(None),
         pending_prompt: RwLock::new(None),
+        session_named: RwLock::new(false),
     });
 
     Agent.builder()
@@ -161,11 +165,21 @@ pub async fn run_acp_agent() -> Result<()> {
                                 .data("session ID mismatch or no active session")
                         })?;
 
+                        // Determine the prompt text content.
                         let content = extract_prompt_text(&req.prompt);
                         log::info!(
                             "ACP: session/prompt, session={session_id}, content_len={}",
                             content.len()
                         );
+
+                        // Update session title from the first prompt.
+                        if !*state.session_named.read().await {
+                            let title = title_from_prompt(&content);
+                            if let Err(e) = state.runtime.update_session_title(session_id, &title) {
+                                log::warn!("ACP: failed to update session title: {e}");
+                            }
+                            *state.session_named.write().await = true;
+                        }
 
                         if let Err(e) = state
                             .runtime

@@ -3947,6 +3947,7 @@ dependencies = [
  "tidev-config",
  "tidev-core",
  "tidev-types",
+ "tidev-utils",
  "tokio",
  "uuid",
 ]

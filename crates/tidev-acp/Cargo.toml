@@ -11,6 +11,7 @@ tidev-core = { path = "../tidev-core" }
 tidev-config = { path = "../tidev-config" }
 tidev-types = { path = "../tidev-types" }
 tidev-agent = { path = "../tidev-agent" }
+tidev-utils = { path = "../tidev-utils" }
 agent-client-protocol = "2.0"
 anyhow = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
