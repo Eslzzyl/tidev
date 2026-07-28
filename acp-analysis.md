@@ -459,136 +459,68 @@ pub trait Agent {
 | `crates/tidev-acp/src/permission_bridge.rs` | TuiRequest → ACP permission request 桥接 |
 | `crates/tidev-acp/src/types.rs` | tidev ↔ ACP 类型转换工具 |
 
-## 十一、实施进度（截至 2026-07-27）
+## 十一、实施进度（截至 2026-07-28）
 
 ### 11.1 已完成
-
-#### Phase 1：最小可用 ACP Agent
 
 | 模块 | 文件 | 说明 |
 |------|------|------|
 | crate 骨架 | `crates/tidev-acp/Cargo.toml` | 依赖 `agent-client-protocol = "2.0"`（schema v1.5.0） |
-| 模块结构 | `crates/tidev-acp/src/lib.rs` | 4 个子模块：handler、event_translator、permission_bridge、types |
-| ACP handler | `crates/tidev-acp/src/handler.rs` | 使用 SDK `Agent.builder()` 注册 5 个 handler + event loop + permission bridge |
-| 事件翻译器 | `crates/tidev-acp/src/event_translator.rs` | BackendEvent → SessionNotification 翻译，支持 12 个事件变体 |
+| 模块结构 | `crates/tidev-acp/src/lib.rs` | 5 个子模块 |
+| ACP handler | `crates/tidev-acp/src/handler.rs` | 8 个 handler + event loop + permission bridge |
+| 事件翻译器 | `crates/tidev-acp/src/event_translator.rs` | BackendEvent → SessionNotification 翻译，支持 11 种通知 + Plan 辅助函数 |
 | 权限桥接 | `crates/tidev-acp/src/permission_bridge.rs` | TuiRequest → ACP `session/request_permission` 双向桥接 |
 | 类型转换 | `crates/tidev-acp/src/types.rs` | tidev ToolCall/ToolExecutionResult → ACP 类型转换工具函数 |
 | CLI 入口 | `src/main.rs` | 新增 `tidev acp` 子命令 |
+| 单元测试 | `crates/tidev-acp/src/event_translator.rs` + `types.rs` | 38 个测试，覆盖翻译逻辑和类型转换 |
 
 #### 已实现的 ACP 方法
 
 | 方法 | 状态 | 说明 |
 |------|------|------|
-| `initialize` | ✅ | 返回 v1 能力协商（loadSession、image、mcp http/sse） |
-| `session/new` | ✅ | 创建 tidev session，设置 event translator |
-| `session/prompt` | ✅ | 提取文本内容，调用 `runtime.submit_prompt()` |
-| `session/cancel` | ✅ | 调用 `runtime.cancel_session()` |
-| `session/close` | ✅ | 清理 active session 和 translator |
-| `session/load` | ❌ | 未实现 |
+| `initialize` | ✅ | v1 能力协商（loadSession、image、mcp http/sse、session.list） |
+| `session/new` | ✅ | 创建 session + 合并 Client MCP servers + 返回可用模式列表 |
+| `session/load` | ✅ | 加载已有 session，重建 message buffer + context manager |
+| `list_sessions` | ✅ | 列出历史 session（最新 50 条），返回 ID/工作区/标题/时间 |
+| `set_session_mode` | ✅ | 切换 Plan/Build 模式，发送 `current_mode_update` 通知 |
+| `session/prompt` | ✅ | 延迟响应：等待 LLM turn 完成，映射正确的 `StopReason` |
+| `session/cancel` | ✅ | 取消 + 清理 pending prompt |
+| `session/close` | ✅ | 清理资源 |
 
 #### 已实现的 BackendEvent → SessionNotification 翻译
 
-| BackendEvent | ACP SessionUpdate | 状态 |
+| BackendEvent | ACP SessionUpdate | 说明 |
 |---|---|---|
-| `TurnStarting` | `agent_message_chunk` (空文本, 分配 messageId) | ✅ |
-| `Delta` | `agent_message_chunk` (文本 delta) | ✅ |
-| `ReasoningDelta` | `agent_thought_chunk` | ✅ |
-| `ToolCallUpdated` | `tool_call_update` (参数更新) | ✅ |
-| `ToolStarting` | `tool_call` + `tool_call_update` (in_progress) | ✅ |
-| `ToolCompleted` | `tool_call_update` (content + completed) | ✅ |
-| `ShellOutput` | `tool_call_update` (content) | ✅ |
-| `SubagentStatus` | 透明化：parent tool update | ✅ |
-| `SubagentCompleted` | parent tool completed | ✅ |
-| `UsageStats` | `usage_update` (token 统计) | ✅ |
-| `UserMessageCreated` | `user_message_chunk` | ✅ |
-| `Failed` | `agent_message_chunk` (错误文本) | ✅ |
-| `Finished` / `StreamEnd` | 忽略（TUI 专属） | ✅ |
+| `TurnStarting` | `agent_message_chunk` (空文本) | 分配 messageId |
+| `Delta` | `agent_message_chunk` | 文本增量 |
+| `ReasoningDelta` | `agent_thought_chunk` | 推理内容 |
+| `ToolCallUpdated` | `tool_call_update` | 工具参数流式更新 |
+| `ToolStarting`（普通） | `tool_call` + `tool_call_update` (in_progress) | 工具开始执行 |
+| `ToolStarting`（todowrite） | 同上 + `plan` | 额外发送 Plan 通知 |
+| `ToolCompleted` | `tool_call_update` (content + completed) | 工具执行完成 |
+| `ShellOutput` | `tool_call_update` | shell 输出流 |
+| `SubagentStatus` | parent tool update | 透明化 |
+| `SubagentCompleted` | parent tool completed | 透明化 |
+| `UsageStats` | `usage_update` | token 统计 |
+| `UserMessageCreated` | `user_message_chunk` | 用户消息确认 |
+| `Failed` | `agent_message_chunk` (错误文本) | LLM 调用失败 |
+| `Retrying` | `agent_message_chunk` (重试信息) | LLM 重试通知 |
+| `Finished` | translator 忽略，event loop 触发 deferred response | 双重逻辑 |
 
-### 11.2 未完成
+其余事件（`StreamEnd`、`InstructionsLoaded`、`ContextCompacted`、`UndoCompleted`、`SidebarSnapshotReady`、`MessagesTruncated`）无 ACP 对应表示，直接忽略。
 
-#### 功能缺失
-
-| 项目 | 优先级 | 说明 |
-|------|--------|------|
-| `session/load`（会话恢复） | P2 | 加载已有 session，重建 buffer + context |
-| MCP servers 合并 | P2 | `session/new` handler 忽略了 `request.mcp_servers`，Client 传入的 MCP 服务器未与 tidev 配置合并 |
-| `set_session_mode` handler | P3 | Plan/Build 模式切换 |
-| Plan 更新通知 | P3 | todo 信息未翻译为 `SessionUpdate::Plan` |
-| 图片输入 | P3 | `extract_prompt_text` 跳过了 `ContentBlock::Image` |
-| `PromptResponse` 错误区分 | P3 | prompt 提交失败时仍返回 `EndTurn`，应区分成功/失败 |
-
-#### 代码质量
-
-| 项目 | 说明 |
-|------|------|
-| `Finished` 事件映射 | 当前被忽略，应触发状态更新让 Client 知道 turn 完成 |
-| Permission bridge 的 `_session_id` 参数 | 未使用（bridge 内部从 `request.session_id` 获取） |
-
-### 11.3 acpx 测试方法
-
-#### 安装
+### 11.2 测试方法
 
 ```bash
-npm install -g acpx@latest
-```
+# 单元测试
+cargo test -p tidev-acp
 
-#### 基本测试（one-shot）
-
-```bash
-cd /path/to/tidev
+# 使用 acpx 做单轮集成测试
 acpx --agent "./target/debug/tidev acp" exec 'hello, reply in one sentence'
-```
 
-#### 查看原始 JSON-RPC 通信
-
-```bash
+# 查看原始 JSON-RPC 通信
 acpx --agent "./target/debug/tidev acp" --format json exec 'hello'
-```
 
-#### 自动批准所有权限请求
-
-```bash
+# 自动批准所有权限请求
 acpx --agent "./target/debug/tidev acp" --approve-all exec 'list files in current directory'
 ```
-
-#### 详细调试日志
-
-```bash
-acpx --agent "./target/debug/tidev acp" --verbose exec 'hello'
-```
-
-### 11.4 已知问题
-
-#### 1. acpx `exec` 模式不显示流式输出
-
-**现象**：`exec` 命令在收到 `PromptResponse(stopReason: "end_turn")` 后立即退出，不等待后续的 `session/update` 通知（Delta、ToolCall 等）。
-
-**原因**：这是 acpx `exec` 模式的设计行为——它是一次性调用，收到 prompt 响应即视为完成。
-
-**影响**：无法通过 `exec` 模式验证流式文本输出和工具调用。
-
-**验证方法**：使用 `--format json` 查看原始 JSON-RPC 通信，确认通知确实被发出：
-
-```bash
-acpx --agent "./target/debug/tidev acp" --format json exec 'hello'
-```
-
-输出中应包含 `session/update` 通知（`agent_message_chunk`、`tool_call` 等）。
-
-#### 2. acpx `sessions new` 不识别 `--agent` 参数
-
-**现象**：`acpx --agent "./target/debug/tidev acp" sessions new` 输出 `[acpx] agent: codex`，创建的是 codex session 而非 tidev session。
-
-**影响**：无法通过 `prompt` 子命令做多轮交互测试。
-
-**原因**：acpx 的 `sessions new` 可能未正确传递 `--agent` 参数到 session 创建逻辑。
-
-**workaround**：使用 `exec` 模式做单轮测试，或直接在 Zed 中配置 tidev agent。
-
-#### 3. Agent loop 事件通道正常但 LLM 调用延迟
-
-**现象**：从日志看，`TurnStarting` 事件发出后，LLM 请求可能有数秒延迟才出现。
-
-**原因**：`stream_turn` 中的工具定义转换（`to_llm_tool_def`）和模型配置组装需要时间，且 `tokio::spawn` 的 LLM 调用是异步的。
-
-**影响**：不影响功能，但可能导致 acpx `exec` 在 LLM 响应到达前超时退出。

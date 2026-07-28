@@ -29,6 +29,8 @@ struct AcpState {
     pending_prompt: RwLock<Option<oneshot::Sender<acp::PromptResponse>>>,
     /// Whether the session title has been set from the first prompt.
     session_named: RwLock<bool>,
+    /// Current session mode (Plan or Build).
+    current_mode: RwLock<SessionMode>,
 }
 
 /// Run tidev as an ACP agent over stdio.
@@ -55,6 +57,7 @@ pub async fn run_acp_agent() -> Result<()> {
         translator: RwLock::new(None),
         pending_prompt: RwLock::new(None),
         session_named: RwLock::new(false),
+        current_mode: RwLock::new(SessionMode::Build),
     });
 
     Agent.builder()
@@ -78,13 +81,16 @@ pub async fn run_acp_agent() -> Result<()> {
                         ))
                         .agent_capabilities(
                             acp::AgentCapabilities::new()
-                                // session/load is not yet implemented
-                                .load_session(false)
+                                .load_session(true)
                                 .prompt_capabilities(
                                     acp::PromptCapabilities::new().image(true),
                                 )
                                 .mcp_capabilities(
                                     acp::McpCapabilities::new().http(true).sse(true),
+                                )
+                                .session_capabilities(
+                                    acp::SessionCapabilities::new()
+                                        .list(acp::SessionListCapabilities::new()),
                                 ),
                         );
                         let _ = responder.respond(response);
@@ -140,8 +146,244 @@ pub async fn run_acp_agent() -> Result<()> {
                         *state.active_session.write().await = Some(session_id);
                         log::info!("ACP: translator set for session {session_id}");
 
-                        let response = acp::NewSessionResponse::new(session_id.to_string());
+                        // Reset mode to default for the new session.
+                        *state.current_mode.write().await = SessionMode::Build;
+
+                        let mode_state = acp::SessionModeState::new(
+                            acp::SessionModeId::new("build"),
+                            vec![
+                                acp::SessionMode::new("plan", "Plan")
+                                    .description(
+                                        "Analyze and plan before making changes",
+                                    ),
+                                acp::SessionMode::new("build", "Build")
+                                    .description(
+                                        "Write and modify code with full tool access",
+                                    ),
+                            ],
+                        );
+                        let response = acp::NewSessionResponse::new(session_id.to_string())
+                            .modes(mode_state);
                         let _ = responder.respond(response);
+                        Ok(agent_client_protocol::Handled::Yes)
+                    }
+                }
+            },
+            on_receive_request!(),
+        )
+        // ── session/load ──────────────────────────────────────────────
+        .on_receive_request(
+            {
+                let state = &state;
+                move |req: acp::LoadSessionRequest,
+                      responder: agent_client_protocol::Responder<acp::LoadSessionResponse>,
+                      _cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>| {
+                    let state = state.clone();
+                    async move {
+                        log::info!(
+                            "ACP: session/load, session_id={}, cwd={}",
+                            req.session_id,
+                            req.cwd.display(),
+                        );
+
+                        let session_id =
+                            match Uuid::parse_str(req.session_id.to_string().as_str()) {
+                                Ok(id) => id,
+                                Err(e) => {
+                                    return Err(
+                                        agent_client_protocol::Error::invalid_request()
+                                            .data(format!("invalid session ID: {e}")),
+                                    )
+                                }
+                            };
+
+                        // Load session record from DB.
+                        let session = state
+                            .runtime
+                            .session_manager()
+                            .load_session(session_id)
+                            .map_err(|e| {
+                                agent_client_protocol::Error::internal_error()
+                                    .data(format!("failed to load session: {e}"))
+                            })?
+                            .ok_or_else(|| {
+                                agent_client_protocol::Error::invalid_request()
+                                    .data(format!("session not found: {session_id}"))
+                            })?;
+
+                        // Warn if the session's workspace root differs from the
+                        // request cwd — we'll still use the session's own root.
+                        let session_workspace = &session.workspace_root;
+                        let req_cwd = req.cwd.to_string_lossy();
+                        if session_workspace != req_cwd.as_ref() {
+                            log::warn!(
+                                "ACP: session workspace '{session_workspace}' \
+                                 differs from request cwd '{req_cwd}', \
+                                 using session workspace",
+                            );
+                        }
+
+                        // Load messages and populate the in-memory buffer.
+                        let messages = state
+                            .runtime
+                            .session_manager()
+                            .load_messages(session_id)
+                            .map_err(|e| {
+                                agent_client_protocol::Error::internal_error()
+                                    .data(format!("failed to load messages: {e}"))
+                            })?;
+                        state
+                            .runtime
+                            .set_message_buffer(session_id, messages)
+                            .await;
+
+                        // The context_manager is lazily created from the DB
+                        // record on first access via context_manager().
+
+                        // Merge MCP servers provided by the client.
+                        for mcp_server in &req.mcp_servers {
+                            let (name, config) = match acp_mcp_server_to_config(mcp_server) {
+                                Some(pair) => pair,
+                                None => continue,
+                            };
+                            log::info!("ACP: adding MCP server from client: {name}");
+                            if let Err(e) = state
+                                .runtime
+                                .mcp_manager()
+                                .upsert_server(name.clone(), config)
+                                .await
+                            {
+                                log::warn!("ACP: failed to add MCP server '{name}': {e}");
+                            }
+                        }
+
+                        // Set up translator and mark session as active.
+                        let translator =
+                            crate::event_translator::EventTranslator::new(session_id);
+                        *state.translator.write().await = Some(translator);
+                        *state.active_session.write().await = Some(session_id);
+
+                        // Reset mode to default for the loaded session.
+                        *state.current_mode.write().await = SessionMode::Build;
+
+                        log::info!("ACP: session loaded successfully: {session_id}");
+
+                        // Advertise available modes in the response.
+                        let mode_state = acp::SessionModeState::new(
+                            acp::SessionModeId::new("build"),
+                            vec![
+                                acp::SessionMode::new("plan", "Plan")
+                                    .description(
+                                        "Analyze and plan before making changes",
+                                    ),
+                                acp::SessionMode::new("build", "Build")
+                                    .description(
+                                        "Write and modify code with full tool access",
+                                    ),
+                            ],
+                        );
+
+                        let response =
+                            acp::LoadSessionResponse::new().modes(mode_state);
+                        let _ = responder.respond(response);
+                        Ok(agent_client_protocol::Handled::Yes)
+                    }
+                }
+            },
+            on_receive_request!(),
+        )
+        // ── list_sessions ─────────────────────────────────────────────
+        .on_receive_request(
+            {
+                let state = &state;
+                move |_req: acp::ListSessionsRequest,
+                      responder: agent_client_protocol::Responder<acp::ListSessionsResponse>,
+                      _cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>| {
+                    let state = state.clone();
+                    async move {
+                        log::info!("ACP: list_sessions");
+
+                        let records = state
+                            .runtime
+                            .session_manager()
+                            .list_sessions(50, 0)
+                            .map_err(|e| {
+                                agent_client_protocol::Error::internal_error()
+                                    .data(format!("failed to list sessions: {e}"))
+                            })?;
+
+                        let sessions: Vec<acp::SessionInfo> = records
+                            .into_iter()
+                            .map(|r| {
+                                acp::SessionInfo::new(
+                                    acp::SessionId::new(r.session_id.to_string()),
+                                    r.workspace_root,
+                                )
+                                .title(Some(r.title))
+                                .updated_at(Some(
+                                    r.updated_at.to_rfc3339(),
+                                ))
+                            })
+                            .collect();
+
+                        log::info!("ACP: list_sessions returning {} sessions", sessions.len());
+                        let _ = responder.respond(acp::ListSessionsResponse::new(sessions));
+                        Ok(agent_client_protocol::Handled::Yes)
+                    }
+                }
+            },
+            on_receive_request!(),
+        )
+        // ── set_session_mode ─────────────────────────────────────────
+        .on_receive_request(
+            {
+                let state = &state;
+                move |req: acp::SetSessionModeRequest,
+                      responder: agent_client_protocol::Responder<acp::SetSessionModeResponse>,
+                      cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>| {
+                    let state = state.clone();
+                    async move {
+                        log::info!(
+                            "ACP: set_session_mode, session={}, mode_id={}",
+                            req.session_id,
+                            req.mode_id,
+                        );
+
+                        // Validate session.
+                        let _session_id = validate_session_id(&state, &req.session_id)
+                            .await
+                            .ok_or_else(|| {
+                                agent_client_protocol::Error::invalid_request()
+                                    .data("session ID mismatch or no active session")
+                            })?;
+
+                        // Map mode_id string to SessionMode.
+                        let mode_str = req.mode_id.to_string();
+                        let new_mode = match mode_str.as_str() {
+                            "plan" => SessionMode::Plan,
+                            "build" => SessionMode::Build,
+                            _ => {
+                                return Err(agent_client_protocol::Error::invalid_request()
+                                    .data(format!("unknown mode: {mode_str}")))
+                            }
+                        };
+
+                        // Store the new mode.
+                        *state.current_mode.write().await = new_mode;
+                        log::info!("ACP: session mode changed to {new_mode:?}");
+
+                        // Notify the client of the mode change.
+                        let update =
+                            acp::CurrentModeUpdate::new(acp::SessionModeId::new(mode_str));
+                        let notif = acp::SessionNotification::new(
+                            req.session_id.clone(),
+                            acp::SessionUpdate::CurrentModeUpdate(update),
+                        );
+                        if let Err(e) = cx.send_notification(notif) {
+                            log::warn!("ACP: failed to send current_mode_update: {e}");
+                        }
+
+                        let _ = responder.respond(acp::SetSessionModeResponse::new());
                         Ok(agent_client_protocol::Handled::Yes)
                     }
                 }
@@ -181,9 +423,10 @@ pub async fn run_acp_agent() -> Result<()> {
                             *state.session_named.write().await = true;
                         }
 
+                        let mode = *state.current_mode.read().await;
                         if let Err(e) = state
                             .runtime
-                            .submit_prompt(session_id, content, SessionMode::Build)
+                            .submit_prompt(session_id, content, mode)
                             .await
                         {
                             log::error!("ACP: failed to submit prompt: {e}");
