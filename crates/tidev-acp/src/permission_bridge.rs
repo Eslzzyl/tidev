@@ -9,6 +9,8 @@ use agent_client_protocol::schema::v1 as acp;
 use tidev_core::{ApprovedTool, TuiRequest, TuiRequestKind, TuiResponse};
 use tidev_types::message::ToolExecutionResult;
 
+use crate::types::tool_kind;
+
 /// Spawn the permission bridge task.
 ///
 /// This task consumes [`TuiRequest`]s from the given channel, converts each
@@ -45,10 +47,15 @@ pub fn spawn(
                             ),
                         ];
 
+                        let raw_input: Option<serde_json::Value> =
+                            serde_json::from_str(&tc.arguments).ok();
                         let tool_call_update = acp::ToolCallUpdate::new(
                             tc.id.clone(),
                             acp::ToolCallUpdateFields::new()
-                                .title(Some(tc.name.clone())),
+                                .title(Some(crate::types::tool_title(tc)))
+                                .kind(Some(tool_kind(tc)))
+                                .locations(crate::types::tool_locations(tc))
+                                .raw_input(raw_input),
                         );
 
                         let permission_request = acp::RequestPermissionRequest::new(

@@ -3941,6 +3941,7 @@ version = "0.7.1"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
+ "base64 0.22.1",
  "log",
  "serde_json",
  "tidev-config",

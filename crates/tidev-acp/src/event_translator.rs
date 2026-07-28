@@ -135,8 +135,8 @@ impl EventTranslator {
                     self.session_id.clone(),
                     acp::SessionUpdate::ToolCall(acp_tc),
                 )];
-                // Then send a status update to in_progress.
-                let update = crate::types::tool_starting_update(tool_call);
+                // Then send a rich status update with title, kind, locations.
+                let update = crate::types::tool_starting_update_rich(tool_call);
                 notifs.push(acp::SessionNotification::new(
                     self.session_id.clone(),
                     acp::SessionUpdate::ToolCallUpdate(update),
@@ -164,8 +164,17 @@ impl EventTranslator {
             } => {
                 let mut notifs = Vec::new();
 
-                // Send tool call content chunks from the result.
-                let content = crate::types::tidev_tool_result_to_acp_content(result);
+                // Prefer Diff content for write/edit/apply_patch.
+                let content = crate::types::tidev_result_to_diff_content(tool_call, result);
+                let content = if !content.is_empty() {
+                    content
+                } else {
+                    // Fallback: text content + any image attachments.
+                    let mut c = crate::types::tidev_tool_result_to_acp_content(result);
+                    c.extend(crate::types::tidev_attachments_to_content(&result.attachments));
+                    c
+                };
+
                 if !content.is_empty() {
                     notifs.push(acp::SessionNotification::new(
                         self.session_id.clone(),
@@ -178,8 +187,8 @@ impl EventTranslator {
                     ));
                 }
 
-                // Send the completed status update.
-                let update = crate::types::tool_completed_update(tool_call);
+                // Send the completed status update with raw_output.
+                let update = crate::types::tool_completed_update_rich(tool_call, result);
                 notifs.push(acp::SessionNotification::new(
                     self.session_id.clone(),
                     acp::SessionUpdate::ToolCallUpdate(update),
@@ -187,25 +196,11 @@ impl EventTranslator {
                 notifs
             }
 
-            BackendEvent::ShellOutput {
-                session_id: _,
-                tool_call_id,
-                content,
-                finished: _,
-                exit_code: _,
-            } => {
-                let update = acp::ToolCallUpdate::new(
-                    tool_call_id.clone(),
-                    acp::ToolCallUpdateFields::new().content(Some(vec![
-                        acp::ToolCallContent::Content(acp::Content::new(
-                            acp::ContentBlock::Text(acp::TextContent::new(content)),
-                        )),
-                    ])),
-                );
-                vec![acp::SessionNotification::new(
-                    self.session_id.clone(),
-                    acp::SessionUpdate::ToolCallUpdate(update),
-                )]
+            BackendEvent::ShellOutput { .. } => {
+                // Shell streaming output is deferred to ToolCompleted in v1
+                // to avoid redundant content transfers. Upgrade to v2 for
+                // terminal_output_chunk support.
+                vec![]
             }
 
             BackendEvent::SubagentStatus {
@@ -277,8 +272,8 @@ impl EventTranslator {
                     ));
                 }
 
-                // Mark the parent tool as completed.
-                let update = crate::types::tool_completed_update(tool_call);
+                // Mark the parent tool as completed with raw_output.
+                let update = crate::types::tool_completed_update_rich(tool_call, result);
                 notifs.push(acp::SessionNotification::new(
                     self.session_id.clone(),
                     acp::SessionUpdate::ToolCallUpdate(update),
@@ -623,7 +618,7 @@ mod tests {
             tool_call: tc,
             result: Box::new(result),
         });
-        // Should emit content + completed status
+        // Should emit content + completed status with raw_output
         assert_eq!(notifs.len(), 2);
         match &notifs[0].update {
             acp::SessionUpdate::ToolCallUpdate(update) => {
@@ -634,6 +629,7 @@ mod tests {
         match &notifs[1].update {
             acp::SessionUpdate::ToolCallUpdate(update) => {
                 assert_eq!(update.tool_call_id.to_string(), "tc-1");
+                assert!(update.fields.raw_output.is_some(), "expected raw_output");
             }
             _ => panic!("expected completed ToolCallUpdate"),
         }
@@ -641,7 +637,7 @@ mod tests {
 
     // ── ShellOutput ──────────────────────────────────────────────────────
     #[test]
-    fn shell_output_sends_tool_call_update() {
+    fn shell_output_deferred_to_completion() {
         let mut tr = make_translator();
         let notifs = tr.translate(&BackendEvent::ShellOutput {
             session_id: sid(),
@@ -650,13 +646,8 @@ mod tests {
             finished: false,
             exit_code: None,
         });
-        assert_eq!(notifs.len(), 1);
-        match &notifs[0].update {
-            acp::SessionUpdate::ToolCallUpdate(update) => {
-                assert_eq!(update.tool_call_id.to_string(), "tc-1");
-            }
-            _ => panic!("expected ToolCallUpdate"),
-        }
+        // Shell streaming is deferred to ToolCompleted in v1.
+        assert!(notifs.is_empty());
     }
 
     // ── UsageStats ───────────────────────────────────────────────────────
