@@ -203,12 +203,18 @@ pub(super) fn compute_tool_result_suffix(
             }
         }
         "read" => {
-            if tool_output_is_error(output) {
-                if output.contains("file not found") && output.contains("Did you mean") {
+            if output.contains("file not found") {
+                if output.contains("Did you mean") {
                     " → not found (with suggestions)".to_string()
                 } else {
-                    " → error".to_string()
+                    " → not found".to_string()
                 }
+            } else if output.contains("escapes the workspace root")
+                || output.contains(" was denied")
+            {
+                " → blocked by policy".to_string()
+            } else if tool_output_is_error(output) {
+                " → error".to_string()
             } else if has_image_attachment(attachments) {
                 // Enriched image suffix: " → TYPE, SIZE"
                 let image = attachments.iter().find_map(|a| {
@@ -328,6 +334,51 @@ fn has_image_attachment(attachments: &[MessageAttachment]) -> bool {
     attachments
         .iter()
         .any(|a| matches!(a, MessageAttachment::Image { .. }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn read_result_suffix_distinguishes_failure_states() {
+        assert_eq!(
+            compute_tool_result_suffix(
+                "read",
+                "Error: failed to read src/missing.rs: file not found",
+                &[],
+            ),
+            " → not found"
+        );
+        assert_eq!(
+            compute_tool_result_suffix(
+                "read",
+                "Error: failed to read src/mian.rs: file not found. Did you mean one of these?\nsrc/main.rs",
+                &[]
+            ),
+            " → not found (with suggestions)"
+        );
+        assert_eq!(
+            compute_tool_result_suffix("read", "Error: Path '/tmp/file' was denied.", &[]),
+            " → blocked by policy"
+        );
+        assert_eq!(
+            compute_tool_result_suffix(
+                "read",
+                "Error: failed to read src/file.rs: permission denied",
+                &[]
+            ),
+            " → error"
+        );
+    }
+
+    #[test]
+    fn read_result_suffix_handles_legacy_denial_without_error_prefix() {
+        assert_eq!(
+            compute_tool_result_suffix("read", "Path '/tmp/file' was denied.", &[]),
+            " → blocked by policy"
+        );
+    }
 }
 
 pub(super) fn summarize_tool_call(tool_call: &ToolCall, max_width: usize) -> String {

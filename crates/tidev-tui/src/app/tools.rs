@@ -82,12 +82,9 @@ impl App {
                         log::info!("Boundary path previously denied: {path_str}");
                         let reason = self.boundary_reasons.remove(&path_str);
                         let msg = if let Some(ref r) = reason {
-                            format!("Path '{}' was denied. Reason: {}", path_str, r)
+                            format!("Error: Path '{}' was denied. Reason: {}", path_str, r)
                         } else {
-                            format!(
-                                "Path '{}' was denied by remembered boundary permission.",
-                                path_str
-                            )
+                            format!("Error: Path '{}' was denied.", path_str)
                         };
                         approval.approved_tools.push(ApprovedTool {
                             tool_call: tc,
@@ -125,12 +122,12 @@ impl App {
                         log::info!("Sensitive file previously denied: {path_str}");
                         let reason = self.sensitive_reasons.remove(&path_str);
                         let msg = if let Some(ref r) = reason {
-                            format!("Sensitive file '{}' was denied. Reason: {}", path_str, r)
-                        } else {
                             format!(
-                                "Sensitive file '{}' was denied by remembered sensitive file permission.",
-                                path_str
+                                "Error: Sensitive file '{}' was denied. Reason: {}",
+                                path_str, r
                             )
+                        } else {
+                            format!("Error: Sensitive file '{}' was denied.", path_str)
                         };
                         approval.approved_tools.push(ApprovedTool {
                             tool_call: tc,

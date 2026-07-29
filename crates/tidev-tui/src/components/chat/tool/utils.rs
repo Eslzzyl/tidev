@@ -5,6 +5,7 @@ pub(super) fn tool_output_is_error(output: &str) -> bool {
         || first_line.starts_with("Request failed:")
         || first_line.starts_with("Error:")
         || first_line.starts_with("failed to read")
+        || first_line.contains(" was denied")
         || first_line.contains("Cannot read binary file")
         || (first_line.starts_with("[exit ") && !first_line.starts_with("[exit 0]"))
 }
@@ -18,4 +19,17 @@ pub(super) fn truncate_utf8(s: &str, max: usize) -> &str {
         end -= 1;
     }
     &s[..end]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn denial_results_are_errors_even_without_prefix() {
+        assert!(tool_output_is_error("Path '/tmp/file' was denied."));
+        assert!(tool_output_is_error(
+            "Sensitive file '/tmp/.env' was denied. Reason: protected"
+        ));
+    }
 }

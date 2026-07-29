@@ -534,7 +534,12 @@ fn is_binary_file(path: &Path) -> Result<bool> {
 
 fn find_fuzzy_suggestions(workspace_root: &Path, relative_path: &Path) -> Result<Vec<String>> {
     let parent = relative_path.parent().unwrap_or(Path::new("."));
-    let absolute_parent = resolve_workspace_path(workspace_root, parent, false)?;
+    // Suggestions only inspect directory entries inside the workspace. An
+    // approved external read must not implicitly enumerate its parent.
+    let absolute_parent = match resolve_workspace_path(workspace_root, parent, false) {
+        Ok(path) => path,
+        Err(_) => return Ok(vec![]),
+    };
     if !absolute_parent.exists() || !absolute_parent.is_dir() {
         return Ok(vec![]);
     }
@@ -1468,6 +1473,60 @@ mod tests {
         assert!(
             result.output.contains("<system-reminder>"),
             "output should embed instructions as system-reminder"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_missing_file_in_workspace_includes_fuzzy_suggestions() -> Result<()> {
+        let workspace = tempfile::TempDir::new()?;
+        let config_dir = tempfile::TempDir::new()?;
+        let src = workspace.path().join("src");
+        std::fs::create_dir(&src)?;
+        std::fs::write(src.join("main.rs"), "fn main() {}")?;
+
+        let result = read_path(
+            workspace.path(),
+            config_dir.path(),
+            "src/mian.rs",
+            None,
+            None,
+            false,
+            false,
+        );
+
+        let error = result.expect_err("missing file should return an error");
+        assert!(error.to_string().contains("file not found"));
+        assert!(error.to_string().contains("src/main.rs"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_missing_external_file_does_not_enumerate_external_parent() -> Result<()> {
+        let temp_root = tempfile::TempDir::new()?;
+        let workspace = temp_root.path().join("workspace");
+        let external = temp_root.path().join("external");
+        std::fs::create_dir(&workspace)?;
+        std::fs::create_dir(&external)?;
+        std::fs::write(external.join("main.rs"), "fn main() {}")?;
+
+        let missing = external.join("mian.rs");
+        let result = read_path(
+            &workspace,
+            temp_root.path(),
+            &missing,
+            None,
+            None,
+            true,
+            false,
+        );
+
+        let error = result.expect_err("missing external file should return an error");
+        let message = error.to_string();
+        assert!(message.contains("file not found"));
+        assert!(
+            !message.contains("Did you mean") && !message.contains("main.rs"),
+            "external parent entries must not be exposed: {message}"
         );
         Ok(())
     }
