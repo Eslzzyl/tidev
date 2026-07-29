@@ -6,6 +6,10 @@ authors.workspace = true
 license.workspace = true
 description = "ACP (Agent Client Protocol) adapter for tidev"
 
+[features]
+default = ["acp-v2"]
+acp-v2 = ["agent-client-protocol/unstable_protocol_v2"]
+
 [dependencies]
 tidev-core = { path = "../tidev-core" }
 tidev-config = { path = "../tidev-config" }

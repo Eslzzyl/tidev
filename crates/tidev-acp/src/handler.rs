@@ -6,10 +6,12 @@
 
 use std::sync::Arc;
 
+#[cfg(feature = "acp-v2")]
+use agent_client_protocol::ConnectTo;
 use agent_client_protocol::schema::v1 as acp;
 use agent_client_protocol::{Agent, Stdio, on_receive_request};
 use anyhow::Result;
-use tokio::sync::{RwLock, oneshot};
+use tokio::sync::{Mutex as AsyncMutex, RwLock, oneshot};
 use uuid::Uuid;
 
 use tidev_config::{AppConfig, AuthStore, ThinkingMatcher, auth::ActiveModel};
@@ -127,12 +129,15 @@ pub async fn run_acp_agent() -> Result<()> {
         cumulative_cache_read: RwLock::new(0),
     });
 
-    Agent.builder()
+    let event_rx_slot = Arc::new(AsyncMutex::new(Some(event_rx)));
+    let request_rx_slot = Arc::new(AsyncMutex::new(Some(request_rx)));
+
+    let v1_agent = Agent.builder()
         .name("tidev")
         // ── initialize ──────────────────────────────────────────────
         .on_receive_request(
             {
-                let state = &state;
+                let state = state.clone();
                 move |_req: acp::InitializeRequest,
                       responder: agent_client_protocol::Responder<acp::InitializeResponse>,
                       _cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>| {
@@ -170,7 +175,7 @@ pub async fn run_acp_agent() -> Result<()> {
         // ── session/new ─────────────────────────────────────────────
         .on_receive_request(
             {
-                let state = &state;
+                let state = state.clone();
                 move |req: acp::NewSessionRequest,
                       responder: agent_client_protocol::Responder<acp::NewSessionResponse>,
                       _cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>| {
@@ -251,7 +256,7 @@ pub async fn run_acp_agent() -> Result<()> {
         // ── session/load ──────────────────────────────────────────────
         .on_receive_request(
             {
-                let state = &state;
+                let state = state.clone();
                 move |req: acp::LoadSessionRequest,
                       responder: agent_client_protocol::Responder<acp::LoadSessionResponse>,
                       _cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>| {
@@ -407,7 +412,7 @@ pub async fn run_acp_agent() -> Result<()> {
         // ── list_sessions ─────────────────────────────────────────────
         .on_receive_request(
             {
-                let state = &state;
+                let state = state.clone();
                 move |_req: acp::ListSessionsRequest,
                       responder: agent_client_protocol::Responder<acp::ListSessionsResponse>,
                       _cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>| {
@@ -449,7 +454,7 @@ pub async fn run_acp_agent() -> Result<()> {
         // ── set_session_mode ─────────────────────────────────────────
         .on_receive_request(
             {
-                let state = &state;
+                let state = state.clone();
                 move |req: acp::SetSessionModeRequest,
                       responder: agent_client_protocol::Responder<acp::SetSessionModeResponse>,
                       cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>| {
@@ -505,7 +510,7 @@ pub async fn run_acp_agent() -> Result<()> {
         // ── session/prompt ──────────────────────────────────────────
         .on_receive_request(
             {
-                let state = &state;
+                let state = state.clone();
                 move |req: acp::PromptRequest,
                       responder: agent_client_protocol::Responder<acp::PromptResponse>,
                       _cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>| {
@@ -583,7 +588,7 @@ pub async fn run_acp_agent() -> Result<()> {
         // ── session/cancel ───────────────────────────────────────────
         .on_receive_notification(
             {
-                let state = &state;
+                let state = state.clone();
                 move |notification: acp::CancelNotification,
                       _cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>| {
                     let state = state.clone();
@@ -613,7 +618,7 @@ pub async fn run_acp_agent() -> Result<()> {
         // ── session/close ────────────────────────────────────────────
         .on_receive_request(
             {
-                let state = &state;
+                let state = state.clone();
                 move |req: acp::CloseSessionRequest,
                       responder: agent_client_protocol::Responder<acp::CloseSessionResponse>,
                       _cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>| {
@@ -643,7 +648,7 @@ pub async fn run_acp_agent() -> Result<()> {
         // ── session/set_config_option ────────────────────────────
         .on_receive_request(
             {
-                let state = &state;
+                let state = state.clone();
                 move |req: acp::SetSessionConfigOptionRequest,
                       responder: agent_client_protocol::Responder<acp::SetSessionConfigOptionResponse>,
                       cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>| {
@@ -750,7 +755,22 @@ pub async fn run_acp_agent() -> Result<()> {
             },
             on_receive_request!(),
         )
-        .connect_with(Stdio::new(), async |cx| {
+        .with_spawned({
+            let state = state.clone();
+            let event_rx_slot = event_rx_slot.clone();
+            let request_rx_slot = request_rx_slot.clone();
+            move |cx| async move {
+            let event_rx = event_rx_slot
+                .lock()
+                .await
+                .take()
+                .ok_or_else(|| agent_client_protocol::Error::internal_error().data("v1 event receiver already taken"))?;
+            let request_rx = request_rx_slot
+                .lock()
+                .await
+                .take()
+                .ok_or_else(|| agent_client_protocol::Error::internal_error().data("v1 request receiver already taken"))?;
+
             // Spawn the event translator task.
             let translator_handle = {
                 let state = state.clone();
@@ -772,7 +792,24 @@ pub async fn run_acp_agent() -> Result<()> {
             let _ = translator_handle.await;
             state.runtime.shutdown().await;
             Ok(())
-        })
+        }
+        }) ;
+
+    #[cfg(feature = "acp-v2")]
+    let agent =
+        Agent::protocol_router(Agent)
+            .with_v1(v1_agent)
+            .with_v2(crate::v2_handler::build_agent(
+                state.runtime.clone(),
+                event_rx_slot,
+                request_rx_slot,
+            ));
+
+    #[cfg(not(feature = "acp-v2"))]
+    let agent = v1_agent;
+
+    agent
+        .connect_to(Stdio::new())
         .await
         .map_err(|e| anyhow::anyhow!("ACP connection error: {e}"))
 }
