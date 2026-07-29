@@ -56,6 +56,7 @@ pub(crate) async fn stream_responses(
     let send_result = http
         .post(&endpoint)
         .bearer_auth(api_key)
+        .header("session-id", session_id.to_string())
         .json(&request)
         .send()
         .await;
@@ -276,11 +277,11 @@ pub(crate) async fn stream_responses(
                     } => {
                         // Handle function_call items (Responses API style)
                         if item.item_type == "function_call" {
-                            // Use item.id as the key (consistent with item_id in delta events)
-                            let key_id = if !item.id.is_empty() {
-                                item.id.clone()
-                            } else if !item.call_id.is_empty() {
+                            // Extract the actual call_id for tool call pairing.
+                            let call_id = if !item.call_id.is_empty() {
                                 item.call_id.clone()
+                            } else if !item.id.is_empty() {
+                                item.id.clone()
                             } else {
                                 continue;
                             };
@@ -289,7 +290,15 @@ pub(crate) async fn stream_responses(
                             } else {
                                 continue;
                             };
-                            let mut builder = ToolCallBuilder::new(key_id.clone(), name.clone());
+                            // Use item.id as the map key (consistent with
+                            // item_id in delta events).
+                            let key_id = if !item.id.is_empty() {
+                                item.id.clone()
+                            } else {
+                                call_id.clone()
+                            };
+                            let mut builder =
+                                ToolCallBuilder::new(call_id, name.clone());
                             // Add initial arguments if present
                             if !item.arguments.is_empty() {
                                 builder.append_arguments(&item.arguments);
@@ -315,7 +324,7 @@ pub(crate) async fn stream_responses(
                                 && let Some(arguments) = builder.arguments()
                             {
                                 let call = tidev_types::message::ToolCall {
-                                    id: key_id.clone(),
+                                    id: builder.id().to_string(),
                                     name: builder.name().to_string(),
                                     arguments: arguments.to_string(),
                                     thought_signature: None,
@@ -724,35 +733,29 @@ fn build_responses_request(
             }
             MessageRole::Assistant => {
                 let text = message_text_with_file_references(message);
-                let has_tool_calls = !message.tool_calls.is_empty();
 
-                let mut content_parts = Vec::new();
-                if has_tool_calls {
-                    let mut combined = text;
-                    for tool_call in &message.tool_calls {
-                        combined.push_str(&format!(
-                            "\n[Tool: {}]\nArguments: {}",
-                            tool_call.name, tool_call.arguments
-                        ));
-                    }
-                    if !combined.is_empty() {
-                        content_parts.push(serde_json::json!({
-                            "type": "input_text",
-                            "text": combined,
-                        }));
-                    }
-                } else if !text.is_empty() {
-                    content_parts.push(serde_json::json!({
-                        "type": "input_text",
-                        "text": text,
-                    }));
-                }
-
-                if !content_parts.is_empty() {
+                // Emit assistant text as a message item (if non-empty).
+                if !text.trim().is_empty() {
                     input_items.push(serde_json::json!({
                         "type": "message",
                         "role": "assistant",
-                        "content": content_parts,
+                        "content": [{
+                            "type": "input_text",
+                            "text": text,
+                        }],
+                    }));
+                }
+
+                // Emit each tool call as a separate function_call item.
+                // This is required by the Responses API — tool calls must be
+                // distinct items so the server can pair them with
+                // function_call_output items via call_id.
+                for tool_call in &message.tool_calls {
+                    input_items.push(serde_json::json!({
+                        "type": "function_call",
+                        "call_id": tool_call.id,
+                        "name": tool_call.name,
+                        "arguments": tool_call.arguments,
                     }));
                 }
             }
@@ -815,15 +818,23 @@ fn build_responses_request(
     };
 
     let thinking = model.thinking_config();
-    let include = thinking
+    // Always request encrypted reasoning content so reasoning items can be
+    // preserved and replayed across multi-turn conversations. Without this,
+    // stateless / non-persisted reasoning items (store=false / ZDR) cannot
+    // be looked up on subsequent turns.
+    let include = Some(vec!["reasoning.encrypted_content".to_string()]);
+
+    let tool_choice = chat_tools
         .as_ref()
-        .map(|_| vec!["reasoning.encrypted_content".to_string()]);
+        .map(|_| "auto".to_string());
 
     Ok(ResponsesRequest {
         model: model.request_model_id.clone().unwrap_or_default(),
         instructions,
         input,
         tools: chat_tools,
+        tool_choice,
+        parallel_tool_calls: true,
         temperature: model.temperature,
         max_output_tokens: Some(model.max_output_tokens),
         stream,
@@ -922,6 +933,9 @@ struct ResponsesRequest {
     input: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Vec<ResponseTool>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_choice: Option<String>,
+    parallel_tool_calls: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1902,8 +1916,18 @@ mod tests {
         let request = build_responses_request(&model, messages, false, &[], None).unwrap();
         let input = request.input.as_array().expect("input should be an array");
 
-        // user, assistant, function_call_output — no synthetic user message.
+        // user message, function_call, function_call_output — no synthetic
+        // user message and no assistant message (empty text).
         assert_eq!(input.len(), 3);
+        assert_eq!(input[0]["type"], "message");
+        assert_eq!(input[0]["role"], "user");
+        assert_eq!(input[1]["type"], "function_call");
+        assert_eq!(input[1]["call_id"], "call_xyz");
+        assert_eq!(input[1]["name"], "read");
+        assert_eq!(
+            input[1]["arguments"],
+            r#"{"file_path":"icon.png"}"#
+        );
         assert_eq!(input[2]["type"], "function_call_output");
 
         let output = input[2]["output"]
@@ -1918,6 +1942,171 @@ mod tests {
                 .unwrap()
                 .starts_with("data:image/png;base64,")
         );
+    }
+
+    #[test]
+    fn test_responses_assistant_with_text_and_tool_calls() {
+        let model = LlmProviderConfig {
+            provider_id: "test".to_string(),
+            base_url: "https://api.openai.com".to_string(),
+            api_type: ApiType::OpenAiResponses,
+            model_id: "gpt-4.5".to_string(),
+            request_model_id: Some("gpt-4.5".to_string()),
+            max_output_tokens: 4096,
+            temperature: Some(0.7),
+            supports_images: false,
+            context_window: 128000,
+            system_prompt: None,
+            api_key: None,
+            extra_body: None,
+            thinking_level: tidev_types::reasoning::ThinkingLevelType::None,
+        };
+
+        let mut assistant = Message::new(MessageRole::Assistant, "Let me read that file.");
+        assistant.tool_calls.push(tidev_types::message::ToolCall {
+            id: "call_abc".to_string(),
+            name: "read".to_string(),
+            arguments: r#"{"file_path":"/tmp/test.txt"}"#.to_string(),
+            thought_signature: None,
+        });
+
+        let messages = vec![
+            Message::new(MessageRole::User, "read /tmp/test.txt"),
+            assistant,
+            Message::tool_result(
+                "call_abc",
+                "read",
+                tidev_types::message::ToolExecutionResult::new("file content"),
+            ),
+        ];
+
+        let request = build_responses_request(&model, messages, true, &[], None).unwrap();
+        let input = request.input.as_array().expect("input should be an array");
+
+        // user message, assistant text message, function_call, function_call_output
+        assert_eq!(input.len(), 4);
+        // [0] user
+        assert_eq!(input[0]["type"], "message");
+        assert_eq!(input[0]["role"], "user");
+        // [1] assistant text
+        assert_eq!(input[1]["type"], "message");
+        assert_eq!(input[1]["role"], "assistant");
+        assert_eq!(input[1]["content"][0]["text"], "Let me read that file.");
+        // [2] function_call
+        assert_eq!(input[2]["type"], "function_call");
+        assert_eq!(input[2]["call_id"], "call_abc");
+        assert_eq!(input[2]["name"], "read");
+        assert_eq!(input[2]["arguments"], r#"{"file_path":"/tmp/test.txt"}"#);
+        // [3] function_call_output
+        assert_eq!(input[3]["type"], "function_call_output");
+        assert_eq!(input[3]["call_id"], "call_abc");
+    }
+
+    #[test]
+    fn test_responses_assistant_multiple_tool_calls() {
+        let model = LlmProviderConfig {
+            provider_id: "test".to_string(),
+            base_url: "https://api.openai.com".to_string(),
+            api_type: ApiType::OpenAiResponses,
+            model_id: "gpt-4.5".to_string(),
+            request_model_id: Some("gpt-4.5".to_string()),
+            max_output_tokens: 4096,
+            temperature: Some(0.7),
+            supports_images: false,
+            context_window: 128000,
+            system_prompt: None,
+            api_key: None,
+            extra_body: None,
+            thinking_level: tidev_types::reasoning::ThinkingLevelType::None,
+        };
+
+        let mut assistant = Message::new(MessageRole::Assistant, "");
+        assistant.tool_calls.push(tidev_types::message::ToolCall {
+            id: "call_1".to_string(),
+            name: "read".to_string(),
+            arguments: r#"{"path":"a.txt"}"#.to_string(),
+            thought_signature: None,
+        });
+        assistant.tool_calls.push(tidev_types::message::ToolCall {
+            id: "call_2".to_string(),
+            name: "grep".to_string(),
+            arguments: r#"{"pattern":"fn main"}"#.to_string(),
+            thought_signature: None,
+        });
+
+        let messages = vec![
+            Message::new(MessageRole::User, "find and read"),
+            assistant,
+            Message::tool_result(
+                "call_1",
+                "read",
+                tidev_types::message::ToolExecutionResult::new("file content"),
+            ),
+            Message::tool_result(
+                "call_2",
+                "grep",
+                tidev_types::message::ToolExecutionResult::new("found matches"),
+            ),
+        ];
+
+        let request = build_responses_request(&model, messages, true, &[], None).unwrap();
+        let input = request.input.as_array().expect("input should be an array");
+
+        // user message, function_call x2, function_call_output x2 — no
+        // assistant message (empty text).
+        assert_eq!(input.len(), 5);
+        assert_eq!(input[0]["type"], "message");
+        assert_eq!(input[0]["role"], "user");
+        assert_eq!(input[1]["type"], "function_call");
+        assert_eq!(input[1]["call_id"], "call_1");
+        assert_eq!(input[1]["name"], "read");
+        assert_eq!(input[2]["type"], "function_call");
+        assert_eq!(input[2]["call_id"], "call_2");
+        assert_eq!(input[2]["name"], "grep");
+        assert_eq!(input[3]["type"], "function_call_output");
+        assert_eq!(input[3]["call_id"], "call_1");
+        assert_eq!(input[4]["type"], "function_call_output");
+        assert_eq!(input[4]["call_id"], "call_2");
+    }
+
+    #[test]
+    fn test_responses_request_fields() {
+        let model = LlmProviderConfig {
+            provider_id: "test".to_string(),
+            base_url: "https://api.openai.com".to_string(),
+            api_type: ApiType::OpenAiResponses,
+            model_id: "gpt-4.5".to_string(),
+            request_model_id: Some("gpt-4.5".to_string()),
+            max_output_tokens: 4096,
+            temperature: Some(0.7),
+            supports_images: false,
+            context_window: 128000,
+            system_prompt: Some("You are helpful.".to_string()),
+            api_key: None,
+            extra_body: None,
+            thinking_level: tidev_types::reasoning::ThinkingLevelType::None,
+        };
+
+        let messages = vec![Message::new(MessageRole::User, "Hello")];
+
+        // With tools — tool_choice should be "auto"
+        let tools = vec![ToolDefinition {
+            name: "read".to_string(),
+            display_name: "Read".to_string(),
+            description: "Read a file".to_string(),
+            parameters: serde_json::json!({"type": "object"}),
+        }];
+        let request = build_responses_request(&model, messages.clone(), true, &tools, None).unwrap();
+        assert_eq!(request.parallel_tool_calls, true);
+        let json = serde_json::to_value(&request).unwrap();
+        assert_eq!(json["tool_choice"], "auto");
+        assert_eq!(json["parallel_tool_calls"], true);
+
+        // Without tools — tool_choice should be absent
+        let request = build_responses_request(&model, messages, true, &[], None).unwrap();
+        let json = serde_json::to_value(&request).unwrap();
+        assert!(!json.as_object().unwrap().contains_key("tool_choice"));
+        assert_eq!(json["parallel_tool_calls"], true);
     }
 
     #[test]
