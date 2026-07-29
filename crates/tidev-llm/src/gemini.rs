@@ -933,6 +933,7 @@ mod tests {
             max_output_tokens: 4096,
             temperature: None,
             supports_images: false,
+            supports_parallel_tool_calls: true,
             context_window: 128000,
             system_prompt: None,
             api_key: None,

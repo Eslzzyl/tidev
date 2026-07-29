@@ -698,6 +698,7 @@ impl AppConfig {
             max_output_tokens: model.max_output_tokens,
             temperature: model.temperature,
             supports_images: model.supports_images,
+            supports_parallel_tool_calls: model.supports_parallel_tool_calls,
             system_prompt: String::new(),
             api_key,
             extra_body: model.extra_body.clone(),

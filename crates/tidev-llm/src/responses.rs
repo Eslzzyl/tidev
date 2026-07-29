@@ -16,11 +16,13 @@ use crate::debug::{
     save_complete_response_for_debugging, save_raw_response_for_debugging,
     save_request_for_debugging,
 };
-use crate::error::classify_response_status;
+use crate::error::{NetworkError, classify_response_status};
 use crate::think_parser::strip_think_tags;
+use std::time::Duration;
 
 /// Responses API endpoint
 const RESPONSES_ENDPOINT: &str = "/responses";
+const RESPONSES_STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn stream_responses(
@@ -102,13 +104,25 @@ pub(crate) async fn stream_responses(
     let mut reasoning_text = String::new();
     let mut finish_reason: Option<String> = None;
     let mut tool_calls: BTreeMap<String, ToolCallBuilder> = BTreeMap::new();
+    let mut responses_output_items: Vec<serde_json::Value> = Vec::new();
     let mut first_delta_time: Option<std::time::Instant> = None;
-    let mut current_event_type: Option<String> = None;
+    let mut sse_parser = SseParser::default();
     let mut raw_payloads: Vec<String> = Vec::new();
 
     use futures_util::StreamExt;
 
-    while let Some(chunk) = stream.next().await {
+    loop {
+        let next_chunk = tokio::time::timeout(RESPONSES_STREAM_IDLE_TIMEOUT, stream.next())
+            .await
+            .map_err(|_| NetworkError::Retryable {
+                message: format!(
+                    "Responses stream idle timeout after {} seconds",
+                    RESPONSES_STREAM_IDLE_TIMEOUT.as_secs()
+                ),
+            })?;
+        let Some(chunk) = next_chunk else {
+            break;
+        };
         let chunk = chunk?;
         buffer.extend_from_slice(&chunk);
 
@@ -121,24 +135,326 @@ pub(crate) async fn stream_responses(
             };
             buffer.drain(..=line_end);
 
-            if line.is_empty() {
+            let Some(payload) = sse_parser.push_line(&line) else {
                 continue;
+            };
+            let payload = payload.trim().to_string();
+
+            raw_payloads.push(payload.clone());
+
+            if payload == "[DONE]" {
+                save_raw_response_for_debugging(
+                    session_id,
+                    request_id,
+                    &raw_payloads,
+                    save_response_body,
+                    max_response_files,
+                );
+                let turn = finalize_turn(
+                    &assistant_text,
+                    &reasoning_text,
+                    &finish_reason,
+                    &tool_calls,
+                    &responses_output_items,
+                );
+                let _ = tx.send(BackendEvent::Finished {
+                    session_id,
+                    request_id,
+                    turn: Box::new(turn),
+                });
+                return Ok(());
             }
 
-            // SSE event type line: "event: TYPE"
-            if let Some(event) = line.strip_prefix("event:") {
-                current_event_type = Some(event.trim().to_string());
-                continue;
-            }
+            let event: ResponseStreamEvent =
+                serde_json::from_str(&payload).context("failed to parse responses event")?;
 
-            // SSE data line: "data: {...}"
-            if let Some(payload) = line.strip_prefix("data:") {
-                let payload = payload.trim().to_string();
-                let _event_type = current_event_type.take();
-
-                raw_payloads.push(payload.clone());
-
-                if payload == "[DONE]" {
+            match event {
+                ResponseStreamEvent::OutputTextDelta {
+                    delta,
+                    sequence_number: _,
+                    output_index: _,
+                    content_index: _,
+                } => {
+                    if first_delta_time.is_none() {
+                        first_delta_time = Some(std::time::Instant::now());
+                    }
+                    assistant_text.push_str(&delta);
+                    let _ = tx.send(BackendEvent::Delta {
+                        session_id,
+                        request_id,
+                        content: delta,
+                    });
+                }
+                ResponseStreamEvent::RefusalDelta {
+                    delta,
+                    sequence_number: _,
+                    output_index: _,
+                    content_index: _,
+                } => {
+                    // Handle refusal text (model declined to respond)
+                    if first_delta_time.is_none() {
+                        first_delta_time = Some(std::time::Instant::now());
+                    }
+                    assistant_text.push_str(&delta);
+                    let _ = tx.send(BackendEvent::Delta {
+                        session_id,
+                        request_id,
+                        content: delta,
+                    });
+                }
+                ResponseStreamEvent::ReasoningDelta {
+                    delta,
+                    sequence_number: _,
+                    output_index: _,
+                    content_index: _,
+                } => {
+                    if first_delta_time.is_none() {
+                        first_delta_time = Some(std::time::Instant::now());
+                    }
+                    let cleaned = strip_think_tags(&delta);
+                    if !cleaned.is_empty() {
+                        reasoning_text.push_str(&cleaned);
+                        let _ = tx.send(BackendEvent::ReasoningDelta {
+                            session_id,
+                            request_id,
+                            content: cleaned,
+                        });
+                    }
+                }
+                ResponseStreamEvent::ReasoningTextDelta {
+                    delta,
+                    sequence_number: _,
+                    item_id: _,
+                    output_index: _,
+                    content_index: _,
+                } => {
+                    if first_delta_time.is_none() {
+                        first_delta_time = Some(std::time::Instant::now());
+                    }
+                    let cleaned = strip_think_tags(&delta);
+                    if !cleaned.is_empty() {
+                        reasoning_text.push_str(&cleaned);
+                        let _ = tx.send(BackendEvent::ReasoningDelta {
+                            session_id,
+                            request_id,
+                            content: cleaned,
+                        });
+                    }
+                }
+                ResponseStreamEvent::ReasoningSummaryTextDelta {
+                    summary_delta,
+                    sequence_number: _,
+                    item_id: _,
+                    output_index: _,
+                    summary_index: _,
+                } => {
+                    let cleaned = strip_think_tags(&summary_delta);
+                    if !cleaned.is_empty() {
+                        reasoning_text.push_str(&cleaned);
+                        let _ = tx.send(BackendEvent::ReasoningDelta {
+                            session_id,
+                            request_id,
+                            content: cleaned,
+                        });
+                    }
+                }
+                ResponseStreamEvent::ReasoningSummaryTextDone {
+                    text: _,
+                    sequence_number: _,
+                    item_id: _,
+                    output_index: _,
+                    summary_index: _,
+                } => {}
+                ResponseStreamEvent::OutputItemAdded {
+                    item,
+                    sequence_number: _,
+                    output_index: _,
+                } => {
+                    // Handle function_call items (Responses API style)
+                    if item.item_type == "function_call" {
+                        // Extract the actual call_id for tool call pairing.
+                        let call_id = if !item.call_id.is_empty() {
+                            item.call_id.clone()
+                        } else if !item.id.is_empty() {
+                            item.id.clone()
+                        } else {
+                            continue;
+                        };
+                        let name = if !item.name.is_empty() {
+                            item.name.clone()
+                        } else {
+                            continue;
+                        };
+                        // Use item.id as the map key (consistent with
+                        // item_id in delta events).
+                        let key_id = if !item.id.is_empty() {
+                            item.id.clone()
+                        } else {
+                            call_id.clone()
+                        };
+                        let mut builder = ToolCallBuilder::new(call_id, name.clone());
+                        // Add initial arguments if present
+                        if !item.arguments.is_empty() {
+                            builder.append_arguments(&item.arguments);
+                        }
+                        tool_calls.insert(key_id.clone(), builder);
+                    }
+                }
+                ResponseStreamEvent::OutputItemDone {
+                    item,
+                    sequence_number: _,
+                    output_index: _,
+                } => {
+                    // Handle function_call items - send final ToolCallUpdated
+                    if item.item_type == "function_call" {
+                        let key_id = if !item.id.is_empty() {
+                            item.id.clone()
+                        } else if !item.call_id.is_empty() {
+                            item.call_id.clone()
+                        } else {
+                            continue;
+                        };
+                        if !item.arguments.is_empty()
+                            && let Some(builder) = tool_calls.get_mut(&key_id)
+                        {
+                            // The done event is authoritative. It may contain
+                            // the complete argument string even when a delta
+                            // was missed or never emitted.
+                            builder.set_arguments(&item.arguments);
+                        }
+                        if let Some(builder) = tool_calls.get(&key_id) {
+                            let arguments = builder.arguments().unwrap_or_default();
+                            let call = tidev_types::message::ToolCall {
+                                id: builder.id().to_string(),
+                                name: builder.name().to_string(),
+                                arguments: arguments.to_string(),
+                                thought_signature: None,
+                            };
+                            let _ = tx.send(BackendEvent::ToolCallUpdated {
+                                session_id,
+                                request_id,
+                                tool_call: call,
+                            });
+                        }
+                    }
+                    if let Ok(raw_item) = serde_json::to_value(&item) {
+                        responses_output_items.push(raw_item);
+                    }
+                    // Extract finish reason from message items
+                    if let Some(reason) = &item.finish_reason {
+                        finish_reason = Some(reason.clone());
+                    }
+                }
+                ResponseStreamEvent::ContentPartAdded {
+                    content_part,
+                    sequence_number: _,
+                    output_index: _,
+                    content_index: _,
+                } => {
+                    if content_part.part_type.as_str() == "tool_use"
+                        && let Some(name) = &content_part.name
+                    {
+                        let call_id = content_part
+                            .id
+                            .clone()
+                            .unwrap_or_else(|| format!("call_{}", Uuid::new_v4()));
+                        tool_calls.insert(
+                            call_id.clone(),
+                            ToolCallBuilder::new(call_id.clone(), name.clone()),
+                        );
+                    }
+                }
+                ResponseStreamEvent::ReasoningPartAdded {
+                    part: _,
+                    sequence_number: _,
+                    item_id: _,
+                    output_index: _,
+                    content_index: _,
+                } => {
+                    // Reasoning part added, handled by ReasoningTextDelta
+                }
+                ResponseStreamEvent::ReasoningPartDone {
+                    sequence_number: _,
+                    item_id: _,
+                    output_index: _,
+                    content_index: _,
+                } => {
+                    // Reasoning part done
+                }
+                ResponseStreamEvent::ReasoningSummaryPartAdded {
+                    part: _,
+                    sequence_number: _,
+                    item_id: _,
+                    output_index: _,
+                    summary_index: _,
+                } => {
+                    // Reasoning summary part added
+                }
+                ResponseStreamEvent::FunctionCallArgumentsDelta {
+                    call_id,
+                    call_name: _,
+                    arguments,
+                    sequence_number: _,
+                    output_index: _,
+                    item_id,
+                } => {
+                    // Use item_id as the key when call_id is empty
+                    let key_id = if call_id.is_empty() {
+                        item_id.clone()
+                    } else {
+                        call_id.clone()
+                    };
+                    // Only accumulate arguments, don't send ToolCallUpdated here
+                    if let Some(builder) = tool_calls.get_mut(&key_id) {
+                        builder.append_arguments(&arguments);
+                    }
+                }
+                ResponseStreamEvent::FunctionCallArgumentsDone {
+                    call_id,
+                    call_name: _,
+                    arguments,
+                    sequence_number: _,
+                    output_index: _,
+                    item_id,
+                } => {
+                    let key_id = if call_id.is_empty() { item_id } else { call_id };
+                    if !arguments.is_empty()
+                        && let Some(builder) = tool_calls.get_mut(&key_id)
+                    {
+                        builder.set_arguments(&arguments);
+                    }
+                }
+                ResponseStreamEvent::ResponseCompleted {
+                    response,
+                    sequence_number: _,
+                } => {
+                    for item in response.output.iter() {
+                        if let Ok(raw_item) = serde_json::to_value(item)
+                            && !responses_output_items.contains(&raw_item)
+                        {
+                            responses_output_items.push(raw_item);
+                        }
+                    }
+                    if let Some(usage) = response.usage {
+                        let cached_tokens = usage
+                            .input_tokens_details
+                            .as_ref()
+                            .map(|d| d.cached_tokens)
+                            .unwrap_or(0);
+                        let duration_ms =
+                            first_delta_time.map(|start| start.elapsed().as_millis() as u64);
+                        let _ = tx.send(BackendEvent::UsageStats {
+                            session_id,
+                            request_id,
+                            input_tokens: usage.input_tokens,
+                            output_tokens: usage.output_tokens,
+                            total_tokens: usage.total_tokens,
+                            cache_read_tokens: cached_tokens,
+                            cache_write_tokens: 0,
+                            model_id: format!("{}:{}", model.provider_id, model.model_id),
+                            duration_ms,
+                        });
+                    }
                     save_raw_response_for_debugging(
                         session_id,
                         request_id,
@@ -151,6 +467,7 @@ pub(crate) async fn stream_responses(
                         &reasoning_text,
                         &finish_reason,
                         &tool_calls,
+                        &responses_output_items,
                     );
                     let _ = tx.send(BackendEvent::Finished {
                         session_id,
@@ -159,383 +476,125 @@ pub(crate) async fn stream_responses(
                     });
                     return Ok(());
                 }
-
-                let event: ResponseStreamEvent =
-                    serde_json::from_str(&payload).context("failed to parse responses event")?;
-
-                match event {
-                    ResponseStreamEvent::OutputTextDelta {
-                        delta,
-                        sequence_number: _,
-                        output_index: _,
-                        content_index: _,
-                    } => {
-                        if first_delta_time.is_none() {
-                            first_delta_time = Some(std::time::Instant::now());
-                        }
-                        assistant_text.push_str(&delta);
-                        let _ = tx.send(BackendEvent::Delta {
-                            session_id,
-                            request_id,
-                            content: delta,
-                        });
-                    }
-                    ResponseStreamEvent::RefusalDelta {
-                        delta,
-                        sequence_number: _,
-                        output_index: _,
-                        content_index: _,
-                    } => {
-                        // Handle refusal text (model declined to respond)
-                        if first_delta_time.is_none() {
-                            first_delta_time = Some(std::time::Instant::now());
-                        }
-                        assistant_text.push_str(&delta);
-                        let _ = tx.send(BackendEvent::Delta {
-                            session_id,
-                            request_id,
-                            content: delta,
-                        });
-                    }
-                    ResponseStreamEvent::ReasoningDelta {
-                        delta,
-                        sequence_number: _,
-                        output_index: _,
-                        content_index: _,
-                    } => {
-                        if first_delta_time.is_none() {
-                            first_delta_time = Some(std::time::Instant::now());
-                        }
-                        let cleaned = strip_think_tags(&delta);
-                        if !cleaned.is_empty() {
-                            reasoning_text.push_str(&cleaned);
-                            let _ = tx.send(BackendEvent::ReasoningDelta {
-                                session_id,
-                                request_id,
-                                content: cleaned,
-                            });
-                        }
-                    }
-                    ResponseStreamEvent::ReasoningTextDelta {
-                        delta,
-                        sequence_number: _,
-                        item_id: _,
-                        output_index: _,
-                        content_index: _,
-                    } => {
-                        if first_delta_time.is_none() {
-                            first_delta_time = Some(std::time::Instant::now());
-                        }
-                        let cleaned = strip_think_tags(&delta);
-                        if !cleaned.is_empty() {
-                            reasoning_text.push_str(&cleaned);
-                            let _ = tx.send(BackendEvent::ReasoningDelta {
-                                session_id,
-                                request_id,
-                                content: cleaned,
-                            });
-                        }
-                    }
-                    ResponseStreamEvent::ReasoningSummaryTextDelta {
-                        summary_delta,
-                        sequence_number: _,
-                        item_id: _,
-                        output_index: _,
-                        summary_index: _,
-                    } => {
-                        let cleaned = strip_think_tags(&summary_delta);
-                        if !cleaned.is_empty() {
-                            reasoning_text.push_str(&cleaned);
-                            let _ = tx.send(BackendEvent::ReasoningDelta {
-                                session_id,
-                                request_id,
-                                content: cleaned,
-                            });
-                        }
-                    }
-                    ResponseStreamEvent::ReasoningSummaryTextDone {
-                        text,
-                        sequence_number: _,
-                        item_id: _,
-                        output_index: _,
-                        summary_index: _,
-                    } => {
-                        let cleaned = strip_think_tags(&text);
-                        if !cleaned.is_empty() {
-                            reasoning_text.push_str(&cleaned);
-                            let _ = tx.send(BackendEvent::ReasoningDelta {
-                                session_id,
-                                request_id,
-                                content: cleaned,
-                            });
-                        }
-                    }
-                    ResponseStreamEvent::OutputItemAdded {
-                        item,
-                        sequence_number: _,
-                        output_index: _,
-                    } => {
-                        // Handle function_call items (Responses API style)
-                        if item.item_type == "function_call" {
-                            // Extract the actual call_id for tool call pairing.
-                            let call_id = if !item.call_id.is_empty() {
-                                item.call_id.clone()
-                            } else if !item.id.is_empty() {
-                                item.id.clone()
+                ResponseStreamEvent::ResponseCreated {
+                    response: _,
+                    sequence_number: _,
+                }
+                | ResponseStreamEvent::ResponseInProgress {
+                    response: _,
+                    sequence_number: _,
+                }
+                | ResponseStreamEvent::ResponseQueued {
+                    response: _,
+                    sequence_number: _,
+                }
+                | ResponseStreamEvent::OutputTextDone {
+                    sequence_number: _,
+                    output_index: _,
+                    content_index: _,
+                }
+                | ResponseStreamEvent::RefusalDone {
+                    sequence_number: _,
+                    output_index: _,
+                    content_index: _,
+                }
+                | ResponseStreamEvent::ReasoningDone {
+                    sequence_number: _,
+                    output_index: _,
+                    content_index: _,
+                }
+                | ResponseStreamEvent::ReasoningTextDone {
+                    text: _,
+                    sequence_number: _,
+                    item_id: _,
+                    output_index: _,
+                    content_index: _,
+                }
+                | ResponseStreamEvent::ReasoningSummaryPartDone {
+                    sequence_number: _,
+                    item_id: _,
+                    output_index: _,
+                    summary_index: _,
+                }
+                | ResponseStreamEvent::ContentPartDone {
+                    content_part: _,
+                    sequence_number: _,
+                    output_index: _,
+                    content_index: _,
+                }
+                | ResponseStreamEvent::FileSearchCallInProgress {
+                    sequence_number: _,
+                    output_index: _,
+                    item_id: _,
+                }
+                | ResponseStreamEvent::FileSearchCallSearching {
+                    sequence_number: _,
+                    output_index: _,
+                    item_id: _,
+                }
+                | ResponseStreamEvent::FileSearchCallCompleted {
+                    sequence_number: _,
+                    output_index: _,
+                    item_id: _,
+                }
+                | ResponseStreamEvent::WebSearchCallInProgress {
+                    sequence_number: _,
+                    output_index: _,
+                    item_id: _,
+                }
+                | ResponseStreamEvent::WebSearchCallSearching {
+                    sequence_number: _,
+                    output_index: _,
+                    item_id: _,
+                }
+                | ResponseStreamEvent::WebSearchCallCompleted {
+                    sequence_number: _,
+                    output_index: _,
+                    item_id: _,
+                } => {}
+                ResponseStreamEvent::ResponseIncomplete {
+                    response,
+                    sequence_number: _,
+                } => {
+                    let detail = response
+                        .incomplete_details
+                        .as_ref()
+                        .map(|details| {
+                            if details.reason.is_empty() {
+                                details.incomplete_type.clone()
                             } else {
-                                continue;
-                            };
-                            let name = if !item.name.is_empty() {
-                                item.name.clone()
-                            } else {
-                                continue;
-                            };
-                            // Use item.id as the map key (consistent with
-                            // item_id in delta events).
-                            let key_id = if !item.id.is_empty() {
-                                item.id.clone()
-                            } else {
-                                call_id.clone()
-                            };
-                            let mut builder =
-                                ToolCallBuilder::new(call_id, name.clone());
-                            // Add initial arguments if present
-                            if !item.arguments.is_empty() {
-                                builder.append_arguments(&item.arguments);
+                                details.reason.clone()
                             }
-                            tool_calls.insert(key_id.clone(), builder);
-                        }
+                        })
+                        .filter(|value| !value.is_empty())
+                        .unwrap_or_else(|| "unknown reason".to_string());
+                    return Err(NetworkError::NonRetryable {
+                        message: format!("Responses response incomplete: {detail}"),
                     }
-                    ResponseStreamEvent::OutputItemDone {
-                        item,
-                        sequence_number: _,
-                        output_index: _,
-                    } => {
-                        // Handle function_call items - send final ToolCallUpdated
-                        if item.item_type == "function_call" {
-                            let key_id = if !item.id.is_empty() {
-                                item.id.clone()
-                            } else if !item.call_id.is_empty() {
-                                item.call_id.clone()
-                            } else {
-                                continue;
-                            };
-                            if let Some(builder) = tool_calls.get(&key_id)
-                                && let Some(arguments) = builder.arguments()
-                            {
-                                let call = tidev_types::message::ToolCall {
-                                    id: builder.id().to_string(),
-                                    name: builder.name().to_string(),
-                                    arguments: arguments.to_string(),
-                                    thought_signature: None,
-                                };
-                                let _ = tx.send(BackendEvent::ToolCallUpdated {
-                                    session_id,
-                                    request_id,
-                                    tool_call: call,
-                                });
-                            }
-                        }
-                        // Extract finish reason from message items
-                        if let Some(reason) = &item.finish_reason {
-                            finish_reason = Some(reason.clone());
-                        }
-                    }
-                    ResponseStreamEvent::ContentPartAdded {
-                        content_part,
-                        sequence_number: _,
-                        output_index: _,
-                        content_index: _,
-                    } => {
-                        if content_part.part_type.as_str() == "tool_use"
-                            && let Some(name) = &content_part.name
-                        {
-                            let call_id = content_part
-                                .id
-                                .clone()
-                                .unwrap_or_else(|| format!("call_{}", Uuid::new_v4()));
-                            tool_calls.insert(
-                                call_id.clone(),
-                                ToolCallBuilder::new(call_id.clone(), name.clone()),
-                            );
-                        }
-                    }
-                    ResponseStreamEvent::ReasoningPartAdded {
-                        part: _,
-                        sequence_number: _,
-                        item_id: _,
-                        output_index: _,
-                        content_index: _,
-                    } => {
-                        // Reasoning part added, handled by ReasoningTextDelta
-                    }
-                    ResponseStreamEvent::ReasoningPartDone {
-                        sequence_number: _,
-                        item_id: _,
-                        output_index: _,
-                        content_index: _,
-                    } => {
-                        // Reasoning part done
-                    }
-                    ResponseStreamEvent::ReasoningSummaryPartAdded {
-                        part: _,
-                        sequence_number: _,
-                        item_id: _,
-                        output_index: _,
-                        summary_index: _,
-                    } => {
-                        // Reasoning summary part added
-                    }
-                    ResponseStreamEvent::FunctionCallArgumentsDelta {
-                        call_id,
-                        call_name: _,
-                        arguments,
-                        sequence_number: _,
-                        output_index: _,
-                        item_id,
-                    } => {
-                        // Use item_id as the key when call_id is empty
-                        let key_id = if call_id.is_empty() {
-                            item_id.clone()
-                        } else {
-                            call_id.clone()
-                        };
-                        // Only accumulate arguments, don't send ToolCallUpdated here
-                        if let Some(builder) = tool_calls.get_mut(&key_id) {
-                            builder.append_arguments(&arguments);
-                        }
-                    }
-                    ResponseStreamEvent::FunctionCallArgumentsDone {
-                        call_id: _,
-                        call_name: _,
-                        sequence_number: _,
-                        output_index: _,
-                        item_id: _,
-                    } => {
-                        // Only accumulate arguments, final ToolCallUpdated is sent in OutputItemDone
-                    }
-                    ResponseStreamEvent::ResponseCompleted {
-                        response,
-                        sequence_number: _,
-                    } => {
-                        if let Some(usage) = response.usage {
-                            let cached_tokens = usage
-                                .input_tokens_details
-                                .as_ref()
-                                .map(|d| d.cached_tokens)
-                                .unwrap_or(0);
-                            let duration_ms =
-                                first_delta_time.map(|start| start.elapsed().as_millis() as u64);
-                            let _ = tx.send(BackendEvent::UsageStats {
-                                session_id,
-                                request_id,
-                                input_tokens: usage.input_tokens,
-                                output_tokens: usage.output_tokens,
-                                total_tokens: usage.total_tokens,
-                                cache_read_tokens: cached_tokens,
-                                cache_write_tokens: 0,
-                                model_id: format!("{}:{}", model.provider_id, model.model_id),
-                                duration_ms,
-                            });
-                        }
-                    }
-                    ResponseStreamEvent::ResponseCreated {
-                        response: _,
-                        sequence_number: _,
-                    }
-                    | ResponseStreamEvent::ResponseInProgress {
-                        response: _,
-                        sequence_number: _,
-                    }
-                    | ResponseStreamEvent::ResponseQueued {
-                        response: _,
-                        sequence_number: _,
-                    }
-                    | ResponseStreamEvent::OutputTextDone {
-                        sequence_number: _,
-                        output_index: _,
-                        content_index: _,
-                    }
-                    | ResponseStreamEvent::RefusalDone {
-                        sequence_number: _,
-                        output_index: _,
-                        content_index: _,
-                    }
-                    | ResponseStreamEvent::ReasoningDone {
-                        sequence_number: _,
-                        output_index: _,
-                        content_index: _,
-                    }
-                    | ResponseStreamEvent::ReasoningTextDone {
-                        text: _,
-                        sequence_number: _,
-                        item_id: _,
-                        output_index: _,
-                        content_index: _,
-                    }
-                    | ResponseStreamEvent::ReasoningSummaryPartDone {
-                        sequence_number: _,
-                        item_id: _,
-                        output_index: _,
-                        summary_index: _,
-                    }
-                    | ResponseStreamEvent::ContentPartDone {
-                        content_part: _,
-                        sequence_number: _,
-                        output_index: _,
-                        content_index: _,
-                    }
-                    | ResponseStreamEvent::FileSearchCallInProgress {
-                        sequence_number: _,
-                        output_index: _,
-                        item_id: _,
-                    }
-                    | ResponseStreamEvent::FileSearchCallSearching {
-                        sequence_number: _,
-                        output_index: _,
-                        item_id: _,
-                    }
-                    | ResponseStreamEvent::FileSearchCallCompleted {
-                        sequence_number: _,
-                        output_index: _,
-                        item_id: _,
-                    }
-                    | ResponseStreamEvent::WebSearchCallInProgress {
-                        sequence_number: _,
-                        output_index: _,
-                        item_id: _,
-                    }
-                    | ResponseStreamEvent::WebSearchCallSearching {
-                        sequence_number: _,
-                        output_index: _,
-                        item_id: _,
-                    }
-                    | ResponseStreamEvent::WebSearchCallCompleted {
-                        sequence_number: _,
-                        output_index: _,
-                        item_id: _,
-                    }
-                    | ResponseStreamEvent::ResponseIncomplete {
-                        response: _,
-                        sequence_number: _,
-                    } => {
-                        // These events don't need special handling
-                    }
-                    ResponseStreamEvent::ResponseFailed {
-                        response: _,
-                        sequence_number: _,
-                    } => {
-                        log_error!("openai responses stream failed");
-                        return Err(anyhow::anyhow!("Response stream failed"));
-                    }
-                    ResponseStreamEvent::Error { message, code } => {
-                        log_error!(
-                            "openai responses stream error: code={:?} message={}",
-                            code,
-                            message
-                        );
-                        return Err(anyhow::anyhow!("Response stream error: {}", message));
-                    }
+                    .into());
+                }
+                ResponseStreamEvent::ResponseFailed {
+                    response,
+                    sequence_number: _,
+                } => {
+                    let (message, code) = response_error_details(&response);
+                    log_error!(
+                        "openai responses stream failed: code={:?} message={}",
+                        code,
+                        message
+                    );
+                    return Err(classify_responses_stream_error(message, code).into());
+                }
+                ResponseStreamEvent::Error { message, code } => {
+                    log_error!(
+                        "openai responses stream error: code={:?} message={}",
+                        code,
+                        message
+                    );
+                    return Err(classify_responses_stream_error(message, code).into());
+                }
+                ResponseStreamEvent::Unknown { event_type } => {
+                    log_debug!("ignoring unknown OpenAI Responses event: {}", event_type);
                 }
             }
         }
@@ -549,26 +608,21 @@ pub(crate) async fn stream_responses(
         max_response_files,
     );
 
-    let turn = finalize_turn(
-        &assistant_text,
-        &reasoning_text,
-        &finish_reason,
-        &tool_calls,
-    );
-    let _ = tx.send(BackendEvent::Finished {
-        session_id,
-        request_id,
-        turn: Box::new(turn),
-    });
-    Ok(())
+    Err(NetworkError::Retryable {
+        message: "Responses stream closed before response.completed".to_string(),
+    }
+    .into())
 }
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn complete_responses(
     http: &Client,
+    session_id: Uuid,
+    request_id: u64,
     model: LlmProviderConfig,
     messages: Vec<Message>,
     tools: Vec<ToolDefinition>,
+    tx: Option<&UnboundedSender<BackendEvent>>,
     save_request_body: bool,
     max_request_files: usize,
     save_response_body: bool,
@@ -639,11 +693,13 @@ pub(crate) async fn complete_responses(
 
     // Check for error in response
     if let Some(error) = response.error {
-        return Err(anyhow::anyhow!(
-            "API error: {} - {}",
-            error.code,
+        let message = if error.message.is_empty() {
+            "Responses API returned an error".to_string()
+        } else {
             error.message
-        ));
+        };
+        let code = (!error.code.is_empty()).then_some(error.code);
+        return Err(classify_responses_stream_error(message, code).into());
     }
 
     // Check for result error
@@ -653,24 +709,39 @@ pub(crate) async fn complete_responses(
         return Err(anyhow::anyhow!("API result error"));
     }
 
-    // Extract text content from message output items
+    // Preserve all output text parts, including text split across multiple
+    // message items. Function calls are intentionally not exposed by this
+    // string-only API, but must not hide later assistant text.
+    if let Some(usage) = response.usage.as_ref()
+        && let Some(tx) = tx
+    {
+        let cached_tokens = usage
+            .input_tokens_details
+            .as_ref()
+            .map(|details| details.cached_tokens)
+            .unwrap_or(0);
+        let _ = tx.send(BackendEvent::UsageStats {
+            session_id,
+            request_id,
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+            total_tokens: usage.total_tokens,
+            cache_read_tokens: cached_tokens,
+            cache_write_tokens: 0,
+            model_id: format!("{}:{}", model.provider_id, model.model_id),
+            duration_ms: None,
+        });
+    }
+
     let content = response
         .output
         .into_iter()
-        .find_map(|output| {
-            if output.kind == "message" {
-                output.content.into_iter().find_map(|part| {
-                    if part.kind == "output_text" || part.kind == "text" {
-                        Some(part.text.unwrap_or_default())
-                    } else {
-                        None
-                    }
-                })
-            } else {
-                None
-            }
-        })
-        .unwrap_or_default();
+        .filter(|output| output.kind == "message")
+        .flat_map(|output| output.content)
+        .filter(|part| part.kind == "output_text" || part.kind == "text")
+        .filter_map(|part| part.text)
+        .collect::<Vec<_>>()
+        .join("");
 
     Ok(content)
 }
@@ -732,6 +803,14 @@ fn build_responses_request(
                 }
             }
             MessageRole::Assistant => {
+                // Replay the provider's completed output items whenever they are
+                // available. This preserves reasoning items and encrypted content
+                // that cannot be reconstructed from the display text alone.
+                if !message.metadata.responses_output_items.is_empty() {
+                    input_items.extend(message.metadata.responses_output_items.iter().cloned());
+                    continue;
+                }
+
                 let text = message_text_with_file_references(message);
 
                 // Emit assistant text as a message item (if non-empty).
@@ -740,7 +819,7 @@ fn build_responses_request(
                         "type": "message",
                         "role": "assistant",
                         "content": [{
-                            "type": "input_text",
+                            "type": "output_text",
                             "text": text,
                         }],
                     }));
@@ -763,6 +842,7 @@ fn build_responses_request(
                 let text = message_text_with_file_references(message);
                 let call_id = message.tool_call_id.clone().unwrap_or_default();
                 let images: Vec<&MessageAttachment> = image_attachments(message).collect();
+                let has_images = !images.is_empty();
 
                 // function_call_output.output supports an array of content
                 // parts (input_text, input_image, input_file), so embed
@@ -794,10 +874,16 @@ fn build_responses_request(
                     }));
                 }
 
+                let output = if !has_images {
+                    serde_json::Value::String(text)
+                } else {
+                    serde_json::Value::Array(output_parts)
+                };
+
                 input_items.push(serde_json::json!({
                     "type": "function_call_output",
                     "call_id": call_id,
-                    "output": output_parts,
+                    "output": output,
                 }));
             }
             MessageRole::Error => {}
@@ -805,11 +891,7 @@ fn build_responses_request(
         }
     }
 
-    let input = if input_items.is_empty() {
-        serde_json::Value::String(String::new())
-    } else {
-        serde_json::Value::Array(input_items)
-    };
+    let input = serde_json::Value::Array(input_items);
 
     let chat_tools = if tools.is_empty() {
         None
@@ -824,9 +906,7 @@ fn build_responses_request(
     // be looked up on subsequent turns.
     let include = Some(vec!["reasoning.encrypted_content".to_string()]);
 
-    let tool_choice = chat_tools
-        .as_ref()
-        .map(|_| "auto".to_string());
+    let tool_choice = chat_tools.as_ref().map(|_| "auto".to_string());
 
     Ok(ResponsesRequest {
         model: model.request_model_id.clone().unwrap_or_default(),
@@ -834,20 +914,18 @@ fn build_responses_request(
         input,
         tools: chat_tools,
         tool_choice,
-        parallel_tool_calls: true,
+        parallel_tool_calls: model.supports_parallel_tool_calls && tools.len() > 1,
         temperature: model.temperature,
         max_output_tokens: Some(model.max_output_tokens),
+        store: false,
         stream,
-        stream_options: if stream {
-            Some(StreamOptions {
-                include_usage: true,
-            })
-        } else {
-            None
-        },
         thinking,
         include,
         prompt_cache_key,
+        // Responses reasoning is already represented by the dedicated
+        // `reasoning` field above. Do not flatten the thinking-level object a
+        // second time into the top-level request.
+        extra_body: model.extra_body.clone(),
     })
 }
 
@@ -856,6 +934,7 @@ fn finalize_turn(
     reasoning_text: &str,
     finish_reason: &Option<String>,
     tool_calls: &BTreeMap<String, ToolCallBuilder>,
+    responses_output_items: &[serde_json::Value],
 ) -> tidev_types::message::AssistantTurn {
     let tool_calls = tool_calls
         .values()
@@ -880,7 +959,41 @@ fn finalize_turn(
         reasoning: reasoning_text.to_string(),
         tool_calls,
         finish_reason: Some(final_finish_reason),
+        responses_output_items: responses_output_items.to_vec(),
         ..Default::default()
+    }
+}
+
+#[derive(Default)]
+struct SseParser {
+    data_lines: Vec<String>,
+    event_type: Option<String>,
+}
+
+impl SseParser {
+    /// Parse one SSE line and return a payload only at an event boundary.
+    fn push_line(&mut self, line: &str) -> Option<String> {
+        if line.is_empty() {
+            let payload = (!self.data_lines.is_empty()).then(|| self.data_lines.join("\n"));
+            self.data_lines.clear();
+            let _event_type = self.event_type.take();
+            return payload;
+        }
+
+        if line.starts_with(':') {
+            return None;
+        }
+
+        if let Some(event_type) = line.strip_prefix("event:") {
+            self.event_type = Some(event_type.trim().to_string());
+            return None;
+        }
+
+        if let Some(data) = line.strip_prefix("data:") {
+            self.data_lines
+                .push(data.strip_prefix(' ').unwrap_or(data).to_string());
+        }
+        None
     }
 }
 
@@ -919,6 +1032,58 @@ impl ToolCallBuilder {
     fn append_arguments(&mut self, args: &str) {
         self.arguments.push_str(args);
     }
+
+    fn set_arguments(&mut self, args: &str) {
+        self.arguments.clear();
+        self.arguments.push_str(args);
+    }
+}
+
+fn response_error_details(response: &ResponseStreamResponse) -> (String, Option<String>) {
+    response
+        .error
+        .as_ref()
+        .map(|error| {
+            let message = if error.message.is_empty() {
+                "Responses API returned a failed response".to_string()
+            } else {
+                error.message.clone()
+            };
+            let code = if error.code.is_empty() {
+                (!error.r#type.is_empty()).then(|| error.r#type.clone())
+            } else {
+                Some(error.code.clone())
+            };
+            (message, code)
+        })
+        .unwrap_or_else(|| ("Responses API returned a failed response".to_string(), None))
+}
+
+fn classify_responses_stream_error(message: String, code: Option<String>) -> NetworkError {
+    let searchable = format!(
+        "{} {}",
+        code.as_deref().unwrap_or_default().to_ascii_lowercase(),
+        message.to_ascii_lowercase()
+    );
+    let retryable = [
+        "rate_limit",
+        "rate limit",
+        "server_error",
+        "server error",
+        "overloaded",
+        "temporarily unavailable",
+        "timeout",
+        "timed out",
+        "try again",
+    ]
+    .iter()
+    .any(|marker| searchable.contains(marker));
+
+    if retryable {
+        NetworkError::Retryable { message }
+    } else {
+        NetworkError::NonRetryable { message }
+    }
 }
 
 // ============================================================================
@@ -941,20 +1106,15 @@ struct ResponsesRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     max_output_tokens: Option<usize>,
     stream: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    stream_options: Option<StreamOptions>,
+    store: bool,
     #[serde(rename = "reasoning", skip_serializing_if = "Option::is_none")]
     thinking: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     include: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     prompt_cache_key: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-struct StreamOptions {
-    #[serde(rename = "include_usage")]
-    include_usage: bool,
+    #[serde(flatten)]
+    extra_body: Option<serde_json::Value>,
 }
 
 // ============================================================================
@@ -1219,6 +1379,8 @@ enum ResponseStreamEvent {
         #[serde(rename = "name")]
         call_name: Option<String>,
         #[serde(default)]
+        arguments: String,
+        #[serde(default)]
         sequence_number: u64,
         #[serde(default)]
         output_index: u32,
@@ -1277,6 +1439,9 @@ enum ResponseStreamEvent {
         message: String,
         #[serde(default)]
         code: Option<String>,
+    },
+    Unknown {
+        event_type: String,
     },
 }
 
@@ -1441,7 +1606,7 @@ impl From<ResponseStreamEventRaw> for ResponseStreamEvent {
             },
             "response.reasoning_summary_text.delta" => {
                 ResponseStreamEvent::ReasoningSummaryTextDelta {
-                    summary_delta: raw.summary,
+                    summary_delta: raw.delta,
                     sequence_number: raw.sequence_number,
                     item_id: raw.item_id,
                     output_index: raw.output_index,
@@ -1496,6 +1661,7 @@ impl From<ResponseStreamEventRaw> for ResponseStreamEvent {
                     } else {
                         Some(raw.name)
                     },
+                    arguments: raw.arguments,
                     sequence_number: raw.sequence_number,
                     output_index: raw.output_index,
                     item_id: raw.item_id,
@@ -1535,13 +1701,24 @@ impl From<ResponseStreamEventRaw> for ResponseStreamEvent {
                 output_index: raw.output_index,
                 item_id: raw.item_id,
             },
-            "error" => ResponseStreamEvent::Error {
-                message: raw.message,
-                code: raw.code,
-            },
-            _ => ResponseStreamEvent::Error {
-                message: format!("Unknown event type: {}", raw.event_type),
-                code: None,
+            "error" => {
+                let message = if !raw.message.is_empty() {
+                    raw.message
+                } else if !raw.error.message.is_empty() {
+                    raw.error.message.clone()
+                } else {
+                    raw.error.error.message.clone()
+                };
+                let code = raw
+                    .code
+                    .or_else(|| (!raw.error.code.is_empty()).then(|| raw.error.code.clone()));
+                let code = code.or_else(|| {
+                    (!raw.error.error.code.is_empty()).then(|| raw.error.error.code.clone())
+                });
+                ResponseStreamEvent::Error { message, code }
+            }
+            _ => ResponseStreamEvent::Unknown {
+                event_type: raw.event_type,
             },
         }
     }
@@ -1558,46 +1735,56 @@ struct ResponseStreamResponse {
     created_at: u64,
     #[serde(default)]
     usage: Option<ResponseStreamUsage>,
+    #[serde(default)]
+    error: Option<ResponseStreamErrorDetail>,
+    #[serde(default)]
+    incomplete_details: Option<ResponseStreamIncompleteDetails>,
+    #[serde(default)]
+    output: Vec<ResponseStreamItem>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[allow(dead_code)]
 struct ResponseStreamItem {
-    #[serde(rename = "type")]
+    #[serde(rename = "type", skip_serializing_if = "String::is_empty")]
     #[serde(default)]
     item_type: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     id: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     call_id: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     status: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     role: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     name: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     arguments: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     content: Option<Vec<ResponseStreamContentPart>>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     finish_reason: Option<String>,
+    #[serde(flatten, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    extra: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[allow(dead_code)]
 struct ResponseStreamContentPart {
-    #[serde(rename = "type")]
+    #[serde(rename = "type", skip_serializing_if = "String::is_empty")]
     #[serde(default)]
     part_type: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     text: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     id: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     name: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     index: Option<u32>,
+    #[serde(flatten, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    extra: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -1696,7 +1883,7 @@ struct ResponsesCompleteResponse {
     #[serde(default)]
     output: Vec<ResponseOutputItem>,
     #[serde(default)]
-    usage: ResponseStreamUsage,
+    usage: Option<ResponseStreamUsage>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -1764,6 +1951,7 @@ mod tests {
             max_output_tokens: 4096,
             temperature: Some(0.7),
             supports_images: true,
+            supports_parallel_tool_calls: true,
             context_window: 128000,
             system_prompt: Some("You are helpful.".to_string()),
             api_key: None,
@@ -1798,6 +1986,7 @@ mod tests {
             max_output_tokens: 4096,
             temperature: Some(0.7),
             supports_images: false,
+            supports_parallel_tool_calls: true,
             context_window: 128000,
             system_prompt: Some("Base system prompt".to_string()),
             api_key: None,
@@ -1833,6 +2022,7 @@ mod tests {
             max_output_tokens: 4096,
             temperature: Some(0.7),
             supports_images: false,
+            supports_parallel_tool_calls: true,
             context_window: 128000,
             system_prompt: Some("You are helpful.".to_string()),
             api_key: None,
@@ -1856,18 +2046,13 @@ mod tests {
         assert_eq!(input[0]["content"][0]["text"], "Run command");
         assert_eq!(input[1]["type"], "message");
         assert_eq!(input[1]["role"], "assistant");
+        assert_eq!(input[1]["content"][0]["type"], "output_text");
         assert_eq!(
             input[1]["content"][0]["text"],
             "I'll help you run a command."
         );
         assert_eq!(input[2]["type"], "function_call_output");
-        // output is now an array of content parts, not a bare string.
-        let output = input[2]["output"]
-            .as_array()
-            .expect("output should be an array");
-        assert_eq!(output.len(), 1);
-        assert_eq!(output[0]["type"], "input_text");
-        assert_eq!(output[0]["text"], "Tool result: success");
+        assert_eq!(input[2]["output"], "Tool result: success");
     }
 
     #[test]
@@ -1881,6 +2066,7 @@ mod tests {
             max_output_tokens: 4096,
             temperature: Some(0.7),
             supports_images: true,
+            supports_parallel_tool_calls: true,
             context_window: 128000,
             system_prompt: None,
             api_key: None,
@@ -1924,10 +2110,7 @@ mod tests {
         assert_eq!(input[1]["type"], "function_call");
         assert_eq!(input[1]["call_id"], "call_xyz");
         assert_eq!(input[1]["name"], "read");
-        assert_eq!(
-            input[1]["arguments"],
-            r#"{"file_path":"icon.png"}"#
-        );
+        assert_eq!(input[1]["arguments"], r#"{"file_path":"icon.png"}"#);
         assert_eq!(input[2]["type"], "function_call_output");
 
         let output = input[2]["output"]
@@ -1955,6 +2138,7 @@ mod tests {
             max_output_tokens: 4096,
             temperature: Some(0.7),
             supports_images: false,
+            supports_parallel_tool_calls: true,
             context_window: 128000,
             system_prompt: None,
             api_key: None,
@@ -2013,6 +2197,7 @@ mod tests {
             max_output_tokens: 4096,
             temperature: Some(0.7),
             supports_images: false,
+            supports_parallel_tool_calls: true,
             context_window: 128000,
             system_prompt: None,
             api_key: None,
@@ -2080,6 +2265,7 @@ mod tests {
             max_output_tokens: 4096,
             temperature: Some(0.7),
             supports_images: false,
+            supports_parallel_tool_calls: true,
             context_window: 128000,
             system_prompt: Some("You are helpful.".to_string()),
             api_key: None,
@@ -2096,17 +2282,18 @@ mod tests {
             description: "Read a file".to_string(),
             parameters: serde_json::json!({"type": "object"}),
         }];
-        let request = build_responses_request(&model, messages.clone(), true, &tools, None).unwrap();
-        assert_eq!(request.parallel_tool_calls, true);
+        let request =
+            build_responses_request(&model, messages.clone(), true, &tools, None).unwrap();
+        assert_eq!(request.parallel_tool_calls, false);
         let json = serde_json::to_value(&request).unwrap();
         assert_eq!(json["tool_choice"], "auto");
-        assert_eq!(json["parallel_tool_calls"], true);
+        assert_eq!(json["parallel_tool_calls"], false);
 
         // Without tools — tool_choice should be absent
         let request = build_responses_request(&model, messages, true, &[], None).unwrap();
         let json = serde_json::to_value(&request).unwrap();
         assert!(!json.as_object().unwrap().contains_key("tool_choice"));
-        assert_eq!(json["parallel_tool_calls"], true);
+        assert_eq!(json["parallel_tool_calls"], false);
     }
 
     #[test]
@@ -2128,5 +2315,201 @@ mod tests {
         assert_eq!(response_tool.kind, "function");
         assert_eq!(response_tool.name, "shell");
         assert!(!response_tool.description.is_empty());
+    }
+
+    #[test]
+    fn responses_assistant_replays_raw_output_items() {
+        let model = LlmProviderConfig {
+            provider_id: "test".to_string(),
+            base_url: "https://api.openai.com/v1".to_string(),
+            api_type: ApiType::OpenAiResponses,
+            model_id: "gpt-5".to_string(),
+            request_model_id: Some("gpt-5".to_string()),
+            max_output_tokens: 4096,
+            temperature: None,
+            supports_images: false,
+            supports_parallel_tool_calls: true,
+            context_window: 128000,
+            system_prompt: None,
+            api_key: None,
+            extra_body: None,
+            thinking_level: tidev_types::reasoning::ThinkingLevelType::None,
+        };
+        let mut assistant = Message::new(MessageRole::Assistant, "visible text");
+        assistant.metadata.responses_output_items = vec![
+            serde_json::json!({
+                "type": "reasoning",
+                "id": "rs_1",
+                "encrypted_content": "opaque"
+            }),
+            serde_json::json!({
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "visible text"}]
+            }),
+        ];
+
+        let request = build_responses_request(&model, vec![assistant], false, &[], None).unwrap();
+        assert_eq!(
+            request.input,
+            serde_json::json!([
+                {
+                    "type": "reasoning",
+                    "id": "rs_1",
+                    "encrypted_content": "opaque"
+                },
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "visible text"}]
+                }
+            ])
+        );
+    }
+
+    #[test]
+    fn reasoning_summary_delta_reads_delta_field() {
+        let event: ResponseStreamEvent = serde_json::from_value(serde_json::json!({
+            "type": "response.reasoning_summary_text.delta",
+            "delta": "summary chunk",
+            "item_id": "rs_1",
+            "output_index": 0,
+            "summary_index": 0
+        }))
+        .unwrap();
+
+        match event {
+            ResponseStreamEvent::ReasoningSummaryTextDelta { summary_delta, .. } => {
+                assert_eq!(summary_delta, "summary chunk");
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn function_call_done_preserves_complete_arguments() {
+        let event: ResponseStreamEvent = serde_json::from_value(serde_json::json!({
+            "type": "response.function_call_arguments.done",
+            "id": "call_1",
+            "name": "read",
+            "arguments": "{\"path\":\"a.txt\"}",
+            "item_id": "fc_1"
+        }))
+        .unwrap();
+
+        match event {
+            ResponseStreamEvent::FunctionCallArgumentsDone { arguments, .. } => {
+                assert_eq!(arguments, r#"{"path":"a.txt"}"#);
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn output_item_serialization_preserves_encrypted_reasoning_content() {
+        let event: ResponseStreamEvent = serde_json::from_value(serde_json::json!({
+            "type": "response.output_item.done",
+            "item": {
+                "type": "reasoning",
+                "id": "rs_1",
+                "status": "completed",
+                "encrypted_content": "opaque",
+                "summary": []
+            }
+        }))
+        .unwrap();
+
+        let ResponseStreamEvent::OutputItemDone { item, .. } = event else {
+            panic!("expected output item done");
+        };
+        let serialized = serde_json::to_value(item).unwrap();
+        assert_eq!(serialized["type"], "reasoning");
+        assert_eq!(serialized["encrypted_content"], "opaque");
+        assert_eq!(serialized["summary"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn unknown_responses_event_is_ignored() {
+        let event: ResponseStreamEvent = serde_json::from_value(serde_json::json!({
+            "type": "response.future_event",
+            "foo": "bar"
+        }))
+        .unwrap();
+        assert!(matches!(event, ResponseStreamEvent::Unknown { .. }));
+    }
+
+    #[test]
+    fn stream_error_classification_retries_transient_errors() {
+        assert!(
+            classify_responses_stream_error(
+                "server overloaded".to_string(),
+                Some("server_error".to_string())
+            )
+            .is_retryable()
+        );
+        assert!(
+            !classify_responses_stream_error(
+                "invalid prompt".to_string(),
+                Some("invalid_request_error".to_string())
+            )
+            .is_retryable()
+        );
+    }
+
+    #[test]
+    fn sse_parser_combines_multiline_data_at_event_boundary() {
+        let mut parser = SseParser::default();
+        assert!(
+            parser
+                .push_line("event: response.output_text.delta")
+                .is_none()
+        );
+        assert!(parser.push_line("data: {\"type\":").is_none());
+        assert!(
+            parser
+                .push_line("data: \"response.output_text.delta\"}")
+                .is_none()
+        );
+        assert_eq!(
+            parser.push_line(""),
+            Some("{\"type\":\n\"response.output_text.delta\"}".to_string())
+        );
+    }
+
+    #[test]
+    fn responses_extra_body_is_flattened_without_thinking_duplicates() {
+        let model = LlmProviderConfig {
+            provider_id: "test".to_string(),
+            base_url: "https://api.openai.com/v1".to_string(),
+            api_type: ApiType::OpenAiResponses,
+            model_id: "gpt-5".to_string(),
+            request_model_id: Some("gpt-5".to_string()),
+            max_output_tokens: 4096,
+            temperature: None,
+            supports_images: false,
+            supports_parallel_tool_calls: true,
+            context_window: 128000,
+            system_prompt: None,
+            api_key: None,
+            extra_body: Some(serde_json::json!({"service_tier": "flex"})),
+            thinking_level: tidev_types::reasoning::ThinkingLevelType::Gpt5(
+                tidev_types::reasoning::Gpt5ThinkingLevel::High,
+            ),
+        };
+
+        let request = build_responses_request(
+            &model,
+            vec![Message::new(MessageRole::User, "Hello")],
+            true,
+            &[],
+            None,
+        )
+        .unwrap();
+        let json = serde_json::to_value(request).unwrap();
+        assert_eq!(json["service_tier"], "flex");
+        assert_eq!(json["reasoning"]["effort"], "high");
+        assert_eq!(json["reasoning"]["summary"], "auto");
+        assert!(json.get("effort").is_none());
+        assert!(json.get("summary").is_none());
     }
 }

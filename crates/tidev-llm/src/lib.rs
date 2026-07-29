@@ -219,9 +219,12 @@ impl LlmClient {
                 ApiType::OpenAiResponses => {
                     responses::complete_responses(
                         &self.http,
+                        session_id,
+                        request_id,
                         model.clone(),
                         messages.clone(),
                         tools.clone(),
+                        tx.as_ref(),
                         self.save_request_body,
                         self.max_request_files,
                         self.save_response_body,

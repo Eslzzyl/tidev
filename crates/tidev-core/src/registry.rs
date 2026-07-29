@@ -281,6 +281,7 @@ mod tests {
             max_output_tokens: 4096,
             temperature: None,
             supports_images: false,
+            supports_parallel_tool_calls: true,
             system_prompt: String::new(),
             api_key: None,
             extra_body: None,

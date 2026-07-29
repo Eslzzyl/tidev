@@ -61,6 +61,9 @@ pub struct ModelConfig {
     pub supports_streaming: bool,
     #[serde(default)]
     pub supports_images: bool,
+    /// Whether the model supports multiple tool calls in one response.
+    #[serde(default = "default_true")]
+    pub supports_parallel_tool_calls: bool,
     #[serde(default)]
     pub extra_body: Option<serde_json::Value>,
     #[serde(default)]
@@ -90,6 +93,7 @@ mod tests {
             system_prompt: None,
             supports_streaming: true,
             supports_images: false,
+            supports_parallel_tool_calls: true,
             extra_body: None,
             request_model_id: None,
         }

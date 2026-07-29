@@ -167,6 +167,7 @@ max_output_tokens = 16384
 temperature = 0.7
 supports_streaming = true
 supports_images = true
+supports_parallel_tool_calls = true
 system_prompt = "You are a helpful assistant."
 extra_body = { some_provider_param = "value" }
 ```
@@ -181,6 +182,7 @@ extra_body = { some_provider_param = "value" }
 | `temperature` | Yes | | Sampling temperature for the model. Higher values produce more random outputs |
 | `supports_streaming` | No | `true` | Whether the model supports streaming responses |
 | `supports_images` | No | `false` | Whether the model can process image inputs |
+| `supports_parallel_tool_calls` | No | `true` | Whether the model can return multiple tool calls in one response |
 | `system_prompt` | No | None | Custom system prompt override. When set, this replaces the default system prompt for this model |
 | `extra_body` | No | None | Additional JSON fields to include in the API request body. Used for provider-specific parameters |
 

@@ -137,6 +137,7 @@ pub fn to_llm_provider_config(model: &ActiveModel) -> LlmProviderConfig {
         context_window: model.context_window,
         temperature: model.temperature,
         supports_images: model.supports_images,
+        supports_parallel_tool_calls: model.supports_parallel_tool_calls,
     }
 }
 
@@ -547,7 +548,20 @@ impl AgentContext for CoreContext {
                                             Some(output_tokens as f32 / (ms as f32 / 1000.0));
                                     }
                                 }
-                                BackendEvent::Finished { .. } | BackendEvent::StreamEnd { .. } => {
+                                BackendEvent::Finished { turn: finished_turn, .. } => {
+                                    // The Responses provider carries opaque output items on the
+                                    // final event because they are not represented by deltas.
+                                    turn.responses_output_items =
+                                        finished_turn.responses_output_items.clone();
+                                    // reasoning -> turn-end transition
+                                    if turn.reasoning_started_at.is_some()
+                                        && turn.reasoning_completed_at.is_none()
+                                    {
+                                        turn.reasoning_completed_at = Some(Utc::now());
+                                    }
+                                    break;
+                                }
+                                BackendEvent::StreamEnd { .. } => {
                                     // reasoning → turn-end transition
                                     if turn.reasoning_started_at.is_some()
                                         && turn.reasoning_completed_at.is_none()

@@ -369,6 +369,7 @@ fn build_assistant_message(turn: &AssistantTurn) -> Message {
     msg.completed_at = Some(completed_at);
     msg.reasoning = turn.reasoning.clone();
     msg.tool_calls = turn.tool_calls.clone();
+    msg.metadata.responses_output_items = turn.responses_output_items.clone();
     msg.input_tokens = turn.input_tokens;
     msg.output_tokens = turn.output_tokens;
     msg.total_tokens = turn.total_tokens;

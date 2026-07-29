@@ -53,6 +53,8 @@ pub struct LlmProviderConfig {
     pub context_window: usize,
     pub temperature: Option<f32>,
     pub supports_images: bool,
+    /// Whether the model supports multiple tool calls in one response.
+    pub supports_parallel_tool_calls: bool,
 }
 
 impl LlmProviderConfig {

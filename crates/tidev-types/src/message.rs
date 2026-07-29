@@ -146,6 +146,10 @@ pub struct ToolMetadata {
     pub child_session_id: Option<Uuid>,
     #[serde(default)]
     pub file_changes: Vec<FileChangeInfo>,
+    /// Raw OpenAI Responses output items needed to replay reasoning and other
+    /// provider-specific items on the next turn.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub responses_output_items: Vec<serde_json::Value>,
 }
 
 // ---------------------------------------------------------------------------
@@ -292,6 +296,9 @@ pub struct AssistantTurn {
     pub reasoning_started_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub reasoning_completed_at: Option<DateTime<Utc>>,
+    /// Raw OpenAI Responses output items returned by the provider.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub responses_output_items: Vec<serde_json::Value>,
 }
 
 impl AssistantTurn {
