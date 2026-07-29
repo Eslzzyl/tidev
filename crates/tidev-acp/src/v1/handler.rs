@@ -26,7 +26,7 @@ struct AcpState {
     /// The active ACP session ID, if any.
     active_session: RwLock<Option<Uuid>>,
     /// The event translator for the active session.
-    translator: RwLock<Option<crate::event_translator::EventTranslator>>,
+    translator: RwLock<Option<crate::v1::event_translator::EventTranslator>>,
     /// Oneshot sender for the pending `session/prompt` response.
     /// When set, the event loop will send the `PromptResponse` through this
     /// channel once the LLM turn completes (or fails).
@@ -214,7 +214,7 @@ pub async fn run_acp_agent() -> Result<()> {
 
                         let context_window = state.runtime.active_model().context_window;
                         let translator =
-                            crate::event_translator::EventTranslator::new(session_id, context_window);
+                            crate::v1::event_translator::EventTranslator::new(session_id, context_window);
                         *state.translator.write().await = Some(translator);
                         *state.active_session.write().await = Some(session_id);
                         *state.cumulative_input.write().await = 0;
@@ -367,7 +367,7 @@ pub async fn run_acp_agent() -> Result<()> {
                         // Set up translator and mark session as active.
                         let context_window = state.runtime.active_model().context_window;
                         let translator =
-                            crate::event_translator::EventTranslator::new(session_id, context_window);
+                            crate::v1::event_translator::EventTranslator::new(session_id, context_window);
                         *state.translator.write().await = Some(translator);
                         *state.active_session.write().await = Some(session_id);
                         *state.cumulative_input.write().await = cum_in;
@@ -782,7 +782,7 @@ pub async fn run_acp_agent() -> Result<()> {
 
             // Spawn the permission bridge task.
             let _permission_handle = {
-                crate::permission_bridge::spawn(request_rx, cx.clone())
+                crate::v1::permission_bridge::spawn(request_rx, cx.clone())
             };
 
             // Wait until the connection closes.
@@ -799,7 +799,7 @@ pub async fn run_acp_agent() -> Result<()> {
     let agent =
         Agent::protocol_router(Agent)
             .with_v1(v1_agent)
-            .with_v2(crate::v2_handler::build_agent(
+            .with_v2(crate::v2::handler::build_agent(
                 state.runtime.clone(),
                 event_rx_slot,
                 request_rx_slot,

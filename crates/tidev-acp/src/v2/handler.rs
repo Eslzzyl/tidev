@@ -1,5 +1,6 @@
 //! ACP v2 request handlers for tidev.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use agent_client_protocol::schema::v2 as acp;
@@ -11,16 +12,17 @@ use uuid::Uuid;
 
 use tidev_config::ThinkingMatcher;
 use tidev_core::Runtime;
-use tidev_types::message::MessageRole;
+use tidev_types::message::{MessageAttachment, MessageRole};
 use tidev_types::prompts::SessionMode;
 use tidev_utils::session::title_from_prompt;
 
 struct State {
     runtime: Runtime,
     active_session: RwLock<Option<Uuid>>,
-    translator: RwLock<Option<crate::v2_event_translator::EventTranslator>>,
+    translator: RwLock<Option<crate::v2::event_translator::EventTranslator>>,
     current_mode: RwLock<SessionMode>,
     session_named: RwLock<bool>,
+    client_supports_elicitation: Arc<RwLock<bool>>,
 }
 
 type ReceiverSlot<T> = Arc<AsyncMutex<Option<tokio::sync::mpsc::UnboundedReceiver<T>>>>;
@@ -36,15 +38,26 @@ pub(crate) fn build_agent(
         translator: RwLock::new(None),
         current_mode: RwLock::new(SessionMode::Build),
         session_named: RwLock::new(false),
+        client_supports_elicitation: Arc::new(RwLock::new(false)),
     });
 
     Agent
         .v2()
         .name("tidev-v2")
         .on_receive_request(
-            |_request: acp::InitializeRequest,
-             responder: agent_client_protocol::Responder<acp::InitializeResponse>,
-             _cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>| async move {
+            {
+                let state = state.clone();
+                move |request: acp::InitializeRequest,
+                      responder: agent_client_protocol::Responder<acp::InitializeResponse>,
+                      _cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>| {
+                    let state = state.clone();
+                    async move {
+                *state.client_supports_elicitation.write().await = request
+                    .capabilities
+                    .elicitation
+                    .as_ref()
+                    .and_then(|capabilities| capabilities.form.as_ref())
+                    .is_some();
                 let response = acp::InitializeResponse::new(
                     agent_client_protocol::schema::ProtocolVersion::V2,
                     acp::Implementation::new(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION")),
@@ -61,13 +74,12 @@ pub(crate) fn build_agent(
                                     .http(acp::McpHttpCapabilities::new()),
                             )
                             .delete(acp::SessionDeleteCapabilities::new())
-                            .additional_directories(
-                                acp::SessionAdditionalDirectoriesCapabilities::new(),
-                            ),
                     ),
                 );
                 let _ = responder.respond(response);
                 Ok(Handled::Yes)
+                    }
+                }
             },
             on_receive_request!(),
         )
@@ -78,6 +90,7 @@ pub(crate) fn build_agent(
                   _cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>| {
                 let state = state.clone();
                 async move {
+                    ensure_workspace(&state.runtime, &request.cwd)?;
                     merge_mcp_servers(&state.runtime, &request.mcp_servers).await;
                     let session_id = state
                         .runtime
@@ -134,7 +147,7 @@ pub(crate) fn build_agent(
                         .map(|record| {
                             acp::SessionInfo::new(
                                 record.session_id.to_string(),
-                                crate::v2_types::absolute_path(record.workspace_root),
+                                crate::v2::types::absolute_path(record.workspace_root),
                             )
                             .title(record.title)
                             .updated_at(record.updated_at.to_rfc3339())
@@ -153,6 +166,7 @@ pub(crate) fn build_agent(
                 let state = state.clone();
                 async move {
                     let session_id = parse_session_id(&request.session_id)?;
+                    state.runtime.cancel_session(session_id).await;
                     state
                         .runtime
                         .session_manager()
@@ -176,7 +190,7 @@ pub(crate) fn build_agent(
                 let state = state.clone();
                 async move {
                     let session_id = validate_session(&state, &request.session_id).await?;
-                    let content = extract_prompt_text(&request.prompt);
+                    let (content, attachments) = extract_prompt(&request.prompt)?;
                     if !*state.session_named.read().await {
                         let title = title_from_prompt(&content);
                         let _ = state.runtime.update_session_title(session_id, &title);
@@ -185,7 +199,7 @@ pub(crate) fn build_agent(
                     let mode = *state.current_mode.read().await;
                     state
                         .runtime
-                        .submit_prompt(session_id, content, mode)
+                        .submit_prompt_with_attachments(session_id, mode, content, attachments, None)
                         .await
                         .map_err(internal_error)?;
                     let _ = responder.respond(acp::PromptResponse::new());
@@ -213,7 +227,8 @@ pub(crate) fn build_agent(
                   _cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>| {
                 let state = state.clone();
                 async move {
-                    let _ = validate_session(&state, &request.session_id).await?;
+                    let session_id = validate_session(&state, &request.session_id).await?;
+                    state.runtime.cancel_session(session_id).await;
                     *state.active_session.write().await = None;
                     *state.translator.write().await = None;
                     let _ = responder.respond(acp::CloseSessionResponse::new());
@@ -258,7 +273,11 @@ pub(crate) fn build_agent(
                     .take()
                     .ok_or_else(|| internal_error("v2 request receiver already taken"))?;
                 let events = tokio::spawn(run_event_loop(state.clone(), event_rx, cx.clone()));
-                let permission = crate::v2_permission_bridge::spawn(request_rx, cx.clone());
+                let permission = crate::v2::permission_bridge::spawn(
+                    request_rx,
+                    cx.clone(),
+                    state.client_supports_elicitation.clone(),
+                );
                 cx.incoming_closed().await;
                 events.abort();
                 let _ = permission.await;
@@ -274,6 +293,9 @@ async fn run_event_loop(
     cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>,
 ) {
     while let Some(event) = event_rx.recv().await {
+        if state.active_session.read().await.as_ref() != Some(&event.session_id()) {
+            continue;
+        }
         let notifications = {
             let mut translator = state.translator.write().await;
             translator
@@ -289,7 +311,7 @@ async fn run_event_loop(
 
 async fn activate(state: &State, session_id: Uuid) {
     let window = state.runtime.active_model().context_window;
-    *state.translator.write().await = Some(crate::v2_event_translator::EventTranslator::new(
+    *state.translator.write().await = Some(crate::v2::event_translator::EventTranslator::new(
         session_id, window,
     ));
     *state.active_session.write().await = Some(session_id);
@@ -314,10 +336,13 @@ async fn load_and_activate(
         .load_messages(session_id)
         .map_err(internal_error)?;
     if session.workspace_root != cwd.0.to_string_lossy() {
-        log::warn!("ACP v2 session workspace differs from requested cwd");
+        return Err(invalid_error(
+            "session workspace differs from requested cwd",
+        ));
     }
     state.runtime.set_message_buffer(session_id, messages).await;
     activate(state, session_id).await;
+    *state.session_named.write().await = true;
     Ok(())
 }
 
@@ -331,13 +356,48 @@ async fn replay_messages(
             let update = match message.role {
                 MessageRole::User => acp::SessionUpdate::UserMessage(
                     acp::UserMessage::new(message.id.to_string())
-                        .content(crate::v2_types::message_content(&message)),
+                        .content(crate::v2::types::message_content(&message)),
                 ),
                 MessageRole::Assistant => acp::SessionUpdate::AgentMessage(
                     acp::AgentMessage::new(message.id.to_string())
-                        .content(crate::v2_types::message_content(&message)),
+                        .content(crate::v2::types::message_content(&message)),
                 ),
-                _ => continue,
+                MessageRole::Tool => {
+                    let Some(tool_call_id) = message.tool_call_id.clone() else {
+                        continue;
+                    };
+                    let tool_call = tidev_types::message::ToolCall {
+                        id: tool_call_id,
+                        name: message
+                            .tool_name
+                            .clone()
+                            .unwrap_or_else(|| "tool".to_string()),
+                        arguments: "{}".to_string(),
+                        thought_signature: None,
+                    };
+                    let update = crate::v2::types::tool_call_update(
+                        &tool_call,
+                        Some(acp::ToolCallStatus::Completed),
+                    )
+                    .content(vec![acp::ToolCallContent::Content(Box::new(
+                        acp::Content::new(acp::ContentBlock::Text(acp::TextContent::new(
+                            &message.content,
+                        ))),
+                    ))])
+                    .raw_output(serde_json::Value::String(message.content.clone()));
+                    acp::SessionUpdate::ToolCallUpdate(update)
+                }
+                MessageRole::System | MessageRole::Error | MessageRole::Shell => {
+                    acp::SessionUpdate::AgentMessage(
+                        acp::AgentMessage::new(message.id.to_string()).content(vec![
+                            acp::ContentBlock::Text(acp::TextContent::new(format!(
+                                "[{}]\n{}",
+                                message.role.label(),
+                                message.content
+                            ))),
+                        ]),
+                    )
+                }
             };
             let _ = cx.send_notification(acp::UpdateSessionNotification::new(
                 session_id.to_string(),
@@ -451,19 +511,51 @@ async fn apply_config_option(
     Ok(())
 }
 
-fn extract_prompt_text(blocks: &[acp::ContentBlock]) -> String {
-    blocks
-        .iter()
-        .map(|block| match block {
-            acp::ContentBlock::Text(text) => text.text.clone(),
+fn ensure_workspace(
+    runtime: &Runtime,
+    cwd: &acp::AbsolutePath,
+) -> Result<(), agent_client_protocol::Error> {
+    let requested = PathBuf::from(&cwd.0);
+    if requested != *runtime.workspace_root() {
+        return Err(invalid_error(format!(
+            "ACP v2 only supports the runtime workspace: {}",
+            runtime.workspace_root().display()
+        )));
+    }
+    Ok(())
+}
+
+fn extract_prompt(
+    blocks: &[acp::ContentBlock],
+) -> Result<(String, Vec<MessageAttachment>), agent_client_protocol::Error> {
+    use base64::Engine as _;
+
+    let mut text = Vec::new();
+    let mut attachments = Vec::new();
+    for (index, block) in blocks.iter().enumerate() {
+        match block {
+            acp::ContentBlock::Text(value) => text.push(value.text.clone()),
             acp::ContentBlock::Image(image) => {
-                format!("[image: {}]", image.mime_type)
+                let data = base64::engine::general_purpose::STANDARD
+                    .decode(&image.data)
+                    .map_err(|error| invalid_error(format!("invalid image data: {error}")))?;
+                attachments.push(MessageAttachment::Image {
+                    filename: format!("acp-image-{index}"),
+                    mime: image.mime_type.to_string(),
+                    file_size: data.len() as u64,
+                    data,
+                });
             }
-            acp::ContentBlock::ResourceLink(link) => link.uri.clone(),
-            other => serde_json::to_string(other).unwrap_or_default(),
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+            acp::ContentBlock::ResourceLink(link) => text.push(link.uri.clone()),
+            acp::ContentBlock::Audio(_)
+            | acp::ContentBlock::Resource(_)
+            | acp::ContentBlock::Other(_) => {
+                return Err(invalid_error("unsupported ACP v2 prompt content block"));
+            }
+            _ => return Err(invalid_error("unsupported ACP v2 prompt content block")),
+        }
+    }
+    Ok((text.join("\n"), attachments))
 }
 
 async fn merge_mcp_servers(runtime: &Runtime, servers: &[acp::McpServer]) {

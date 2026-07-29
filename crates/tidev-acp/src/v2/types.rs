@@ -21,7 +21,7 @@ pub(crate) fn absolute_path(path: impl AsRef<Path>) -> acp::AbsolutePath {
 
 /// Build the display title used for a tool call.
 pub(crate) fn tool_title(tool_call: &ToolCall) -> String {
-    crate::types::tool_title(tool_call)
+    crate::common::tool::tool_title(tool_call)
 }
 
 /// Map tidev's canonical tool names to ACP v2 tool kinds.

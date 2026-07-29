@@ -9,7 +9,7 @@ use agent_client_protocol::schema::v1 as acp;
 use tidev_core::{ApprovedTool, TuiRequest, TuiRequestKind, TuiResponse};
 use tidev_types::message::ToolExecutionResult;
 
-use crate::types::tool_kind;
+use crate::v1::types::tool_kind;
 
 /// Spawn the permission bridge task.
 ///
@@ -51,9 +51,9 @@ pub fn spawn(
                         let tool_call_update = acp::ToolCallUpdate::new(
                             tc.id.clone(),
                             acp::ToolCallUpdateFields::new()
-                                .title(Some(crate::types::tool_title(tc)))
+                                .title(Some(crate::common::tool::tool_title(tc)))
                                 .kind(Some(tool_kind(tc)))
-                                .locations(crate::types::tool_locations(tc))
+                                .locations(crate::v1::types::tool_locations(tc))
                                 .raw_input(raw_input),
                         );
 

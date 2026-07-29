@@ -114,7 +114,7 @@ impl EventTranslator {
                 request_id: _,
                 tool_call,
             } => {
-                let update = crate::types::tidev_tool_call_to_acp_update(tool_call, None);
+                let update = crate::v1::types::tidev_tool_call_to_acp_update(tool_call, None);
                 vec![acp::SessionNotification::new(
                     self.session_id.clone(),
                     acp::SessionUpdate::ToolCallUpdate(update),
@@ -127,13 +127,13 @@ impl EventTranslator {
                 tool_call,
             } => {
                 // First, send the initial ToolCall notification.
-                let acp_tc = crate::types::tidev_tool_call_to_acp(tool_call);
+                let acp_tc = crate::v1::types::tidev_tool_call_to_acp(tool_call);
                 let mut notifs = vec![acp::SessionNotification::new(
                     self.session_id.clone(),
                     acp::SessionUpdate::ToolCall(acp_tc),
                 )];
                 // Then send a rich status update with title, kind, locations.
-                let update = crate::types::tool_starting_update_rich(tool_call);
+                let update = crate::v1::types::tool_starting_update_rich(tool_call);
                 notifs.push(acp::SessionNotification::new(
                     self.session_id.clone(),
                     acp::SessionUpdate::ToolCallUpdate(update),
@@ -162,13 +162,13 @@ impl EventTranslator {
                 let mut notifs = Vec::new();
 
                 // Prefer Diff content for write/edit/apply_patch.
-                let content = crate::types::tidev_result_to_diff_content(tool_call, result);
+                let content = crate::v1::types::tidev_result_to_diff_content(tool_call, result);
                 let content = if !content.is_empty() {
                     content
                 } else {
                     // Fallback: text content + any image attachments.
-                    let mut c = crate::types::tidev_tool_result_to_acp_content(result);
-                    c.extend(crate::types::tidev_attachments_to_content(
+                    let mut c = crate::v1::types::tidev_tool_result_to_acp_content(result);
+                    c.extend(crate::v1::types::tidev_attachments_to_content(
                         &result.attachments,
                     ));
                     c
@@ -185,7 +185,7 @@ impl EventTranslator {
                 }
 
                 // Send the completed status update with raw_output.
-                let update = crate::types::tool_completed_update_rich(tool_call, result);
+                let update = crate::v1::types::tool_completed_update_rich(tool_call, result);
                 notifs.push(acp::SessionNotification::new(
                     self.session_id.clone(),
                     acp::SessionUpdate::ToolCallUpdate(update),
@@ -258,7 +258,7 @@ impl EventTranslator {
                 let mut notifs = Vec::new();
 
                 // Send the subagent result as tool content.
-                let content = crate::types::tidev_tool_result_to_acp_content(result);
+                let content = crate::v1::types::tidev_tool_result_to_acp_content(result);
                 if !content.is_empty() {
                     notifs.push(acp::SessionNotification::new(
                         self.session_id.clone(),
@@ -270,7 +270,7 @@ impl EventTranslator {
                 }
 
                 // Mark the parent tool as completed with raw_output.
-                let update = crate::types::tool_completed_update_rich(tool_call, result);
+                let update = crate::v1::types::tool_completed_update_rich(tool_call, result);
                 notifs.push(acp::SessionNotification::new(
                     self.session_id.clone(),
                     acp::SessionUpdate::ToolCallUpdate(update),

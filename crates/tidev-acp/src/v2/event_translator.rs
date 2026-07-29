@@ -98,14 +98,14 @@ impl EventTranslator {
                 ),
             ))],
             BackendEvent::ToolCallUpdated { tool_call, .. } => vec![self.update(
-                acp::SessionUpdate::ToolCallUpdate(crate::v2_types::tool_call_update(
+                acp::SessionUpdate::ToolCallUpdate(crate::v2::types::tool_call_update(
                     tool_call,
                     Some(acp::ToolCallStatus::Pending),
                 )),
             )],
             BackendEvent::ToolStarting { tool_call, .. } => {
                 let mut updates = vec![self.update(acp::SessionUpdate::ToolCallUpdate(
-                    crate::v2_types::tool_call_update(
+                    crate::v2::types::tool_call_update(
                         tool_call,
                         Some(acp::ToolCallStatus::InProgress),
                     ),
@@ -115,14 +115,14 @@ impl EventTranslator {
                     Some("shell") | Some("exec")
                 ) {
                     let terminal =
-                        acp::TerminalUpdate::new(crate::v2_types::terminal_id(&tool_call.id))
-                            .command(crate::v2_types::shell_command(tool_call))
-                            .cwd(crate::v2_types::absolute_path(
+                        acp::TerminalUpdate::new(crate::v2::types::terminal_id(&tool_call.id))
+                            .command(crate::v2::types::shell_command(tool_call))
+                            .cwd(crate::v2::types::absolute_path(
                                 std::env::current_dir().unwrap_or_default(),
                             ));
                     updates.push(self.update(acp::SessionUpdate::TerminalUpdate(terminal)));
                 }
-                if let Some(plan) = crate::v2_types::todo_plan_update(tool_call) {
+                if let Some(plan) = crate::v2::types::todo_plan_update(tool_call) {
                     updates.push(self.update(acp::SessionUpdate::PlanUpdate(plan)));
                 }
                 updates
@@ -130,8 +130,8 @@ impl EventTranslator {
             BackendEvent::ToolCompleted {
                 tool_call, result, ..
             } => {
-                let content = crate::v2_types::tool_result_content(tool_call, result);
-                let mut update = crate::v2_types::tool_call_update(
+                let content = crate::v2::types::tool_result_content(tool_call, result);
+                let mut update = crate::v2::types::tool_call_update(
                     tool_call,
                     Some(acp::ToolCallStatus::Completed),
                 );
@@ -148,7 +148,7 @@ impl EventTranslator {
                 exit_code,
                 ..
             } => {
-                let terminal_id = crate::v2_types::terminal_id(tool_call_id);
+                let terminal_id = crate::v2::types::terminal_id(tool_call_id);
                 let mut updates = vec![self.update(acp::SessionUpdate::TerminalOutputChunk(
                     acp::TerminalOutputChunk::new(
                         terminal_id.clone(),
@@ -186,12 +186,14 @@ impl EventTranslator {
                     ))),
                 ]
             }
-            BackendEvent::UserMessageCreated { message, .. } => vec![
-                self.update(acp::SessionUpdate::UserMessage(
-                    acp::UserMessage::new(message.id.to_string())
-                        .content(crate::v2_types::message_content(message)),
-                )),
-            ],
+            BackendEvent::UserMessageCreated { message, .. } => {
+                vec![
+                    self.update(acp::SessionUpdate::UserMessage(
+                        acp::UserMessage::new(message.id.to_string())
+                            .content(crate::v2::types::message_content(message)),
+                    )),
+                ]
+            }
             BackendEvent::Failed { error, .. } => {
                 let mut updates = vec![self.update(acp::SessionUpdate::AgentMessageChunk(
                     acp::ContentChunk::new(
@@ -248,15 +250,16 @@ impl EventTranslator {
             BackendEvent::SubagentCompleted {
                 tool_call, result, ..
             } => {
-                let mut update = crate::v2_types::tool_call_update(
+                let mut update = crate::v2::types::tool_call_update(
                     tool_call,
                     Some(acp::ToolCallStatus::Completed),
                 );
                 update = update
-                    .content(crate::v2_types::tool_result_content(tool_call, result))
+                    .content(crate::v2::types::tool_result_content(tool_call, result))
                     .raw_output(serde_json::Value::String(result.output.clone()));
                 vec![self.update(acp::SessionUpdate::ToolCallUpdate(update))]
             }
+            // ACP v2 has no session-history deletion or truncation update.
             BackendEvent::StreamEnd { .. }
             | BackendEvent::InstructionsLoaded { .. }
             | BackendEvent::ContextCompacted { .. }
