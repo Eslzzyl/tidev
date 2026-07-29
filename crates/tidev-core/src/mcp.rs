@@ -676,12 +676,12 @@ pub(crate) fn insert_mock_tool(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rmcp::model::CallToolResult;
+    use rmcp::model::{CallToolResult, ContentBlock, Resource};
 
     // ── call_tool_result_data tests ────────────────────────────────────
     #[test]
     fn test_call_tool_result_text_only() {
-        let result = CallToolResult::success(vec![rmcp::model::Content::text("hello")]);
+        let result = CallToolResult::success(vec![ContentBlock::text("hello")]);
         let converted = call_tool_result_data(&result, "tool");
         assert_eq!(converted.output, "hello");
         assert!(converted.attachments.is_empty());
@@ -703,8 +703,7 @@ mod tests {
 
     #[test]
     fn test_call_tool_result_image_attachment_only() {
-        let result =
-            CallToolResult::success(vec![rmcp::model::Content::image("aGVsbG8=", "image/png")]);
+        let result = CallToolResult::success(vec![ContentBlock::image("aGVsbG8=", "image/png")]);
         let converted = call_tool_result_data(&result, "img-tool");
         assert_eq!(converted.output, "MCP tool returned image attachment(s)");
         assert_eq!(converted.attachments.len(), 1);
@@ -712,19 +711,9 @@ mod tests {
 
     #[test]
     fn test_call_tool_result_mixed_text_and_resource() {
-        use rmcp::model::RawResource;
         let result = CallToolResult::success(vec![
-            rmcp::model::Content::text("Done"),
-            rmcp::model::Content::resource_link(RawResource {
-                uri: "file:///tmp/x.txt".into(),
-                name: "x.txt".into(),
-                title: None,
-                description: None,
-                mime_type: None,
-                size: None,
-                icons: None,
-                meta: None,
-            }),
+            ContentBlock::text("Done"),
+            ContentBlock::resource_link(Resource::new("file:///tmp/x.txt", "x.txt")),
         ]);
         let converted = call_tool_result_data(&result, "tool");
         assert!(converted.output.contains("Done"));
