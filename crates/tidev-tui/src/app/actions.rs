@@ -240,24 +240,15 @@ impl App {
                         }
 
                         // Switch the runtime's active model to match this
-                        // session's model so the composer displays the
-                        // correct provider/model instead of the default.
-                        if let Ok(Some(record)) =
-                            self.runtime.session_manager().load_session(session_id)
-                        {
-                            let config = self.runtime.config();
-                            let auth = self.runtime.auth();
-                            if let Ok(model) = config.resolve_model_by_ids(
-                                &auth,
-                                &record.provider_id,
-                                &record.model_id,
-                            ) {
-                                self.runtime.set_active_model(model.clone());
-                                if let Some(ref mut composer) = self.composer {
-                                    composer.set_model_supports_images(model.supports_images);
-                                }
-                            }
-                        }
+                        // session's model and restore its latest thinking level.
+                        let session_thinking_level = chat.active_chat_context().and_then(|ctx| {
+                            ctx.messages
+                                .iter()
+                                .rev()
+                                .find(|m| m.role == MessageRole::User)
+                                .and_then(|m| m.thinking_level.clone())
+                        });
+                        self.sync_active_model_for_session(session_id, session_thinking_level);
 
                         log::info!("Switching to session: existing context (fast path)");
 
@@ -279,6 +270,12 @@ impl App {
                         .session_manager()
                         .load_messages(session_id)
                         .unwrap_or_default();
+
+                    let session_thinking_level = messages
+                        .iter()
+                        .rev()
+                        .find(|m| m.role == MessageRole::User)
+                        .and_then(|m| m.thinking_level.clone());
 
                     // Resolve session mode from the last user message.
                     // Keep pending_mode intact so a deferred mode switch
@@ -339,27 +336,9 @@ impl App {
                         ctx
                     };
 
-                    // Switch the runtime's active model to match this
-                    // session's model so the composer displays the correct
-                    // provider/model instead of the default.
-                    {
-                        let config = self.runtime.config();
-                        let auth = self.runtime.auth();
-                        if let Ok(Some(record)) =
-                            self.runtime.session_manager().load_session(session_id)
-                        {
-                            if let Ok(model) = config.resolve_model_by_ids(
-                                &auth,
-                                &record.provider_id,
-                                &record.model_id,
-                            ) {
-                                self.runtime.set_active_model(model.clone());
-                                if let Some(ref mut composer) = self.composer {
-                                    composer.set_model_supports_images(model.supports_images);
-                                }
-                            }
-                        }
-                    }
+                    // Switch the runtime's active model to match this session
+                    // and restore its latest thinking level.
+                    self.sync_active_model_for_session(session_id, session_thinking_level);
 
                     let session_title = chat_context.title.clone();
 
@@ -967,6 +946,33 @@ impl App {
                     OverlayKind::McpServerPanel,
                 )));
             }
+        }
+    }
+
+    /// Restore the active model and thinking level when entering a session.
+    fn sync_active_model_for_session(
+        &mut self,
+        session_id: uuid::Uuid,
+        thinking_level: Option<ThinkingLevelType>,
+    ) {
+        let Ok(Some(record)) = self.runtime.session_manager().load_session(session_id) else {
+            return;
+        };
+        let config = self.runtime.config();
+        let auth = self.runtime.auth();
+        let Ok(mut model) =
+            config.resolve_model_by_ids(&auth, &record.provider_id, &record.model_id)
+        else {
+            return;
+        };
+
+        if let Some(level) = thinking_level {
+            model.thinking_level = level;
+        }
+        self.thinking_level = model.thinking_level.clone();
+        self.runtime.set_active_model(model.clone());
+        if let Some(ref mut composer) = self.composer {
+            composer.set_model_supports_images(model.supports_images);
         }
     }
 }
