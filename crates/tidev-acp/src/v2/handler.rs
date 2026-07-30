@@ -28,11 +28,21 @@ struct State {
 type ReceiverSlot<T> = Arc<AsyncMutex<Option<tokio::sync::mpsc::UnboundedReceiver<T>>>>;
 
 /// Commands that the ACP client may expose in its prompt UI.
-fn available_commands() -> acp::AvailableCommandsUpdate {
-    acp::AvailableCommandsUpdate::new(vec![acp::AvailableCommand::new(
+fn available_commands(mode: SessionMode) -> acp::AvailableCommandsUpdate {
+    let mut commands = vec![acp::AvailableCommand::new(
         "compact",
         "Compact the current session context to free space",
-    )])
+    )];
+    if mode == SessionMode::Build {
+        commands.push(
+            acp::AvailableCommand::new("init", "Analyze the project and create AGENTS.md").input(
+                acp::AvailableCommandInput::Text(acp::TextCommandInput::new(
+                    "Optional project focus or constraints",
+                )),
+            ),
+        );
+    }
+    acp::AvailableCommandsUpdate::new(commands)
 }
 
 pub(crate) fn build_agent(
@@ -112,7 +122,9 @@ pub(crate) fn build_agent(
                     let _ = responder.respond(response);
                     let _ = cx.send_notification(acp::UpdateSessionNotification::new(
                         session_id.to_string(),
-                        acp::SessionUpdate::AvailableCommandsUpdate(available_commands()),
+                        acp::SessionUpdate::AvailableCommandsUpdate(available_commands(
+                            SessionMode::Build,
+                        )),
                     ));
                     Ok(Handled::Yes)
                 }
@@ -138,7 +150,9 @@ pub(crate) fn build_agent(
                     let _ = responder.respond(response);
                     let _ = cx.send_notification(acp::UpdateSessionNotification::new(
                         session_id.to_string(),
-                        acp::SessionUpdate::AvailableCommandsUpdate(available_commands()),
+                        acp::SessionUpdate::AvailableCommandsUpdate(available_commands(
+                            SessionMode::Build,
+                        )),
                     ));
                     Ok(Handled::Yes)
                 }
@@ -206,7 +220,7 @@ pub(crate) fn build_agent(
                 let state = state.clone();
                 async move {
                     let session_id = validate_session(&state, &request.session_id).await?;
-                    let (content, attachments) = extract_prompt(&request.prompt)?;
+                    let (mut content, attachments) = extract_prompt(&request.prompt)?;
                     if content.trim() == "/compact" {
                         state
                             .runtime
@@ -216,12 +230,21 @@ pub(crate) fn build_agent(
                         let _ = responder.respond(acp::PromptResponse::new());
                         return Ok(Handled::Yes);
                     }
+                    let mode = if let Some(args) = command_arguments(&content, "/init") {
+                        let args = args.to_owned();
+                        if *state.current_mode.read().await != SessionMode::Build {
+                            return Err(invalid_error("/init requires Build mode"));
+                        }
+                        content = tidev_types::prompts::init_command_with_args(&args);
+                        SessionMode::Build
+                    } else {
+                        *state.current_mode.read().await
+                    };
                     if !*state.session_named.read().await {
                         let title = title_from_prompt(&content);
                         let _ = state.runtime.update_session_title(session_id, &title);
                         *state.session_named.write().await = true;
                     }
-                    let mode = *state.current_mode.read().await;
                     state
                         .runtime
                         .submit_prompt_with_attachments(session_id, mode, content, attachments, None)
@@ -279,6 +302,12 @@ pub(crate) fn build_agent(
                     let _ = cx.send_notification(acp::UpdateSessionNotification::new(
                         session_id.to_string(),
                         acp::SessionUpdate::ConfigOptionUpdate(acp::ConfigOptionUpdate::new(options)),
+                    ));
+                    let _ = cx.send_notification(acp::UpdateSessionNotification::new(
+                        session_id.to_string(),
+                        acp::SessionUpdate::AvailableCommandsUpdate(available_commands(
+                            *state.current_mode.read().await,
+                        )),
                     ));
                     Ok(Handled::Yes)
                 }
@@ -619,6 +648,29 @@ async fn merge_mcp_servers(runtime: &Runtime, servers: &[acp::McpServer]) {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn init_command_arguments_require_an_exact_command_name() {
+        assert_eq!(command_arguments("/init", "/init"), Some(""));
+        assert_eq!(
+            command_arguments(" /init focus on tests ", "/init"),
+            Some("focus on tests")
+        );
+        assert_eq!(command_arguments("/initialize", "/init"), None);
+    }
+
+    #[test]
+    fn init_is_advertised_only_in_build_mode() {
+        let plan = serde_json::to_value(available_commands(SessionMode::Plan)).unwrap();
+        let build = serde_json::to_value(available_commands(SessionMode::Build)).unwrap();
+        assert_eq!(plan["availableCommands"].as_array().unwrap().len(), 1);
+        assert_eq!(build["availableCommands"].as_array().unwrap().len(), 2);
+    }
+}
+
 async fn validate_session(
     state: &State,
     requested: &acp::SessionId,
@@ -633,6 +685,17 @@ async fn validate_session(
 fn parse_session_id(id: &acp::SessionId) -> Result<Uuid, agent_client_protocol::Error> {
     Uuid::parse_str(id.0.as_ref())
         .map_err(|error| invalid_error(format!("invalid session ID: {error}")))
+}
+
+/// Return the text following an exact slash command, if present.
+fn command_arguments<'a>(content: &'a str, command: &str) -> Option<&'a str> {
+    let trimmed = content.trim();
+    let rest = trimmed.strip_prefix(command)?;
+    if rest.is_empty() || rest.chars().next().is_some_and(|ch| ch.is_whitespace()) {
+        Some(rest.trim())
+    } else {
+        None
+    }
 }
 
 fn invalid_error(message: impl Into<String>) -> agent_client_protocol::Error {

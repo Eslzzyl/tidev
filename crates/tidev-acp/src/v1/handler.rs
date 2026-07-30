@@ -99,11 +99,21 @@ fn build_thought_level_config_option(active: &ActiveModel) -> acp::SessionConfig
 }
 
 /// Commands that the ACP client may expose in its prompt UI.
-fn available_commands() -> acp::AvailableCommandsUpdate {
-    acp::AvailableCommandsUpdate::new(vec![acp::AvailableCommand::new(
+fn available_commands(mode: SessionMode) -> acp::AvailableCommandsUpdate {
+    let mut commands = vec![acp::AvailableCommand::new(
         "compact",
         "Compact the current session context to free space",
-    )])
+    )];
+    if mode == SessionMode::Build {
+        commands.push(
+            acp::AvailableCommand::new("init", "Analyze the project and create AGENTS.md").input(
+                acp::AvailableCommandInput::Unstructured(acp::UnstructuredCommandInput::new(
+                    "Optional project focus or constraints",
+                )),
+            ),
+        );
+    }
+    acp::AvailableCommandsUpdate::new(commands)
 }
 
 /// Run tidev as an ACP agent over stdio.
@@ -257,7 +267,9 @@ pub async fn run_acp_agent() -> Result<()> {
                         let _ = responder.respond(response);
                         let _ = cx.send_notification(acp::SessionNotification::new(
                             session_id.to_string(),
-                            acp::SessionUpdate::AvailableCommandsUpdate(available_commands()),
+                            acp::SessionUpdate::AvailableCommandsUpdate(available_commands(
+                                SessionMode::Build,
+                            )),
                         ));
                         Ok(agent_client_protocol::Handled::Yes)
                     }
@@ -417,7 +429,9 @@ pub async fn run_acp_agent() -> Result<()> {
                         let _ = responder.respond(response);
                         let _ = cx.send_notification(acp::SessionNotification::new(
                             session_id.to_string(),
-                            acp::SessionUpdate::AvailableCommandsUpdate(available_commands()),
+                            acp::SessionUpdate::AvailableCommandsUpdate(available_commands(
+                                SessionMode::Build,
+                            )),
                         ));
                         Ok(agent_client_protocol::Handled::Yes)
                     }
@@ -483,7 +497,7 @@ pub async fn run_acp_agent() -> Result<()> {
                         );
 
                         // Validate session.
-                        let _session_id = validate_session_id(&state, &req.session_id)
+                        let session_id = validate_session_id(&state, &req.session_id)
                             .await
                             .ok_or_else(|| {
                                 agent_client_protocol::Error::invalid_request()
@@ -515,6 +529,14 @@ pub async fn run_acp_agent() -> Result<()> {
                         if let Err(e) = cx.send_notification(notif) {
                             log::warn!("ACP: failed to send current_mode_update: {e}");
                         }
+                        if let Err(e) = cx.send_notification(acp::SessionNotification::new(
+                            session_id.to_string(),
+                            acp::SessionUpdate::AvailableCommandsUpdate(available_commands(
+                                new_mode,
+                            )),
+                        )) {
+                            log::warn!("ACP: failed to send available_commands_update: {e}");
+                        }
 
                         let _ = responder.respond(acp::SetSessionModeResponse::new());
                         Ok(agent_client_protocol::Handled::Yes)
@@ -543,7 +565,7 @@ pub async fn run_acp_agent() -> Result<()> {
                         // ACP clients submit available commands through the
                         // normal prompt method. Handle compact before creating
                         // a user message or starting an agent loop.
-                        let content = extract_prompt_text(&req.prompt);
+                        let mut content = extract_prompt_text(&req.prompt);
                         log::info!(
                             "ACP: session/prompt, session={session_id}, content_len={}",
                             content.len()
@@ -564,6 +586,22 @@ pub async fn run_acp_agent() -> Result<()> {
                             return Ok(agent_client_protocol::Handled::Yes);
                         }
 
+                        let mode = if let Some(args) = command_arguments(&content, "/init") {
+                            let args = args.to_owned();
+                            if *state.current_mode.read().await != SessionMode::Build {
+                                return Err(agent_client_protocol::Error::invalid_request()
+                                    .data("/init requires Build mode"));
+                            }
+                            content = tidev_types::prompts::init_command_with_args(&args);
+                            log::info!(
+                                "ACP: expanding /init command for session={session_id}, args_len={}",
+                                args.len()
+                            );
+                            SessionMode::Build
+                        } else {
+                            *state.current_mode.read().await
+                        };
+
                         // Update session title from the first prompt.
                         if !*state.session_named.read().await {
                             let title = title_from_prompt(&content);
@@ -573,7 +611,6 @@ pub async fn run_acp_agent() -> Result<()> {
                             *state.session_named.write().await = true;
                         }
 
-                        let mode = *state.current_mode.read().await;
                         if let Err(e) = state
                             .runtime
                             .submit_prompt(session_id, content, mode)
@@ -953,6 +990,17 @@ async fn validate_session_id(
     }
 }
 
+/// Return the text following an exact slash command, if present.
+fn command_arguments<'a>(content: &'a str, command: &str) -> Option<&'a str> {
+    let trimmed = content.trim();
+    let rest = trimmed.strip_prefix(command)?;
+    if rest.is_empty() || rest.chars().next().is_some_and(|ch| ch.is_whitespace()) {
+        Some(rest.trim())
+    } else {
+        None
+    }
+}
+
 /// Convert an ACP `McpServer` to a tidev `(name, McpServerConfig)` pair.
 fn acp_mcp_server_to_config(
     server: &acp::McpServer,
@@ -985,6 +1033,29 @@ fn acp_mcp_server_to_config(
             log::warn!("ACP: unsupported MCP server type, skipping");
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn init_command_arguments_require_an_exact_command_name() {
+        assert_eq!(command_arguments("/init", "/init"), Some(""));
+        assert_eq!(
+            command_arguments(" /init focus on tests ", "/init"),
+            Some("focus on tests")
+        );
+        assert_eq!(command_arguments("/initialize", "/init"), None);
+    }
+
+    #[test]
+    fn init_is_advertised_only_in_build_mode() {
+        let plan = serde_json::to_value(available_commands(SessionMode::Plan)).unwrap();
+        let build = serde_json::to_value(available_commands(SessionMode::Build)).unwrap();
+        assert_eq!(plan["availableCommands"].as_array().unwrap().len(), 1);
+        assert_eq!(build["availableCommands"].as_array().unwrap().len(), 2);
     }
 }
 
