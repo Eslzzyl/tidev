@@ -101,13 +101,28 @@ fn render_assistant_body_lines(
         )));
     }
 
-    // 4. Metadata footer at round end (model · duration · t/s · time · mode)
+    // 4. Metadata footer at round end (model · thinking level · duration · t/s · time · mode)
     if is_round_end && !message.streaming && message.tool_calls.is_empty() {
         let mut parts: Vec<String> = Vec::new();
 
         // Model display name (resolve via config in old code — use model_id as fallback)
         if message.model_id.is_some() {
             parts.push(ctx.model_display_name.to_string());
+        }
+
+        // The thinking level is stored on the user message for the request
+        // that produced this assistant response.  Prefer a level copied onto
+        // the assistant message when available for forward compatibility.
+        let thinking_level = message.thinking_level.clone().or_else(|| {
+            let message_index = messages.iter().position(|m| m.id == message.id)?;
+            messages[..message_index]
+                .iter()
+                .rev()
+                .find(|m| matches!(m.role, MessageRole::User))
+                .and_then(|m| m.thinking_level.clone())
+        });
+        if let Some(level) = thinking_level.filter(|level| level.is_supported()) {
+            parts.push(level.display_name().to_string());
         }
 
         // Duration: from previous user message created_at to this message completed_at

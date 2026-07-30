@@ -186,6 +186,7 @@ mod tests {
     use ratatui::style::Color;
     use std::path::Path;
     use tidev_types::message::{Message, MessageRole};
+    use tidev_types::reasoning::ThinkingLevelType;
 
     fn user_msg(content: &str, id: u128) -> Message {
         let mut msg = Message::new(MessageRole::User, content);
@@ -339,6 +340,44 @@ mod tests {
             "Expected 1 blank line between assistant footer and next user, got {}",
             blank_count
         );
+    }
+
+    #[test]
+    fn assistant_footer_includes_request_thinking_level() {
+        let palette = test_palette();
+        let expanded = HashSet::new();
+        let subagents = Vec::new();
+        let collapsed = HashSet::new();
+        let ctx = test_render_ctx(&palette, &expanded, &subagents, &collapsed);
+
+        let mut request = user_msg("hello", 1);
+        request.thinking_level = Some(ThinkingLevelType::from_string("gpt5:high"));
+        let msgs = vec![request, assistant_msg("", "response", 2)];
+        let chat_ctx = ChatContext::new(
+            Uuid::from_u128(100),
+            "test".into(),
+            msgs,
+            None,
+            "test".into(),
+            "test-provider".into(),
+        );
+
+        let geom = CardGeom::new(80);
+        let mut index = MessageLayoutIndex::new();
+        let mut cache = lru::LruCache::new(std::num::NonZeroUsize::new(64).unwrap());
+        update_layout_index(&mut index, &mut cache, &chat_ctx.messages, &geom, &ctx);
+
+        let output = messages_text(
+            &chat_ctx, &mut index, &mut cache, &ctx, geom, 0, 200, false, &None,
+        );
+        let rendered: String = output
+            .lines
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.content.as_ref())
+            .collect();
+
+        assert!(rendered.contains("test · High · 0s"), "{rendered}");
     }
 
     #[test]
