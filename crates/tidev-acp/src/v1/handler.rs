@@ -98,6 +98,14 @@ fn build_thought_level_config_option(active: &ActiveModel) -> acp::SessionConfig
         .category(acp::SessionConfigOptionCategory::ThoughtLevel)
 }
 
+/// Commands that the ACP client may expose in its prompt UI.
+fn available_commands() -> acp::AvailableCommandsUpdate {
+    acp::AvailableCommandsUpdate::new(vec![acp::AvailableCommand::new(
+        "compact",
+        "Compact the current session context to free space",
+    )])
+}
+
 /// Run tidev as an ACP agent over stdio.
 ///
 /// This is the main entry point called from the `tidev acp` CLI subcommand.
@@ -178,7 +186,7 @@ pub async fn run_acp_agent() -> Result<()> {
                 let state = state.clone();
                 move |req: acp::NewSessionRequest,
                       responder: agent_client_protocol::Responder<acp::NewSessionResponse>,
-                      _cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>| {
+                      cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>| {
                     let state = state.clone();
                     async move {
                         let cwd = &req.cwd;
@@ -247,6 +255,10 @@ pub async fn run_acp_agent() -> Result<()> {
                         let response = response.config_options(config_opts);
 
                         let _ = responder.respond(response);
+                        let _ = cx.send_notification(acp::SessionNotification::new(
+                            session_id.to_string(),
+                            acp::SessionUpdate::AvailableCommandsUpdate(available_commands()),
+                        ));
                         Ok(agent_client_protocol::Handled::Yes)
                     }
                 }
@@ -259,7 +271,7 @@ pub async fn run_acp_agent() -> Result<()> {
                 let state = state.clone();
                 move |req: acp::LoadSessionRequest,
                       responder: agent_client_protocol::Responder<acp::LoadSessionResponse>,
-                      _cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>| {
+                      cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>| {
                     let state = state.clone();
                     async move {
                         log::info!(
@@ -403,6 +415,10 @@ pub async fn run_acp_agent() -> Result<()> {
                         let response = response.config_options(config_opts);
 
                         let _ = responder.respond(response);
+                        let _ = cx.send_notification(acp::SessionNotification::new(
+                            session_id.to_string(),
+                            acp::SessionUpdate::AvailableCommandsUpdate(available_commands()),
+                        ));
                         Ok(agent_client_protocol::Handled::Yes)
                     }
                 }
@@ -524,12 +540,29 @@ pub async fn run_acp_agent() -> Result<()> {
                                 .data("session ID mismatch or no active session")
                         })?;
 
-                        // Determine the prompt text content.
+                        // ACP clients submit available commands through the
+                        // normal prompt method. Handle compact before creating
+                        // a user message or starting an agent loop.
                         let content = extract_prompt_text(&req.prompt);
                         log::info!(
                             "ACP: session/prompt, session={session_id}, content_len={}",
                             content.len()
                         );
+
+                        if content.trim() == "/compact" {
+                            log::info!("ACP: running manual context compaction for session={session_id}");
+                            if let Err(e) = state.runtime.compact_session(session_id, Some(0)).await {
+                                log::error!("ACP: context compaction failed: {e}");
+                                let _ = responder.respond(acp::PromptResponse::new(
+                                    acp::StopReason::EndTurn,
+                                ));
+                            } else {
+                                let _ = responder.respond(acp::PromptResponse::new(
+                                    acp::StopReason::EndTurn,
+                                ));
+                            }
+                            return Ok(agent_client_protocol::Handled::Yes);
+                        }
 
                         // Update session title from the first prompt.
                         if !*state.session_named.read().await {

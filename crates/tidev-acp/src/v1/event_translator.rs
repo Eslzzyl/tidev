@@ -60,8 +60,10 @@ impl EventTranslator {
     /// Translate a single [`BackendEvent`] into zero or more ACP session
     /// update notifications.
     ///
-    /// Returns `None` for events that have no ACP representation (e.g.
-    /// `SidebarSnapshotReady`, `ContextCompacted`).
+    /// Returns an empty vector for events that have no ACP representation (e.g.
+    /// `SidebarSnapshotReady`). Compaction output is reported as agent thought
+    /// content because it is an internal context-management operation, not the
+    /// answer to the user's prompt.
     pub fn translate(&mut self, event: &BackendEvent) -> Vec<acp::SessionNotification> {
         match event {
             BackendEvent::TurnStarting {
@@ -90,7 +92,11 @@ impl EventTranslator {
                         .message_id(message_id);
                 vec![acp::SessionNotification::new(
                     self.session_id.clone(),
-                    acp::SessionUpdate::AgentMessageChunk(chunk),
+                    if *request_id == 0 {
+                        acp::SessionUpdate::AgentThoughtChunk(chunk)
+                    } else {
+                        acp::SessionUpdate::AgentMessageChunk(chunk)
+                    },
                 )]
             }
 
@@ -307,6 +313,29 @@ impl EventTranslator {
                 )]
             }
 
+            BackendEvent::ContextCompacted {
+                compacted,
+                manual: _,
+                error,
+                ..
+            } => {
+                let text = if *compacted {
+                    "Context compacted."
+                } else {
+                    "Context compaction failed."
+                };
+                let text = match error {
+                    Some(error) => format!("{text} {error}"),
+                    None => text.to_string(),
+                };
+                let chunk =
+                    acp::ContentChunk::new(acp::ContentBlock::Text(acp::TextContent::new(text)));
+                vec![acp::SessionNotification::new(
+                    self.session_id.clone(),
+                    acp::SessionUpdate::AgentThoughtChunk(chunk),
+                )]
+            }
+
             BackendEvent::Failed {
                 session_id: _,
                 request_id: _,
@@ -327,7 +356,6 @@ impl EventTranslator {
             BackendEvent::Finished { .. }
             | BackendEvent::StreamEnd { .. }
             | BackendEvent::InstructionsLoaded { .. }
-            | BackendEvent::ContextCompacted { .. }
             | BackendEvent::UndoCompleted { .. }
             | BackendEvent::SidebarSnapshotReady { .. }
             | BackendEvent::MessagesTruncated { .. } => vec![],
@@ -799,7 +827,7 @@ mod tests {
     }
 
     #[test]
-    fn context_compacted_is_ignored() {
+    fn context_compacted_reports_status_as_thought() {
         let mut tr = make_translator();
         let notifs = tr.translate(&BackendEvent::ContextCompacted {
             session_id: sid(),
@@ -811,7 +839,28 @@ mod tests {
             completed_at: None,
             error: None,
         });
-        assert!(notifs.is_empty());
+        assert_eq!(notifs.len(), 1);
+        match &notifs[0].update {
+            acp::SessionUpdate::AgentThoughtChunk(chunk) => match &chunk.content {
+                acp::ContentBlock::Text(text) => assert_eq!(text.text, "Context compacted."),
+                _ => panic!("expected Text content"),
+            },
+            _ => panic!("expected AgentThoughtChunk"),
+        }
+    }
+
+    #[test]
+    fn internal_compaction_delta_is_presented_as_thought() {
+        let mut tr = make_translator();
+        let notifs = tr.translate(&BackendEvent::Delta {
+            session_id: sid(),
+            request_id: 0,
+            content: "summary".into(),
+        });
+        assert!(matches!(
+            &notifs[0].update,
+            acp::SessionUpdate::AgentThoughtChunk(_)
+        ));
     }
 
     // ── todo_args_to_plan ────────────────────────────────────────────────

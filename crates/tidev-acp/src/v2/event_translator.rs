@@ -81,12 +81,18 @@ impl EventTranslator {
                 request_id,
                 content,
                 ..
-            } => vec![self.update(acp::SessionUpdate::AgentMessageChunk(
-                acp::ContentChunk::new(
+            } => {
+                let chunk = acp::ContentChunk::new(
                     acp::ContentBlock::Text(acp::TextContent::new(content)),
                     self.message_id(*request_id),
-                ),
-            ))],
+                );
+                let update = if *request_id == 0 {
+                    acp::SessionUpdate::AgentThoughtChunk(chunk)
+                } else {
+                    acp::SessionUpdate::AgentMessageChunk(chunk)
+                };
+                vec![self.update(update)]
+            }
             BackendEvent::ReasoningDelta {
                 request_id,
                 content,
@@ -204,6 +210,32 @@ impl EventTranslator {
                 updates.push(self.idle(acp::StopReason::EndTurn));
                 updates
             }
+            BackendEvent::ContextCompacted {
+                compacted,
+                manual,
+                error,
+                ..
+            } => {
+                let text = if *compacted {
+                    "Context compacted."
+                } else {
+                    "Context compaction failed."
+                };
+                let text = match error {
+                    Some(error) => format!("{text} {error}"),
+                    None => text.to_string(),
+                };
+                let mut updates = vec![self.update(acp::SessionUpdate::AgentThoughtChunk(
+                    acp::ContentChunk::new(
+                        acp::ContentBlock::Text(acp::TextContent::new(text)),
+                        acp::MessageId::new(format!("msg-{}", self.message_counter)),
+                    ),
+                ))];
+                if *manual {
+                    updates.push(self.idle(acp::StopReason::EndTurn));
+                }
+                updates
+            }
             BackendEvent::Finished { turn, .. } => {
                 let reason = match turn.finish_reason.as_deref() {
                     Some("max_tokens") | Some("length") => acp::StopReason::MaxTokens,
@@ -262,7 +294,6 @@ impl EventTranslator {
             // ACP v2 has no session-history deletion or truncation update.
             BackendEvent::StreamEnd { .. }
             | BackendEvent::InstructionsLoaded { .. }
-            | BackendEvent::ContextCompacted { .. }
             | BackendEvent::UndoCompleted { .. }
             | BackendEvent::SidebarSnapshotReady { .. }
             | BackendEvent::MessagesTruncated { .. } => Vec::new(),
@@ -320,5 +351,33 @@ mod tests {
         assert!(updates.iter().any(|update| {
             serde_json::to_value(update).unwrap()["update"]["sessionUpdate"] == "terminal_update"
         }));
+    }
+
+    #[test]
+    fn v2_manual_compaction_reports_thought_and_idle() {
+        let mut translator = translator();
+        let updates = translator.translate(&BackendEvent::ContextCompacted {
+            session_id: Uuid::nil(),
+            compacted: true,
+            manual: true,
+            summary: Some("summary".to_string()),
+            retained_from: 3,
+            model_id: None,
+            completed_at: None,
+            error: None,
+        });
+        assert_eq!(updates.len(), 2);
+        assert_eq!(
+            serde_json::to_value(&updates[0]).unwrap()["update"]["sessionUpdate"],
+            "agent_thought_chunk"
+        );
+        assert_eq!(
+            serde_json::to_value(&updates[1]).unwrap()["update"]["sessionUpdate"],
+            "state_update"
+        );
+        assert_eq!(
+            serde_json::to_value(&updates[1]).unwrap()["update"]["state"],
+            "idle"
+        );
     }
 }

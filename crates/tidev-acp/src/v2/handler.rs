@@ -27,6 +27,14 @@ struct State {
 
 type ReceiverSlot<T> = Arc<AsyncMutex<Option<tokio::sync::mpsc::UnboundedReceiver<T>>>>;
 
+/// Commands that the ACP client may expose in its prompt UI.
+fn available_commands() -> acp::AvailableCommandsUpdate {
+    acp::AvailableCommandsUpdate::new(vec![acp::AvailableCommand::new(
+        "compact",
+        "Compact the current session context to free space",
+    )])
+}
+
 pub(crate) fn build_agent(
     runtime: Runtime,
     event_rx_slot: ReceiverSlot<tidev_types::message::BackendEvent>,
@@ -87,7 +95,7 @@ pub(crate) fn build_agent(
             let state = state.clone();
             move |request: acp::NewSessionRequest,
                   responder: agent_client_protocol::Responder<acp::NewSessionResponse>,
-                  _cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>| {
+                  cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>| {
                 let state = state.clone();
                 async move {
                     ensure_workspace(&state.runtime, &request.cwd)?;
@@ -102,6 +110,10 @@ pub(crate) fn build_agent(
                             build_config_options(&state.runtime, *state.current_mode.read().await),
                         );
                     let _ = responder.respond(response);
+                    let _ = cx.send_notification(acp::UpdateSessionNotification::new(
+                        session_id.to_string(),
+                        acp::SessionUpdate::AvailableCommandsUpdate(available_commands()),
+                    ));
                     Ok(Handled::Yes)
                 }
             }
@@ -124,6 +136,10 @@ pub(crate) fn build_agent(
                             build_config_options(&state.runtime, *state.current_mode.read().await),
                         );
                     let _ = responder.respond(response);
+                    let _ = cx.send_notification(acp::UpdateSessionNotification::new(
+                        session_id.to_string(),
+                        acp::SessionUpdate::AvailableCommandsUpdate(available_commands()),
+                    ));
                     Ok(Handled::Yes)
                 }
             }
@@ -191,6 +207,15 @@ pub(crate) fn build_agent(
                 async move {
                     let session_id = validate_session(&state, &request.session_id).await?;
                     let (content, attachments) = extract_prompt(&request.prompt)?;
+                    if content.trim() == "/compact" {
+                        state
+                            .runtime
+                            .compact_session(session_id, Some(0))
+                            .await
+                            .map_err(internal_error)?;
+                        let _ = responder.respond(acp::PromptResponse::new());
+                        return Ok(Handled::Yes);
+                    }
                     if !*state.session_named.read().await {
                         let title = title_from_prompt(&content);
                         let _ = state.runtime.update_session_title(session_id, &title);
