@@ -120,6 +120,8 @@ pub(crate) struct MessageList {
     // ── Interrupt handling ──
     /// Set on user abort to discard stale delta events after cancellation.
     cancelled: bool,
+    /// Whether the interruption notice must wait for pending tool results.
+    pending_interruption_notice: bool,
 }
 
 impl MessageList {
@@ -156,6 +158,7 @@ impl MessageList {
             image_badge_bounds: Vec::new(),
             dirty: true,
             cancelled: false,
+            pending_interruption_notice: false,
         }
     }
 
@@ -182,6 +185,7 @@ impl MessageList {
             // entries from a previous session's incomplete rendering pass.
             self.render_cache.clear();
             self.streaming_buffer = StreamingBuffer::new();
+            self.pending_interruption_notice = false;
             self.selectable_regions.clear();
             self.hovered_inline_subagent = None;
             self.inline_subagent_card_bounds.clear();
@@ -218,6 +222,7 @@ impl MessageList {
         self.layout_index = MessageLayoutIndex::new();
         self.render_cache.clear();
         self.streaming_buffer = StreamingBuffer::new();
+        self.pending_interruption_notice = false;
         self.selectable_regions.clear();
         self.hovered_inline_subagent = None;
         self.inline_subagent_card_bounds.clear();
@@ -449,13 +454,15 @@ impl MessageList {
         // prevents "Running Shell" from leaking into subsequent turns.
         self.running_tools.clear();
 
-        // Append an error message to indicate the interruption.
-        let mut err_msg = tidev_types::message::Message::new(
-            tidev_types::message::MessageRole::Error,
-            "Request interrupted by user",
-        );
-        err_msg.completed_at = Some(Utc::now());
-        chat_context.messages.push(err_msg);
+        // Keep the interruption notice after all tool results.  Inserting it
+        // between an assistant message and its tool results would split the
+        // assistant/tool render block and force the result into a standalone
+        // fallback tool card.
+        if latest_assistant_has_pending_tool_results(&chat_context.messages) {
+            self.pending_interruption_notice = true;
+        } else {
+            append_interruption_notice(&mut chat_context.messages);
+        }
 
         // Invalidate layout index so the next render fully rebuilds from the
         // current message list.  Without this, when the empty streaming message
@@ -826,6 +833,17 @@ impl MessageList {
                             self.completed_subagent_sessions.insert(msg_id, csid);
                         }
                     }
+                    self.dirty = true;
+                }
+
+                if self.active_session_id == Some(session_id)
+                    && self.pending_interruption_notice
+                    && !latest_assistant_has_pending_tool_results(&chat_context.messages)
+                {
+                    self.pending_interruption_notice = false;
+                    append_interruption_notice(&mut chat_context.messages);
+                    self.layout_index.invalidate_all();
+                    self.render_cache.clear();
                     self.dirty = true;
                 }
             }
@@ -1436,4 +1454,36 @@ fn infer_subagent_status(event: &BackendEvent) -> Option<String> {
         | BackendEvent::TurnStarting { .. } => Some("Thinking".to_string()),
         _ => None,
     }
+}
+
+/// Return whether the latest assistant tool-call message is still missing a
+/// result for at least one of its tool calls.
+fn latest_assistant_has_pending_tool_results(messages: &[Message]) -> bool {
+    let Some((assistant_idx, assistant)) = messages
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, message)| {
+            message.role == tidev_types::message::MessageRole::Assistant
+                && !message.tool_calls.is_empty()
+        })
+    else {
+        return false;
+    };
+
+    assistant.tool_calls.iter().any(|tool_call| {
+        !messages[assistant_idx + 1..].iter().any(|message| {
+            message.role == tidev_types::message::MessageRole::Tool
+                && message.tool_call_id.as_deref() == Some(tool_call.id.as_str())
+        })
+    })
+}
+
+fn append_interruption_notice(messages: &mut Vec<Message>) {
+    let mut err_msg = Message::new(
+        tidev_types::message::MessageRole::Error,
+        "Request interrupted by user",
+    );
+    err_msg.completed_at = Some(Utc::now());
+    messages.push(err_msg);
 }
