@@ -83,6 +83,12 @@ impl App {
                         .resolve_provider_default_model(&self.runtime.auth(), &provider_id)
                     {
                         Ok(model) => {
+                            // Keep the persisted default in sync with the runtime model.
+                            self.runtime.update_config(|cfg| {
+                                cfg.default_provider = model.provider_id.clone();
+                                cfg.default_model = model.model_id.clone();
+                            });
+                            let _ = self.runtime.save_config();
                             self.runtime.set_active_model(model.clone());
 
                             // Update composer's image support flag.
