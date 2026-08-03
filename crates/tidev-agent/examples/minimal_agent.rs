@@ -72,6 +72,41 @@ impl Tool for EchoTool {
     }
 }
 
+struct LengthTool;
+
+#[async_trait]
+impl Tool for LengthTool {
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition {
+            name: "length".into(),
+            display_name: "Length".into(),
+            description: "Return the character count of supplied text.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {"text": {"type": "string"}},
+                "required": ["text"]
+            }),
+        }
+    }
+
+    fn read_only(&self) -> bool {
+        true
+    }
+
+    async fn execute(
+        &self,
+        args: serde_json::Value,
+        _context: &dyn ToolContext,
+    ) -> Result<ToolExecutionResult> {
+        let length = args
+            .get("text")
+            .and_then(serde_json::Value::as_str)
+            .map_or(0, |text| text.chars().count())
+            .to_string();
+        Ok(ToolExecutionResult::new(length))
+    }
+}
+
 fn provider_config() -> LlmProviderConfig {
     LlmProviderConfig {
         provider_id: "example".into(),
@@ -113,6 +148,7 @@ async fn main() -> Result<()> {
 
     let mut tool_registry = ToolRegistry::new(64 * 1024);
     tool_registry.register(EchoTool);
+    tool_registry.register(LengthTool);
 
     let mcp = mcp_spec_from_environment()
         .map(|spec| McpRegistry::new(BTreeMap::from([("example".to_string(), spec)])));
