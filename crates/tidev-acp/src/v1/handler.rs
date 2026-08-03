@@ -17,7 +17,7 @@ use uuid::Uuid;
 use tidev_config::{AppConfig, AuthStore, ThinkingMatcher, auth::ActiveModel};
 use tidev_core::Runtime;
 use tidev_llm::message::MessageRole;
-use tidev_llm::mode::SessionMode;
+use tidev_core::Mode as SessionMode;
 use tidev_utils::session::title_from_prompt;
 
 /// Shared state accessible from all ACP request handlers.

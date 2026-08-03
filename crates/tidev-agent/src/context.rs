@@ -16,7 +16,6 @@ use tokio_util::sync::CancellationToken;
 use tidev_llm::message::{
     AssistantTurn, Message, QueuedUserMessage, ToolCall, ToolExecutionResult,
 };
-use tidev_llm::mode::SessionMode;
 use tidev_llm::reasoning::ThinkingLevelType;
 use tidev_llm::ToolDefinition;
 
@@ -32,8 +31,8 @@ pub struct AgentLoopConfig {
     pub session_id: uuid::Uuid,
     /// The system prompt for this agent loop run.
     pub system_prompt: String,
-    /// The session mode (Plan / Build).
-    pub mode: SessionMode,
+    /// Whether this run is read-only.
+    pub read_only: bool,
     /// Thinking / reasoning level.
     pub thinking_level: ThinkingLevelType,
     /// Channel for sending real-time events to the frontend.
@@ -153,7 +152,7 @@ pub trait AgentContext: Send + Sync {
     async fn request_tool_approval(
         &self,
         tool_calls: &[ToolCall],
-        mode: SessionMode,
+        read_only: bool,
     ) -> Result<Vec<ApprovedTool>>;
 
     /// Execute a batch of approved tool calls and return their results.

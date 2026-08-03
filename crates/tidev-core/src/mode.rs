@@ -1,12 +1,12 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SessionMode {
+pub enum Mode {
     Plan,
     Build,
 }
 
-impl SessionMode {
+impl Mode {
     pub fn all() -> &'static [Self] {
         &[Self::Plan, Self::Build]
     }
@@ -18,7 +18,7 @@ impl SessionMode {
         }
     }
 
-    pub fn toggle(&self) -> Self {
+    pub fn toggle(self) -> Self {
         match self {
             Self::Plan => Self::Build,
             Self::Build => Self::Plan,
@@ -40,13 +40,13 @@ impl SessionMode {
     }
 }
 
-impl std::fmt::Display for SessionMode {
+impl std::fmt::Display for Mode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
     }
 }
 
-impl std::str::FromStr for SessionMode {
+impl std::str::FromStr for Mode {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {

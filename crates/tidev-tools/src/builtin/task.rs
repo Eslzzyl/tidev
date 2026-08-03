@@ -6,7 +6,6 @@ use uuid::Uuid;
 use crate::builtin::utils::decode_tool_args;
 use crate::todo_persistence::TodoPersistence;
 use crate::types::{TaskArgs, ToolDefinition, ToolPermission};
-use tidev_llm::mode::SessionMode;
 
 /// Mirrors `tidev_core::agent_type::AgentType::parse` accepted names.
 /// Keep in sync when agent types are added/renamed (see tidev-core agent_type.rs).
@@ -34,7 +33,6 @@ pub fn execute_tool_call(
     _session_id: Uuid,
     tool_name: &str,
     arguments: Value,
-    _mode: SessionMode,
 ) -> Result<String> {
     let args = decode_tool_args::<TaskArgs>(tool_name, arguments)?;
 
@@ -102,7 +100,6 @@ mod tests {
                 "prompt": "prompt",
                 "subagent_type": "bogus",
             }),
-            SessionMode::Build,
         )
         .unwrap_err();
         assert!(

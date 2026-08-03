@@ -12,7 +12,6 @@ mod error;
 pub mod event;
 mod gemini;
 pub mod message;
-pub mod mode;
 mod openai;
 pub mod reasoning;
 mod responses;

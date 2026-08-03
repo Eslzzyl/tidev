@@ -1,13 +1,12 @@
-//! tidev-agent: prompts and execution loop.
+//! tidev-agent: execution loop.
 //!
-//! This crate defines the thin agent layer — the prompts and loop skeleton
+//! This crate defines the thin agent layer — the loop skeleton
 //! that are independent of any concrete runtime implementation.
 //! tidev-core provides the real [`AgentContext`] and drives the loop.
 
 pub mod context;
 pub mod event;
 pub mod loop_;
-pub mod prompts;
 
 // Re-export types from tidev-llm (defined there as shared protocol types).
 pub use context::{

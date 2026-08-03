@@ -21,7 +21,6 @@ use super::utils::truncate_in_place;
 use crate::builtin::classify::{Classifier, Safety};
 use crate::builtin::utils::decode_tool_args;
 use crate::types::{ShellArgs, ToolDefinition, ToolPermission};
-use tidev_llm::mode::SessionMode;
 use tidev_utils::encoding::decode_command_output;
 use tidev_utils::encoding::prepare_command_for_shell;
 
@@ -122,7 +121,7 @@ pub fn execute_tool_call(
     tool_name: &str,
     arguments: Value,
     max_output_bytes: usize,
-    mode: SessionMode,
+    read_only: bool,
     session_id: Uuid,
     request_id: u64,
     event_tx: Option<UnboundedSender<ShellOutput>>,
@@ -136,7 +135,7 @@ pub fn execute_tool_call(
         None,
         timeout,
         event_tx,
-        mode,
+        read_only,
         session_id,
         request_id,
         "",
@@ -150,7 +149,7 @@ pub fn execute_tool_call_with_cancel(
     arguments: Value,
     max_output_bytes: usize,
     cancel: &CancellationToken,
-    mode: SessionMode,
+    read_only: bool,
     session_id: Uuid,
     request_id: u64,
     event_tx: Option<UnboundedSender<ShellOutput>>,
@@ -164,7 +163,7 @@ pub fn execute_tool_call_with_cancel(
         Some(cancel),
         timeout,
         event_tx,
-        mode,
+        read_only,
         session_id,
         request_id,
         "",
@@ -183,7 +182,7 @@ pub async fn execute_tool_call_with_cancel_async(
     arguments: Value,
     max_output_bytes: usize,
     cancel: &CancellationToken,
-    mode: SessionMode,
+    read_only: bool,
     session_id: Uuid,
     request_id: u64,
     event_tx: Option<UnboundedSender<ShellOutput>>,
@@ -198,7 +197,7 @@ pub async fn execute_tool_call_with_cancel_async(
         cancel,
         timeout,
         event_tx,
-        mode,
+        read_only,
         session_id,
         request_id,
         tool_call_id,
@@ -219,7 +218,7 @@ async fn run_shell_streaming(
     cancel: &CancellationToken,
     timeout_ms: u64,
     event_tx: Option<UnboundedSender<ShellOutput>>,
-    mode: SessionMode,
+    read_only: bool,
     session_id: Uuid,
     request_id: u64,
     tool_call_id: &str,
@@ -227,7 +226,7 @@ async fn run_shell_streaming(
     let mut actual_command = command.to_string();
 
     // ── Layer 0: Plan mode command classification ────────────────────
-    if mode == SessionMode::Plan && Classifier::global().classify(command) >= Safety::WriteOperation
+    if read_only && Classifier::global().classify(command) >= Safety::WriteOperation
     {
         log::info!(
             "plan mode blocked write command: {}",
@@ -479,7 +478,7 @@ fn run_shell_inner(
     cancel: Option<&CancellationToken>,
     timeout_ms: u64,
     event_tx: Option<UnboundedSender<ShellOutput>>,
-    mode: SessionMode,
+    read_only: bool,
     session_id: Uuid,
     request_id: u64,
     tool_call_id: &str,
@@ -487,7 +486,7 @@ fn run_shell_inner(
     let mut actual_command = command.to_string();
 
     // ── Layer 0: Plan mode command classification ────────────────────
-    if mode == SessionMode::Plan && Classifier::global().classify(command) >= Safety::WriteOperation
+    if read_only && Classifier::global().classify(command) >= Safety::WriteOperation
     {
         log::info!(
             "plan mode blocked write command: {}",

@@ -165,10 +165,6 @@ pub struct ToolExecutionResult {
     pub metadata: ToolMetadata,
     #[serde(default)]
     pub instruction_sources: Vec<String>,
-    #[serde(default)]
-    pub snapshot_hash: Option<String>,
-    #[serde(default)]
-    pub patch_files: Option<String>,
 }
 
 impl ToolExecutionResult {
@@ -178,8 +174,6 @@ impl ToolExecutionResult {
             attachments: Vec::new(),
             metadata: ToolMetadata::default(),
             instruction_sources: Vec::new(),
-            snapshot_hash: None,
-            patch_files: None,
         }
     }
 
@@ -193,8 +187,6 @@ impl ToolExecutionResult {
             attachments: self.attachments.clone(),
             metadata: self.metadata.clone(),
             instruction_sources: self.instruction_sources.clone(),
-            snapshot_hash: self.snapshot_hash.clone(),
-            patch_files: self.patch_files.clone(),
         }
     }
 }
@@ -365,8 +357,9 @@ pub struct Message {
     pub patch_files: Option<String>,
     #[serde(default)]
     pub file_diffs: Option<String>,
+    /// Legacy application-mode storage value. Core owns its interpretation.
     #[serde(default)]
-    pub mode: Option<crate::mode::SessionMode>,
+    pub mode: Option<String>,
     #[serde(default)]
     pub thinking_level: Option<crate::reasoning::ThinkingLevelType>,
 }
@@ -503,9 +496,9 @@ impl Message {
             cache_read_tokens: None,
             cache_write_tokens: None,
             model_id: None,
+            snapshot_hash: None,
+            patch_files: None,
             tokens_per_second: None,
-            snapshot_hash: result.snapshot_hash,
-            patch_files: result.patch_files,
             file_diffs: None,
             mode: None,
             thinking_level: None,
@@ -539,7 +532,6 @@ impl Message {
 pub struct QueuedUserMessage {
     pub content: String,
     pub attachments: Vec<MessageAttachment>,
-    pub mode: crate::mode::SessionMode,
     pub thinking_level: Option<crate::reasoning::ThinkingLevelType>,
 }
 
@@ -754,7 +746,6 @@ mod tests {
         let r = ToolExecutionResult::new("hello");
         assert_eq!(r.output, "hello");
         assert!(r.attachments.is_empty());
-        assert!(r.snapshot_hash.is_none());
     }
 
     #[test]

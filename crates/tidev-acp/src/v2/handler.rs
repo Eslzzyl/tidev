@@ -13,7 +13,7 @@ use uuid::Uuid;
 use tidev_config::ThinkingMatcher;
 use tidev_core::Runtime;
 use tidev_llm::message::{MessageAttachment, MessageRole};
-use tidev_llm::mode::SessionMode;
+use tidev_core::Mode as SessionMode;
 use tidev_utils::session::title_from_prompt;
 
 struct State {

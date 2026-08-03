@@ -9,7 +9,6 @@ use tokio_util::sync::CancellationToken;
 use crate::builtin::utils::parse_arguments;
 use crate::types::{QuestionArgs, SkillArgs, ToolDefinition, ToolPermission};
 use tidev_llm::message::{ToolCall, ToolExecutionResult};
-use tidev_llm::mode::SessionMode;
 use tidev_utils::tool_name::canonical_tool_name;
 
 use crate::skills::SkillCatalog;
@@ -25,7 +24,7 @@ pub struct ToolContext<'a> {
     pub session_id: uuid::Uuid,
     pub request_id: u64,
     pub max_output_bytes: usize,
-    pub mode: SessionMode,
+    pub read_only: bool,
     pub allow_outside: bool,
     pub sensitive_file_approved: bool,
     pub web_search_config: &'a tidev_config::WebSearchConfig,
@@ -206,7 +205,7 @@ pub async fn execute_tool_call(
             let workspace_root = ctx.workspace_root.to_path_buf();
             let call_name = call.name.clone();
             let max_output_bytes = ctx.max_output_bytes;
-            let mode = ctx.mode;
+            let read_only = ctx.read_only;
             let cancel = cancel.clone();
             let session_id = ctx.session_id;
             let request_id = ctx.request_id;
@@ -219,7 +218,7 @@ pub async fn execute_tool_call(
                     arguments,
                     max_output_bytes,
                     &cancel,
-                    mode,
+                    read_only,
                     session_id,
                     request_id,
                     event_tx,
@@ -244,7 +243,6 @@ pub async fn execute_tool_call(
             let store = ctx.todo.clone();
             let session_id = ctx.session_id;
             let call_name = call.name.clone();
-            let mode = ctx.mode;
             safe_spawn_blocking_str(move || {
                 task::execute_tool_call(
                     &workspace_root,
@@ -252,7 +250,6 @@ pub async fn execute_tool_call(
                     session_id,
                     &call_name,
                     arguments,
-                    mode,
                 )
             })
             .await

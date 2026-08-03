@@ -25,8 +25,8 @@ use tokio::process::Command;
 
 use tidev_config::mcp::McpServerConfig;
 use tidev_llm::message::{MessageAttachment, ToolCall, ToolExecutionResult, ToolMetadata};
-use tidev_llm::mode::SessionMode;
 use tidev_tools::types::{ToolDefinition, ToolPermission};
+use crate::mode::Mode;
 
 // ---------------------------------------------------------------------------
 // Type aliases
@@ -299,7 +299,7 @@ impl McpManager {
     }
 
     /// Return tool definitions from all connected servers, filtered by mode.
-    pub fn available_definitions(&self, mode: SessionMode) -> Vec<ToolDefinition> {
+    pub fn available_definitions(&self, mode: Mode) -> Vec<ToolDefinition> {
         let inner = self.inner.lock().unwrap();
         inner
             .servers
@@ -309,7 +309,11 @@ impl McpManager {
                 state
                     .tools
                     .iter()
-                    .filter(|definition| definition.permission.allowed_in_mode(mode))
+                    .filter(|definition| {
+                        definition
+                            .permission
+                            .allowed_in_read_only(mode == Mode::Plan)
+                    })
                     .cloned()
                     .collect::<Vec<_>>()
             })
@@ -340,9 +344,13 @@ impl McpManager {
 
     // ── Permission helpers ──────────────────────────────────────────────
 
-    pub fn can_execute(&self, tool_name: &str, mode: SessionMode) -> bool {
+    pub fn can_execute(&self, tool_name: &str, mode: Mode) -> bool {
         self.definition_for(tool_name)
-            .is_some_and(|definition| definition.permission.allowed_in_mode(mode))
+            .is_some_and(|definition| {
+                definition
+                    .permission
+                    .allowed_in_read_only(mode == Mode::Plan)
+            })
     }
 
     // ── Execution ───────────────────────────────────────────────────────
@@ -612,8 +620,6 @@ fn call_tool_result_data(
         attachments,
         metadata: ToolMetadata::default(),
         instruction_sources: Vec::new(),
-        snapshot_hash: None,
-        patch_files: None,
     }
 }
 
@@ -810,7 +816,7 @@ mod tests {
         let mgr = McpManager::new(PathBuf::from("/tmp"), BTreeMap::new());
         assert!(mgr.all_definitions().is_empty());
         assert!(mgr.definition_for("anything").is_none());
-        assert!(mgr.available_definitions(SessionMode::Build).is_empty());
+        assert!(mgr.available_definitions(Mode::Build).is_empty());
     }
 
     #[test]
@@ -870,18 +876,18 @@ mod tests {
         insert_mock_tool(&mgr, "srv", make_stdio_config(), write_tool);
         insert_mock_tool(&mgr, "srv", make_stdio_config(), read_tool);
 
-        let plan_tools = mgr.available_definitions(SessionMode::Plan);
+        let plan_tools = mgr.available_definitions(Mode::Plan);
         assert_eq!(plan_tools.len(), 1);
         assert_eq!(plan_tools[0].name, "read");
 
-        let build_tools = mgr.available_definitions(SessionMode::Build);
+        let build_tools = mgr.available_definitions(Mode::Build);
         assert_eq!(build_tools.len(), 2);
     }
 
     #[test]
     fn test_mcp_manager_can_execute_for_unknown() {
         let mgr = McpManager::new(PathBuf::from("/tmp"), BTreeMap::new());
-        assert!(!mgr.can_execute("nonexistent", SessionMode::Build));
+        assert!(!mgr.can_execute("nonexistent", Mode::Build));
     }
 
     #[test]

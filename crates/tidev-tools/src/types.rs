@@ -38,17 +38,18 @@ pub enum ToolPermission {
 }
 
 impl ToolPermission {
-    /// Returns whether this permission level is allowed in the given session mode.
+    /// Returns whether this permission level is allowed in a read-only session.
     ///
     /// Hardcoded: Plan mode only allows read-only and non-destructive tools;
     /// Build mode allows everything.
-    pub fn allowed_in_mode(&self, mode: tidev_llm::mode::SessionMode) -> bool {
-        match mode {
-            tidev_llm::mode::SessionMode::Plan => matches!(
+    pub fn allowed_in_read_only(&self, read_only: bool) -> bool {
+        if read_only {
+            matches!(
                 self,
                 Self::Read | Self::Search | Self::Execute | Self::Session
-            ),
-            tidev_llm::mode::SessionMode::Build => true,
+            )
+        } else {
+            true
         }
     }
 }
@@ -544,18 +545,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_allowed_in_mode() {
-        assert!(ToolPermission::Read.allowed_in_mode(tidev_llm::mode::SessionMode::Plan));
-        assert!(ToolPermission::Search.allowed_in_mode(tidev_llm::mode::SessionMode::Plan));
-        assert!(ToolPermission::Execute.allowed_in_mode(tidev_llm::mode::SessionMode::Plan));
-        assert!(ToolPermission::Session.allowed_in_mode(tidev_llm::mode::SessionMode::Plan));
-        assert!(!ToolPermission::Write.allowed_in_mode(tidev_llm::mode::SessionMode::Plan));
-        assert!(!ToolPermission::Edit.allowed_in_mode(tidev_llm::mode::SessionMode::Plan));
+    fn test_allowed_in_read_only() {
+        assert!(ToolPermission::Read.allowed_in_read_only(true));
+        assert!(ToolPermission::Search.allowed_in_read_only(true));
+        assert!(ToolPermission::Execute.allowed_in_read_only(true));
+        assert!(ToolPermission::Session.allowed_in_read_only(true));
+        assert!(!ToolPermission::Write.allowed_in_read_only(true));
+        assert!(!ToolPermission::Edit.allowed_in_read_only(true));
 
-        assert!(ToolPermission::Read.allowed_in_mode(tidev_llm::mode::SessionMode::Build));
-        assert!(ToolPermission::Write.allowed_in_mode(tidev_llm::mode::SessionMode::Build));
-        assert!(ToolPermission::Edit.allowed_in_mode(tidev_llm::mode::SessionMode::Build));
-        assert!(ToolPermission::Execute.allowed_in_mode(tidev_llm::mode::SessionMode::Build));
+        assert!(ToolPermission::Read.allowed_in_read_only(false));
+        assert!(ToolPermission::Write.allowed_in_read_only(false));
+        assert!(ToolPermission::Edit.allowed_in_read_only(false));
+        assert!(ToolPermission::Execute.allowed_in_read_only(false));
     }
 
     #[test]

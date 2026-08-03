@@ -4,7 +4,7 @@ use crate::context::UpdateContext;
 use crate::theme::ThemePalette;
 use tidev_core::ApprovedTool;
 use tidev_llm::message::{MessageRole, ToolExecutionResult};
-use tidev_llm::mode::SessionMode;
+use tidev_core::Mode as SessionMode;
 
 use crate::action::{
     Action, BoundaryDecision, ChatAction, ConnectAction, McpAction, OverlayAction, OverlayKind,
@@ -206,7 +206,11 @@ impl App {
                                 .iter()
                                 .rev()
                                 .find(|m| m.role == MessageRole::User)
-                                .and_then(|m| m.mode)
+                                .and_then(|m| {
+                                    m.mode
+                                        .as_deref()
+                                        .and_then(|value| value.parse::<SessionMode>().ok())
+                                })
                                 .unwrap_or(SessionMode::Build);
                         }
 
@@ -290,7 +294,11 @@ impl App {
                         .iter()
                         .rev()
                         .find(|m| m.role == tidev_llm::message::MessageRole::User)
-                        .and_then(|m| m.mode)
+                        .and_then(|m| {
+                            m.mode
+                                .as_deref()
+                                .and_then(|value| value.parse::<SessionMode>().ok())
+                        })
                         .unwrap_or(SessionMode::Build);
 
                     // Compute context_usage from stored messages (last assistant

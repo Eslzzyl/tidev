@@ -18,7 +18,7 @@ use ratatui::layout::Rect;
 use tidev_core::{BackendEvent, TuiResponse};
 use tidev_core::{ApprovedTool, ToolCallWithViolations};
 use tidev_llm::message::{COMPACTION_MESSAGE_LABEL, Message, MessageAttachment, MessageRole};
-use tidev_llm::mode::SessionMode;
+use tidev_core::Mode as SessionMode;
 use tidev_llm::reasoning::ThinkingLevelType;
 use tidev_tools::types::TodoItem;
 use uuid::Uuid;

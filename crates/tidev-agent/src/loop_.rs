@@ -7,8 +7,6 @@
 //! The loop is generic over [`AgentContext`], which provides the concrete
 //! implementations for LLM calls, tool execution, and persistence.
 
-use std::path::Path;
-
 use anyhow::Result;
 use chrono::Utc;
 
@@ -18,7 +16,6 @@ use tidev_llm::message::{
 
 use crate::context::{AgentContext, AgentLoopConfig};
 use crate::event::AgentEvent;
-use crate::prompts;
 
 /// Run the full agent loop until the model produces a text-only response.
 ///
@@ -45,18 +42,11 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
 
         // ─── 1. Load messages ────────────────────────────────────────────
         let mut messages = ctx.load_messages(session_id).await?;
-
-        // ─── 2. Inject instruction files into the last user message ───────
-        // Must run BEFORE inject_mode_reminder so that the mode-reminder
-        // de-duplication check (content.starts_with) still works across
-        // turns — after both injections the content looks like:
-        //   [mode_reminder]\n\n<system-reminder>...\n\n[original]
+        // CoreContext performs injection while loading; retain the returned
+        // source list for the tool-result replay notification below.
         let already_injected = ctx.inject_instructions(session_id, &mut messages).await?;
 
-        // ─── 3. Inject mode reminder into the last user message ───────────
-        inject_mode_reminder(ctx, session_id, &mut messages, config.mode).await?;
-
-        // ─── 4. Notify frontend that a new turn is starting ───────────────
+        // ─── 2. Notify frontend that a new turn is starting ───────────────
         // Placed after instruction/mode injection so the TUI creates the
         // streaming assistant message AFTER any system notification messages
         // emitted by inject_instructions, keeping the correct visual order.
@@ -148,7 +138,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
 
         // ─── 9. Permission approval ──────────────────────────────────────
         let approved = ctx
-            .request_tool_approval(&turn.tool_calls, config.mode)
+            .request_tool_approval(&turn.tool_calls, config.read_only)
             .await?;
 
         let mut task_calls: Vec<(ToolCall, Option<uuid::Uuid>)> = Vec::new();
@@ -271,81 +261,6 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
 }
 
 // ---------------------------------------------------------------------------
-// Mode reminder injection
-// ---------------------------------------------------------------------------
-
-/// Inject a mode reminder into the last user message if needed.
-///
-/// Mirrors the old v0.6.x `inject_mode_reminder` logic:
-/// - First user message → inject `mode_reminder(current_mode)`
-/// - Mode changed from previous user message → inject `plan_switch_reminder()`
-///   or `build_switch_reminder()`
-/// - Same mode → no injection
-///
-/// The reminder is prepended to the message content and persisted to both
-/// the in-memory buffer and the store so subsequent turns see it.
-async fn inject_mode_reminder(
-    ctx: &dyn AgentContext,
-    session_id: uuid::Uuid,
-    messages: &mut [Message],
-    current_mode: tidev_llm::mode::SessionMode,
-) -> Result<()> {
-    // Find the last user message index.
-    let last_user_idx = match messages.iter().rposition(|m| m.role == MessageRole::User) {
-        Some(idx) => idx,
-        None => return Ok(()),
-    };
-
-    // Find the mode of the most recent *previous* real user message.
-    // Skip synthetic messages (e.g. compaction summaries) whose mode is None.
-    let prev_mode = messages[..last_user_idx]
-        .iter()
-        .rev()
-        .find(|m| m.role == MessageRole::User && m.mode.is_some())
-        .and_then(|m| m.mode);
-
-    let is_first_user = prev_mode.is_none();
-
-    let reminder: Option<String> = match (is_first_user, prev_mode) {
-        (true, _) => Some(prompts::mode_reminder(current_mode)),
-        (false, Some(prev)) if prev != current_mode => Some(match current_mode {
-            tidev_llm::mode::SessionMode::Plan => prompts::plan_switch_reminder(),
-            tidev_llm::mode::SessionMode::Build => prompts::build_switch_reminder(),
-        }),
-        _ => None,
-    };
-
-    let Some(text) = reminder else {
-        return Ok(());
-    };
-
-    // De-duplicate: skip if the content already starts with this reminder.
-    if messages[last_user_idx].content.starts_with(&text) {
-        return Ok(());
-    }
-
-    // Prepend the reminder.
-    let new_content = format!("{text}\n\n{}", messages[last_user_idx].content);
-
-    // Update in-memory message.
-    let msg_id = messages[last_user_idx].id;
-    messages[last_user_idx].content = new_content.clone();
-
-    // Persist to buffer + store.
-    ctx.update_message_content(session_id, msg_id, new_content)
-        .await?;
-
-    log::info!(
-        "injected mode reminder into user message {} (mode={:?}, is_first={})",
-        msg_id,
-        current_mode,
-        is_first_user,
-    );
-
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -375,3 +290,4 @@ fn build_assistant_message(turn: &AssistantTurn) -> Message {
     msg.reasoning_completed_at = turn.reasoning_completed_at;
     msg
 }
+use std::path::Path;

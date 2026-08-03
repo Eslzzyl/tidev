@@ -13,7 +13,6 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use tidev_llm::message::{ToolCall, ToolExecutionResult};
-use tidev_llm::mode::SessionMode;
 use tidev_tools::types::ToolDefinition;
 
 use tidev_config::auth::ActiveModel;
@@ -22,6 +21,7 @@ use tidev_tools::execute_tool_call;
 use tidev_tools::{ShellOutput, SkillCatalog, TodoPersistence};
 
 use crate::mcp::{McpManager, McpServerSummary};
+use crate::mode::Mode;
 
 /// Tool execution entry point for tidev-core.
 ///
@@ -78,7 +78,7 @@ impl ToolRegistry {
         call: &ToolCall,
         session_id: Uuid,
         request_id: u64,
-        mode: SessionMode,
+        mode: Mode,
         allow_outside: bool,
         sensitive_file_approved: bool,
         cancel: &CancellationToken,
@@ -103,7 +103,7 @@ impl ToolRegistry {
             session_id,
             request_id,
             max_output_bytes: self.max_output_bytes,
-            mode,
+            read_only: mode == Mode::Plan,
             allow_outside,
             sensitive_file_approved,
             web_search_config: &self.web_search_config,
@@ -173,11 +173,11 @@ impl ToolRegistry {
 
     /// Returns `true` if the tool exists and its permission level is allowed
     /// in the given session mode (hardcoded per mode).
-    pub fn can_execute(&self, tool_name: &str, mode: SessionMode) -> bool {
+    pub fn can_execute(&self, tool_name: &str, mode: Mode) -> bool {
         // Check built-in tools first.
         if self
             .definition_for(tool_name)
-            .is_some_and(|def| def.permission.allowed_in_mode(mode))
+            .is_some_and(|def| def.permission.allowed_in_read_only(mode == Mode::Plan))
         {
             return true;
         }
@@ -261,9 +261,9 @@ mod tests {
     fn test_mcp_can_execute() {
         let reg = make_registry_with_mcp();
         // MCP tool has ToolPermission::Execute, Build mode allows execute.
-        assert!(reg.can_execute("mcp__srv__tool", SessionMode::Build));
+        assert!(reg.can_execute("mcp__srv__tool", Mode::Build));
         // Plan mode allows execute by default too.
-        assert!(reg.can_execute("mcp__srv__tool", SessionMode::Plan));
+        assert!(reg.can_execute("mcp__srv__tool", Mode::Plan));
     }
 
     #[test]

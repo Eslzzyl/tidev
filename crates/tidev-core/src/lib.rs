@@ -7,6 +7,7 @@ pub mod backend_event;
 pub mod context;
 pub mod mcp;
 pub mod message_buf;
+pub mod mode;
 pub mod prompts;
 pub mod registry;
 pub mod runtime;
@@ -18,6 +19,7 @@ pub use agent_ctx::CoreContext;
 pub use backend_event::{BackendEvent, agent_event_to_backend_event};
 pub use context::{CompactionResult, ContextManager};
 pub use message_buf::MessageBuffer;
+pub use mode::Mode;
 pub use registry::ToolRegistry;
 pub use runtime::Runtime;
 pub use session::SessionManager;
@@ -36,7 +38,7 @@ pub use tidev_agent::{
 #[derive(Debug)]
 pub struct PendingToolApproval {
     pub tool_calls: Vec<tidev_llm::message::ToolCall>,
-    pub mode: tidev_llm::mode::SessionMode,
+    pub mode: Mode,
     pub response_tx: tokio::sync::oneshot::Sender<Vec<ApprovedTool>>,
 }
 

@@ -35,7 +35,7 @@ use tidev_config::{AppConfig, AuthStore, paths::ConfigPaths};
 use tidev_search::FileSearchIndex;
 use tidev_storage::SessionStore;
 use tidev_llm::message::{Message, MessageAttachment, MessageRole, QueuedUserMessage};
-use tidev_llm::mode::SessionMode;
+use crate::mode::Mode;
 use tidev_llm::reasoning::ThinkingLevelType;
 use tidev_tools::types::TodoItem;
 
@@ -433,7 +433,7 @@ impl Runtime {
         &self,
         session_id: Uuid,
         content: String,
-        mode: SessionMode,
+        mode: Mode,
     ) -> Result<()> {
         self.submit_prompt_with_attachments(session_id, mode, content, Vec::new(), None)
             .await
@@ -450,14 +450,14 @@ impl Runtime {
     pub async fn submit_prompt_with_attachments(
         &self,
         session_id: Uuid,
-        mode: SessionMode,
+        mode: Mode,
         content: String,
         attachments: Vec<MessageAttachment>,
         thinking_level: Option<ThinkingLevelType>,
     ) -> Result<()> {
         let mut user_msg = Message::new(MessageRole::User, content);
-        user_msg.attachments = attachments;
-        user_msg.mode = Some(mode);
+            user_msg.attachments = attachments;
+            user_msg.mode = Some(mode.as_str().to_string());
         user_msg.thinking_level = thinking_level;
 
         // 1. If undo revert is active, discard hidden messages first.
@@ -498,7 +498,6 @@ impl Runtime {
         // Capture values needed for the queue before user_msg is moved.
         let q_content = user_msg.content.clone();
         let q_attachments = user_msg.attachments.clone();
-        let q_mode = mode;
         let q_thinking = user_msg.thinking_level.clone();
 
         // 3. Notify the TUI so it can display the message.
@@ -511,7 +510,7 @@ impl Runtime {
         // Fast path: avoid queue_user_message when possible.
         // The atomic check-and-start in start_agent_loop prevents TOCTOU.
         if self.is_session_busy(session_id) {
-            self.queue_user_message(session_id, q_content, q_attachments, q_mode, q_thinking);
+            self.queue_user_message(session_id, q_content, q_attachments, q_thinking);
             return Ok(());
         }
 
@@ -530,7 +529,6 @@ impl Runtime {
         session_id: Uuid,
         content: String,
         attachments: Vec<MessageAttachment>,
-        mode: SessionMode,
         thinking_level: Option<ThinkingLevelType>,
     ) {
         let mut queue = self.queued_messages.lock().unwrap();
@@ -540,7 +538,6 @@ impl Runtime {
             .push_back(QueuedUserMessage {
                 content,
                 attachments,
-                mode,
                 thinking_level,
             });
     }
@@ -556,7 +553,7 @@ impl Runtime {
     pub async fn continue_session(
         &self,
         session_id: Uuid,
-        mode: Option<SessionMode>,
+        mode: Option<Mode>,
     ) -> Result<()> {
         // Fast path: avoid DB reload if the session is already running.
         // The atomic check in start_agent_loop prevents TOCTOU.
@@ -577,8 +574,8 @@ impl Runtime {
                     .iter()
                     .rev()
                     .find(|m| m.role == MessageRole::User)
-                    .and_then(|m| m.mode)
-                    .unwrap_or(SessionMode::Build)
+                    .and_then(|m| m.mode.as_deref()?.parse::<Mode>().ok())
+                    .unwrap_or(Mode::Build)
             }
         };
 
@@ -626,7 +623,7 @@ impl Runtime {
     ///
     /// Uses `session_start_lock` to prevent a TOCTOU race: only one task
     /// per session gets past the busy check and marks the session as busy.
-    async fn start_agent_loop(&self, session_id: Uuid, mode: SessionMode) -> Result<()> {
+    async fn start_agent_loop(&self, session_id: Uuid, mode: Mode) -> Result<()> {
         // ── Check-and-claim: atomic under session_start_lock ──────────
         {
             let _lock = self.session_start_lock.lock().unwrap();
@@ -707,7 +704,7 @@ impl Runtime {
         let loop_config = tidev_agent::AgentLoopConfig {
             session_id,
             system_prompt,
-            mode,
+            read_only: mode == Mode::Plan,
             thinking_level: active_model.thinking_level.clone(),
             event_tx: ctx.event_tx(),
             cancel: cancel.clone(),

@@ -205,8 +205,6 @@ pub fn execute_tool_call(
                 attachments: Vec::new(),
                 metadata,
                 instruction_sources: Vec::new(),
-                snapshot_hash: None,
-                patch_files: None,
             })
         }
         Some(other) => bail!("unsupported file tool '{}'", other),
@@ -278,8 +276,6 @@ fn file_change_output(
         attachments: Vec::new(),
         metadata,
         instruction_sources: Vec::new(),
-        snapshot_hash: None,
-        patch_files: None,
     }
 }
 

@@ -13,7 +13,7 @@ use ratatui::layout::{Constraint, Layout, Margin, Position, Rect};
 use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Cell, Clear, Paragraph, Row, Table, TableState};
-use tidev_llm::mode::SessionMode;
+use tidev_core::Mode as SessionMode;
 use uuid::Uuid;
 
 use crate::action::{Action, ChatAction, OverlayAction, OverlayKind};

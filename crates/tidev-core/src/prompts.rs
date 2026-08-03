@@ -1,5 +1,51 @@
 //! Prompt text helpers shared across the workspace.
 
+use crate::Mode;
+
+/// Mode reminder for a given session mode.
+pub fn mode_reminder(mode: Mode) -> String {
+    match mode {
+        Mode::Plan => plan_mode_reminder(),
+        Mode::Build => build_mode_reminder(),
+    }
+}
+
+fn plan_constraints() -> &'static str {
+    r#"You are FORBIDDEN from writing, editing, applying patches, or running any shell command that modifies files; only read-only commands such as grep, glob, read, ls, cat, and git log are allowed, and you must ensure these commands do not change any state. When delegating sub-agents, only explorer, librarian, and oracle are permitted — never fixer."#
+}
+
+fn build_constraints() -> &'static str {
+    r#"Implement changes with write, edit, or apply_patch. Preserve existing style, and verify with build or test before finishing."#
+}
+
+pub fn plan_mode_reminder() -> String {
+    format!(
+        "<system-reminder>\nYou are in Plan mode. READ-ONLY.\n\n{constraints}\n</system-reminder>",
+        constraints = plan_constraints(),
+    )
+}
+
+pub fn build_mode_reminder() -> String {
+    format!(
+        "<system-reminder>\nYou are in Build mode.\n\n{constraints}\n</system-reminder>",
+        constraints = build_constraints(),
+    )
+}
+
+pub fn plan_switch_reminder() -> String {
+    format!(
+        "<system-reminder>\nThe user switched to Plan mode since this message. READ-ONLY.\n\n{constraints}\n</system-reminder>",
+        constraints = plan_constraints(),
+    )
+}
+
+pub fn build_switch_reminder() -> String {
+    format!(
+        "<system-reminder>\nThe user switched to Build mode since this message.\n\n{constraints}\n</system-reminder>",
+        constraints = build_constraints(),
+    )
+}
+
 /// Generate the `/init` command text with `$ARGUMENTS` replaced by the
 /// given args, so the user can pre-fill the prompt before editing.
 pub fn init_command_with_args(args: &str) -> String {

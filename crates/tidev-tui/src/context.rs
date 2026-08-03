@@ -2,7 +2,7 @@
 
 use crate::theme::ThemePalette;
 use std::path::Path;
-use tidev_llm::mode::SessionMode;
+use tidev_core::Mode as SessionMode;
 use tidev_llm::reasoning::ThinkingLevelType;
 
 /// Immutable resources passed to every component during initialisation.

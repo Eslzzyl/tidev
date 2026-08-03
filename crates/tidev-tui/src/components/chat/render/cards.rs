@@ -165,7 +165,7 @@ fn render_assistant_body_lines(
         }
 
         // Mode
-        if let Some(mode) = message.mode {
+        if let Some(mode) = message.mode.as_deref().and_then(|value| value.parse::<tidev_core::Mode>().ok()) {
             parts.push(mode.title().to_string());
         }
 
@@ -196,9 +196,13 @@ fn render_user_shell_card(
         render_text_body_lines(ctx, &display_content, content_width.saturating_sub(2)); // 2 for ┃ prefix
     apply_badge_styling(&mut content_lines, palette);
 
-    let mode_color = message.mode.map_or(palette.accent, |m| match m {
-        tidev_llm::mode::SessionMode::Build => palette.mode_build,
-        tidev_llm::mode::SessionMode::Plan => palette.mode_plan,
+    let mode_color = message
+        .mode
+        .as_deref()
+        .and_then(|value| value.parse::<tidev_core::Mode>().ok())
+        .map_or(palette.accent, |m| match m {
+        tidev_core::Mode::Build => palette.mode_build,
+        tidev_core::Mode::Plan => palette.mode_plan,
     });
     let prefix_style = Style::default().fg(mode_color).add_modifier(Modifier::BOLD);
 
@@ -381,7 +385,7 @@ pub(super) fn render_system_card(
                         .to_string(),
                 );
             }
-            if let Some(mode) = message.mode {
+            if let Some(mode) = message.mode.as_deref().and_then(|value| value.parse::<tidev_core::Mode>().ok()) {
                 parts.push(mode.title().to_string());
             }
             if !parts.is_empty() {

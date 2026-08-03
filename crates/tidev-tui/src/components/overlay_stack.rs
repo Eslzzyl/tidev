@@ -117,7 +117,7 @@ mod tests {
     use tidev_config::AppConfig;
     use tidev_config::auth::{ActiveModel, AuthStore};
     use tidev_config::types::ApiType;
-    use tidev_llm::mode::SessionMode;
+    use tidev_core::Mode as SessionMode;
     use tidev_llm::reasoning::ThinkingLevelType;
     use uuid::Uuid;
 

@@ -15,7 +15,7 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use tidev_core::BackendEvent;
 use tidev_llm::message::{Message, MessageAttachment};
-use tidev_llm::mode::SessionMode;
+use tidev_core::Mode as SessionMode;
 use uuid::Uuid;
 
 use crate::action::{Action, ChatAction, OverlayAction, OverlayKind, SessionAction};
@@ -366,7 +366,7 @@ impl MessageList {
                 msg.completed_at = Some(completed);
             }
             if let Some(mode) = mode {
-                msg.mode = Some(mode);
+                msg.mode = Some(mode.as_str().to_string());
             }
             self.layout_index.mark_dirty(msg_id);
         }

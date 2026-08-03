@@ -77,7 +77,10 @@ impl App {
                                 message_id: m.id,
                                 content: strip_system_reminder_tags(&m.content),
                                 created_at: m.created_at,
-                                mode: m.mode,
+                                mode: m
+                                    .mode
+                                    .as_deref()
+                                    .and_then(|value| value.parse::<tidev_core::Mode>().ok()),
                                 original_index: i,
                             })
                             .collect::<Vec<_>>()

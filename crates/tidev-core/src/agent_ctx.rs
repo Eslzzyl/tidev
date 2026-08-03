@@ -28,7 +28,6 @@ use crate::backend_event::{
     agent_event_channel, agent_event_to_backend_event, BackendEvent,
 };
 use tidev_llm::message::{AssistantTurn, Message, MessageRole, ToolCall, ToolExecutionResult};
-use tidev_llm::mode::SessionMode;
 use tidev_llm::reasoning::ThinkingLevelType;
 use tidev_tools::types::ToolDefinition;
 use tidev_tools::ShellOutput;
@@ -40,6 +39,7 @@ use tidev_llm::{LlmClient, LlmProviderConfig};
 use tidev_snapshot::SnapshotService;
 
 use crate::context::ContextManager;
+use crate::mode::Mode;
 use crate::context::to_llm_tool_def;
 use crate::message_buf::MessageBuffer;
 use crate::registry::ToolRegistry;
@@ -194,7 +194,7 @@ pub struct CoreContext {
     /// This loop's session ID.
     session_id: Uuid,
     /// Current session mode.
-    mode: SessionMode,
+    mode: Mode,
     /// Pre-composed system prompt (session-scoped, immutable after creation).
     system_prompt: String,
     /// Resolved model config for the LLM call.
@@ -240,7 +240,7 @@ impl CoreContext {
         event_tx: UnboundedSender<BackendEvent>,
         request_tx: UnboundedSender<TuiRequest>,
         session_id: Uuid,
-        mode: SessionMode,
+        mode: Mode,
         system_prompt: String,
         model_config: LlmProviderConfig,
         cancel: CancellationToken,
@@ -426,6 +426,55 @@ impl CoreContext {
 
         Ok(updated)
     }
+
+    /// Inject the mode reminder into the last user message when the mode
+    /// changes, preserving the existing message prefix and persistence order.
+    async fn inject_mode_reminder_impl(
+        &self,
+        session_id: Uuid,
+        messages: &mut [Message],
+    ) -> Result<()> {
+        let last_user_idx = match messages.iter().rposition(|m| m.role == MessageRole::User) {
+            Some(idx) => idx,
+            None => return Ok(()),
+        };
+
+        let prev_mode = messages[..last_user_idx]
+            .iter()
+            .rev()
+            .find(|m| m.role == MessageRole::User && m.mode.is_some())
+            .and_then(|m| m.mode.as_deref()?.parse::<Mode>().ok());
+        let is_first_user = prev_mode.is_none();
+        let reminder = match (is_first_user, prev_mode) {
+            (true, _) => Some(crate::prompts::mode_reminder(self.mode)),
+            (false, Some(previous)) if previous != self.mode => Some(match self.mode {
+                Mode::Plan => crate::prompts::plan_switch_reminder(),
+                Mode::Build => crate::prompts::build_switch_reminder(),
+            }),
+            _ => None,
+        };
+
+        let Some(text) = reminder else {
+            return Ok(());
+        };
+        if messages[last_user_idx].content.starts_with(&text) {
+            return Ok(());
+        }
+
+        let new_content = format!("{text}\n\n{}", messages[last_user_idx].content);
+        let message_id = messages[last_user_idx].id;
+        messages[last_user_idx].content = new_content.clone();
+        self.update_message_content(session_id, message_id, new_content)
+            .await?;
+
+        log::info!(
+            "injected mode reminder into user message {} (mode={:?}, is_first={})",
+            message_id,
+            self.mode,
+            is_first_user,
+        );
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -584,8 +633,9 @@ impl AgentContext for CoreContext {
     async fn request_tool_approval(
         &self,
         tool_calls: &[ToolCall],
-        mode: SessionMode,
+        read_only: bool,
     ) -> Result<Vec<ApprovedTool>> {
+        let mode = if read_only { Mode::Plan } else { Mode::Build };
         // Load sensitive-file patterns once (file read).
         let sensitive_patterns = load_sensitive_patterns(&self.workspace_root);
 
@@ -1151,7 +1201,7 @@ impl AgentContext for CoreContext {
         Ok(())
     }
 
-    async fn load_messages(&self, _session_id: Uuid) -> Result<Vec<Message>> {
+    async fn load_messages(&self, session_id: Uuid) -> Result<Vec<Message>> {
         // 1. Check if compaction is needed (brief lock).
         let (needs_compact, msgs_to_compact) = {
             let cm = self.context_manager.lock().await;
@@ -1228,7 +1278,15 @@ impl AgentContext for CoreContext {
         // 4. Return the prepared message view.
         let cm = self.context_manager.lock().await;
         let buf = self.buffer.read().await;
-        Ok(cm.build_request_messages(&buf))
+        let mut messages = cm.build_request_messages(&buf);
+        drop(buf);
+        drop(cm);
+
+        // Keep both injections in the same order as the original agent loop:
+        // instruction files first, then the mode reminder.
+        self.inject_instructions_impl(session_id, &mut messages).await?;
+        self.inject_mode_reminder_impl(session_id, &mut messages).await?;
+        Ok(messages)
     }
 
     // -----------------------------------------------------------------------
@@ -1396,7 +1454,7 @@ struct SubagentSpawner {
     workspace_root: PathBuf,
     config_dir: PathBuf,
     event_tx: UnboundedSender<BackendEvent>,
-    mode: SessionMode,
+    mode: Mode,
     system_prompt: String,
     snapshot: Option<SnapshotService>,
     config: Arc<StdRwLock<AppConfig>>,
@@ -1447,7 +1505,7 @@ async fn execute_task_tool(
     // Plan mode rejects delegation to fixer subagents (they perform writes).
     // Moved here from tidev-tools task.rs: the main loop intercepts all task
     // calls in execute_tools, so this check only takes effect in core.
-    if spawner.mode == SessionMode::Plan && agent_type == AgentType::Fixer {
+    if spawner.mode == Mode::Plan && agent_type == AgentType::Fixer {
         anyhow::bail!(
             "Task delegation to fixer subagent rejected: Plan mode is read-only and does not allow write operations. \
             You may delegate to read-only subagents (explorer, librarian, oracle) in plan mode. \
@@ -1572,7 +1630,7 @@ async fn execute_task_tool(
     let loop_config = AgentLoopConfig {
         session_id: child_session_id,
         system_prompt: agent_def.system_prompt.clone(),
-        mode: spawner.mode,
+        read_only: spawner.mode == Mode::Plan,
         thinking_level: child_thinking_level,
         event_tx: child_ctx.event_tx(),
         cancel: config.cancel_token.clone(),
@@ -1632,7 +1690,7 @@ fn build_agent_def(agent_type: AgentType, parent_prompt: &str) -> AgentDefinitio
 fn filter_subagent_tools(
     parent_tools: &[ToolDefinition],
     agent_type: AgentType,
-    mode: SessionMode,
+    mode: Mode,
 ) -> Result<Vec<ToolDefinition>> {
     let allowed = agent_type.default_tool_restrictions();
     let read_only = agent_type.is_read_only();
@@ -1644,7 +1702,7 @@ fn filter_subagent_tools(
             let canonical = tidev_utils::tool_name::canonical_tool_name(name).unwrap_or(name.as_str());
 
             // Plan mode or read-only agent: only read tools.
-            if mode == SessionMode::Plan || read_only {
+            if mode == Mode::Plan || read_only {
                 return is_read_tool(canonical);
             }
 
