@@ -29,6 +29,15 @@ impl ToolRegistry {
         self.tools.push(Arc::new(tool));
     }
 
+    /// Register an already shared tool implementation.
+    ///
+    /// This is used by tool providers such as MCP registries whose tool
+    /// instances are tied to provider state and therefore cannot be moved out
+    /// as concrete values.
+    pub fn register_shared(&mut self, tool: Arc<dyn Tool>) {
+        self.tools.push(tool);
+    }
+
     /// Return all protocol definitions in registration order.
     pub fn definitions(&self) -> Vec<ToolDefinition> {
         self.tools.iter().map(|tool| tool.definition()).collect()

@@ -294,6 +294,26 @@ impl McpRegistry {
             .collect()
     }
 
+    /// Return connected MCP tools as generic agent tool implementations.
+    ///
+    /// Hosts can register these values in [`crate::ToolRegistry`] to expose
+    /// MCP and built-in tools through one runtime dispatch path.
+    pub fn tool_implementations(&self) -> Vec<Arc<dyn Tool>> {
+        let inner = self.inner.lock().unwrap();
+        inner
+            .servers
+            .values()
+            .filter(|state| matches!(state.status, McpConnectionStatus::Connected))
+            .flat_map(|state| {
+                state
+                    .tools
+                    .iter()
+                    .cloned()
+                    .map(|tool| tool as Arc<dyn Tool>)
+            })
+            .collect()
+    }
+
     pub fn all_definitions(&self) -> Vec<ToolDefinition> {
         self.all_tools()
             .into_iter()
@@ -718,6 +738,7 @@ mod tests {
         let registry = McpRegistry::new(BTreeMap::new());
         assert!(registry.summaries().is_empty());
         assert!(registry.all_definitions().is_empty());
+        assert!(registry.tool_implementations().is_empty());
         assert!(registry.definition_for("missing").is_none());
     }
 
