@@ -275,6 +275,10 @@ pub struct CoreContext {
     instruction_content_cache: Arc<Mutex<HashMap<String, String>>>,
     /// Config directory path (for instruction file lookup).
     config_dir: PathBuf,
+    /// Instruction sources discovered during tool execution. They are
+    /// persisted immediately, while the replay notification is appended after
+    /// the corresponding tool results to preserve message order.
+    pending_instruction_sources: Arc<Mutex<Vec<String>>>,
 }
 
 impl CoreContext {
@@ -325,6 +329,7 @@ impl CoreContext {
             auth,
             instruction_content_cache: Arc::new(Mutex::new(HashMap::new())),
             config_dir,
+            pending_instruction_sources: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -528,6 +533,104 @@ impl CoreContext {
             self.mode,
             is_first_user,
         );
+        Ok(())
+    }
+
+    /// Update the content of an existing message in both the buffer and store.
+    async fn update_message_content(
+        &self,
+        session_id: Uuid,
+        message_id: Uuid,
+        content: String,
+    ) -> Result<()> {
+        {
+            let mut buf = self.buffer.write().await;
+            buf.update_content(message_id, content.clone());
+        }
+        self.session_manager
+            .update_message_content(session_id, message_id, &content)?;
+        Ok(())
+    }
+
+    /// Move instruction sources collected by tools into persistent session
+    /// state while deferring their replay notice until tool results are saved.
+    async fn collect_instruction_sources(&self, session_id: Uuid) -> Result<()> {
+        let sources = self.tool_registry.take_instruction_sources(session_id);
+        if sources.is_empty() {
+            return Ok(());
+        }
+
+        self.emit(BackendEvent::InstructionsLoaded {
+            session_id,
+            sources: sources.clone(),
+        });
+
+        let already_injected = self
+            .session_manager
+            .store()
+            .load_instruction_sources(session_id)?;
+        self.session_manager
+            .store()
+            .append_instruction_sources(session_id, &sources)?;
+
+        let mut unique = sources;
+        unique.sort();
+        unique.dedup();
+        let new_sources: Vec<String> = unique
+            .into_iter()
+            .filter(|source| !already_injected.contains(source))
+            .collect();
+        if !new_sources.is_empty() {
+            self.pending_instruction_sources
+                .lock()
+                .await
+                .extend(new_sources);
+        }
+        Ok(())
+    }
+
+    async fn finish_tool_execution(
+        &self,
+        session_id: Uuid,
+        results: Vec<ExecutedTool>,
+    ) -> Result<Vec<ExecutedTool>> {
+        self.collect_instruction_sources(session_id).await?;
+        Ok(results)
+    }
+
+    /// Append the replay notice after the tool result messages have been
+    /// persisted. This matches the previous loop-level ordering.
+    async fn append_pending_instruction_message(&self, session_id: Uuid) -> Result<()> {
+        let sources = {
+            let mut pending = self.pending_instruction_sources.lock().await;
+            std::mem::take(&mut *pending)
+        };
+        if sources.is_empty() {
+            return Ok(());
+        }
+
+        let display: Vec<String> = sources
+            .iter()
+            .map(|source| {
+                std::path::Path::new(source)
+                    .strip_prefix(&self.workspace_root)
+                    .unwrap_or(std::path::Path::new(source))
+                    .display()
+                    .to_string()
+            })
+            .collect();
+        let content = if display.len() == 1 {
+            format!("Loaded instructions from {}", display[0])
+        } else {
+            format!(
+                "Loaded {} instruction files: {}",
+                display.len(),
+                display.join(", ")
+            )
+        };
+        let message = Message::new(MessageRole::System, &content);
+        self.buffer.write().await.append(message.clone());
+        self.session_manager.append_message(session_id, &message)?;
         Ok(())
     }
 }
@@ -861,7 +964,7 @@ impl AgentContext for CoreContext {
                         child_session_id: None,
                     });
                 }
-                return Ok(results);
+                return self.finish_tool_execution(session_id, results).await;
             }
 
             let mut pending_tcs: Vec<ToolCall> =
@@ -918,7 +1021,7 @@ impl AgentContext for CoreContext {
                                 child_session_id: None,
                             });
                         }
-                        return Ok(results);
+                        return self.finish_tool_execution(session_id, results).await;
                     }
                     result = join_set.join_next() => {
                         match result {
@@ -1111,7 +1214,7 @@ impl AgentContext for CoreContext {
                             });
                         }
                         cancel_guard.disarmed = true;
-                        return Ok(results);
+                        return self.finish_tool_execution(session_id, results).await;
                     }
                     result = join_set.join_next() => {
                         match result {
@@ -1163,7 +1266,7 @@ impl AgentContext for CoreContext {
                                         });
                                     }
                                     cancel_guard.disarmed = true;
-                                    return Ok(results);
+                                    return self.finish_tool_execution(session_id, results).await;
                                 } else {
                                     cancel_guard.disarmed = true;
                                     return Err(e);
@@ -1183,7 +1286,7 @@ impl AgentContext for CoreContext {
             cancel_guard.disarmed = true;
         }
 
-        Ok(results)
+        self.finish_tool_execution(session_id, results).await
     }
 
     // -----------------------------------------------------------------------
@@ -1305,6 +1408,9 @@ impl AgentContext for CoreContext {
         }
         self.session_manager
             .append_messages_with_app_data(session_id, &enriched, &app_data)?;
+        if has_tool_results {
+            self.append_pending_instruction_message(session_id).await?;
+        }
         Ok(())
     }
 
@@ -1396,54 +1502,6 @@ impl AgentContext for CoreContext {
         Ok(messages)
     }
 
-    // -----------------------------------------------------------------------
-    async fn update_message_content(
-        &self,
-        session_id: uuid::Uuid,
-        message_id: uuid::Uuid,
-        content: String,
-    ) -> Result<()> {
-        // Update in-memory buffer.
-        {
-            let mut buf = self.buffer.write().await;
-            buf.update_content(message_id, content.clone());
-        }
-        // Persist to store.
-        self.session_manager
-            .update_message_content(session_id, message_id, &content)?;
-        Ok(())
-    }
-
-    // -----------------------------------------------------------------------
-    async fn inject_instructions(
-        &self,
-        session_id: uuid::Uuid,
-        messages: &mut [Message],
-    ) -> Result<Vec<String>> {
-        self.inject_instructions_impl(session_id, messages).await
-    }
-
-    // -----------------------------------------------------------------------
-    async fn append_instruction_sources(
-        &self,
-        session_id: uuid::Uuid,
-        sources: &[String],
-    ) -> Result<()> {
-        self.session_manager
-            .store()
-            .append_instruction_sources(session_id, sources)
-    }
-
-    fn take_instruction_sources(&self, session_id: Uuid) -> Vec<String> {
-        let sources = self.tool_registry.take_instruction_sources(session_id);
-        if !sources.is_empty() {
-            self.emit(BackendEvent::InstructionsLoaded {
-                session_id,
-                sources: sources.clone(),
-            });
-        }
-        sources
-    }
 }
 
 // ---------------------------------------------------------------------------

@@ -22,7 +22,7 @@ use crate::event::AgentEvent;
 /// # Flow
 ///
 /// ```text
-///  load messages → inject instructions → inject mode reminder → notify turn starting
+///  load prepared messages → notify turn starting
 ///       → compose system prompt → stream LLM turn
 ///       ↑                                                            │
 ///       │                                                  tool calls? ──no──→ persist → exit
@@ -41,15 +41,11 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
         }
 
         // ─── 1. Load messages ────────────────────────────────────────────
-        let mut messages = ctx.load_messages(session_id).await?;
-        // CoreContext performs injection while loading; retain the returned
-        // source list for the tool-result replay notification below.
-        let already_injected = ctx.inject_instructions(session_id, &mut messages).await?;
+        let messages = ctx.load_messages(session_id).await?;
 
         // ─── 2. Notify frontend that a new turn is starting ───────────────
-        // Placed after instruction/mode injection so the TUI creates the
-        // streaming assistant message AFTER any system notification messages
-        // emitted by inject_instructions, keeping the correct visual order.
+        // CoreContext has already performed injection while loading, so the
+        // streaming assistant message is created after any system notices.
         let _ = event_tx.send(AgentEvent::TurnStarting {
             request_id,
         });
@@ -210,54 +206,6 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
             ctx.save_messages(session_id, &result_msgs, &child_session_ids)
                 .await?;
 
-            // Persist nearby instruction sources discovered during tool
-            // execution so the TUI can restore dedup tracking across
-            // session switches without writing to the DB itself.
-            let instruction_sources = ctx.take_instruction_sources(session_id);
-            if !instruction_sources.is_empty() {
-                ctx.append_instruction_sources(session_id, &instruction_sources)
-                    .await?;
-            }
-
-            // Also persist a "Loaded instructions from" System message for
-            // correct cross-session replay in the conversation history.
-            // Only create it for sources NOT already known before this turn
-            // (already_injected — captured from step 2's DB snapshot).
-            let system_sources = instruction_sources;
-            if !system_sources.is_empty() {
-                let mut unique = system_sources;
-                unique.sort();
-                unique.dedup();
-
-                let new_sources: Vec<String> = unique
-                    .into_iter()
-                    .filter(|s| !already_injected.contains(s))
-                    .collect();
-                if !new_sources.is_empty() {
-                    let ws_root = ctx.workspace_root();
-                    let display: Vec<String> = new_sources
-                        .iter()
-                        .map(|s| {
-                            Path::new(s)
-                                .strip_prefix(ws_root)
-                                .unwrap_or(Path::new(s))
-                                .display()
-                                .to_string()
-                        })
-                        .collect();
-                    let content = if display.len() == 1 {
-                        format!("Loaded instructions from {}", display[0])
-                    } else {
-                        format!(
-                            "Loaded {} instruction files: {}",
-                            display.len(),
-                            display.join(", ")
-                        )
-                    };
-                    ctx.save_messages(session_id, &[Message::new(MessageRole::System, &content)], &[])
-                        .await?;
-                }
-            }
         }
 
         // ─── 12. Prepare for next turn ────────────────────────────────────
@@ -303,4 +251,3 @@ fn build_assistant_message(turn: &AssistantTurn) -> Message {
     msg.reasoning_completed_at = turn.reasoning_completed_at;
     msg
 }
-use std::path::Path;

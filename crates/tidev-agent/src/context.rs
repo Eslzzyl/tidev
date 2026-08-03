@@ -193,48 +193,4 @@ pub trait AgentContext: Send + Sync {
     /// Load all messages for the current session.
     async fn load_messages(&self, session_id: uuid::Uuid) -> Result<Vec<Message>>;
 
-    /// Update the content of an existing message in-place (both buffer and store).
-    async fn update_message_content(
-        &self,
-        session_id: uuid::Uuid,
-        message_id: uuid::Uuid,
-        content: String,
-    ) -> Result<()>;
-
-    /// Inject new instruction files into the last user message via
-    /// `<system-reminder>` tags.
-    ///
-    /// Called once per agent-loop turn, before `stream_turn`.  Returns the
-    /// full list of instruction sources known after injection (including
-    /// both previously-known and newly-injected sources), so callers can
-    /// reuse it for downstream dedup without an extra DB query.
-    ///
-    /// The default implementation is a no-op — only `CoreContext` provides
-    /// a real implementation.
-    async fn inject_instructions(
-        &self,
-        _session_id: uuid::Uuid,
-        _messages: &mut [Message],
-    ) -> Result<Vec<String>> {
-        // default: no-op
-        Ok(Vec::new())
-    }
-
-    /// Persist instruction sources discovered during tool execution, so the
-    /// TUI can restore its dedup tracking across session switches.
-    ///
-    /// Uses INSERT OR IGNORE — duplicate entries are silently skipped.
-    /// The default implementation is a no-op.
-    async fn append_instruction_sources(
-        &self,
-        _session_id: uuid::Uuid,
-        _sources: &[String],
-    ) -> Result<()> {
-        Ok(())
-    }
-
-    /// Take instruction sources collected by tool execution for a session.
-    fn take_instruction_sources(&self, _session_id: uuid::Uuid) -> Vec<String> {
-        Vec::new()
-    }
 }
