@@ -10,9 +10,7 @@
 use anyhow::Result;
 use chrono::Utc;
 
-use tidev_llm::message::{
-    AssistantTurn, Message, MessageRole, ToolCall,
-};
+use tidev_llm::message::{AssistantTurn, Message, MessageRole};
 
 use crate::context::{AgentContext, AgentLoopConfig};
 use crate::event::AgentEvent;
@@ -132,55 +130,12 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
         let assistant_msg = build_assistant_message(&turn);
         ctx.save_messages(session_id, &[assistant_msg], &[]).await?;
 
-        // ─── 9. Permission approval ──────────────────────────────────────
-        let approved = ctx
-            .request_tool_approval(&turn.tool_calls, config.read_only)
+        // ─── 9. Approve and execute tools ─────────────────────────────────
+        // Approval is host policy. The generic loop receives one ordered
+        // result stream so rejected results remain before executed results.
+        let all_results = ctx
+            .execute_tools(&turn.tool_calls, session_id, request_id)
             .await?;
-
-        let mut task_calls: Vec<(ToolCall, Option<uuid::Uuid>)> = Vec::new();
-        let mut other_calls: Vec<(ToolCall, bool, bool)> = Vec::new();
-        let mut rejected_msgs: Vec<Message> = Vec::new();
-
-        for approved_tool in &approved {
-            if let Some(rejection) = &approved_tool.rejection {
-                // Rejected tool: persist rejection as tool result
-                let result_msg = Message::tool_result(
-                    &approved_tool.tool_call.id,
-                    &approved_tool.tool_call.name,
-                    rejection.clone(),
-                );
-                rejected_msgs.push(result_msg);
-                let _ = event_tx.send(AgentEvent::ToolCompleted {
-                    request_id,
-                    tool_call: approved_tool.tool_call.clone(),
-                    result: Box::new(rejection.clone()),
-                    child_session_id: None,
-                });
-            } else if approved_tool.tool_call.name == "task" {
-                task_calls.push((
-                    approved_tool.tool_call.clone(),
-                    approved_tool.child_session_id,
-                ));
-            } else {
-                other_calls.push((
-                    approved_tool.tool_call.clone(),
-                    approved_tool.allow_outside,
-                    approved_tool.sensitive_file_approved,
-                ));
-            }
-        }
-
-        if !rejected_msgs.is_empty() {
-            ctx.save_messages(session_id, &rejected_msgs, &[]).await?;
-        }
-
-        // ─── 10. Execute tools ───────────────────────────────────────────
-        let mut all_results = Vec::new();
-
-        if !other_calls.is_empty() || !task_calls.is_empty() {
-            let results = ctx.execute_tools(&approved, session_id, request_id).await?;
-            all_results = results;
-        }
 
         // ─── 11. Persist tool results ─────────────────────────────────────
         if !all_results.is_empty() {
@@ -205,7 +160,6 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
                 .collect();
             ctx.save_messages(session_id, &result_msgs, &child_session_ids)
                 .await?;
-
         }
 
         // ─── 12. Prepare for next turn ────────────────────────────────────

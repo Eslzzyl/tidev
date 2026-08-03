@@ -39,10 +39,11 @@ use crate::mode::Mode;
 use tidev_llm::reasoning::ThinkingLevelType;
 use tidev_tools::types::TodoItem;
 
-use tidev_agent::{AgentContext, TuiRequest};
+use tidev_agent::AgentContext;
 
 use crate::context::ContextManager;
 use crate::backend_event::BackendEvent;
+use crate::approval::TuiRequest;
 use crate::mcp::McpManager;
 use crate::message_buf::MessageBuffer;
 use crate::registry::ToolRegistry;
@@ -735,7 +736,6 @@ impl Runtime {
         let loop_config = tidev_agent::AgentLoopConfig {
             session_id,
             system_prompt,
-            read_only: mode == Mode::Plan,
             thinking_level: active_model.thinking_level.clone(),
             event_tx: ctx.event_tx(),
             cancel: cancel.clone(),

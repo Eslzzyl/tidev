@@ -18,8 +18,7 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use tidev_agent::{
-    llm_event_to_agent_event, AgentContext, AgentEvent, AgentLoopConfig, ApprovedTool,
-    ExecutedTool, ToolCallWithViolations, TuiRequest, TuiRequestKind, TuiResponse,
+    llm_event_to_agent_event, AgentContext, AgentEvent, AgentLoopConfig, ExecutedTool,
 };
 use tidev_config::auth::ActiveModel;
 use tidev_config::{AppConfig, AuthStore};
@@ -42,6 +41,7 @@ use tidev_storage::MessageAppData;
 use crate::context::ContextManager;
 use crate::mode::Mode;
 use crate::context::to_llm_tool_def;
+use crate::approval::{ApprovedTool, ToolCallWithViolations, TuiRequest, TuiRequestKind, TuiResponse};
 use crate::message_buf::MessageBuffer;
 use crate::registry::ToolRegistry;
 use crate::session::SessionManager;
@@ -633,6 +633,105 @@ impl CoreContext {
         self.session_manager.append_message(session_id, &message)?;
         Ok(())
     }
+
+    async fn request_tool_approval(
+        &self,
+        tool_calls: &[ToolCall],
+        read_only: bool,
+    ) -> Result<Vec<ApprovedTool>> {
+        let mode = if read_only { Mode::Plan } else { Mode::Build };
+        let sensitive_patterns = load_sensitive_patterns(&self.workspace_root);
+        let access_control = {
+            let cfg = self.config.read().unwrap();
+            cfg.access_control.clone()
+        };
+
+        let mut approved = Vec::with_capacity(tool_calls.len());
+        let mut pending = Vec::new();
+        for tc in tool_calls {
+            if !self.tool_registry.can_execute(&tc.name, mode) {
+                approved.push(ApprovedTool {
+                    tool_call: tc.clone(),
+                    rejection: Some(ToolExecutionResult::new(format!(
+                        "Tool '{}' is disabled in {} mode.",
+                        tc.name,
+                        mode.as_str(),
+                    ))),
+                    child_session_id: None,
+                    allow_outside: false,
+                    sensitive_file_approved: false,
+                    user_reason: None,
+                });
+                continue;
+            }
+
+            let arguments: Value = serde_json::from_str(&tc.arguments).unwrap_or(Value::Null);
+            let boundary_violation = if access_control.allow_outside_workspace_access {
+                None
+            } else {
+                extract_boundary_violation_path(&self.workspace_root, &tc.name, &arguments)
+            };
+            let sensitive_violation = if access_control.allow_sensitive_file_access {
+                None
+            } else {
+                extract_sensitive_file_path(
+                    &self.workspace_root,
+                    &tc.name,
+                    &arguments,
+                    &sensitive_patterns,
+                )
+            };
+
+            if tidev_utils::tool_name::canonical_tool_name(&tc.name) == Some("question") {
+                pending.push(ToolCallWithViolations {
+                    tool_call: tc.clone(),
+                    workspace_boundary_violation: None,
+                    sensitive_file_violation: None,
+                });
+                continue;
+            }
+
+            if boundary_violation.is_none() && sensitive_violation.is_none() {
+                approved.push(ApprovedTool {
+                    tool_call: tc.clone(),
+                    rejection: None,
+                    child_session_id: None,
+                    allow_outside: access_control.allow_outside_workspace_access,
+                    sensitive_file_approved: access_control.allow_sensitive_file_access,
+                    user_reason: None,
+                });
+            } else {
+                pending.push(ToolCallWithViolations {
+                    tool_call: tc.clone(),
+                    workspace_boundary_violation: boundary_violation,
+                    sensitive_file_violation: sensitive_violation,
+                });
+            }
+        }
+
+        if pending.is_empty() {
+            return Ok(approved);
+        }
+
+        let (response_tx, mut response_rx) = tokio::sync::mpsc::unbounded_channel();
+        self.request_tx
+            .send(TuiRequest {
+                session_id: self.session_id,
+                kind: TuiRequestKind::ToolApproval(pending),
+                response_tx,
+            })
+            .map_err(|_| anyhow::anyhow!("UI request channel closed — UI may have exited"))?;
+
+        let user_approved = tokio::select! {
+            _ = self.cancel.cancelled() => Vec::new(),
+            result = response_rx.recv() => match result {
+                Some(TuiResponse::ToolApproval(tools)) => tools,
+                None => Vec::new(),
+            },
+        };
+        approved.extend(user_approved);
+        Ok(approved)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -788,139 +887,35 @@ impl AgentContext for CoreContext {
     }
 
     // -----------------------------------------------------------------------
-    async fn request_tool_approval(
-        &self,
-        tool_calls: &[ToolCall],
-        read_only: bool,
-    ) -> Result<Vec<ApprovedTool>> {
-        let mode = if read_only { Mode::Plan } else { Mode::Build };
-        // Load sensitive-file patterns once (file read).
-        let sensitive_patterns = load_sensitive_patterns(&self.workspace_root);
-
-        // Read access-control config — allows skipping boundary/sensitive dialogs.
-        let access_control = {
-            let cfg = self.config.read().unwrap();
-            cfg.access_control.clone()
-        };
-
-        let mut approved: Vec<ApprovedTool> = Vec::with_capacity(tool_calls.len());
-        let mut pending: Vec<ToolCallWithViolations> = Vec::new();
-
-        for tc in tool_calls {
-            // 1. Permission check: is this tool allowed in the current mode?
-            if !self.tool_registry.can_execute(&tc.name, mode) {
-                approved.push(ApprovedTool {
-                    tool_call: tc.clone(),
-                    rejection: Some(ToolExecutionResult::new(format!(
-                        "Tool '{}' is disabled in {} mode.",
-                        tc.name,
-                        mode.as_str(),
-                    ))),
-                    child_session_id: None,
-                    allow_outside: false,
-                    sensitive_file_approved: false,
-                    user_reason: None,
-                });
-                continue;
-            }
-
-            // 2. Check workspace boundary & sensitive file violations.
-            let arguments: Value = serde_json::from_str(&tc.arguments).unwrap_or(Value::Null);
-            let boundary_violation = if access_control.allow_outside_workspace_access {
-                None
-            } else {
-                extract_boundary_violation_path(&self.workspace_root, &tc.name, &arguments)
-            };
-            let sensitive_violation = if access_control.allow_sensitive_file_access {
-                None
-            } else {
-                extract_sensitive_file_path(
-                    &self.workspace_root,
-                    &tc.name,
-                    &arguments,
-                    &sensitive_patterns,
-                )
-            };
-
-            // The question tool must always be routed to the TUI for user
-            // interaction — it is never executed on the backend.
-            if tidev_utils::tool_name::canonical_tool_name(&tc.name) == Some("question") {
-                pending.push(ToolCallWithViolations {
-                    tool_call: tc.clone(),
-                    workspace_boundary_violation: None,
-                    sensitive_file_violation: None,
-                });
-                continue;
-            }
-
-            // 3. If no violations → auto-approve (fast path).
-            if boundary_violation.is_none() && sensitive_violation.is_none() {
-                approved.push(ApprovedTool {
-                    tool_call: tc.clone(),
-                    rejection: None,
-                    child_session_id: None,
-                    allow_outside: access_control.allow_outside_workspace_access,
-                    sensitive_file_approved: access_control.allow_sensitive_file_access,
-                    user_reason: None,
-                });
-                continue;
-            }
-
-            // 4. Has violations → needs user input.
-            pending.push(ToolCallWithViolations {
-                tool_call: tc.clone(),
-                workspace_boundary_violation: boundary_violation,
-                sensitive_file_violation: sensitive_violation,
-            });
-        }
-
-        // If nothing needs user input, return all auto-decided.
-        if pending.is_empty() {
-            return Ok(approved);
-        }
-
-        // ─── Send to frontends for user interaction ───────────────────
-        //
-        // The response channel is an mpsc sender so the same request can be
-        // broadcast to multiple frontends; the first response wins, and the
-        // request is rejected when every frontend drops its sender without
-        // answering.
-        let (response_tx, mut response_rx) = tokio::sync::mpsc::unbounded_channel();
-
-        self.request_tx
-            .send(TuiRequest {
-                session_id: self.session_id,
-                kind: TuiRequestKind::ToolApproval(pending),
-                response_tx,
-            })
-            .map_err(|_| anyhow::anyhow!("UI request channel closed — UI may have exited"))?;
-
-        let user_approved = tokio::select! {
-            _ = self.cancel.cancelled() => {
-                // Cancelled — reject all pending tools.
-                Vec::new()
-            }
-            result = response_rx.recv() => {
-                match result {
-                    Some(TuiResponse::ToolApproval(tools)) => tools,
-                    // All response channels closed → reject all pending tools.
-                    None => Vec::new(),
-                }
-            }
-        };
-
-        approved.extend(user_approved);
-        Ok(approved)
-    }
-
-    // -----------------------------------------------------------------------
     async fn execute_tools(
         &self,
-        approved_tools: &[ApprovedTool],
+        tool_calls: &[ToolCall],
         session_id: Uuid,
         request_id: u64,
     ) -> Result<Vec<ExecutedTool>> {
-        // Separate: rejected (already persisted by the loop), task, read-only, write.
+        let approved_tools = self
+            .request_tool_approval(tool_calls, self.mode == Mode::Plan)
+            .await?;
+
+        let mut results: Vec<ExecutedTool> = Vec::new();
+        for approved in &approved_tools {
+            if let Some(rejection) = &approved.rejection {
+                self.emit(BackendEvent::ToolCompleted {
+                    session_id,
+                    request_id,
+                    tool_call: approved.tool_call.clone(),
+                    result: Box::new(rejection.clone()),
+                    child_session_id: None,
+                });
+                results.push(ExecutedTool {
+                    tool_call: approved.tool_call.clone(),
+                    result: rejection.clone(),
+                    child_session_id: None,
+                });
+            }
+        }
+
+        // Separate approved calls into task, read-only, and write groups.
         let mut task_calls: Vec<(ToolCall, Option<Uuid>)> = Vec::new();
         let mut read_only: Vec<(ToolCall, bool, bool)> = Vec::new();
         let mut write: Vec<(ToolCall, bool, bool)> = Vec::new();
@@ -940,8 +935,6 @@ impl AgentContext for CoreContext {
                 write.push((tc, approved.allow_outside, approved.sensitive_file_approved));
             }
         }
-
-        let mut results: Vec<ExecutedTool> = Vec::new();
 
         // --- Read-only tools: parallel execution with immediate cancellation ---
         //
@@ -1824,7 +1817,6 @@ async fn execute_task_tool(
     let loop_config = AgentLoopConfig {
         session_id: child_session_id,
         system_prompt: agent_def.system_prompt.clone(),
-        read_only: spawner.mode == Mode::Plan,
         thinking_level: child_thinking_level,
         event_tx: child_ctx.event_tx(),
         cancel: config.cancel_token.clone(),

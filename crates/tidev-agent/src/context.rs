@@ -4,12 +4,11 @@
 //! tidev-agent defines the loop skeleton; tidev-core implements [`AgentContext`].
 
 use std::collections::VecDeque;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_util::sync::CancellationToken;
 
@@ -31,8 +30,6 @@ pub struct AgentLoopConfig {
     pub session_id: uuid::Uuid,
     /// The system prompt for this agent loop run.
     pub system_prompt: String,
-    /// Whether this run is read-only.
-    pub read_only: bool,
     /// Thinking / reasoning level.
     pub thinking_level: ThinkingLevelType,
     /// Channel for sending real-time events to the frontend.
@@ -47,32 +44,6 @@ pub struct AgentLoopConfig {
     pub queued_messages: Arc<Mutex<VecDeque<QueuedUserMessage>>>,
 }
 
-// ---------------------------------------------------------------------------
-// ApprovedTool, TuiRequest & TuiResponse
-// ---------------------------------------------------------------------------
-
-/// A tool call with an optional rejection reason.
-///
-/// Sent by the frontend through the permission channel to tell the agent loop
-/// which tools are approved and which are rejected.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ApprovedTool {
-    pub tool_call: ToolCall,
-    /// If `Some`, the tool is rejected; this [`ToolExecutionResult`] will be
-    /// persisted as the tool's output. If `None`, the tool is approved.
-    pub rejection: Option<ToolExecutionResult>,
-    /// Pre-generated child session ID for subagent (task) tools.
-    pub child_session_id: Option<uuid::Uuid>,
-    /// Whether this tool call is allowed to access paths outside the workspace.
-    pub allow_outside: bool,
-    /// Whether this tool call is allowed to read sensitive files.
-    pub sensitive_file_approved: bool,
-    /// An optional user-supplied reason attached during permission approval.
-    /// When set, the reason is incorporated into the rejection output or
-    /// passed along as context for why the tool was approved/rejected.
-    pub user_reason: Option<String>,
-}
-
 /// A completed tool execution and its application-owned session association.
 ///
 /// The child session ID is intentionally carried outside the protocol result
@@ -82,45 +53,6 @@ pub struct ExecutedTool {
     pub tool_call: ToolCall,
     pub result: ToolExecutionResult,
     pub child_session_id: Option<uuid::Uuid>,
-}
-
-/// A tool call augmented with pre-computed violation info for the UI.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ToolCallWithViolations {
-    pub tool_call: ToolCall,
-    /// If the tool targets a path outside the workspace, the resolved path.
-    pub workspace_boundary_violation: Option<PathBuf>,
-    /// If the tool targets a sensitive file, the resolved path.
-    pub sensitive_file_violation: Option<PathBuf>,
-}
-
-/// Request sent by the agent loop to the frontend, requiring user interaction.
-///
-/// The request is broadcast to every registered frontend (see
-/// `Runtime::request_rx`). Any frontend may respond by sending a
-/// [`TuiResponse`] through `response_tx`; the first response wins. If every
-/// frontend drops its `response_tx` without sending, the agent loop treats it
-/// as a rejection of all pending tools.
-#[derive(Clone, Debug)]
-pub struct TuiRequest {
-    /// The session that originated this request.
-    pub session_id: uuid::Uuid,
-    pub kind: TuiRequestKind,
-    pub response_tx: UnboundedSender<TuiResponse>,
-}
-
-/// Variants of [`TuiRequest`].
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum TuiRequestKind {
-    /// Ask the user to approve or reject tool calls.
-    ToolApproval(Vec<ToolCallWithViolations>),
-}
-
-/// Response sent by the frontend to the agent loop after user interaction.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum TuiResponse {
-    /// User decisions for a [`TuiRequestKind::ToolApproval`] request.
-    ToolApproval(Vec<ApprovedTool>),
 }
 
 // ---------------------------------------------------------------------------
@@ -156,25 +88,16 @@ pub trait AgentContext: Send + Sync {
         request_id: u64,
     ) -> Result<AssistantTurn>;
 
-    /// Request frontend approval for a batch of tool calls.
-    ///
-    /// Returns a list of [`ApprovedTool`]s where each entry either carries a
-    /// rejection reason or is approved for execution.
-    async fn request_tool_approval(
-        &self,
-        tool_calls: &[ToolCall],
-        read_only: bool,
-    ) -> Result<Vec<ApprovedTool>>;
-
-    /// Execute a batch of approved tool calls and return their results.
+    /// Execute a batch of tool calls and return their results.
     ///
     /// The implementation is responsible for:
+    /// - Applying any host-specific approval policy
     /// - Separating read-only vs write tools (parallel vs serial execution)
     /// - Handling `task` tools (subagent delegation)
     /// - Emitting [`AgentEvent::ToolCompleted`] events
     async fn execute_tools(
         &self,
-        approved_tools: &[ApprovedTool],
+        tool_calls: &[ToolCall],
         session_id: uuid::Uuid,
         request_id: u64,
     ) -> Result<Vec<ExecutedTool>>;
