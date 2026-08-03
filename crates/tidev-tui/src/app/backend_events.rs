@@ -1,7 +1,7 @@
 use super::*;
 
 use chrono::Utc;
-use tidev_llm::message::BackendEvent;
+use tidev_core::BackendEvent;
 use uuid::Uuid;
 
 use crate::utils::strip_system_reminder_tags;

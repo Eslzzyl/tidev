@@ -20,7 +20,7 @@ pub mod types;
 mod bundled_skills;
 
 // Re-export key public types.
-pub use builtin::ToolContext;
+pub use builtin::{ShellOutput, ToolContext};
 pub use builtin::definitions as tool_definitions;
 pub use builtin::execute_tool_call;
 pub use builtin::kill_all_children;

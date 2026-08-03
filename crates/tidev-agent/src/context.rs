@@ -14,11 +14,13 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio_util::sync::CancellationToken;
 
 use tidev_llm::message::{
-    AssistantTurn, BackendEvent, Message, QueuedUserMessage, ToolCall, ToolExecutionResult,
+    AssistantTurn, Message, QueuedUserMessage, ToolCall, ToolExecutionResult,
 };
 use tidev_llm::mode::SessionMode;
 use tidev_llm::reasoning::ThinkingLevelType;
 use tidev_llm::ToolDefinition;
+
+use crate::event::AgentEvent;
 
 // ---------------------------------------------------------------------------
 // AgentLoopConfig
@@ -35,7 +37,7 @@ pub struct AgentLoopConfig {
     /// Thinking / reasoning level.
     pub thinking_level: ThinkingLevelType,
     /// Channel for sending real-time events to the frontend.
-    pub event_tx: UnboundedSender<BackendEvent>,
+    pub event_tx: UnboundedSender<AgentEvent>,
     /// Cancellation token for cooperative termination.
     pub cancel: CancellationToken,
     /// Queue of user messages that arrived while the loop was busy.
@@ -125,11 +127,11 @@ pub trait AgentContext: Send + Sync {
     fn tools(&self) -> Vec<ToolDefinition>;
 
     /// Return the event channel for sending real-time events to the frontend.
-    fn event_tx(&self) -> UnboundedSender<BackendEvent>;
+    fn event_tx(&self) -> UnboundedSender<AgentEvent>;
 
     /// Stream a single LLM turn and return the completed [`AssistantTurn`].
     ///
-    /// The implementation should forward streaming [`BackendEvent`]s (deltas,
+    /// The implementation should forward streaming [`AgentEvent`]s (deltas,
     /// tool call updates, usage stats, etc.) through [`Self::event_tx`] in
     /// real time.
     ///
@@ -159,7 +161,7 @@ pub trait AgentContext: Send + Sync {
     /// The implementation is responsible for:
     /// - Separating read-only vs write tools (parallel vs serial execution)
     /// - Handling `task` tools (subagent delegation)
-    /// - Emitting [`BackendEvent::ToolCompleted`] events
+    /// - Emitting [`AgentEvent::ToolCompleted`] events
     async fn execute_tools(
         &self,
         approved_tools: &[ApprovedTool],

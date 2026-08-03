@@ -8,7 +8,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::builtin::utils::parse_arguments;
 use crate::types::{QuestionArgs, SkillArgs, ToolDefinition, ToolPermission};
-use tidev_llm::message::{BackendEvent, ToolCall, ToolExecutionResult};
+use tidev_llm::message::{ToolCall, ToolExecutionResult};
 use tidev_llm::mode::SessionMode;
 use tidev_utils::tool_name::canonical_tool_name;
 
@@ -23,13 +23,26 @@ pub struct ToolContext<'a> {
     pub skills: &'a SkillCatalog,
     pub todo: Arc<dyn TodoPersistence + Send + Sync>,
     pub session_id: uuid::Uuid,
+    pub request_id: u64,
     pub max_output_bytes: usize,
     pub mode: SessionMode,
     pub allow_outside: bool,
     pub sensitive_file_approved: bool,
     pub web_search_config: &'a tidev_config::WebSearchConfig,
     pub auth_store: &'a tidev_config::AuthStore,
-    pub event_tx: Option<UnboundedSender<BackendEvent>>,
+    pub event_tx: Option<UnboundedSender<ShellOutput>>,
+}
+
+/// Streaming output emitted by the shell tool before the host converts it to
+/// its product-facing event type.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ShellOutput {
+    pub session_id: uuid::Uuid,
+    pub request_id: u64,
+    pub tool_call_id: String,
+    pub content: String,
+    pub finished: bool,
+    pub exit_code: Option<i32>,
 }
 
 pub mod apply_patch;
@@ -124,7 +137,7 @@ fn panic_msg(panic: Box<dyn Any + Send>) -> String {
 
 /// Execute a tool call with streaming output support.
 ///
-/// Shell emits [`BackendEvent::ShellOutput`] events when `event_tx` is `Some`.
+/// Shell emits [`ShellOutput`] events when `event_tx` is `Some`.
 /// Other tools execute in [`tokio::task::spawn_blocking`] to avoid blocking the
 /// async runtime. The `cancel` token is used for cooperative cancellation of
 /// the shell tool.
@@ -196,6 +209,7 @@ pub async fn execute_tool_call(
             let mode = ctx.mode;
             let cancel = cancel.clone();
             let session_id = ctx.session_id;
+            let request_id = ctx.request_id;
             let event_tx = ctx.event_tx.clone();
             let tool_call_id = call.id.clone();
             match tokio::task::spawn(async move {
@@ -207,6 +221,7 @@ pub async fn execute_tool_call(
                     &cancel,
                     mode,
                     session_id,
+                    request_id,
                     event_tx,
                     &tool_call_id,
                 )

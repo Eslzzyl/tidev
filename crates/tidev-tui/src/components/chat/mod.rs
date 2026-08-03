@@ -13,7 +13,8 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use lru::LruCache;
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use tidev_llm::message::{BackendEvent, Message, MessageAttachment};
+use tidev_core::BackendEvent;
+use tidev_llm::message::{Message, MessageAttachment};
 use tidev_llm::mode::SessionMode;
 use uuid::Uuid;
 

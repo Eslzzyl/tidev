@@ -12,14 +12,14 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use tidev_llm::message::{BackendEvent, ToolCall, ToolExecutionResult};
+use tidev_llm::message::{ToolCall, ToolExecutionResult};
 use tidev_llm::mode::SessionMode;
 use tidev_tools::types::ToolDefinition;
 
 use tidev_config::auth::ActiveModel;
 use tidev_config::{AuthStore, WebSearchConfig};
 use tidev_tools::execute_tool_call;
-use tidev_tools::{SkillCatalog, TodoPersistence};
+use tidev_tools::{ShellOutput, SkillCatalog, TodoPersistence};
 
 use crate::mcp::{McpManager, McpServerSummary};
 
@@ -69,7 +69,7 @@ impl ToolRegistry {
     /// Shell commands honor the `cancel` token — when cancelled, the
     /// process group is killed and partial output is returned. Other tools ignore it.
     /// When `event_tx` is `Some`, shell output is streamed as
-    /// [`BackendEvent::ShellOutput`] events.
+    /// [`ShellOutput`] events.
     ///
     /// MCP-backed tools are dispatched directly to the [`McpManager`].
     #[allow(clippy::too_many_arguments)]
@@ -77,11 +77,12 @@ impl ToolRegistry {
         &self,
         call: &ToolCall,
         session_id: Uuid,
+        request_id: u64,
         mode: SessionMode,
         allow_outside: bool,
         sensitive_file_approved: bool,
         cancel: &CancellationToken,
-        event_tx: Option<UnboundedSender<BackendEvent>>,
+        event_tx: Option<UnboundedSender<ShellOutput>>,
     ) -> ToolExecutionResult {
         // MCP tool dispatch.
         if self.mcp.definition_for(&call.name).is_some() {
@@ -100,6 +101,7 @@ impl ToolRegistry {
             skills: &self.skills,
             todo: self.todo.clone(),
             session_id,
+            request_id,
             max_output_bytes: self.max_output_bytes,
             mode,
             allow_outside,

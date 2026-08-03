@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use agent_client_protocol::schema::v1 as acp;
-use tidev_llm::message::BackendEvent;
+use tidev_core::BackendEvent;
 use uuid::Uuid;
 
 /// Stateful translator that converts [`BackendEvent`]s into ACP

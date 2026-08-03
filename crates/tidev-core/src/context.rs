@@ -10,7 +10,8 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
-use tidev_llm::message::{BackendEvent, Message, MessageRole};
+use tidev_agent::{AgentEvent, llm_event_to_agent_event};
+use tidev_llm::message::{Message, MessageRole};
 
 use tidev_tools::types::ToolDefinition;
 use uuid::Uuid;
@@ -211,8 +212,8 @@ impl ContextManager {
         model: &LlmProviderConfig,
         tools: &[ToolDefinition],
         messages: &[Message],
-        session_id: Uuid,
-        event_tx: Option<tokio::sync::mpsc::UnboundedSender<BackendEvent>>,
+        _session_id: Uuid,
+        event_tx: Option<tokio::sync::mpsc::UnboundedSender<AgentEvent>>,
     ) -> Result<CompactionResult> {
         // 1. Build prefix (same logic as build_request_messages -> prefix cache hit).
         let mut compact_msgs = Vec::new();
@@ -236,11 +237,11 @@ impl ContextManager {
         // 5. Call the LLM (streaming or non-streaming).
         let summary = match &event_tx {
             Some(tx) => {
-                self.compact_streaming(llm, model, &llm_tools, compact_msgs, session_id, tx.clone())
+                self.compact_streaming(llm, model, &llm_tools, compact_msgs, tx.clone())
                     .await?
             }
             None => {
-                self.compact_non_streaming(llm, model, &llm_tools, compact_msgs, session_id, None)
+                self.compact_non_streaming(llm, model, &llm_tools, compact_msgs)
                     .await?
             }
         };
@@ -307,16 +308,12 @@ impl ContextManager {
         model: &LlmProviderConfig,
         tools: &[tidev_llm::ToolDefinition],
         messages: Vec<Message>,
-        session_id: Uuid,
-        event_tx: Option<tokio::sync::mpsc::UnboundedSender<BackendEvent>>,
     ) -> Result<String> {
         llm.complete_with_messages(
-            session_id,
-            0,
             model.clone(),
             messages,
             tools.to_vec(),
-            event_tx,
+            None,
         )
         .await
     }
@@ -327,11 +324,8 @@ impl ContextManager {
         model: &LlmProviderConfig,
         tools: &[tidev_llm::ToolDefinition],
         messages: Vec<Message>,
-        session_id: Uuid,
-        event_tx: tokio::sync::mpsc::UnboundedSender<BackendEvent>,
+        event_tx: tokio::sync::mpsc::UnboundedSender<AgentEvent>,
     ) -> Result<String> {
-        use tidev_llm::message::BackendEvent;
-
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let llm_clone = llm.clone();
         let model = model.clone();
@@ -340,8 +334,6 @@ impl ContextManager {
         let handle = tokio::spawn(async move {
             llm_clone
                 .stream_chat(
-                    session_id,
-                    0,
                     model,
                     messages,
                     tools,
@@ -353,22 +345,18 @@ impl ContextManager {
 
         let mut accumulated = String::new();
         while let Some(event) = rx.recv().await {
-            match event {
-                BackendEvent::Delta { content, .. } => {
+            match llm_event_to_agent_event(event, 0) {
+                AgentEvent::Delta { content, .. } => {
                     accumulated.push_str(&content);
                     // Forward delta to the UI so the user sees progress.
-                    let _ = event_tx.send(BackendEvent::Delta {
-                        session_id,
-                        request_id: 0,
-                        content: content.clone(),
-                    });
+                    let _ = event_tx.send(AgentEvent::Delta { request_id: 0, content });
                 }
-                BackendEvent::Finished { .. } => {
+                AgentEvent::Finished { .. } => {
                     // Intercepted — not forwarded to the UI because
                     // it would trigger `finish_assistant_turn` logic.
                     break;
                 }
-                BackendEvent::Failed { error, .. } => {
+                AgentEvent::Failed { error, .. } => {
                     return Err(anyhow::anyhow!("Compaction LLM call failed: {error}"));
                 }
                 _ => {}

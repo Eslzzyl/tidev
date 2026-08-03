@@ -13,10 +13,11 @@ use anyhow::Result;
 use chrono::Utc;
 
 use tidev_llm::message::{
-    AssistantTurn, BackendEvent, Message, MessageRole, ToolCall, ToolExecutionResult,
+    AssistantTurn, Message, MessageRole, ToolCall, ToolExecutionResult,
 };
 
 use crate::context::{AgentContext, AgentLoopConfig};
+use crate::event::AgentEvent;
 use crate::prompts;
 
 /// Run the full agent loop until the model produces a text-only response.
@@ -59,8 +60,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
         // Placed after instruction/mode injection so the TUI creates the
         // streaming assistant message AFTER any system notification messages
         // emitted by inject_instructions, keeping the correct visual order.
-        let _ = event_tx.send(BackendEvent::TurnStarting {
-            session_id,
+        let _ = event_tx.send(AgentEvent::TurnStarting {
             request_id,
         });
 
@@ -82,8 +82,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
                 // Cancellation is expected — exit cleanly.
                 // Already-streamed content was forwarded to the TUI via events;
                 // the TUI will mark the message as done and append a cancel note.
-                let _ = event_tx.send(BackendEvent::StreamEnd {
-                    session_id,
+                let _ = event_tx.send(AgentEvent::StreamEnd {
                     request_id,
                     reasoning_started_at: None,
                     reasoning_completed_at: None,
@@ -91,8 +90,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
                 return Ok(());
             }
             Err(e) => {
-                let _ = event_tx.send(BackendEvent::StreamEnd {
-                    session_id,
+                let _ = event_tx.send(AgentEvent::StreamEnd {
                     request_id,
                     reasoning_started_at: None,
                     reasoning_completed_at: None,
@@ -126,8 +124,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
 
             if has_queued {
                 // Finalise the current turn before starting a new one.
-                let _ = event_tx.send(BackendEvent::StreamEnd {
-                    session_id,
+                let _ = event_tx.send(AgentEvent::StreamEnd {
                     request_id,
                     reasoning_started_at: turn.reasoning_started_at,
                     reasoning_completed_at: turn.reasoning_completed_at,
@@ -137,8 +134,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
                 continue;
             }
 
-            let _ = event_tx.send(BackendEvent::StreamEnd {
-                session_id,
+            let _ = event_tx.send(AgentEvent::StreamEnd {
                 request_id,
                 reasoning_started_at: turn.reasoning_started_at,
                 reasoning_completed_at: turn.reasoning_completed_at,
@@ -168,8 +164,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
                     rejection.clone(),
                 );
                 rejected_msgs.push(result_msg);
-                let _ = event_tx.send(BackendEvent::ToolCompleted {
-                    session_id,
+                let _ = event_tx.send(AgentEvent::ToolCompleted {
                     request_id,
                     tool_call: approved_tool.tool_call.clone(),
                     result: Box::new(rejection.clone()),
@@ -263,8 +258,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
         }
 
         // ─── 12. Prepare for next turn ────────────────────────────────────
-        let _ = event_tx.send(BackendEvent::StreamEnd {
-            session_id,
+        let _ = event_tx.send(AgentEvent::StreamEnd {
             request_id,
             reasoning_started_at: turn.reasoning_started_at,
             reasoning_completed_at: turn.reasoning_completed_at,

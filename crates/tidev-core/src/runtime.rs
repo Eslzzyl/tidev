@@ -34,16 +34,15 @@ use tidev_config::auth::ActiveModel;
 use tidev_config::{AppConfig, AuthStore, paths::ConfigPaths};
 use tidev_search::FileSearchIndex;
 use tidev_storage::SessionStore;
-use tidev_llm::message::{
-    BackendEvent, Message, MessageAttachment, MessageRole, QueuedUserMessage,
-};
+use tidev_llm::message::{Message, MessageAttachment, MessageRole, QueuedUserMessage};
 use tidev_llm::mode::SessionMode;
 use tidev_llm::reasoning::ThinkingLevelType;
 use tidev_tools::types::TodoItem;
 
-use tidev_agent::TuiRequest;
+use tidev_agent::{AgentContext, TuiRequest};
 
 use crate::context::ContextManager;
+use crate::backend_event::BackendEvent;
 use crate::mcp::McpManager;
 use crate::message_buf::MessageBuffer;
 use crate::registry::ToolRegistry;
@@ -710,7 +709,7 @@ impl Runtime {
             system_prompt,
             mode,
             thinking_level: active_model.thinking_level.clone(),
-            event_tx: self.event_tx.clone(),
+            event_tx: ctx.event_tx(),
             cancel: cancel.clone(),
             queued_messages: per_session_queue.clone(),
         };
@@ -908,6 +907,10 @@ impl Runtime {
 
         // 2. Run compaction (async, no locks held on ContextManager).
         //    Capture prior compaction state before it gets overwritten.
+        let agent_event_tx = crate::backend_event::agent_event_channel(
+            session_id,
+            self.event_tx.clone(),
+        );
         let (result, prior_summary, prior_retained_from) = {
             let cm_lock = cm.lock().await;
             let prior_summary = cm_lock.summary.clone();
@@ -919,7 +922,7 @@ impl Runtime {
                     &tools,
                     &messages,
                     session_id,
-                    Some(self.event_tx.clone()),
+                    Some(agent_event_tx),
                 )
                 .await
                 .inspect_err(|e| {

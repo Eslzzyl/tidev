@@ -3,6 +3,7 @@
 pub mod agent_ctx;
 pub mod agent_type;
 pub mod attachment;
+pub mod backend_event;
 pub mod context;
 pub mod mcp;
 pub mod message_buf;
@@ -14,6 +15,7 @@ pub mod system_info;
 pub mod undo;
 
 pub use agent_ctx::CoreContext;
+pub use backend_event::{BackendEvent, agent_event_to_backend_event};
 pub use context::{CompactionResult, ContextManager};
 pub use message_buf::MessageBuffer;
 pub use registry::ToolRegistry;

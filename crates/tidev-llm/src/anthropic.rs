@@ -4,10 +4,10 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use tokio::sync::mpsc::UnboundedSender;
-use uuid::Uuid;
 
 use crate::{types::LlmProviderConfig, types::ToolDefinition};
-use crate::message::{BackendEvent, Message, MessageAttachment, MessageRole};
+use crate::event::LlmEvent;
+use crate::message::{Message, MessageAttachment, MessageRole};
 
 use log::{debug as log_debug, error as log_error};
 
@@ -24,12 +24,10 @@ use crate::turn::finalize_turn;
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn stream_anthropic(
     http: &Client,
-    session_id: Uuid,
-    request_id: u64,
     model: LlmProviderConfig,
     messages: Vec<Message>,
     tools: Vec<ToolDefinition>,
-    tx: UnboundedSender<BackendEvent>,
+    tx: UnboundedSender<LlmEvent>,
     save_request_body: bool,
     max_request_files: usize,
     save_response_body: bool,
@@ -144,17 +142,13 @@ pub(crate) async fn stream_anthropic(
                             let (visible, reasoning) = think_parser.push(&text);
                             if !visible.is_empty() {
                                 assistant_text.push_str(&visible);
-                                let _ = tx.send(BackendEvent::Delta {
-                                    session_id,
-                                    request_id,
+                                let _ = tx.send(LlmEvent::Delta {
                                     content: visible,
                                 });
                             }
                             if !reasoning.is_empty() {
                                 reasoning_text.push_str(&reasoning);
-                                let _ = tx.send(BackendEvent::ReasoningDelta {
-                                    session_id,
-                                    request_id,
+                                let _ = tx.send(LlmEvent::ReasoningDelta {
                                     content: reasoning,
                                 });
                             }
@@ -167,9 +161,7 @@ pub(crate) async fn stream_anthropic(
                             entry.arguments.push_str(&partial_json);
 
                             if !entry.id.is_empty() && !entry.name.is_empty() {
-                                let _ = tx.send(BackendEvent::ToolCallUpdated {
-                                    session_id,
-                                    request_id,
+                                let _ = tx.send(LlmEvent::ToolCallUpdated {
                                     tool_call: entry.clone().into_tool_call(index),
                                 });
                             }
@@ -180,9 +172,7 @@ pub(crate) async fn stream_anthropic(
                             }
                             if thinking_blocks.contains(&index) {
                                 reasoning_text.push_str(&thinking);
-                                let _ = tx.send(BackendEvent::ReasoningDelta {
-                                    session_id,
-                                    request_id,
+                                let _ = tx.send(LlmEvent::ReasoningDelta {
                                     content: thinking,
                                 });
                             }
@@ -215,9 +205,7 @@ pub(crate) async fn stream_anthropic(
                             entry.id = id;
                             entry.name = name;
 
-                            let _ = tx.send(BackendEvent::ToolCallUpdated {
-                                session_id,
-                                request_id,
+                            let _ = tx.send(LlmEvent::ToolCallUpdated {
                                 tool_call: entry.clone().into_tool_call(index),
                             });
                         }
@@ -228,8 +216,6 @@ pub(crate) async fn stream_anthropic(
                     },
                     AnthropicStreamEvent::MessageStop => {
                         save_raw_response_for_debugging(
-                            session_id,
-                            request_id,
                             &raw_payloads,
                             save_response_body,
                             max_response_files,
@@ -241,9 +227,7 @@ pub(crate) async fn stream_anthropic(
                             &tool_calls,
                             &mut think_parser,
                         );
-                        let _ = tx.send(BackendEvent::Finished {
-                            session_id,
-                            request_id,
+                        let _ = tx.send(LlmEvent::Finished {
                             turn: Box::new(turn),
                         });
                         return Ok(());
@@ -262,9 +246,7 @@ pub(crate) async fn stream_anthropic(
                             let total_tokens = total_input + usage.output_tokens;
                             let duration_ms =
                                 first_delta_time.map(|start| start.elapsed().as_millis() as u64);
-                            let _ = tx.send(BackendEvent::UsageStats {
-                                session_id,
-                                request_id,
+                            let _ = tx.send(LlmEvent::UsageStats {
                                 input_tokens: total_input,
                                 output_tokens: usage.output_tokens,
                                 total_tokens,
@@ -290,9 +272,7 @@ pub(crate) async fn stream_anthropic(
                             error.error_type,
                             error.message
                         );
-                        let _ = tx.send(BackendEvent::Failed {
-                            session_id,
-                            request_id,
+                        let _ = tx.send(LlmEvent::Failed {
                             error: format!("{}: {}", error.error_type, error.message),
                         });
                         return Ok(());
@@ -302,13 +282,7 @@ pub(crate) async fn stream_anthropic(
         }
     }
 
-    save_raw_response_for_debugging(
-        session_id,
-        request_id,
-        &raw_payloads,
-        save_response_body,
-        max_response_files,
-    );
+    save_raw_response_for_debugging(&raw_payloads, save_response_body, max_response_files);
 
     let turn = finalize_turn(
         assistant_text.clone(),
@@ -317,9 +291,7 @@ pub(crate) async fn stream_anthropic(
         &tool_calls,
         &mut think_parser,
     );
-    let _ = tx.send(BackendEvent::Finished {
-        session_id,
-        request_id,
+    let _ = tx.send(LlmEvent::Finished {
         turn: Box::new(turn),
     });
     Ok(())

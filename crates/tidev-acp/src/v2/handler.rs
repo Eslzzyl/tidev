@@ -47,7 +47,7 @@ fn available_commands(mode: SessionMode) -> acp::AvailableCommandsUpdate {
 
 pub(crate) fn build_agent(
     runtime: Runtime,
-    event_rx_slot: ReceiverSlot<tidev_llm::message::BackendEvent>,
+    event_rx_slot: ReceiverSlot<tidev_core::BackendEvent>,
     request_rx_slot: ReceiverSlot<tidev_core::TuiRequest>,
 ) -> impl ConnectTo<agent_client_protocol::Client> {
     let state = Arc::new(State {
@@ -343,7 +343,7 @@ pub(crate) fn build_agent(
 
 async fn run_event_loop(
     state: Arc<State>,
-    mut event_rx: tokio::sync::mpsc::UnboundedReceiver<tidev_llm::message::BackendEvent>,
+    mut event_rx: tokio::sync::mpsc::UnboundedReceiver<tidev_core::BackendEvent>,
     cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>,
 ) {
     while let Some(event) = event_rx.recv().await {

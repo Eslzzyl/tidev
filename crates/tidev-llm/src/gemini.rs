@@ -25,10 +25,10 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use tokio::sync::mpsc::UnboundedSender;
-use uuid::Uuid;
 
 use crate::{types::LlmProviderConfig, types::ToolDefinition};
-use crate::message::{BackendEvent, Message, MessageAttachment, MessageRole, ToolCall};
+use crate::event::LlmEvent;
+use crate::message::{Message, MessageAttachment, MessageRole, ToolCall};
 
 use log::{debug as log_debug, error as log_error};
 
@@ -50,12 +50,10 @@ use crate::turn::finalize_turn;
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn stream_gemini(
     http: &Client,
-    session_id: Uuid,
-    request_id: u64,
     model: LlmProviderConfig,
     messages: Vec<Message>,
     tools: Vec<ToolDefinition>,
-    tx: UnboundedSender<BackendEvent>,
+    tx: UnboundedSender<LlmEvent>,
     save_request_body: bool,
     max_request_files: usize,
     save_response_body: bool,
@@ -200,9 +198,7 @@ pub(crate) async fn stream_gemini(
 
                             if was_thinking {
                                 // Native Gemini thought/reasoning
-                                let _ = tx.send(BackendEvent::ReasoningDelta {
-                                    session_id,
-                                    request_id,
+                                let _ = tx.send(LlmEvent::ReasoningDelta {
                                     content: text.clone(),
                                 });
                                 reasoning_text.push_str(&text);
@@ -210,17 +206,13 @@ pub(crate) async fn stream_gemini(
                                 // Regular text — run through ThinkParser for <think> tags too
                                 let (visible, reasoning) = think_parser.push(&text);
                                 if !visible.is_empty() {
-                                    let _ = tx.send(BackendEvent::Delta {
-                                        session_id,
-                                        request_id,
+                                    let _ = tx.send(LlmEvent::Delta {
                                         content: visible.clone(),
                                     });
                                     assistant_text.push_str(&visible);
                                 }
                                 if !reasoning.is_empty() {
-                                    let _ = tx.send(BackendEvent::ReasoningDelta {
-                                        session_id,
-                                        request_id,
+                                    let _ = tx.send(LlmEvent::ReasoningDelta {
                                         content: reasoning.clone(),
                                     });
                                     reasoning_text.push_str(&reasoning);
@@ -233,7 +225,7 @@ pub(crate) async fn stream_gemini(
                             let tc_id = fcall
                                 .id
                                 .clone()
-                                .unwrap_or_else(|| format!("gc-{}-{}", fcall.name, request_id));
+                                .unwrap_or_else(|| format!("gc-{}-{}", fcall.name, tool_call_index));
 
                             let tc = ToolCall {
                                 id: tc_id.clone(),
@@ -243,9 +235,7 @@ pub(crate) async fn stream_gemini(
                                 thought_signature: part.thought_signature.clone(),
                             };
 
-                            let _ = tx.send(BackendEvent::ToolCallUpdated {
-                                session_id,
-                                request_id,
+                            let _ = tx.send(LlmEvent::ToolCallUpdated {
                                 tool_call: tc,
                             });
 
@@ -269,18 +259,14 @@ pub(crate) async fn stream_gemini(
                         {
                             let (visible, reasoning) = think_parser.push(&output);
                             if !visible.is_empty() {
-                                let _ = tx.send(BackendEvent::Delta {
-                                    session_id,
-                                    request_id,
-                                    content: visible.clone(),
+                                let _ = tx.send(LlmEvent::Delta {
+                                        content: visible.clone(),
                                 });
                                 assistant_text.push_str(&visible);
                             }
                             if !reasoning.is_empty() {
-                                let _ = tx.send(BackendEvent::ReasoningDelta {
-                                    session_id,
-                                    request_id,
-                                    content: reasoning.clone(),
+                                let _ = tx.send(LlmEvent::ReasoningDelta {
+                                        content: reasoning.clone(),
                                 });
                                 reasoning_text.push_str(&reasoning);
                             }
@@ -302,36 +288,24 @@ pub(crate) async fn stream_gemini(
     // Drain any remaining think_parser buffer
     let (remaining_visible, remaining_reasoning) = think_parser.finish();
     if !remaining_visible.is_empty() {
-        let _ = tx.send(BackendEvent::Delta {
-            session_id,
-            request_id,
+        let _ = tx.send(LlmEvent::Delta {
             content: remaining_visible.clone(),
         });
         assistant_text.push_str(&remaining_visible);
     }
     if !remaining_reasoning.is_empty() {
-        let _ = tx.send(BackendEvent::ReasoningDelta {
-            session_id,
-            request_id,
+        let _ = tx.send(LlmEvent::ReasoningDelta {
             content: remaining_reasoning.clone(),
         });
         reasoning_text.push_str(&remaining_reasoning);
     }
 
     // ── Save raw response payloads ────────────────────────────────────────
-    save_raw_response_for_debugging(
-        session_id,
-        request_id,
-        &raw_payloads,
-        save_response_body,
-        max_response_files,
-    );
+    save_raw_response_for_debugging(&raw_payloads, save_response_body, max_response_files);
 
     // ── Send usage stats ──────────────────────────────────────────────────
     if let Some(usage) = last_usage {
-        let _ = tx.send(BackendEvent::UsageStats {
-            session_id,
-            request_id,
+        let _ = tx.send(LlmEvent::UsageStats {
             input_tokens: usage.prompt_token_count.unwrap_or(0),
             output_tokens: usage.candidates_token_count.unwrap_or(0),
             total_tokens: usage.total_token_count.unwrap_or(0),
@@ -351,9 +325,7 @@ pub(crate) async fn stream_gemini(
         &mut think_parser,
     );
 
-    let _ = tx.send(BackendEvent::Finished {
-        session_id,
-        request_id,
+    let _ = tx.send(LlmEvent::Finished {
         turn: Box::new(turn),
     });
 

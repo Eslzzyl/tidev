@@ -93,8 +93,6 @@ pub fn save_complete_response_for_debugging(response_body: &str, enabled: bool, 
 /// Saves to the system temp directory when `enabled` is true and `max_files > 0`.
 /// Rotates old files when the count exceeds `max_files`.
 pub fn save_raw_response_for_debugging(
-    session_id: Uuid,
-    request_id: u64,
     payloads: &[String],
     enabled: bool,
     max_files: usize,
@@ -117,12 +115,11 @@ pub fn save_raw_response_for_debugging(
         None => return,
     };
     let now_cst = Utc::now().with_timezone(&cst_offset);
-    let session_short = &session_id.simple().to_string()[..8];
+    let suffix = Uuid::new_v4().simple();
     let filename = format!(
-        "response_{}_{}_{}.jsonl",
+        "response_{}_{}.jsonl",
         now_cst.format("%Y%m%d_%H%M%S_%3f"),
-        session_short,
-        request_id,
+        suffix,
     );
     let filepath = dir.join(&filename);
 

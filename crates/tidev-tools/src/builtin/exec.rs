@@ -21,10 +21,11 @@ use super::utils::truncate_in_place;
 use crate::builtin::classify::{Classifier, Safety};
 use crate::builtin::utils::decode_tool_args;
 use crate::types::{ShellArgs, ToolDefinition, ToolPermission};
-use tidev_llm::message::BackendEvent;
 use tidev_llm::mode::SessionMode;
 use tidev_utils::encoding::decode_command_output;
 use tidev_utils::encoding::prepare_command_for_shell;
+
+use super::ShellOutput;
 
 /// Registry of active child process PIDs spawned by the shell tool.
 /// Used during program exit to prevent orphaned processes.
@@ -123,7 +124,8 @@ pub fn execute_tool_call(
     max_output_bytes: usize,
     mode: SessionMode,
     session_id: Uuid,
-    event_tx: Option<UnboundedSender<BackendEvent>>,
+    request_id: u64,
+    event_tx: Option<UnboundedSender<ShellOutput>>,
 ) -> Result<ShellExecutionResult> {
     let args = decode_tool_args::<ShellArgs>(tool_name, arguments)?;
     let timeout = args.timeout.unwrap_or(120_000) as u64; // default 2 minutes
@@ -136,6 +138,7 @@ pub fn execute_tool_call(
         event_tx,
         mode,
         session_id,
+        request_id,
         "",
     )
 }
@@ -149,7 +152,8 @@ pub fn execute_tool_call_with_cancel(
     cancel: &CancellationToken,
     mode: SessionMode,
     session_id: Uuid,
-    event_tx: Option<UnboundedSender<BackendEvent>>,
+    request_id: u64,
+    event_tx: Option<UnboundedSender<ShellOutput>>,
 ) -> Result<ShellExecutionResult> {
     let args = decode_tool_args::<ShellArgs>(tool_name, arguments)?;
     let timeout = args.timeout.unwrap_or(120_000) as u64;
@@ -162,6 +166,7 @@ pub fn execute_tool_call_with_cancel(
         event_tx,
         mode,
         session_id,
+        request_id,
         "",
     )
 }
@@ -169,7 +174,7 @@ pub fn execute_tool_call_with_cancel(
 /// Execute a shell command with streaming output, cancellation, and timeout.
 ///
 /// Uses `tokio::process::Command` for non-blocking process execution.
-/// Stdout is streamed chunk-by-chunk via `BackendEvent::ShellOutput` events.
+/// Stdout is streamed chunk-by-chunk via [`ShellOutput`] events.
 /// The `cancel` token terminates the process group on cancellation.
 #[allow(clippy::too_many_arguments)]
 pub async fn execute_tool_call_with_cancel_async(
@@ -180,7 +185,8 @@ pub async fn execute_tool_call_with_cancel_async(
     cancel: &CancellationToken,
     mode: SessionMode,
     session_id: Uuid,
-    event_tx: Option<UnboundedSender<BackendEvent>>,
+    request_id: u64,
+    event_tx: Option<UnboundedSender<ShellOutput>>,
     tool_call_id: &str,
 ) -> Result<ShellExecutionResult> {
     let args = decode_tool_args::<ShellArgs>(tool_name, arguments)?;
@@ -194,6 +200,7 @@ pub async fn execute_tool_call_with_cancel_async(
         event_tx,
         mode,
         session_id,
+        request_id,
         tool_call_id,
     )
     .await
@@ -203,7 +210,7 @@ pub async fn execute_tool_call_with_cancel_async(
 ///
 /// Internally uses `tokio::process::Command` so the calling async task is never
 /// blocked by a running shell command. Output is read chunk-by-chunk and
-/// forwarded as [`BackendEvent::ShellOutput`] events.
+/// forwarded as [`ShellOutput`] events.
 #[allow(clippy::too_many_arguments)]
 async fn run_shell_streaming(
     workspace_root: &Path,
@@ -211,9 +218,10 @@ async fn run_shell_streaming(
     max_output_bytes: usize,
     cancel: &CancellationToken,
     timeout_ms: u64,
-    event_tx: Option<UnboundedSender<BackendEvent>>,
+    event_tx: Option<UnboundedSender<ShellOutput>>,
     mode: SessionMode,
     session_id: Uuid,
+    request_id: u64,
     tool_call_id: &str,
 ) -> Result<ShellExecutionResult> {
     let mut actual_command = command.to_string();
@@ -226,20 +234,20 @@ async fn run_shell_streaming(
             command.lines().next().unwrap_or(command)
         );
 
-        // Emit ShellOutput so the TUI creates a streaming message
+        // Emit shell output so the TUI creates a streaming message
         // that ToolCompleted can finalize; otherwise the result is lost
         // because shell results rely on ShellOutput for display.
-        if let Some(ref tx) = event_tx {
-            let _ = tx.send(BackendEvent::ShellOutput {
-                session_id,
-                tool_call_id: tool_call_id.to_string(),
-                content: "Error: Command blocked in Plan mode — this command appears \
-                              to modify files."
-                    .to_string(),
-                finished: true,
-                exit_code: Some(1),
-            });
-        }
+        emit_shell_output(
+            event_tx.as_ref(),
+            session_id,
+            request_id,
+            tool_call_id,
+            "Error: Command blocked in Plan mode — this command appears \
+                          to modify files."
+                .to_string(),
+            true,
+            Some(1),
+        );
 
         return Ok(ShellExecutionResult {
             output: "[exit 1]\nError: Command blocked in Plan mode — this command appears \
@@ -337,15 +345,15 @@ async fn run_shell_streaming(
                 let _ = child.wait().await;
                 unregister_child(child_pid);
 
-                if let Some(ref tx) = event_tx {
-                    let _ = tx.send(BackendEvent::ShellOutput {
-                        session_id,
-                        tool_call_id: tool_call_id.to_string(),
-                        content: output_buf.clone(),
-                        finished: true,
-                        exit_code: None,
-                    });
-                }
+                emit_shell_output(
+                    event_tx.as_ref(),
+                    session_id,
+                    request_id,
+                    tool_call_id,
+                    output_buf.clone(),
+                    true,
+                    None,
+                );
 
                 truncate_in_place(&mut output_buf, max_output_bytes);
                 return Ok(ShellExecutionResult {
@@ -358,15 +366,15 @@ async fn run_shell_streaming(
                 let _ = child.wait().await;
                 unregister_child(child_pid);
 
-                if let Some(ref tx) = event_tx {
-                    let _ = tx.send(BackendEvent::ShellOutput {
-                        session_id,
-                        tool_call_id: tool_call_id.to_string(),
-                        content: output_buf.clone(),
-                        finished: true,
-                        exit_code: None,
-                    });
-                }
+                emit_shell_output(
+                    event_tx.as_ref(),
+                    session_id,
+                    request_id,
+                    tool_call_id,
+                    output_buf.clone(),
+                    true,
+                    None,
+                );
 
                 truncate_in_place(&mut output_buf, max_output_bytes);
                 return Ok(ShellExecutionResult {
@@ -399,15 +407,15 @@ async fn run_shell_streaming(
                         }
 
                         // Send streaming event
-                        if let Some(ref tx) = event_tx {
-                            let _ = tx.send(BackendEvent::ShellOutput {
-                                session_id,
-                                tool_call_id: tool_call_id.to_string(),
-                                content: output_buf.clone(),
-                                finished: false,
-                                exit_code: None,
-                            });
-                        }
+                        emit_shell_output(
+                            event_tx.as_ref(),
+                            session_id,
+                            request_id,
+                            tool_call_id,
+                            output_buf.clone(),
+                            false,
+                            None,
+                        );
                     }
                     Err(e) => {
                         log::error!("Failed to read from shell stdout: {e}");
@@ -447,15 +455,15 @@ async fn run_shell_streaming(
     truncate_in_place(&mut combined, max_output_bytes);
 
     // Send final event with exit code
-    if let Some(ref tx) = event_tx {
-        let _ = tx.send(BackendEvent::ShellOutput {
-            session_id,
-            tool_call_id: tool_call_id.to_string(),
-            content: combined.clone(),
-            finished: true,
-            exit_code,
-        });
-    }
+    emit_shell_output(
+        event_tx.as_ref(),
+        session_id,
+        request_id,
+        tool_call_id,
+        combined.clone(),
+        true,
+        exit_code,
+    );
 
     let status_code = exit_code.unwrap_or_default();
 
@@ -470,9 +478,10 @@ fn run_shell_inner(
     max_output_bytes: usize,
     cancel: Option<&CancellationToken>,
     timeout_ms: u64,
-    event_tx: Option<UnboundedSender<BackendEvent>>,
+    event_tx: Option<UnboundedSender<ShellOutput>>,
     mode: SessionMode,
     session_id: Uuid,
+    request_id: u64,
     tool_call_id: &str,
 ) -> Result<ShellExecutionResult> {
     let mut actual_command = command.to_string();
@@ -485,20 +494,20 @@ fn run_shell_inner(
             command.lines().next().unwrap_or(command)
         );
 
-        // Emit ShellOutput so the TUI creates a streaming message
+        // Emit shell output so the TUI creates a streaming message
         // that ToolCompleted can finalize; otherwise the result is lost
         // because shell results rely on ShellOutput for display.
-        if let Some(ref tx) = event_tx {
-            let _ = tx.send(BackendEvent::ShellOutput {
-                session_id,
-                tool_call_id: tool_call_id.to_string(),
-                content: "Error: Command blocked in Plan mode — this command appears \
-                              to modify files."
-                    .to_string(),
-                finished: true,
-                exit_code: Some(1),
-            });
-        }
+        emit_shell_output(
+            event_tx.as_ref(),
+            session_id,
+            request_id,
+            tool_call_id,
+            "Error: Command blocked in Plan mode — this command appears \
+                          to modify files."
+                .to_string(),
+            true,
+            Some(1),
+        );
 
         return Ok(ShellExecutionResult {
             output: "[exit 1]\nError: Command blocked in Plan mode — this command appears \
@@ -625,16 +634,16 @@ fn run_shell_inner(
             let _ = process.wait();
             unregister_child(child_pid);
 
-            // Send final ShellOutput event so UI consumers see the last state
-            if let Some(ref tx) = event_tx {
-                let _ = tx.send(BackendEvent::ShellOutput {
-                    session_id,
-                    tool_call_id: tool_call_id.to_string(),
-                    content: output_buf.clone(),
-                    finished: true,
-                    exit_code: None,
-                });
-            }
+            // Send final shell output event so UI consumers see the last state.
+            emit_shell_output(
+                event_tx.as_ref(),
+                session_id,
+                request_id,
+                tool_call_id,
+                output_buf.clone(),
+                true,
+                None,
+            );
 
             // Only show the output we got so far (truncated at max)
             truncate_in_place(&mut output_buf, max_output_bytes);
@@ -648,15 +657,15 @@ fn run_shell_inner(
             let _ = process.wait();
             unregister_child(child_pid);
 
-            if let Some(ref tx) = event_tx {
-                let _ = tx.send(BackendEvent::ShellOutput {
-                    session_id,
-                    tool_call_id: tool_call_id.to_string(),
-                    content: output_buf.clone(),
-                    finished: true,
-                    exit_code: None,
-                });
-            }
+            emit_shell_output(
+                event_tx.as_ref(),
+                session_id,
+                request_id,
+                tool_call_id,
+                output_buf.clone(),
+                true,
+                None,
+            );
 
             truncate_in_place(&mut output_buf, max_output_bytes);
             return Ok(ShellExecutionResult {
@@ -691,16 +700,16 @@ fn run_shell_inner(
                     }
                 }
 
-                // Send streaming event
-                if let Some(ref tx) = event_tx {
-                    let _ = tx.send(BackendEvent::ShellOutput {
-                        session_id,
-                        tool_call_id: tool_call_id.to_string(),
-                        content: output_buf.clone(),
-                        finished: false,
-                        exit_code: None,
-                    });
-                }
+                // Send streaming event.
+                emit_shell_output(
+                    event_tx.as_ref(),
+                    session_id,
+                    request_id,
+                    tool_call_id,
+                    output_buf.clone(),
+                    false,
+                    None,
+                );
             }
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
             Err(mpsc::RecvTimeoutError::Disconnected) => break, // reader thread finished
@@ -729,19 +738,40 @@ fn run_shell_inner(
     truncate_in_place(&mut combined, max_output_bytes);
 
     // Send final event with exit code
-    if let Some(ref tx) = event_tx {
-        let _ = tx.send(BackendEvent::ShellOutput {
-            session_id,
-            tool_call_id: tool_call_id.to_string(),
-            content: combined.clone(),
-            finished: true,
-            exit_code,
-        });
-    }
+    emit_shell_output(
+        event_tx.as_ref(),
+        session_id,
+        request_id,
+        tool_call_id,
+        combined.clone(),
+        true,
+        exit_code,
+    );
 
     let status_code = exit_code.unwrap_or_default();
 
     Ok(ShellExecutionResult {
         output: format!("[exit {status_code}]\n{}", combined),
     })
+}
+
+fn emit_shell_output(
+    event_tx: Option<&UnboundedSender<ShellOutput>>,
+    session_id: Uuid,
+    request_id: u64,
+    tool_call_id: &str,
+    content: String,
+    finished: bool,
+    exit_code: Option<i32>,
+) {
+    if let Some(tx) = event_tx {
+        let _ = tx.send(ShellOutput {
+            session_id,
+            request_id,
+            tool_call_id: tool_call_id.to_string(),
+            content,
+            finished,
+            exit_code,
+        });
+    }
 }

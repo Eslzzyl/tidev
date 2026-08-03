@@ -9,6 +9,7 @@ mod anthropic;
 mod attachments;
 mod debug;
 mod error;
+pub mod event;
 mod gemini;
 pub mod message;
 pub mod mode;
@@ -21,14 +22,14 @@ mod turn;
 mod types;
 
 pub use types::{ApiType, LlmProviderConfig, ToolDefinition};
+pub use event::LlmEvent;
 
 use anyhow::{Context, Result};
 use reqwest::Client;
 use std::time::Duration;
 use tokio::sync::mpsc::UnboundedSender;
-use uuid::Uuid;
 
-use crate::message::{BackendEvent, Message};
+use crate::message::Message;
 
 use error::{MAX_RETRIES, backoff_delay, backoff_sleep, classify_anyhow_error};
 
@@ -75,22 +76,18 @@ impl LlmClient {
         &self.http
     }
 
-    /// Stream a chat completion, forwarding [`BackendEvent`]s through `tx`.
+    /// Stream a chat completion, forwarding [`LlmEvent`]s through `tx`.
     #[allow(clippy::too_many_arguments)]
     pub async fn stream_chat(
         &self,
-        session_id: Uuid,
-        request_id: u64,
         model: LlmProviderConfig,
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
-        tx: UnboundedSender<BackendEvent>,
+        tx: UnboundedSender<LlmEvent>,
         thinking_level: crate::reasoning::ThinkingLevelType,
     ) {
         let result = self
             .stream_chat_with_retry(
-                session_id,
-                request_id,
                 model,
                 messages,
                 tools,
@@ -100,26 +97,20 @@ impl LlmClient {
             .await;
 
         if let Err(error) = result {
-            let _ = tx.send(BackendEvent::Failed {
-                session_id,
-                request_id,
-                error: error.to_string(),
-            });
+            let _ = tx.send(LlmEvent::Failed { error: error.to_string() });
         }
     }
 
     /// Non-streaming completion — returns the full assistant text.
     pub async fn complete_with_messages(
         &self,
-        session_id: Uuid,
-        request_id: u64,
         model: LlmProviderConfig,
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
-        tx: Option<UnboundedSender<BackendEvent>>,
+        tx: Option<UnboundedSender<LlmEvent>>,
     ) -> Result<String> {
         let result = self
-            .complete_with_retry(session_id, request_id, model, messages, tools, tx)
+            .complete_with_retry(model, messages, tools, tx)
             .await;
         result.context("LLM completion failed after retries")
     }
@@ -127,12 +118,10 @@ impl LlmClient {
     #[allow(clippy::too_many_arguments)]
     async fn stream_chat_with_retry(
         &self,
-        session_id: Uuid,
-        request_id: u64,
         model: LlmProviderConfig,
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
-        tx: UnboundedSender<BackendEvent>,
+        tx: UnboundedSender<LlmEvent>,
         thinking_level: crate::reasoning::ThinkingLevelType,
     ) -> Result<()> {
         // Determine how many retries we can afford.
@@ -141,8 +130,6 @@ impl LlmClient {
         for attempt in 0..=max {
             let result = self
                 .stream_chat_inner(
-                    session_id,
-                    request_id,
                     model.clone(),
                     messages.clone(),
                     tools.clone(),
@@ -161,9 +148,7 @@ impl LlmClient {
                     }
 
                     let delay = backoff_delay(attempt + 1);
-                    let _ = tx.send(BackendEvent::Retrying {
-                        session_id,
-                        request_id,
+                    let _ = tx.send(LlmEvent::Retrying {
                         attempt: attempt + 1,
                         max_attempts: max + 1,
                         reason: network_err.message().to_string(),
@@ -184,12 +169,10 @@ impl LlmClient {
 
     async fn complete_with_retry(
         &self,
-        session_id: Uuid,
-        request_id: u64,
         model: LlmProviderConfig,
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
-        tx: Option<UnboundedSender<BackendEvent>>,
+        tx: Option<UnboundedSender<LlmEvent>>,
     ) -> Result<String> {
         for attempt in 1..=MAX_RETRIES {
             let result = match model.api_type {
@@ -222,8 +205,6 @@ impl LlmClient {
                 ApiType::OpenAiResponses => {
                     responses::complete_responses(
                         &self.http,
-                        session_id,
-                        request_id,
                         model.clone(),
                         messages.clone(),
                         tools.clone(),
@@ -262,9 +243,7 @@ impl LlmClient {
                     let delay_secs = backoff_delay(attempt).as_secs() as u32;
 
                     if let Some(tx) = &tx {
-                        let _ = tx.send(BackendEvent::Retrying {
-                            session_id,
-                            request_id,
+                        let _ = tx.send(LlmEvent::Retrying {
                             attempt,
                             max_attempts: MAX_RETRIES,
                             reason: network_error.message().to_string(),
@@ -288,20 +267,16 @@ impl LlmClient {
     #[allow(clippy::too_many_arguments)]
     async fn stream_chat_inner(
         &self,
-        session_id: Uuid,
-        request_id: u64,
         model: LlmProviderConfig,
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
-        tx: UnboundedSender<BackendEvent>,
+        tx: UnboundedSender<LlmEvent>,
         thinking_level: crate::reasoning::ThinkingLevelType,
     ) -> Result<()> {
         match model.api_type {
             ApiType::Anthropic => {
                 anthropic::stream_anthropic(
                     &self.http,
-                    session_id,
-                    request_id,
                     model,
                     messages,
                     tools,
@@ -316,8 +291,6 @@ impl LlmClient {
             ApiType::OpenAiChatCompletions => {
                 openai::stream_openai(
                     &self.http,
-                    session_id,
-                    request_id,
                     model,
                     messages,
                     tools,
@@ -333,8 +306,6 @@ impl LlmClient {
             ApiType::OpenAiResponses => {
                 responses::stream_responses(
                     &self.http,
-                    session_id,
-                    request_id,
                     model,
                     messages,
                     tools,
@@ -349,8 +320,6 @@ impl LlmClient {
             ApiType::GoogleGemini => {
                 gemini::stream_gemini(
                     &self.http,
-                    session_id,
-                    request_id,
                     model,
                     messages,
                     tools,

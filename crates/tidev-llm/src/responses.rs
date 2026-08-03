@@ -7,7 +7,8 @@ use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 
 use crate::{types::LlmProviderConfig, types::ToolDefinition};
-use crate::message::{BackendEvent, Message, MessageAttachment, MessageRole, ToolCall};
+use crate::event::LlmEvent;
+use crate::message::{Message, MessageAttachment, MessageRole, ToolCall};
 
 use log::{debug as log_debug, error as log_error};
 
@@ -27,12 +28,10 @@ const RESPONSES_STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn stream_responses(
     http: &Client,
-    session_id: Uuid,
-    request_id: u64,
     model: LlmProviderConfig,
     messages: Vec<Message>,
     tools: Vec<ToolDefinition>,
-    tx: UnboundedSender<BackendEvent>,
+    tx: UnboundedSender<LlmEvent>,
     save_request_body: bool,
     max_request_files: usize,
     save_response_body: bool,
@@ -43,8 +42,7 @@ pub(crate) async fn stream_responses(
         .clone()
         .with_context(|| format!("missing API key for provider '{}'", model.provider_id))?;
 
-    let request =
-        build_responses_request(&model, messages, true, &tools, Some(session_id.to_string()))?;
+    let request = build_responses_request(&model, messages, true, &tools, None)?;
     let request_body = serde_json::to_string(&request).unwrap_or_default();
     let request_body_size = request_body.len();
     save_request_for_debugging(&request_body, save_request_body, max_request_files);
@@ -58,7 +56,6 @@ pub(crate) async fn stream_responses(
     let send_result = http
         .post(&endpoint)
         .bearer_auth(api_key)
-        .header("session-id", session_id.to_string())
         .json(&request)
         .send()
         .await;
@@ -144,8 +141,6 @@ pub(crate) async fn stream_responses(
 
             if payload == "[DONE]" {
                 save_raw_response_for_debugging(
-                    session_id,
-                    request_id,
                     &raw_payloads,
                     save_response_body,
                     max_response_files,
@@ -157,9 +152,7 @@ pub(crate) async fn stream_responses(
                     &tool_calls,
                     &responses_output_items,
                 );
-                let _ = tx.send(BackendEvent::Finished {
-                    session_id,
-                    request_id,
+                let _ = tx.send(LlmEvent::Finished {
                     turn: Box::new(turn),
                 });
                 return Ok(());
@@ -179,9 +172,7 @@ pub(crate) async fn stream_responses(
                         first_delta_time = Some(std::time::Instant::now());
                     }
                     assistant_text.push_str(&delta);
-                    let _ = tx.send(BackendEvent::Delta {
-                        session_id,
-                        request_id,
+                    let _ = tx.send(LlmEvent::Delta {
                         content: delta,
                     });
                 }
@@ -196,9 +187,7 @@ pub(crate) async fn stream_responses(
                         first_delta_time = Some(std::time::Instant::now());
                     }
                     assistant_text.push_str(&delta);
-                    let _ = tx.send(BackendEvent::Delta {
-                        session_id,
-                        request_id,
+                    let _ = tx.send(LlmEvent::Delta {
                         content: delta,
                     });
                 }
@@ -214,9 +203,7 @@ pub(crate) async fn stream_responses(
                     let cleaned = strip_think_tags(&delta);
                     if !cleaned.is_empty() {
                         reasoning_text.push_str(&cleaned);
-                        let _ = tx.send(BackendEvent::ReasoningDelta {
-                            session_id,
-                            request_id,
+                        let _ = tx.send(LlmEvent::ReasoningDelta {
                             content: cleaned,
                         });
                     }
@@ -234,9 +221,7 @@ pub(crate) async fn stream_responses(
                     let cleaned = strip_think_tags(&delta);
                     if !cleaned.is_empty() {
                         reasoning_text.push_str(&cleaned);
-                        let _ = tx.send(BackendEvent::ReasoningDelta {
-                            session_id,
-                            request_id,
+                        let _ = tx.send(LlmEvent::ReasoningDelta {
                             content: cleaned,
                         });
                     }
@@ -251,9 +236,7 @@ pub(crate) async fn stream_responses(
                     let cleaned = strip_think_tags(&summary_delta);
                     if !cleaned.is_empty() {
                         reasoning_text.push_str(&cleaned);
-                        let _ = tx.send(BackendEvent::ReasoningDelta {
-                            session_id,
-                            request_id,
+                        let _ = tx.send(LlmEvent::ReasoningDelta {
                             content: cleaned,
                         });
                     }
@@ -330,9 +313,7 @@ pub(crate) async fn stream_responses(
                                 arguments: arguments.to_string(),
                                 thought_signature: None,
                             };
-                            let _ = tx.send(BackendEvent::ToolCallUpdated {
-                                session_id,
-                                request_id,
+                            let _ = tx.send(LlmEvent::ToolCallUpdated {
                                 tool_call: call,
                             });
                         }
@@ -443,9 +424,7 @@ pub(crate) async fn stream_responses(
                             .unwrap_or(0);
                         let duration_ms =
                             first_delta_time.map(|start| start.elapsed().as_millis() as u64);
-                        let _ = tx.send(BackendEvent::UsageStats {
-                            session_id,
-                            request_id,
+                        let _ = tx.send(LlmEvent::UsageStats {
                             input_tokens: usage.input_tokens,
                             output_tokens: usage.output_tokens,
                             total_tokens: usage.total_tokens,
@@ -456,8 +435,6 @@ pub(crate) async fn stream_responses(
                         });
                     }
                     save_raw_response_for_debugging(
-                        session_id,
-                        request_id,
                         &raw_payloads,
                         save_response_body,
                         max_response_files,
@@ -469,9 +446,7 @@ pub(crate) async fn stream_responses(
                         &tool_calls,
                         &responses_output_items,
                     );
-                    let _ = tx.send(BackendEvent::Finished {
-                        session_id,
-                        request_id,
+                    let _ = tx.send(LlmEvent::Finished {
                         turn: Box::new(turn),
                     });
                     return Ok(());
@@ -600,13 +575,7 @@ pub(crate) async fn stream_responses(
         }
     }
 
-    save_raw_response_for_debugging(
-        session_id,
-        request_id,
-        &raw_payloads,
-        save_response_body,
-        max_response_files,
-    );
+    save_raw_response_for_debugging(&raw_payloads, save_response_body, max_response_files);
 
     Err(NetworkError::Retryable {
         message: "Responses stream closed before response.completed".to_string(),
@@ -617,12 +586,10 @@ pub(crate) async fn stream_responses(
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn complete_responses(
     http: &Client,
-    session_id: Uuid,
-    request_id: u64,
     model: LlmProviderConfig,
     messages: Vec<Message>,
     tools: Vec<ToolDefinition>,
-    tx: Option<&UnboundedSender<BackendEvent>>,
+    tx: Option<&UnboundedSender<LlmEvent>>,
     save_request_body: bool,
     max_request_files: usize,
     save_response_body: bool,
@@ -720,9 +687,7 @@ pub(crate) async fn complete_responses(
             .as_ref()
             .map(|details| details.cached_tokens)
             .unwrap_or(0);
-        let _ = tx.send(BackendEvent::UsageStats {
-            session_id,
-            request_id,
+        let _ = tx.send(LlmEvent::UsageStats {
             input_tokens: usage.input_tokens,
             output_tokens: usage.output_tokens,
             total_tokens: usage.total_tokens,

@@ -5,6 +5,7 @@
 //! tidev-core provides the real [`AgentContext`] and drives the loop.
 
 pub mod context;
+pub mod event;
 pub mod loop_;
 pub mod prompts;
 
@@ -13,4 +14,5 @@ pub use context::{
     AgentContext, AgentLoopConfig, ApprovedTool, ToolCallWithViolations, TuiRequest,
     TuiRequestKind, TuiResponse,
 };
+pub use event::{AgentEvent, llm_event_to_agent_event};
 pub use loop_::run_agent_loop;

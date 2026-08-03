@@ -4,10 +4,10 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use tokio::sync::mpsc::UnboundedSender;
-use uuid::Uuid;
 
 use crate::{types::LlmProviderConfig, types::ToolDefinition};
-use crate::message::{BackendEvent, Message, MessageAttachment, MessageRole, ToolCall};
+use crate::event::LlmEvent;
+use crate::message::{Message, MessageAttachment, MessageRole, ToolCall};
 use crate::reasoning::ThinkingLevelType;
 
 use log::{debug as log_debug, error as log_error};
@@ -26,12 +26,10 @@ use crate::turn::finalize_turn;
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn stream_openai(
     http: &Client,
-    session_id: Uuid,
-    request_id: u64,
     model: LlmProviderConfig,
     messages: Vec<Message>,
     tools: Vec<ToolDefinition>,
-    tx: UnboundedSender<BackendEvent>,
+    tx: UnboundedSender<LlmEvent>,
     thinking_level: ThinkingLevelType,
     save_request_body: bool,
     max_request_files: usize,
@@ -128,8 +126,6 @@ pub(crate) async fn stream_openai(
                 raw_payloads.push(payload.to_string());
                 if payload == "[DONE]" {
                     save_raw_response_for_debugging(
-                        session_id,
-                        request_id,
                         &raw_payloads,
                         save_response_body,
                         max_response_files,
@@ -141,9 +137,7 @@ pub(crate) async fn stream_openai(
                         &tool_calls,
                         &mut think_parser,
                     );
-                    let _ = tx.send(BackendEvent::Finished {
-                        session_id,
-                        request_id,
+                    let _ = tx.send(LlmEvent::Finished {
                         turn: Box::new(turn),
                     });
                     return Ok(());
@@ -160,9 +154,7 @@ pub(crate) async fn stream_openai(
                         .unwrap_or(0);
                     let duration_ms =
                         first_delta_time.map(|start| start.elapsed().as_millis() as u64);
-                    let _ = tx.send(BackendEvent::UsageStats {
-                        session_id,
-                        request_id,
+                    let _ = tx.send(LlmEvent::UsageStats {
                         input_tokens: usage.input_tokens,
                         output_tokens: usage.output_tokens,
                         total_tokens: usage.total_tokens,
@@ -182,9 +174,7 @@ pub(crate) async fn stream_openai(
                         let cleaned = strip_think_tags(&reasoning);
                         if !cleaned.is_empty() {
                             reasoning_text.push_str(&cleaned);
-                            let _ = tx.send(BackendEvent::ReasoningDelta {
-                                session_id,
-                                request_id,
+                            let _ = tx.send(LlmEvent::ReasoningDelta {
                                 content: cleaned,
                             });
                         }
@@ -209,9 +199,7 @@ pub(crate) async fn stream_openai(
                                     let cleaned = strip_think_tags(text);
                                     if !cleaned.is_empty() {
                                         reasoning_text.push_str(&cleaned);
-                                        let _ = tx.send(BackendEvent::ReasoningDelta {
-                                            session_id,
-                                            request_id,
+                                        let _ = tx.send(LlmEvent::ReasoningDelta {
                                             content: cleaned,
                                         });
                                     }
@@ -233,9 +221,7 @@ pub(crate) async fn stream_openai(
                             // <thinking> text in the visible output would be
                             // misclassified as reasoning.
                             assistant_text.push_str(&content);
-                            let _ = tx.send(BackendEvent::Delta {
-                                session_id,
-                                request_id,
+                            let _ = tx.send(LlmEvent::Delta {
                                 content,
                             });
                         } else {
@@ -245,18 +231,14 @@ pub(crate) async fn stream_openai(
 
                             if !visible.is_empty() {
                                 assistant_text.push_str(&visible);
-                                let _ = tx.send(BackendEvent::Delta {
-                                    session_id,
-                                    request_id,
+                                let _ = tx.send(LlmEvent::Delta {
                                     content: visible,
                                 });
                             }
 
                             if !reasoning.is_empty() {
                                 reasoning_text.push_str(&reasoning);
-                                let _ = tx.send(BackendEvent::ReasoningDelta {
-                                    session_id,
-                                    request_id,
+                                let _ = tx.send(LlmEvent::ReasoningDelta {
                                     content: reasoning,
                                 });
                             }
@@ -288,9 +270,7 @@ pub(crate) async fn stream_openai(
                             }
 
                             if !entry.id.is_empty() && !entry.name.is_empty() {
-                                let _ = tx.send(BackendEvent::ToolCallUpdated {
-                                    session_id,
-                                    request_id,
+                                let _ = tx.send(LlmEvent::ToolCallUpdated {
                                     tool_call: entry.clone().into_tool_call(index),
                                 });
                             }
@@ -305,13 +285,7 @@ pub(crate) async fn stream_openai(
         }
     }
 
-    save_raw_response_for_debugging(
-        session_id,
-        request_id,
-        &raw_payloads,
-        save_response_body,
-        max_response_files,
-    );
+    save_raw_response_for_debugging(&raw_payloads, save_response_body, max_response_files);
 
     let turn = finalize_turn(
         assistant_text.clone(),
@@ -320,9 +294,7 @@ pub(crate) async fn stream_openai(
         &tool_calls,
         &mut think_parser,
     );
-    let _ = tx.send(BackendEvent::Finished {
-        session_id,
-        request_id,
+    let _ = tx.send(LlmEvent::Finished {
         turn: Box::new(turn),
     });
     Ok(())

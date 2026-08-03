@@ -12,24 +12,26 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use chrono::Utc;
 use serde_json::Value;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use tidev_agent::{
-    AgentContext, AgentLoopConfig, ApprovedTool, ToolCallWithViolations, TuiRequest,
-    TuiRequestKind, TuiResponse,
+    llm_event_to_agent_event, AgentContext, AgentEvent, AgentLoopConfig, ApprovedTool,
+    ToolCallWithViolations, TuiRequest, TuiRequestKind, TuiResponse,
 };
 use tidev_config::auth::ActiveModel;
 use tidev_config::{AppConfig, AuthStore};
 use crate::agent_type::{AgentDefinition, AgentType};
-use tidev_llm::message::{
-    AssistantTurn, BackendEvent, Message, MessageRole, ToolCall, ToolExecutionResult,
+use crate::backend_event::{
+    agent_event_channel, agent_event_to_backend_event, BackendEvent,
 };
+use tidev_llm::message::{AssistantTurn, Message, MessageRole, ToolCall, ToolExecutionResult};
 use tidev_llm::mode::SessionMode;
 use tidev_llm::reasoning::ThinkingLevelType;
 use tidev_tools::types::ToolDefinition;
+use tidev_tools::ShellOutput;
 use tidev_utils::path::{
     extract_boundary_violation_path, extract_sensitive_file_path, load_sensitive_patterns,
 };
@@ -437,8 +439,8 @@ impl AgentContext for CoreContext {
         self.tools.iter().map(to_llm_tool_def).collect()
     }
 
-    fn event_tx(&self) -> UnboundedSender<BackendEvent> {
-        self.event_tx.clone()
+    fn event_tx(&self) -> UnboundedSender<AgentEvent> {
+        agent_event_channel(self.session_id, self.event_tx.clone())
     }
 
     fn workspace_root(&self) -> &std::path::Path {
@@ -460,12 +462,11 @@ impl AgentContext for CoreContext {
         let llm_tools: Vec<tidev_llm::ToolDefinition> =
             self.tools.iter().map(to_llm_tool_def).collect();
         let tl = thinking_level.clone();
-        let sid = self.session_id;
         let msgs = messages.to_vec();
 
         // Spawn the streaming LLM call.
         let handle = tokio::spawn(async move {
-            llm.stream_chat(sid, request_id, model, msgs, llm_tools, tx, tl)
+            llm.stream_chat(model, msgs, llm_tools, tx, tl)
                 .await;
         });
 
@@ -481,7 +482,7 @@ impl AgentContext for CoreContext {
                     handle.abort();
                     self.emit(BackendEvent::StreamEnd {
                         session_id: self.session_id,
-                        request_id: 0,
+                        request_id,
                         reasoning_started_at: None,
                         reasoning_completed_at: None,
                     });
@@ -490,10 +491,13 @@ impl AgentContext for CoreContext {
                 event = rx.recv() => {
                     match event {
                         Some(ev) => {
-                            // Forward to the UI.
-                            self.emit(ev.clone());
+                            let ev = llm_event_to_agent_event(ev, request_id);
+                            self.emit(agent_event_to_backend_event(
+                                ev.clone(),
+                                self.session_id,
+                            ));
                             match ev {
-                                BackendEvent::Delta { content, .. } => {
+                                AgentEvent::Delta { content, .. } => {
                                     turn.content.push_str(&content);
                                     // reasoning → content transition
                                     if turn.reasoning_started_at.is_some()
@@ -502,13 +506,13 @@ impl AgentContext for CoreContext {
                                         turn.reasoning_completed_at = Some(Utc::now());
                                     }
                                 }
-                                BackendEvent::ReasoningDelta { content, .. } => {
+                                AgentEvent::ReasoningDelta { content, .. } => {
                                     if turn.reasoning_started_at.is_none() {
                                         turn.reasoning_started_at = Some(Utc::now());
                                     }
                                     turn.reasoning.push_str(&content);
                                 }
-                                BackendEvent::ToolCallUpdated { tool_call, .. } => {
+                                AgentEvent::ToolCallUpdated { tool_call, .. } => {
                                     turn.upsert_tool_call(tool_call);
                                     // reasoning → tool-call transition
                                     if turn.reasoning_started_at.is_some()
@@ -517,7 +521,7 @@ impl AgentContext for CoreContext {
                                         turn.reasoning_completed_at = Some(Utc::now());
                                     }
                                 }
-                                BackendEvent::UsageStats {
+                                AgentEvent::UsageStats {
                                     input_tokens,
                                     output_tokens,
                                     total_tokens,
@@ -538,7 +542,7 @@ impl AgentContext for CoreContext {
                                             Some(output_tokens as f32 / (ms as f32 / 1000.0));
                                     }
                                 }
-                                BackendEvent::Finished { turn: finished_turn, .. } => {
+                                AgentEvent::Finished { turn: finished_turn, .. } => {
                                     // The Responses provider carries opaque output items on the
                                     // final event because they are not represented by deltas.
                                     turn.responses_output_items =
@@ -551,7 +555,7 @@ impl AgentContext for CoreContext {
                                     }
                                     break;
                                 }
-                                BackendEvent::StreamEnd { .. } => {
+                                AgentEvent::StreamEnd { .. } => {
                                     // reasoning → turn-end transition
                                     if turn.reasoning_started_at.is_some()
                                         && turn.reasoning_completed_at.is_none()
@@ -560,7 +564,7 @@ impl AgentContext for CoreContext {
                                     }
                                     break;
                                 }
-                                BackendEvent::Failed { error, .. } => {
+                                AgentEvent::Failed { error, .. } => {
                                     return Err(anyhow::anyhow!("LLM error: {error}"));
                                 }
                                 _ => {}
@@ -776,6 +780,7 @@ impl AgentContext for CoreContext {
                         .execute(
                             &tc,
                             sid,
+                            request_id,
                             mode,
                             allow_outside,
                             sensitive_approved,
@@ -848,21 +853,28 @@ impl AgentContext for CoreContext {
                 tool_call: tc.clone(),
             });
 
+            let (shell_tx, shell_rx) = tokio::sync::mpsc::unbounded_channel::<ShellOutput>();
             let tool_fut = self.tool_registry.execute(
                 &tc,
                 session_id,
+                request_id,
                 self.mode,
                 allow_outside,
                 sensitive_approved,
                 &self.cancel,
-                Some(self.event_tx.clone()),
+                Some(shell_tx),
             );
 
             // Guard ensures ToolCompleted is sent if this future is
             // force-dropped (e.g. by JoinHandle::abort()), preventing the
             // TUI's running_tools from leaking.
-            let mut guard =
-                ToolCompletedGuard::new(session_id, Some(self.event_tx.clone()), tc.clone());
+            let mut guard = ToolCompletedGuard::new(
+                session_id,
+                request_id,
+                Some(self.event_tx.clone()),
+                shell_rx,
+                tc.clone(),
+            );
 
             // Directly await the tool. We do NOT use a select! with a cancel
             // branch here because doing so would drop the in-flight JoinHandle
@@ -873,6 +885,7 @@ impl AgentContext for CoreContext {
             // (write/edit/apply_patch/todowrite) are fast spawn_blocking
             // operations that complete in milliseconds anyway.
             let result = tool_fut.await;
+            guard.drain_shell_output();
             guard.disarm();
             self.emit(BackendEvent::ToolCompleted {
                 session_id,
@@ -1267,7 +1280,9 @@ impl AgentContext for CoreContext {
 /// the `execute_tools` future is force-dropped (e.g. by `JoinHandle::abort()`).
 struct ToolCompletedGuard {
     session_id: Uuid,
+    request_id: u64,
     event_tx: Option<UnboundedSender<BackendEvent>>,
+    shell_rx: Option<UnboundedReceiver<ShellOutput>>,
     tool_call: ToolCall,
     disarmed: bool,
 }
@@ -1275,14 +1290,35 @@ struct ToolCompletedGuard {
 impl ToolCompletedGuard {
     fn new(
         session_id: Uuid,
+        request_id: u64,
         event_tx: Option<UnboundedSender<BackendEvent>>,
+        shell_rx: UnboundedReceiver<ShellOutput>,
         tool_call: ToolCall,
     ) -> Self {
         Self {
             session_id,
+            request_id,
             event_tx,
+            shell_rx: Some(shell_rx),
             tool_call,
             disarmed: false,
+        }
+    }
+
+    fn drain_shell_output(&mut self) {
+        let Some(shell_rx) = self.shell_rx.as_mut() else {
+            return;
+        };
+        while let Ok(output) = shell_rx.try_recv() {
+            if let Some(ref tx) = self.event_tx {
+                let _ = tx.send(BackendEvent::ShellOutput {
+                    session_id: output.session_id,
+                    tool_call_id: output.tool_call_id,
+                    content: output.content,
+                    finished: output.finished,
+                    exit_code: output.exit_code,
+                });
+            }
         }
     }
 
@@ -1294,15 +1330,56 @@ impl ToolCompletedGuard {
 impl Drop for ToolCompletedGuard {
     fn drop(&mut self) {
         if !self.disarmed {
+            self.drain_shell_output();
             if let Some(ref tx) = self.event_tx {
                 let _ = tx.send(BackendEvent::ToolCompleted {
                     session_id: self.session_id,
-                    request_id: 0,
+                    request_id: self.request_id,
                     tool_call: self.tool_call.clone(),
                     result: Box::new(ToolExecutionResult::new("User cancelled the request")),
                 });
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tool_event_order_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn guard_drains_shell_output_before_tool_completed() {
+        let session_id = Uuid::new_v4();
+        let (backend_tx, mut backend_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (shell_tx, shell_rx) = tokio::sync::mpsc::unbounded_channel();
+        shell_tx
+            .send(ShellOutput {
+                session_id,
+                request_id: 7,
+                tool_call_id: "call-1".to_string(),
+                content: "partial output".to_string(),
+                finished: true,
+                exit_code: Some(0),
+            })
+            .unwrap();
+        drop(shell_tx);
+
+        drop(ToolCompletedGuard::new(
+            session_id,
+            7,
+            Some(backend_tx),
+            shell_rx,
+            ToolCall::default(),
+        ));
+
+        assert!(matches!(
+            backend_rx.recv().await,
+            Some(BackendEvent::ShellOutput { .. })
+        ));
+        assert!(matches!(
+            backend_rx.recv().await,
+            Some(BackendEvent::ToolCompleted { request_id: 7, .. })
+        ));
     }
 }
 
@@ -1497,7 +1574,7 @@ async fn execute_task_tool(
         system_prompt: agent_def.system_prompt.clone(),
         mode: spawner.mode,
         thinking_level: child_thinking_level,
-        event_tx: spawner.event_tx.clone(),
+        event_tx: child_ctx.event_tx(),
         cancel: config.cancel_token.clone(),
         // Subagents run in isolation — they don't process main-session
         // user messages, so give them a fresh empty queue.

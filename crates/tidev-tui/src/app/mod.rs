@@ -15,11 +15,9 @@ use std::time::Instant;
 
 use crate::theme::ThemePalette;
 use ratatui::layout::Rect;
-use tidev_core::TuiResponse;
+use tidev_core::{BackendEvent, TuiResponse};
 use tidev_core::{ApprovedTool, ToolCallWithViolations};
-use tidev_llm::message::{
-    BackendEvent, COMPACTION_MESSAGE_LABEL, Message, MessageAttachment, MessageRole,
-};
+use tidev_llm::message::{COMPACTION_MESSAGE_LABEL, Message, MessageAttachment, MessageRole};
 use tidev_llm::mode::SessionMode;
 use tidev_llm::reasoning::ThinkingLevelType;
 use tidev_tools::types::TodoItem;

@@ -884,11 +884,11 @@ pub async fn run_acp_agent() -> Result<()> {
 /// the LLM turn completes or fails.
 async fn run_event_loop(
     state: Arc<AcpState>,
-    mut event_rx: tokio::sync::mpsc::UnboundedReceiver<tidev_llm::message::BackendEvent>,
+    mut event_rx: tokio::sync::mpsc::UnboundedReceiver<tidev_core::BackendEvent>,
     cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>,
 ) {
     log::info!("ACP: event loop started, waiting for events");
-    use tidev_llm::message::BackendEvent;
+    use tidev_core::BackendEvent;
 
     while let Some(event) = event_rx.recv().await {
         log::debug!(
