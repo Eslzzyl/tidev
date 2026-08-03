@@ -94,16 +94,6 @@ max_output_tokens = 131072
 supports_streaming = true
 supports_images = true
 
-[providers.opencode-go.models.qwen-3-6-plus]
-api_type = "anthropic"
-base_url = "https://opencode.ai/zen/go/v1/messages"
-request_model_id = "qwen3.6-plus"
-display_name = "Qwen3.6 Plus"
-context_window = 200000
-max_output_tokens = 32768
-supports_streaming = true
-supports_images = true
-
 [providers.opencode-go.models.qwen-3-7-plus]
 api_type = "anthropic"
 base_url = "https://opencode.ai/zen/go/v1/messages"
@@ -123,3 +113,13 @@ context_window = 1048576
 max_output_tokens = 32768
 supports_streaming = true
 supports_images = false
+
+[providers.opencode-go.models.gpt-5-6-luna]
+api_type = "openai_responses"
+base_url = "https://opencode.ai/zen/go/v1"
+request_model_id = "gpt-5.6-luna"
+display_name = "GPT 5.6 Luna"
+context_window = 256000
+max_output_tokens = 32768
+supports_streaming = true
+supports_images = true
