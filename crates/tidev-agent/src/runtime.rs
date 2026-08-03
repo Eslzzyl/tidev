@@ -161,6 +161,11 @@ impl AgentRuntime {
         self.session_id
     }
 
+    /// Execute one registered tool without entering the agent loop.
+    pub async fn execute_tool(&self, call: &ToolCall) -> Result<ToolExecutionResult> {
+        self.tools.execute(call, self).await
+    }
+
     fn emit(&self, event: AgentEvent) {
         let _ = self.event_tx.send(event);
     }
@@ -208,6 +213,16 @@ impl AgentRuntime {
 struct RuntimeToolContext {
     workspace_root: PathBuf,
     event_tx: UnboundedSender<AgentEvent>,
+}
+
+impl ToolContext for AgentRuntime {
+    fn workspace_root(&self) -> &Path {
+        &self.workspace_root
+    }
+
+    fn event_tx(&self) -> UnboundedSender<AgentEvent> {
+        self.event_tx.clone()
+    }
 }
 
 impl ToolContext for RuntimeToolContext {
