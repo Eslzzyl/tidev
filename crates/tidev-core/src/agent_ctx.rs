@@ -23,13 +23,13 @@ use tidev_agent::{
 };
 use tidev_config::auth::ActiveModel;
 use tidev_config::{AppConfig, AuthStore};
-use tidev_types::agent_type::{AgentDefinition, AgentType};
-use tidev_types::message::{
+use crate::agent_type::{AgentDefinition, AgentType};
+use tidev_llm::message::{
     AssistantTurn, BackendEvent, Message, MessageRole, ToolCall, ToolExecutionResult,
 };
-use tidev_types::prompts::SessionMode;
-use tidev_types::reasoning::ThinkingLevelType;
-use tidev_types::tools::ToolDefinition;
+use tidev_llm::mode::SessionMode;
+use tidev_llm::reasoning::ThinkingLevelType;
+use tidev_tools::types::ToolDefinition;
 use tidev_utils::path::{
     extract_boundary_violation_path, extract_sensitive_file_path, load_sensitive_patterns,
 };
@@ -55,10 +55,10 @@ use crate::session::SessionManager;
 /// `<system-reminder>` tags instead (see `inject_instructions`).
 /// Mode reminders are injected into user messages instead (see `inject_mode_reminder`).
 pub fn compose_system_prompt(
-    agent_type: tidev_types::agent_type::AgentType,
+    agent_type: crate::agent_type::AgentType,
     workspace_root: &std::path::Path,
 ) -> String {
-    let base_prompt = tidev_agent::prompts::system_prompt(agent_type);
+    let base_prompt = crate::agent_type::system_prompt(agent_type);
 
     // Environment info (detected once, frozen for the session lifetime).
     let system_info = crate::system_info::SystemInfo::detect();
@@ -104,28 +104,18 @@ fn read_only_tool_names() -> HashSet<&'static str> {
 
 /// Whether a tool call is read-only (and may thus run in parallel with others).
 fn is_read_only(name: &str) -> bool {
-    read_only_tool_names().contains(tidev_types::tools::canonical_tool_name(name).unwrap_or(name))
+    read_only_tool_names().contains(tidev_utils::tool_name::canonical_tool_name(name).unwrap_or(name))
 }
 
 // ---------------------------------------------------------------------------
 // Conversions
 // ---------------------------------------------------------------------------
 
-/// Convert a `tidev_config::ApiType` to the `tidev_llm` equivalent.
-fn to_llm_api_type(t: tidev_config::ApiType) -> tidev_llm::ApiType {
-    match t {
-        tidev_config::ApiType::OpenAiChatCompletions => tidev_llm::ApiType::OpenAiChatCompletions,
-        tidev_config::ApiType::OpenAiResponses => tidev_llm::ApiType::OpenAiResponses,
-        tidev_config::ApiType::Anthropic => tidev_llm::ApiType::Anthropic,
-        tidev_config::ApiType::GoogleGemini => tidev_llm::ApiType::GoogleGemini,
-    }
-}
-
 /// Build an [`LlmProviderConfig`] from a resolved [`ActiveModel`].
 pub fn to_llm_provider_config(model: &ActiveModel) -> LlmProviderConfig {
     LlmProviderConfig {
         provider_id: model.provider_id.clone(),
-        api_type: to_llm_api_type(model.api_type),
+        api_type: model.api_type,
         api_key: model.api_key.clone(),
         base_url: model.base_url.clone(),
         model_id: model.model_id.clone(),
@@ -443,8 +433,8 @@ impl CoreContext {
 #[async_trait]
 impl AgentContext for CoreContext {
     // -----------------------------------------------------------------------
-    fn tools(&self) -> Vec<ToolDefinition> {
-        self.tools.clone()
+    fn tools(&self) -> Vec<tidev_llm::ToolDefinition> {
+        self.tools.iter().map(to_llm_tool_def).collect()
     }
 
     fn event_tx(&self) -> UnboundedSender<BackendEvent> {
@@ -642,7 +632,7 @@ impl AgentContext for CoreContext {
 
             // The question tool must always be routed to the TUI for user
             // interaction — it is never executed on the backend.
-            if tidev_types::tools::canonical_tool_name(&tc.name) == Some("question") {
+            if tidev_utils::tool_name::canonical_tool_name(&tc.name) == Some("question") {
                 pending.push(ToolCallWithViolations {
                     tool_call: tc.clone(),
                     workspace_boundary_violation: None,
@@ -730,7 +720,7 @@ impl AgentContext for CoreContext {
 
             let tc = approved.tool_call.clone();
 
-            if tidev_types::tools::canonical_tool_name(&tc.name) == Some("task") {
+            if tidev_utils::tool_name::canonical_tool_name(&tc.name) == Some("task") {
                 task_calls.push((tc, approved.child_session_id));
             } else if is_read_only(&tc.name) {
                 read_only.push((tc, approved.allow_outside, approved.sensitive_file_approved));
@@ -1377,6 +1367,17 @@ async fn execute_task_tool(
     let agent_type = AgentType::parse(subagent_type_str)
         .ok_or_else(|| anyhow::anyhow!("unknown subagent type '{subagent_type_str}'"))?;
 
+    // Plan mode rejects delegation to fixer subagents (they perform writes).
+    // Moved here from tidev-tools task.rs: the main loop intercepts all task
+    // calls in execute_tools, so this check only takes effect in core.
+    if spawner.mode == SessionMode::Plan && agent_type == AgentType::Fixer {
+        anyhow::bail!(
+            "Task delegation to fixer subagent rejected: Plan mode is read-only and does not allow write operations. \
+            You may delegate to read-only subagents (explorer, librarian, oracle) in plan mode. \
+            Switch to build mode to use the fixer subagent."
+        );
+    }
+
     // 2. Build agent definition.
     let agent_def = build_agent_def(agent_type, &spawner.system_prompt);
 
@@ -1426,7 +1427,7 @@ async fn execute_task_tool(
 
     // 5. Create child buffer + seed with the user prompt.
     let child_buffer = Arc::new(RwLock::new(MessageBuffer::empty()));
-    let user_msg = Message::new(tidev_types::message::MessageRole::User, prompt);
+    let user_msg = Message::new(tidev_llm::message::MessageRole::User, prompt);
     child_buffer.write().await.append(user_msg.clone());
     spawner
         .session_manager
@@ -1493,7 +1494,7 @@ async fn execute_task_tool(
 
     let loop_config = AgentLoopConfig {
         session_id: child_session_id,
-        definition: agent_def,
+        system_prompt: agent_def.system_prompt.clone(),
         mode: spawner.mode,
         thinking_level: child_thinking_level,
         event_tx: spawner.event_tx.clone(),
@@ -1512,7 +1513,7 @@ async fn execute_task_tool(
         buf.load()
             .iter()
             .rev()
-            .find(|m| m.role == tidev_types::message::MessageRole::Assistant)
+            .find(|m| m.role == tidev_llm::message::MessageRole::Assistant)
             .cloned()
     };
 
@@ -1563,7 +1564,7 @@ fn filter_subagent_tools(
         .iter()
         .filter(|def| {
             let name = &def.name;
-            let canonical = tidev_types::tools::canonical_tool_name(name).unwrap_or(name.as_str());
+            let canonical = tidev_utils::tool_name::canonical_tool_name(name).unwrap_or(name.as_str());
 
             // Plan mode or read-only agent: only read tools.
             if mode == SessionMode::Plan || read_only {
@@ -1578,7 +1579,7 @@ fn filter_subagent_tools(
         })
         .filter(|def| {
             let name = &def.name;
-            let canonical = tidev_types::tools::canonical_tool_name(name).unwrap_or(name.as_str());
+            let canonical = tidev_utils::tool_name::canonical_tool_name(name).unwrap_or(name.as_str());
             // Extra safety: never include write tools for read-only agents.
             if read_only && is_write_tool(canonical) {
                 return false;
@@ -1587,7 +1588,7 @@ fn filter_subagent_tools(
         })
         // Never include the task tool — subagents must not spawn further subagents.
         .filter(|def| {
-            let canonical = tidev_types::tools::canonical_tool_name(&def.name).unwrap_or(&def.name);
+            let canonical = tidev_utils::tool_name::canonical_tool_name(&def.name).unwrap_or(&def.name);
             canonical != "task"
         })
         .cloned()

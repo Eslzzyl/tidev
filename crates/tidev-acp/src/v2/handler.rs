@@ -12,8 +12,8 @@ use uuid::Uuid;
 
 use tidev_config::ThinkingMatcher;
 use tidev_core::Runtime;
-use tidev_types::message::{MessageAttachment, MessageRole};
-use tidev_types::prompts::SessionMode;
+use tidev_llm::message::{MessageAttachment, MessageRole};
+use tidev_llm::mode::SessionMode;
 use tidev_utils::session::title_from_prompt;
 
 struct State {
@@ -47,7 +47,7 @@ fn available_commands(mode: SessionMode) -> acp::AvailableCommandsUpdate {
 
 pub(crate) fn build_agent(
     runtime: Runtime,
-    event_rx_slot: ReceiverSlot<tidev_types::message::BackendEvent>,
+    event_rx_slot: ReceiverSlot<tidev_llm::message::BackendEvent>,
     request_rx_slot: ReceiverSlot<tidev_core::TuiRequest>,
 ) -> impl ConnectTo<agent_client_protocol::Client> {
     let state = Arc::new(State {
@@ -235,7 +235,7 @@ pub(crate) fn build_agent(
                         if *state.current_mode.read().await != SessionMode::Build {
                             return Err(invalid_error("/init requires Build mode"));
                         }
-                        content = tidev_types::prompts::init_command_with_args(&args);
+                        content = tidev_core::prompts::init_command_with_args(&args);
                         SessionMode::Build
                     } else {
                         *state.current_mode.read().await
@@ -343,7 +343,7 @@ pub(crate) fn build_agent(
 
 async fn run_event_loop(
     state: Arc<State>,
-    mut event_rx: tokio::sync::mpsc::UnboundedReceiver<tidev_types::message::BackendEvent>,
+    mut event_rx: tokio::sync::mpsc::UnboundedReceiver<tidev_llm::message::BackendEvent>,
     cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>,
 ) {
     while let Some(event) = event_rx.recv().await {
@@ -420,7 +420,7 @@ async fn replay_messages(
                     let Some(tool_call_id) = message.tool_call_id.clone() else {
                         continue;
                     };
-                    let tool_call = tidev_types::message::ToolCall {
+                    let tool_call = tidev_llm::message::ToolCall {
                         id: tool_call_id,
                         name: message
                             .tool_name

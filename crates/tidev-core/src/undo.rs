@@ -4,7 +4,7 @@
 //! (snapshot capture, persistence, event emission) lives in [`Runtime`](crate::Runtime).
 
 use tidev_snapshot::Patch;
-use tidev_types::message::{COMPACTION_MESSAGE_LABEL, Message, MessageRole};
+use tidev_llm::message::{COMPACTION_MESSAGE_LABEL, Message, MessageRole};
 use uuid::Uuid;
 
 // ---------------------------------------------------------------------------

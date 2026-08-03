@@ -366,7 +366,7 @@ pub struct Message {
     #[serde(default)]
     pub file_diffs: Option<String>,
     #[serde(default)]
-    pub mode: Option<crate::prompts::SessionMode>,
+    pub mode: Option<crate::mode::SessionMode>,
     #[serde(default)]
     pub thinking_level: Option<crate::reasoning::ThinkingLevelType>,
 }
@@ -531,6 +531,7 @@ impl Message {
 // BackendEvent
 // ---------------------------------------------------------------------------
 
+// TODO(event-split): move to tidev-core when LlmEvent/AgentEvent land.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum BackendEvent {
     Delta {
@@ -670,7 +671,7 @@ pub enum BackendEvent {
 pub struct QueuedUserMessage {
     pub content: String,
     pub attachments: Vec<MessageAttachment>,
-    pub mode: crate::prompts::SessionMode,
+    pub mode: crate::mode::SessionMode,
     pub thinking_level: Option<crate::reasoning::ThinkingLevelType>,
 }
 

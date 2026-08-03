@@ -7,8 +7,8 @@ use crate::chat_context::ChatContext;
 use ratatui::prelude::Style;
 use ratatui::text::{Line, Span};
 use rayon::prelude::*;
-use tidev_types::message::{Message, MessageAttachment, MessageRole};
-use tidev_types::tools::canonical_tool_name;
+use tidev_llm::message::{Message, MessageAttachment, MessageRole};
+use tidev_utils::tool_name::canonical_tool_name;
 use uuid::Uuid;
 
 use crate::components::chat::layout_index::{MessageBlock, MessageLayoutIndex};

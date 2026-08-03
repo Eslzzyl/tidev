@@ -7,7 +7,7 @@ license.workspace = true
 description = "Agent types and execution loop for tidev"
 
 [dependencies]
-tidev-types = { path = "../tidev-types" }
+tidev-llm = { path = "../tidev-llm" }
 serde = { version = "1", features = ["derive"] }
 async-trait = "0.1"
 tokio = { version = "1", features = ["sync"] }

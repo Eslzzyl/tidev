@@ -16,7 +16,8 @@ serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
 zstd = { version = "0.13", default-features = false }
-tidev-types = { path = "../tidev-types" }
+tidev-llm = { path = "../tidev-llm" }
+tidev-tools = { path = "../tidev-tools" }
 
 [dev-dependencies]
 tempfile = "3"

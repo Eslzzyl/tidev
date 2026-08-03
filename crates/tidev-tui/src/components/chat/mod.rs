@@ -13,8 +13,8 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use lru::LruCache;
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use tidev_types::message::{BackendEvent, Message, MessageAttachment};
-use tidev_types::prompts::SessionMode;
+use tidev_llm::message::{BackendEvent, Message, MessageAttachment};
+use tidev_llm::mode::SessionMode;
 use uuid::Uuid;
 
 use crate::action::{Action, ChatAction, OverlayAction, OverlayKind, SessionAction};
@@ -28,7 +28,7 @@ use crate::components::chat::streaming::StreamingBuffer;
 use crate::components::chat::tool::tool_call_arguments_are_complete;
 use crate::context::{DrawContext, InitContext, UpdateContext};
 use scroll::{ScrollbarDrag, compute_scrollbar_rect};
-use tidev_types::tools::canonical_tool_name;
+use tidev_utils::tool_name::canonical_tool_name;
 
 /// A non-subagent tool currently being executed by the agent loop.
 #[derive(Clone, Debug)]
@@ -197,7 +197,7 @@ impl MessageList {
                 && ctx
                     .messages
                     .iter()
-                    .any(|m| m.streaming && m.role == tidev_types::message::MessageRole::Assistant)
+                    .any(|m| m.streaming && m.role == tidev_llm::message::MessageRole::Assistant)
             {
                 self.streaming_buffer.recover_or_begin_streaming(
                     &mut self.chat_contexts.get_mut(&session_id).unwrap().messages,
@@ -235,7 +235,7 @@ impl MessageList {
             && ctx
                 .messages
                 .iter()
-                .any(|m| m.streaming && m.role == tidev_types::message::MessageRole::Assistant)
+                .any(|m| m.streaming && m.role == tidev_llm::message::MessageRole::Assistant)
         {
             self.streaming_buffer.recover_or_begin_streaming(
                 &mut self.chat_contexts.get_mut(&session_id).unwrap().messages,
@@ -270,12 +270,12 @@ impl MessageList {
 
         let tool_result_ids: std::collections::HashSet<&str> = messages
             .iter()
-            .filter(|m| m.role == tidev_types::message::MessageRole::Tool)
+            .filter(|m| m.role == tidev_llm::message::MessageRole::Tool)
             .filter_map(|m| m.tool_call_id.as_deref())
             .collect();
 
         for msg in messages {
-            if msg.role == tidev_types::message::MessageRole::Tool
+            if msg.role == tidev_llm::message::MessageRole::Tool
                 && msg.tool_name.as_deref() == Some("task")
                 && let Some(csid) = msg.metadata.child_session_id
             {
@@ -284,7 +284,7 @@ impl MessageList {
                 let assistant_id = messages
                     .iter()
                     .find(|m| {
-                        m.role == tidev_types::message::MessageRole::Assistant
+                        m.role == tidev_llm::message::MessageRole::Assistant
                             && m.tool_calls
                                 .iter()
                                 .any(|tc| Some(tc.id.as_str()) == msg.tool_call_id.as_deref())
@@ -295,7 +295,7 @@ impl MessageList {
                 }
             }
 
-            if msg.role == tidev_types::message::MessageRole::Assistant {
+            if msg.role == tidev_llm::message::MessageRole::Assistant {
                 let msg_csid = msg.metadata.child_session_id;
                 for tc in &msg.tool_calls {
                     if canonical_tool_name(&tc.name) == Some("task")
@@ -351,7 +351,7 @@ impl MessageList {
             .messages
             .iter_mut()
             .rev()
-            .find(|m| m.role == tidev_types::message::MessageRole::Assistant)
+            .find(|m| m.role == tidev_llm::message::MessageRole::Assistant)
         {
             let msg_id = msg.id;
             msg.input_tokens = input_tokens;
@@ -382,7 +382,7 @@ impl MessageList {
         };
         let msg_id = self.streaming_buffer.current_message_id;
         if let Some(msg) = chat_context.messages.iter_mut().rev().find(|m| m.streaming) {
-            msg.role = tidev_types::message::MessageRole::Error;
+            msg.role = tidev_llm::message::MessageRole::Error;
             msg.content = format!("Request failed: {error}");
             msg.completed_at = Some(Utc::now());
             if let Some(mid) = msg_id {
@@ -421,7 +421,7 @@ impl MessageList {
             })
             .or_else(|| {
                 chat_context.messages.iter().rposition(|m| {
-                    m.role == tidev_types::message::MessageRole::Assistant
+                    m.role == tidev_llm::message::MessageRole::Assistant
                         && !m.streaming
                         && m.content.is_empty()
                         && m.reasoning.trim().is_empty()
@@ -609,7 +609,7 @@ impl MessageList {
                     // Background session: just push a streaming placeholder.
                     // The streaming_buffer is reserved for the active session.
                     let msg = Message::streaming(
-                        tidev_types::message::MessageRole::Assistant,
+                        tidev_llm::message::MessageRole::Assistant,
                         String::new(),
                     );
                     chat_context.messages.push(msg);
@@ -718,7 +718,7 @@ impl MessageList {
                 } else {
                     // Recovery path: find any streaming Assistant message.
                     if let Some(idx) = chat_context.messages.iter().rposition(|m| {
-                        m.streaming && m.role == tidev_types::message::MessageRole::Assistant
+                        m.streaming && m.role == tidev_llm::message::MessageRole::Assistant
                     }) {
                         chat_context.messages[idx].streaming = false;
                         chat_context.messages[idx].reasoning_started_at = *reasoning_started_at;
@@ -738,7 +738,7 @@ impl MessageList {
                 // it up so we add the tool call to the right message.
                 if !self.streaming_buffer.is_streaming
                     && chat_context.messages.iter().any(|m| {
-                        m.streaming && m.role == tidev_types::message::MessageRole::Assistant
+                        m.streaming && m.role == tidev_llm::message::MessageRole::Assistant
                     })
                 {
                     self.streaming_buffer
@@ -756,7 +756,7 @@ impl MessageList {
                         .messages
                         .iter_mut()
                         .rev()
-                        .find(|m| m.role == tidev_types::message::MessageRole::Assistant)
+                        .find(|m| m.role == tidev_llm::message::MessageRole::Assistant)
                 };
                 if let Some(msg) = target {
                     msg.upsert_tool_call(tool_call.clone());
@@ -778,7 +778,7 @@ impl MessageList {
                     // Shell output was streamed via ShellOutput — find and finalize
                     // the existing streaming Tool message instead of creating a new one.
                     if let Some(idx) = chat_context.messages.iter().rposition(|m| {
-                        m.role == tidev_types::message::MessageRole::Tool
+                        m.role == tidev_llm::message::MessageRole::Tool
                             && m.tool_call_id.as_deref() == Some(&tool_call.id)
                             && m.streaming
                     }) {
@@ -790,13 +790,13 @@ impl MessageList {
                     // Dedup: if a message for this tool_call_id already exists,
                     // update its content instead of pushing a duplicate.
                     let existing = chat_context.messages.iter_mut().rfind(|m| {
-                        m.role == tidev_types::message::MessageRole::Tool
+                        m.role == tidev_llm::message::MessageRole::Tool
                             && m.tool_call_id.as_deref() == Some(&tool_call.id)
                     });
                     if let Some(existing) = existing {
                         existing.content = result.output.clone();
                     } else {
-                        let tool_msg = tidev_types::message::Message::tool_result(
+                        let tool_msg = tidev_llm::message::Message::tool_result(
                             tool_call.id.clone(),
                             tool_call.name.clone(),
                             (**result).clone(),
@@ -825,7 +825,7 @@ impl MessageList {
                             .iter()
                             .rev()
                             .find(|m| {
-                                m.role == tidev_types::message::MessageRole::Assistant
+                                m.role == tidev_llm::message::MessageRole::Assistant
                                     && m.tool_calls.iter().any(|tc| tc.id == tool_call.id)
                             })
                             .map(|m| m.id);
@@ -861,7 +861,7 @@ impl MessageList {
                     finished,
                 );
                 let existing = chat_context.messages.iter_mut().rev().find(|m| {
-                    m.role == tidev_types::message::MessageRole::Tool
+                    m.role == tidev_llm::message::MessageRole::Tool
                         && m.tool_call_id.as_deref() == Some(tool_call_id)
                 });
                 if let Some(msg) = existing {
@@ -875,8 +875,8 @@ impl MessageList {
                     self.layout_index
                         .mark_block_dirty(&chat_context.messages, msg_id);
                 } else {
-                    let mut msg = tidev_types::message::Message::streaming(
-                        tidev_types::message::MessageRole::Tool,
+                    let mut msg = tidev_llm::message::Message::streaming(
+                        tidev_llm::message::MessageRole::Tool,
                         content.clone(),
                     );
                     msg.tool_call_id = Some(tool_call_id.clone());
@@ -916,7 +916,7 @@ impl MessageList {
                 // Sync child_session_id into the assistant message's metadata
                 // so rebuild_subagent_state() can recover it from messages.
                 if let Some(msg) = chat_context.messages.iter_mut().rev().find(|m| {
-                    m.role == tidev_types::message::MessageRole::Assistant
+                    m.role == tidev_llm::message::MessageRole::Assistant
                         && m.tool_calls.iter().any(|tc| tc.id == *tool_call_id)
                 }) {
                     msg.metadata.child_session_id = Some(*child_session_id);
@@ -970,15 +970,15 @@ impl MessageList {
                         // a streaming System message, finalize it.  Otherwise
                         // create a compaction message.
                         let found = chat_context.messages.iter_mut().rev().find(|m| {
-                            m.streaming && m.role == tidev_types::message::MessageRole::System
+                            m.streaming && m.role == tidev_llm::message::MessageRole::System
                         });
                         if let Some(msg) = found {
                             msg.streaming = false;
                             msg.model_id = model_id.clone();
                             msg.completed_at = *completed_at;
                         } else {
-                            let mut compaction_msg = tidev_types::message::Message::new(
-                                tidev_types::message::MessageRole::System,
+                            let mut compaction_msg = tidev_llm::message::Message::new(
+                                tidev_llm::message::MessageRole::System,
                                 format!("Compaction\n\n{}", summary),
                             );
                             compaction_msg.model_id = model_id.clone();
@@ -1085,7 +1085,7 @@ impl MessageList {
     /// that would be wrong for word-wrapped / tool-call-heavy content.
     fn resolve_scroll_to_message(
         &self,
-        messages: &[tidev_types::message::Message],
+        messages: &[tidev_llm::message::Message],
         target_id: uuid::Uuid,
     ) -> Option<usize> {
         self.layout_index.find_scroll_offset(messages, target_id)
@@ -1464,7 +1464,7 @@ fn latest_assistant_has_pending_tool_results(messages: &[Message]) -> bool {
         .enumerate()
         .rev()
         .find(|(_, message)| {
-            message.role == tidev_types::message::MessageRole::Assistant
+            message.role == tidev_llm::message::MessageRole::Assistant
                 && !message.tool_calls.is_empty()
         })
     else {
@@ -1473,7 +1473,7 @@ fn latest_assistant_has_pending_tool_results(messages: &[Message]) -> bool {
 
     assistant.tool_calls.iter().any(|tool_call| {
         !messages[assistant_idx + 1..].iter().any(|message| {
-            message.role == tidev_types::message::MessageRole::Tool
+            message.role == tidev_llm::message::MessageRole::Tool
                 && message.tool_call_id.as_deref() == Some(tool_call.id.as_str())
         })
     })
@@ -1481,7 +1481,7 @@ fn latest_assistant_has_pending_tool_results(messages: &[Message]) -> bool {
 
 fn append_interruption_notice(messages: &mut Vec<Message>) {
     let mut err_msg = Message::new(
-        tidev_types::message::MessageRole::Error,
+        tidev_llm::message::MessageRole::Error,
         "Request interrupted by user",
     );
     err_msg.completed_at = Some(Utc::now());

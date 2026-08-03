@@ -4,7 +4,7 @@
 //! go through this buffer; writes are synchronously dual-written
 //! (cache + DB) by the caller.
 
-use tidev_types::message::Message;
+use tidev_llm::message::Message;
 
 /// In-memory authoritative copy of a session's messages.
 ///

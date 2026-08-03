@@ -19,9 +19,10 @@ use std::path::Path;
 use crate::theme::ThemePalette;
 use ratatui::prelude::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use tidev_types::message::{Message, ToolCall};
-use tidev_types::tools::{TaskArgs, canonical_tool_name};
+use tidev_llm::message::{Message, ToolCall};
+use tidev_tools::types::TaskArgs;
 use tidev_utils::path::display_workspace_relative;
+use tidev_utils::tool_name::canonical_tool_name;
 use unicode_width::UnicodeWidthStr;
 
 use crate::ansi::ansi_to_styled_line;
@@ -1047,7 +1048,7 @@ mod tests {
     use ratatui::style::Color;
     use std::collections::HashSet;
     use std::path::Path;
-    use tidev_types::message::{Message, ToolCall, ToolExecutionResult};
+    use tidev_llm::message::{Message, ToolCall, ToolExecutionResult};
 
     fn test_palette() -> ThemePalette {
         ThemePalette {

@@ -13,7 +13,7 @@ use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph, Wrap};
 use tidev_core::FileDiff;
-use tidev_types::tools::TodoItem;
+use tidev_tools::types::TodoItem;
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::ContextUsage;
@@ -110,7 +110,7 @@ impl Sidebar {
             let session_tps: Vec<f32> = ctx
                 .messages
                 .iter()
-                .filter(|m| matches!(m.role, tidev_types::message::MessageRole::Assistant))
+                .filter(|m| matches!(m.role, tidev_llm::message::MessageRole::Assistant))
                 .filter_map(|m| m.tokens_per_second)
                 .collect();
 
@@ -144,7 +144,7 @@ impl Sidebar {
             for m in ctx
                 .messages
                 .iter()
-                .filter(|m| matches!(m.role, tidev_types::message::MessageRole::Assistant))
+                .filter(|m| matches!(m.role, tidev_llm::message::MessageRole::Assistant))
             {
                 token_usage.add(TokenUsage::new(
                     m.input_tokens.unwrap_or(0),
@@ -195,7 +195,7 @@ impl Sidebar {
             let request_count = ctx
                 .messages
                 .iter()
-                .filter(|m| matches!(m.role, tidev_types::message::MessageRole::Assistant))
+                .filter(|m| matches!(m.role, tidev_llm::message::MessageRole::Assistant))
                 .count();
             lines.push(Line::from(vec![Span::styled(
                 format!("Requests: {request_count}"),

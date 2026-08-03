@@ -451,7 +451,7 @@ pub(crate) fn execute_command(action: CommandAction, args: &[String]) -> Vec<Act
             vec![Action::Session(SessionAction::Compact)]
         }
         CommandAction::Init => {
-            let prompt = tidev_types::prompts::init_command_with_args(&args.join(" "));
+            let prompt = tidev_core::prompts::init_command_with_args(&args.join(" "));
             vec![Action::Chat(ChatAction::SetInput(prompt))]
         }
     }

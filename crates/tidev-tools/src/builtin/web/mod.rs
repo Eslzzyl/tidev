@@ -20,8 +20,8 @@ use serde_json::Value;
 
 use tidev_config::AuthStore;
 use tidev_config::{WebSearchConfig, WebSearchProviderConfig};
-use tidev_types::tools::{ToolDefinition, ToolPermission};
-use tidev_types::tools::{WebFetchArgs as WebFetchToolArgs, WebSearchArgs as WebSearchToolArgs};
+use crate::types::{ToolDefinition, ToolPermission};
+use crate::types::{WebFetchArgs as WebFetchToolArgs, WebSearchArgs as WebSearchToolArgs};
 
 // ---------------------------------------------------------------------------
 // Provider trait
@@ -137,7 +137,7 @@ pub async fn execute_tool_call_async(
     web_search_config: &WebSearchConfig,
     auth_store: &AuthStore,
 ) -> Result<String> {
-    match tidev_types::tools::canonical_tool_name(tool_name) {
+    match tidev_utils::tool_name::canonical_tool_name(tool_name) {
         Some("websearch") => {
             let args = serde_json::from_value::<WebSearchToolArgs>(arguments)?;
             execute_search(args, web_search_config, auth_store).await

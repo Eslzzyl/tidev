@@ -10,7 +10,10 @@ mod attachments;
 mod debug;
 mod error;
 mod gemini;
+pub mod message;
+pub mod mode;
 mod openai;
+pub mod reasoning;
 mod responses;
 mod think_parser;
 mod tool_call_format;
@@ -25,7 +28,7 @@ use std::time::Duration;
 use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 
-use tidev_types::message::{BackendEvent, Message};
+use crate::message::{BackendEvent, Message};
 
 use error::{MAX_RETRIES, backoff_delay, backoff_sleep, classify_anyhow_error};
 
@@ -82,7 +85,7 @@ impl LlmClient {
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
         tx: UnboundedSender<BackendEvent>,
-        thinking_level: tidev_types::reasoning::ThinkingLevelType,
+        thinking_level: crate::reasoning::ThinkingLevelType,
     ) {
         let result = self
             .stream_chat_with_retry(
@@ -130,7 +133,7 @@ impl LlmClient {
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
         tx: UnboundedSender<BackendEvent>,
-        thinking_level: tidev_types::reasoning::ThinkingLevelType,
+        thinking_level: crate::reasoning::ThinkingLevelType,
     ) -> Result<()> {
         // Determine how many retries we can afford.
         let max = MAX_RETRIES;
@@ -291,7 +294,7 @@ impl LlmClient {
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
         tx: UnboundedSender<BackendEvent>,
-        thinking_level: tidev_types::reasoning::ThinkingLevelType,
+        thinking_level: crate::reasoning::ThinkingLevelType,
     ) -> Result<()> {
         match model.api_type {
             ApiType::Anthropic => {

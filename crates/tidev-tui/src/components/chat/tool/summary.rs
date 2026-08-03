@@ -3,8 +3,8 @@ use std::path::Path;
 use crate::theme::ThemePalette;
 use ratatui::prelude::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use tidev_types::message::{Message, MessageAttachment, ToolCall};
-use tidev_types::tools::canonical_tool_name;
+use tidev_llm::message::{Message, MessageAttachment, ToolCall};
+use tidev_utils::tool_name::canonical_tool_name;
 use tidev_utils::path::display_workspace_relative;
 use unicode_width::UnicodeWidthStr;
 

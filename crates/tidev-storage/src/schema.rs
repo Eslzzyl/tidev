@@ -308,7 +308,7 @@ pub struct Conversation {
     pub updated_at: chrono::DateTime<chrono::Utc>,
     pub context_summary: Option<String>,
     pub context_retained_from: usize,
-    pub messages: Vec<tidev_types::message::Message>,
+    pub messages: Vec<tidev_llm::message::Message>,
     pub revert_message_id: Option<uuid::Uuid>,
 }
 

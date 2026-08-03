@@ -32,7 +32,7 @@ use unicode_width::UnicodeWidthChar;
 use crate::action::{Action, ChatAction};
 use crate::component::Component;
 use crate::context::DrawContext;
-use tidev_types::message::MessageAttachment;
+use tidev_llm::message::MessageAttachment;
 
 pub(crate) use at_mention::AtMentionState;
 pub(crate) use command_palette::{CommandPaletteState, CommandRegistry};

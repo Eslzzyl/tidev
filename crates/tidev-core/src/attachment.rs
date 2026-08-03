@@ -12,7 +12,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use tidev_types::message::MessageAttachment;
+use tidev_llm::message::MessageAttachment;
 
 /// Build [`MessageAttachment`] values for a list of `@`-referenced paths.
 ///

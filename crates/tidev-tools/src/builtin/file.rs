@@ -10,11 +10,9 @@ use std::{
 use super::apply_patch;
 use super::utils::{display_workspace_relative, read_existing_text, resolve_workspace_path};
 use crate::builtin::utils::decode_tool_args;
+use crate::types::{ApplyPatchArgs, EditArgs, ReadArgs, ToolDefinition, ToolPermission, WriteArgs};
 use tidev_instructions::resolve_nearby_instructions;
-use tidev_types::message::{FileChangeInfo, MessageAttachment, ToolExecutionResult, ToolMetadata};
-use tidev_types::tools::{
-    ApplyPatchArgs, EditArgs, ReadArgs, ToolDefinition, ToolPermission, WriteArgs,
-};
+use tidev_llm::message::{FileChangeInfo, MessageAttachment, ToolExecutionResult, ToolMetadata};
 
 const MAX_LINE_LENGTH: usize = 2000;
 const MAX_LINE_SUFFIX: &str = "... (line truncated to 2000 chars)";
@@ -71,8 +69,8 @@ pub fn execute_tool_call(
     _max_output_bytes: usize,
     allow_outside: bool,
     sensitive_file_approved: bool,
-) -> Result<tidev_types::message::ToolExecutionResult> {
-    match tidev_types::tools::canonical_tool_name(tool_name) {
+) -> Result<tidev_llm::message::ToolExecutionResult> {
+    match tidev_utils::tool_name::canonical_tool_name(tool_name) {
         Some("read") => {
             let args = decode_tool_args::<ReadArgs>(tool_name, arguments)?;
             read_path(

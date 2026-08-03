@@ -1,8 +1,8 @@
 //! Type conversions between tidev internal types and ACP v1 schema types.
 
 use agent_client_protocol::schema::v1 as acp;
-use tidev_types::message::{MessageAttachment, ToolCall, ToolExecutionResult};
-use tidev_types::tools::canonical_tool_name;
+use tidev_llm::message::{MessageAttachment, ToolCall, ToolExecutionResult};
+use tidev_utils::tool_name::canonical_tool_name;
 
 // ---------------------------------------------------------------------------
 // Title helpers — matches TUI style (bare infinitive, no emoji)

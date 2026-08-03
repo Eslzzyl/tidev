@@ -16,8 +16,8 @@ use uuid::Uuid;
 
 use tidev_config::{AppConfig, AuthStore, ThinkingMatcher, auth::ActiveModel};
 use tidev_core::Runtime;
-use tidev_types::message::MessageRole;
-use tidev_types::prompts::SessionMode;
+use tidev_llm::message::MessageRole;
+use tidev_llm::mode::SessionMode;
 use tidev_utils::session::title_from_prompt;
 
 /// Shared state accessible from all ACP request handlers.
@@ -586,7 +586,7 @@ pub async fn run_acp_agent() -> Result<()> {
                                 return Err(agent_client_protocol::Error::invalid_request()
                                     .data("/init requires Build mode"));
                             }
-                            content = tidev_types::prompts::init_command_with_args(&args);
+                            content = tidev_core::prompts::init_command_with_args(&args);
                             log::info!(
                                 "ACP: expanding /init command for session={session_id}, args_len={}",
                                 args.len()
@@ -775,7 +775,7 @@ pub async fn run_acp_agent() -> Result<()> {
                                     || tl_str.ends_with(":off");
                                 if tl.is_none() && !is_off {
                                     // Still need to validate that the string is parseable.
-                                    let parsed = tidev_types::reasoning::ThinkingLevelType::from_string(&tl_str);
+                                    let parsed = tidev_llm::reasoning::ThinkingLevelType::from_string(&tl_str);
                                     if parsed.is_none() && tl_str != "none" {
                                         return Err(invalid_value("thought_level",
                                             &format!("unknown thinking level: {tl_str}")));
@@ -884,11 +884,11 @@ pub async fn run_acp_agent() -> Result<()> {
 /// the LLM turn completes or fails.
 async fn run_event_loop(
     state: Arc<AcpState>,
-    mut event_rx: tokio::sync::mpsc::UnboundedReceiver<tidev_types::message::BackendEvent>,
+    mut event_rx: tokio::sync::mpsc::UnboundedReceiver<tidev_llm::message::BackendEvent>,
     cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>,
 ) {
     log::info!("ACP: event loop started, waiting for events");
-    use tidev_types::message::BackendEvent;
+    use tidev_llm::message::BackendEvent;
 
     while let Some(event) = event_rx.recv().await {
         log::debug!(

@@ -1,7 +1,7 @@
 //! Message buffer for streaming — accumulates delta content as the agent
 //! generates a response, then flushes to ChatContext when complete.
 
-use tidev_types::message::{Message, MessageRole};
+use tidev_llm::message::{Message, MessageRole};
 use uuid::Uuid;
 
 /// A mutable extension over ChatContext that supports streaming deltas.

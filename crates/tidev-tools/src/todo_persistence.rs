@@ -4,7 +4,7 @@
 //! persist todo items without depending on `tidev-storage` directly.
 //! tidev-core implements this trait by bridging to `SessionStore`.
 
-use tidev_types::TodoItem;
+use crate::types::TodoItem;
 
 /// Abstraction for persisting todo items scoped to a session.
 ///

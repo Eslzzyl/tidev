@@ -9,7 +9,8 @@ description = "TUI frontend for tidev"
 [dependencies]
 tidev-search = { path = "../tidev-search" }
 tidev-core = { path = "../tidev-core" }
-tidev-types = { path = "../tidev-types" }
+tidev-llm = { path = "../tidev-llm" }
+tidev-tools = { path = "../tidev-tools" }
 tidev-config = { path = "../tidev-config" }
 tidev-utils = { path = "../tidev-utils" }
 

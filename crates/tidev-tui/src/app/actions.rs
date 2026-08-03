@@ -3,8 +3,8 @@ use super::*;
 use crate::context::UpdateContext;
 use crate::theme::ThemePalette;
 use tidev_core::ApprovedTool;
-use tidev_types::message::{MessageRole, ToolExecutionResult};
-use tidev_types::prompts::SessionMode;
+use tidev_llm::message::{MessageRole, ToolExecutionResult};
+use tidev_llm::mode::SessionMode;
 
 use crate::action::{
     Action, BoundaryDecision, ChatAction, ConnectAction, McpAction, OverlayAction, OverlayKind,
@@ -289,7 +289,7 @@ impl App {
                     self.mode = messages
                         .iter()
                         .rev()
-                        .find(|m| m.role == tidev_types::message::MessageRole::User)
+                        .find(|m| m.role == tidev_llm::message::MessageRole::User)
                         .and_then(|m| m.mode)
                         .unwrap_or(SessionMode::Build);
 

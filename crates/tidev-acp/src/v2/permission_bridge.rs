@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use agent_client_protocol::schema::v2 as acp;
 use tidev_core::{ApprovedTool, TuiRequest, TuiRequestKind, TuiResponse};
-use tidev_types::message::ToolExecutionResult;
+use tidev_llm::message::ToolExecutionResult;
 use tokio::sync::RwLock;
 
 pub(crate) fn spawn(
@@ -21,7 +21,7 @@ pub(crate) fn spawn(
             for item in tools {
                 let tool = &item.tool_call;
                 let reason = permission_reason(item);
-                if tidev_types::tools::canonical_tool_name(&tool.name) == Some("question") {
+                if tidev_utils::tool_name::canonical_tool_name(&tool.name) == Some("question") {
                     let approved_tool = handle_question(
                         &request,
                         item,
@@ -157,7 +157,7 @@ async fn handle_question(
 }
 
 fn build_question_request(
-    tool: &tidev_types::message::ToolCall,
+    tool: &tidev_llm::message::ToolCall,
     session_id: &acp::SessionId,
 ) -> Result<acp::CreateElicitationRequest, String> {
     let args: serde_json::Value = serde_json::from_str(&tool.arguments)
@@ -249,7 +249,7 @@ fn build_question_request(
 
 fn question_response(
     response: acp::CreateElicitationResponse,
-    tool: &tidev_types::message::ToolCall,
+    tool: &tidev_llm::message::ToolCall,
 ) -> ToolExecutionResult {
     match response.action {
         acp::ElicitationAction::Accept(action) => {
@@ -308,8 +308,8 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
-    fn tool(arguments: &str) -> tidev_types::message::ToolCall {
-        tidev_types::message::ToolCall {
+    fn tool(arguments: &str) -> tidev_llm::message::ToolCall {
+        tidev_llm::message::ToolCall {
             id: "question-1".to_string(),
             name: "question".to_string(),
             arguments: arguments.to_string(),

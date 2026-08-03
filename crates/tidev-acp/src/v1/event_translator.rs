@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use agent_client_protocol::schema::v1 as acp;
-use tidev_types::message::BackendEvent;
+use tidev_llm::message::BackendEvent;
 use uuid::Uuid;
 
 /// Stateful translator that converts [`BackendEvent`]s into ACP
@@ -435,8 +435,8 @@ mod tests {
         EventTranslator::new(sid(), 200000)
     }
 
-    fn make_tc(name: &str, args: &str) -> tidev_types::message::ToolCall {
-        tidev_types::message::ToolCall {
+    fn make_tc(name: &str, args: &str) -> tidev_llm::message::ToolCall {
+        tidev_llm::message::ToolCall {
             id: "tc-1".into(),
             name: name.into(),
             arguments: args.into(),
@@ -627,7 +627,7 @@ mod tests {
     fn tool_completed_sends_content_and_completed_status() {
         let mut tr = make_translator();
         let tc = make_tc("read", r#"{"path":"Cargo.toml"}"#);
-        let result = tidev_types::message::ToolExecutionResult::new("file content");
+        let result = tidev_llm::message::ToolExecutionResult::new("file content");
         let notifs = tr.translate(&BackendEvent::ToolCompleted {
             session_id: sid(),
             request_id: 1,
@@ -698,7 +698,7 @@ mod tests {
     fn user_message_created_sends_user_message_chunk() {
         let mut tr = make_translator();
         let mut msg =
-            tidev_types::message::Message::new(tidev_types::message::MessageRole::User, "hello");
+            tidev_llm::message::Message::new(tidev_llm::message::MessageRole::User, "hello");
         msg.id = Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
         let notifs = tr.translate(&BackendEvent::UserMessageCreated {
             session_id: sid(),
@@ -789,7 +789,7 @@ mod tests {
     #[test]
     fn finished_is_ignored_by_translator() {
         let mut tr = make_translator();
-        let turn = tidev_types::message::AssistantTurn {
+        let turn = tidev_llm::message::AssistantTurn {
             content: "done".into(),
             ..Default::default()
         };

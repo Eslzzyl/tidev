@@ -7,7 +7,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 
 use crate::{types::LlmProviderConfig, types::ToolDefinition};
-use tidev_types::message::{BackendEvent, Message, MessageAttachment, MessageRole};
+use crate::message::{BackendEvent, Message, MessageAttachment, MessageRole};
 
 use log::{debug as log_debug, error as log_error};
 

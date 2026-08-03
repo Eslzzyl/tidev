@@ -13,12 +13,12 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_util::sync::CancellationToken;
 
-use tidev_types::message::{
+use tidev_llm::message::{
     AssistantTurn, BackendEvent, Message, QueuedUserMessage, ToolCall, ToolExecutionResult,
 };
-use tidev_types::prompts::SessionMode;
-use tidev_types::reasoning::ThinkingLevelType;
-use tidev_types::tools::ToolDefinition;
+use tidev_llm::mode::SessionMode;
+use tidev_llm::reasoning::ThinkingLevelType;
+use tidev_llm::ToolDefinition;
 
 // ---------------------------------------------------------------------------
 // AgentLoopConfig
@@ -28,8 +28,8 @@ use tidev_types::tools::ToolDefinition;
 pub struct AgentLoopConfig {
     /// The session this agent loop is running in.
     pub session_id: uuid::Uuid,
-    /// The initial agent definition (type, system prompt, tool restrictions).
-    pub definition: crate::AgentDefinition,
+    /// The system prompt for this agent loop run.
+    pub system_prompt: String,
     /// The session mode (Plan / Build).
     pub mode: SessionMode,
     /// Thinking / reasoning level.

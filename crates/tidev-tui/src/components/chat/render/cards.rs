@@ -4,7 +4,7 @@ use chrono::Local;
 use ratatui::prelude::{Modifier, Style};
 use ratatui::style::Color;
 use ratatui::text::{Line, Span};
-use tidev_types::message::{COMPACTION_MESSAGE_LABEL, Message, MessageRole};
+use tidev_llm::message::{COMPACTION_MESSAGE_LABEL, Message, MessageRole};
 use unicode_width::UnicodeWidthStr;
 
 use crate::diff_render::render_unified_diff_text;
@@ -197,8 +197,8 @@ fn render_user_shell_card(
     apply_badge_styling(&mut content_lines, palette);
 
     let mode_color = message.mode.map_or(palette.accent, |m| match m {
-        tidev_types::prompts::SessionMode::Build => palette.mode_build,
-        tidev_types::prompts::SessionMode::Plan => palette.mode_plan,
+        tidev_llm::mode::SessionMode::Build => palette.mode_build,
+        tidev_llm::mode::SessionMode::Plan => palette.mode_plan,
     });
     let prefix_style = Style::default().fg(mode_color).add_modifier(Modifier::BOLD);
 

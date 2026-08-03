@@ -7,7 +7,7 @@
 
 use agent_client_protocol::schema::v1 as acp;
 use tidev_core::{ApprovedTool, TuiRequest, TuiRequestKind, TuiResponse};
-use tidev_types::message::ToolExecutionResult;
+use tidev_llm::message::ToolExecutionResult;
 
 use crate::v1::types::tool_kind;
 

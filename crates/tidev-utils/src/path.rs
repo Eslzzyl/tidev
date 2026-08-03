@@ -288,7 +288,7 @@ pub fn extract_boundary_violation_path(
     tool_name: &str,
     arguments: &Value,
 ) -> Option<PathBuf> {
-    let canonical_name = tidev_types::tools::canonical_tool_name(tool_name)?;
+    let canonical_name = crate::tool_name::canonical_tool_name(tool_name)?;
 
     let path_buf: PathBuf = match canonical_name {
         "read" | "write" | "edit" | "glob" | "grep" => {
@@ -328,7 +328,7 @@ pub fn extract_sensitive_file_path(
         return None;
     }
 
-    let canonical_name = tidev_types::tools::canonical_tool_name(tool_name)?;
+    let canonical_name = crate::tool_name::canonical_tool_name(tool_name)?;
 
     let path_buf: PathBuf = match canonical_name {
         "read" => {

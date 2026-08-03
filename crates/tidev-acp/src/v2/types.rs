@@ -3,8 +3,8 @@
 use std::path::{Path, PathBuf};
 
 use agent_client_protocol::schema::v2 as acp;
-use tidev_types::message::{Message, MessageAttachment, ToolCall, ToolExecutionResult};
-use tidev_types::tools::canonical_tool_name;
+use tidev_llm::message::{Message, MessageAttachment, ToolCall, ToolExecutionResult};
+use tidev_utils::tool_name::canonical_tool_name;
 
 /// Convert a possibly relative path into the absolute path required by ACP v2.
 pub(crate) fn absolute_path(path: impl AsRef<Path>) -> acp::AbsolutePath {

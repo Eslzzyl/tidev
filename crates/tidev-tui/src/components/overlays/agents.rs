@@ -6,7 +6,7 @@ use ratatui::layout::{Constraint, Layout, Margin, Position, Rect};
 use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph};
-use tidev_types::agent_type::AgentType;
+use tidev_core::agent_type::AgentType;
 
 use crate::action::{Action, OverlayAction, OverlayKind};
 use crate::component::Component;

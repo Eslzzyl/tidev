@@ -1,12 +1,11 @@
-//! Tool type definitions shared across the tidev workspace.
+//! Tool type definitions for the tidev tool system.
 //!
 //! This module defines the core types for the tool system:
+//! - [`TodoItem`]: a task/todo item within a session
 //! - [`ToolDefinition`]: metadata describing a tool (name, description, parameters, permissions)
 //! - [`ToolOrigin`]: whether a tool is local or comes from MCP
 //! - [`ToolPermission`]: permission level required by a tool (hardcoded per mode)
 //! - [`ToolArgs`] trait + `tool_args!` macro: parameter schema definition
-//! - [`FileReadStamp`]: records a file read for edit-before-read enforcement
-//! - [`canonical_tool_name()`]: normalizes tool name aliases
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -20,21 +19,6 @@ use serde_json::Value;
 pub struct TodoItem {
     pub content: String,
     pub status: String,
-}
-
-// ---------------------------------------------------------------------------
-// FileReadStamp
-// ---------------------------------------------------------------------------
-
-/// Records that a file was read at a point in time, along with its metadata.
-///
-/// Used to enforce the rule that a file must be read before editing, and
-/// detects if the file has been modified since it was last read.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileReadStamp {
-    pub read_at: chrono::DateTime<chrono::Utc>,
-    pub mtime: Option<i64>,
-    pub size: Option<i64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -58,13 +42,13 @@ impl ToolPermission {
     ///
     /// Hardcoded: Plan mode only allows read-only and non-destructive tools;
     /// Build mode allows everything.
-    pub fn allowed_in_mode(&self, mode: crate::prompts::SessionMode) -> bool {
+    pub fn allowed_in_mode(&self, mode: tidev_llm::mode::SessionMode) -> bool {
         match mode {
-            crate::prompts::SessionMode::Plan => matches!(
+            tidev_llm::mode::SessionMode::Plan => matches!(
                 self,
                 Self::Read | Self::Search | Self::Execute | Self::Session
             ),
-            crate::prompts::SessionMode::Build => true,
+            tidev_llm::mode::SessionMode::Build => true,
         }
     }
 }
@@ -79,35 +63,21 @@ pub enum ToolOrigin {
     /// A built-in tool implemented by tidev itself.
     Local,
     /// A tool exposed by an MCP server.
-    Mcp(McpTarget),
+    Mcp {
+        server_name: String,
+        tool_name: String,
+    },
 }
 
 impl ToolOrigin {
     /// If this tool is backed by an MCP server, return the target reference.
-    pub fn as_mcp(&self) -> Option<&McpTarget> {
+    pub fn as_mcp(&self) -> Option<(&str, &str)> {
         match self {
             Self::Local => None,
-            Self::Mcp(target) => Some(target),
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// McpTarget
-// ---------------------------------------------------------------------------
-
-/// Identifies a specific tool exposed by an MCP server.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct McpTarget {
-    pub server_name: String,
-    pub tool_name: String,
-}
-
-impl McpTarget {
-    pub fn new(server_name: impl Into<String>, tool_name: impl Into<String>) -> Self {
-        Self {
-            server_name: server_name.into(),
-            tool_name: tool_name.into(),
+            Self::Mcp {
+                server_name,
+                tool_name,
+            } => Some((server_name, tool_name)),
         }
     }
 }
@@ -172,18 +142,16 @@ impl ToolDefinition {
             description,
             parameters,
             permission,
-            origin: ToolOrigin::Mcp(McpTarget {
+            origin: ToolOrigin::Mcp {
                 server_name,
                 tool_name,
-            }),
+            },
         }
     }
 
     /// If this tool is backed by an MCP server, return the target info.
     pub fn mcp_target(&self) -> Option<(&str, &str)> {
-        self.origin
-            .as_mcp()
-            .map(|t| (t.server_name.as_str(), t.tool_name.as_str()))
+        self.origin.as_mcp()
     }
 }
 
@@ -367,7 +335,7 @@ macro_rules! tool_args {
             )*
         }
 
-        impl $crate::tools::ToolArgs for $name {
+        impl $crate::types::ToolArgs for $name {
             fn schema() -> Value {
                 let mut properties = serde_json::Map::new();
                 let mut required = Vec::new();
@@ -484,7 +452,7 @@ tool_args! {
 tool_args! {
     /// Update the todo list.
     pub struct TodoWriteArgs {
-        todos: array(crate::tools::TodoItem, "The updated todo list"),
+        todos: array(crate::types::TodoItem, "The updated todo list"),
     }
 }
 
@@ -533,7 +501,7 @@ tool_args! {
     pub struct QuestionInfo {
         question: string("Complete question"),
         header: string("Short label for the question"),
-        options: array(crate::tools::QuestionOption, "Available choices"),
+        options: array(crate::types::QuestionOption, "Available choices"),
         multiple: optional_boolean("Allow selecting multiple choices"),
         custom: optional_boolean("Allow typing a custom answer"),
     }
@@ -542,7 +510,7 @@ tool_args! {
 tool_args! {
     /// Ask the user questions during execution.
     pub struct QuestionArgs {
-        questions: array(crate::tools::QuestionInfo, "Questions to ask"),
+        questions: array(crate::types::QuestionInfo, "Questions to ask"),
     }
 }
 
@@ -568,30 +536,6 @@ tool_args! {
 }
 
 // ---------------------------------------------------------------------------
-// canonical_tool_name
-// ---------------------------------------------------------------------------
-
-/// Map a tool name (possibly an alias) to its canonical form.
-pub fn canonical_tool_name(tool_name: &str) -> Option<&'static str> {
-    match tool_name {
-        "read" | "read_file" => Some("read"),
-        "write" | "write_file" => Some("write"),
-        "edit" => Some("edit"),
-        "glob" => Some("glob"),
-        "grep" => Some("grep"),
-        "bash" | "shell" => Some("shell"),
-        "task" => Some("task"),
-        "question" => Some("question"),
-        "todowrite" | "todo" => Some("todowrite"),
-        "skill" => Some("skill"),
-        "websearch" => Some("websearch"),
-        "webfetch" => Some("webfetch"),
-        "apply_patch" => Some("apply_patch"),
-        _ => None,
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -600,29 +544,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_canonical_tool_name() {
-        assert_eq!(canonical_tool_name("read"), Some("read"));
-        assert_eq!(canonical_tool_name("read_file"), Some("read"));
-        assert_eq!(canonical_tool_name("write_file"), Some("write"));
-        assert_eq!(canonical_tool_name("shell"), Some("shell"));
-        assert_eq!(canonical_tool_name("bash"), Some("shell"));
-        assert_eq!(canonical_tool_name("todo"), Some("todowrite"));
-        assert_eq!(canonical_tool_name("unknown"), None);
-    }
-
-    #[test]
     fn test_allowed_in_mode() {
-        assert!(ToolPermission::Read.allowed_in_mode(crate::prompts::SessionMode::Plan));
-        assert!(ToolPermission::Search.allowed_in_mode(crate::prompts::SessionMode::Plan));
-        assert!(ToolPermission::Execute.allowed_in_mode(crate::prompts::SessionMode::Plan));
-        assert!(ToolPermission::Session.allowed_in_mode(crate::prompts::SessionMode::Plan));
-        assert!(!ToolPermission::Write.allowed_in_mode(crate::prompts::SessionMode::Plan));
-        assert!(!ToolPermission::Edit.allowed_in_mode(crate::prompts::SessionMode::Plan));
+        assert!(ToolPermission::Read.allowed_in_mode(tidev_llm::mode::SessionMode::Plan));
+        assert!(ToolPermission::Search.allowed_in_mode(tidev_llm::mode::SessionMode::Plan));
+        assert!(ToolPermission::Execute.allowed_in_mode(tidev_llm::mode::SessionMode::Plan));
+        assert!(ToolPermission::Session.allowed_in_mode(tidev_llm::mode::SessionMode::Plan));
+        assert!(!ToolPermission::Write.allowed_in_mode(tidev_llm::mode::SessionMode::Plan));
+        assert!(!ToolPermission::Edit.allowed_in_mode(tidev_llm::mode::SessionMode::Plan));
 
-        assert!(ToolPermission::Read.allowed_in_mode(crate::prompts::SessionMode::Build));
-        assert!(ToolPermission::Write.allowed_in_mode(crate::prompts::SessionMode::Build));
-        assert!(ToolPermission::Edit.allowed_in_mode(crate::prompts::SessionMode::Build));
-        assert!(ToolPermission::Execute.allowed_in_mode(crate::prompts::SessionMode::Build));
+        assert!(ToolPermission::Read.allowed_in_mode(tidev_llm::mode::SessionMode::Build));
+        assert!(ToolPermission::Write.allowed_in_mode(tidev_llm::mode::SessionMode::Build));
+        assert!(ToolPermission::Edit.allowed_in_mode(tidev_llm::mode::SessionMode::Build));
+        assert!(ToolPermission::Execute.allowed_in_mode(tidev_llm::mode::SessionMode::Build));
     }
 
     #[test]
@@ -654,19 +587,14 @@ mod tests {
     // ── MCP type tests ────────────────────────────────────────────────
 
     #[test]
-    fn test_mcp_target_new() {
-        let target = McpTarget::new("my-server", "do-thing");
-        assert_eq!(target.server_name, "my-server");
-        assert_eq!(target.tool_name, "do-thing");
-    }
-
-    #[test]
     fn test_tool_origin_mcp_as_mcp() {
-        let target = McpTarget::new("srv", "tool");
-        let mcp_origin = ToolOrigin::Mcp(target.clone());
+        let mcp_origin = ToolOrigin::Mcp {
+            server_name: "srv".into(),
+            tool_name: "tool".into(),
+        };
         let local_origin = ToolOrigin::Local;
 
-        assert_eq!(mcp_origin.as_mcp(), Some(&target));
+        assert_eq!(mcp_origin.as_mcp(), Some(("srv", "tool")));
         assert_eq!(local_origin.as_mcp(), None);
     }
 

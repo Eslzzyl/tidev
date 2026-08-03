@@ -35,7 +35,7 @@ tokio-util = "0.7"
 url = "2"
 uuid = { version = "1", features = ["v4"] }
 
-tidev-types = { path = "../tidev-types" }
+tidev-llm = { path = "../tidev-llm" }
 tidev-utils = { path = "../tidev-utils" }
 tidev-config = { path = "../tidev-config" }
 tidev-instructions = { path = "../tidev-instructions" }

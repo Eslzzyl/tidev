@@ -16,7 +16,7 @@ acp-v2 = [
 [dependencies]
 tidev-core = { path = "../tidev-core" }
 tidev-config = { path = "../tidev-config" }
-tidev-types = { path = "../tidev-types" }
+tidev-llm = { path = "../tidev-llm" }
 tidev-utils = { path = "../tidev-utils" }
 agent-client-protocol = { version = "2.0", features = ["unstable_end_turn_token_usage", "unstable_elicitation"] }
 anyhow = "1"

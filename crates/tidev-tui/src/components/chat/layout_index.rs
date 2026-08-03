@@ -6,7 +6,7 @@
 //! 2. Incremental updates when only the last few messages change
 //! 3. Accurate scroll position calculations
 
-use tidev_types::message::Message;
+use tidev_llm::message::Message;
 use uuid::Uuid;
 
 // ---------------------------------------------------------------------------

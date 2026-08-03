@@ -3,7 +3,7 @@
 
 use uuid::Uuid;
 
-use tidev_types::message::Message;
+use tidev_llm::message::Message;
 
 /// A lightweight replacement for the old `Conversation` type.
 /// Holds the message list and session metadata needed by rendering code.

@@ -10,9 +10,9 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
-use tidev_types::message::{BackendEvent, Message, MessageRole};
+use tidev_llm::message::{BackendEvent, Message, MessageRole};
 
-use tidev_types::tools::ToolDefinition;
+use tidev_tools::types::ToolDefinition;
 use uuid::Uuid;
 
 use tidev_llm::{LlmClient, LlmProviderConfig};
@@ -21,7 +21,7 @@ use tidev_llm::{LlmClient, LlmProviderConfig};
 // Conversions
 // ---------------------------------------------------------------------------
 
-/// Convert a `tidev_types::tools::ToolDefinition` to the `tidev_llm` variant.
+/// Convert a `tidev_tools::types::ToolDefinition` to the `tidev_llm` variant.
 pub(crate) fn to_llm_tool_def(def: &ToolDefinition) -> tidev_llm::ToolDefinition {
     tidev_llm::ToolDefinition {
         name: def.name.clone(),
@@ -120,10 +120,10 @@ impl ContextManager {
                     + Self::estimate_tokens_for_text(&msg.reasoning);
                 for attachment in &msg.attachments {
                     match attachment {
-                        tidev_types::message::MessageAttachment::FileReference {
+                        tidev_llm::message::MessageAttachment::FileReference {
                             content, ..
                         } => tokens += Self::estimate_tokens_for_text(content),
-                        tidev_types::message::MessageAttachment::DirectoryReference {
+                        tidev_llm::message::MessageAttachment::DirectoryReference {
                             tree,
                             ..
                         } => tokens += Self::estimate_tokens_for_text(tree),
@@ -330,7 +330,7 @@ impl ContextManager {
         session_id: Uuid,
         event_tx: tokio::sync::mpsc::UnboundedSender<BackendEvent>,
     ) -> Result<String> {
-        use tidev_types::message::BackendEvent;
+        use tidev_llm::message::BackendEvent;
 
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let llm_clone = llm.clone();
@@ -346,7 +346,7 @@ impl ContextManager {
                     messages,
                     tools,
                     tx,
-                    tidev_types::reasoning::ThinkingLevelType::None,
+                    tidev_llm::reasoning::ThinkingLevelType::None,
                 )
                 .await;
         });
@@ -423,7 +423,7 @@ impl ContextManager {
             out.push(Message::tool_result(
                 &tool_call_id,
                 &tool_name,
-                tidev_types::message::ToolExecutionResult::new(
+                tidev_llm::message::ToolExecutionResult::new(
                     "[Tool result was not captured before context compaction. \
                      The tool may need to be re-run if still relevant.]"
                         .to_string(),
@@ -440,7 +440,7 @@ impl ContextManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tidev_types::message::{Message, MessageRole, ToolCall, ToolExecutionResult};
+    use tidev_llm::message::{Message, MessageRole, ToolCall, ToolExecutionResult};
     use uuid::Uuid;
 
     fn user_msg(content: &str) -> Message {

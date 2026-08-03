@@ -1,8 +1,8 @@
 //! Model name → thinking level matching.
 //!
-//! The thinking level types themselves live in `tidev-types`.
+//! The thinking level types themselves live in `tidev-llm`.
 
-pub use tidev_types::reasoning::{
+pub use tidev_llm::reasoning::{
     ClaudeEffortLevel, DeepSeekV4ThinkingLevel, GlmThinkingLevel, Gpt5ThinkingLevel,
     MiniMaxThinkingLevel, Qwen35ThinkingLevel, ThinkingLevel, ThinkingLevelType,
 };

@@ -10,7 +10,7 @@ use std::time::Duration;
 use tokio::time::timeout;
 use url::Url;
 
-use tidev_types::tools::WebFetchArgs;
+use crate::types::WebFetchArgs;
 
 const FETCH_DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 const FETCH_MAX_TIMEOUT: Duration = Duration::from_secs(120);

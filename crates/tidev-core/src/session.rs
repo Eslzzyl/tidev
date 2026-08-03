@@ -51,7 +51,7 @@ impl SessionManager {
     }
 
     /// Load all messages for a session, ordered by creation time.
-    pub fn load_messages(&self, session_id: Uuid) -> Result<Vec<tidev_types::message::Message>> {
+    pub fn load_messages(&self, session_id: Uuid) -> Result<Vec<tidev_llm::message::Message>> {
         self.store.load_messages(session_id)
     }
 
@@ -68,7 +68,7 @@ impl SessionManager {
     pub fn append_message(
         &self,
         session_id: Uuid,
-        msg: &tidev_types::message::Message,
+        msg: &tidev_llm::message::Message,
     ) -> Result<()> {
         self.store.append_message(session_id, msg)
     }
@@ -77,7 +77,7 @@ impl SessionManager {
     pub fn append_messages(
         &self,
         session_id: Uuid,
-        messages: &[tidev_types::message::Message],
+        messages: &[tidev_llm::message::Message],
     ) -> Result<()> {
         self.store.append_messages(session_id, messages)
     }
@@ -147,7 +147,7 @@ impl SessionManager {
         &self,
         session_id: Uuid,
         message_id: Uuid,
-        metadata: &tidev_types::message::ToolMetadata,
+        metadata: &tidev_llm::message::ToolMetadata,
     ) -> Result<()> {
         self.store
             .update_message_metadata(session_id, message_id, metadata)

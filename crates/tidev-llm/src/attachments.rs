@@ -1,4 +1,4 @@
-use tidev_types::message::{Message, MessageAttachment, MessageRole, tool_output_preview};
+use crate::message::{Message, MessageAttachment, MessageRole, tool_output_preview};
 
 pub fn message_text_with_file_references(message: &Message) -> String {
     let mut text = if matches!(message.role, MessageRole::Tool) {

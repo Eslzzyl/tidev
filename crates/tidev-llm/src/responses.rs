@@ -7,7 +7,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 
 use crate::{types::LlmProviderConfig, types::ToolDefinition};
-use tidev_types::message::{BackendEvent, Message, MessageAttachment, MessageRole, ToolCall};
+use crate::message::{BackendEvent, Message, MessageAttachment, MessageRole, ToolCall};
 
 use log::{debug as log_debug, error as log_error};
 
@@ -324,7 +324,7 @@ pub(crate) async fn stream_responses(
                         }
                         if let Some(builder) = tool_calls.get(&key_id) {
                             let arguments = builder.arguments().unwrap_or_default();
-                            let call = tidev_types::message::ToolCall {
+                            let call = crate::message::ToolCall {
                                 id: builder.id().to_string(),
                                 name: builder.name().to_string(),
                                 arguments: arguments.to_string(),
@@ -935,7 +935,7 @@ fn finalize_turn(
     finish_reason: &Option<String>,
     tool_calls: &BTreeMap<String, ToolCallBuilder>,
     responses_output_items: &[serde_json::Value],
-) -> tidev_types::message::AssistantTurn {
+) -> crate::message::AssistantTurn {
     let tool_calls = tool_calls
         .values()
         .map(|builder| ToolCall {
@@ -954,7 +954,7 @@ fn finalize_turn(
         }
     });
 
-    tidev_types::message::AssistantTurn {
+    crate::message::AssistantTurn {
         content: assistant_text.to_string(),
         reasoning: reasoning_text.to_string(),
         tool_calls,
@@ -1938,7 +1938,7 @@ struct ResponseOutputContent {
 mod tests {
     use super::*;
     use crate::types::ApiType;
-    use tidev_types::message::{Message, MessageRole};
+    use crate::message::{Message, MessageRole};
 
     #[test]
     fn test_responses_request_basic() {
@@ -1956,7 +1956,7 @@ mod tests {
             system_prompt: Some("You are helpful.".to_string()),
             api_key: None,
             extra_body: None,
-            thinking_level: tidev_types::reasoning::ThinkingLevelType::None,
+            thinking_level: crate::reasoning::ThinkingLevelType::None,
         };
 
         let messages = vec![Message::new(MessageRole::User, "Hello")];
@@ -1991,7 +1991,7 @@ mod tests {
             system_prompt: Some("Base system prompt".to_string()),
             api_key: None,
             extra_body: None,
-            thinking_level: tidev_types::reasoning::ThinkingLevelType::None,
+            thinking_level: crate::reasoning::ThinkingLevelType::None,
         };
 
         // System messages in the list are now skipped; only model.system_prompt is used
@@ -2027,7 +2027,7 @@ mod tests {
             system_prompt: Some("You are helpful.".to_string()),
             api_key: None,
             extra_body: None,
-            thinking_level: tidev_types::reasoning::ThinkingLevelType::None,
+            thinking_level: crate::reasoning::ThinkingLevelType::None,
         };
 
         let messages = vec![
@@ -2071,11 +2071,11 @@ mod tests {
             system_prompt: None,
             api_key: None,
             extra_body: None,
-            thinking_level: tidev_types::reasoning::ThinkingLevelType::None,
+            thinking_level: crate::reasoning::ThinkingLevelType::None,
         };
 
         // Build a tool result message that carries an image attachment.
-        use tidev_types::message::ToolExecutionResult;
+        use crate::message::ToolExecutionResult;
         let mut result = ToolExecutionResult::new("Image read successfully.");
         result.attachments.push(MessageAttachment::Image {
             filename: "icon.png".to_string(),
@@ -2086,7 +2086,7 @@ mod tests {
         let tool_msg = Message::tool_result("call_xyz", "read", result);
 
         let mut assistant = Message::new(MessageRole::Assistant, "");
-        assistant.tool_calls.push(tidev_types::message::ToolCall {
+        assistant.tool_calls.push(crate::message::ToolCall {
             id: "call_xyz".to_string(),
             name: "read".to_string(),
             arguments: r#"{"file_path":"icon.png"}"#.to_string(),
@@ -2143,11 +2143,11 @@ mod tests {
             system_prompt: None,
             api_key: None,
             extra_body: None,
-            thinking_level: tidev_types::reasoning::ThinkingLevelType::None,
+            thinking_level: crate::reasoning::ThinkingLevelType::None,
         };
 
         let mut assistant = Message::new(MessageRole::Assistant, "Let me read that file.");
-        assistant.tool_calls.push(tidev_types::message::ToolCall {
+        assistant.tool_calls.push(crate::message::ToolCall {
             id: "call_abc".to_string(),
             name: "read".to_string(),
             arguments: r#"{"file_path":"/tmp/test.txt"}"#.to_string(),
@@ -2160,7 +2160,7 @@ mod tests {
             Message::tool_result(
                 "call_abc",
                 "read",
-                tidev_types::message::ToolExecutionResult::new("file content"),
+                crate::message::ToolExecutionResult::new("file content"),
             ),
         ];
 
@@ -2202,17 +2202,17 @@ mod tests {
             system_prompt: None,
             api_key: None,
             extra_body: None,
-            thinking_level: tidev_types::reasoning::ThinkingLevelType::None,
+            thinking_level: crate::reasoning::ThinkingLevelType::None,
         };
 
         let mut assistant = Message::new(MessageRole::Assistant, "");
-        assistant.tool_calls.push(tidev_types::message::ToolCall {
+        assistant.tool_calls.push(crate::message::ToolCall {
             id: "call_1".to_string(),
             name: "read".to_string(),
             arguments: r#"{"path":"a.txt"}"#.to_string(),
             thought_signature: None,
         });
-        assistant.tool_calls.push(tidev_types::message::ToolCall {
+        assistant.tool_calls.push(crate::message::ToolCall {
             id: "call_2".to_string(),
             name: "grep".to_string(),
             arguments: r#"{"pattern":"fn main"}"#.to_string(),
@@ -2225,12 +2225,12 @@ mod tests {
             Message::tool_result(
                 "call_1",
                 "read",
-                tidev_types::message::ToolExecutionResult::new("file content"),
+                crate::message::ToolExecutionResult::new("file content"),
             ),
             Message::tool_result(
                 "call_2",
                 "grep",
-                tidev_types::message::ToolExecutionResult::new("found matches"),
+                crate::message::ToolExecutionResult::new("found matches"),
             ),
         ];
 
@@ -2270,7 +2270,7 @@ mod tests {
             system_prompt: Some("You are helpful.".to_string()),
             api_key: None,
             extra_body: None,
-            thinking_level: tidev_types::reasoning::ThinkingLevelType::None,
+            thinking_level: crate::reasoning::ThinkingLevelType::None,
         };
 
         let messages = vec![Message::new(MessageRole::User, "Hello")];
@@ -2333,7 +2333,7 @@ mod tests {
             system_prompt: None,
             api_key: None,
             extra_body: None,
-            thinking_level: tidev_types::reasoning::ThinkingLevelType::None,
+            thinking_level: crate::reasoning::ThinkingLevelType::None,
         };
         let mut assistant = Message::new(MessageRole::Assistant, "visible text");
         assistant.metadata.responses_output_items = vec![
@@ -2492,8 +2492,8 @@ mod tests {
             system_prompt: None,
             api_key: None,
             extra_body: Some(serde_json::json!({"service_tier": "flex"})),
-            thinking_level: tidev_types::reasoning::ThinkingLevelType::Gpt5(
-                tidev_types::reasoning::Gpt5ThinkingLevel::High,
+            thinking_level: crate::reasoning::ThinkingLevelType::Gpt5(
+                crate::reasoning::Gpt5ThinkingLevel::High,
             ),
         };
 

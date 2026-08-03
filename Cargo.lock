@@ -3948,7 +3948,7 @@ dependencies = [
  "serde_json",
  "tidev-config",
  "tidev-core",
- "tidev-types",
+ "tidev-llm",
  "tidev-utils",
  "tokio",
  "uuid",
@@ -3963,7 +3963,7 @@ dependencies = [
  "chrono",
  "log",
  "serde",
- "tidev-types",
+ "tidev-llm",
  "tokio",
  "tokio-util",
  "uuid",
@@ -3978,7 +3978,7 @@ dependencies = [
  "include_dir",
  "serde",
  "serde_json",
- "tidev-types",
+ "tidev-llm",
  "toml",
 ]
 
@@ -4004,7 +4004,6 @@ dependencies = [
  "tidev-snapshot",
  "tidev-storage",
  "tidev-tools",
- "tidev-types",
  "tidev-utils",
  "tokio",
  "tokio-util",
@@ -4039,7 +4038,6 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
- "tidev-types",
  "tokio",
  "uuid",
 ]
@@ -4093,7 +4091,8 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "tidev-types",
+ "tidev-llm",
+ "tidev-tools",
  "uuid",
  "zstd",
 ]
@@ -4125,7 +4124,7 @@ dependencies = [
  "tempfile",
  "tidev-config",
  "tidev-instructions",
- "tidev-types",
+ "tidev-llm",
  "tidev-utils",
  "tokio",
  "tokio-util",
@@ -4162,24 +4161,15 @@ dependencies = [
  "textwrap",
  "tidev-config",
  "tidev-core",
+ "tidev-llm",
  "tidev-search",
- "tidev-types",
+ "tidev-tools",
  "tidev-utils",
  "tokio",
  "two-face",
  "unicode-width",
  "url",
  "urlencoding",
- "uuid",
-]
-
-[[package]]
-name = "tidev-types"
-version = "0.8.0"
-dependencies = [
- "chrono",
- "serde",
- "serde_json",
  "uuid",
 ]
 
@@ -4195,7 +4185,6 @@ dependencies = [
  "log",
  "serde_json",
  "tempfile",
- "tidev-types",
  "uuid",
 ]
 

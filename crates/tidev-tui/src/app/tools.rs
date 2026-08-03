@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use tidev_core::TuiResponse;
-use tidev_types::message::ToolExecutionResult;
-use tidev_types::tools::QuestionArgs;
+use tidev_llm::message::ToolExecutionResult;
+use tidev_tools::types::QuestionArgs;
 use uuid::Uuid;
 
 use crate::action::{BoundaryDecision, SensitiveFileDecision};

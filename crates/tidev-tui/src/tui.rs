@@ -26,7 +26,7 @@ use crossterm::terminal::{
 };
 use ratatui::Terminal;
 use ratatui::backend::{Backend, ClearType, CrosstermBackend};
-use tidev_types::message::BackendEvent;
+use tidev_llm::message::BackendEvent;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 

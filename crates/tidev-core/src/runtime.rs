@@ -34,14 +34,14 @@ use tidev_config::auth::ActiveModel;
 use tidev_config::{AppConfig, AuthStore, paths::ConfigPaths};
 use tidev_search::FileSearchIndex;
 use tidev_storage::SessionStore;
-use tidev_types::message::{
+use tidev_llm::message::{
     BackendEvent, Message, MessageAttachment, MessageRole, QueuedUserMessage,
 };
-use tidev_types::prompts::SessionMode;
-use tidev_types::reasoning::ThinkingLevelType;
-use tidev_types::tools::TodoItem;
+use tidev_llm::mode::SessionMode;
+use tidev_llm::reasoning::ThinkingLevelType;
+use tidev_tools::types::TodoItem;
 
-use tidev_agent::{AgentDefinition, TuiRequest};
+use tidev_agent::TuiRequest;
 
 use crate::context::ContextManager;
 use crate::mcp::McpManager;
@@ -371,7 +371,7 @@ impl Runtime {
     ) -> Result<()> {
         let mut active = self.active_model.write().unwrap();
         active.thinking_level =
-            tidev_types::reasoning::ThinkingLevelType::from_string(thinking_level);
+            tidev_llm::reasoning::ThinkingLevelType::from_string(thinking_level);
         if let Err(e) = self.session_manager.store().save_model_thinking_level(
             provider_id,
             model_id,
@@ -419,7 +419,7 @@ impl Runtime {
     pub async fn append_message(
         &self,
         session_id: Uuid,
-        msg: tidev_types::message::Message,
+        msg: tidev_llm::message::Message,
     ) -> Result<()> {
         {
             let buf = self.message_buffer(session_id).await;
@@ -660,7 +660,7 @@ impl Runtime {
                 Some(s) if !s.system_prompt.is_empty() => (s.system_prompt, ssh),
                 _ => {
                     let sp = crate::agent_ctx::compose_system_prompt(
-                        tidev_types::agent_type::AgentType::General,
+                        crate::agent_type::AgentType::General,
                         &self.workspace_root,
                     );
                     // Persist system prompt to the session record.
@@ -673,16 +673,6 @@ impl Runtime {
         let active_model = self.active_model.read().unwrap().clone();
         let llm_config = crate::agent_ctx::to_llm_provider_config(&active_model);
 
-        let agent_def = AgentDefinition {
-            agent_type: tidev_types::agent_type::AgentType::General,
-            display_name: "tidev".into(),
-            description: "A terminal-based AI coding agent".into(),
-            system_prompt: system_prompt.clone(),
-            allowed_tools: None,
-            temperature: None,
-            read_only: false,
-        };
-
         let filtered_tools = self.tool_registry.definitions_for_model(&active_model);
         let ctx = crate::agent_ctx::CoreContext::new(
             self.llm.clone(),
@@ -694,7 +684,7 @@ impl Runtime {
             self.request_tx.clone(),
             session_id,
             mode,
-            system_prompt,
+            system_prompt.clone(),
             llm_config,
             cancel.clone(),
             filtered_tools,
@@ -717,7 +707,7 @@ impl Runtime {
 
         let loop_config = tidev_agent::AgentLoopConfig {
             session_id,
-            definition: agent_def,
+            system_prompt,
             mode,
             thinking_level: active_model.thinking_level.clone(),
             event_tx: self.event_tx.clone(),

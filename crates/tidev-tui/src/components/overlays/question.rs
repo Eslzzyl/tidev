@@ -8,7 +8,7 @@ use ratatui::prelude::{Frame, Modifier, Style};
 use anyhow::Result;
 use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
 use textwrap::wrap;
-use tidev_types::tools::QuestionInfo;
+use tidev_tools::types::QuestionInfo;
 use unicode_width::UnicodeWidthStr;
 
 use crate::action::{Action, OverlayAction, OverlayKind};

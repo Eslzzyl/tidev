@@ -7,8 +7,8 @@ use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 
 use crate::{types::LlmProviderConfig, types::ToolDefinition};
-use tidev_types::message::{BackendEvent, Message, MessageAttachment, MessageRole, ToolCall};
-use tidev_types::reasoning::ThinkingLevelType;
+use crate::message::{BackendEvent, Message, MessageAttachment, MessageRole, ToolCall};
+use crate::reasoning::ThinkingLevelType;
 
 use log::{debug as log_debug, error as log_error};
 
@@ -687,7 +687,7 @@ fn user_message_content(model: &LlmProviderConfig, message: &Message) -> Result<
 mod tests {
     use super::*;
     use crate::types::{ApiType, LlmProviderConfig};
-    use tidev_types::message::{Message, MessageRole};
+    use crate::message::{Message, MessageRole};
 
     #[test]
     fn openai_system_messages_are_combined() {
@@ -705,7 +705,7 @@ mod tests {
             system_prompt: Some("base system prompt".to_string()),
             api_key: None,
             extra_body: None,
-            thinking_level: tidev_types::reasoning::ThinkingLevelType::None,
+            thinking_level: crate::reasoning::ThinkingLevelType::None,
         };
 
         // System messages in the message list are now skipped (role match arm is empty).
@@ -755,7 +755,7 @@ mod tests {
             system_prompt: Some("base system prompt".to_string()),
             api_key: None,
             extra_body: None,
-            thinking_level: tidev_types::reasoning::ThinkingLevelType::None,
+            thinking_level: crate::reasoning::ThinkingLevelType::None,
         };
 
         // No System message in messages, only model.system_prompt
@@ -796,13 +796,13 @@ mod tests {
             system_prompt: None,
             api_key: None,
             extra_body: None,
-            thinking_level: tidev_types::reasoning::ThinkingLevelType::None,
+            thinking_level: crate::reasoning::ThinkingLevelType::None,
         }
     }
 
     /// Helper: build a Tool message carrying an image attachment.
     fn tool_message_with_image(tool_call_id: &str) -> Message {
-        use tidev_types::message::ToolExecutionResult;
+        use crate::message::ToolExecutionResult;
         let mut result = ToolExecutionResult::new("Image read successfully.");
         result.attachments.push(MessageAttachment::Image {
             filename: "icon.png".to_string(),

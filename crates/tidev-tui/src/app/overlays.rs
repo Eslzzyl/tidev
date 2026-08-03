@@ -1,7 +1,7 @@
 use super::*;
 
 use crate::theme::ThemeName;
-use tidev_types::agent_type::AgentType;
+use tidev_core::agent_type::AgentType;
 
 use crate::action::{Action, OverlayAction, OverlayKind};
 use crate::component::Component;
@@ -71,7 +71,7 @@ impl App {
                     .map(|ctx| {
                         ctx.visible_messages()
                             .iter()
-                            .filter(|m| matches!(m.role, tidev_types::message::MessageRole::User))
+                            .filter(|m| matches!(m.role, tidev_llm::message::MessageRole::User))
                             .enumerate()
                             .map(|(i, m)| MessagePanelMessage {
                                 message_id: m.id,

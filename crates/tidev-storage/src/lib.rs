@@ -20,7 +20,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
-use tidev_types::message::{Message, MessageRole};
+use tidev_llm::message::{Message, MessageRole};
 use uuid::Uuid;
 
 use crate::compression::{compress_text, decompress_text};
@@ -118,17 +118,17 @@ impl RawMessageRow {
             return Message::new(MessageRole::User, "");
         }
 
-        let metadata: tidev_types::message::ToolMetadata =
+        let metadata: tidev_llm::message::ToolMetadata =
             serde_json::from_str(&decompress_text(&self.metadata)).unwrap_or_default();
 
         let content = decompress_text(&self.content);
 
-        let attachments: Vec<tidev_types::message::MessageAttachment> =
+        let attachments: Vec<tidev_llm::message::MessageAttachment> =
             serde_json::from_str(&self.attachments).unwrap_or_default();
 
         let reasoning = decompress_text(&self.reasoning);
 
-        let tool_calls: Vec<tidev_types::message::ToolCall> =
+        let tool_calls: Vec<tidev_llm::message::ToolCall> =
             serde_json::from_str(&decompress_text(&self.tool_calls)).unwrap_or_default();
 
         let patch_files =
@@ -1207,7 +1207,7 @@ impl SessionStore {
         &self,
         session_id: Uuid,
         message_id: Uuid,
-        tool_calls: &[tidev_types::message::ToolCall],
+        tool_calls: &[tidev_llm::message::ToolCall],
     ) -> Result<()> {
         let json = serde_json::to_string(tool_calls)?;
         let conn = self.write_conn.lock().unwrap();
@@ -1227,7 +1227,7 @@ impl SessionStore {
         &self,
         session_id: Uuid,
         message_id: Uuid,
-        metadata: &tidev_types::message::ToolMetadata,
+        metadata: &tidev_llm::message::ToolMetadata,
     ) -> Result<()> {
         let json = serde_json::to_string(metadata)?;
         let conn = self.write_conn.lock().unwrap();
@@ -1334,10 +1334,10 @@ impl SessionStore {
             .map(|b| decompress_text(&b))
             .unwrap_or_else(|_| row.get::<_, String>(2).unwrap_or_default());
         let attachments_raw: String = row.get(3).unwrap_or_default();
-        let attachments: Vec<tidev_types::message::MessageAttachment> =
+        let attachments: Vec<tidev_llm::message::MessageAttachment> =
             serde_json::from_str(&attachments_raw).unwrap_or_default();
         let metadata_raw: Vec<u8> = row.get(8).unwrap_or_default();
-        let metadata: tidev_types::message::ToolMetadata =
+        let metadata: tidev_llm::message::ToolMetadata =
             serde_json::from_str(&decompress_text(&metadata_raw)).unwrap_or_default();
         let completed_at: Option<String> = row.get(10).ok().flatten();
         let streaming: bool = row.get::<_, i64>(11).unwrap_or(0) != 0;
@@ -2043,7 +2043,7 @@ impl SessionStore {
     pub fn save_todos(
         &self,
         session_id: Uuid,
-        todos: &[tidev_types::tools::TodoItem],
+        todos: &[tidev_tools::types::TodoItem],
     ) -> Result<()> {
         let conn = self.write_conn.lock().unwrap();
         conn.execute(
@@ -2060,13 +2060,13 @@ impl SessionStore {
     }
 
     /// Load todo items for a session.
-    pub fn load_todos(&self, session_id: Uuid) -> Result<Vec<tidev_types::tools::TodoItem>> {
+    pub fn load_todos(&self, session_id: Uuid) -> Result<Vec<tidev_tools::types::TodoItem>> {
         self.read(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT content, status FROM todos WHERE session_id = ?1 ORDER BY position ASC",
             )?;
             let rows = stmt.query_map(params![session_id.to_string()], |row| {
-                Ok(tidev_types::tools::TodoItem {
+                Ok(tidev_tools::types::TodoItem {
                     content: row.get(0)?,
                     status: row.get(1)?,
                 })
@@ -2402,7 +2402,7 @@ mod tests {
         let msg = Message::new(MessageRole::Assistant, "");
         store.append_message(sid, &msg).unwrap();
 
-        let calls = vec![tidev_types::message::ToolCall {
+        let calls = vec![tidev_llm::message::ToolCall {
             id: "tc-1".into(),
             name: "shell".into(),
             arguments: r#"{"command":"ls"}"#.into(),
@@ -2424,7 +2424,7 @@ mod tests {
         let msg = Message::new(MessageRole::User, "hello");
         store.append_message(sid, &msg).unwrap();
 
-        let meta = tidev_types::message::ToolMetadata {
+        let meta = tidev_llm::message::ToolMetadata {
             prior_summary: Some("old summary".into()),
             prior_retained_from: Some(42),
             ..Default::default()
@@ -2457,11 +2457,11 @@ mod tests {
         let (store, _tmp) = test_store();
         let sid = create_test_session(&store, "/workspace", "todo test");
         let todos = vec![
-            tidev_types::tools::TodoItem {
+            tidev_tools::types::TodoItem {
                 content: "Fix bug".into(),
                 status: "pending".into(),
             },
-            tidev_types::tools::TodoItem {
+            tidev_tools::types::TodoItem {
                 content: "Write tests".into(),
                 status: "completed".into(),
             },

@@ -17,7 +17,6 @@ tidev-instructions = { path = "../tidev-instructions" }
 tidev-logging = { path = "../tidev-logging" }
 tidev-search = { path = "../tidev-search" }
 tidev-utils = { path = "../tidev-utils" }
-tidev-types = { path = "../tidev-types" }
 anyhow = "1"
 tokio = { version = "1", features = ["sync", "rt", "process"] }
 tokio-util = "0.7"

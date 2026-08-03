@@ -1,6 +1,6 @@
 use ratatui::style::Color;
 
-use tidev_types::prompts::SessionMode;
+use tidev_llm::mode::SessionMode;
 
 mod name;
 pub use name::ThemeName;

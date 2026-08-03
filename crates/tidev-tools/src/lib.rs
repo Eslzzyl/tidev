@@ -15,6 +15,7 @@ pub mod builtin;
 pub mod shell;
 pub mod skills;
 pub mod todo_persistence;
+pub mod types;
 
 mod bundled_skills;
 

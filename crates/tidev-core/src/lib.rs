@@ -1,10 +1,12 @@
 //! tidev-core: core orchestration layer.
 
 pub mod agent_ctx;
+pub mod agent_type;
 pub mod attachment;
 pub mod context;
 pub mod mcp;
 pub mod message_buf;
+pub mod prompts;
 pub mod registry;
 pub mod runtime;
 pub mod session;
@@ -31,8 +33,8 @@ pub use tidev_agent::{
 /// The new type is [`TuiRequest`].
 #[derive(Debug)]
 pub struct PendingToolApproval {
-    pub tool_calls: Vec<tidev_types::message::ToolCall>,
-    pub mode: tidev_types::prompts::SessionMode,
+    pub tool_calls: Vec<tidev_llm::message::ToolCall>,
+    pub mode: tidev_llm::mode::SessionMode,
     pub response_tx: tokio::sync::oneshot::Sender<Vec<ApprovedTool>>,
 }
 

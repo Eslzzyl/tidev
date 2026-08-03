@@ -16,7 +16,7 @@ use std::{
 
 use super::utils::{display_workspace_relative, resolve_workspace_path, truncate_in_place};
 use crate::builtin::utils::decode_tool_args;
-use tidev_types::tools::{GlobArgs, GrepArgs, ToolDefinition, ToolPermission};
+use crate::types::{GlobArgs, GrepArgs, ToolDefinition, ToolPermission};
 
 pub fn definitions() -> Vec<ToolDefinition> {
     vec![
@@ -40,7 +40,7 @@ pub fn execute_tool_call(
     _max_output_bytes: usize,
     allow_outside: bool,
 ) -> Result<String> {
-    match tidev_types::tools::canonical_tool_name(tool_name) {
+    match tidev_utils::tool_name::canonical_tool_name(tool_name) {
         Some("glob") => {
             let args = decode_tool_args::<GlobArgs>(tool_name, arguments)?;
             let path = args.path.unwrap_or_else(|| ".".to_string());

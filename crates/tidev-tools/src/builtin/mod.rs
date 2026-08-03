@@ -7,13 +7,10 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio_util::sync::CancellationToken;
 
 use crate::builtin::utils::parse_arguments;
-use tidev_types::message::BackendEvent;
-use tidev_types::message::ToolCall;
-use tidev_types::message::ToolExecutionResult;
-use tidev_types::prompts::SessionMode;
-use tidev_types::tools::{
-    QuestionArgs, SkillArgs, ToolDefinition, ToolPermission, canonical_tool_name,
-};
+use crate::types::{QuestionArgs, SkillArgs, ToolDefinition, ToolPermission};
+use tidev_llm::message::{BackendEvent, ToolCall, ToolExecutionResult};
+use tidev_llm::mode::SessionMode;
+use tidev_utils::tool_name::canonical_tool_name;
 
 use crate::skills::SkillCatalog;
 use crate::todo_persistence::TodoPersistence;

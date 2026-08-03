@@ -4,8 +4,8 @@ use std::path::Path;
 
 use crate::builtin::utils::decode_tool_args;
 use crate::todo_persistence::TodoPersistence;
-use tidev_types::TodoItem;
-use tidev_types::tools::{TodoWriteArgs, ToolDefinition, ToolPermission};
+use crate::types::TodoItem;
+use crate::types::{TodoWriteArgs, ToolDefinition, ToolPermission};
 
 pub fn definitions() -> Vec<ToolDefinition> {
     vec![ToolDefinition::new::<TodoWriteArgs>(

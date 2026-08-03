@@ -24,9 +24,9 @@ use std::sync::{Arc, Mutex};
 use tokio::process::Command;
 
 use tidev_config::mcp::McpServerConfig;
-use tidev_types::message::{MessageAttachment, ToolCall, ToolExecutionResult, ToolMetadata};
-use tidev_types::prompts::SessionMode;
-use tidev_types::tools::{ToolDefinition, ToolPermission};
+use tidev_llm::message::{MessageAttachment, ToolCall, ToolExecutionResult, ToolMetadata};
+use tidev_llm::mode::SessionMode;
+use tidev_tools::types::{ToolDefinition, ToolPermission};
 
 // ---------------------------------------------------------------------------
 // Type aliases
@@ -816,7 +816,7 @@ mod tests {
     #[test]
     fn test_mcp_manager_definitions_with_mock_tool() {
         let mgr = McpManager::new(PathBuf::from("/tmp"), BTreeMap::new());
-        let tool = ToolDefinition::new::<tidev_types::tools::ReadArgs>(
+        let tool = ToolDefinition::new::<tidev_tools::types::ReadArgs>(
             "read",
             "Read a file",
             ToolPermission::Read,
@@ -856,12 +856,12 @@ mod tests {
     fn test_mcp_manager_available_definitions_filters_by_mode() {
         let mgr = McpManager::new(PathBuf::from("/tmp"), BTreeMap::new());
 
-        let write_tool = ToolDefinition::new::<tidev_types::tools::WriteArgs>(
+        let write_tool = ToolDefinition::new::<tidev_tools::types::WriteArgs>(
             "write",
             "Write file",
             ToolPermission::Write,
         );
-        let read_tool = ToolDefinition::new::<tidev_types::tools::ReadArgs>(
+        let read_tool = ToolDefinition::new::<tidev_tools::types::ReadArgs>(
             "read",
             "Read file",
             ToolPermission::Read,

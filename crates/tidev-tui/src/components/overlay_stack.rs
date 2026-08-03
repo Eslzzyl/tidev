@@ -117,8 +117,8 @@ mod tests {
     use tidev_config::AppConfig;
     use tidev_config::auth::{ActiveModel, AuthStore};
     use tidev_config::types::ApiType;
-    use tidev_types::prompts::SessionMode;
-    use tidev_types::reasoning::ThinkingLevelType;
+    use tidev_llm::mode::SessionMode;
+    use tidev_llm::reasoning::ThinkingLevelType;
     use uuid::Uuid;
 
     use crate::components::overlays::agents::AgentsPanel;

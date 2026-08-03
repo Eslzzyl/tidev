@@ -20,9 +20,9 @@ use uuid::Uuid;
 use super::utils::truncate_in_place;
 use crate::builtin::classify::{Classifier, Safety};
 use crate::builtin::utils::decode_tool_args;
-use tidev_types::message::BackendEvent;
-use tidev_types::prompts::SessionMode;
-use tidev_types::tools::{ShellArgs, ToolDefinition, ToolPermission};
+use crate::types::{ShellArgs, ToolDefinition, ToolPermission};
+use tidev_llm::message::BackendEvent;
+use tidev_llm::mode::SessionMode;
 use tidev_utils::encoding::decode_command_output;
 use tidev_utils::encoding::prepare_command_for_shell;
 

@@ -2,8 +2,8 @@
 
 use crate::theme::ThemePalette;
 use std::path::Path;
-use tidev_types::prompts::SessionMode;
-use tidev_types::reasoning::ThinkingLevelType;
+use tidev_llm::mode::SessionMode;
+use tidev_llm::reasoning::ThinkingLevelType;
 
 /// Immutable resources passed to every component during initialisation.
 pub(crate) struct InitContext<'a> {

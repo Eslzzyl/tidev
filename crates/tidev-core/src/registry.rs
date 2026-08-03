@@ -12,9 +12,9 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use tidev_types::message::{BackendEvent, ToolCall, ToolExecutionResult};
-use tidev_types::prompts::SessionMode;
-use tidev_types::tools::ToolDefinition;
+use tidev_llm::message::{BackendEvent, ToolCall, ToolExecutionResult};
+use tidev_llm::mode::SessionMode;
+use tidev_tools::types::ToolDefinition;
 
 use tidev_config::auth::ActiveModel;
 use tidev_config::{AuthStore, WebSearchConfig};
@@ -165,7 +165,7 @@ impl ToolRegistry {
             return Some(def);
         }
         // Fall back to canonical name lookup.
-        let canonical = tidev_types::tools::canonical_tool_name(tool_name)?;
+        let canonical = tidev_utils::tool_name::canonical_tool_name(tool_name)?;
         definitions.into_iter().find(|d| d.name == canonical)
     }
 
@@ -200,13 +200,13 @@ mod tests {
         fn load_todos(
             &self,
             _session_id: Uuid,
-        ) -> anyhow::Result<Vec<tidev_types::tools::TodoItem>> {
+        ) -> anyhow::Result<Vec<tidev_tools::types::TodoItem>> {
             Ok(Vec::new())
         }
         fn replace_todos(
             &self,
             _session_id: Uuid,
-            _todos: &[tidev_types::tools::TodoItem],
+            _todos: &[tidev_tools::types::TodoItem],
         ) -> anyhow::Result<()> {
             Ok(())
         }
@@ -230,7 +230,7 @@ mod tests {
             "Srv Tool".into(),
             "Does something".into(),
             serde_json::json!({"type": "object"}),
-            tidev_types::tools::ToolPermission::Execute,
+            tidev_tools::types::ToolPermission::Execute,
             "srv".into(),
             "tool".into(),
         );

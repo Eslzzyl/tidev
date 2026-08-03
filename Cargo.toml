@@ -1,7 +1,6 @@
 [workspace]
 members = [
   ".",
-  "crates/tidev-types",
   "crates/tidev-storage",
   "crates/tidev-llm",
   "crates/tidev-config",

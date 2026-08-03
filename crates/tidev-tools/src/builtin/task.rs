@@ -1,13 +1,22 @@
-use anyhow::{Result, bail, ensure};
+use anyhow::{Result, ensure};
 use serde_json::Value;
 use std::path::Path;
 use uuid::Uuid;
 
 use crate::builtin::utils::decode_tool_args;
 use crate::todo_persistence::TodoPersistence;
-use tidev_types::agent_type::AgentType;
-use tidev_types::prompts::SessionMode;
-use tidev_types::tools::{TaskArgs, ToolDefinition, ToolPermission};
+use crate::types::{TaskArgs, ToolDefinition, ToolPermission};
+use tidev_llm::mode::SessionMode;
+
+/// Mirrors `tidev_core::agent_type::AgentType::parse` accepted names.
+/// Keep in sync when agent types are added/renamed (see tidev-core agent_type.rs).
+const SUBAGENT_TYPES: &[&str] = &["explorer", "librarian", "oracle", "fixer"];
+
+fn normalize_subagent_type(s: &str) -> Option<&'static str> {
+    let s = s.trim().to_ascii_lowercase();
+    let s = s.strip_prefix('@').unwrap_or(&s);
+    SUBAGENT_TYPES.iter().find(|t| **t == s).copied()
+}
 
 pub fn definitions() -> Vec<ToolDefinition> {
     vec![ToolDefinition::new::<TaskArgs>(
@@ -25,7 +34,7 @@ pub fn execute_tool_call(
     _session_id: Uuid,
     tool_name: &str,
     arguments: Value,
-    mode: SessionMode,
+    _mode: SessionMode,
 ) -> Result<String> {
     let args = decode_tool_args::<TaskArgs>(tool_name, arguments)?;
 
@@ -41,22 +50,65 @@ pub fn execute_tool_call(
         "subagent_type is required: specify one of explorer, librarian, oracle, fixer"
     );
 
-    let agent_type = AgentType::parse(subagent_type_str)
-        .ok_or_else(|| anyhow::anyhow!(
+    let subagent_type = normalize_subagent_type(&args.subagent_type).ok_or_else(|| {
+        anyhow::anyhow!(
             "unknown subagent type '{subagent_type_str}': expected one of explorer, librarian, oracle, fixer"
-        ))?;
+        )
+    })?;
 
-    // In plan mode, reject delegation to fixer subagents (they perform writes)
-    if mode == SessionMode::Plan && agent_type == AgentType::Fixer {
-        bail!(
-            "Task delegation to fixer subagent rejected: Plan mode is read-only and does not allow write operations. \
-            You may delegate to read-only subagents (explorer, librarian, oracle) in plan mode. \
-            Switch to build mode to use the fixer subagent."
-        );
+    Ok(format!("Started {subagent_type} subagent task '{description}'"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::TodoItem;
+
+    struct MockTodoStore;
+
+    impl TodoPersistence for MockTodoStore {
+        fn load_todos(&self, _session_id: Uuid) -> anyhow::Result<Vec<TodoItem>> {
+            Ok(Vec::new())
+        }
+
+        fn replace_todos(&self, _session_id: Uuid, _todos: &[TodoItem]) -> anyhow::Result<()> {
+            Ok(())
+        }
     }
 
-    Ok(format!(
-        "Started {agent_type} subagent task '{description}'",
-        agent_type = agent_type.display_name()
-    ))
+    #[test]
+    fn test_normalize_subagent_type() {
+        for name in SUBAGENT_TYPES {
+            assert_eq!(normalize_subagent_type(name), Some(*name));
+            assert_eq!(normalize_subagent_type(&format!("@{name}")), Some(*name));
+            assert_eq!(
+                normalize_subagent_type(&name.to_uppercase()),
+                Some(*name)
+            );
+        }
+        assert_eq!(normalize_subagent_type("general"), None);
+        assert_eq!(normalize_subagent_type("unknown"), None);
+    }
+
+    #[test]
+    fn test_unknown_subagent_type_error_message() {
+        let err = execute_tool_call(
+            Path::new("."),
+            &MockTodoStore,
+            Uuid::new_v4(),
+            "task",
+            serde_json::json!({
+                "description": "desc",
+                "prompt": "prompt",
+                "subagent_type": "bogus",
+            }),
+            SessionMode::Build,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("expected one of explorer, librarian, oracle, fixer"),
+            "error message: {err}"
+        );
+    }
 }

@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use uuid::Uuid;
 
 use crate::theme::ThemeName;
-use tidev_types::message::MessageAttachment;
+use tidev_llm::message::MessageAttachment;
 
 /// Panel action identifiers (launcher target).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

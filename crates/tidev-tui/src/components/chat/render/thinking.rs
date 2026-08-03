@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use ratatui::prelude::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use tidev_types::message::Message;
+use tidev_llm::message::Message;
 use uuid::Uuid;
 
 use crate::markdown;

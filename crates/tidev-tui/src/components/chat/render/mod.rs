@@ -185,8 +185,8 @@ mod tests {
     use cards::render_system_card;
     use ratatui::style::Color;
     use std::path::Path;
-    use tidev_types::message::{Message, MessageRole};
-    use tidev_types::reasoning::ThinkingLevelType;
+    use tidev_llm::message::{Message, MessageRole};
+    use tidev_llm::reasoning::ThinkingLevelType;
 
     fn user_msg(content: &str, id: u128) -> Message {
         let mut msg = Message::new(MessageRole::User, content);

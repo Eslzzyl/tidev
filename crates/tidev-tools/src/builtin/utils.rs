@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use serde_json::Value;
 use std::path::Path;
 
-use tidev_types::tools::ToolArgs;
+use crate::types::ToolArgs;
 
 // ---------------------------------------------------------------------------
 // Tool-specific utilities

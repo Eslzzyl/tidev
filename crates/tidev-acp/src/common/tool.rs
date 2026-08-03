@@ -1,7 +1,7 @@
 //! Shared tool presentation helpers.
 
-use tidev_types::message::ToolCall;
-use tidev_types::tools::canonical_tool_name;
+use tidev_llm::message::ToolCall;
+use tidev_utils::tool_name::canonical_tool_name;
 
 /// Build the human-readable title used for a tool call in ACP requests.
 pub(crate) fn tool_title(tc: &ToolCall) -> String {

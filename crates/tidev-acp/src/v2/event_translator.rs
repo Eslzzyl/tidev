@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use agent_client_protocol::schema::v2 as acp;
-use tidev_types::message::BackendEvent;
+use tidev_llm::message::BackendEvent;
 use uuid::Uuid;
 
 /// Stateful event translator for one ACP v2 session.
@@ -117,7 +117,7 @@ impl EventTranslator {
                     ),
                 ))];
                 if matches!(
-                    tidev_types::tools::canonical_tool_name(&tool_call.name),
+                    tidev_utils::tool_name::canonical_tool_name(&tool_call.name),
                     Some("shell") | Some("exec")
                 ) {
                     let terminal =
@@ -304,7 +304,7 @@ impl EventTranslator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tidev_types::message::{AssistantTurn, ToolCall};
+    use tidev_llm::message::{AssistantTurn, ToolCall};
 
     fn translator() -> EventTranslator {
         EventTranslator::new(Uuid::nil(), 128_000)

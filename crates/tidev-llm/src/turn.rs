@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use tidev_types::message::AssistantTurn;
+use crate::message::AssistantTurn;
 
 use crate::think_parser::ThinkParser;
 use crate::think_parser::strip_think_tags;

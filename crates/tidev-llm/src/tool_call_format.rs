@@ -7,8 +7,8 @@ pub(crate) struct ToolCallBuilder {
 }
 
 impl ToolCallBuilder {
-    pub(crate) fn into_tool_call(self, index: usize) -> tidev_types::message::ToolCall {
-        tidev_types::message::ToolCall {
+    pub(crate) fn into_tool_call(self, index: usize) -> crate::message::ToolCall {
+        crate::message::ToolCall {
             id: if self.id.is_empty() {
                 format!("tool-call-{index}")
             } else {
@@ -96,9 +96,9 @@ fn parse_parameters(body: &str) -> serde_json::Map<String, serde_json::Value> {
 /// that immediately follows `</invoke>`.
 ///
 /// Returns `(cleaned_text, extracted_tool_calls)`.
-pub(crate) fn parse_invoke_xml(text: &str) -> (String, Vec<tidev_types::message::ToolCall>) {
+pub(crate) fn parse_invoke_xml(text: &str) -> (String, Vec<crate::message::ToolCall>) {
     let mut text_parts: Vec<String> = Vec::new();
-    let mut calls: Vec<tidev_types::message::ToolCall> = Vec::new();
+    let mut calls: Vec<crate::message::ToolCall> = Vec::new();
     let mut cursor = 0usize;
     let mut call_index = 0usize;
 
@@ -138,7 +138,7 @@ pub(crate) fn parse_invoke_xml(text: &str) -> (String, Vec<tidev_types::message:
                 let args = parse_parameters(body);
                 let args_json = serde_json::Value::Object(args).to_string();
 
-                calls.push(tidev_types::message::ToolCall {
+                calls.push(crate::message::ToolCall {
                     id: format!("tool-call-{}", call_index),
                     name,
                     arguments: args_json,

@@ -12,7 +12,7 @@ use std::path::Path;
 use anyhow::Result;
 use chrono::Utc;
 
-use tidev_types::message::{
+use tidev_llm::message::{
     AssistantTurn, BackendEvent, Message, MessageRole, ToolCall, ToolExecutionResult,
 };
 
@@ -65,7 +65,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
         });
 
         // ─── 5. Compose system prompt ─────────────────────────────────────
-        let system_prompt = config.definition.system_prompt.clone();
+        let system_prompt = config.system_prompt.clone();
 
         // ─── 6. Stream LLM turn ──────────────────────────────────────────
         let turn = match ctx
@@ -294,7 +294,7 @@ async fn inject_mode_reminder(
     ctx: &dyn AgentContext,
     session_id: uuid::Uuid,
     messages: &mut [Message],
-    current_mode: tidev_types::prompts::SessionMode,
+    current_mode: tidev_llm::mode::SessionMode,
 ) -> Result<()> {
     // Find the last user message index.
     let last_user_idx = match messages.iter().rposition(|m| m.role == MessageRole::User) {
@@ -315,8 +315,8 @@ async fn inject_mode_reminder(
     let reminder: Option<String> = match (is_first_user, prev_mode) {
         (true, _) => Some(prompts::mode_reminder(current_mode)),
         (false, Some(prev)) if prev != current_mode => Some(match current_mode {
-            tidev_types::prompts::SessionMode::Plan => prompts::plan_switch_reminder(),
-            tidev_types::prompts::SessionMode::Build => prompts::build_switch_reminder(),
+            tidev_llm::mode::SessionMode::Plan => prompts::plan_switch_reminder(),
+            tidev_llm::mode::SessionMode::Build => prompts::build_switch_reminder(),
         }),
         _ => None,
     };

@@ -17,12 +17,12 @@ use crate::theme::ThemePalette;
 use ratatui::layout::Rect;
 use tidev_core::TuiResponse;
 use tidev_core::{ApprovedTool, ToolCallWithViolations};
-use tidev_types::message::{
+use tidev_llm::message::{
     BackendEvent, COMPACTION_MESSAGE_LABEL, Message, MessageAttachment, MessageRole,
 };
-use tidev_types::prompts::SessionMode;
-use tidev_types::reasoning::ThinkingLevelType;
-use tidev_types::tools::TodoItem;
+use tidev_llm::mode::SessionMode;
+use tidev_llm::reasoning::ThinkingLevelType;
+use tidev_tools::types::TodoItem;
 use uuid::Uuid;
 
 use crate::component::Component;
@@ -508,7 +508,7 @@ impl App {
         if let Some(ref mut chat) = self.message_list {
             if let Some(ref mut ctx) = chat.active_chat_context_mut() {
                 let msg = Message::streaming(
-                    tidev_types::message::MessageRole::System,
+                    tidev_llm::message::MessageRole::System,
                     format!("{}\n\n", COMPACTION_MESSAGE_LABEL),
                 );
                 ctx.push(msg);
