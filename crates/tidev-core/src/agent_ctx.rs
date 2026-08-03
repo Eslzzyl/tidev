@@ -29,7 +29,6 @@ use crate::backend_event::{
 use tidev_llm::message::{AssistantTurn, Message, MessageRole, ToolCall, ToolExecutionResult};
 use tidev_llm::reasoning::ThinkingLevelType;
 use tidev_tools::types::ToolDefinition;
-use tidev_tools::ShellOutput;
 use tidev_utils::path::{
     extract_boundary_violation_path, extract_sensitive_file_path, load_sensitive_patterns,
 };
@@ -1004,6 +1003,8 @@ impl AgentContext for CoreContext {
                             allow_outside,
                             sensitive_approved,
                             &cancel,
+                            None,
+                            false,
                         )
                         .await;
                     (tc, result)
@@ -1077,8 +1078,19 @@ impl AgentContext for CoreContext {
                 tool_call: tc.clone(),
             });
 
-            let (shell_tx, shell_rx) = tokio::sync::mpsc::unbounded_channel::<ShellOutput>();
-            let tool_fut = self.tool_registry.execute(
+            let (agent_event_tx, agent_event_rx) =
+                tokio::sync::mpsc::unbounded_channel::<AgentEvent>();
+            // Declare the completion guard before the future so cancellation
+            // drops the future first, allowing its adapter to forward any
+            // queued ShellOutput before the guard emits ToolCompleted.
+            let mut guard = ToolCompletedGuard::new(
+                session_id,
+                request_id,
+                Some(self.event_tx.clone()),
+                agent_event_rx,
+                tc.clone(),
+            );
+            let tool_fut = self.tool_registry.execute_via_agent(
                 &tc,
                 session_id,
                 request_id,
@@ -1086,18 +1098,8 @@ impl AgentContext for CoreContext {
                 allow_outside,
                 sensitive_approved,
                 &self.cancel,
-                Some(shell_tx),
-            );
-
-            // Guard ensures ToolCompleted is sent if this future is
-            // force-dropped (e.g. by JoinHandle::abort()), preventing the
-            // TUI's running_tools from leaking.
-            let mut guard = ToolCompletedGuard::new(
-                session_id,
-                request_id,
-                Some(self.event_tx.clone()),
-                shell_rx,
-                tc.clone(),
+                Some(agent_event_tx),
+                true,
             );
 
             // Directly await the tool. We do NOT use a select! with a cancel
@@ -1109,7 +1111,7 @@ impl AgentContext for CoreContext {
             // (write/edit/apply_patch/todowrite) are fast spawn_blocking
             // operations that complete in milliseconds anyway.
             let result = tool_fut.await;
-            guard.drain_shell_output();
+            guard.drain_agent_events();
             guard.disarm();
             self.emit(BackendEvent::ToolCompleted {
                 session_id,
@@ -1520,7 +1522,7 @@ struct ToolCompletedGuard {
     session_id: Uuid,
     request_id: u64,
     event_tx: Option<UnboundedSender<BackendEvent>>,
-    shell_rx: Option<UnboundedReceiver<ShellOutput>>,
+    agent_event_rx: Option<UnboundedReceiver<AgentEvent>>,
     tool_call: ToolCall,
     disarmed: bool,
 }
@@ -1530,32 +1532,26 @@ impl ToolCompletedGuard {
         session_id: Uuid,
         request_id: u64,
         event_tx: Option<UnboundedSender<BackendEvent>>,
-        shell_rx: UnboundedReceiver<ShellOutput>,
+        agent_event_rx: UnboundedReceiver<AgentEvent>,
         tool_call: ToolCall,
     ) -> Self {
         Self {
             session_id,
             request_id,
             event_tx,
-            shell_rx: Some(shell_rx),
+            agent_event_rx: Some(agent_event_rx),
             tool_call,
             disarmed: false,
         }
     }
 
-    fn drain_shell_output(&mut self) {
-        let Some(shell_rx) = self.shell_rx.as_mut() else {
+    fn drain_agent_events(&mut self) {
+        let Some(agent_event_rx) = self.agent_event_rx.as_mut() else {
             return;
         };
-        while let Ok(output) = shell_rx.try_recv() {
+        while let Ok(event) = agent_event_rx.try_recv() {
             if let Some(ref tx) = self.event_tx {
-                let _ = tx.send(BackendEvent::ShellOutput {
-                    session_id: output.session_id,
-                    tool_call_id: output.tool_call_id,
-                    content: output.content,
-                    finished: output.finished,
-                    exit_code: output.exit_code,
-                });
+                let _ = tx.send(agent_event_to_backend_event(event, self.session_id));
             }
         }
     }
@@ -1568,7 +1564,7 @@ impl ToolCompletedGuard {
 impl Drop for ToolCompletedGuard {
     fn drop(&mut self) {
         if !self.disarmed {
-            self.drain_shell_output();
+            self.drain_agent_events();
             if let Some(ref tx) = self.event_tx {
                 let _ = tx.send(BackendEvent::ToolCompleted {
                     session_id: self.session_id,
@@ -1590,10 +1586,9 @@ mod tool_event_order_tests {
     async fn guard_drains_shell_output_before_tool_completed() {
         let session_id = Uuid::new_v4();
         let (backend_tx, mut backend_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (shell_tx, shell_rx) = tokio::sync::mpsc::unbounded_channel();
-        shell_tx
-            .send(ShellOutput {
-                session_id,
+        let (agent_tx, agent_rx) = tokio::sync::mpsc::unbounded_channel();
+        agent_tx
+            .send(AgentEvent::ShellOutput {
                 request_id: 7,
                 tool_call_id: "call-1".to_string(),
                 content: "partial output".to_string(),
@@ -1601,13 +1596,13 @@ mod tool_event_order_tests {
                 exit_code: Some(0),
             })
             .unwrap();
-        drop(shell_tx);
+        drop(agent_tx);
 
         drop(ToolCompletedGuard::new(
             session_id,
             7,
             Some(backend_tx),
-            shell_rx,
+            agent_rx,
             ToolCall::default(),
         ));
 

@@ -13,6 +13,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use tidev_agent::AgentEvent;
 use tidev_llm::message::{ToolCall, ToolExecutionResult};
 use tidev_tools::types::ToolDefinition;
 
@@ -167,8 +168,8 @@ impl ToolRegistry {
         &self.skills
     }
 
-    /// Execute a non-streaming built-in call through the generic agent
-    /// registry while preserving the original host execution contract.
+    /// Execute a built-in call through the generic agent registry while
+    /// preserving the original host execution and streaming contract.
     pub(crate) async fn execute_via_agent(
         &self,
         call: &ToolCall,
@@ -178,6 +179,8 @@ impl ToolRegistry {
         allow_outside: bool,
         sensitive_file_approved: bool,
         cancel: &CancellationToken,
+        event_tx: Option<UnboundedSender<AgentEvent>>,
+        stream_shell: bool,
     ) -> ToolExecutionResult {
         execute_builtin_via_agent(
             self,
@@ -188,6 +191,8 @@ impl ToolRegistry {
             allow_outside,
             sensitive_file_approved,
             cancel,
+            event_tx,
+            stream_shell,
         )
         .await
     }
