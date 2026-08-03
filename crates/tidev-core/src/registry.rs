@@ -285,17 +285,10 @@ mod tests {
     }
 
     fn make_registry_with_mcp() -> ToolRegistry {
-        let mcp = McpManager::new(PathBuf::from("/tmp"), BTreeMap::new());
-        let tool = ToolDefinition::mcp(
-            "mcp__srv__tool".into(),
-            "Srv Tool".into(),
-            "Does something".into(),
-            serde_json::json!({"type": "object"}),
-            tidev_tools::types::ToolPermission::Execute,
-            "srv".into(),
-            "tool".into(),
+        let mcp = McpManager::new(
+            PathBuf::from("/tmp"),
+            BTreeMap::from([("srv".to_string(), make_stdio_config())]),
         );
-        crate::mcp::insert_mock_tool(&mcp, "srv", make_stdio_config(), tool);
         ToolRegistry::new(
             PathBuf::from("/tmp"),
             PathBuf::from("/tmp/.config"),
@@ -309,27 +302,23 @@ mod tests {
     }
 
     #[test]
-    fn test_mcp_definition_for_includes_mcp_tools() {
+    fn test_mcp_definition_for_disconnected_server_is_unavailable() {
         let reg = make_registry_with_mcp();
         let def = reg.definition_for("mcp__srv__tool");
-        assert!(def.is_some());
-        assert_eq!(def.unwrap().mcp_target(), Some(("srv", "tool")));
+        assert!(def.is_none());
     }
 
     #[test]
-    fn test_mcp_can_execute() {
+    fn test_mcp_cannot_execute_when_disconnected() {
         let reg = make_registry_with_mcp();
-        // MCP tool has ToolPermission::Execute, Build mode allows execute.
-        assert!(reg.can_execute("mcp__srv__tool", Mode::Build));
-        // Plan mode allows execute by default too.
-        assert!(reg.can_execute("mcp__srv__tool", Mode::Plan));
+        assert!(!reg.can_execute("mcp__srv__tool", Mode::Build));
+        assert!(!reg.can_execute("mcp__srv__tool", Mode::Plan));
     }
 
     #[test]
-    fn test_mcp_definitions_for_model_includes_mcp_tools() {
+    fn test_mcp_definitions_for_model_excludes_disconnected_tools() {
         let reg = make_registry_with_mcp();
         // Use a model that doesn't apply_patch (the default path).
-        // Simply check that MCP tools are included in definitions_for_model.
         let defs = reg.definitions_for_model(&tidev_config::auth::ActiveModel {
             provider_id: "test".into(),
             provider_display_name: "Test".into(),
@@ -350,8 +339,8 @@ mod tests {
         });
         let mcp_names: Vec<&str> = defs.iter().map(|d| d.name.as_str()).collect();
         assert!(
-            mcp_names.contains(&"mcp__srv__tool"),
-            "MCP tool should be in definitions_for_model output: {mcp_names:?}"
+            !mcp_names.contains(&"mcp__srv__tool"),
+            "Disconnected MCP tools must not be offered to the model: {mcp_names:?}"
         );
     }
 
@@ -361,7 +350,7 @@ mod tests {
         let summaries = reg.mcp_summaries();
         assert_eq!(summaries.len(), 1);
         assert_eq!(summaries[0].name, "srv");
-        assert_eq!(summaries[0].tool_count, 1);
+        assert_eq!(summaries[0].tool_count, 0);
     }
 
     #[test]

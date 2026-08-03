@@ -3960,8 +3960,10 @@ version = "0.8.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "base64 0.23.0",
  "chrono",
  "log",
+ "rmcp",
  "serde",
  "serde_json",
  "tidev-llm",
@@ -3989,11 +3991,9 @@ version = "0.8.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "base64 0.23.0",
  "chrono",
  "dirs",
  "log",
- "rmcp",
  "serde",
  "serde_json",
  "tidev-agent",

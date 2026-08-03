@@ -8,6 +8,7 @@ pub mod context;
 pub mod context_manager;
 pub mod event;
 pub mod loop_;
+pub mod mcp;
 pub mod message_buf;
 pub mod registry;
 pub mod tool;
@@ -19,6 +20,9 @@ pub use context::{
 pub use context_manager::{CompactionResult, ContextManager};
 pub use event::{AgentEvent, llm_event_to_agent_event};
 pub use loop_::run_agent_loop;
+pub use mcp::{
+    McpConnectionStatus, McpRegistry, McpServerSpec, McpServerSummary, McpToolInfo,
+};
 pub use message_buf::MessageBuffer;
 pub use registry::ToolRegistry;
 pub use tool::{Tool, ToolContext};
