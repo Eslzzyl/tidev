@@ -11,6 +11,7 @@ pub mod loop_;
 pub mod mcp;
 pub mod message_buf;
 pub mod registry;
+pub mod runtime;
 pub mod tool;
 
 // Re-export types from tidev-llm (defined there as shared protocol types).
@@ -25,4 +26,5 @@ pub use mcp::{
 };
 pub use message_buf::MessageBuffer;
 pub use registry::ToolRegistry;
+pub use runtime::{AgentRuntime, MessageStore};
 pub use tool::{Tool, ToolContext};
