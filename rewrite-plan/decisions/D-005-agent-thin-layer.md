@@ -1,93 +1,60 @@
-# D-005: tidev-agent 薄层设计
+# D-005: tidev-agent Runtime Boundary
 
-**日期**: 2026-07-02  
-**状态**: 待实现
+**Date**: 2026-08-03
+**Status**: Adopted and implemented in stages
 
-## 背景
+## Background
 
-旧 `AgentRuntime` 持有所有资源（store、LLM client、tools、config、auth 等），子代理启动时 `.clone()` 整个结构体（见旧 `agent/runtime/mod.rs`）。子代理的 agent loop 完整复制了主 loop 的逻辑（`subagent.rs` ~500 行 vs `agent_loop.rs` ~500 行）。
+The old `AgentRuntime` owned tidev product state and was cloned wholesale for
+subagents. The rewritten architecture separates the reusable agent mechanism
+from tidev product policy while still providing a usable default runtime.
 
-## 决策
+## Decision
 
-**tidev-agent 只定义 agent 循环的骨架和类型，不持有实现资源。**
-
-```
-tidev-agent（薄层）
-├── AgentType                    — 7 种 agent 类型的枚举
-├── AgentDefinition              — 完整的 agent 配置定义
-├── AgentOverride                — 覆盖配置
-├── prompts.rs                   — 各 agent 系统提示词
-├── AgentContext trait           — 循环需要的外部能力接口
-├── PendingToolApproval          — 权限审批请求（含 oneshot 通道）
-├── ApprovedTool                 — 审批结果（含 rejection/child_session_id）
-└── run_agent_loop()             — 循环骨架函数
-
-tidev-core（编排层）
-└── 实现 AgentContext
-└── SessionManager（含 SubagentHost）
-```
-
-## AgentContext trait 定义
-
-```rust
-#[async_trait]
-pub trait AgentContext: Send + Sync {
-    /// 获取当前工具列表
-    fn tools(&self) -> Vec<ToolDefinition>;
-
-    /// 事件通道
-    fn event_tx(&self) -> UnboundedSender<BackendEvent>;
-
-    /// 流式调用 LLM
-    async fn stream_turn(&self, messages: &[Message],
-        system_prompt: &str, thinking_level: &ThinkingLevelType) -> Result<AssistantTurn>;
-
-    /// 请求工具权限审批
-    async fn request_tool_approval(&self,
-        tool_calls: &[ToolCall], mode: SessionMode) -> Result<Vec<ApprovedTool>>;
-
-    /// 执行一批已审批的工具调用并返回其执行结果。
-    ///
-    /// 实现职责：
-    /// - 分离只读和写入工具（并行 vs 串行执行）
-    /// - 处理 task 工具（子代理委托）
-    /// - 发送 BackendEvent::ToolCompleted 事件
-    ///
-    /// 注意：本方法**不负责持久化工具结果**。持久化由
-    /// `run_agent_loop` 统一通过 `save_messages()` 处理。
-    /// 避免在内部分配 Message ID 或写入 message buffer/DB。
-    async fn execute_tools(&self,
-        approved_tools: &[ApprovedTool],
-        session_id: uuid::Uuid,
-        request_id: u64) -> Result<Vec<(ToolCall, ToolExecutionResult)>>;
-
-    /// 持久化消息（追加到缓存 + 写入 DB）。
-    async fn save_messages(&self, session_id: uuid::Uuid, messages: &[Message]) -> Result<()>;
-
-    /// 加载消息历史（从内存缓存读取，不读 DB）。
-    async fn load_messages(&self, session_id: uuid::Uuid) -> Result<Vec<Message>>;
-}
-```
-
-### 与设计变更相关
-
-- `session_id` 参数：`save_messages`/`load_messages`/`execute_tools` 均接受 `session_id`，使 trait 不隐含 single-session 假设
-- `event_tx` 返回值：返回 `UnboundedSender` 本身而非引用，因为 sender 是 `Clone`，更灵活
-- `execute_tools` 不持久化：详见 architecture.md §4
-
-## 依赖
+`tidev-agent` owns the generic protocol-level runtime:
 
 ```
-tidev-agent ─── tidev-types
-            ├── serde
-            ├── async-trait
-            └── tokio (sync)
+tidev-agent
+├── AgentContext + run_agent_loop
+├── AgentRuntime + MessageStore
+├── ContextManager + MessageBuffer
+├── Tool + ToolContext + ToolRegistry
+├── MCP client + McpRegistry
+└── AgentEvent
+
+tidev-core
+├── CoreContext and BackendEvent
+├── approval and Mode policy
+├── application message data and persistence
+├── snapshots and instruction injection
+└── subagent/session orchestration
 ```
 
-不依赖 tidev-storage / tidev-config / tidev-llm / tidev-tools / tidev-mcp。
+The generic `AgentContext` has seven methods: `tools`, `event_tx`,
+`stream_turn`, `execute_tools`, `save_messages`, `workspace_root`, and
+`load_messages`. The loop does not know about approvals, modes, snapshots,
+application metadata, or subagent sessions.
 
-## 理由
+`AgentRuntime` provides the default implementation for products that need no
+approval policy. It owns protocol messages in a `MessageBuffer`, delegates
+persistence through `MessageStore`, builds request views through
+`ContextManager`, streams `LlmEvent` values as `AgentEvent`, and executes
+read-only tools concurrently while keeping write-tool execution serial.
 
-1. **复用**：主 agent 和子 agent 共用同一个 `run_agent_loop()` 函数，只传入不同的 `AgentContext` 实现
-2. **可测试**：`AgentContext` 可以 mock，纯循环逻辑可单元测试
-3. **边界清晰**：循环"怎么转"在 tidev-agent，"用什么转"在 tidev-core
+Approvals and subagents remain host policies. A product that needs either can
+implement `AgentContext::execute_tools` itself, as tidev-core does. No generic
+`ApprovalHandler` or tidev session type is added to the agent crate.
+
+## Dependencies
+
+The agent crate depends on `tidev-llm` for protocol and provider types. MCP
+support uses the external `rmcp` client. It has no dependency on
+`tidev-core`, `tidev-config`, `tidev-storage`, or `tidev-tools`.
+
+## Reasons
+
+1. A product can use `AgentRuntime` without importing tidev application policy.
+2. Core-specific approval, snapshot, and subagent behavior stays testable at
+   the host boundary.
+3. The loop and context construction can be reused without changing the bytes
+   of protocol messages sent to an LLM.

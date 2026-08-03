@@ -1,12 +1,26 @@
-# D-006: tidev-mcp 不纳入重写
+# D-006: MCP Client Placement
 
-**日期**: 2026-07-03  
-**状态**: ✅ 已定案
+**Date**: 2026-08-03
+**Status**: Superseded by the target roadmap
 
-## 决策
+## Previous decision
 
-`tidev-mcp` 不纳入重写，删除该 crate。
+The 2026-07-03 rewrite plan skipped MCP because the feature had no verified
+users and the archived implementation had not been validated.
 
-## 理由
+## Current decision
 
-团队未实际使用过 MCP 功能，旧代码的正确性无法验证。当前阶段不值得投入精力迁移一个没有使用者、无法验证的模块。后续有需要时可以从旧存档（`_archive/v0.6.x/crates/tidev-engine/src/mcp.rs`）移植。
+The target roadmap supersedes that decision. MCP is implemented as a generic
+client and registry in `tidev-agent`, using `rmcp`. `tidev-core` retains only
+the product integration layer: configuration mapping, workspace path
+resolution, permission mapping, and TUI-facing connection state.
+
+MCP tools are exposed through the same generic `Tool` and `ToolRegistry`
+interfaces as built-in tools. A disconnected or failed server contributes no
+tool definitions and cannot execute calls.
+
+## Scope boundary
+
+The rewrite still does not add MCP-specific product policy to the agent crate.
+Hosts decide when to connect, which permissions to expose, and how MCP errors
+are presented to users.
