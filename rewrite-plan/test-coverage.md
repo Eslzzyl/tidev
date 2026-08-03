@@ -83,7 +83,7 @@ crates/tidev-test-utils/
 
 Dev-dependencies（只对 test 可见）：
 - `tempfile`
-- `tidev-types`
+- `tidev-llm`、`tidev-tools` 和 `tidev-core` 的协议、工具及应用数据
 - `uuid`
 - `chrono`
 - `serde_json`
@@ -262,7 +262,7 @@ CI 中生成覆盖率报告，上传到 Codecov。
 ### 3.3 关键公共 API 文档测试
 
 逐步把 ` ```ignore` 改为 ` ```rust`，优先覆盖：
-- `tidev-types` 中 `Message` / `ToolCall` 的构造 + 序列化
+- `tidev-llm` 中 `Message` / `ToolCall` 的构造 + 序列化
 - `tidev-storage` 中 `SessionStore` 的基本使用
 - `tidev-config` 中配置加载
 - `tidev-llm` 中 `LlmClient::new` 创建

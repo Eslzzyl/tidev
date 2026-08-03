@@ -1,7 +1,7 @@
 # D-005: tidev-agent Runtime Boundary
 
 **Date**: 2026-08-03
-**Status**: Adopted and implemented in stages
+**Status**: Adopted and implemented in stages; v1 boundary finalized
 
 ## Background
 
@@ -44,6 +44,13 @@ read-only tools concurrently while keeping write-tool execution serial.
 Approvals and subagents remain host policies. A product that needs either can
 implement `AgentContext::execute_tools` itself, as tidev-core does. No generic
 `ApprovalHandler` or tidev session type is added to the agent crate.
+
+For v1, this also resolves the optional `SubagentHost` design point: no generic
+`SubagentHost` trait is added. `AgentRuntime` does not inspect or dispatch a
+`task` tool. tidev-core keeps subagent session creation, model selection,
+approval inheritance, cancellation, event association, and result synthesis in
+its `CoreContext::execute_tools` implementation while reusing the generic
+`run_agent_loop` for child sessions.
 
 ## Dependencies
 

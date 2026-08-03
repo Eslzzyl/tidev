@@ -1,4 +1,7 @@
-# tidev-types 拆分实施计划
+# tidev-types 拆分实施计划（历史记录）
+
+> 状态：已完成。本文保留迁移过程和历史目标，当前 crate 边界以
+> tidev-target-roadmap.md 和 rewrite-plan/architecture.md 为准。
 
 **状态**: 已完成（2026-08-03 实施，§8 验收标准全部通过；唯一行为变化：fixer Plan 检查生效于 core）
 **日期**: 2026-08-03
@@ -57,7 +60,7 @@ tidev-types 共 3435 行、5 个模块：
 
 1. **SessionMode 必须进协议层（tidev-llm）**。tidev-tools 的 exec/task 使用它，若进 tidev-core 则 tools→core 循环；若进 tidev-tools 则 tidev-agent 无法使用（只能依赖 llm）。Message.mode 字段（`Option<SessionMode>`）与 task.rs 的 mode 参数都引用它。归入 `tidev_llm::mode`，保留原名与方法（all/as_str/toggle/title/description + serde）。
 2. **canonical_tool_name 必须进 tidev-utils**。tidev-utils/src/path.rs（:291、:331）自身使用它，若留 tidev-tools 则 utils→tools→utils 循环。迁入后 tidev-utils 变为零内部依赖叶子。
-3. **BackendEvent 临时留在 tidev-llm**。tidev-llm（41 处构造）、tidev-agent（loop_.rs、context.rs）、tidev-tools（exec 的 ShellOutput）都向它发事件，放进 tidev-core 会形成 llm/agent/tools→core 循环。因此 message.rs 整文件迁入 llm，BackendEvent 随迁，**在 BackendEvent 定义处加注释**：`// TODO(event-split): move to tidev-core when LlmEvent/AgentEvent land`。事件三层拆分（LlmEvent/AgentEvent/BackendEvent）**本次不做**（§9）。
+3. 历史上 BackendEvent 曾临时留在 tidev-llm，以避免迁移阶段的依赖循环。后续 P1 已完成 LlmEvent/AgentEvent/BackendEvent 三层拆分，当前 BackendEvent 在 tidev-core。
 4. **agent_type → core 的连锁**（本次范围，见 §5）：task 工具（tidev-tools 唯一引用 AgentType 处）必须解耦；`AgentLoopConfig.definition: AgentDefinition` 字段必须换成 `system_prompt: String`（agent 无法引用 core 的类型）；trait 的 `tools()` 必须改用 `tidev_llm::ToolDefinition`（agent 无法依赖 tools）。
 5. **ShellOutput 暂无独立处理**。仍是 BackendEvent 的一个变体（tidev-tools 的 `ToolContext.event_tx: Option<UnboundedSender<BackendEvent>>`，builtin/mod.rs:35），随事件拆分再本地化到 tidev-tools（§9）。
 
@@ -175,7 +178,7 @@ tidev（bin）──→ core, config, storage, tui, acp, utils（不变）
 
 ### 步骤 1：tidev-llm 吸收协议层
 
-1. 新建 `crates/tidev-llm/src/message.rs`：将 `tidev-types/src/message.rs` 整文件迁入（1420 行 + 47 测试），内容一字不改；内部引用 `crate::prompts::SessionMode`（Message.mode 字段，原文件 :369）改为 `crate::mode::SessionMode`；BackendEvent 定义处加 `// TODO(event-split)` 注释。
+1. 新建 `crates/tidev-llm/src/message.rs`：将协议消息类型迁入 tidev-llm；产品字段和 BackendEvent 后续按目标路线图分别净化、迁移。
 2. 新建 `crates/tidev-llm/src/reasoning.rs`：`tidev-types/src/reasoning.rs` 整文件迁入（948 行 + 34 测试），一字不改。
 3. 新建 `crates/tidev-llm/src/mode.rs`：`tidev-types/src/prompts.rs` 的 SessionMode 部分迁入（枚举 + 全部方法 + 相关测试），一字不改。
 4. `crates/tidev-llm/src/lib.rs`：声明 `pub mod message; pub mod reasoning; pub mod mode;`。

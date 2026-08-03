@@ -1,30 +1,31 @@
 # D-002: 工具类型系统分层
 
-**日期**: 2026-07-02  
-**状态**: 已采纳
+**日期**：2026-07-02
+**更新**：2026-08-04
+**状态**：已采纳，当前边界已落地
 
-## 背景
+## 当前决策
 
-旧实现中工具相关的类型（`ToolDefinition`、`ToolPermission`、`ToolArgs` trait��和工具实现（file read/write/edit、bash、glob/grep、web 等）都在 `tidev-engine/src/tooling/` 下，没有 crate 边界。
+工具分为三个职责层：
 
-## 决策
+    tidev-llm
+      仅保留发送给 provider 的精简 ToolDefinition
 
-**拆分为三层：**
+    tidev-tools
+      ToolDefinition、ToolPermission、ToolArgs 和 builtin 工具实现
+      execute_tool_call、SkillCatalog、TodoPersistence、ShellOutput
 
-```
-tidev-types/src/tools.rs   — 纯类型定义（ToolDefinition, ToolOrigin, ToolPermission,
-                              PermissionConfig, ToolArgs trait + macros, Args structs,
-                              canonical_tool_name, FileReadStamp）
+    tidev-core
+      ToolRegistry 宿主策略、审批、边界检查、敏感文件检查和 MCP 集成
 
-tidev-tools/               — 工具实现（builtin/ 下的 read/write/edit/bash/glob/grep 等，
-                              execute_tool_call() 路由，ToolContext，SkillCatalog）
+    tidev-agent
+      通用 Tool、ToolContext、ToolRegistry 和 MCP client
 
-tidev-core                 — 编排层（ToolRegistry：统一注册 builtin + MCP 工具，
-                              权限检查，文件读取追踪）
-```
+tidev-tools 不依赖 tidev-agent 或 tidev-core。core 通过 adapter 将 builtin
+工具接入 tidev-agent 的 Tool 契约；MCP 的通用 client 和 registry 由
+tidev-agent 提供，core 只负责产品配置和权限映射。
 
-## 理由
+## 约束
 
-1. **依赖关系清晰**：tidev-mcp、tidev-llm 只需 tidev-types 获取 `ToolDefinition`，不必引入整个工具实现树
-2. **编译分离**：工具实现依赖大量外部 crate（reqwest、diffy、base64 等），不影响类型层的编译
-3. **职责单一**：types 定义"工具长什么样"，tools 实现"工具怎么执行"，core 协调"什么时候用什么工具"
+工具定义、工具执行、权限策略和持久化必须保持可区分。agent 层不得引入
+tidev 的审批、session 或 storage 类型。

@@ -54,17 +54,9 @@ Runtime::cancel():
 
 ### 1.2 AgentLoopConfig
 
-```rust
-pub struct AgentLoopConfig {
-    pub session_id: Uuid,
-    pub definition: AgentDefinition,
-    pub mode: SessionMode,
-    pub thinking_level: ThinkingLevelType,
-    pub event_tx: UnboundedSender<BackendEvent>,
-    pub system_prompt: String,
-    pub cancel: CancellationToken,          // ← 新增
-}
-```
+AgentLoopConfig 只保留 session_id、system_prompt、thinking_level、AgentEvent
+通道、CancellationToken 和排队消息。mode、审批和 BackendEvent 都属于
+tidev-core 宿主层。
 
 tidev-agent 新增 `tokio-util = { version = "0.7", features = ["sync"] }` 依赖。
 
@@ -138,7 +130,8 @@ tokio::select! {
 
 子 agent loop 共享同一个 `cancel_token`（`child_token()` 克隆）。同样在每轮开始检查 `is_cancelled()`，流式时用 `select!` 赛跑取消。
 
-不需要独立的 SubagentHost trait。子代理创建和取消是 `execute_tools()` 内部细节。
+不需要独立的 SubagentHost trait。子代理创建和取消是 core 的
+`execute_tools()` 内部细节；子代理和主代理共享 `run_agent_loop()`。
 
 ---
 

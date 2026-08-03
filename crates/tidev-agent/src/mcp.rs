@@ -785,7 +785,7 @@ mod tests {
         let registry = McpRegistry::new(BTreeMap::from([(
             "broken".to_string(),
             McpServerSpec::Stdio {
-                command: "/definitely/missing/tidev-mcp-server".into(),
+                command: "/definitely/missing-mcp-server".into(),
                 args: Vec::new(),
                 cwd: None,
                 env: BTreeMap::new(),

@@ -642,7 +642,7 @@ render/ 和 input/ 目录不再存在，功能已并入组件。
 | 基础设施 | 位置 | 状态 |
 |---------|------|------|
 | Markdown 渲染管线 | `crates/tidev-tui/src/markdown/` (2,465 行) | ✅ 已完整拷贝 |
-| Message 类型 | `tidev-types::message::Message` | ✅ 存在 |
+| Message 类型 | `tidev-llm::message::Message` | ✅ 存在 |
 | ChatContext | `tidev_tui_old::chat_context::ChatContext` | ✅ 存在 |
 | Component trait | `component.rs` | ✅ 存在 |
 | 全局 MARKDOWN_RENDER_CACHE | `markdown/mod.rs` LazyLock | ✅ 存在 |
@@ -729,4 +729,3 @@ src/components/
 
 - **结构重组，行为保留。** 渲染逻辑、缓存策略、并行计算、流式增量全部原样迁移。
 - **只改代码归属**：从 `impl App` 方法改为 `impl MessageList` 方法。Composer 是独立 Component，由 App 直接持有。**没有 ChatScreen 这个组件。**
-

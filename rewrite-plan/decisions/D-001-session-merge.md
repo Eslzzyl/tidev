@@ -1,35 +1,22 @@
-# D-001: 合并 tidev-session 进 tidev-types
+# D-001: 共享类型阶段性合并
 
-**日期**: 2026-07-02  
-**状态**: 已采纳
+**日期**：2026-07-02
+**状态**：历史决策，已被 tidev-types-split 和目标路线图 supersede
 
 ## 背景
 
-旧项目有两个共享类型 crate：
-- `tidev-types`：`ThinkingLevelType`、`SessionMode` 等配置类枚举
-- `tidev-session`：`Message`、`BackendEvent`、`ToolCall` 等运行时数据结构
+重写早期需要先把旧 tidev-session 的消息类型与旧 tidev-types 的配置类型
+放到同一共享类型层，以便完成一次性拆分。该阶段性决策解决了旧 crate
+之间的循环引用和迁移顺序问题。
 
-## 决策
+## 当前状态
 
-**合并为一个 `tidev-types` crate，删掉 `tidev-session`。**
+后续的 tidev-types-split 已完成，旧 tidev-types crate 已移除。当前类型归属
+如下：
 
-## 理由
+- LLM 协议类型在 tidev-llm。
+- 工具定义和权限声明在 tidev-tools。
+- tidev 产品事件、Mode、审批媒介和应用数据在 tidev-core。
+- 通用 agent 机制在 tidev-agent。
 
-1. **两者本质相同**：都是零业务逻辑的纯数据类型定义，无实际区分标准
-2. **类型互相引用**：`Message` 的字段直接使用 `ThinkingLevelType` 和 `SessionMode`，拆开只是制造了一条无意义的依赖边
-3. **共享程度一致**：tidev-llm、tidev-agent、tidev-tools、tidev-storage、tidev-tui 都需要同时使用两者的类型
-4. **"session" 命名模糊**：容易被误解为"会话管理"，实际内容是消息数据结构
-
-## 模块组织
-
-```
-tidev-types/
-  src/
-    lib.rs         — pub mod reasoning; pub mod prompts; pub mod message;
-    reasoning.rs    — ThinkingLevelType 及子级别
-    prompts.rs      — SessionMode
-    message.rs      — Message, MessageRole, MessageAttachment, ToolCall,
-                      ToolExecutionResult, AssistantTurn, BackendEvent 等
-```
-
-`message` 比 `session` 更准确地表达了内容——这些是跨 crate 流转的消息协议类型。
+本文件保留作为迁移历史，不再作为当前依赖或模块边界的依据。

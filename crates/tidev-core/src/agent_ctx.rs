@@ -108,6 +108,34 @@ fn is_read_only(name: &str) -> bool {
     read_only_tool_names().contains(tidev_utils::tool_name::canonical_tool_name(name).unwrap_or(name))
 }
 
+/// Restore the model's tool-call order after concurrent execution.
+///
+/// Completion events are intentionally emitted as tools finish, but persisted
+/// tool-result messages must follow the order used by the assistant message.
+/// Otherwise the next request can contain a different protocol message order.
+fn order_tool_results(
+    tool_calls: &[ToolCall],
+    results: Vec<(ToolCall, ToolExecutionResult)>,
+) -> Vec<(ToolCall, ToolExecutionResult)> {
+    let mut pending: Vec<Option<(ToolCall, ToolExecutionResult)>> =
+        results.into_iter().map(Some).collect();
+    let mut ordered = Vec::with_capacity(pending.len());
+
+    for tool_call in tool_calls {
+        if let Some(index) = pending.iter().position(|entry| {
+            entry
+                .as_ref()
+                .is_some_and(|(result_call, _)| result_call.id == tool_call.id)
+        }) {
+            ordered.push(pending[index].take().expect("matched result must exist"));
+        }
+    }
+
+    // Keep unexpected results observable instead of silently dropping them.
+    ordered.extend(pending.into_iter().flatten());
+    ordered
+}
+
 /// Recover a subagent association from the assistant tool call that produced
 /// a result. The association is application data and must never enter the
 /// protocol-level tool result.
@@ -612,10 +640,11 @@ impl CoreContext {
     async fn finish_tool_execution(
         &self,
         session_id: Uuid,
+        tool_calls: &[ToolCall],
         results: Vec<(ToolCall, ToolExecutionResult)>,
     ) -> Result<Vec<(ToolCall, ToolExecutionResult)>> {
         self.collect_instruction_sources(session_id).await?;
-        Ok(results)
+        Ok(order_tool_results(tool_calls, results))
     }
 
     /// Append the replay notice after the tool result messages have been
@@ -972,7 +1001,9 @@ impl AgentContext for CoreContext {
                         ToolExecutionResult::new("User cancelled the request"),
                     ));
                 }
-                return self.finish_tool_execution(session_id, results).await;
+                return self
+                    .finish_tool_execution(session_id, tool_calls, results)
+                    .await;
             }
 
             let mut pending_tcs: Vec<ToolCall> =
@@ -1029,7 +1060,9 @@ impl AgentContext for CoreContext {
                                 ToolExecutionResult::new("User cancelled the request"),
                             ));
                         }
-                        return self.finish_tool_execution(session_id, results).await;
+                        return self
+                            .finish_tool_execution(session_id, tool_calls, results)
+                            .await;
                     }
                     result = join_set.join_next() => {
                         match result {
@@ -1209,7 +1242,9 @@ impl AgentContext for CoreContext {
                             ));
                         }
                         cancel_guard.disarmed = true;
-                        return self.finish_tool_execution(session_id, results).await;
+                        return self
+                            .finish_tool_execution(session_id, tool_calls, results)
+                            .await;
                     }
                     result = join_set.join_next() => {
                         match result {
@@ -1255,7 +1290,9 @@ impl AgentContext for CoreContext {
                                         ));
                                     }
                                     cancel_guard.disarmed = true;
-                                    return self.finish_tool_execution(session_id, results).await;
+                                    return self
+                                        .finish_tool_execution(session_id, tool_calls, results)
+                                        .await;
                                 } else {
                                     cancel_guard.disarmed = true;
                                     return Err(e);
@@ -1275,7 +1312,7 @@ impl AgentContext for CoreContext {
             cancel_guard.disarmed = true;
         }
 
-        self.finish_tool_execution(session_id, results).await
+        self.finish_tool_execution(session_id, tool_calls, results).await
     }
 
     // -----------------------------------------------------------------------
@@ -1614,6 +1651,47 @@ mod tool_event_order_tests {
             backend_rx.recv().await,
             Some(BackendEvent::ToolCompleted { request_id: 7, .. })
         ));
+    }
+}
+
+#[cfg(test)]
+mod tool_result_order_tests {
+    use super::*;
+
+    fn call(id: &str) -> ToolCall {
+        ToolCall {
+            id: id.to_string(),
+            name: "read".to_string(),
+            arguments: "{}".to_string(),
+            thought_signature: None,
+        }
+    }
+
+    #[test]
+    fn reorders_completion_results_to_match_assistant_tool_calls() {
+        let calls = vec![call("first"), call("second"), call("third")];
+        let results = vec![
+            (calls[2].clone(), ToolExecutionResult::new("third result")),
+            (calls[0].clone(), ToolExecutionResult::new("first result")),
+            (calls[1].clone(), ToolExecutionResult::new("second result")),
+        ];
+
+        let ordered = order_tool_results(&calls, results);
+
+        assert_eq!(
+            ordered
+                .iter()
+                .map(|(tool_call, _)| tool_call.id.as_str())
+                .collect::<Vec<_>>(),
+            ["first", "second", "third"]
+        );
+        assert_eq!(
+            ordered
+                .iter()
+                .map(|(_, result)| result.output.as_str())
+                .collect::<Vec<_>>(),
+            ["first result", "second result", "third result"]
+        );
     }
 }
 

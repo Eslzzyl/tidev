@@ -1,430 +1,216 @@
-# tidev 架构改进方案
+# tidev 当前目标架构
 
-## 解决的问题
+**状态**：P1-P4 已落地，P5 清理与最终验证进行中
+**更新**：2026-08-04
 
-### 1. TUI 承载了后端初始化职责
+本文档描述当前重写代码的实际边界。路线图中的阶段计划和验收要求见
+tidev-target-roadmap.md；本文档不再保留旧 tidev-types 架构的兼容描述。
 
-旧 `tidev-tui/src/core/run.rs` 的 `App::new_with_paths()` 直接创建 ConfigPaths、AppConfig、AuthStore、ToolRegistry、SnapshotService、SessionManager 及多个后台任务，导致 TUI 直接依赖 8 个 tidev crate。
+## 设计约束
 
-### 2. tidev-tools 混合了定义与执行
+### LLM 请求字节不变
 
-旧 `ToolRegistry` 同时负责工具定义、工具执行、MCP 路由、权限校验。定义与执行是不同层面的概念，不应在一个结构体中。
+同一会话内，已经发送给 LLM API 的内容在后续请求中必须保持字节级不变。
+请求消息由协议层的 Message 列表、系统提示词、工具定义和 provider 配置
+共同决定。任何消息注入、压缩、持久化重载、工具结果合成和事件顺序的修改，
+都必须检查它是否改变下一轮请求的消息字节。
 
-### 3. 缺少接口抽象
+本轮不实现 P0 请求字节捕获 harness。工程上采用小步提交、确定性构造、针对
+消息顺序的单测和代码审查控制风险；这不是对铁律的放宽。
 
-crate 之间通过具体 struct 直接耦合。AgentLoop 直接持有 `ToolRegistry` 而非通过 `AgentContext` trait 间接调用，SessionManager 直接持有 `SessionStore` 而非 `Box<dyn SessionRepository>`。
+### 单一消息事实源
 
-### 4. 子代理重复实现
+tidev-core::CoreMessageBuffer 持有协议消息和 tidev 应用数据的配对：
 
-子 agent loop 完整复制了主 loop 的逻辑（`subagent.rs` ~500 行 vs `agent_loop.rs` ~500 行），维护成本高。
+    CoreMessageBuffer
+    ├── tidev-agent::MessageBuffer<Message>
+    └── HashMap<MessageId, tidev-storage::MessageAppData>
 
-### 5. 消息状态多权威
+协议消息进入 tidev-agent::ContextManager 前会经过 core 的压缩、指令注入和
+mode reminder 处理。应用数据不会进入 LLM 协议消息。
 
-TUI、agent loop、ContextManager 各持有一份消息列表，同步困难，直接导致上下文压缩协调和取消后后台残留问题。
+### 工具结果顺序
 
----
+工具可以按策略并行执行，但事件顺序和持久化顺序是两件事：
 
-## 铁律
+- ToolStarting、ShellOutput、ToolCompleted 在工具实际执行时发出。
+- AgentContext::execute_tools 返回值必须按 assistant 原始 tool_calls 顺序排列。
+- run_agent_loop 按返回顺序构造并保存 tool result 消息。
 
-**字节级不变性**——同一 session 内，任何两次 `build_request_messages()` 的输出，如果消息列表相同，必须字节相同。这是前提，不是可选项。
+这样只读工具的完成竞态不会改变下一轮发送给 LLM 的协议消息顺序。
 
-发送给 LLM 的字节序列必须是确定性的、幂等的。每一轮构造的 `Vec<Message>` 必须是前一轮的严格前缀加上新消息。任何变动都会炸掉前缀缓存，让用户承担重新处理整个上下文的费用。
+## Crate 边界
 
----
+    tidev-llm
+      协议类型、provider 实现、LlmEvent
+      只依赖外部库
 
-## 目标架构
+    tidev-agent -> tidev-llm
+      AgentContext、run_agent_loop、AgentEvent
+      MessageBuffer、ContextManager
+      Tool、ToolContext、ToolRegistry
+      AgentRuntime、MessageStore
+      MCP client、McpRegistry
 
-```
-tidev-tui
-  依赖: tidev-core, tidev-types, tidev-config(UI配置), tidev-utils
+    tidev-tools -> tidev-llm, tidev-utils, tidev-config, tidev-instructions
+      builtin 工具、工具定义、权限声明、ShellOutput
+      不依赖 tidev-agent、tidev-core、tidev-storage
 
-   tidev-core
-  依赖: tidev-agent, tidev-tools, tidev-config,
-        tidev-storage, tidev-llm, tidev-snapshot,
-        tidev-instructions
+    tidev-core -> tidev-agent, tidev-tools, tidev-llm, tidev-config,
+                   tidev-storage, tidev-snapshot, tidev-instructions,
+                   tidev-logging, tidev-search, tidev-utils
+      CoreContext、Runtime、SessionManager、BackendEvent
+      审批媒介、Mode、SessionMessage、快照、指令注入、undo
+      MCP 产品集成和 tidev 工具适配器
 
-  Runtime             运行时上下文，持有全部资源
-  RuntimeBuilder      将 TUI 散落的初始化逻辑收拢至此
-  SessionManager      会话生命周期
-  AgentContext impl   实现 tidev-agent 定义的 trait
-  ContextManager      上下文压缩（build_request_messages + compact）
-  ToolRegistry        工具注册与执行
-  消息缓存            追加写的 Vec<Message>，唯一权威副本
-tidev-tools
-  依赖: tidev-types, tidev-utils, tidev-instructions, tidev-config
-        + 外部 crate（glob, grep, ignore, diffy, reqwest 等）
-  不依赖: tidev-storage（通过 TodoPersistence trait 切断）
+    tidev-tui -> tidev-core, tidev-llm, tidev-tools, tidev-config, tidev-utils
+    tidev-acp -> tidev-core, tidev-llm, tidev-config, tidev-utils
 
-  所有 builtin 工具实现（file, exec, search, web, apply_patch 等）
-  分派函数 execute_tool_call() + ExecutionContext
-  SkillCatalog
-  TodoPersistence trait（2 个方法，供 tidev-core 桥接）
+tidev-agent 的 tidev 内部依赖只有 tidev-llm。rmcp 是 agent 的外部依赖，
+不把 tidev 配置、session、审批或存储类型带入 agent。
 
-tidev-agent（薄层）
-  依赖: tidev-types + serde, async-trait, tokio, tokio-util, anyhow, chrono, uuid, log
-  不依赖: tidev-storage / tidev-config / tidev-llm / tidev-tools
+## tidev-agent
 
-  AgentType + AgentDefinition + AgentOverride
-  AgentContext trait（7 个方法）
-  run_agent_loop() 骨架（主 agent 和子 agent 共用）
-  AgentLoopConfig（含 cancel_token）
-  ApprovedTool / PendingToolApproval
-  prompts（6 套系统提示词）
+### AgentContext
 
-tidev-types（扩展）
-  现有: tools.rs, message.rs, prompts.rs, reasoning.rs
-  新增: approval.rs — PendingToolApproval, ApprovedTool
-                    （从 tidev-agent 移入，属于跨 crate 协议类型）
-```
+AgentContext 只有七个方法：
 
----
+    tools() -> Vec<tidev_llm::ToolDefinition>
+    event_tx() -> UnboundedSender<AgentEvent>
+    workspace_root() -> &Path
+    stream_turn(...)
+    execute_tools(...)
+    save_messages(...)
+    load_messages(...)
 
-## 关键决策
+循环不识别审批、mode、快照、应用数据或子代理 session。宿主通过
+execute_tools 自行实现这些产品策略。
 
-### 1. 消息缓存的权威持有者
+### AgentRuntime
 
-**tidev-core 持有唯一权威的消息列表。**
+AgentRuntime 是不需要审批和 tidev 产品状态时的默认实现：
 
-- 初始化时从数据库加载，之后只追加
-- `load_messages()` 从内存缓存读取，不读 DB
-- `save_messages()` 追加到缓存 + 写入 DB
-- `build_request_messages()` 在 tidev-core 里，是访问消息列表的唯一出口
+- 使用 MessageBuffer 管理协议消息。
+- 通过 MessageStore 读写消息。
+- 使用 ContextManager 构造请求消息和压缩上下文。
+- 只读工具并行执行，写工具串行执行，取消时生成确定性的取消结果。
+- 保持 tool result 的原始调用顺序。
 
-这解决了：
-- **每次循环读数据库** — 热路径走缓存
-- **ContextManager 协调困难** — 压缩是 tidev-core 的内部操作：读自己的缓存 → 调 LLM → 更新自己的 retained_from → 发 ContextCompacted 事件通知 TUI 刷新渲染
-- **TUI 膨胀** — TUI 只维护一份渲染用的消息副本，通过 BackendEvent 增量更新，不做任何修改
+examples/minimal_agent.rs 展示了仅依赖 tidev-agent 的消费方、两个内置
+工具和可选 stdio MCP server。
 
-### 2. ContextManager
+### 事件
 
-在 tidev-core。因为 `build_request_messages()` 需要访问消息缓存，而缓存在 tidev-core。ContextManager 也需要 LLM 来生成摘要，tidev-core 持有 LLM 客户端。
+    tidev-llm::LlmEvent
+            │ llm_event_to_agent_event()
+            ▼
+    tidev-agent::AgentEvent  (request_id，无 session_id)
+            │ agent_event_to_backend_event()
+            ▼
+    tidev-core::BackendEvent (补 session_id)
 
-### 3. system_prompt 组装
+ShellOutput 在 tidev-tools 独立产生。core 的适配器在发出 ToolCompleted
+前同步 drain ShellOutput，保持原有 TUI 可见顺序。
 
-不是 `AgentContext` 的 trait 方法。system prompt 在 session 创建时预组装好，存入 `AgentLoopConfig.system_prompt` 字段，session 生命周期内不变。
+## tidev-core
 
-```rust
-pub struct AgentLoopConfig {
-    pub session_id: Uuid,
-    pub definition: AgentDefinition,
-    pub mode: SessionMode,
-    pub thinking_level: ThinkingLevelType,
-    pub event_tx: UnboundedSender<BackendEvent>,
-    pub system_prompt: String,
-    pub cancel: CancellationToken,
-}
-```
+### CoreContext
 
-组装逻辑是 tidev-core 里 session 创建时的自由函数：
+CoreContext 是 AgentContext 的 tidev 宿主实现，而不是 AgentRuntime 的
+包装器。原因是 tidev 的审批、快照、指令注入、应用数据、敏感文件和子代理
+session 都属于产品策略，无法安全地塞进通用 runtime。
 
-```rust
-fn compose_system_prompt(
-    agent_type: AgentType,
-    instructions: &[String],
-    tool_descriptions: &str,
-    mode: SessionMode,
-) -> String
-```
+CoreContext 的职责：
 
-mode 切换不修改 system prompt。两种 mode 的定义在 session 开始时一次性注入。后续切换 mode 通过 `<system-reminder>` 附加在用户消息开头，不影响前缀缓存。
+1. 通过 ContextManager 做压缩，并保存 compaction marker 和状态。
+2. 在 load_messages 中按既定顺序注入 instruction 和 mode reminder。
+3. 在 execute_tools 中执行权限检查、审批、取消、只读并行、写操作串行和
+   子代理派发。
+4. 在 save_messages 中维护协议消息与 MessageAppData，处理快照、diff、
+   child session 关联和工具发现的 instruction sources。
+5. 把 agent 事件补充 session_id 后发往 TUI/ACP。
 
-模型切换会重新组装 system prompt（tool descriptions 随模型变化），用户接受前缀缓存失效的成本。
+工具实现通过 core 的 adapter 接入 agent 的 Tool 契约；工具本身不依赖
+agent。MCP 的 client 和通用 registry 在 agent，core 只负责配置映射、工作区
+路径、权限和 UI 状态。
 
-### 4. ToolRegistry 与工具执行
+### 审批
 
-tidev-core 的 `ToolRegistry` 直接包装 `tidev_tools::execute_tool_call`，不引入额外的 `ToolExecutor` trait。
+审批完全属于 core：
 
-执行前做：权限检查、文件读取追踪检查、路径边界检查。
-执行后做：文件读取记录。
+    CoreContext::execute_tools
+      ├── ToolPermission / mode 检查
+      ├── 工作区边界和敏感文件检查
+      ├── TuiRequest -> TuiResponse
+      ├── 拒绝调用合成 ToolExecutionResult
+      └── 已批准调用进入工具执行调度
 
-`AgentContext::execute_tools()` 内部调用 `ToolRegistry`，agent loop 不直接接触工具执行层。
+AgentContext 和 AgentRuntime 没有 ApprovalHandler 或审批方法。
+拒绝结果与执行结果最终都由 loop 按原始 tool call 顺序保存。
 
-#### 持久化职责边界
+### 子代理
 
-`AgentContext::execute_tools()` **只负责执行和发事件**，不负责持久化工具结果。工具结果的持久化由 `run_agent_loop` 统一通过 `save_messages()` 处理。
+v1 不提供通用 SubagentHost trait，也不让 AgentRuntime 特判 task。
+子代理的 session 创建、模型解析、工具过滤、审批继承、事件关联、取消和
+结果合成全部由 CoreContext::execute_tools 及其 core 内部 helper 负责；
+子代理与主代理共享 tidev-agent::run_agent_loop。
 
-```
-run_agent_loop:
-  1. stream_turn()
-  2. save_messages(assistant_msg)           ← 助手消息持久化
-  3. execute_tools()                         ← 只执行，内部不调 save_messages
-  4. save_messages(tool_results)             ← 工具结果统一持久化 ← 唯一入口
-  5. goto 1
-```
+tidev-tools::builtin::task 只负责参数和 agent type 的基础校验及工具定义，
+不创建 session，也不执行子代理。
 
-理由：
-- 单一权威：所有消息持久化统一经过 `save_messages()`，避免 `MessageBuffer` + DB 双重写入走不同路径
-- 铁律保障：`build_request_messages()` 的输出必须是确定性的，分散持久化容易引入重复或乱序
-- 职责内聚：`execute_tools()` 的存在理由是"协调工具执行"（并行/串行调度、子代理派生），持久化是横切关注点，不应内嵌在执行逻辑中
+## 持久化和请求构造
 
-Exception：流式工具（bash）在执行过程中产生的 `ShellOutput` 事件不通过 `save_messages()`，直接通过 `event_tx` 发送实时给 TUI。
+    SQLite SessionMessage
+            │ load
+            ▼
+    CoreMessageBuffer (protocol Message + MessageAppData)
+            │ load_messages
+            ├── context compaction / marker
+            ├── instruction injection
+            └── mode reminder injection
+            ▼
+    AgentContext::stream_turn
+            ▼
+    tidev-llm provider request
 
-### 5. tidev-tools 执行接口
+助手消息先保存，工具执行结果由 loop 在 execute_tools 返回后统一保存。
+instruction source 的 replay system message 在工具结果保存之后追加，保持历史
+顺序。
 
-tidev-tools 提供纯函数分派，不做权限检查：
+应用字段 mode、snapshot、diff、instruction source 和 child session id 只在
+storage/core 侧维护；它们不能出现在发送给 LLM 的协议消息中。
 
-```rust
-pub fn execute_tool_call(
-    tool_name: &str,
-    arguments: &Value,
-    ctx: &ExecutionContext,
-) -> Result<ToolExecutionResult>;
-```
+## 子代理和取消
 
-依赖：tidev-types, tidev-utils, tidev-instructions, tidev-config + 外部 crate。
+主代理和子代理使用同一个 run_agent_loop。子代理使用受限工具定义、独立
+session 和自己的消息 buffer，并通过 core 的 BackendEvent 通道向前端报告。
 
-todowrite 工具的存储通过 `TodoPersistence` trait 切断对 tidev-storage 的直接依赖：
+取消分两层处理：
 
-```rust
-pub trait TodoPersistence: Send + Sync {
-    fn load_todos(&self, session_id: Uuid) -> Result<Vec<TodoItem>>;
-    fn replace_todos(&self, session_id: Uuid, todos: &[TodoItem]) -> Result<()>;
-}
-```
+- 工具和 LLM 调用接收 CancellationToken，在可合作的检查点退出。
+- core 使用 JoinSet::abort_all 和 RAII guard，确保强制取消后仍产生工具
+  完成事件及确定性的取消结果。
 
-tidev-core 在实现 AgentContext 时桥接 SessionStore。
+已经发送到前端的内容不回滚；取消结果仍按原始 tool call 顺序持久化。
 
-### 6. 工具权限审批
+## 实施状态和验收
 
-独立于 BackendEvent 的双向通道：
+已完成：
 
-```
-tidev-core 创建 (perm_tx, perm_rx)
-perm_tx → tidev-core 的 AgentContext impl（发送 PendingToolApproval）
-perm_rx → TUI（接收审批请求，弹对话框）
-oneshot → TUI 回复 Vec<ApprovedTool>
-```
+- P1 事件三层拆分和 ShellOutput 顺序桥接。
+- P1.5 协议字段与应用数据拆分、storage v40、mode 迁移。
+- P2 七方法 AgentContext、宿主审批、注入迁移和循环净化。
+- P3 MessageBuffer、ContextManager、Tool、ToolRegistry、MCP 迁移。
+- P4 AgentRuntime、MessageStore、消费方示例和 core 工具适配。
+- CoreContext 工具结果按原始调用顺序返回的回归测试。
 
-协议类型（`PendingToolApproval`、`ApprovedTool`）在 **tidev-agent** 中定义（tidev-agent/src/context.rs），不在 tidev-types。原因：`PendingToolApproval` 包含 `tokio::sync::oneshot::Sender`，`ApprovedTool` 包含 `uuid::Uuid`，这些是运行时依赖，不属于纯数据类型层。tidev-core 依赖 tidev-agent 即可访问这些类型；tidev-tui 通过 tidev-core 间接使用。
-
-### 7. 子代理
-
-不设独立的 SubagentHost trait。子代理创建和调度是 `AgentContext::execute_tools()` 的内部细节。
-
-```
-execute_tools() 解析 task 工具
-  → 解析 AgentType，分类只读/写
-  → 构造子 AgentContext（受限工具集 + 子 session 存储 + 同一 event_tx）
-  → 串行/并行调用 run_agent_loop()
-  → 收集结果返回
-```
-
-子代理与父代理共享同一个 `run_agent_loop()` 函数和同一个 `BackendEvent` 通道。TUI 按 session_id 分派渲染。
-
-### 8. 取消
-
-参见 [D-008 取消机制设计](decisions/D-008-cancellation.md)。
-
-两个层面：
-- **合作式**：CancellationToken 检查点 + select! 赛跑
-- **强制式**：JoinHandle::abort() + kill_all_children()
-
-### 9. HookEngine / Persistence 辅助函数
-
-HookEngine：跳过，见 [D-007](decisions/D-007-skip-hooks.md)。
-
-Persistence 辅助函数：不需要。`build_assistant_message()` 已在 tidev-agent 的 loop_.rs 中，`Message::tool_result()` 是 tidev-types 的构造器，`save_messages()` 是 trait 方法。
-
-### 10. 排队消息
-
-不在 `run_agent_loop` 里处理。TUI 通过 `runtime.submit_prompt()` 提交消息：
-
-```rust
-impl Runtime {
-    pub async fn submit_prompt(&self, session_id: Uuid, content: String) {
-        // 1. 追加到缓存 + DB
-        // 2. 如无活跃 loop，启动一个
-        // 3. 如有活跃 loop，下一轮迭代自动加载到新消息
-    }
-}
-```
-
-`run_agent_loop` 每次 `load_messages()` 读取最新消息列表，新消息自然在其中。
-
----
-
-## 各 crate 精确边界
-
-### tidev-types
-
-```
-src/
-  lib.rs
-  tools.rs          ToolDefinition, ToolOrigin, ToolPermission, PermissionConfig,
-                    ToolArgs trait + macros, 所有 *Args struct,
-                    canonical_tool_name, FileReadStamp, TodoItem
-  message.rs        Message, MessageRole, MessageAttachment, ToolCall,
-                    ToolExecutionResult, ToolMetadata, FileChangeInfo,
-                    AssistantTurn, BackendEvent
-  prompts.rs        SessionMode
-  reasoning.rs      ThinkingLevelType 及子级别
-  permission.rs（新增）
-                    PendingToolApproval, ApprovedTool
-```
-
-### tidev-agent
-
-```
-src/
-  lib.rs            导出
-  agent_type.rs     AgentType, AgentDefinition, AgentOverride,
-                    create_agent, create_all_agents, create_sub_agents
-  context.rs        AgentContext trait（7 方法）
-                    AgentLoopConfig, ApprovedTool, PendingToolApproval
-  loop_.rs          run_agent_loop() 骨架
-  prompts.rs        6 套 agent 系统提示词
-```
-
-`AgentContext` trait：
-
-```rust
-#[async_trait]
-pub trait AgentContext: Send + Sync {
-    fn tools(&self) -> Vec<ToolDefinition>;
-    fn event_tx(&self) -> UnboundedSender<BackendEvent>;
-    async fn stream_turn(&self, messages: &[Message],
-        system_prompt: &str, thinking_level: &ThinkingLevelType) -> Result<AssistantTurn>;
-    async fn request_tool_approval(&self,
-        tool_calls: &[ToolCall], mode: SessionMode) -> Result<Vec<ApprovedTool>>;
-    async fn execute_tools(&self,
-        approved_tools: &[ApprovedTool], session_id: Uuid,
-        request_id: u64) -> Result<Vec<(ToolCall, ToolExecutionResult)>>;
-    async fn save_messages(&self, session_id: Uuid, messages: &[Message]) -> Result<()>;
-    async fn load_messages(&self, session_id: Uuid) -> Result<Vec<Message>>;
-}
-```
-src/
-  lib.rs            导出 Runtime, RuntimeBuilder
-  runtime.rs        Runtime / RuntimeBuilder
-  context.rs        ContextManager
-  agent_ctx.rs      AgentContext impl（CoreContext）
-  registry.rs       ToolRegistry
-  session.rs        SessionManager
-  message_buf.rs    MessageBuffer（Vec<Message>, append-only）
-```
-
-`Runtime`：
-
-```rust
-pub struct Runtime {
-    pub session_manager: SessionManager,
-    store: SessionStore,
-    tool_registry: Arc<ToolRegistry>,
-    snapshot_service: SnapshotService,
-    file_read_tracker: Arc<FileReadTracker>,
-    event_tx: UnboundedSender<BackendEvent>,
-    event_rx: UnboundedReceiver<BackendEvent>,  // → TUI
-    perm_tx: UnboundedSender<PendingToolApproval>,
-    perm_rx: UnboundedReceiver<PendingToolApproval>,  // → TUI
-    cancel_token: CancellationToken,
-    run_loop_handle: Option<JoinHandle<()>>,
-    message_buffers: HashMap<Uuid, Arc<RwLock<MessageBuffer>>>,
-    _background_tasks: Vec<JoinHandle<()>>,
-}```
-
-### tidev-core
-
-```
-src/
-  lib.rs            导出 Runtime, RuntimeBuilder
-  runtime.rs        Runtime / RuntimeBuilder
-  context.rs        ContextManager
-  agent_ctx.rs      AgentContext impl（CoreContext）
-  registry.rs       ToolRegistry
-  session.rs        SessionManager
-  message_buf.rs    MessageBuffer（Vec<Message>, append-only）
-```
-
-`Runtime`：
-
-```rust
-pub struct Runtime {
-    pub session_manager: SessionManager,
-    store: SessionStore,
-    tool_registry: Arc<ToolRegistry>,
-    snapshot_service: SnapshotService,
-    file_read_tracker: Arc<FileReadTracker>,
-    event_tx: UnboundedSender<BackendEvent>,
-    event_rx: UnboundedReceiver<BackendEvent>,  // → TUI
-    perm_tx: UnboundedSender<PendingToolApproval>,
-    perm_rx: UnboundedReceiver<PendingToolApproval>,  // → TUI
-    cancel_token: CancellationToken,
-    run_loop_handle: Option<JoinHandle<()>>,
-    message_buffers: HashMap<Uuid, Arc<RwLock<MessageBuffer>>>,
-    _background_tasks: Vec<JoinHandle<()>>,
-}
-
-impl Runtime {
-    pub fn cancel(&self);
-    pub async fn submit_prompt(&self, session_id: Uuid, content: String);
-    pub fn event_rx(&self) -> UnboundedReceiver<BackendEvent>;
-    pub fn perm_rx(&self) -> UnboundedReceiver<PendingToolApproval>;
-    // ...
-}
-```
-
-`RuntimeBuilder` 初始化顺序：
-1. ConfigPaths / AppConfig / AuthStore（tidev-config）
-2. SessionStore / Database（tidev-storage）
-3. LlmClient（tidev-llm）
-4. ToolRegistry
-5. ContextManager
-6. SnapshotService（tidev-snapshot）
-7. SessionManager
-8. 消息缓冲（从 DB 加载当前 session）
-9. 事件通道 / 审批通道 / CancellationToken
-10. 后台任务
-
-### tidev-tui
-
-```
-只持有：
-  runtime: Runtime
-  backend_rx（BackendEvent 接收端）
-  perm_rx（PendingToolApproval 接收端）
-  渲染用消息副本（通过 BackendEvent 增量更新，只读）
-  纯 UI 状态（theme, composer, panels, screen）
-```
-
-TUI → Core：通过 `Runtime` 方法
-Core → TUI：通过 `BackendEvent` + `perm_rx`
-
----
-
-## 依赖图
-
-```
-tidev-tui ──→ tidev-core ──→ tidev-agent ──→ tidev-types
-                     │             │
-                     │             └── tokio-util, async-trait, ...
-                     │
-                     ├── tidev-tools ──→ tidev-types
-                     │       │          tidev-utils
-                     │       │          tidev-instructions
-                     │       │          tidev-config
-                     │       │
-                     │       ├── glob / grep / ignore / globset / rayon
-                     │       ├── diffy / base64 / mime_guess
-                     │       ├── async_trait / reqwest / pulldown-cmark / url
-                     │       └── log / libc(unix) / tempfile(dev)
-                     │
-                     ├── tidev-config ──→ tidev-types
-                     ├── tidev-storage ──→ tidev-types
-                     ├── tidev-llm ──→ tidev-types
-                     ├── tidev-snapshot ──→ tidev-utils, tidev-config
-                     └── tidev-instructions ──→ tidev-utils
-```
-
-无循环依赖。tidev-agent 是唯一的"不知道具体实现"的 crate——它只面向 `AgentContext` trait 编程。
-
----
-
-## 实现顺序
-
-| 阶段 | Crate | 内容 | 依赖 |
-|------|-------|------|------|
-| 1 | tidev-tools | 迁移所有 builtin 工具实现 + SkillCatalog | tidev-types, tidev-utils, tidev-instructions, tidev-config |
-| 2 | tidev-core | 消息缓存, ContextManager, ToolRegistry, AgentContext impl | 全部 tidev crate |
-| 3 | tidev-core | Runtime / RuntimeBuilder | 同上 |
-| 4 | tidev-tui | 接入 Runtime，删除直接持有的资源 | tidev-core |
-| 5 | tidev-agent | 完善 loop_.rs（取消检查点） | tidev-types |
+进行中：
+
+- 清理旧设计文档和遗留临时说明。
+- cargo tree、全仓 grep、cargo check --workspace 和
+  cargo test --workspace --all-targets 最终验收。
+
+本轮明确不做：
+
+  - P0 请求字节捕获 harness。
+  - 将 tidev 的审批、SQLite session 或子代理策略抽象进 tidev-agent。

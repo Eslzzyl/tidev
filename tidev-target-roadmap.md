@@ -1,8 +1,8 @@
 # tidev 目标态路线图（tidev-types 拆分之后）
 
-**状态**: 待实施
-**日期**: 2026-08-03
-**修订**: 2026-08-03（第二轮讨论后）——澄清铁律权威定义（§1）；新增 P1.5「llm 协议净化」；审批完全移出内核（trait 7 方法，P2）；MCP 客户端入 tidev-agent（P3）；child_session_id 迁移 v40（P1.5）
+**状态**: P5 清理与最终验证进行中
+**日期**: 2026-08-04
+**修订**: 2026-08-04（P4 收口）——补充 CoreContext 工具结果顺序约束；确定 v1 不提供通用 SubagentHost；明确 P0 请求字节捕获 harness 不纳入本轮
 **前置条件**: `tidev-types-split.md`（tidev-types 拆分）已完成并验收通过
 **执行对象**: Coding Agent。本文档是路线图：给出阶段划分、依赖顺序、关键设计点与验收标准；每阶段的具体执行细节在开工时按本文档展开。
 
@@ -43,12 +43,12 @@ tidev-acp ──→ core, llm, config, utils
 
 拆分完成后已落位（来自 tidev-types-split.md，本路线图不再涉及）：
 
-- 协议类型（message/reasoning/SessionMode/精简 ToolDefinition/ApiType 合并）在 tidev-llm；**BackendEvent 临时驻留 tidev-llm**（带 `TODO(event-split)` 注释）。
+- 协议类型（message/reasoning/精简 ToolDefinition/ApiType 合并）在 tidev-llm；BackendEvent 已迁入 tidev-core，事件三层拆分已完成。
 - 全量工具类型在 tidev-tools；canonical_tool_name 在 tidev-utils；死代码已删除。
 - agent_type（数据 + 工厂 + agent 系统提示词）在 tidev-core；task 工具已解耦；fixer Plan 检查在 core 的 execute_task_tool。
 - `AgentLoopConfig.system_prompt: String` 已替换 definition；trait 的 `tools()` 已用 `tidev_llm::ToolDefinition`。
 - tidev-agent 依赖仅 tidev-llm；prompts.rs 只剩 mode reminders。
-- 遗留待办：BackendEvent 的 TODO 注释（本路线图 P1 处理）。
+- P1 遗留待办已清除：tidev-llm、tidev-agent、tidev-tools 不再引用 BackendEvent。
 
 ## 3. 阶段总览
 
@@ -58,7 +58,7 @@ tidev-acp ──→ core, llm, config, utils
 | P1.5 llm 协议净化 | Message/ToolMetadata/ToolExecutionResult 净化、SessionMode→Mode 移 core、tools 只读信号化、storage app-data 通道 + 迁移 v40 | P1 | 6–9 天 |
 | P2 循环与 trait 去 tidev 化 | trait 7 方法（审批删除）、注入迁移、审批媒介归 core、AgentLoopConfig 无 mode | P1、P1.5 | 3–4 天 |
 | P3 内核组件迁入 | MessageBuffer / ContextManager / Tool trait / ToolRegistry / MCP 客户端进 tidev-agent | P1、P2 | 5–6 天 |
-| P4 默认运行时与收口 | AgentRuntime（无 ApprovalHandler）、CoreContext 收口、子代理机制统一、消费方示例（含 MCP） | P3 | 4–6 天 |
+| P4 默认运行时与收口 | AgentRuntime（无 ApprovalHandler）、CoreContext 收口、core 自有子代理策略、消费方示例（含 MCP） | P3 | 4–6 天 |
 | P5 清理与验证 | TODO 清除、文档同步、最终依赖图验证 | 全部 | 0.5–1 天 |
 
 **合计约 22–30 个工作日（5–6 周）**。阶段边界是自然的中途止损点：**每个阶段结束时工作区必须 `cargo check` + `cargo test --workspace` 全绿**（与拆分的一次性策略不同，本路线图按阶段增量交付；P1.5 例外——它与 P1 同属 llm 范围内的连锁改动，可合并为一次性迁移）。
@@ -85,7 +85,7 @@ tidev-acp ──→ core, llm, config, utils
 - tidev-tools：**ShellOutput 本地化**——`ToolContext.event_tx`（builtin/mod.rs:32）改 `Option<UnboundedSender<ShellOutput>>`，ShellOutput 为 tidev-tools 本地结构体（session_id/request_id/content/finished 等数据字段）；exec.rs 的 5 处事件通道改型。tidev-tools 不再引用 BackendEvent。**顺序约束**：ShellOutput 改独立通道后，宿主必须在发 ToolCompleted 前同步 drain 该通道——现状 ShellOutput 与 ToolCompleted 同通道天然有序，改独立通道后用异步转发任务会产生竞态、破坏 TUI 渲染顺序，行为必须保持。
 - tidev-core：BackendEvent 从 llm 迁入 core（新模块或 message 模块内）；ShellOutput 桥接（core 订阅 tools 的 ShellOutput 通道 → `BackendEvent::ShellOutput`，同步 drain，见上）；stream_turn 的匹配循环改造。
 
-**验收**：llm/agent/tools 零 `BackendEvent` 引用；TUI 渲染行为与拆分前一致（BackendEvent 变体全集未变）；`grep -rn "TODO(event-split)"` 无残留；**两个转换函数各加穷举全部变体的单元测试 + 变体数量守恒断言**（现有 TUI/ACP 的 tests/ 目录为空、无集成测试可依赖，只能靠单测兜底）。
+**验收**：llm/agent/tools 零 `BackendEvent` 引用；TUI 渲染行为与拆分前一致（BackendEvent 变体全集未变）；事件拆分临时注释已清除；**两个转换函数各加穷举全部变体的单元测试 + 变体数量守恒断言**（现有 TUI/ACP 的 tests/ 目录为空、无集成测试可依赖，只能靠单测兜底）。
 
 ### P1.5 llm 协议净化
 
@@ -178,27 +178,27 @@ tidev-acp ──→ core, llm, config, utils
 
 ### P4 默认运行时与收口
 
-**目标**：tidev-agent 开箱即用（AgentRuntime）；tidev 的 CoreContext 成为内核的一个宿主实现；子代理机制统一；消费方验证。
+**目标**：tidev-agent 开箱即用（AgentRuntime）；tidev 的 CoreContext 成为内核的一个宿主实现；子代理策略留在 core；消费方验证。
 
 - **AgentRuntime**（tidev-agent，实现 AgentContext）：接线 LlmClient + LlmProviderConfig + ToolRegistry + ContextManager + MessageBuffer + event_tx + cancel；通用 `execute_tools` 实现（只读并行 / 写串行 + 取消，**无审批**——需要审批的宿主自行实现 execute_tools）。
   - 对外抽象：`MessageStore` trait（load_messages/save_messages，宿主实现持久化）。（**ApprovalHandler 已删除**——审批是宿主 execute_tools 的内部策略，内核不提供审批钩子。）
-  - **子代理**：设计决策点——内核提供可插拔 `SubagentHost` trait（AgentRuntime 的 execute_tools 检测 task 类工具时经其派发），或 v1 不支持子代理（宿主自行在 execute_tools 处理）。tidev 需要子代理，倾向提供 SubagentHost；若采用，`AgentEvent` 增加 `SubagentStatus`/`SubagentCompleted` 变体（注意：SubagentCompleted 目前是死变体，生产代码从不发射，采用时一并决定去留）。
+- **子代理决策（v1）**：不提供通用 `SubagentHost` trait，`AgentRuntime` 不识别 `task`。tidev 的 session 创建、模型解析、工具过滤、审批继承、事件关联、取消和结果合成继续由 `CoreContext::execute_tools` 负责；主代理和子代理共享 `run_agent_loop`。这样不会把 SQLite/session/审批概念带入 agent。
 - **CoreContext 收口**：`execute_tools` 内部自含审批流程（问 TuiRequest → 批准/拒绝 → 执行，拒绝结果合成）；保持 tidev 行为（子代理/敏感文件/边界/取消守卫/undo），底层基于内核 ToolRegistry；`stream_turn` 复用 P1 的 LlmEvent→AgentEvent 转换。
-- **task 工具机制统一**：tidev-tools 的 task.rs 校验桩与 tidev-core 的 execute_task_tool（子代理派发）经 SubagentHost 统一；agent_type 已在 core，本次是机制整合。
+- **task 工具分层**：`tidev-tools::builtin::task` 只负责工具定义和基础参数校验；真实子代理派发仍由 `tidev-core::CoreContext::execute_tools` 完成，共享 `tidev-agent::run_agent_loop`。
 - **消费方示例**（验收核心）：新增示例（如 `crates/tidev-agent/examples/minimal_agent.rs` 或独立 example 目录）——只依赖 tidev-agent + tidev-llm，实现 MessageStore + 注册两个内置工具 + 连接一个 MCP 服务器（execute_tools 用 AgentRuntime 通用实现或自定义），跑通 `run_agent_loop`。这是"另一个 agent 产品只依赖 tidev-agent"的证明。
 
 **验收**：示例 crate 的 Cargo.toml 中 tidev 依赖仅有 tidev-agent（+tidev-llm 传递）；示例含 MCP 工具调用；tidev 自身功能回归全绿。
 
 ### P5 清理与验证
 
-- 删除全部遗留 TODO（event-split 等）；`grep` 确认无临时注释残留。
+- 删除事件拆分等遗留临时注释；通过 `grep` 确认 llm/agent/tools 的产品层引用已清除。
 - 同步 rewrite-plan/architecture.md 与 D-005 等设计文档至目标态（含本轮修订：铁律定义、7 方法 trait、审批归位、MCP 入 agent）。
 - 最终 `cargo tree` 验证 §1 依赖图（叶子、无循环、agent 的 tidev 依赖仅 llm）。
 - 可选（用户决策）：tidev-llm / tidev-agent / tidev-protocol 相关类型的 crates.io 发布准备（版本、文档、license；届时评估 `tidev-` 前缀的品牌问题）。
 
 ## 5. 执行顺序依据
 
-1. **P1 最先**：BackendEvent 的 TODO 在 llm 中悬置；AgentEvent 是 P3（ContextManager 发 ContextCompacted）的前置；事件类型是所有后续阶段的地基。
+1. **P1 最先**：事件三层是所有后续阶段的地基；AgentEvent 是 P3（ContextManager 发 ContextCompacted）的前置。
 2. **P1.5 在 P2 之前**：trait 冻结必须在净化后的类型上进行——Mode 已移 core、Message 已净化、注入移植读 app-data；P1.5 与 P1 同属 llm 范围内的连锁改动，做完再冻结 trait 避免返工。
 3. **P2 在 P3 之前**：trait 定稿后，内核组件（ToolRegistry/AgentRuntime）按最终契约编写，避免返工；注入迁移独立于组件迁移。
 4. **P3 在 P4 之前**：AgentRuntime 需要 MessageBuffer/ContextManager/ToolRegistry 就位。
@@ -208,7 +208,7 @@ tidev-acp ──→ core, llm, config, utils
 
 - 依赖图与 §1 完全一致；`tidev-agent` 的 tidev 内部依赖仅 tidev-llm（rmcp 为外部依赖）。
 - 铁律（§1 权威定义）：P1.5、P2、P3 各做一次"同一会话数据下 LLM 请求字节一致"回归验证；P2 额外验证拒绝/结果消息顺序。
-- 消费方示例只依赖 tidev-agent 跑通完整循环（含 MCP）。
+- 消费方示例只依赖 tidev-agent 跑通完整循环（含可选 MCP）。
 - `grep` 确认 llm 零 tidev 概念（SessionMode / snapshot_hash / patch_files / file_diffs / instruction_sources / child_session_id 零命中）。
 - `cargo check --workspace`、`cargo test --workspace` 全绿（现有 858 单测 + 集成测试 + 各阶段新增测试）。
 - 除已确认的行为变化（fixer Plan 检查，拆分时已落地）外，tidev 产品行为不变。
@@ -220,6 +220,6 @@ tidev-acp ──→ core, llm, config, utils
 - **ShellOutput 顺序竞态（P1）**：tools 的 ShellOutput 改独立通道后，若用异步转发任务转发，ShellOutput 可能晚于 ToolCompleted 到达 TUI——必须在发 ToolCompleted 前同步 drain，保持与现状一致的事件顺序。
 - **child_session_id 迁移（P1.5）**：旧值在 zstd 压缩的 metadata blob 里，纯 SQL 无法回填；migration.rs 需要支持 Rust 回填步骤（v40），验收含旧库升级测试。
 - **CoreContext 是最大改动面**：P3/P4 两次触碰；每次改动保持小步提交。
-- **子代理抽象（P4）是最大设计点**：tidev 的子代理含 session 管理（SQLite）与审批（宿主侧），通用 SubagentHost trait 的边界需谨慎；若设计成本过高，v1 可允许宿主自实现（AgentRuntime 不内建子代理），在文档中明确记录该决策。
+- **子代理边界（P4）已定案**：v1 不提供通用 SubagentHost；tidev 的 session 管理、审批和 BackendEvent 关联留在 CoreContext，AgentRuntime 不内建子代理。
 - **AgentRuntime 与 CoreContext 的行为分叉**：tidev 产品行为（指令注入、undo、敏感文件、审批、快照）留在 CoreContext，不要试图全部塞进通用内核——内核提供机制，tidev 提供策略。
 - **新增共享类型的归属纪律**：llm 与 utils 为叶子；任何新共享类型必须先定归属，防止"types crate"死灰复燃。QueuedUserMessage 因依赖图约束（tui 构造 → core 中转 → agent 消费，共同祖先仅 llm）留在 llm（去 mode 后为纯协议输入类型），是已记录的理由而非例外。
