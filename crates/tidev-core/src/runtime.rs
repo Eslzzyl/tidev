@@ -45,7 +45,7 @@ use crate::context::ContextManager;
 use crate::backend_event::BackendEvent;
 use crate::approval::TuiRequest;
 use crate::mcp::McpManager;
-use crate::message_buf::MessageBuffer;
+use crate::message_buf::CoreMessageBuffer;
 use crate::registry::ToolRegistry;
 use crate::session::SessionManager;
 
@@ -102,7 +102,7 @@ pub struct Runtime {
     snapshot: Option<tidev_snapshot::SnapshotService>,
 
     /// Per-session message buffers, keyed by session ID.
-    buffers: Arc<Mutex<HashMap<Uuid, Arc<RwLock<MessageBuffer>>>>>,
+    buffers: Arc<Mutex<HashMap<Uuid, Arc<RwLock<CoreMessageBuffer>>>>>,
     /// Per-session context managers, keyed by session ID.
     context_managers: Arc<Mutex<HashMap<Uuid, Arc<Mutex<ContextManager>>>>>,
 
@@ -206,7 +206,7 @@ impl Runtime {
     }
 
     /// Get (or create) the message buffer for a session.
-    pub async fn message_buffer(&self, session_id: Uuid) -> Arc<RwLock<MessageBuffer>> {
+    pub async fn message_buffer(&self, session_id: Uuid) -> Arc<RwLock<CoreMessageBuffer>> {
         let mut bufs = self.buffers.lock().await;
         if let Some(buf) = bufs.get(&session_id) {
             return buf.clone();
@@ -216,7 +216,7 @@ impl Runtime {
             .session_manager
             .load_session_messages(session_id)
             .unwrap_or_default();
-        let buf = Arc::new(RwLock::new(MessageBuffer::from_session_messages(messages)));
+        let buf = Arc::new(RwLock::new(CoreMessageBuffer::from_session_messages(messages)));
         bufs.insert(session_id, buf.clone());
         buf
     }
@@ -629,7 +629,7 @@ impl Runtime {
         if let Some(buf) = bufs.get(&session_id) {
             buf.write().await.replace_all(messages);
         } else {
-            let buf = Arc::new(RwLock::new(MessageBuffer::new(messages)));
+            let buf = Arc::new(RwLock::new(CoreMessageBuffer::new(messages)));
             bufs.insert(session_id, buf);
         }
     }
@@ -646,7 +646,7 @@ impl Runtime {
                 .await
                 .replace_all_with_session_messages(messages);
         } else {
-            let buf = Arc::new(RwLock::new(MessageBuffer::from_session_messages(messages)));
+            let buf = Arc::new(RwLock::new(CoreMessageBuffer::from_session_messages(messages)));
             bufs.insert(session_id, buf);
         }
     }

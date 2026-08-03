@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 
+use tidev_agent::MessageBuffer as ProtocolMessageBuffer;
 use tidev_llm::message::Message;
 use tidev_storage::MessageAppData;
 
@@ -16,19 +17,22 @@ use crate::SessionMessage;
 /// All message reads during an active session go through this struct,
 /// never directly to the database. Write operations are the caller's
 /// responsibility to keep the cache and DB in sync.
-pub struct MessageBuffer {
-    messages: Vec<Message>,
+pub struct CoreMessageBuffer {
+    protocol: ProtocolMessageBuffer,
     app_data: HashMap<uuid::Uuid, MessageAppData>,
 }
 
-impl MessageBuffer {
+impl CoreMessageBuffer {
     /// Create from an existing message list (typically loaded from DB).
     pub fn new(messages: Vec<Message>) -> Self {
         let app_data = messages
             .iter()
             .map(|message| (message.id, MessageAppData::default()))
             .collect();
-        Self { messages, app_data }
+        Self {
+            protocol: ProtocolMessageBuffer::new(messages),
+            app_data,
+        }
     }
 
     /// Create from protocol messages and their persisted application data.
@@ -40,20 +44,28 @@ impl MessageBuffer {
             messages.push(session_message.message);
             app_data.insert(id, session_message.app_data);
         }
-        Self { messages, app_data }
+        Self {
+            protocol: ProtocolMessageBuffer::new(messages),
+            app_data,
+        }
     }
 
     /// Create an empty buffer (new session).
     pub fn empty() -> Self {
         Self {
-            messages: Vec::new(),
+            protocol: ProtocolMessageBuffer::empty(),
             app_data: HashMap::new(),
         }
     }
 
     /// Read-only access to all current messages.
     pub fn load(&self) -> &[Message] {
-        &self.messages
+        self.protocol.load()
+    }
+
+    /// Borrow the protocol-only buffer used by generic context management.
+    pub fn protocol(&self) -> &ProtocolMessageBuffer {
+        &self.protocol
     }
 
     /// Append a single message.
@@ -64,7 +76,7 @@ impl MessageBuffer {
     /// Append a protocol message with its application-owned fields.
     pub fn append_with_app_data(&mut self, msg: Message, app_data: MessageAppData) {
         let id = msg.id;
-        self.messages.push(msg);
+        self.protocol.append(msg);
         self.app_data.insert(id, app_data);
     }
 
@@ -80,7 +92,8 @@ impl MessageBuffer {
 
     /// Return protocol messages paired with their application-owned fields.
     pub fn session_messages(&self) -> Vec<SessionMessage> {
-        self.messages
+        self.protocol
+            .load()
             .iter()
             .map(|message| {
                 let app_data = self
@@ -106,30 +119,25 @@ impl MessageBuffer {
     /// Update the content of a message identified by its ID.
     /// Returns the old content if the message was found, `None` otherwise.
     pub fn update_content(&mut self, id: uuid::Uuid, new_content: String) -> Option<String> {
-        for msg in &mut self.messages {
-            if msg.id == id {
-                let old = std::mem::replace(&mut msg.content, new_content);
-                return Some(old);
-            }
-        }
-        None
+        self.protocol.update_content(id, new_content)
     }
 
     /// Remove all messages from `index` onward.
     pub fn truncate(&mut self, index: usize) {
-        self.messages.truncate(index);
-        let retained: std::collections::HashSet<_> = self.messages.iter().map(|m| m.id).collect();
+        self.protocol.truncate(index);
+        let retained: std::collections::HashSet<_> =
+            self.protocol.load().iter().map(|m| m.id).collect();
         self.app_data.retain(|id, _| retained.contains(id));
     }
 
     /// Number of messages currently buffered.
     pub fn len(&self) -> usize {
-        self.messages.len()
+        self.protocol.len()
     }
 
     /// Whether the buffer is empty.
     pub fn is_empty(&self) -> bool {
-        self.messages.is_empty()
+        self.protocol.is_empty()
     }
 }
 
@@ -156,7 +164,7 @@ mod tests {
             ..Default::default()
         };
 
-        let buffer = MessageBuffer::from_session_messages(vec![
+        let buffer = CoreMessageBuffer::from_session_messages(vec![
             SessionMessage::new(first.clone(), first_data.clone()),
             SessionMessage::new(second.clone(), second_data.clone()),
         ]);
@@ -183,7 +191,7 @@ mod tests {
             snapshot_hash: Some("hash".into()),
             ..Default::default()
         };
-        let mut buffer = MessageBuffer::from_session_messages(vec![
+        let mut buffer = CoreMessageBuffer::from_session_messages(vec![
             SessionMessage::new(first.clone(), MessageAppData::default()),
             SessionMessage::new(second.clone(), second_data),
         ]);

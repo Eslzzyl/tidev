@@ -7,6 +7,7 @@
 pub mod context;
 pub mod event;
 pub mod loop_;
+pub mod message_buf;
 
 // Re-export types from tidev-llm (defined there as shared protocol types).
 pub use context::{
@@ -14,3 +15,4 @@ pub use context::{
 };
 pub use event::{AgentEvent, llm_event_to_agent_event};
 pub use loop_::run_agent_loop;
+pub use message_buf::MessageBuffer;

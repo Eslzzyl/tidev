@@ -42,7 +42,7 @@ use crate::context::ContextManager;
 use crate::mode::Mode;
 use crate::context::to_llm_tool_def;
 use crate::approval::{ApprovedTool, ToolCallWithViolations, TuiRequest, TuiRequestKind, TuiResponse};
-use crate::message_buf::MessageBuffer;
+use crate::message_buf::CoreMessageBuffer;
 use crate::registry::ToolRegistry;
 use crate::session::SessionManager;
 
@@ -113,7 +113,10 @@ fn is_read_only(name: &str) -> bool {
 /// Recover a subagent association from the assistant tool call that produced
 /// a result. The association is application data and must never enter the
 /// protocol-level tool result.
-fn child_session_id_for_tool_call(buffer: &MessageBuffer, tool_call_id: &str) -> Option<Uuid> {
+fn child_session_id_for_tool_call(
+    buffer: &CoreMessageBuffer,
+    tool_call_id: &str,
+) -> Option<Uuid> {
     buffer
         .load()
         .iter()
@@ -166,7 +169,7 @@ pub fn to_llm_provider_config(model: &ActiveModel) -> LlmProviderConfig {
 /// the parent agent sees the cancellation signal on the next turn.
 struct CancelPersistGuard {
     session_manager: SessionManager,
-    buffer: Arc<RwLock<MessageBuffer>>,
+    buffer: Arc<RwLock<CoreMessageBuffer>>,
     session_id: Uuid,
     /// The tool calls that were pending when the guard was created.
     tool_calls: Vec<ToolCall>,
@@ -254,7 +257,7 @@ pub struct CoreContext {
     /// Context compaction state.
     context_manager: Arc<Mutex<ContextManager>>,
     /// Per-session message buffer (the in-memory cache / single source of truth).
-    buffer: Arc<RwLock<MessageBuffer>>,
+    buffer: Arc<RwLock<CoreMessageBuffer>>,
     /// Channel for sending events to the UI.
     event_tx: UnboundedSender<BackendEvent>,
     /// Channel for sending UI requests (tool approval etc.).
@@ -308,7 +311,7 @@ impl CoreContext {
         session_manager: SessionManager,
         tool_registry: Arc<ToolRegistry>,
         context_manager: Arc<Mutex<ContextManager>>,
-        buffer: Arc<RwLock<MessageBuffer>>,
+        buffer: Arc<RwLock<CoreMessageBuffer>>,
         event_tx: UnboundedSender<BackendEvent>,
         request_tx: UnboundedSender<TuiRequest>,
         session_id: Uuid,
@@ -1418,7 +1421,7 @@ impl AgentContext for CoreContext {
             let cm = self.context_manager.lock().await;
             let buf = self.buffer.read().await;
             let needs = cm.needs_compaction(
-                &buf,
+                buf.protocol(),
                 self.model_config.context_window,
                 self.model_config.max_output_tokens,
             );
@@ -1489,7 +1492,7 @@ impl AgentContext for CoreContext {
         // 4. Return the prepared message view.
         let cm = self.context_manager.lock().await;
         let buf = self.buffer.read().await;
-        let mut messages = cm.build_request_messages(&buf);
+        let mut messages = cm.build_request_messages(buf.protocol());
         drop(buf);
         drop(cm);
 
@@ -1623,7 +1626,7 @@ mod tool_event_order_tests {
 /// Holds all the resources a subagent needs (owned, 'static-capable).
 struct SubagentSpawner {
     session_manager: SessionManager,
-    buffer: Arc<RwLock<MessageBuffer>>,
+    buffer: Arc<RwLock<CoreMessageBuffer>>,
     tool_registry: Arc<ToolRegistry>,
     llm: LlmClient,
     active_model: ActiveModel,
@@ -1737,7 +1740,7 @@ async fn execute_task_tool(
     };
 
     // 5. Create child buffer + seed with the user prompt.
-    let child_buffer = Arc::new(RwLock::new(MessageBuffer::empty()));
+    let child_buffer = Arc::new(RwLock::new(CoreMessageBuffer::empty()));
     let user_msg = Message::new(tidev_llm::message::MessageRole::User, prompt);
     child_buffer.write().await.append(user_msg.clone());
     spawner
@@ -1949,7 +1952,7 @@ mod child_session_app_data_tests {
         let mut assistant = Message::new(MessageRole::Assistant, "");
         assistant.tool_calls.push(tool_call);
         let child_session_id = Uuid::new_v4();
-        let mut buffer = MessageBuffer::empty();
+        let mut buffer = CoreMessageBuffer::empty();
         buffer.append_with_app_data(
             assistant,
             MessageAppData {

@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
-use tidev_agent::{AgentEvent, llm_event_to_agent_event};
+use tidev_agent::{AgentEvent, MessageBuffer, llm_event_to_agent_event};
 use tidev_llm::message::{Message, MessageRole};
 
 use tidev_tools::types::ToolDefinition;
@@ -31,8 +31,6 @@ pub(crate) fn to_llm_tool_def(def: &ToolDefinition) -> tidev_llm::ToolDefinition
         parameters: def.parameters.clone(),
     }
 }
-
-use crate::MessageBuffer;
 
 // ---------------------------------------------------------------------------
 // Compaction prompt

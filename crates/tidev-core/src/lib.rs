@@ -24,7 +24,7 @@ pub use approval::{
 };
 pub use backend_event::{BackendEvent, agent_event_to_backend_event};
 pub use context::{CompactionResult, ContextManager};
-pub use message_buf::MessageBuffer;
+pub use message_buf::CoreMessageBuffer;
 pub use mode::Mode;
 pub use registry::ToolRegistry;
 pub use runtime::Runtime;
