@@ -177,9 +177,23 @@ impl McpRegistry {
 
         let client = match existing_client {
             Some(client) if !client.is_closed() => client,
-            _ => Self::connect_client(&spec).await?,
+            _ => match Self::connect_client(&spec).await {
+                Ok(client) => client,
+                Err(error) => {
+                    self.mark_failed(name, error.to_string());
+                    return Err(error);
+                }
+            },
         };
-        let tools = Self::load_tools(name, &client, &self.inner).await?;
+        let tools = match Self::load_tools(name, &client, &self.inner).await {
+            Ok(tools) => tools,
+            Err(error) => {
+                let mut client = client;
+                let _ = client.close().await;
+                self.mark_failed(name, error.to_string());
+                return Err(error);
+            }
+        };
         Self::store_connection(&self.inner, name, client, tools);
         Ok(())
     }
@@ -442,11 +456,18 @@ impl McpRegistry {
         }
     }
 
-    fn restore_client(inner: &Arc<Mutex<McpRegistryInner>>, name: &str, client: McpClient) {
-        let mut inner = inner.lock().unwrap();
-        if let Some(state) = inner.servers.get_mut(name) {
-            state.client = Some(client);
-            state.status = McpConnectionStatus::Connected;
+    async fn restore_client(inner: &Arc<Mutex<McpRegistryInner>>, name: &str, client: McpClient) {
+        let mut client = Some(client);
+        {
+            let mut inner = inner.lock().unwrap();
+            if let Some(state) = inner.servers.get_mut(name).filter(|state| {
+                matches!(state.status, McpConnectionStatus::Connected) && state.client.is_none()
+            }) {
+                state.client = client.take();
+            }
+        }
+        if let Some(mut client) = client {
+            let _ = client.close().await;
         }
     }
 
@@ -486,13 +507,13 @@ impl McpTool {
         let result = match client.peer().call_tool(request).await {
             Ok(result) => result,
             Err(error) => {
-                McpRegistry::restore_client(&inner, &self.info.server_name, client);
+                McpRegistry::restore_client(&inner, &self.info.server_name, client).await;
                 return Err(error)
                     .with_context(|| format!("failed to call MCP tool '{}'", self.info.tool_name));
             }
         };
 
-        McpRegistry::restore_client(&inner, &self.info.server_name, client);
+        McpRegistry::restore_client(&inner, &self.info.server_name, client).await;
         Ok(call_tool_result_data(&result, &self.info.tool_name))
     }
 }
@@ -757,5 +778,27 @@ mod tests {
         let summaries = registry.summaries();
         assert_eq!(summaries[0].name, "a");
         assert_eq!(summaries[1].status, McpConnectionStatus::Disconnected);
+    }
+
+    #[tokio::test]
+    async fn refresh_failure_marks_server_failed() {
+        let registry = McpRegistry::new(BTreeMap::from([(
+            "broken".to_string(),
+            McpServerSpec::Stdio {
+                command: "/definitely/missing/tidev-mcp-server".into(),
+                args: Vec::new(),
+                cwd: None,
+                env: BTreeMap::new(),
+            },
+        )]));
+
+        assert!(registry.refresh_server("broken").await.is_err());
+        let summaries = registry.summaries();
+        assert!(matches!(
+            summaries[0].status,
+            McpConnectionStatus::Failed(_)
+        ));
+        assert_eq!(summaries[0].tool_count, 0);
+        assert!(registry.all_definitions().is_empty());
     }
 }
