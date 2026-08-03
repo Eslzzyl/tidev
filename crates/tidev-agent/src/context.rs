@@ -9,7 +9,8 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use async_trait::async_trait;
-use tokio::sync::{mpsc::UnboundedSender, oneshot};
+use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc::UnboundedSender;
 use tokio_util::sync::CancellationToken;
 
 use tidev_types::message::{
@@ -53,7 +54,7 @@ pub struct AgentLoopConfig {
 ///
 /// Sent by the frontend through the permission channel to tell the agent loop
 /// which tools are approved and which are rejected.
-#[derive(Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ApprovedTool {
     pub tool_call: ToolCall,
     /// If `Some`, the tool is rejected; this [`ToolExecutionResult`] will be
@@ -72,7 +73,7 @@ pub struct ApprovedTool {
 }
 
 /// A tool call augmented with pre-computed violation info for the UI.
-#[derive(Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ToolCallWithViolations {
     pub tool_call: ToolCall,
     /// If the tool targets a path outside the workspace, the resolved path.
@@ -83,24 +84,28 @@ pub struct ToolCallWithViolations {
 
 /// Request sent by the agent loop to the frontend, requiring user interaction.
 ///
-/// The frontend processes the request and sends back a [`TuiResponse`] through
-/// `response_tx`. If the sender is dropped without sending, the agent loop
-/// treats it as a rejection of all pending tools.
+/// The request is broadcast to every registered frontend (see
+/// `Runtime::request_rx`). Any frontend may respond by sending a
+/// [`TuiResponse`] through `response_tx`; the first response wins. If every
+/// frontend drops its `response_tx` without sending, the agent loop treats it
+/// as a rejection of all pending tools.
+#[derive(Clone, Debug)]
 pub struct TuiRequest {
     /// The session that originated this request.
     pub session_id: uuid::Uuid,
     pub kind: TuiRequestKind,
-    pub response_tx: oneshot::Sender<TuiResponse>,
+    pub response_tx: UnboundedSender<TuiResponse>,
 }
 
 /// Variants of [`TuiRequest`].
-#[derive(Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum TuiRequestKind {
     /// Ask the user to approve or reject tool calls.
     ToolApproval(Vec<ToolCallWithViolations>),
 }
 
 /// Response sent by the frontend to the agent loop after user interaction.
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum TuiResponse {
     /// User decisions for a [`TuiRequestKind::ToolApproval`] request.
     ToolApproval(Vec<ApprovedTool>),

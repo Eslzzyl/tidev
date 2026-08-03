@@ -46,7 +46,7 @@ pub(crate) struct ContextUsage {
 
 /// Per-session pending tool approval state.
 struct PendingApproval {
-    response_tx: tokio::sync::oneshot::Sender<TuiResponse>,
+    response_tx: tokio::sync::mpsc::UnboundedSender<TuiResponse>,
     tools: Vec<ToolCallWithViolations>,
     tool_index: usize,
     approved_tools: Vec<ApprovedTool>,
@@ -200,8 +200,8 @@ struct QueuedPrompt {
 impl App {
     pub fn new(
         runtime: tidev_core::Runtime,
-        request_rx: Option<tokio::sync::mpsc::UnboundedReceiver<tidev_core::TuiRequest>>,
-        event_rx: Option<tokio::sync::mpsc::UnboundedReceiver<BackendEvent>>,
+        request_rx: tokio::sync::mpsc::UnboundedReceiver<tidev_core::TuiRequest>,
+        event_rx: tokio::sync::mpsc::UnboundedReceiver<BackendEvent>,
     ) -> Self {
         let theme_str = runtime.config().theme;
         let current_palette = ThemePalette::from_name(&theme_str);
@@ -230,8 +230,8 @@ impl App {
             last_notice: None,
             notifications: NotificationState::new(),
             desktop_notifications: NotificationManager::new(&notif_config),
-            request_rx,
-            event_rx,
+            request_rx: Some(request_rx),
+            event_rx: Some(event_rx),
             pending_approvals: HashMap::new(),
             active_approval_session: None,
             boundary_permissions: HashMap::new(),

@@ -677,8 +677,13 @@ impl AgentContext for CoreContext {
             return Ok(approved);
         }
 
-        // ─── Send to TUI for user interaction ──────────────────────────
-        let (response_tx, mut response_rx) = tokio::sync::oneshot::channel();
+        // ─── Send to frontends for user interaction ───────────────────
+        //
+        // The response channel is an mpsc sender so the same request can be
+        // broadcast to multiple frontends; the first response wins, and the
+        // request is rejected when every frontend drops its sender without
+        // answering.
+        let (response_tx, mut response_rx) = tokio::sync::mpsc::unbounded_channel();
 
         self.request_tx
             .send(TuiRequest {
@@ -693,10 +698,11 @@ impl AgentContext for CoreContext {
                 // Cancelled — reject all pending tools.
                 Vec::new()
             }
-            result = &mut response_rx => {
+            result = response_rx.recv() => {
                 match result {
-                    Ok(TuiResponse::ToolApproval(tools)) => tools,
-                    Err(_) => Vec::new(), // channel closed → reject all pending
+                    Some(TuiResponse::ToolApproval(tools)) => tools,
+                    // All response channels closed → reject all pending tools.
+                    None => Vec::new(),
                 }
             }
         };

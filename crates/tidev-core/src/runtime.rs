@@ -13,8 +13,9 @@
 //! // Submit a user prompt
 //! rt.submit_prompt(session_id, "Refactor this function".into()).await;
 //!
-//! // Receive events
-//! while let Some(event) = rt.event_rx().recv().await { ... }
+//! // Subscribe to events (each call registers a new subscriber)
+//! let mut events = rt.event_rx().await;
+//! while let Some(event) = events.recv().await { ... }
 //! ```
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -105,12 +106,18 @@ pub struct Runtime {
     /// Per-session context managers, keyed by session ID.
     context_managers: Arc<Mutex<HashMap<Uuid, Arc<Mutex<ContextManager>>>>>,
 
-    /// Event channel (sender → UI, receiver → TUI).
+    /// Event channel (sender → UI). Messages are fanned out to every
+    /// registered subscriber (see [`Runtime::event_rx`]).
     event_tx: UnboundedSender<BackendEvent>,
-    _event_rx: Arc<Mutex<Option<UnboundedReceiver<BackendEvent>>>>,
-    /// Request channel (sender → UI).
+    /// Registered event subscribers. Each call to [`Runtime::event_rx`]
+    /// adds one; dead senders are pruned by the fan-out task.
+    event_subscribers: Arc<Mutex<Vec<UnboundedSender<BackendEvent>>>>,
+    /// Request channel (sender → UI). Messages are fanned out to every
+    /// registered subscriber (see [`Runtime::request_rx`]).
     request_tx: UnboundedSender<TuiRequest>,
-    _request_rx: Arc<Mutex<Option<UnboundedReceiver<TuiRequest>>>>,
+    /// Registered request subscribers. Each call to [`Runtime::request_rx`]
+    /// adds one; dead senders are pruned by the fan-out task.
+    request_subscribers: Arc<Mutex<Vec<UnboundedSender<TuiRequest>>>>,
 
     /// Currently running agent loop handles, keyed by session ID.
     run_loop_handles: Arc<std::sync::Mutex<HashMap<Uuid, tokio::task::JoinHandle<()>>>>,
@@ -166,14 +173,28 @@ impl Runtime {
     // Accessors
     // -----------------------------------------------------------------------
 
-    /// Get the event receiver (consumed by the TUI).
-    pub async fn event_rx(&self) -> Option<UnboundedReceiver<BackendEvent>> {
-        self._event_rx.lock().await.take()
+    /// Subscribe to backend events.
+    ///
+    /// Every call registers a new subscriber and returns its receiver;
+    /// events are broadcast to all subscribers concurrently. The receiver
+    /// yields events until it is dropped. Frontends (TUI, ACP, web server,
+    /// ...) can subscribe any number of times.
+    pub async fn event_rx(&self) -> UnboundedReceiver<BackendEvent> {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        self.event_subscribers.lock().await.push(tx);
+        rx
     }
 
-    /// Get the request receiver (consumed by the TUI).
-    pub async fn request_rx(&self) -> Option<UnboundedReceiver<TuiRequest>> {
-        self._request_rx.lock().await.take()
+    /// Subscribe to frontend requests (tool approval etc.).
+    ///
+    /// Every call registers a new subscriber and returns its receiver;
+    /// requests are broadcast to all subscribers concurrently. Each
+    /// [`TuiRequest`] carries its own response channel, so any subscriber
+    /// can answer — the first response wins.
+    pub async fn request_rx(&self) -> UnboundedReceiver<TuiRequest> {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        self.request_subscribers.lock().await.push(tx);
+        rx
     }
 
     /// Deprecated — use [`request_rx`] instead.
@@ -1354,9 +1375,38 @@ impl RuntimeBuilder {
             });
         }
 
-        // 14. Channels.
-        let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (request_tx, request_rx) = tokio::sync::mpsc::unbounded_channel::<TuiRequest>();
+        // 14. Channels. The runtime owns the primary (unbounded) channels;
+        //     a fan-out task per channel forwards every message to all
+        //     registered subscribers so multiple frontends (TUI, ACP, web
+        //     server, ...) can consume the same stream concurrently and
+        //     subscribe/unsubscribe at any time.
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<BackendEvent>();
+        let event_subscribers: Arc<Mutex<Vec<UnboundedSender<BackendEvent>>>> =
+            Arc::new(Mutex::new(Vec::new()));
+        {
+            let subscribers = event_subscribers.clone();
+            tokio::spawn(async move {
+                while let Some(event) = event_rx.recv().await {
+                    let mut subs = subscribers.lock().await;
+                    // Send to every subscriber; drop senders whose receiver
+                    // was closed (frontend exited).
+                    subs.retain(|tx| tx.send(event.clone()).is_ok());
+                }
+            });
+        }
+
+        let (request_tx, mut request_rx) = tokio::sync::mpsc::unbounded_channel::<TuiRequest>();
+        let request_subscribers: Arc<Mutex<Vec<UnboundedSender<TuiRequest>>>> =
+            Arc::new(Mutex::new(Vec::new()));
+        {
+            let subscribers = request_subscribers.clone();
+            tokio::spawn(async move {
+                while let Some(request) = request_rx.recv().await {
+                    let mut subs = subscribers.lock().await;
+                    subs.retain(|tx| tx.send(request.clone()).is_ok());
+                }
+            });
+        }
 
         log::info!("startup: runtime ready in {:?}", _start.elapsed());
 
@@ -1374,9 +1424,9 @@ impl RuntimeBuilder {
             buffers: Arc::new(Mutex::new(HashMap::new())),
             context_managers: Arc::new(Mutex::new(HashMap::new())),
             event_tx,
-            _event_rx: Arc::new(Mutex::new(Some(event_rx))),
+            event_subscribers,
             request_tx,
-            _request_rx: Arc::new(Mutex::new(Some(request_rx))),
+            request_subscribers,
             run_loop_handles: Arc::new(std::sync::Mutex::new(HashMap::new())),
             busy_sessions: Arc::new(std::sync::Mutex::new(HashSet::new())),
             queued_messages: Arc::new(std::sync::Mutex::new(HashMap::new())),

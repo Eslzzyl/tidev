@@ -125,14 +125,8 @@ pub async fn run_acp_agent() -> Result<()> {
         .build()
         .await?;
 
-    let event_rx = runtime
-        .event_rx()
-        .await
-        .ok_or_else(|| anyhow::anyhow!("event_rx already taken"))?;
-    let request_rx = runtime
-        .request_rx()
-        .await
-        .ok_or_else(|| anyhow::anyhow!("request_rx already taken"))?;
+    let event_rx = runtime.event_rx().await;
+    let request_rx = runtime.request_rx().await;
 
     let state = Arc::new(AcpState {
         runtime,
