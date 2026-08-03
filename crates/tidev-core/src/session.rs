@@ -77,7 +77,7 @@ impl SessionManager {
                 let data = app_data
                     .get(&message.id)
                     .cloned()
-                    .unwrap_or_else(|| tidev_storage::MessageAppData::from_message(&message));
+                    .unwrap_or_default();
                 crate::SessionMessage::new(message, data)
             })
             .collect())

@@ -348,15 +348,6 @@ pub struct Message {
     #[serde(default)]
     pub tokens_per_second: Option<f32>,
     #[serde(default)]
-    pub snapshot_hash: Option<String>,
-    #[serde(default)]
-    pub patch_files: Option<String>,
-    #[serde(default)]
-    pub file_diffs: Option<String>,
-    /// Legacy application-mode storage value. Core owns its interpretation.
-    #[serde(default)]
-    pub mode: Option<String>,
-    #[serde(default)]
     pub thinking_level: Option<crate::reasoning::ThinkingLevelType>,
 }
 
@@ -382,10 +373,6 @@ impl Message {
             cache_write_tokens: None,
             model_id: None,
             tokens_per_second: None,
-            snapshot_hash: None,
-            patch_files: None,
-            file_diffs: None,
-            mode: None,
             thinking_level: None,
             reasoning_started_at: None,
             reasoning_completed_at: None,
@@ -421,10 +408,6 @@ impl Message {
             cache_write_tokens: None,
             model_id: None,
             tokens_per_second: None,
-            snapshot_hash: None,
-            patch_files: None,
-            file_diffs: None,
-            mode: None,
             thinking_level: None,
             reasoning_started_at: None,
             reasoning_completed_at: None,
@@ -458,10 +441,6 @@ impl Message {
             cache_write_tokens: None,
             model_id: None,
             tokens_per_second: None,
-            snapshot_hash: None,
-            patch_files: None,
-            file_diffs: None,
-            mode: None,
             thinking_level: None,
             reasoning_started_at: None,
             reasoning_completed_at: None,
@@ -492,11 +471,7 @@ impl Message {
             cache_read_tokens: None,
             cache_write_tokens: None,
             model_id: None,
-            snapshot_hash: None,
-            patch_files: None,
             tokens_per_second: None,
-            file_diffs: None,
-            mode: None,
             thinking_level: None,
             reasoning_started_at: None,
             reasoning_completed_at: None,

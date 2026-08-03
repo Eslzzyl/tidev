@@ -14,6 +14,7 @@ use rayon::prelude::*;
 use rusqlite::{
     Connection, OptionalExtension, named_params, params, params_from_iter, types::Type,
 };
+use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     fs,
@@ -101,10 +102,6 @@ struct RawMessageRow {
     cache_write_tokens: Option<i64>,
     model_id: Option<String>,
     tokens_per_second: Option<f64>,
-    snapshot_hash: Option<String>,
-    patch_files: Vec<u8>,
-    file_diffs: Vec<u8>,
-    mode: Option<String>,
     thinking_level: Option<String>,
     reasoning_started_at: Option<String>,
     reasoning_completed_at: Option<String>,
@@ -115,25 +112,13 @@ struct RawMessageRow {
 /// These values are intentionally kept out of the LLM message payload. The
 /// mode value remains in its database JSON representation so old databases
 /// can be read without rewriting rows.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MessageAppData {
     pub snapshot_hash: Option<String>,
     pub patch_files: Option<String>,
     pub file_diffs: Option<String>,
     pub mode: Option<String>,
     pub child_session_id: Option<Uuid>,
-}
-
-impl MessageAppData {
-    pub fn from_message(message: &Message) -> Self {
-        Self {
-            snapshot_hash: message.snapshot_hash.clone(),
-            patch_files: message.patch_files.clone(),
-            file_diffs: message.file_diffs.clone(),
-            mode: message.mode.clone(),
-            child_session_id: message.metadata.child_session_id,
-        }
-    }
 }
 
 impl RawMessageRow {
@@ -157,13 +142,6 @@ impl RawMessageRow {
 
         let tool_calls: Vec<tidev_llm::message::ToolCall> =
             serde_json::from_str(&decompress_text(&self.tool_calls)).unwrap_or_default();
-
-        let patch_files =
-            (!self.patch_files.is_empty()).then(|| decompress_text(&self.patch_files));
-
-        let file_diffs = (!self.file_diffs.is_empty()).then(|| decompress_text(&self.file_diffs));
-
-        let mode = self.mode.and_then(|m| serde_json::from_str(&m).ok());
 
         let thinking_level = self
             .thinking_level
@@ -195,10 +173,6 @@ impl RawMessageRow {
             cache_write_tokens: self.cache_write_tokens.map(|v| v as u32),
             model_id: self.model_id,
             tokens_per_second: self.tokens_per_second.map(|v| v as f32),
-            snapshot_hash: self.snapshot_hash,
-            patch_files,
-            file_diffs,
-            mode,
             thinking_level,
             reasoning_started_at: self.reasoning_started_at.and_then(|s| {
                 DateTime::parse_from_rfc3339(&s)
@@ -1044,8 +1018,7 @@ impl SessionStore {
 impl SessionStore {
     /// Insert a single message row (no session timestamp update).
     fn insert_message(conn: &Connection, session_id: Uuid, msg: &Message) -> Result<()> {
-        let app_data = MessageAppData::from_message(msg);
-        Self::insert_message_with_app_data(conn, session_id, msg, &app_data)
+        Self::insert_message_with_app_data(conn, session_id, msg, &MessageAppData::default())
     }
 
     fn insert_message_with_app_data(
@@ -1140,7 +1113,7 @@ impl SessionStore {
             let data = match app_data.get(&msg.id) {
                 Some(data) => data,
                 None => {
-                    fallback = MessageAppData::from_message(msg);
+                    fallback = MessageAppData::default();
                     &fallback
                 }
             };
@@ -1196,7 +1169,7 @@ impl SessionStore {
                 "SELECT id, role, content, attachments, reasoning, tool_calls, tool_call_id, \
              tool_name, metadata, created_at, completed_at, streaming, input_tokens, \
              output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, \
-             tokens_per_second, snapshot_hash, patch_files, file_diffs, mode, thinking_level, \
+             tokens_per_second, thinking_level, \
              reasoning_started_at, reasoning_completed_at \
              FROM messages WHERE session_id = ?1 ORDER BY created_at ASC",
             )?;
@@ -1224,13 +1197,9 @@ impl SessionStore {
                         cache_write_tokens: row.get(16).ok().flatten(),
                         model_id: row.get(17).ok().flatten(),
                         tokens_per_second: row.get(18).ok().flatten(),
-                        snapshot_hash: row.get(19).ok().flatten(),
-                        patch_files: row.get::<_, Vec<u8>>(20).unwrap_or_default(),
-                        file_diffs: row.get::<_, Vec<u8>>(21).unwrap_or_default(),
-                        mode: row.get(22).ok().flatten(),
-                        thinking_level: row.get(23).ok().flatten(),
-                        reasoning_started_at: row.get(24).ok().flatten(),
-                        reasoning_completed_at: row.get(25).ok().flatten(),
+                        thinking_level: row.get(19).ok().flatten(),
+                        reasoning_started_at: row.get(20).ok().flatten(),
+                        reasoning_completed_at: row.get(21).ok().flatten(),
                     })
                 })?;
                 let mut raw = Vec::new();
@@ -1423,7 +1392,7 @@ impl SessionStore {
                 "SELECT id, role, content, attachments, reasoning, tool_calls, tool_call_id, \
                  tool_name, metadata, created_at, completed_at, streaming, input_tokens, \
                  output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, \
-                 tokens_per_second, snapshot_hash, patch_files, file_diffs, mode, thinking_level, \
+                 tokens_per_second, thinking_level, \
                  reasoning_started_at, reasoning_completed_at \
                  FROM messages WHERE session_id = ?1 ORDER BY created_at DESC LIMIT 1",
             )?;
@@ -1463,22 +1432,9 @@ impl SessionStore {
             .map(|b| decompress_text(&b))
             .unwrap_or_else(|_| "[]".to_string());
 
-        let patch_files = row
-            .get::<_, Vec<u8>>(20)
-            .ok()
-            .filter(|b| !b.is_empty())
-            .map(|b| decompress_text(&b));
-
-        let file_diffs = row
-            .get::<_, Vec<u8>>(21)
-            .ok()
-            .filter(|b| !b.is_empty())
-            .map(|b| decompress_text(&b));
-
-        let mode: Option<String> = row.get(22).ok().flatten();
-        let thinking_level: Option<String> = row.get(23).ok().flatten();
-        let reasoning_started_at: Option<String> = row.get(24).ok().flatten();
-        let reasoning_completed_at: Option<String> = row.get(25).ok().flatten();
+        let thinking_level: Option<String> = row.get(19).ok().flatten();
+        let reasoning_started_at: Option<String> = row.get(20).ok().flatten();
+        let reasoning_completed_at: Option<String> = row.get(21).ok().flatten();
 
         Message {
             id: Uuid::parse_str(&row.get::<_, String>(0).unwrap_or_default()).unwrap_or_default(),
@@ -1506,10 +1462,6 @@ impl SessionStore {
             cache_write_tokens: row.get(16).ok().flatten(),
             model_id: row.get(17).ok().flatten(),
             tokens_per_second: row.get(18).ok().flatten(),
-            snapshot_hash: row.get(19).ok().flatten(),
-            patch_files,
-            file_diffs,
-            mode: mode.and_then(|m| serde_json::from_str(&m).ok()),
             thinking_level: thinking_level.and_then(|t| serde_json::from_str(&t).ok()),
             reasoning_started_at: reasoning_started_at.and_then(|s| {
                 DateTime::parse_from_rfc3339(&s)
@@ -2517,6 +2469,11 @@ mod tests {
         assert_eq!(loaded.get(&msg.id), app_data.get(&msg.id));
         let protocol = store.load_messages(sid).unwrap();
         assert_eq!(protocol[0].content, "hello");
+        let serialized = serde_json::to_value(&protocol[0]).unwrap();
+        assert!(serialized.get("snapshot_hash").is_none());
+        assert!(serialized.get("patch_files").is_none());
+        assert!(serialized.get("file_diffs").is_none());
+        assert!(serialized.get("mode").is_none());
     }
 
     #[test]

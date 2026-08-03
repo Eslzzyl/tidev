@@ -1096,6 +1096,7 @@ mod tests {
             hovered_inline_subagent: None,
             thinking_collapsed_overrides: &empty_set,
             default_collapse_thinking: false,
+            message_app_data: None,
         };
         // Normal read output (no instruction files)
         let normal_output = "\

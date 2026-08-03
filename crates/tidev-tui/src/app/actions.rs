@@ -201,17 +201,18 @@ impl App {
                         // Keep pending_mode intact so a deferred mode switch
                         // survives session navigation.
                         if let Some(ctx) = chat.active_chat_context() {
-                            self.mode = ctx
-                                .messages
-                                .iter()
-                                .rev()
-                                .find(|m| m.role == MessageRole::User)
-                                .and_then(|m| {
-                                    m.mode
-                                        .as_deref()
-                                        .and_then(|value| value.parse::<SessionMode>().ok())
-                                })
-                                .unwrap_or(SessionMode::Build);
+                                self.mode = ctx
+                                    .messages
+                                    .iter()
+                                    .rev()
+                                    .find(|m| m.role == MessageRole::User)
+                                    .and_then(|m| ctx.app_data(m.id))
+                                    .and_then(|data| {
+                                        data.mode
+                                            .as_deref()
+                                            .and_then(|value| value.parse::<SessionMode>().ok())
+                                    })
+                                    .unwrap_or(SessionMode::Build);
                         }
 
                         // Clear stale interaction state on session switch.
@@ -242,10 +243,10 @@ impl App {
                         // Refresh the Runtime's in-memory message buffer.
                         // Use the already-cached messages to avoid a redundant DB read.
                         if let Some(ctx) = chat.active_chat_context() {
-                            let buf_messages = ctx.messages.clone();
+                            let buf_messages = ctx.session_messages();
                             let rt = self.runtime.clone();
                             tokio::spawn(async move {
-                                rt.set_message_buffer(session_id, buf_messages).await;
+                                rt.set_session_message_buffer(session_id, buf_messages).await;
                             });
                         }
 
@@ -275,11 +276,15 @@ impl App {
                     self.screen = AppScreen::Chat;
 
                     // Load session record and messages for chat display
-                    let messages = self
+                    let session_messages = self
                         .runtime
                         .session_manager()
-                        .load_messages(session_id)
+                        .load_session_messages(session_id)
                         .unwrap_or_default();
+                    let messages: Vec<_> = session_messages
+                        .iter()
+                        .map(|message| message.message.clone())
+                        .collect();
 
                     let session_thinking_level = messages
                         .iter()
@@ -290,15 +295,11 @@ impl App {
                     // Resolve session mode from the last user message.
                     // Keep pending_mode intact so a deferred mode switch
                     // survives session navigation.
-                    self.mode = messages
+                    self.mode = session_messages
                         .iter()
                         .rev()
                         .find(|m| m.role == tidev_llm::message::MessageRole::User)
-                        .and_then(|m| {
-                            m.mode
-                                .as_deref()
-                                .and_then(|value| value.parse::<SessionMode>().ok())
-                        })
+                        .and_then(|m| m.mode())
                         .unwrap_or(SessionMode::Build);
 
                     // Compute context_usage from stored messages (last assistant
@@ -324,16 +325,16 @@ impl App {
                     // Use the already-loaded messages to avoid a redundant DB read.
                     let rt = self.runtime.clone();
                     let sid = session_id;
-                    let buf_messages = messages.clone();
+                    let buf_messages = session_messages.clone();
                     tokio::spawn(async move {
-                        rt.set_message_buffer(sid, buf_messages).await;
+                        rt.set_session_message_buffer(sid, buf_messages).await;
                     });
 
                     let chat_context = {
-                        let mut ctx = crate::chat_context::ChatContext::new(
+                        let mut ctx = crate::chat_context::ChatContext::from_session_messages(
                             session_id,
                             String::new(),
-                            messages,
+                            session_messages,
                             None,
                             String::new(),
                             String::new(),

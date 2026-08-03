@@ -303,6 +303,7 @@ impl EventTranslator {
             BackendEvent::UserMessageCreated {
                 session_id: _,
                 message,
+                ..
             } => {
                 let chunk = acp::ContentChunk::new(acp::ContentBlock::Text(acp::TextContent::new(
                     &message.content,
@@ -703,6 +704,7 @@ mod tests {
         let notifs = tr.translate(&BackendEvent::UserMessageCreated {
             session_id: sid(),
             message: Box::new(msg),
+            app_data: Box::new(tidev_core::MessageAppData::default()),
         });
         assert_eq!(notifs.len(), 1);
         match &notifs[0].update {

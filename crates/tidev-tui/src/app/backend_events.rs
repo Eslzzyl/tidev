@@ -155,12 +155,13 @@ impl App {
             BackendEvent::UserMessageCreated {
                 session_id,
                 message,
+                app_data,
             } => {
                 if let Some(ref mut chat) = self.message_list {
                     if let Some(ref mut ctx) = chat.active_chat_context_mut()
                         && ctx.session_id == session_id
                     {
-                        ctx.push(*message);
+                        ctx.push_with_app_data(*message, *app_data);
                     }
                     chat.invalidate_layout();
                 }

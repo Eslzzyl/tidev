@@ -33,7 +33,7 @@ use uuid::Uuid;
 use tidev_config::auth::ActiveModel;
 use tidev_config::{AppConfig, AuthStore, paths::ConfigPaths};
 use tidev_search::FileSearchIndex;
-use tidev_storage::SessionStore;
+use tidev_storage::{MessageAppData, SessionStore};
 use tidev_llm::message::{Message, MessageAttachment, MessageRole, QueuedUserMessage};
 use crate::mode::Mode;
 use tidev_llm::reasoning::ThinkingLevelType;
@@ -213,9 +213,9 @@ impl Runtime {
         // Load from DB and create.
         let messages = self
             .session_manager
-            .load_messages(session_id)
+            .load_session_messages(session_id)
             .unwrap_or_default();
-        let buf = Arc::new(RwLock::new(MessageBuffer::new(messages)));
+        let buf = Arc::new(RwLock::new(MessageBuffer::from_session_messages(messages)));
         bufs.insert(session_id, buf.clone());
         buf
     }
@@ -456,9 +456,10 @@ impl Runtime {
         thinking_level: Option<ThinkingLevelType>,
     ) -> Result<()> {
         let mut user_msg = Message::new(MessageRole::User, content);
-            user_msg.attachments = attachments;
-            user_msg.mode = Some(mode.as_str().to_string());
+        user_msg.attachments = attachments;
         user_msg.thinking_level = thinking_level;
+        let mut user_app_data = MessageAppData::default();
+        user_app_data.mode = Some(mode.as_str().to_string());
 
         // 1. If undo revert is active, discard hidden messages first.
         if let Ok(Some((revert_msg_id, _))) = self.session_manager.load_revert_state(session_id)
@@ -491,9 +492,19 @@ impl Runtime {
         // 2. Persist the user message.
         {
             let buf = self.message_buffer(session_id).await;
-            buf.write().await.append(user_msg.clone());
+            buf.write()
+                .await
+                .append_with_app_data(user_msg.clone(), user_app_data.clone());
         }
-        self.session_manager.append_message(session_id, &user_msg)?;
+        self.session_manager.append_messages_with_app_data(
+            session_id,
+            std::slice::from_ref(&user_msg),
+            &[(user_msg.id, user_app_data)].into_iter().collect(),
+        )?;
+        let event_app_data = MessageAppData {
+            mode: Some(mode.as_str().to_string()),
+            ..Default::default()
+        };
 
         // Capture values needed for the queue before user_msg is moved.
         let q_content = user_msg.content.clone();
@@ -504,6 +515,7 @@ impl Runtime {
         let _ = self.event_tx.send(BackendEvent::UserMessageCreated {
             session_id,
             message: Box::new(user_msg),
+            app_data: Box::new(event_app_data),
         });
 
         // 4. Check if this session already has a loop running.
@@ -569,12 +581,12 @@ impl Runtime {
         let mode = match mode {
             Some(m) => m,
             None => {
-                let messages = self.session_manager.load_messages(session_id)?;
+                let messages = self.session_manager.load_session_messages(session_id)?;
                 messages
                     .iter()
                     .rev()
                     .find(|m| m.role == MessageRole::User)
-                    .and_then(|m| m.mode.as_deref()?.parse::<Mode>().ok())
+                    .and_then(|m| m.mode())
                     .unwrap_or(Mode::Build)
             }
         };
@@ -600,8 +612,10 @@ impl Runtime {
     /// Reload the in-memory [`MessageBuffer`] for a session from the store.
     pub async fn reload_message_buffer(&self, session_id: Uuid) {
         let buf = self.message_buffer(session_id).await;
-        if let Ok(messages) = self.session_manager.load_messages(session_id) {
-            buf.write().await.replace_all(messages);
+        if let Ok(messages) = self.session_manager.load_session_messages(session_id) {
+            buf.write()
+                .await
+                .replace_all_with_session_messages(messages);
         }
     }
 
@@ -615,6 +629,23 @@ impl Runtime {
             buf.write().await.replace_all(messages);
         } else {
             let buf = Arc::new(RwLock::new(MessageBuffer::new(messages)));
+            bufs.insert(session_id, buf);
+        }
+    }
+
+    /// Set the in-memory message buffer from protocol messages paired with app data.
+    pub async fn set_session_message_buffer(
+        &self,
+        session_id: Uuid,
+        messages: Vec<crate::SessionMessage>,
+    ) {
+        let mut bufs = self.buffers.lock().await;
+        if let Some(buf) = bufs.get(&session_id) {
+            buf.write()
+                .await
+                .replace_all_with_session_messages(messages);
+        } else {
+            let buf = Arc::new(RwLock::new(MessageBuffer::from_session_messages(messages)));
             bufs.insert(session_id, buf);
         }
     }
@@ -819,7 +850,7 @@ impl Runtime {
     /// Undo — revert to the previous user message's state.
     pub async fn undo(&self, session_id: Uuid) -> Result<()> {
         let buf = self.message_buffer(session_id).await;
-        let messages = buf.read().await.load().to_vec();
+        let messages = buf.read().await.session_messages();
         drop(buf);
 
         // Determine target: previous user message (or one more back if in revert state).
@@ -848,7 +879,7 @@ impl Runtime {
         };
 
         let buf = self.message_buffer(session_id).await;
-        let messages = buf.read().await.load().to_vec();
+        let messages = buf.read().await.session_messages();
         drop(buf);
 
         // Is there a next user message to move forward to?
@@ -983,7 +1014,7 @@ impl Runtime {
     async fn revert_to_message(
         &self,
         session_id: Uuid,
-        messages: &[Message],
+        messages: &[crate::SessionMessage],
         target_id: Uuid,
     ) -> Result<()> {
         // 1. Reuse existing redo_snapshot if one exists (maintains undo chain),

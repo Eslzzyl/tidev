@@ -4,15 +4,17 @@
 //! (snapshot capture, persistence, event emission) lives in [`Runtime`](crate::Runtime).
 
 use tidev_snapshot::Patch;
-use tidev_llm::message::{COMPACTION_MESSAGE_LABEL, Message, MessageRole};
+use tidev_llm::message::{COMPACTION_MESSAGE_LABEL, MessageRole};
 use uuid::Uuid;
+
+use crate::SessionMessage;
 
 // ---------------------------------------------------------------------------
 // Message navigation
 // ---------------------------------------------------------------------------
 
 /// Find the last non-streaming User message that isn't a compaction marker.
-pub fn last_visible_user_message(messages: &[Message]) -> Option<Uuid> {
+pub fn last_visible_user_message(messages: &[SessionMessage]) -> Option<Uuid> {
     messages
         .iter()
         .rev()
@@ -23,7 +25,7 @@ pub fn last_visible_user_message(messages: &[Message]) -> Option<Uuid> {
 }
 
 /// Find the first visible User message **before** `before_id` (going backwards).
-pub fn prev_user_message_before(messages: &[Message], before_id: Uuid) -> Option<Uuid> {
+pub fn prev_user_message_before(messages: &[SessionMessage], before_id: Uuid) -> Option<Uuid> {
     let mut found = false;
     for m in messages.iter().rev() {
         if found
@@ -41,7 +43,7 @@ pub fn prev_user_message_before(messages: &[Message], before_id: Uuid) -> Option
 }
 
 /// Find the first visible User message **after** `after_id` (going forwards).
-pub fn next_user_message_after(messages: &[Message], after_id: Uuid) -> Option<Uuid> {
+pub fn next_user_message_after(messages: &[SessionMessage], after_id: Uuid) -> Option<Uuid> {
     let mut found = false;
     for m in messages {
         if found
@@ -68,7 +70,7 @@ pub fn next_user_message_after(messages: &[Message], after_id: Uuid) -> Option<U
 ///
 /// Returns `true` if state was restored.
 pub fn restore_context_from_compaction(
-    messages: &[Message],
+    messages: &[SessionMessage],
     target_id: Uuid,
     summary: &mut Option<String>,
     retained_from: &mut usize,
@@ -97,7 +99,7 @@ pub fn restore_context_from_compaction(
 }
 
 /// Extract prior context state stored on a compaction message's metadata.
-fn extract_compaction_prior_state(message: &Message) -> Option<(Option<String>, usize)> {
+fn extract_compaction_prior_state(message: &SessionMessage) -> Option<(Option<String>, usize)> {
     let prior_summary = message.metadata.prior_summary.clone();
     let prior_retained_from = message.metadata.prior_retained_from?;
     Some((prior_summary, prior_retained_from))
@@ -111,7 +113,7 @@ fn extract_compaction_prior_state(message: &Message) -> Option<(Option<String>, 
 ///
 /// Patches are returned in **application order** (oldest first), suitable for
 /// [`SnapshotService::revert`](tidev_snapshot::SnapshotService::revert).
-pub fn collect_patches_after_message(messages: &[Message], target_id: Uuid) -> Vec<Patch> {
+pub fn collect_patches_after_message(messages: &[SessionMessage], target_id: Uuid) -> Vec<Patch> {
     let mut patches = Vec::new();
     let mut found = false;
 
@@ -133,7 +135,7 @@ pub fn collect_patches_after_message(messages: &[Message], target_id: Uuid) -> V
 
 /// Accumulate patches from a single message into `patches`, inserting each at
 /// the front so that newest-step-first order is maintained within one message.
-fn accumulate_patches(patches: &mut Vec<Patch>, message: &Message) {
+fn accumulate_patches(patches: &mut Vec<Patch>, message: &SessionMessage) {
     let extracted = extract_patches_from_message(message);
     if extracted.is_empty() {
         return;
@@ -144,11 +146,11 @@ fn accumulate_patches(patches: &mut Vec<Patch>, message: &Message) {
     }
 }
 
-/// Decode the patches stored inside a message's `patch_files` field.
+/// Decode the patches stored in a message's application-owned fields.
 ///
 /// Supports both the current StepPatch format and a legacy flat file-list format.
-fn extract_patches_from_message(message: &Message) -> Vec<Patch> {
-    let Some(patch_files_str) = &message.patch_files else {
+fn extract_patches_from_message(message: &SessionMessage) -> Vec<Patch> {
+    let Some(patch_files_str) = &message.app_data.patch_files else {
         return Vec::new();
     };
 
@@ -181,7 +183,7 @@ fn extract_patches_from_message(message: &Message) -> Vec<Patch> {
         .collect();
 
     if !files.is_empty()
-        && let Some(hash) = &message.snapshot_hash
+        && let Some(hash) = &message.app_data.snapshot_hash
     {
         return vec![Patch {
             hash: hash.clone(),
@@ -195,56 +197,65 @@ fn extract_patches_from_message(message: &Message) -> Vec<Patch> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tidev_llm::message::Message;
 
-    fn msg_user(id: Uuid) -> Message {
+    fn msg_user(id: Uuid) -> SessionMessage {
         let mut m = Message::new(MessageRole::User, "test");
         m.id = id;
-        m
+        SessionMessage::new(m, Default::default())
     }
 
-    fn msg_assistant(id: Uuid) -> Message {
+    fn msg_assistant(id: Uuid) -> SessionMessage {
         let mut m = Message::new(MessageRole::Assistant, "response");
         m.id = id;
-        m
+        SessionMessage::new(m, Default::default())
     }
 
-    fn msg_compaction(summary: &str) -> Message {
+    fn msg_compaction(summary: &str) -> SessionMessage {
         let mut m = Message::compaction(summary);
         m.metadata.prior_summary = Some("old".into());
         m.metadata.prior_retained_from = Some(42);
-        m
+        SessionMessage::new(m, Default::default())
     }
 
     fn msg_compaction_with(
         summary: &str,
         prior_summary: Option<&str>,
         prior_retained: usize,
-    ) -> Message {
+    ) -> SessionMessage {
         let mut m = Message::compaction(summary);
         m.metadata.prior_summary = prior_summary.map(|s| s.to_string());
         m.metadata.prior_retained_from = Some(prior_retained);
-        m
+        SessionMessage::new(m, Default::default())
     }
 
-    fn msg_with_patches(id: Uuid, hash: &str, files: &[&str]) -> Message {
+    fn msg_with_patches(id: Uuid, hash: &str, files: &[&str]) -> SessionMessage {
         let patch: Vec<serde_json::Value> = vec![serde_json::json!({
             "hash": hash,
             "files": files,
             "step": 1,
         })];
         let json = serde_json::to_string(&patch).unwrap();
-        let mut m = msg_assistant(id);
-        m.patch_files = Some(json);
-        m.snapshot_hash = Some(hash.to_string());
-        m
+        SessionMessage::new(
+            msg_assistant(id).message,
+            tidev_storage::MessageAppData {
+                patch_files: Some(json),
+                snapshot_hash: Some(hash.to_string()),
+                ..Default::default()
+            },
+        )
     }
 
-    fn msg_with_flat_patches(id: Uuid, hash: &str, files: &[&str]) -> Message {
+    fn msg_with_flat_patches(id: Uuid, hash: &str, files: &[&str]) -> SessionMessage {
         let json = serde_json::to_string(files).unwrap();
-        let mut m = msg_assistant(id);
-        m.patch_files = Some(json);
-        m.snapshot_hash = Some(hash.to_string());
-        m
+        SessionMessage::new(
+            msg_assistant(id).message,
+            tidev_storage::MessageAppData {
+                patch_files: Some(json),
+                snapshot_hash: Some(hash.to_string()),
+                ..Default::default()
+            },
+        )
     }
 
     // ── Message navigation ────────────────────────────────────────
@@ -270,7 +281,10 @@ mod tests {
     #[test]
     fn last_visible_user_message_skips_compaction() {
         let id1 = Uuid::new_v4();
-        let mut compact = Message::new(MessageRole::User, COMPACTION_MESSAGE_LABEL.to_string());
+        let mut compact = SessionMessage::new(
+            Message::new(MessageRole::User, COMPACTION_MESSAGE_LABEL.to_string()),
+            Default::default(),
+        );
         compact.id = id1;
         let msgs = vec![compact, msg_user(Uuid::new_v4())];
         let result = last_visible_user_message(&msgs);
@@ -354,7 +368,7 @@ mod tests {
     #[test]
     fn restore_context_skips_compaction_without_prior_metadata() {
         let target_id = Uuid::new_v4();
-        let no_prior = Message::compaction("no prior");
+        let no_prior = SessionMessage::new(Message::compaction("no prior"), Default::default());
         // Don't set metadata.prior_retained_from — not extractable
         let with_prior = msg_compaction_with("has prior", Some("summary"), 99);
         let msgs = vec![msg_user(target_id), no_prior, with_prior];

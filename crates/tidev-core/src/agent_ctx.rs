@@ -37,6 +37,7 @@ use tidev_utils::path::{
 
 use tidev_llm::{LlmClient, LlmProviderConfig};
 use tidev_snapshot::SnapshotService;
+use tidev_storage::MessageAppData;
 
 use crate::context::ContextManager;
 use crate::mode::Mode;
@@ -439,11 +440,17 @@ impl CoreContext {
             None => return Ok(()),
         };
 
+        let buffer = self.buffer.read().await;
         let prev_mode = messages[..last_user_idx]
             .iter()
             .rev()
-            .find(|m| m.role == MessageRole::User && m.mode.is_some())
-            .and_then(|m| m.mode.as_deref()?.parse::<Mode>().ok());
+            .filter(|m| m.role == MessageRole::User)
+            .find_map(|m| {
+                buffer
+                    .app_data(m.id)
+                    .and_then(|data| data.mode.as_deref()?.parse::<Mode>().ok())
+            });
+        drop(buffer);
         let is_first_user = prev_mode.is_none();
         let reminder = match (is_first_user, prev_mode) {
             (true, _) => Some(crate::prompts::mode_reminder(self.mode)),
@@ -1141,6 +1148,10 @@ impl AgentContext for CoreContext {
         // capture the post-round snapshot and diff against pre-round.
         let has_tool_results = messages.iter().any(|m| m.role == MessageRole::Tool);
         let mut enriched = messages.to_vec();
+        let mut app_data: HashMap<Uuid, MessageAppData> = enriched
+            .iter()
+            .map(|message| (message.id, MessageAppData::default()))
+            .collect();
         if has_tool_results {
             let pre = { self.pre_round_hash.lock().await.clone() };
             if let Some(ref pre) = pre
@@ -1165,8 +1176,9 @@ impl AgentContext for CoreContext {
                         "step": 1,
                     }]);
                     if let Some(last) = enriched.last_mut() {
-                        last.snapshot_hash = Some(post_hash.clone());
-                        last.patch_files = Some(step_patch.to_string());
+                        let data = app_data.entry(last.id).or_default();
+                        data.snapshot_hash = Some(post_hash.clone());
+                        data.patch_files = Some(step_patch.to_string());
                         // Serialize lightweight diffs for sidebar display.
                         // Use session_start_hash as baseline so the diff
                         // matches `git diff` from session start.
@@ -1176,7 +1188,7 @@ impl AgentContext for CoreContext {
                             snap.diff_lightweight(baseline, &post_hash).await
                             && let Ok(diffs_json) = serde_json::to_string(&cumulative_diffs)
                         {
-                            last.file_diffs = Some(diffs_json.clone());
+                            data.file_diffs = Some(diffs_json.clone());
                             self.emit(BackendEvent::SidebarSnapshotReady {
                                 session_id,
                                 request_id: 0,
@@ -1193,11 +1205,12 @@ impl AgentContext for CoreContext {
         {
             let mut buf = self.buffer.write().await;
             for msg in &enriched {
-                buf.append(msg.clone());
+                let data = app_data.get(&msg.id).cloned().unwrap_or_default();
+                buf.append_with_app_data(msg.clone(), data);
             }
         }
         self.session_manager
-            .append_messages(session_id, &enriched)?;
+            .append_messages_with_app_data(session_id, &enriched, &app_data)?;
         Ok(())
     }
 

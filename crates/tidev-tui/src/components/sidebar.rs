@@ -215,7 +215,11 @@ impl Sidebar {
                 .visible_messages()
                 .iter()
                 .rev()
-                .filter_map(|msg| msg.file_diffs.as_ref().filter(|s| !s.is_empty()))
+                .filter_map(|msg| {
+                    ctx.app_data(msg.id)
+                        .and_then(|data| data.file_diffs.as_ref())
+                        .filter(|s| !s.is_empty())
+                })
                 .find_map(|json| serde_json::from_str::<Vec<FileDiff>>(json).ok())
             {
                 all_diffs = latest;

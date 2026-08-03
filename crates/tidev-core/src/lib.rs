@@ -47,4 +47,4 @@ pub struct PendingToolApproval {
 // Re-export storage/snapshot types so tidev-tui can use them
 // without depending on tidev-storage / tidev-snapshot directly.
 pub use tidev_snapshot::FileDiff;
-pub use tidev_storage::SessionRecord;
+pub use tidev_storage::{MessageAppData, SessionRecord};

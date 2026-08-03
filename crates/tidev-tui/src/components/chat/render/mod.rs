@@ -11,7 +11,7 @@ mod subagent;
 mod thinking;
 mod utils;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::Instant;
 
@@ -54,6 +54,7 @@ pub(crate) struct RenderContext<'a> {
     pub thinking_collapsed_overrides: &'a HashSet<Uuid>,
     /// Default collapse state for thinking content (from config).
     pub default_collapse_thinking: bool,
+    pub message_app_data: Option<&'a HashMap<Uuid, tidev_core::MessageAppData>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -124,6 +125,7 @@ pub(crate) fn render_messages(
         hovered_inline_subagent,
         thinking_collapsed_overrides,
         default_collapse_thinking,
+        message_app_data: Some(&chat_context.message_app_data),
     };
 
     let output = messages_text(
@@ -244,6 +246,7 @@ mod tests {
             hovered_inline_subagent: None,
             thinking_collapsed_overrides: collapsed,
             default_collapse_thinking: false,
+            message_app_data: None,
         }
     }
 

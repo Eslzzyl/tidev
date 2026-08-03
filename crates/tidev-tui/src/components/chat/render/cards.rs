@@ -165,7 +165,12 @@ fn render_assistant_body_lines(
         }
 
         // Mode
-        if let Some(mode) = message.mode.as_deref().and_then(|value| value.parse::<tidev_core::Mode>().ok()) {
+        if let Some(mode) = ctx
+            .message_app_data
+            .and_then(|data| data.get(&message.id))
+            .and_then(|data| data.mode.as_deref())
+            .and_then(|value| value.parse::<tidev_core::Mode>().ok())
+        {
             parts.push(mode.title().to_string());
         }
 
@@ -196,9 +201,10 @@ fn render_user_shell_card(
         render_text_body_lines(ctx, &display_content, content_width.saturating_sub(2)); // 2 for ┃ prefix
     apply_badge_styling(&mut content_lines, palette);
 
-    let mode_color = message
-        .mode
-        .as_deref()
+    let mode_color = ctx
+        .message_app_data
+        .and_then(|data| data.get(&message.id))
+        .and_then(|data| data.mode.as_deref())
         .and_then(|value| value.parse::<tidev_core::Mode>().ok())
         .map_or(palette.accent, |m| match m {
         tidev_core::Mode::Build => palette.mode_build,
@@ -385,7 +391,12 @@ pub(super) fn render_system_card(
                         .to_string(),
                 );
             }
-            if let Some(mode) = message.mode.as_deref().and_then(|value| value.parse::<tidev_core::Mode>().ok()) {
+            if let Some(mode) = ctx
+                .message_app_data
+                .and_then(|data| data.get(&message.id))
+                .and_then(|data| data.mode.as_deref())
+                .and_then(|value| value.parse::<tidev_core::Mode>().ok())
+            {
                 parts.push(mode.title().to_string());
             }
             if !parts.is_empty() {

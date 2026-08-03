@@ -278,7 +278,9 @@ impl MessageList {
         for msg in messages {
             if msg.role == tidev_llm::message::MessageRole::Tool
                 && msg.tool_name.as_deref() == Some("task")
-                && let Some(csid) = msg.metadata.child_session_id
+                && let Some(csid) = ctx
+                    .app_data(msg.id)
+                    .and_then(|data| data.child_session_id)
             {
                 self.completed_subagent_sessions.insert(msg.id, csid);
                 // Also map by assistant message ID for click hit-testing.
@@ -297,7 +299,9 @@ impl MessageList {
             }
 
             if msg.role == tidev_llm::message::MessageRole::Assistant {
-                let msg_csid = msg.metadata.child_session_id;
+                let msg_csid = ctx
+                    .app_data(msg.id)
+                    .and_then(|data| data.child_session_id);
                 for tc in &msg.tool_calls {
                     if canonical_tool_name(&tc.name) == Some("task")
                         && !tool_result_ids.contains(tc.id.as_str())
@@ -366,7 +370,12 @@ impl MessageList {
                 msg.completed_at = Some(completed);
             }
             if let Some(mode) = mode {
-                msg.mode = Some(mode.as_str().to_string());
+                let mut app_data = chat_context
+                    .app_data(msg_id)
+                    .cloned()
+                    .unwrap_or_default();
+                app_data.mode = Some(mode.as_str().to_string());
+                chat_context.set_app_data(msg_id, app_data);
             }
             self.layout_index.mark_dirty(msg_id);
         }
@@ -775,6 +784,7 @@ impl MessageList {
             BackendEvent::ToolCompleted {
                 tool_call, result, ..
             } => {
+                let child_session_id = result.metadata.child_session_id;
                 if tool_call.name == "shell" {
                     // Shell output was streamed via ShellOutput — find and finalize
                     // the existing streaming Tool message instead of creating a new one.
@@ -809,7 +819,7 @@ impl MessageList {
                     // routing.
 
                     // Track child_session_id for subagent task results.
-                    if let Some(csid) = result.metadata.child_session_id {
+                    if let Some(csid) = child_session_id {
                         // Map by tool message ID.
                         let tool_msg_id = chat_context
                             .messages
@@ -819,6 +829,12 @@ impl MessageList {
                             .map(|m| m.id);
                         if let Some(msg_id) = tool_msg_id {
                             self.completed_subagent_sessions.insert(msg_id, csid);
+                            let mut app_data = chat_context
+                                .app_data(msg_id)
+                                .cloned()
+                                .unwrap_or_default();
+                            app_data.child_session_id = Some(csid);
+                            chat_context.set_app_data(msg_id, app_data);
                         }
                         // Also map by assistant message ID for click hit-testing.
                         let assistant_msg_id = chat_context
@@ -832,6 +848,12 @@ impl MessageList {
                             .map(|m| m.id);
                         if let Some(msg_id) = assistant_msg_id {
                             self.completed_subagent_sessions.insert(msg_id, csid);
+                            let mut app_data = chat_context
+                                .app_data(msg_id)
+                                .cloned()
+                                .unwrap_or_default();
+                            app_data.child_session_id = Some(csid);
+                            chat_context.set_app_data(msg_id, app_data);
                         }
                     }
                     self.dirty = true;
@@ -914,13 +936,19 @@ impl MessageList {
                 // nested subagents are linked even when this chat_context
                 // hasn't been visited yet.  Here we only sync the metadata
                 // and assistant message which require the chat_context.
-                // Sync child_session_id into the assistant message's metadata
+                // Sync child_session_id into the assistant message's app data
                 // so rebuild_subagent_state() can recover it from messages.
-                if let Some(msg) = chat_context.messages.iter_mut().rev().find(|m| {
+                let assistant_id = chat_context.messages.iter().rev().find(|m| {
                     m.role == tidev_llm::message::MessageRole::Assistant
                         && m.tool_calls.iter().any(|tc| tc.id == *tool_call_id)
-                }) {
-                    msg.metadata.child_session_id = Some(*child_session_id);
+                }).map(|msg| msg.id);
+                if let Some(message_id) = assistant_id {
+                    let mut app_data = chat_context
+                        .app_data(message_id)
+                        .cloned()
+                        .unwrap_or_default();
+                    app_data.child_session_id = Some(*child_session_id);
+                    chat_context.set_app_data(message_id, app_data);
                 }
                 if let Some(ref msg) = **assistant_message {
                     let existing = chat_context.messages.iter_mut().find(|m| m.id == msg.id);
@@ -951,8 +979,14 @@ impl MessageList {
                     .iter_mut()
                     .find(|m| m.tool_call_id.as_deref() == Some(tool_call_id))
                 {
-                    msg.file_diffs = Some(file_diffs_json.clone());
-                    self.layout_index.mark_dirty(msg.id);
+                    let message_id = msg.id;
+                    let mut app_data = chat_context
+                        .app_data(message_id)
+                        .cloned()
+                        .unwrap_or_default();
+                    app_data.file_diffs = Some(file_diffs_json.clone());
+                    chat_context.set_app_data(message_id, app_data);
+                    self.layout_index.mark_dirty(message_id);
                     self.dirty = true;
                 }
             }
