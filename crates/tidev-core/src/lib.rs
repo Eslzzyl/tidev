@@ -12,6 +12,7 @@ pub mod prompts;
 pub mod registry;
 pub mod runtime;
 pub mod session;
+pub mod session_message;
 pub mod system_info;
 pub mod undo;
 
@@ -23,6 +24,7 @@ pub use mode::Mode;
 pub use registry::ToolRegistry;
 pub use runtime::Runtime;
 pub use session::SessionManager;
+pub use session_message::SessionMessage;
 
 // Re-export approval types from tidev-agent so tidev-tui can access them
 // without depending on tidev-agent directly.

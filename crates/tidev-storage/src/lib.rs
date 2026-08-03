@@ -15,6 +15,7 @@ use rusqlite::{
     Connection, OptionalExtension, named_params, params, params_from_iter, types::Type,
 };
 use std::{
+    collections::HashMap,
     fs,
     io::Write,
     path::{Path, PathBuf},
@@ -107,6 +108,30 @@ struct RawMessageRow {
     thinking_level: Option<String>,
     reasoning_started_at: Option<String>,
     reasoning_completed_at: Option<String>,
+}
+
+/// Application-owned fields stored alongside a protocol message.
+///
+/// These values are intentionally kept out of the LLM message payload. The
+/// mode value remains in its database JSON representation so old databases
+/// can be read without rewriting rows.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MessageAppData {
+    pub snapshot_hash: Option<String>,
+    pub patch_files: Option<String>,
+    pub file_diffs: Option<String>,
+    pub mode: Option<String>,
+}
+
+impl MessageAppData {
+    pub fn from_message(message: &Message) -> Self {
+        Self {
+            snapshot_hash: message.snapshot_hash.clone(),
+            patch_files: message.patch_files.clone(),
+            file_diffs: message.file_diffs.clone(),
+            mode: message.mode.clone(),
+        }
+    }
 }
 
 impl RawMessageRow {
@@ -1017,6 +1042,16 @@ impl SessionStore {
 impl SessionStore {
     /// Insert a single message row (no session timestamp update).
     fn insert_message(conn: &Connection, session_id: Uuid, msg: &Message) -> Result<()> {
+        let app_data = MessageAppData::from_message(msg);
+        Self::insert_message_with_app_data(conn, session_id, msg, &app_data)
+    }
+
+    fn insert_message_with_app_data(
+        conn: &Connection,
+        session_id: Uuid,
+        msg: &Message,
+        app_data: &MessageAppData,
+    ) -> Result<()> {
         let now = msg.created_at.to_rfc3339();
         let completed = msg.completed_at.map(|t| t.to_rfc3339());
         conn.execute(
@@ -1052,10 +1087,10 @@ impl SessionStore {
                 msg.cache_write_tokens,
                 msg.model_id,
                 msg.tokens_per_second,
-                msg.snapshot_hash,
-                compress_text(msg.patch_files.as_deref().unwrap_or("")),
-                msg.file_diffs.as_deref().map(compress_text),
-                msg.mode
+                app_data.snapshot_hash,
+                compress_text(app_data.patch_files.as_deref().unwrap_or("")),
+                app_data.file_diffs.as_deref().map(compress_text),
+                app_data.mode
                     .as_ref()
                     .map(|m| serde_json::to_string(m).unwrap_or_default()),
                 msg.thinking_level
@@ -1078,6 +1113,34 @@ impl SessionStore {
         let tx = conn.transaction()?;
         for msg in messages {
             Self::insert_message(&tx, session_id, msg)?;
+        }
+        tx.execute(
+            "UPDATE sessions SET updated_at = ?1 WHERE id = ?2",
+            params![Utc::now().to_rfc3339(), session_id.to_string()],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Append protocol messages with their application-owned fields.
+    pub fn append_messages_with_app_data(
+        &self,
+        session_id: Uuid,
+        messages: &[Message],
+        app_data: &HashMap<Uuid, MessageAppData>,
+    ) -> Result<()> {
+        let mut conn = self.write_conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        for msg in messages {
+            let fallback;
+            let data = match app_data.get(&msg.id) {
+                Some(data) => data,
+                None => {
+                    fallback = MessageAppData::from_message(msg);
+                    &fallback
+                }
+            };
+            Self::insert_message_with_app_data(&tx, session_id, msg, data)?;
         }
         tx.execute(
             "UPDATE sessions SET updated_at = ?1 WHERE id = ?2",
@@ -1180,6 +1243,47 @@ impl SessionStore {
                 .collect();
 
             Ok(messages)
+        })
+    }
+
+    /// Load application-owned fields for all messages in a session.
+    pub fn load_message_app_data(&self, session_id: Uuid) -> Result<HashMap<Uuid, MessageAppData>> {
+        self.read(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, snapshot_hash, patch_files, file_diffs, mode \
+                 FROM messages WHERE session_id = ?1",
+            )?;
+            let rows = stmt.query_map(params![session_id.to_string()], |row| {
+                let id = Uuid::parse_str(&row.get::<_, String>(0)?).unwrap_or_default();
+                let patch_files = row
+                    .get::<_, Vec<u8>>(2)
+                    .ok()
+                    .filter(|bytes| !bytes.is_empty())
+                    .map(|bytes| decompress_text(&bytes));
+                let file_diffs = row
+                    .get::<_, Vec<u8>>(3)
+                    .ok()
+                    .filter(|bytes| !bytes.is_empty())
+                    .map(|bytes| decompress_text(&bytes));
+                let mode = row
+                    .get::<_, Option<String>>(4)?
+                    .and_then(|raw| serde_json::from_str::<String>(&raw).ok().or(Some(raw)));
+                Ok((
+                    id,
+                    MessageAppData {
+                        snapshot_hash: row.get(1)?,
+                        patch_files,
+                        file_diffs,
+                        mode,
+                    },
+                ))
+            })?;
+            let mut app_data = HashMap::new();
+            for row in rows {
+                let (id, data) = row?;
+                app_data.insert(id, data);
+            }
+            Ok(app_data)
         })
     }
 
@@ -2378,6 +2482,31 @@ mod tests {
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].role, MessageRole::User);
         assert_eq!(messages[0].content, "Hello, world!");
+    }
+
+    #[test]
+    fn message_app_data_round_trip() {
+        let (store, _tmp) = test_store();
+        let sid = create_test_session(&store, "/workspace", "app data test");
+        let msg = Message::new(MessageRole::User, "hello");
+        let mut app_data = HashMap::new();
+        app_data.insert(
+            msg.id,
+            MessageAppData {
+                snapshot_hash: Some("snap-1".into()),
+                patch_files: Some(r#"[{"files":["src/main.rs"]}]"#.into()),
+                file_diffs: Some("[]".into()),
+                mode: Some("plan".into()),
+            },
+        );
+        store
+            .append_messages_with_app_data(sid, &[msg.clone()], &app_data)
+            .unwrap();
+
+        let loaded = store.load_message_app_data(sid).unwrap();
+        assert_eq!(loaded.get(&msg.id), app_data.get(&msg.id));
+        let protocol = store.load_messages(sid).unwrap();
+        assert_eq!(protocol[0].content, "hello");
     }
 
     #[test]

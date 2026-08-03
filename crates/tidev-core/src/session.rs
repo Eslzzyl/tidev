@@ -5,6 +5,7 @@
 
 use anyhow::Result;
 use tidev_storage::SessionStore;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 /// Thin wrapper around [`SessionStore`] for session lifecycle operations.
@@ -55,6 +56,33 @@ impl SessionManager {
         self.store.load_messages(session_id)
     }
 
+    /// Load application-owned message fields separately from protocol data.
+    pub fn load_message_app_data(
+        &self,
+        session_id: Uuid,
+    ) -> Result<HashMap<Uuid, tidev_storage::MessageAppData>> {
+        self.store.load_message_app_data(session_id)
+    }
+
+    /// Load protocol messages and pair them with their application data.
+    pub fn load_session_messages(
+        &self,
+        session_id: Uuid,
+    ) -> Result<Vec<crate::SessionMessage>> {
+        let messages = self.load_messages(session_id)?;
+        let app_data = self.load_message_app_data(session_id)?;
+        Ok(messages
+            .into_iter()
+            .map(|message| {
+                let data = app_data
+                    .get(&message.id)
+                    .cloned()
+                    .unwrap_or_else(|| tidev_storage::MessageAppData::from_message(&message));
+                crate::SessionMessage::new(message, data)
+            })
+            .collect())
+    }
+
     /// List sessions (newest first).
     pub fn list_sessions(
         &self,
@@ -80,6 +108,17 @@ impl SessionManager {
         messages: &[tidev_llm::message::Message],
     ) -> Result<()> {
         self.store.append_messages(session_id, messages)
+    }
+
+    /// Append protocol messages together with application-owned fields.
+    pub fn append_messages_with_app_data(
+        &self,
+        session_id: Uuid,
+        messages: &[tidev_llm::message::Message],
+        app_data: &HashMap<Uuid, tidev_storage::MessageAppData>,
+    ) -> Result<()> {
+        self.store
+            .append_messages_with_app_data(session_id, messages, app_data)
     }
 
     /// Persist compaction state (summary + retained_from).
