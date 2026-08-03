@@ -10,7 +10,7 @@ pub mod loop_;
 
 // Re-export types from tidev-llm (defined there as shared protocol types).
 pub use context::{
-    AgentContext, AgentLoopConfig, ExecutedTool,
+    AgentContext, AgentLoopConfig,
 };
 pub use event::{AgentEvent, llm_event_to_agent_event};
 pub use loop_::run_agent_loop;

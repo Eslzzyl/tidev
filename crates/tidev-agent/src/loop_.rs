@@ -86,7 +86,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
         // ─── 7. No tool calls → check for queued messages ────────────────
         if turn.tool_calls.is_empty() {
             let msg = build_assistant_message(&turn);
-            ctx.save_messages(session_id, &[msg], &[]).await?;
+            ctx.save_messages(session_id, &[msg]).await?;
 
             // Check for user messages queued while this turn was running.
             // The messages themselves are already persisted in the buffer
@@ -128,7 +128,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
 
         // ─── 8. Persist assistant message (with tool calls) ──────────────
         let assistant_msg = build_assistant_message(&turn);
-        ctx.save_messages(session_id, &[assistant_msg], &[]).await?;
+        ctx.save_messages(session_id, &[assistant_msg]).await?;
 
         // ─── 9. Approve and execute tools ─────────────────────────────────
         // Approval is host policy. The generic loop receives one ordered
@@ -141,25 +141,15 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
         if !all_results.is_empty() {
             let result_msgs: Vec<Message> = all_results
                 .iter()
-                .map(|execution| {
+                .map(|(tool_call, result)| {
                     Message::tool_result(
-                        &execution.tool_call.id,
-                        &execution.tool_call.name,
-                        execution.result.clone(),
+                        &tool_call.id,
+                        &tool_call.name,
+                        result.clone(),
                     )
                 })
                 .collect();
-            let child_session_ids: Vec<(uuid::Uuid, uuid::Uuid)> = result_msgs
-                .iter()
-                .zip(&all_results)
-                .filter_map(|(message, execution)| {
-                    execution
-                        .child_session_id
-                        .map(|child_id| (message.id, child_id))
-                })
-                .collect();
-            ctx.save_messages(session_id, &result_msgs, &child_session_ids)
-                .await?;
+            ctx.save_messages(session_id, &result_msgs).await?;
         }
 
         // ─── 12. Prepare for next turn ────────────────────────────────────

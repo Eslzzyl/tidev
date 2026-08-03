@@ -18,7 +18,7 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use tidev_agent::{
-    llm_event_to_agent_event, AgentContext, AgentEvent, AgentLoopConfig, ExecutedTool,
+    llm_event_to_agent_event, AgentContext, AgentEvent, AgentLoopConfig,
 };
 use tidev_config::auth::ActiveModel;
 use tidev_config::{AppConfig, AuthStore};
@@ -108,6 +108,25 @@ fn read_only_tool_names() -> HashSet<&'static str> {
 /// Whether a tool call is read-only (and may thus run in parallel with others).
 fn is_read_only(name: &str) -> bool {
     read_only_tool_names().contains(tidev_utils::tool_name::canonical_tool_name(name).unwrap_or(name))
+}
+
+/// Recover a subagent association from the assistant tool call that produced
+/// a result. The association is application data and must never enter the
+/// protocol-level tool result.
+fn child_session_id_for_tool_call(buffer: &MessageBuffer, tool_call_id: &str) -> Option<Uuid> {
+    buffer
+        .load()
+        .iter()
+        .rev()
+        .find(|message| {
+            message.role == MessageRole::Assistant
+                && message
+                    .tool_calls
+                    .iter()
+                    .any(|tool_call| tool_call.id == tool_call_id)
+        })
+        .and_then(|message| buffer.app_data(message.id))
+        .and_then(|data| data.child_session_id)
 }
 
 // ---------------------------------------------------------------------------
@@ -592,8 +611,8 @@ impl CoreContext {
     async fn finish_tool_execution(
         &self,
         session_id: Uuid,
-        results: Vec<ExecutedTool>,
-    ) -> Result<Vec<ExecutedTool>> {
+        results: Vec<(ToolCall, ToolExecutionResult)>,
+    ) -> Result<Vec<(ToolCall, ToolExecutionResult)>> {
         self.collect_instruction_sources(session_id).await?;
         Ok(results)
     }
@@ -892,12 +911,12 @@ impl AgentContext for CoreContext {
         tool_calls: &[ToolCall],
         session_id: Uuid,
         request_id: u64,
-    ) -> Result<Vec<ExecutedTool>> {
+    ) -> Result<Vec<(ToolCall, ToolExecutionResult)>> {
         let approved_tools = self
             .request_tool_approval(tool_calls, self.mode == Mode::Plan)
             .await?;
 
-        let mut results: Vec<ExecutedTool> = Vec::new();
+        let mut results: Vec<(ToolCall, ToolExecutionResult)> = Vec::new();
         for approved in &approved_tools {
             if let Some(rejection) = &approved.rejection {
                 self.emit(BackendEvent::ToolCompleted {
@@ -907,11 +926,7 @@ impl AgentContext for CoreContext {
                     result: Box::new(rejection.clone()),
                     child_session_id: None,
                 });
-                results.push(ExecutedTool {
-                    tool_call: approved.tool_call.clone(),
-                    result: rejection.clone(),
-                    child_session_id: None,
-                });
+                results.push((approved.tool_call.clone(), rejection.clone()));
             }
         }
 
@@ -951,11 +966,10 @@ impl AgentContext for CoreContext {
                         result: Box::new(ToolExecutionResult::new("User cancelled the request")),
                         child_session_id: None,
                     });
-                    results.push(ExecutedTool {
-                        tool_call: tc.clone(),
-                        result: ToolExecutionResult::new("User cancelled the request"),
-                        child_session_id: None,
-                    });
+                    results.push((
+                        tc.clone(),
+                        ToolExecutionResult::new("User cancelled the request"),
+                    ));
                 }
                 return self.finish_tool_execution(session_id, results).await;
             }
@@ -1008,11 +1022,10 @@ impl AgentContext for CoreContext {
                                 result: Box::new(ToolExecutionResult::new("User cancelled the request")),
                                 child_session_id: None,
                             });
-                            results.push(ExecutedTool {
-                                tool_call: tc,
-                                result: ToolExecutionResult::new("User cancelled the request"),
-                                child_session_id: None,
-                            });
+                            results.push((
+                                tc,
+                                ToolExecutionResult::new("User cancelled the request"),
+                            ));
                         }
                         return self.finish_tool_execution(session_id, results).await;
                     }
@@ -1027,11 +1040,7 @@ impl AgentContext for CoreContext {
                                     result: Box::new(result.clone()),
                                     child_session_id: None,
                                 });
-                                results.push(ExecutedTool {
-                                    tool_call: tc,
-                                    result,
-                                    child_session_id: None,
-                                });
+                                results.push((tc, result));
                             }
                             Some(Err(join_err)) => {
                                 return Err(anyhow::anyhow!("Task join error: {join_err}"));
@@ -1053,11 +1062,10 @@ impl AgentContext for CoreContext {
                     result: Box::new(ToolExecutionResult::new("User cancelled the request")),
                     child_session_id: None,
                 });
-                results.push(ExecutedTool {
-                    tool_call: tc,
-                    result: ToolExecutionResult::new("User cancelled the request"),
-                    child_session_id: None,
-                });
+                results.push((
+                    tc,
+                    ToolExecutionResult::new("User cancelled the request"),
+                ));
                 continue;
             }
 
@@ -1109,11 +1117,7 @@ impl AgentContext for CoreContext {
                 result: Box::new(result.clone()),
                 child_session_id: None,
             });
-            results.push(ExecutedTool {
-                tool_call: tc,
-                result,
-                child_session_id: None,
-            });
+            results.push((tc, result));
         }
 
         // --- Task tools (subagents): parallel with immediate cancellation ---
@@ -1130,11 +1134,7 @@ impl AgentContext for CoreContext {
                     result: Box::new(result.clone()),
                     child_session_id,
                 });
-                results.push(ExecutedTool {
-                    tool_call: tc,
-                    result,
-                    child_session_id,
-                });
+                results.push((tc, result));
             }
         }
 
@@ -1200,11 +1200,10 @@ impl AgentContext for CoreContext {
                                 result: Box::new(ToolExecutionResult::new("User cancelled the request")),
                                 child_session_id,
                             });
-                            results.push(ExecutedTool {
-                                tool_call: tc,
-                                result: ToolExecutionResult::new("User cancelled the request"),
-                                child_session_id,
-                            });
+                            results.push((
+                                tc,
+                                ToolExecutionResult::new("User cancelled the request"),
+                            ));
                         }
                         cancel_guard.disarmed = true;
                         return self.finish_tool_execution(session_id, results).await;
@@ -1215,11 +1214,10 @@ impl AgentContext for CoreContext {
                                 pending_tcs.retain(|(t, _)| t.id != tc.id);
                                 if self.cancel.is_cancelled() {
                                     // Already cancelled — push synthetic result.
-                                    results.push(ExecutedTool {
-                                        tool_call: tc,
-                                        result: ToolExecutionResult::new("User cancelled the request"),
-                                        child_session_id: Some(child_session_id),
-                                    });
+                                    results.push((
+                                        tc,
+                                        ToolExecutionResult::new("User cancelled the request"),
+                                    ));
                                 } else {
                                     self.emit(BackendEvent::ToolCompleted {
                                         session_id,
@@ -1228,11 +1226,7 @@ impl AgentContext for CoreContext {
                                         result: Box::new(result.clone()),
                                         child_session_id: Some(child_session_id),
                                     });
-                                    results.push(ExecutedTool {
-                                        tool_call: tc,
-                                        result,
-                                        child_session_id: Some(child_session_id),
-                                    });
+                                    results.push((tc, result));
                                 }
                             }
                             Some(Ok(Err(e))) => {
@@ -1250,13 +1244,12 @@ impl AgentContext for CoreContext {
                                             )),
                                             child_session_id,
                                         });
-                                        results.push(ExecutedTool {
-                                            tool_call: tc,
-                                            result: ToolExecutionResult::new(
+                                        results.push((
+                                            tc,
+                                            ToolExecutionResult::new(
                                                 "User cancelled the request",
                                             ),
-                                            child_session_id,
-                                        });
+                                        ));
                                     }
                                     cancel_guard.disarmed = true;
                                     return self.finish_tool_execution(session_id, results).await;
@@ -1287,7 +1280,6 @@ impl AgentContext for CoreContext {
         &self,
         session_id: Uuid,
         messages: &[Message],
-        child_session_ids: &[(Uuid, Uuid)],
     ) -> Result<()> {
         // ── Phase 1: Round-level snapshot tracking ──────────────────────
         //
@@ -1337,9 +1329,22 @@ impl AgentContext for CoreContext {
             .iter()
             .map(|message| (message.id, MessageAppData::default()))
             .collect();
-        for (message_id, child_session_id) in child_session_ids {
-            if let Some(data) = app_data.get_mut(message_id) {
-                data.child_session_id = Some(*child_session_id);
+        if messages.iter().any(|message| message.role == MessageRole::Tool) {
+            let buffer = self.buffer.read().await;
+            for message in messages {
+                if message.role != MessageRole::Tool {
+                    continue;
+                }
+                let Some(tool_call_id) = message.tool_call_id.as_deref() else {
+                    continue;
+                };
+                if let Some(child_session_id) =
+                    child_session_id_for_tool_call(&buffer, tool_call_id)
+                {
+                    if let Some(data) = app_data.get_mut(&message.id) {
+                        data.child_session_id = Some(child_session_id);
+                    }
+                }
             }
         }
         if has_tool_results {
@@ -1927,4 +1932,36 @@ fn is_write_tool(name: &str) -> bool {
         name,
         "write" | "edit" | "apply_patch" | "shell" | "todowrite"
     )
+}
+
+#[cfg(test)]
+mod child_session_app_data_tests {
+    use super::*;
+
+    #[test]
+    fn finds_child_session_from_matching_assistant_tool_call() {
+        let tool_call = ToolCall {
+            id: "call-1".to_string(),
+            name: "task".to_string(),
+            arguments: "{}".to_string(),
+            thought_signature: None,
+        };
+        let mut assistant = Message::new(MessageRole::Assistant, "");
+        assistant.tool_calls.push(tool_call);
+        let child_session_id = Uuid::new_v4();
+        let mut buffer = MessageBuffer::empty();
+        buffer.append_with_app_data(
+            assistant,
+            MessageAppData {
+                child_session_id: Some(child_session_id),
+                ..MessageAppData::default()
+            },
+        );
+
+        assert_eq!(
+            child_session_id_for_tool_call(&buffer, "call-1"),
+            Some(child_session_id)
+        );
+        assert_eq!(child_session_id_for_tool_call(&buffer, "missing"), None);
+    }
 }

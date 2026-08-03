@@ -44,17 +44,6 @@ pub struct AgentLoopConfig {
     pub queued_messages: Arc<Mutex<VecDeque<QueuedUserMessage>>>,
 }
 
-/// A completed tool execution and its application-owned session association.
-///
-/// The child session ID is intentionally carried outside the protocol result
-/// so it cannot leak into messages sent to an LLM provider.
-#[derive(Clone, Debug)]
-pub struct ExecutedTool {
-    pub tool_call: ToolCall,
-    pub result: ToolExecutionResult,
-    pub child_session_id: Option<uuid::Uuid>,
-}
-
 // ---------------------------------------------------------------------------
 // AgentContext trait
 // ---------------------------------------------------------------------------
@@ -100,15 +89,10 @@ pub trait AgentContext: Send + Sync {
         tool_calls: &[ToolCall],
         session_id: uuid::Uuid,
         request_id: u64,
-    ) -> Result<Vec<ExecutedTool>>;
+    ) -> Result<Vec<(ToolCall, ToolExecutionResult)>>;
 
     /// Persist one or more messages to the session store.
-    async fn save_messages(
-        &self,
-        session_id: uuid::Uuid,
-        messages: &[Message],
-        child_session_ids: &[(uuid::Uuid, uuid::Uuid)],
-    ) -> Result<()>;
+    async fn save_messages(&self, session_id: uuid::Uuid, messages: &[Message]) -> Result<()>;
 
     /// Return the workspace root path.
     fn workspace_root(&self) -> &Path;
