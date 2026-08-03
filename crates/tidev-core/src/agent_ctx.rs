@@ -996,7 +996,7 @@ impl AgentContext for CoreContext {
                 let cancel = self.cancel.clone();
                 join_set.spawn(async move {
                     let result = reg
-                        .execute(
+                        .execute_via_agent(
                             &tc,
                             sid,
                             request_id,
@@ -1004,7 +1004,6 @@ impl AgentContext for CoreContext {
                             allow_outside,
                             sensitive_approved,
                             &cancel,
-                            None,
                         )
                         .await;
                     (tc, result)

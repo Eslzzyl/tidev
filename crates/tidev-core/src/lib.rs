@@ -15,6 +15,7 @@ pub mod session;
 pub mod session_message;
 pub mod system_info;
 mod tool_def;
+mod tool_adapter;
 pub mod undo;
 
 pub use agent_ctx::CoreContext;

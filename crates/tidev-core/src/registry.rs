@@ -23,6 +23,7 @@ use tidev_tools::{ShellOutput, SkillCatalog, TodoPersistence};
 
 use crate::mcp::{McpManager, McpServerSummary};
 use crate::mode::Mode;
+use crate::tool_adapter::execute_builtin_via_agent;
 
 /// Tool execution entry point for tidev-core.
 ///
@@ -164,6 +165,35 @@ impl ToolRegistry {
     /// Access the skill catalog.
     pub fn skills(&self) -> &SkillCatalog {
         &self.skills
+    }
+
+    /// Execute a non-streaming built-in call through the generic agent
+    /// registry while preserving the original host execution contract.
+    pub(crate) async fn execute_via_agent(
+        &self,
+        call: &ToolCall,
+        session_id: Uuid,
+        request_id: u64,
+        mode: Mode,
+        allow_outside: bool,
+        sensitive_file_approved: bool,
+        cancel: &CancellationToken,
+    ) -> ToolExecutionResult {
+        execute_builtin_via_agent(
+            self,
+            call,
+            session_id,
+            request_id,
+            mode,
+            allow_outside,
+            sensitive_file_approved,
+            cancel,
+        )
+        .await
+    }
+
+    pub(crate) fn workspace_root(&self) -> &std::path::Path {
+        &self.workspace_root
     }
 
     /// Access the MCP manager.
