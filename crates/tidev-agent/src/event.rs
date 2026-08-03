@@ -61,7 +61,6 @@ pub enum AgentEvent {
         request_id: u64,
         tool_call: ToolCall,
         result: Box<ToolExecutionResult>,
-        child_session_id: Option<uuid::Uuid>,
     },
     ContextCompacted {
         compacted: bool,

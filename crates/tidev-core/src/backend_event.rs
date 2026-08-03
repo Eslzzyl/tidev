@@ -288,13 +288,12 @@ pub fn agent_event_to_backend_event(event: AgentEvent, session_id: Uuid) -> Back
             request_id,
             tool_call,
             result,
-            child_session_id,
         } => BackendEvent::ToolCompleted {
             session_id,
             request_id,
             tool_call,
             result,
-            child_session_id,
+            child_session_id: None,
         },
         AgentEvent::ContextCompacted {
             compacted,
@@ -358,7 +357,6 @@ mod tests {
     #[test]
     fn every_agent_event_maps_to_one_backend_event() {
         let session_id = Uuid::new_v4();
-        let child_session_id = Uuid::new_v4();
         let events = vec![
             AgentEvent::Delta {
                 request_id: 1,
@@ -411,7 +409,6 @@ mod tests {
                 request_id: 1,
                 tool_call: ToolCall::default(),
                 result: Box::new(ToolExecutionResult::new("ok")),
-                child_session_id: None,
             },
             AgentEvent::ContextCompacted {
                 compacted: true,
@@ -439,6 +436,5 @@ mod tests {
             );
         }
 
-        let _ = child_session_id;
     }
 }
