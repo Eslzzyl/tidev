@@ -5,6 +5,7 @@
 //! tidev-core provides the real [`AgentContext`] and drives the loop.
 
 pub mod context;
+pub mod context_manager;
 pub mod event;
 pub mod loop_;
 pub mod message_buf;
@@ -13,6 +14,7 @@ pub mod message_buf;
 pub use context::{
     AgentContext, AgentLoopConfig,
 };
+pub use context_manager::{CompactionResult, ContextManager};
 pub use event::{AgentEvent, llm_event_to_agent_event};
 pub use loop_::run_agent_loop;
 pub use message_buf::MessageBuffer;

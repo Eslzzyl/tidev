@@ -10,27 +10,12 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
-use tidev_agent::{AgentEvent, MessageBuffer, llm_event_to_agent_event};
 use tidev_llm::message::{Message, MessageRole};
-
-use tidev_tools::types::ToolDefinition;
+use tidev_llm::{LlmClient, LlmProviderConfig, ToolDefinition};
 use uuid::Uuid;
 
-use tidev_llm::{LlmClient, LlmProviderConfig};
-
-// ---------------------------------------------------------------------------
-// Conversions
-// ---------------------------------------------------------------------------
-
-/// Convert a `tidev_tools::types::ToolDefinition` to the `tidev_llm` variant.
-pub(crate) fn to_llm_tool_def(def: &ToolDefinition) -> tidev_llm::ToolDefinition {
-    tidev_llm::ToolDefinition {
-        name: def.name.clone(),
-        display_name: def.display_name.clone(),
-        description: def.description.clone(),
-        parameters: def.parameters.clone(),
-    }
-}
+use crate::event::{AgentEvent, llm_event_to_agent_event};
+use crate::message_buf::MessageBuffer;
 
 // ---------------------------------------------------------------------------
 // Compaction prompt
@@ -229,8 +214,8 @@ impl ContextManager {
         // 3. Record how many messages will be covered by this summary.
         let retained_from = messages.len();
 
-        // 4. Convert tool definitions to tidev-llm format.
-        let llm_tools: Vec<tidev_llm::ToolDefinition> = tools.iter().map(to_llm_tool_def).collect();
+        // 4. Copy the protocol tool definitions for the compaction request.
+        let llm_tools = tools.to_vec();
 
         // 5. Call the LLM (streaming or non-streaming).
         let summary = match &event_tx {

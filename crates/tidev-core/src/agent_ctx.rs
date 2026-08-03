@@ -18,7 +18,7 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use tidev_agent::{
-    llm_event_to_agent_event, AgentContext, AgentEvent, AgentLoopConfig,
+    ContextManager, AgentContext, AgentEvent, AgentLoopConfig, llm_event_to_agent_event,
 };
 use tidev_config::auth::ActiveModel;
 use tidev_config::{AppConfig, AuthStore};
@@ -38,13 +38,12 @@ use tidev_llm::{LlmClient, LlmProviderConfig};
 use tidev_snapshot::SnapshotService;
 use tidev_storage::MessageAppData;
 
-use crate::context::ContextManager;
 use crate::mode::Mode;
-use crate::context::to_llm_tool_def;
 use crate::approval::{ApprovedTool, ToolCallWithViolations, TuiRequest, TuiRequestKind, TuiResponse};
 use crate::message_buf::CoreMessageBuffer;
 use crate::registry::ToolRegistry;
 use crate::session::SessionManager;
+use crate::tool_def::to_llm_tool_def;
 
 // ---------------------------------------------------------------------------
 // System prompt composition
@@ -1440,7 +1439,12 @@ impl AgentContext for CoreContext {
                 let cm = self.context_manager.lock().await;
                 (cm.summary.clone(), cm.retained_from)
             };
-            let tools = self.tool_registry.definitions_for_model(&self.active_model);
+            let tools: Vec<tidev_llm::ToolDefinition> = self
+                .tool_registry
+                .definitions_for_model(&self.active_model)
+                .iter()
+                .map(to_llm_tool_def)
+                .collect();
             let result = {
                 let mut compact_model = self.model_config.clone();
                 compact_model.system_prompt = Some(self.system_prompt.clone());

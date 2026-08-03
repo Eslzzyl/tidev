@@ -4,7 +4,6 @@ pub mod agent_ctx;
 pub mod agent_type;
 pub mod attachment;
 pub mod backend_event;
-pub mod context;
 pub mod approval;
 pub mod mcp;
 pub mod message_buf;
@@ -15,6 +14,7 @@ pub mod runtime;
 pub mod session;
 pub mod session_message;
 pub mod system_info;
+mod tool_def;
 pub mod undo;
 
 pub use agent_ctx::CoreContext;
@@ -23,7 +23,7 @@ pub use approval::{
     TuiResponse,
 };
 pub use backend_event::{BackendEvent, agent_event_to_backend_event};
-pub use context::{CompactionResult, ContextManager};
+pub use tidev_agent::{CompactionResult, ContextManager};
 pub use message_buf::CoreMessageBuffer;
 pub use mode::Mode;
 pub use registry::ToolRegistry;

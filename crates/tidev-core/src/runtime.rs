@@ -39,15 +39,15 @@ use crate::mode::Mode;
 use tidev_llm::reasoning::ThinkingLevelType;
 use tidev_tools::types::TodoItem;
 
-use tidev_agent::AgentContext;
+use tidev_agent::{AgentContext, ContextManager};
 
-use crate::context::ContextManager;
 use crate::backend_event::BackendEvent;
 use crate::approval::TuiRequest;
 use crate::mcp::McpManager;
 use crate::message_buf::CoreMessageBuffer;
 use crate::registry::ToolRegistry;
 use crate::session::SessionManager;
+use crate::tool_def::to_llm_tool_def;
 
 // ---------------------------------------------------------------------------
 // TodoPersistence impl — bridges tidev-tools to tidev-storage.
@@ -931,7 +931,12 @@ impl Runtime {
             m
         };
         let active_model = self.active_model.read().unwrap().clone();
-        let tools = self.tool_registry.definitions_for_model(&active_model);
+        let tools: Vec<tidev_llm::ToolDefinition> = self
+            .tool_registry
+            .definitions_for_model(&active_model)
+            .iter()
+            .map(to_llm_tool_def)
+            .collect();
 
         // 2. Run compaction (async, no locks held on ContextManager).
         //    Capture prior compaction state before it gets overwritten.
