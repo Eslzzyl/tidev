@@ -59,6 +59,7 @@ pub enum BackendEvent {
         request_id: u64,
         tool_call: ToolCall,
         result: Box<ToolExecutionResult>,
+        child_session_id: Option<Uuid>,
     },
     SubagentStatus {
         session_id: Uuid,
@@ -287,11 +288,13 @@ pub fn agent_event_to_backend_event(event: AgentEvent, session_id: Uuid) -> Back
             request_id,
             tool_call,
             result,
+            child_session_id,
         } => BackendEvent::ToolCompleted {
             session_id,
             request_id,
             tool_call,
             result,
+            child_session_id,
         },
         AgentEvent::ContextCompacted {
             compacted,
@@ -408,6 +411,7 @@ mod tests {
                 request_id: 1,
                 tool_call: ToolCall::default(),
                 result: Box::new(ToolExecutionResult::new("ok")),
+                child_session_id: None,
             },
             AgentEvent::ContextCompacted {
                 compacted: true,

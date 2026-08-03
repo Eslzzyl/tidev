@@ -2,6 +2,8 @@
 
 use anyhow::Result;
 use rusqlite::Connection;
+use serde::Deserialize;
+use uuid::Uuid;
 
 use super::schema::SCHEMA_VERSION;
 
@@ -40,6 +42,11 @@ pub const MIGRATIONS: &[Migration] = &[
         sql: "ALTER TABLE messages ADD COLUMN child_session_id TEXT",
     },
 ];
+
+#[derive(Deserialize)]
+struct LegacyMessageMetadata {
+    child_session_id: Option<Uuid>,
+}
 
 /// Run all pending migrations on the given connection.
 pub fn run_migrations(conn: &Connection) -> Result<()> {
@@ -120,8 +127,7 @@ fn backfill_child_session_ids(conn: &Connection) -> Result<()> {
 
     for (message_id, metadata_blob) in rows {
         let metadata = crate::compression::decompress_text(&metadata_blob);
-        let Ok(metadata) = serde_json::from_str::<tidev_llm::message::ToolMetadata>(&metadata)
-        else {
+        let Ok(metadata) = serde_json::from_str::<LegacyMessageMetadata>(&metadata) else {
             continue;
         };
         let Some(child_session_id) = metadata.child_session_id else {
@@ -138,8 +144,6 @@ fn backfill_child_session_ids(conn: &Connection) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uuid::Uuid;
-
     fn fresh_conn() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
@@ -206,10 +210,7 @@ mod tests {
 
         let message_id = Uuid::new_v4();
         let child_id = Uuid::new_v4();
-        let metadata = tidev_llm::message::ToolMetadata {
-            child_session_id: Some(child_id),
-            ..Default::default()
-        };
+        let metadata = serde_json::json!({ "child_session_id": child_id });
         conn.execute(
             "INSERT INTO messages (id, metadata) VALUES (?1, ?2)",
             rusqlite::params![

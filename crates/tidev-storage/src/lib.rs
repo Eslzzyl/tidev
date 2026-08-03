@@ -1322,6 +1322,25 @@ impl SessionStore {
         Ok(())
     }
 
+    /// Update a message's child-session association without touching protocol metadata.
+    pub fn update_message_child_session_id(
+        &self,
+        session_id: Uuid,
+        message_id: Uuid,
+        child_session_id: Uuid,
+    ) -> Result<()> {
+        let conn = self.write_conn.lock().unwrap();
+        conn.execute(
+            "UPDATE messages SET child_session_id = ?1 WHERE id = ?2 AND session_id = ?3",
+            params![
+                child_session_id.to_string(),
+                message_id.to_string(),
+                session_id.to_string()
+            ],
+        )?;
+        Ok(())
+    }
+
     /// Update message completion status.
     #[allow(clippy::too_many_arguments)]
     pub fn update_message_completed(
@@ -2467,6 +2486,14 @@ mod tests {
 
         let loaded = store.load_message_app_data(sid).unwrap();
         assert_eq!(loaded.get(&msg.id), app_data.get(&msg.id));
+        let child_id = Uuid::new_v4();
+        store
+            .update_message_child_session_id(sid, msg.id, child_id)
+            .unwrap();
+        assert_eq!(
+            store.load_message_app_data(sid).unwrap()[&msg.id].child_session_id,
+            Some(child_id)
+        );
         let protocol = store.load_messages(sid).unwrap();
         assert_eq!(protocol[0].content, "hello");
         let serialized = serde_json::to_value(&protocol[0]).unwrap();

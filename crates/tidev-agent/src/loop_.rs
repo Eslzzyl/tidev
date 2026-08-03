@@ -11,7 +11,7 @@ use anyhow::Result;
 use chrono::Utc;
 
 use tidev_llm::message::{
-    AssistantTurn, Message, MessageRole, ToolCall, ToolExecutionResult,
+    AssistantTurn, Message, MessageRole, ToolCall,
 };
 
 use crate::context::{AgentContext, AgentLoopConfig};
@@ -92,7 +92,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
         // ─── 7. No tool calls → check for queued messages ────────────────
         if turn.tool_calls.is_empty() {
             let msg = build_assistant_message(&turn);
-            ctx.save_messages(session_id, &[msg]).await?;
+            ctx.save_messages(session_id, &[msg], &[]).await?;
 
             // Check for user messages queued while this turn was running.
             // The messages themselves are already persisted in the buffer
@@ -134,7 +134,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
 
         // ─── 8. Persist assistant message (with tool calls) ──────────────
         let assistant_msg = build_assistant_message(&turn);
-        ctx.save_messages(session_id, &[assistant_msg]).await?;
+        ctx.save_messages(session_id, &[assistant_msg], &[]).await?;
 
         // ─── 9. Permission approval ──────────────────────────────────────
         let approved = ctx
@@ -158,6 +158,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
                     request_id,
                     tool_call: approved_tool.tool_call.clone(),
                     result: Box::new(rejection.clone()),
+                    child_session_id: None,
                 });
             } else if approved_tool.tool_call.name == "task" {
                 task_calls.push((
@@ -174,11 +175,11 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
         }
 
         if !rejected_msgs.is_empty() {
-            ctx.save_messages(session_id, &rejected_msgs).await?;
+            ctx.save_messages(session_id, &rejected_msgs, &[]).await?;
         }
 
         // ─── 10. Execute tools ───────────────────────────────────────────
-        let mut all_results: Vec<(ToolCall, ToolExecutionResult)> = Vec::new();
+        let mut all_results = Vec::new();
 
         if !other_calls.is_empty() || !task_calls.is_empty() {
             let results = ctx.execute_tools(&approved, session_id, request_id).await?;
@@ -189,9 +190,25 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
         if !all_results.is_empty() {
             let result_msgs: Vec<Message> = all_results
                 .iter()
-                .map(|(tc, r)| Message::tool_result(&tc.id, &tc.name, r.clone()))
+                .map(|execution| {
+                    Message::tool_result(
+                        &execution.tool_call.id,
+                        &execution.tool_call.name,
+                        execution.result.clone(),
+                    )
+                })
                 .collect();
-            ctx.save_messages(session_id, &result_msgs).await?;
+            let child_session_ids: Vec<(uuid::Uuid, uuid::Uuid)> = result_msgs
+                .iter()
+                .zip(&all_results)
+                .filter_map(|(message, execution)| {
+                    execution
+                        .child_session_id
+                        .map(|child_id| (message.id, child_id))
+                })
+                .collect();
+            ctx.save_messages(session_id, &result_msgs, &child_session_ids)
+                .await?;
 
             // Persist nearby instruction sources discovered during tool
             // execution so the TUI can restore dedup tracking across
@@ -237,7 +254,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
                             display.join(", ")
                         )
                     };
-                    ctx.save_messages(session_id, &[Message::new(MessageRole::System, &content)])
+                    ctx.save_messages(session_id, &[Message::new(MessageRole::System, &content)], &[])
                         .await?;
                 }
             }

@@ -164,6 +164,7 @@ impl EventTranslator {
                 request_id: _,
                 tool_call,
                 result,
+                ..
             } => {
                 let mut notifs = Vec::new();
 
@@ -634,6 +635,7 @@ mod tests {
             request_id: 1,
             tool_call: tc,
             result: Box::new(result),
+            child_session_id: None,
         });
         // Should emit content + completed status with raw_output
         assert_eq!(notifs.len(), 2);

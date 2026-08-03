@@ -782,9 +782,11 @@ impl MessageList {
                 // chat_context hasn't been created yet.
             }
             BackendEvent::ToolCompleted {
-                tool_call, result, ..
+                tool_call,
+                result,
+                child_session_id,
+                ..
             } => {
-                let child_session_id = result.metadata.child_session_id;
                 if tool_call.name == "shell" {
                     // Shell output was streamed via ShellOutput — find and finalize
                     // the existing streaming Tool message instead of creating a new one.
@@ -819,7 +821,7 @@ impl MessageList {
                     // routing.
 
                     // Track child_session_id for subagent task results.
-                    if let Some(csid) = child_session_id {
+                    if let Some(csid) = *child_session_id {
                         // Map by tool message ID.
                         let tool_msg_id = chat_context
                             .messages

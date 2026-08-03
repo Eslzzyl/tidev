@@ -192,6 +192,17 @@ impl SessionManager {
             .update_message_metadata(session_id, message_id, metadata)
     }
 
+    /// Update a message's child-session association in application data.
+    pub fn update_message_child_session_id(
+        &self,
+        session_id: Uuid,
+        message_id: Uuid,
+        child_session_id: Uuid,
+    ) -> Result<()> {
+        self.store
+            .update_message_child_session_id(session_id, message_id, child_session_id)
+    }
+
     /// Delete specific messages from a session.
     pub fn delete_messages(&self, session_id: Uuid, message_ids: &[Uuid]) -> Result<()> {
         self.store.delete_messages(session_id, message_ids)

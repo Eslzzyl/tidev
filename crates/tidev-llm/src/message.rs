@@ -143,8 +143,6 @@ pub struct ToolMetadata {
     #[serde(default)]
     pub prior_retained_from: Option<usize>,
     #[serde(default)]
-    pub child_session_id: Option<Uuid>,
-    #[serde(default)]
     pub file_changes: Vec<FileChangeInfo>,
     /// Raw OpenAI Responses output items needed to replay reasoning and other
     /// provider-specific items on the next turn.

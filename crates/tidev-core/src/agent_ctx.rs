@@ -19,7 +19,7 @@ use uuid::Uuid;
 
 use tidev_agent::{
     llm_event_to_agent_event, AgentContext, AgentEvent, AgentLoopConfig, ApprovedTool,
-    ToolCallWithViolations, TuiRequest, TuiRequestKind, TuiResponse,
+    ExecutedTool, ToolCallWithViolations, TuiRequest, TuiRequestKind, TuiResponse,
 };
 use tidev_config::auth::ActiveModel;
 use tidev_config::{AppConfig, AuthStore};
@@ -160,13 +160,61 @@ impl Drop for CancelPersistGuard {
         if self.disarmed {
             return;
         }
-        // Task was aborted — persist "User cancelled" for every task tool call.
+
+        // Task was aborted — persist "User cancelled" for every task tool
+        // call, retaining any child-session association established before
+        // the child was aborted.
+        let child_session_ids: HashMap<String, Option<Uuid>> = self
+            .buffer
+            .try_read()
+            .ok()
+            .map(|buffer| {
+                self.tool_calls
+                    .iter()
+                    .map(|tc| {
+                        let child_session_id = buffer
+                            .load()
+                            .iter()
+                            .rev()
+                            .find(|message| {
+                                message.role == MessageRole::Assistant
+                                    && message
+                                        .tool_calls
+                                        .iter()
+                                        .any(|tool_call| tool_call.id == tc.id)
+                            })
+                            .and_then(|message| buffer.app_data(message.id))
+                            .and_then(|data| data.child_session_id);
+                        (tc.id.clone(), child_session_id)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let mut messages = Vec::with_capacity(self.tool_calls.len());
+        let mut app_data = HashMap::with_capacity(self.tool_calls.len());
         for tc in &self.tool_calls {
             let result = ToolExecutionResult::new("User cancelled the request");
             let msg = Message::tool_result(&tc.id, &tc.name, result);
-            let _ = self.session_manager.append_message(self.session_id, &msg);
-            if let Ok(mut buf) = self.buffer.try_write() {
-                buf.append(msg);
+            app_data.insert(
+                msg.id,
+                MessageAppData {
+                    child_session_id: child_session_ids.get(&tc.id).copied().flatten(),
+                    ..MessageAppData::default()
+                },
+            );
+            messages.push(msg);
+        }
+
+        let _ = self.session_manager.append_messages_with_app_data(
+            self.session_id,
+            &messages,
+            &app_data,
+        );
+        if let Ok(mut buf) = self.buffer.try_write() {
+            for msg in messages {
+                let data = app_data.get(&msg.id).cloned().unwrap_or_default();
+                buf.append_with_app_data(msg, data);
             }
         }
     }
@@ -768,7 +816,7 @@ impl AgentContext for CoreContext {
         approved_tools: &[ApprovedTool],
         session_id: Uuid,
         request_id: u64,
-    ) -> Result<Vec<(ToolCall, ToolExecutionResult)>> {
+    ) -> Result<Vec<ExecutedTool>> {
         // Separate: rejected (already persisted by the loop), task, read-only, write.
         let mut task_calls: Vec<(ToolCall, Option<Uuid>)> = Vec::new();
         let mut read_only: Vec<(ToolCall, bool, bool)> = Vec::new();
@@ -790,7 +838,7 @@ impl AgentContext for CoreContext {
             }
         }
 
-        let mut results: Vec<(ToolCall, ToolExecutionResult)> = Vec::new();
+        let mut results: Vec<ExecutedTool> = Vec::new();
 
         // --- Read-only tools: parallel execution with immediate cancellation ---
         //
@@ -805,11 +853,13 @@ impl AgentContext for CoreContext {
                         request_id,
                         tool_call: tc.clone(),
                         result: Box::new(ToolExecutionResult::new("User cancelled the request")),
+                        child_session_id: None,
                     });
-                    results.push((
-                        tc.clone(),
-                        ToolExecutionResult::new("User cancelled the request"),
-                    ));
+                    results.push(ExecutedTool {
+                        tool_call: tc.clone(),
+                        result: ToolExecutionResult::new("User cancelled the request"),
+                        child_session_id: None,
+                    });
                 }
                 return Ok(results);
             }
@@ -860,11 +910,13 @@ impl AgentContext for CoreContext {
                                 request_id,
                                 tool_call: tc.clone(),
                                 result: Box::new(ToolExecutionResult::new("User cancelled the request")),
+                                child_session_id: None,
                             });
-                            results.push((
-                                tc,
-                                ToolExecutionResult::new("User cancelled the request"),
-                            ));
+                            results.push(ExecutedTool {
+                                tool_call: tc,
+                                result: ToolExecutionResult::new("User cancelled the request"),
+                                child_session_id: None,
+                            });
                         }
                         return Ok(results);
                     }
@@ -877,8 +929,13 @@ impl AgentContext for CoreContext {
                                     request_id,
                                     tool_call: tc.clone(),
                                     result: Box::new(result.clone()),
+                                    child_session_id: None,
                                 });
-                                results.push((tc, result));
+                                results.push(ExecutedTool {
+                                    tool_call: tc,
+                                    result,
+                                    child_session_id: None,
+                                });
                             }
                             Some(Err(join_err)) => {
                                 return Err(anyhow::anyhow!("Task join error: {join_err}"));
@@ -898,8 +955,13 @@ impl AgentContext for CoreContext {
                     request_id,
                     tool_call: tc.clone(),
                     result: Box::new(ToolExecutionResult::new("User cancelled the request")),
+                    child_session_id: None,
                 });
-                results.push((tc, ToolExecutionResult::new("User cancelled the request")));
+                results.push(ExecutedTool {
+                    tool_call: tc,
+                    result: ToolExecutionResult::new("User cancelled the request"),
+                    child_session_id: None,
+                });
                 continue;
             }
 
@@ -949,14 +1011,19 @@ impl AgentContext for CoreContext {
                 request_id,
                 tool_call: tc.clone(),
                 result: Box::new(result.clone()),
+                child_session_id: None,
             });
-            results.push((tc, result));
+            results.push(ExecutedTool {
+                tool_call: tc,
+                result,
+                child_session_id: None,
+            });
         }
 
         // --- Task tools (subagents): parallel with immediate cancellation ---
         // When subagent is disabled by config, return an error instead of spawning.
         if !task_calls.is_empty() && !self.config.read().unwrap().subagent.enabled {
-            for (tc, _) in task_calls.drain(..) {
+            for (tc, child_session_id) in task_calls.drain(..) {
                 let result = ToolExecutionResult::new(
                     "User has temporarily disabled the subagent (task) tool.",
                 );
@@ -965,20 +1032,24 @@ impl AgentContext for CoreContext {
                     request_id,
                     tool_call: tc.clone(),
                     result: Box::new(result.clone()),
+                    child_session_id,
                 });
-                results.push((tc, result));
+                results.push(ExecutedTool {
+                    tool_call: tc,
+                    result,
+                    child_session_id,
+                });
             }
         }
 
         if !task_calls.is_empty() {
-            let mut pending_tcs: Vec<ToolCall> =
-                task_calls.iter().map(|(tc, _)| tc.clone()).collect();
+            let mut pending_tcs = task_calls.clone();
             // Drop guard persists "User cancelled" if h.abort() kills this task.
             let mut cancel_guard = CancelPersistGuard {
                 session_manager: self.session_manager.clone(),
                 buffer: self.buffer.clone(),
                 session_id,
-                tool_calls: pending_tcs.clone(),
+                tool_calls: pending_tcs.iter().map(|(tc, _)| tc.clone()).collect(),
                 disarmed: false,
             };
             let mut join_set = tokio::task::JoinSet::new();
@@ -998,6 +1069,7 @@ impl AgentContext for CoreContext {
                     config: self.config.clone(),
                     auth: self.auth.clone(),
                     session_start_hash: self.session_start_hash.lock().await.clone(),
+                    buffer: self.buffer.clone(),
                 };
                 join_set.spawn(async move {
                     execute_task_tool(
@@ -1011,7 +1083,7 @@ impl AgentContext for CoreContext {
                         },
                     )
                     .await
-                    .map(|result| (tc, result))
+                    .map(|(result, child_session_id)| (tc, result, child_session_id))
                 });
             }
 
@@ -1024,39 +1096,47 @@ impl AgentContext for CoreContext {
                         // drops the child JoinSet, which aborts the child's
                         // tools — recursively to any depth.
                         join_set.abort_all();
-                        for tc in pending_tcs {
+                        for (tc, child_session_id) in pending_tcs {
                             self.emit(BackendEvent::ToolCompleted {
                                 session_id,
                                 request_id,
                                 tool_call: tc.clone(),
                                 result: Box::new(ToolExecutionResult::new("User cancelled the request")),
+                                child_session_id,
                             });
-                            results.push((
-                                tc,
-                                ToolExecutionResult::new("User cancelled the request"),
-                            ));
+                            results.push(ExecutedTool {
+                                tool_call: tc,
+                                result: ToolExecutionResult::new("User cancelled the request"),
+                                child_session_id,
+                            });
                         }
                         cancel_guard.disarmed = true;
                         return Ok(results);
                     }
                     result = join_set.join_next() => {
                         match result {
-                            Some(Ok(Ok((tc, result)))) => {
-                                pending_tcs.retain(|t| t.id != tc.id);
+                            Some(Ok(Ok((tc, result, child_session_id)))) => {
+                                pending_tcs.retain(|(t, _)| t.id != tc.id);
                                 if self.cancel.is_cancelled() {
                                     // Already cancelled — push synthetic result.
-                                    results.push((
-                                        tc,
-                                        ToolExecutionResult::new("User cancelled the request"),
-                                    ));
+                                    results.push(ExecutedTool {
+                                        tool_call: tc,
+                                        result: ToolExecutionResult::new("User cancelled the request"),
+                                        child_session_id: Some(child_session_id),
+                                    });
                                 } else {
                                     self.emit(BackendEvent::ToolCompleted {
                                         session_id,
                                         request_id,
                                         tool_call: tc.clone(),
                                         result: Box::new(result.clone()),
+                                        child_session_id: Some(child_session_id),
                                     });
-                                    results.push((tc, result));
+                                    results.push(ExecutedTool {
+                                        tool_call: tc,
+                                        result,
+                                        child_session_id: Some(child_session_id),
+                                    });
                                 }
                             }
                             Some(Ok(Err(e))) => {
@@ -1064,7 +1144,7 @@ impl AgentContext for CoreContext {
                                     // Cancelled subagent with error: push
                                     // synthetic results for all remaining.
                                     join_set.abort_all();
-                                    for tc in pending_tcs {
+                                    for (tc, child_session_id) in pending_tcs {
                                         self.emit(BackendEvent::ToolCompleted {
                                             session_id,
                                             request_id,
@@ -1072,11 +1152,15 @@ impl AgentContext for CoreContext {
                                             result: Box::new(ToolExecutionResult::new(
                                                 "User cancelled the request",
                                             )),
+                                            child_session_id,
                                         });
-                                        results.push((
-                                            tc,
-                                            ToolExecutionResult::new("User cancelled the request"),
-                                        ));
+                                        results.push(ExecutedTool {
+                                            tool_call: tc,
+                                            result: ToolExecutionResult::new(
+                                                "User cancelled the request",
+                                            ),
+                                            child_session_id,
+                                        });
                                     }
                                     cancel_guard.disarmed = true;
                                     return Ok(results);
@@ -1103,7 +1187,12 @@ impl AgentContext for CoreContext {
     }
 
     // -----------------------------------------------------------------------
-    async fn save_messages(&self, session_id: Uuid, messages: &[Message]) -> Result<()> {
+    async fn save_messages(
+        &self,
+        session_id: Uuid,
+        messages: &[Message],
+        child_session_ids: &[(Uuid, Uuid)],
+    ) -> Result<()> {
         // ── Phase 1: Round-level snapshot tracking ──────────────────────
         //
         // When the assistant message with tool calls is saved, a round is
@@ -1152,6 +1241,11 @@ impl AgentContext for CoreContext {
             .iter()
             .map(|message| (message.id, MessageAppData::default()))
             .collect();
+        for (message_id, child_session_id) in child_session_ids {
+            if let Some(data) = app_data.get_mut(message_id) {
+                data.child_session_id = Some(*child_session_id);
+            }
+        }
         if has_tool_results {
             let pre = { self.pre_round_hash.lock().await.clone() };
             if let Some(ref pre) = pre
@@ -1419,6 +1513,7 @@ impl Drop for ToolCompletedGuard {
                     request_id: self.request_id,
                     tool_call: self.tool_call.clone(),
                     result: Box::new(ToolExecutionResult::new("User cancelled the request")),
+                    child_session_id: None,
                 });
             }
         }
@@ -1472,6 +1567,7 @@ mod tool_event_order_tests {
 /// Holds all the resources a subagent needs (owned, 'static-capable).
 struct SubagentSpawner {
     session_manager: SessionManager,
+    buffer: Arc<RwLock<MessageBuffer>>,
     tool_registry: Arc<ToolRegistry>,
     llm: LlmClient,
     active_model: ActiveModel,
@@ -1499,7 +1595,7 @@ struct SubagentConfig {
 async fn execute_task_tool(
     spawner: SubagentSpawner,
     config: SubagentConfig,
-) -> Result<ToolExecutionResult> {
+) -> Result<(ToolExecutionResult, Uuid)> {
     // 1. Parse the task arguments.
     let args: Value = serde_json::from_str(&config.tool_call.arguments)
         .context("failed to parse task tool arguments")?;
@@ -1606,22 +1702,38 @@ async fn execute_task_tool(
         reasoning_delta: None,
     });
 
-    // Persist child_session_id in the parent's assistant message metadata
-    // so the TUI can recover it when switching sessions.
-    if let Ok(messages) = spawner
-        .session_manager
-        .load_messages(config.parent_session_id)
-        && let Some(msg) = messages.iter().find(|m| {
-            m.role == MessageRole::Assistant
-                && m.tool_calls.iter().any(|tc| tc.id == config.tool_call.id)
-        })
-    {
-        let mut meta = msg.metadata.clone();
-        meta.child_session_id = Some(child_session_id);
-        let _ = spawner.session_manager.update_message_metadata(
+    // Persist the child association as application data on the parent
+    // assistant message so it survives session reloads without entering the
+    // protocol metadata sent to an LLM.
+    let assistant_message_id = {
+        let buffer = spawner.buffer.read().await;
+        buffer
+            .load()
+            .iter()
+            .find(|message| {
+                message.role == MessageRole::Assistant
+                    && message
+                        .tool_calls
+                        .iter()
+                        .any(|tool_call| tool_call.id == config.tool_call.id)
+            })
+            .map(|message| message.id)
+    };
+    if let Some(message_id) = assistant_message_id {
+        let mut app_data = {
+            let buffer = spawner.buffer.read().await;
+            buffer.app_data(message_id).cloned().unwrap_or_default()
+        };
+        app_data.child_session_id = Some(child_session_id);
+        spawner
+            .buffer
+            .write()
+            .await
+            .set_app_data(message_id, app_data);
+        let _ = spawner.session_manager.update_message_child_session_id(
             config.parent_session_id,
-            msg.id,
-            &meta,
+            message_id,
+            child_session_id,
         );
     }
 
@@ -1676,19 +1788,17 @@ async fn execute_task_tool(
             .cloned()
     };
 
-    // 10. Build result with child_session_id embedded in metadata.
-    //     The parent's execute_tools emits ToolCompleted (not SubagentCompleted),
-    //     so the TUI handles subagent completion identically to any other tool.
-    let mut final_result = match result {
+    // 10. Build the protocol result separately from the child-session
+    // association. The parent emits ToolCompleted for the result, while the
+    // association remains host-owned application data.
+    let final_result = match result {
         Ok(()) => match final_output {
             Some(msg) if !msg.content.is_empty() => ToolExecutionResult::new(msg.content),
             _ => ToolExecutionResult::new("(Subagent completed without text output)".to_string()),
         },
         Err(e) => ToolExecutionResult::new(format!("Subagent failed: {e}")),
     };
-    final_result.metadata.child_session_id = Some(child_session_id);
-
-    Ok(final_result)
+    Ok((final_result, child_session_id))
 }
 
 fn build_agent_def(agent_type: AgentType, parent_prompt: &str) -> AgentDefinition {

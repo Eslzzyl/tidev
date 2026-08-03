@@ -73,6 +73,11 @@ impl MessageBuffer {
         self.app_data.get(&id)
     }
 
+    /// Replace application-owned fields for an existing message.
+    pub fn set_app_data(&mut self, id: uuid::Uuid, app_data: MessageAppData) {
+        self.app_data.insert(id, app_data);
+    }
+
     /// Return protocol messages paired with their application-owned fields.
     pub fn session_messages(&self) -> Vec<SessionMessage> {
         self.messages
