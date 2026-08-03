@@ -10,7 +10,7 @@ description = "Agent types and execution loop for tidev"
 tidev-llm = { path = "../tidev-llm" }
 serde = { version = "1", features = ["derive"] }
 async-trait = "0.1"
-tokio = { version = "1", features = ["sync"] }
+tokio = { version = "1", features = ["sync", "rt", "macros"] }
 tokio-util = "0.7"
 anyhow = "1"
 serde_json = "1"
