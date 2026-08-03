@@ -34,6 +34,11 @@ pub const MIGRATIONS: &[Migration] = &[
         description: "Add reasoning_completed_at to messages",
         sql: "ALTER TABLE messages ADD COLUMN reasoning_completed_at TEXT",
     },
+    Migration {
+        version: 40,
+        description: "Add child session id to messages",
+        sql: "ALTER TABLE messages ADD COLUMN child_session_id TEXT",
+    },
 ];
 
 /// Run all pending migrations on the given connection.
@@ -78,6 +83,9 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
                     anyhow::bail!("migration v{} failed: {e:#}", migration.version);
                 }
             }
+            if migration.version == 40 {
+                backfill_child_session_ids(conn)?;
+            }
             conn.execute(
                 "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?1)",
                 rusqlite::params![migration.version.to_string()],
@@ -94,9 +102,43 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+fn backfill_child_session_ids(conn: &Connection) -> Result<()> {
+    let rows = match conn.prepare("SELECT id, metadata FROM messages") {
+        Ok(mut stmt) => {
+            let rows = stmt.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
+            })?;
+            let mut values = Vec::new();
+            for row in rows {
+                values.push(row?);
+            }
+            values
+        }
+        Err(error) if error.to_string().contains("no such table") => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+
+    for (message_id, metadata_blob) in rows {
+        let metadata = crate::compression::decompress_text(&metadata_blob);
+        let Ok(metadata) = serde_json::from_str::<tidev_llm::message::ToolMetadata>(&metadata)
+        else {
+            continue;
+        };
+        let Some(child_session_id) = metadata.child_session_id else {
+            continue;
+        };
+        conn.execute(
+            "UPDATE messages SET child_session_id = ?1 WHERE id = ?2 AND child_session_id IS NULL",
+            rusqlite::params![child_session_id.to_string(), message_id],
+        )?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uuid::Uuid;
 
     fn fresh_conn() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
@@ -146,5 +188,46 @@ mod tests {
         let err = run_migrations(&conn).unwrap_err();
         let msg = format!("{err:#}");
         assert!(msg.contains("newer"), "expected 'newer' error, got: {msg}");
+    }
+
+    #[test]
+    fn v40_backfills_child_session_id_from_metadata() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);\
+             CREATE TABLE messages (id TEXT PRIMARY KEY, metadata BLOB NOT NULL);",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES ('schema_version', '39')",
+            [],
+        )
+        .unwrap();
+
+        let message_id = Uuid::new_v4();
+        let child_id = Uuid::new_v4();
+        let metadata = tidev_llm::message::ToolMetadata {
+            child_session_id: Some(child_id),
+            ..Default::default()
+        };
+        conn.execute(
+            "INSERT INTO messages (id, metadata) VALUES (?1, ?2)",
+            rusqlite::params![
+                message_id.to_string(),
+                crate::compression::compress_text(&serde_json::to_string(&metadata).unwrap()),
+            ],
+        )
+        .unwrap();
+
+        run_migrations(&conn).unwrap();
+
+        let stored: String = conn
+            .query_row(
+                "SELECT child_session_id FROM messages WHERE id = ?1",
+                rusqlite::params![message_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored, child_id.to_string());
     }
 }
