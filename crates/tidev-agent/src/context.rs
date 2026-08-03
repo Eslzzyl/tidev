@@ -216,4 +216,9 @@ pub trait AgentContext: Send + Sync {
     ) -> Result<()> {
         Ok(())
     }
+
+    /// Take instruction sources collected by tool execution for a session.
+    fn take_instruction_sources(&self, _session_id: uuid::Uuid) -> Vec<String> {
+        Vec::new()
+    }
 }

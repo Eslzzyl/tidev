@@ -5,8 +5,9 @@
 //! / `execute_tool_call_streaming` while managing the `ToolContext` lifecycle
 //! (workspace paths, skills catalog, web search config, etc.).
 
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_util::sync::CancellationToken;
@@ -38,6 +39,7 @@ pub struct ToolRegistry {
     auth_store: AuthStore,
     max_output_bytes: usize,
     mcp: McpManager,
+    pending_instruction_sources: Arc<Mutex<HashMap<Uuid, Vec<String>>>>,
 }
 
 impl ToolRegistry {
@@ -61,6 +63,7 @@ impl ToolRegistry {
             auth_store,
             max_output_bytes,
             mcp,
+            pending_instruction_sources: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -109,8 +112,29 @@ impl ToolRegistry {
             web_search_config: &self.web_search_config,
             auth_store: &self.auth_store,
             event_tx,
+            instruction_sources: Some(Arc::new(Mutex::new(Vec::new()))),
         };
-        execute_tool_call(&ctx, call, cancel).await
+        let source_sink = ctx.instruction_sources.clone().expect("source sink");
+        let result = execute_tool_call(&ctx, call, cancel).await;
+        if let Ok(mut pending) = self.pending_instruction_sources.lock()
+            && let Ok(sources) = source_sink.lock()
+            && !sources.is_empty()
+        {
+            pending
+                .entry(session_id)
+                .or_default()
+                .extend(sources.iter().cloned());
+        }
+        result
+    }
+
+    /// Take instruction sources discovered by tools in a session.
+    pub fn take_instruction_sources(&self, session_id: Uuid) -> Vec<String> {
+        self.pending_instruction_sources
+            .lock()
+            .ok()
+            .and_then(|mut pending| pending.remove(&session_id))
+            .unwrap_or_default()
     }
 
     /// Return all available tool definitions (unfiltered, without MCP tools).

@@ -619,7 +619,6 @@ fn call_tool_result_data(
         output,
         attachments,
         metadata: ToolMetadata::default(),
-        instruction_sources: Vec::new(),
     }
 }
 

@@ -5,6 +5,7 @@ use std::{
     fs,
     io::BufRead,
     path::{Path, PathBuf},
+    sync::{Arc, Mutex},
 };
 
 use super::apply_patch;
@@ -69,6 +70,7 @@ pub fn execute_tool_call(
     _max_output_bytes: usize,
     allow_outside: bool,
     sensitive_file_approved: bool,
+    instruction_sources: Option<Arc<Mutex<Vec<String>>>>,
 ) -> Result<tidev_llm::message::ToolExecutionResult> {
     match tidev_utils::tool_name::canonical_tool_name(tool_name) {
         Some("read") => {
@@ -81,6 +83,7 @@ pub fn execute_tool_call(
                 args.limit,
                 allow_outside,
                 sensitive_file_approved,
+                instruction_sources,
             )
         }
         Some("write") => {
@@ -204,7 +207,6 @@ pub fn execute_tool_call(
                 output,
                 attachments: Vec::new(),
                 metadata,
-                instruction_sources: Vec::new(),
             })
         }
         Some(other) => bail!("unsupported file tool '{}'", other),
@@ -275,7 +277,6 @@ fn file_change_output(
         output,
         attachments: Vec::new(),
         metadata,
-        instruction_sources: Vec::new(),
     }
 }
 
@@ -287,6 +288,7 @@ pub(super) fn read_path(
     limit: Option<i64>,
     allow_outside: bool,
     sensitive_file_approved: bool,
+    instruction_sources: Option<Arc<Mutex<Vec<String>>>>,
 ) -> Result<ToolExecutionResult> {
     let path = resolve_workspace_path(workspace_root, relative_path.as_ref(), allow_outside)?;
 
@@ -332,7 +334,7 @@ pub(super) fn read_path(
                 path: display_workspace_relative(workspace_root, &path),
                 tree: std::sync::Arc::new("".to_string()),
             });
-        attach_instructions(&mut result, instructions);
+        attach_instructions(&mut result, instructions, instruction_sources.as_ref());
         return Ok(result);
     }
 
@@ -359,7 +361,7 @@ pub(super) fn read_path(
             data: content,
             file_size,
         });
-        attach_instructions(&mut result, instructions);
+        attach_instructions(&mut result, instructions, instruction_sources.as_ref());
         return Ok(result);
     }
 
@@ -494,28 +496,36 @@ pub(super) fn read_path(
     );
 
     let mut result = ToolExecutionResult::new(output);
-    attach_instructions(&mut result, instructions);
+    attach_instructions(&mut result, instructions, instruction_sources.as_ref());
 
     Ok(result)
 }
 
 /// Attach nearby instruction files to a tool execution result as `<system-reminder>` blocks.
 /// The instructions are appended to the result's output text so they reach the LLM context.
-fn attach_instructions(result: &mut ToolExecutionResult, instructions: Vec<(PathBuf, String)>) {
+fn attach_instructions(
+    result: &mut ToolExecutionResult,
+    instructions: Vec<(PathBuf, String)>,
+    instruction_sources: Option<&Arc<Mutex<Vec<String>>>>,
+) {
     if instructions.is_empty() {
         return;
     }
-    let mut instruction_sources = Vec::new();
+    let mut source_names = Vec::new();
     let mut reminders = Vec::new();
     for (path, content) in instructions {
-        instruction_sources.push(path.to_string_lossy().to_string());
+        source_names.push(path.to_string_lossy().to_string());
         reminders.push(content);
     }
     result.output.push_str(&format!(
         "\n\n<system-reminder>\n{}\n</system-reminder>",
         reminders.join("\n\n")
     ));
-    result.instruction_sources = instruction_sources;
+    if let Some(sink) = instruction_sources {
+        if let Ok(mut sources) = sink.lock() {
+            sources.extend(source_names.iter().cloned());
+        }
+    }
 }
 
 fn is_binary_file(path: &Path) -> Result<bool> {
@@ -1400,16 +1410,27 @@ mod tests {
         std::fs::create_dir(&nested)?;
 
         // Read the nested directory — upward traversal finds subdir/AGENTS.md
-        let result = read_path(ws_path, cf_path, "subdir/nested", None, None, false, false)?;
+        let sources = Arc::new(Mutex::new(Vec::new()));
+        let result = read_path(
+            ws_path,
+            cf_path,
+            "subdir/nested",
+            None,
+            None,
+            false,
+            false,
+            Some(sources.clone()),
+        )?;
+        let sources = sources.lock().unwrap();
 
         assert!(
-            !result.instruction_sources.is_empty(),
+            !sources.is_empty(),
             "should discover AGENTS.md when reading a directory"
         );
         assert!(
-            result.instruction_sources[0].ends_with("AGENTS.md"),
+            sources[0].ends_with("AGENTS.md"),
             "instruction source should reference AGENTS.md: got {}",
-            result.instruction_sources[0]
+            sources[0]
         );
         assert!(
             result.output.contains("<system-reminder>"),
@@ -1445,6 +1466,7 @@ mod tests {
         std::fs::write(nested.join("file.txt"), "hello world")?;
 
         // Read the text file — upward traversal finds subdir/AGENTS.md
+        let sources = Arc::new(Mutex::new(Vec::new()));
         let result = read_path(
             ws_path,
             cf_path,
@@ -1453,16 +1475,18 @@ mod tests {
             None,
             false,
             false,
+            Some(sources.clone()),
         )?;
+        let sources = sources.lock().unwrap();
 
         assert!(
-            !result.instruction_sources.is_empty(),
+            !sources.is_empty(),
             "should discover AGENTS.md when reading a file"
         );
         assert!(
-            result.instruction_sources[0].ends_with("AGENTS.md"),
+            sources[0].ends_with("AGENTS.md"),
             "instruction source should reference AGENTS.md: got {}",
-            result.instruction_sources[0]
+            sources[0]
         );
         assert!(
             result.output.contains("<system-reminder>"),
@@ -1487,6 +1511,7 @@ mod tests {
             None,
             false,
             false,
+            None,
         );
 
         let error = result.expect_err("missing file should return an error");
@@ -1513,6 +1538,7 @@ mod tests {
             None,
             true,
             false,
+            None,
         );
 
         let error = result.expect_err("missing external file should return an error");

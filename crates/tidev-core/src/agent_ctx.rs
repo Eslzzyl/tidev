@@ -1326,6 +1326,17 @@ impl AgentContext for CoreContext {
             .store()
             .append_instruction_sources(session_id, sources)
     }
+
+    fn take_instruction_sources(&self, session_id: Uuid) -> Vec<String> {
+        let sources = self.tool_registry.take_instruction_sources(session_id);
+        if !sources.is_empty() {
+            self.emit(BackendEvent::InstructionsLoaded {
+                session_id,
+                sources: sources.clone(),
+            });
+        }
+        sources
+    }
 }
 
 // ---------------------------------------------------------------------------

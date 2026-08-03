@@ -118,10 +118,6 @@ pub struct App {
     /// Tracks instruction sources already shown as "Loaded instructions from" messages
     /// in the current session.  Pure in-memory dedup — never written to the DB.
     shown_instruction_sources: Vec<String>,
-    /// Buffer for instruction sources discovered during tool execution.
-    /// Flushed to chat_context (and persisted) on StreamEnd, after all tool
-    /// results for this turn have been placed in the message list.
-    pending_instruction_sources: HashMap<Uuid, Vec<String>>,
 
     // ── Tool approval pipeline (per-session) ──
     /// Per-session pending tool approval states.
@@ -258,7 +254,6 @@ impl App {
             terminal_area: Rect::new(0, 0, 0, 0),
             todos: Vec::new(),
             shown_instruction_sources: Vec::new(),
-            pending_instruction_sources: HashMap::new(),
             image_picker: {
                 log::info!("[img] from_query_stdio START");
                 let r = Picker::from_query_stdio();

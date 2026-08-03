@@ -218,22 +218,8 @@ impl App {
             BackendEvent::ToolCompleted {
                 session_id,
                 ref tool_call,
-                result,
                 ..
             } => {
-                // Buffer instruction sources discovered during tool execution.
-                // They will be flushed on StreamEnd, after all tool results in
-                // this turn are placed into the chat_context (which guarantees
-                // the System notification message appears after all tools).
-                if Some(session_id) == self.current_session_id
-                    && !result.instruction_sources.is_empty()
-                {
-                    self.pending_instruction_sources
-                        .entry(session_id)
-                        .or_default()
-                        .extend(result.instruction_sources.iter().cloned());
-                }
-
                 // todowrite-specific: reload todos from database.
                 // Guard with current_session_id so that a subagent's todowrite
                 // in a child session doesn't overwrite the parent's sidebar.
@@ -249,17 +235,6 @@ impl App {
                 }
             }
             BackendEvent::StreamEnd { session_id, .. } => {
-                // Flush pending instruction sources discovered during tool
-                // execution.  Only inserts into the in-memory chat_context —
-                // persistence is handled by the backend (loop_.rs step 11)
-                // so the System message appears after all tool results.
-                if let Some(sources) = self.pending_instruction_sources.remove(&session_id)
-                    && !sources.is_empty()
-                    && Some(session_id) == self.current_session_id
-                {
-                    self.show_instruction_sources(&sources);
-                }
-
                 // Flush queued prompts for sessions that are no longer busy.
                 self.flush_pending_prompt_queue();
 

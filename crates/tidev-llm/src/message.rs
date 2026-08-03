@@ -163,8 +163,6 @@ pub struct ToolExecutionResult {
     pub attachments: Vec<MessageAttachment>,
     #[serde(default)]
     pub metadata: ToolMetadata,
-    #[serde(default)]
-    pub instruction_sources: Vec<String>,
 }
 
 impl ToolExecutionResult {
@@ -173,7 +171,6 @@ impl ToolExecutionResult {
             output: output.into(),
             attachments: Vec::new(),
             metadata: ToolMetadata::default(),
-            instruction_sources: Vec::new(),
         }
     }
 
@@ -186,7 +183,6 @@ impl ToolExecutionResult {
             output,
             attachments: self.attachments.clone(),
             metadata: self.metadata.clone(),
-            instruction_sources: self.instruction_sources.clone(),
         }
     }
 }

@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde_json::Value;
 use std::any::Any;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_util::sync::CancellationToken;
 
@@ -30,6 +30,7 @@ pub struct ToolContext<'a> {
     pub web_search_config: &'a tidev_config::WebSearchConfig,
     pub auth_store: &'a tidev_config::AuthStore,
     pub event_tx: Option<UnboundedSender<ShellOutput>>,
+    pub instruction_sources: Option<Arc<Mutex<Vec<String>>>>,
 }
 
 /// Streaming output emitted by the shell tool before the host converts it to
@@ -168,6 +169,7 @@ pub async fn execute_tool_call(
             let max_output_bytes = ctx.max_output_bytes;
             let allow_outside = ctx.allow_outside;
             let sensitive_file_approved = ctx.sensitive_file_approved;
+            let instruction_sources = ctx.instruction_sources.clone();
             safe_spawn_blocking_result(move || {
                 file::execute_tool_call(
                     &workspace_root,
@@ -177,6 +179,7 @@ pub async fn execute_tool_call(
                     max_output_bytes,
                     allow_outside,
                     sensitive_file_approved,
+                    instruction_sources,
                 )
             })
             .await
