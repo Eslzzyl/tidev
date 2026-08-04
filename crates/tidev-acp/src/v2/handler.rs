@@ -11,9 +11,9 @@ use tokio::sync::{Mutex as AsyncMutex, RwLock};
 use uuid::Uuid;
 
 use tidev_config::ThinkingMatcher;
+use tidev_core::Mode as SessionMode;
 use tidev_core::Runtime;
 use tidev_llm::message::{MessageAttachment, MessageRole};
-use tidev_core::Mode as SessionMode;
 use tidev_utils::session::title_from_prompt;
 
 struct State {
@@ -261,7 +261,7 @@ pub(crate) fn build_agent(
                   _cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>| {
                 let state = state.clone();
                 async move {
-                    if let Some(session_id) = validate_session(&state, &notification.session_id).await.ok() {
+                    if let Ok(session_id) = validate_session(&state, &notification.session_id).await {
                         state.runtime.cancel_session(session_id).await;
                     }
                     Ok(Handled::Yes)
@@ -636,38 +636,14 @@ async fn merge_mcp_servers(runtime: &Runtime, servers: &[acp::McpServer]) {
             )),
             _ => None,
         };
-        if let Some((name, config)) = converted {
-            if let Err(error) = runtime
+        if let Some((name, config)) = converted
+            && let Err(error) = runtime
                 .mcp_manager()
                 .upsert_server(name.clone(), config)
                 .await
-            {
-                log::warn!("ACP v2 failed to add MCP server '{name}': {error}");
-            }
+        {
+            log::warn!("ACP v2 failed to add MCP server '{name}': {error}");
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn init_command_arguments_require_an_exact_command_name() {
-        assert_eq!(command_arguments("/init", "/init"), Some(""));
-        assert_eq!(
-            command_arguments(" /init focus on tests ", "/init"),
-            Some("focus on tests")
-        );
-        assert_eq!(command_arguments("/initialize", "/init"), None);
-    }
-
-    #[test]
-    fn init_is_advertised_only_in_build_mode() {
-        let plan = serde_json::to_value(available_commands(SessionMode::Plan)).unwrap();
-        let build = serde_json::to_value(available_commands(SessionMode::Build)).unwrap();
-        assert_eq!(plan["availableCommands"].as_array().unwrap().len(), 1);
-        assert_eq!(build["availableCommands"].as_array().unwrap().len(), 2);
     }
 }
 
@@ -704,4 +680,27 @@ fn invalid_error(message: impl Into<String>) -> agent_client_protocol::Error {
 
 fn internal_error(error: impl std::fmt::Display) -> agent_client_protocol::Error {
     agent_client_protocol::Error::internal_error().data(error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn init_command_arguments_require_an_exact_command_name() {
+        assert_eq!(command_arguments("/init", "/init"), Some(""));
+        assert_eq!(
+            command_arguments(" /init focus on tests ", "/init"),
+            Some("focus on tests")
+        );
+        assert_eq!(command_arguments("/initialize", "/init"), None);
+    }
+
+    #[test]
+    fn init_is_advertised_only_in_build_mode() {
+        let plan = serde_json::to_value(available_commands(SessionMode::Plan)).unwrap();
+        let build = serde_json::to_value(available_commands(SessionMode::Build)).unwrap();
+        assert_eq!(plan["availableCommands"].as_array().unwrap().len(), 1);
+        assert_eq!(build["availableCommands"].as_array().unwrap().len(), 2);
+    }
 }

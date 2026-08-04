@@ -20,8 +20,8 @@ mod tool_call_format;
 mod turn;
 mod types;
 
-pub use types::{ApiType, LlmProviderConfig, ToolDefinition};
 pub use event::LlmEvent;
+pub use types::{ApiType, LlmProviderConfig, ToolDefinition};
 
 use anyhow::{Context, Result};
 use reqwest::Client;
@@ -86,17 +86,13 @@ impl LlmClient {
         thinking_level: crate::reasoning::ThinkingLevelType,
     ) {
         let result = self
-            .stream_chat_with_retry(
-                model,
-                messages,
-                tools,
-                tx.clone(),
-                thinking_level,
-            )
+            .stream_chat_with_retry(model, messages, tools, tx.clone(), thinking_level)
             .await;
 
         if let Err(error) = result {
-            let _ = tx.send(LlmEvent::Failed { error: error.to_string() });
+            let _ = tx.send(LlmEvent::Failed {
+                error: error.to_string(),
+            });
         }
     }
 
@@ -108,9 +104,7 @@ impl LlmClient {
         tools: Vec<ToolDefinition>,
         tx: Option<UnboundedSender<LlmEvent>>,
     ) -> Result<String> {
-        let result = self
-            .complete_with_retry(model, messages, tools, tx)
-            .await;
+        let result = self.complete_with_retry(model, messages, tools, tx).await;
         result.context("LLM completion failed after retries")
     }
 

@@ -18,10 +18,10 @@ use async_trait::async_trait;
 use reqwest::Client;
 use serde_json::Value;
 
-use tidev_config::AuthStore;
-use tidev_config::{WebSearchConfig, WebSearchProviderConfig};
 use crate::types::{ToolDefinition, ToolPermission};
 use crate::types::{WebFetchArgs as WebFetchToolArgs, WebSearchArgs as WebSearchToolArgs};
+use tidev_config::AuthStore;
+use tidev_config::{WebSearchConfig, WebSearchProviderConfig};
 
 // ---------------------------------------------------------------------------
 // Provider trait

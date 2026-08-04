@@ -26,9 +26,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::{types::LlmProviderConfig, types::ToolDefinition};
 use crate::event::LlmEvent;
 use crate::message::{Message, MessageAttachment, MessageRole, ToolCall};
+use crate::{types::LlmProviderConfig, types::ToolDefinition};
 
 use log::{debug as log_debug, error as log_error};
 
@@ -222,10 +222,9 @@ pub(crate) async fn stream_gemini(
 
                         // ── Function call part ─────────────────────────────
                         if let Some(fcall) = part.function_call {
-                            let tc_id = fcall
-                                .id
-                                .clone()
-                                .unwrap_or_else(|| format!("gc-{}-{}", fcall.name, tool_call_index));
+                            let tc_id = fcall.id.clone().unwrap_or_else(|| {
+                                format!("gc-{}-{}", fcall.name, tool_call_index)
+                            });
 
                             let tc = ToolCall {
                                 id: tc_id.clone(),
@@ -235,9 +234,7 @@ pub(crate) async fn stream_gemini(
                                 thought_signature: part.thought_signature.clone(),
                             };
 
-                            let _ = tx.send(LlmEvent::ToolCallUpdated {
-                                tool_call: tc,
-                            });
+                            let _ = tx.send(LlmEvent::ToolCallUpdated { tool_call: tc });
 
                             tool_calls.insert(
                                 tool_call_index,
@@ -260,13 +257,13 @@ pub(crate) async fn stream_gemini(
                             let (visible, reasoning) = think_parser.push(&output);
                             if !visible.is_empty() {
                                 let _ = tx.send(LlmEvent::Delta {
-                                        content: visible.clone(),
+                                    content: visible.clone(),
                                 });
                                 assistant_text.push_str(&visible);
                             }
                             if !reasoning.is_empty() {
                                 let _ = tx.send(LlmEvent::ReasoningDelta {
-                                        content: reasoning.clone(),
+                                    content: reasoning.clone(),
                                 });
                                 reasoning_text.push_str(&reasoning);
                             }
@@ -657,8 +654,7 @@ fn build_gemini_request(
 /// Build the parts array for a user message (text + optional images).
 fn user_message_parts(model: &LlmProviderConfig, message: &Message) -> Result<Vec<GeminiPart>> {
     let text = message_text_with_file_references(message);
-    let images: Vec<&crate::message::MessageAttachment> =
-        image_attachments(message).collect();
+    let images: Vec<&crate::message::MessageAttachment> = image_attachments(message).collect();
 
     let mut parts = Vec::new();
 
@@ -891,9 +887,9 @@ struct GeminiBlobResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{ApiType, LlmProviderConfig};
     use crate::message::{Message, MessageRole};
     use crate::reasoning::{DeepSeekV4ThinkingLevel, ThinkingLevelType};
+    use crate::types::{ApiType, LlmProviderConfig};
 
     fn base_model() -> LlmProviderConfig {
         LlmProviderConfig {

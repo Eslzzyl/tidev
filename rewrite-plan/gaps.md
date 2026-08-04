@@ -1,49 +1,22 @@
 # 功能实现差距跟踪
 
-本文档记录已知的未实现功能，按影响范围分级。
+**更新时间**：2026-08-04
 
----
+本文件记录重构范围内的已知差距。路线图 P1-P5 已完成；以下原先记录的
+差距已经在当前代码中闭合：
 
-## P0 — 核心功能缺失
+- per-agent 模型配置：`tidev-config` 提供解析和持久化，`tidev-core`
+  在子代理创建时解析，`tidev-tui` 的 `ModelPanel` 提供多 agent tab、模型
+  选择和思考等级配置。
+- TUI Runtime 接入：`tidev-tui` 由 `tidev-core::Runtime` 统一持有资源，
+  通过 `Runtime::submit_prompt`、`event_rx` 和 `request_rx` 完成请求、事件
+  和审批交互。
+- 图片 base64 编码：`MessageAttachment::Image` 保留原始字节，各 provider
+  在请求构造时完成编码，详见 `rewrite-plan/issues/image-base64-encoding.md`。
 
-### 1. 子代理不支持 per-agent 模型配置（`/model`）
+本轮明确不纳入：
 
-**当前状态：** tidev-config 层方法已实现，tidev-core 层子代理创建时已接入。仅缺 tidev-tui 的 `/model` 命令 + Model Panel UI。
-
-**仍缺失：**
-
-| 层 | 具体缺失 |
-|----|----------|
-| tidev-tui | `/model` 命令注册 + Model Panel 多 Tab UI + 模型选择 + 思考等级选择 |
-| tidev-tui | 配置变更后通过 Runtime 通知 tidev-core 刷新模型 |
-
-**涉及文件：**
-- `crates/tidev-tui/` — 新命令 + 新面板
-
-**旧版参考：**
-- `_archive/v0.6.x/crates/tidev-tui/src/ui/model_panel.rs` — Model Panel 完整实现（约 270 行）
-
----
-
-## P1 — 已知功能缺口
-
-### 2. 图片 base64 编码
-
-✅ 已完成，见 `rewrite-plan/issues/image-base64-encoding.md`。
-
-`MessageAttachment::Image` 存储原始字节 `data: Vec<u8>`，各 LLM provider 在请求构建时自行编码。
-
----
-
-## P2 — 阶段 4 未完成
-
-### 3. tidev-tui 未接入 Runtime（阶段 4）
-
-architecture.md 阶段 4 计划：
-> tidev-tui 接入 Runtime，删除直接持有的资源
-
-当前 tidev-tui 尚未启动重写。接入 Runtime 后：
-- TUI 不再直接持有 `SessionStore`、`LlmClient`、`ToolRegistry` 等资源
-- 通过 `Runtime::submit_prompt()` 提交用户消息
-- 通过 `Runtime::event_rx()` 接收事件
-- 通过 `Runtime::perm_rx()` 处理权限审批
+- P0 请求字节捕获 harness。铁律仍然有效，当前采用确定性请求构造、消息
+  顺序回归测试、小步提交和代码审查控制风险。
+- HookEngine。该功能未纳入本轮重写，决策见
+  `rewrite-plan/decisions/D-007-skip-hooks.md`。

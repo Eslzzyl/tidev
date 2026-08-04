@@ -12,11 +12,11 @@ use async_trait::async_trait;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_util::sync::CancellationToken;
 
+use tidev_llm::ToolDefinition;
 use tidev_llm::message::{
     AssistantTurn, Message, QueuedUserMessage, ToolCall, ToolExecutionResult,
 };
 use tidev_llm::reasoning::ThinkingLevelType;
-use tidev_llm::ToolDefinition;
 
 use crate::event::AgentEvent;
 
@@ -99,5 +99,4 @@ pub trait AgentContext: Send + Sync {
 
     /// Load all messages for the current session.
     async fn load_messages(&self, session_id: uuid::Uuid) -> Result<Vec<Message>>;
-
 }

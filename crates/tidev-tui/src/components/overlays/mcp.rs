@@ -360,11 +360,9 @@ impl Component for McpServerPanel {
 
         // ── List mode ──────────────────────────────────────────────────
         match key.code {
-            KeyCode::Esc | KeyCode::Char('q') => {
-                return Some(Action::Overlay(OverlayAction::Close(
-                    OverlayKind::McpServerPanel,
-                )));
-            }
+            KeyCode::Esc | KeyCode::Char('q') => Some(Action::Overlay(OverlayAction::Close(
+                OverlayKind::McpServerPanel,
+            ))),
             KeyCode::Up => {
                 self.move_up(1);
                 Some(Action::Noop)

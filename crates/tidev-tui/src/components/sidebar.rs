@@ -438,6 +438,27 @@ impl Sidebar {
     }
 }
 
+/// Truncate a string to fit within `max_width` characters, appending `…` when truncated.
+fn shorten(s: &str, max_width: usize) -> String {
+    let width = UnicodeWidthStr::width(s);
+    if width <= max_width || max_width < 3 {
+        return s.to_string();
+    }
+    let mut result = String::with_capacity(max_width);
+    let mut current_width = 0;
+    for ch in s.chars() {
+        let w = UnicodeWidthStr::width(ch.to_string().as_str());
+        if current_width + w + 1 > max_width {
+            // +1 for the ellipsis
+            result.push('…');
+            break;
+        }
+        result.push(ch);
+        current_width += w;
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -541,25 +562,4 @@ mod tests {
         assert!(text.contains("Beta"), "should show in_progress item");
         assert!(text.contains("Gamma"), "should show pending item");
     }
-}
-
-/// Truncate a string to fit within `max_width` characters, appending `…` when truncated.
-fn shorten(s: &str, max_width: usize) -> String {
-    let width = UnicodeWidthStr::width(s);
-    if width <= max_width || max_width < 3 {
-        return s.to_string();
-    }
-    let mut result = String::with_capacity(max_width);
-    let mut current_width = 0;
-    for ch in s.chars() {
-        let w = UnicodeWidthStr::width(ch.to_string().as_str());
-        if current_width + w + 1 > max_width {
-            // +1 for the ellipsis
-            result.push('…');
-            break;
-        }
-        result.push(ch);
-        current_width += w;
-    }
-    result
 }

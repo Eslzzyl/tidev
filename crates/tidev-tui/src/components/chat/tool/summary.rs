@@ -4,8 +4,8 @@ use crate::theme::ThemePalette;
 use ratatui::prelude::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use tidev_llm::message::{Message, MessageAttachment, ToolCall};
-use tidev_utils::tool_name::canonical_tool_name;
 use tidev_utils::path::display_workspace_relative;
+use tidev_utils::tool_name::canonical_tool_name;
 use unicode_width::UnicodeWidthStr;
 
 use crate::components::chat::render::RenderContext;
@@ -336,51 +336,6 @@ fn has_image_attachment(attachments: &[MessageAttachment]) -> bool {
         .any(|a| matches!(a, MessageAttachment::Image { .. }))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn read_result_suffix_distinguishes_failure_states() {
-        assert_eq!(
-            compute_tool_result_suffix(
-                "read",
-                "Error: failed to read src/missing.rs: file not found",
-                &[],
-            ),
-            " → not found"
-        );
-        assert_eq!(
-            compute_tool_result_suffix(
-                "read",
-                "Error: failed to read src/mian.rs: file not found. Did you mean one of these?\nsrc/main.rs",
-                &[]
-            ),
-            " → not found (with suggestions)"
-        );
-        assert_eq!(
-            compute_tool_result_suffix("read", "Error: Path '/tmp/file' was denied.", &[]),
-            " → blocked by policy"
-        );
-        assert_eq!(
-            compute_tool_result_suffix(
-                "read",
-                "Error: failed to read src/file.rs: permission denied",
-                &[]
-            ),
-            " → error"
-        );
-    }
-
-    #[test]
-    fn read_result_suffix_handles_legacy_denial_without_error_prefix() {
-        assert_eq!(
-            compute_tool_result_suffix("read", "Path '/tmp/file' was denied.", &[]),
-            " → blocked by policy"
-        );
-    }
-}
-
 pub(super) fn summarize_tool_call(tool_call: &ToolCall, max_width: usize) -> String {
     let args = summarize_tool_arguments(tool_call, max_width);
     if args.len() > max_width {
@@ -431,4 +386,49 @@ pub(crate) fn tool_output_is_truncated(output: &str) -> bool {
         || output.contains("... (truncated)")
         || output.contains("(Output capped at")
         || output.contains("[truncated]")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn read_result_suffix_distinguishes_failure_states() {
+        assert_eq!(
+            compute_tool_result_suffix(
+                "read",
+                "Error: failed to read src/missing.rs: file not found",
+                &[],
+            ),
+            " → not found"
+        );
+        assert_eq!(
+            compute_tool_result_suffix(
+                "read",
+                "Error: failed to read src/mian.rs: file not found. Did you mean one of these?\nsrc/main.rs",
+                &[],
+            ),
+            " → not found (with suggestions)"
+        );
+        assert_eq!(
+            compute_tool_result_suffix("read", "Error: Path '/tmp/file' was denied.", &[]),
+            " → blocked by policy"
+        );
+        assert_eq!(
+            compute_tool_result_suffix(
+                "read",
+                "Error: failed to read src/file.rs: permission denied",
+                &[],
+            ),
+            " → error"
+        );
+    }
+
+    #[test]
+    fn read_result_suffix_handles_legacy_denial_without_error_prefix() {
+        assert_eq!(
+            compute_tool_result_suffix("read", "Path '/tmp/file' was denied.", &[]),
+            " → blocked by policy"
+        );
+    }
 }

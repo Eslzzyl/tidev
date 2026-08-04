@@ -108,8 +108,7 @@ impl ContextManager {
                             content, ..
                         } => tokens += Self::estimate_tokens_for_text(content),
                         tidev_llm::message::MessageAttachment::DirectoryReference {
-                            tree,
-                            ..
+                            tree, ..
                         } => tokens += Self::estimate_tokens_for_text(tree),
                         _ => {}
                     }
@@ -292,13 +291,8 @@ impl ContextManager {
         tools: &[tidev_llm::ToolDefinition],
         messages: Vec<Message>,
     ) -> Result<String> {
-        llm.complete_with_messages(
-            model.clone(),
-            messages,
-            tools.to_vec(),
-            None,
-        )
-        .await
+        llm.complete_with_messages(model.clone(), messages, tools.to_vec(), None)
+            .await
     }
 
     async fn compact_streaming(
@@ -332,7 +326,10 @@ impl ContextManager {
                 AgentEvent::Delta { content, .. } => {
                     accumulated.push_str(&content);
                     // Forward delta to the UI so the user sees progress.
-                    let _ = event_tx.send(AgentEvent::Delta { request_id: 0, content });
+                    let _ = event_tx.send(AgentEvent::Delta {
+                        request_id: 0,
+                        content,
+                    });
                 }
                 AgentEvent::Finished { .. } => {
                     // Intercepted — not forwarded to the UI because

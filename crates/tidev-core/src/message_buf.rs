@@ -96,11 +96,7 @@ impl CoreMessageBuffer {
             .load()
             .iter()
             .map(|message| {
-                let app_data = self
-                    .app_data
-                    .get(&message.id)
-                    .cloned()
-                    .unwrap_or_default();
+                let app_data = self.app_data.get(&message.id).cloned().unwrap_or_default();
                 SessionMessage::new(message.clone(), app_data)
             })
             .collect()

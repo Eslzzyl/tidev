@@ -6,9 +6,9 @@ use std::collections::BTreeMap;
 use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 
-use crate::{types::LlmProviderConfig, types::ToolDefinition};
 use crate::event::LlmEvent;
 use crate::message::{Message, MessageAttachment, MessageRole, ToolCall};
+use crate::{types::LlmProviderConfig, types::ToolDefinition};
 
 use log::{debug as log_debug, error as log_error};
 
@@ -172,9 +172,7 @@ pub(crate) async fn stream_responses(
                         first_delta_time = Some(std::time::Instant::now());
                     }
                     assistant_text.push_str(&delta);
-                    let _ = tx.send(LlmEvent::Delta {
-                        content: delta,
-                    });
+                    let _ = tx.send(LlmEvent::Delta { content: delta });
                 }
                 ResponseStreamEvent::RefusalDelta {
                     delta,
@@ -187,9 +185,7 @@ pub(crate) async fn stream_responses(
                         first_delta_time = Some(std::time::Instant::now());
                     }
                     assistant_text.push_str(&delta);
-                    let _ = tx.send(LlmEvent::Delta {
-                        content: delta,
-                    });
+                    let _ = tx.send(LlmEvent::Delta { content: delta });
                 }
                 ResponseStreamEvent::ReasoningDelta {
                     delta,
@@ -203,9 +199,7 @@ pub(crate) async fn stream_responses(
                     let cleaned = strip_think_tags(&delta);
                     if !cleaned.is_empty() {
                         reasoning_text.push_str(&cleaned);
-                        let _ = tx.send(LlmEvent::ReasoningDelta {
-                            content: cleaned,
-                        });
+                        let _ = tx.send(LlmEvent::ReasoningDelta { content: cleaned });
                     }
                 }
                 ResponseStreamEvent::ReasoningTextDelta {
@@ -221,9 +215,7 @@ pub(crate) async fn stream_responses(
                     let cleaned = strip_think_tags(&delta);
                     if !cleaned.is_empty() {
                         reasoning_text.push_str(&cleaned);
-                        let _ = tx.send(LlmEvent::ReasoningDelta {
-                            content: cleaned,
-                        });
+                        let _ = tx.send(LlmEvent::ReasoningDelta { content: cleaned });
                     }
                 }
                 ResponseStreamEvent::ReasoningSummaryTextDelta {
@@ -236,9 +228,7 @@ pub(crate) async fn stream_responses(
                     let cleaned = strip_think_tags(&summary_delta);
                     if !cleaned.is_empty() {
                         reasoning_text.push_str(&cleaned);
-                        let _ = tx.send(LlmEvent::ReasoningDelta {
-                            content: cleaned,
-                        });
+                        let _ = tx.send(LlmEvent::ReasoningDelta { content: cleaned });
                     }
                 }
                 ResponseStreamEvent::ReasoningSummaryTextDone {
@@ -313,9 +303,7 @@ pub(crate) async fn stream_responses(
                                 arguments: arguments.to_string(),
                                 thought_signature: None,
                             };
-                            let _ = tx.send(LlmEvent::ToolCallUpdated {
-                                tool_call: call,
-                            });
+                            let _ = tx.send(LlmEvent::ToolCallUpdated { tool_call: call });
                         }
                     }
                     if let Ok(raw_item) = serde_json::to_value(&item) {
@@ -1902,8 +1890,8 @@ struct ResponseOutputContent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::ApiType;
     use crate::message::{Message, MessageRole};
+    use crate::types::ApiType;
 
     #[test]
     fn test_responses_request_basic() {
@@ -2249,7 +2237,7 @@ mod tests {
         }];
         let request =
             build_responses_request(&model, messages.clone(), true, &tools, None).unwrap();
-        assert_eq!(request.parallel_tool_calls, false);
+        assert!(!request.parallel_tool_calls);
         let json = serde_json::to_value(&request).unwrap();
         assert_eq!(json["tool_choice"], "auto");
         assert_eq!(json["parallel_tool_calls"], false);

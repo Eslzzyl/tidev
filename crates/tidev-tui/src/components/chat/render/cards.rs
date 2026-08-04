@@ -207,9 +207,9 @@ fn render_user_shell_card(
         .and_then(|data| data.mode.as_deref())
         .and_then(|value| value.parse::<tidev_core::Mode>().ok())
         .map_or(palette.accent, |m| match m {
-        tidev_core::Mode::Build => palette.mode_build,
-        tidev_core::Mode::Plan => palette.mode_plan,
-    });
+            tidev_core::Mode::Build => palette.mode_build,
+            tidev_core::Mode::Plan => palette.mode_plan,
+        });
     let prefix_style = Style::default().fg(mode_color).add_modifier(Modifier::BOLD);
 
     let mut lines = Vec::new();

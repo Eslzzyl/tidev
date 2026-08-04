@@ -15,15 +15,11 @@ pub mod runtime;
 pub mod tool;
 
 // Re-export types from tidev-llm (defined there as shared protocol types).
-pub use context::{
-    AgentContext, AgentLoopConfig,
-};
+pub use context::{AgentContext, AgentLoopConfig};
 pub use context_manager::{CompactionResult, ContextManager};
 pub use event::{AgentEvent, llm_event_to_agent_event};
 pub use loop_::run_agent_loop;
-pub use mcp::{
-    McpConnectionStatus, McpRegistry, McpServerSpec, McpServerSummary, McpToolInfo,
-};
+pub use mcp::{McpConnectionStatus, McpRegistry, McpServerSpec, McpServerSummary, McpToolInfo};
 pub use message_buf::MessageBuffer;
 pub use registry::ToolRegistry;
 pub use runtime::{AgentRuntime, MessageStore};

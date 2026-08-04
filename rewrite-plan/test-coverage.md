@@ -290,4 +290,5 @@ CI 中生成覆盖率报告，上传到 Codecov。
 
 1. **`tidev-core` 的 trait 提取** — 当前 `Runtime` 直接使用具体 `LlmClient` 和 `SessionStore`，提取 trait 需要改生产代码接口。虽然工作量不大，但需要 review 确保不引入回归
 2. **`wiremock` 依赖** — 不需要引入网络层 mock 框架。可以简单地在测试中构造 `LlmProviderConfig` + mock 响应体，通过自定义 `reqwest::Client` 的 `Interceptor` 或直接绕过 HTTP 层测试解析逻辑。如果路径简单，就 mock 纯解析逻辑
-3. **`tidev-tui-old` 的测试** — 这个 crate 不编译，其 90 个测试也是死代码。不要在修复编译 bug 上花时间。等 `tidev-tui` 稳定后把有价值的部分移植过来
+3. **`tidev-tui` 的测试** — 当前 TUI 已完成迁移；后续覆盖率工作应继续补充
+   交互流程和 Runtime 边界测试，不再维护已删除的旧 crate 测试。

@@ -60,8 +60,8 @@ impl App {
                     );
                 }
 
-                // Persist to store (record_usage API not yet available in new storage).
-                // TODO: add record_usage to tidev-storage if needed later.
+                // Token usage is persisted with the completed assistant message by
+                // tidev-core; this event updates the live UI state only.
             }
             BackendEvent::InstructionsLoaded {
                 session_id,

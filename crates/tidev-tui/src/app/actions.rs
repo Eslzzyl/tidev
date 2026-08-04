@@ -3,8 +3,8 @@ use super::*;
 use crate::context::UpdateContext;
 use crate::theme::ThemePalette;
 use tidev_core::ApprovedTool;
-use tidev_llm::message::{MessageRole, ToolExecutionResult};
 use tidev_core::Mode as SessionMode;
+use tidev_llm::message::{MessageRole, ToolExecutionResult};
 
 use crate::action::{
     Action, BoundaryDecision, ChatAction, ConnectAction, McpAction, OverlayAction, OverlayKind,
@@ -201,18 +201,18 @@ impl App {
                         // Keep pending_mode intact so a deferred mode switch
                         // survives session navigation.
                         if let Some(ctx) = chat.active_chat_context() {
-                                self.mode = ctx
-                                    .messages
-                                    .iter()
-                                    .rev()
-                                    .find(|m| m.role == MessageRole::User)
-                                    .and_then(|m| ctx.app_data(m.id))
-                                    .and_then(|data| {
-                                        data.mode
-                                            .as_deref()
-                                            .and_then(|value| value.parse::<SessionMode>().ok())
-                                    })
-                                    .unwrap_or(SessionMode::Build);
+                            self.mode = ctx
+                                .messages
+                                .iter()
+                                .rev()
+                                .find(|m| m.role == MessageRole::User)
+                                .and_then(|m| ctx.app_data(m.id))
+                                .and_then(|data| {
+                                    data.mode
+                                        .as_deref()
+                                        .and_then(|value| value.parse::<SessionMode>().ok())
+                                })
+                                .unwrap_or(SessionMode::Build);
                         }
 
                         // Clear stale interaction state on session switch.
@@ -246,7 +246,8 @@ impl App {
                             let buf_messages = ctx.session_messages();
                             let rt = self.runtime.clone();
                             tokio::spawn(async move {
-                                rt.set_session_message_buffer(session_id, buf_messages).await;
+                                rt.set_session_message_buffer(session_id, buf_messages)
+                                    .await;
                             });
                         }
 
@@ -939,10 +940,10 @@ impl App {
                 let mcp = self.runtime.mcp_manager().clone();
                 tokio::spawn(async move {
                     // If renaming, remove the old entry first.
-                    if let Some(ref orig) = orig_for_spawn {
-                        if orig != &name_for_spawn {
-                            let _ = mcp.remove_server(orig).await;
-                        }
+                    if let Some(ref orig) = orig_for_spawn
+                        && orig != &name_for_spawn
+                    {
+                        let _ = mcp.remove_server(orig).await;
                     }
                     let _ = mcp.upsert_server(name_for_spawn, cfg_for_spawn).await;
                 });

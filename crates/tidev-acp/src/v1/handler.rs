@@ -15,9 +15,9 @@ use tokio::sync::{Mutex as AsyncMutex, RwLock, oneshot};
 use uuid::Uuid;
 
 use tidev_config::{AppConfig, AuthStore, ThinkingMatcher, auth::ActiveModel};
+use tidev_core::Mode as SessionMode;
 use tidev_core::Runtime;
 use tidev_llm::message::MessageRole;
-use tidev_core::Mode as SessionMode;
 use tidev_utils::session::title_from_prompt;
 
 /// Shared state accessible from all ACP request handlers.
@@ -349,8 +349,7 @@ pub async fn run_acp_agent() -> Result<()> {
                         // Compute context_used from the last assistant message.
                         let _context_used = messages
                             .iter()
-                            .filter(|m| m.role == MessageRole::Assistant)
-                            .last()
+                            .rfind(|m| m.role == MessageRole::Assistant)
                             .map(|m| {
                                 m.input_tokens.unwrap_or(0) as u64
                                     + m.output_tokens.unwrap_or(0) as u64
@@ -946,11 +945,11 @@ async fn run_event_loop(
                 log::info!("ACP: turn completed, sending PromptResponse with usage");
                 let _ = tx.send(acp::PromptResponse::new(acp::StopReason::EndTurn).usage(usage));
             }
-        } else if matches!(&event, BackendEvent::Failed { .. }) {
-            if let Some(tx) = state.pending_prompt.write().await.take() {
-                log::info!("ACP: turn failed, sending PromptResponse(Error)");
-                let _ = tx.send(acp::PromptResponse::new(acp::StopReason::EndTurn));
-            }
+        } else if matches!(&event, BackendEvent::Failed { .. })
+            && let Some(tx) = state.pending_prompt.write().await.take()
+        {
+            log::info!("ACP: turn failed, sending PromptResponse(Error)");
+            let _ = tx.send(acp::PromptResponse::new(acp::StopReason::EndTurn));
         }
     }
     log::info!("ACP: event loop ended (channel closed)");
@@ -1030,29 +1029,6 @@ fn acp_mcp_server_to_config(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn init_command_arguments_require_an_exact_command_name() {
-        assert_eq!(command_arguments("/init", "/init"), Some(""));
-        assert_eq!(
-            command_arguments(" /init focus on tests ", "/init"),
-            Some("focus on tests")
-        );
-        assert_eq!(command_arguments("/initialize", "/init"), None);
-    }
-
-    #[test]
-    fn init_is_advertised_only_in_build_mode() {
-        let plan = serde_json::to_value(available_commands(SessionMode::Plan)).unwrap();
-        let build = serde_json::to_value(available_commands(SessionMode::Build)).unwrap();
-        assert_eq!(plan["availableCommands"].as_array().unwrap().len(), 1);
-        assert_eq!(build["availableCommands"].as_array().unwrap().len(), 2);
-    }
-}
-
 /// Build an ACP error for an invalid config option value.
 fn invalid_value(config_id: &str, detail: &str) -> agent_client_protocol::Error {
     agent_client_protocol::Error::invalid_request()
@@ -1097,4 +1073,27 @@ fn extract_prompt_text(blocks: &[acp::ContentBlock]) -> String {
         }
     }
     parts.join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn init_command_arguments_require_an_exact_command_name() {
+        assert_eq!(command_arguments("/init", "/init"), Some(""));
+        assert_eq!(
+            command_arguments(" /init focus on tests ", "/init"),
+            Some("focus on tests")
+        );
+        assert_eq!(command_arguments("/initialize", "/init"), None);
+    }
+
+    #[test]
+    fn init_is_advertised_only_in_build_mode() {
+        let plan = serde_json::to_value(available_commands(SessionMode::Plan)).unwrap();
+        let build = serde_json::to_value(available_commands(SessionMode::Build)).unwrap();
+        assert_eq!(plan["availableCommands"].as_array().unwrap().len(), 1);
+        assert_eq!(build["availableCommands"].as_array().unwrap().len(), 2);
+    }
 }

@@ -92,11 +92,7 @@ pub fn save_complete_response_for_debugging(response_body: &str, enabled: bool, 
 /// Each line is one `data:` payload (the JSON part after stripping the prefix).
 /// Saves to the system temp directory when `enabled` is true and `max_files > 0`.
 /// Rotates old files when the count exceeds `max_files`.
-pub fn save_raw_response_for_debugging(
-    payloads: &[String],
-    enabled: bool,
-    max_files: usize,
-) {
+pub fn save_raw_response_for_debugging(payloads: &[String], enabled: bool, max_files: usize) {
     if !enabled || max_files == 0 || payloads.is_empty() {
         return;
     }

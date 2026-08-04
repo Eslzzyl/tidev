@@ -4,8 +4,8 @@
 //! loading, listing sessions, and persisting compaction state.
 
 use anyhow::Result;
-use tidev_storage::SessionStore;
 use std::collections::HashMap;
+use tidev_storage::SessionStore;
 use uuid::Uuid;
 
 /// Thin wrapper around [`SessionStore`] for session lifecycle operations.
@@ -65,19 +65,13 @@ impl SessionManager {
     }
 
     /// Load protocol messages and pair them with their application data.
-    pub fn load_session_messages(
-        &self,
-        session_id: Uuid,
-    ) -> Result<Vec<crate::SessionMessage>> {
+    pub fn load_session_messages(&self, session_id: Uuid) -> Result<Vec<crate::SessionMessage>> {
         let messages = self.load_messages(session_id)?;
         let app_data = self.load_message_app_data(session_id)?;
         Ok(messages
             .into_iter()
             .map(|message| {
-                let data = app_data
-                    .get(&message.id)
-                    .cloned()
-                    .unwrap_or_default();
+                let data = app_data.get(&message.id).cloned().unwrap_or_default();
                 crate::SessionMessage::new(message, data)
             })
             .collect())

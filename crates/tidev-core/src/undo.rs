@@ -3,8 +3,8 @@
 //! These are pure functions that operate on message lists. The orchestration
 //! (snapshot capture, persistence, event emission) lives in [`Runtime`](crate::Runtime).
 
-use tidev_snapshot::Patch;
 use tidev_llm::message::{COMPACTION_MESSAGE_LABEL, MessageRole};
+use tidev_snapshot::Patch;
 use uuid::Uuid;
 
 use crate::SessionMessage;

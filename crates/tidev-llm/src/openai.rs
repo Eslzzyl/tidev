@@ -5,10 +5,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::{types::LlmProviderConfig, types::ToolDefinition};
 use crate::event::LlmEvent;
 use crate::message::{Message, MessageAttachment, MessageRole, ToolCall};
 use crate::reasoning::ThinkingLevelType;
+use crate::{types::LlmProviderConfig, types::ToolDefinition};
 
 use log::{debug as log_debug, error as log_error};
 
@@ -174,9 +174,7 @@ pub(crate) async fn stream_openai(
                         let cleaned = strip_think_tags(&reasoning);
                         if !cleaned.is_empty() {
                             reasoning_text.push_str(&cleaned);
-                            let _ = tx.send(LlmEvent::ReasoningDelta {
-                                content: cleaned,
-                            });
+                            let _ = tx.send(LlmEvent::ReasoningDelta { content: cleaned });
                         }
                     }
 
@@ -194,15 +192,13 @@ pub(crate) async fn stream_openai(
                                 "reasoning.text" => detail.text.as_deref(),
                                 _ => None,
                             };
-                            if let Some(text) = text {
-                                if !text.is_empty() {
-                                    let cleaned = strip_think_tags(text);
-                                    if !cleaned.is_empty() {
-                                        reasoning_text.push_str(&cleaned);
-                                        let _ = tx.send(LlmEvent::ReasoningDelta {
-                                            content: cleaned,
-                                        });
-                                    }
+                            if let Some(text) = text
+                                && !text.is_empty()
+                            {
+                                let cleaned = strip_think_tags(text);
+                                if !cleaned.is_empty() {
+                                    reasoning_text.push_str(&cleaned);
+                                    let _ = tx.send(LlmEvent::ReasoningDelta { content: cleaned });
                                 }
                             }
                         }
@@ -221,9 +217,7 @@ pub(crate) async fn stream_openai(
                             // <thinking> text in the visible output would be
                             // misclassified as reasoning.
                             assistant_text.push_str(&content);
-                            let _ = tx.send(LlmEvent::Delta {
-                                content,
-                            });
+                            let _ = tx.send(LlmEvent::Delta { content });
                         } else {
                             // No separate reasoning channel — use ThinkParser to
                             // extract any <think> / <thinking> tags from the text.
@@ -231,16 +225,12 @@ pub(crate) async fn stream_openai(
 
                             if !visible.is_empty() {
                                 assistant_text.push_str(&visible);
-                                let _ = tx.send(LlmEvent::Delta {
-                                    content: visible,
-                                });
+                                let _ = tx.send(LlmEvent::Delta { content: visible });
                             }
 
                             if !reasoning.is_empty() {
                                 reasoning_text.push_str(&reasoning);
-                                let _ = tx.send(LlmEvent::ReasoningDelta {
-                                    content: reasoning,
-                                });
+                                let _ = tx.send(LlmEvent::ReasoningDelta { content: reasoning });
                             }
                         }
                     }
@@ -658,8 +648,8 @@ fn user_message_content(model: &LlmProviderConfig, message: &Message) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{ApiType, LlmProviderConfig};
     use crate::message::{Message, MessageRole};
+    use crate::types::{ApiType, LlmProviderConfig};
 
     #[test]
     fn openai_system_messages_are_combined() {

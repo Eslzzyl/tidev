@@ -310,7 +310,7 @@ mod tests {
         let mut blank_count = 0usize;
         let mut passed_footer = false;
 
-        for (_i, line) in output.lines.iter().enumerate() {
+        for line in &output.lines {
             let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
             let trimmed = text.trim();
 

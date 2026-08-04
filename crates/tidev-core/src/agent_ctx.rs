@@ -17,15 +17,13 @@ use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use crate::agent_type::{AgentDefinition, AgentType};
+use crate::backend_event::{BackendEvent, agent_event_channel, agent_event_to_backend_event};
 use tidev_agent::{
-    ContextManager, AgentContext, AgentEvent, AgentLoopConfig, llm_event_to_agent_event,
+    AgentContext, AgentEvent, AgentLoopConfig, ContextManager, llm_event_to_agent_event,
 };
 use tidev_config::auth::ActiveModel;
 use tidev_config::{AppConfig, AuthStore};
-use crate::agent_type::{AgentDefinition, AgentType};
-use crate::backend_event::{
-    agent_event_channel, agent_event_to_backend_event, BackendEvent,
-};
 use tidev_llm::message::{AssistantTurn, Message, MessageRole, ToolCall, ToolExecutionResult};
 use tidev_llm::reasoning::ThinkingLevelType;
 use tidev_tools::types::ToolDefinition;
@@ -37,9 +35,11 @@ use tidev_llm::{LlmClient, LlmProviderConfig};
 use tidev_snapshot::SnapshotService;
 use tidev_storage::MessageAppData;
 
-use crate::mode::Mode;
-use crate::approval::{ApprovedTool, ToolCallWithViolations, TuiRequest, TuiRequestKind, TuiResponse};
+use crate::approval::{
+    ApprovedTool, ToolCallWithViolations, TuiRequest, TuiRequestKind, TuiResponse,
+};
 use crate::message_buf::CoreMessageBuffer;
+use crate::mode::Mode;
 use crate::registry::ToolRegistry;
 use crate::session::SessionManager;
 use crate::tool_def::to_llm_tool_def;
@@ -105,7 +105,8 @@ fn read_only_tool_names() -> HashSet<&'static str> {
 
 /// Whether a tool call is read-only (and may thus run in parallel with others).
 fn is_read_only(name: &str) -> bool {
-    read_only_tool_names().contains(tidev_utils::tool_name::canonical_tool_name(name).unwrap_or(name))
+    read_only_tool_names()
+        .contains(tidev_utils::tool_name::canonical_tool_name(name).unwrap_or(name))
 }
 
 /// Restore the model's tool-call order after concurrent execution.
@@ -139,10 +140,7 @@ fn order_tool_results(
 /// Recover a subagent association from the assistant tool call that produced
 /// a result. The association is application data and must never enter the
 /// protocol-level tool result.
-fn child_session_id_for_tool_call(
-    buffer: &CoreMessageBuffer,
-    tool_call_id: &str,
-) -> Option<Uuid> {
+fn child_session_id_for_tool_call(buffer: &CoreMessageBuffer, tool_call_id: &str) -> Option<Uuid> {
     buffer
         .load()
         .iter()
@@ -821,8 +819,7 @@ impl AgentContext for CoreContext {
 
         // Spawn the streaming LLM call.
         let handle = tokio::spawn(async move {
-            llm.stream_chat(model, msgs, llm_tools, tx, tl)
-                .await;
+            llm.stream_chat(model, msgs, llm_tools, tx, tl).await;
         });
 
         let mut turn = AssistantTurn {
@@ -1097,10 +1094,7 @@ impl AgentContext for CoreContext {
                     result: Box::new(ToolExecutionResult::new("User cancelled the request")),
                     child_session_id: None,
                 });
-                results.push((
-                    tc,
-                    ToolExecutionResult::new("User cancelled the request"),
-                ));
+                results.push((tc, ToolExecutionResult::new("User cancelled the request")));
                 continue;
             }
 
@@ -1312,15 +1306,12 @@ impl AgentContext for CoreContext {
             cancel_guard.disarmed = true;
         }
 
-        self.finish_tool_execution(session_id, tool_calls, results).await
+        self.finish_tool_execution(session_id, tool_calls, results)
+            .await
     }
 
     // -----------------------------------------------------------------------
-    async fn save_messages(
-        &self,
-        session_id: Uuid,
-        messages: &[Message],
-    ) -> Result<()> {
+    async fn save_messages(&self, session_id: Uuid, messages: &[Message]) -> Result<()> {
         // ── Phase 1: Round-level snapshot tracking ──────────────────────
         //
         // When the assistant message with tool calls is saved, a round is
@@ -1369,7 +1360,10 @@ impl AgentContext for CoreContext {
             .iter()
             .map(|message| (message.id, MessageAppData::default()))
             .collect();
-        if messages.iter().any(|message| message.role == MessageRole::Tool) {
+        if messages
+            .iter()
+            .any(|message| message.role == MessageRole::Tool)
+        {
             let buffer = self.buffer.read().await;
             for message in messages {
                 if message.role != MessageRole::Tool {
@@ -1380,10 +1374,9 @@ impl AgentContext for CoreContext {
                 };
                 if let Some(child_session_id) =
                     child_session_id_for_tool_call(&buffer, tool_call_id)
+                    && let Some(data) = app_data.get_mut(&message.id)
                 {
-                    if let Some(data) = app_data.get_mut(&message.id) {
-                        data.child_session_id = Some(child_session_id);
-                    }
+                    data.child_session_id = Some(child_session_id);
                 }
             }
         }
@@ -1540,11 +1533,12 @@ impl AgentContext for CoreContext {
 
         // Keep both injections in the same order as the original agent loop:
         // instruction files first, then the mode reminder.
-        self.inject_instructions_impl(session_id, &mut messages).await?;
-        self.inject_mode_reminder_impl(session_id, &mut messages).await?;
+        self.inject_instructions_impl(session_id, &mut messages)
+            .await?;
+        self.inject_mode_reminder_impl(session_id, &mut messages)
+            .await?;
         Ok(messages)
     }
-
 }
 
 // ---------------------------------------------------------------------------
@@ -1967,7 +1961,8 @@ fn filter_subagent_tools(
         .iter()
         .filter(|def| {
             let name = &def.name;
-            let canonical = tidev_utils::tool_name::canonical_tool_name(name).unwrap_or(name.as_str());
+            let canonical =
+                tidev_utils::tool_name::canonical_tool_name(name).unwrap_or(name.as_str());
 
             // Plan mode or read-only agent: only read tools.
             if mode == Mode::Plan || read_only {
@@ -1982,7 +1977,8 @@ fn filter_subagent_tools(
         })
         .filter(|def| {
             let name = &def.name;
-            let canonical = tidev_utils::tool_name::canonical_tool_name(name).unwrap_or(name.as_str());
+            let canonical =
+                tidev_utils::tool_name::canonical_tool_name(name).unwrap_or(name.as_str());
             // Extra safety: never include write tools for read-only agents.
             if read_only && is_write_tool(canonical) {
                 return false;
@@ -1991,7 +1987,8 @@ fn filter_subagent_tools(
         })
         // Never include the task tool — subagents must not spawn further subagents.
         .filter(|def| {
-            let canonical = tidev_utils::tool_name::canonical_tool_name(&def.name).unwrap_or(&def.name);
+            let canonical =
+                tidev_utils::tool_name::canonical_tool_name(&def.name).unwrap_or(&def.name);
             canonical != "task"
         })
         .cloned()

@@ -12,8 +12,8 @@ use ratatui::layout::{Constraint, Layout, Margin, Position, Rect};
 use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, List, ListItem, Paragraph};
-use tidev_config::ThinkingMatcher;
 use tidev_config::ThinkingLevelType;
+use tidev_config::ThinkingMatcher;
 use tidev_config::auth::{ActiveModel, ModelSummary};
 
 use crate::action::{Action, OverlayAction, OverlayKind};
@@ -767,7 +767,11 @@ impl Component for ModelPanel {
                                         .map(|t| t.thinking_level_index)
                                         .unwrap_or(0);
                                     let tl = &tl_options[tl_idx % tl_options.len()];
-                                    Some(ThinkingLevelType::from_string(tl).display_name().to_string())
+                                    Some(
+                                        ThinkingLevelType::from_string(tl)
+                                            .display_name()
+                                            .to_string(),
+                                    )
                                 } else {
                                     None
                                 }
@@ -810,7 +814,9 @@ impl Component for ModelPanel {
                                     .unwrap_or(0);
                                 for (oi, opt) in tl_options.iter().enumerate() {
                                     let is_tl_selected = oi == tl_idx % tl_options.len();
-                                    let level_name = ThinkingLevelType::from_string(opt).display_name().to_string();
+                                    let level_name = ThinkingLevelType::from_string(opt)
+                                        .display_name()
+                                        .to_string();
                                     let bullet = if is_tl_selected { " ● " } else { " ○ " };
                                     let tl_style = if is_tl_selected {
                                         Style::default()

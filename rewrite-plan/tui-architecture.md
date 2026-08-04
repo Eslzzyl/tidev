@@ -1,9 +1,8 @@
 # tidev-tui 架构设计
 
-> **2026-07-07 实现更新：**
-> `tidev-tui-new` 已重命名为 `tidev-tui`，旧 `tidev-tui` 已重命名为 `tidev-tui-old`。
-> 新 crate 通过 `tidev_tui_old::*` 导入旧 crate 的公开类型（`ThemeName`、`ThemePalette`、`ChatContext`），
-> 其余代码为独立实现。
+> **2026-08-04 实现状态：**
+> `tidev-tui` 已完成新架构迁移并成为唯一 TUI crate。Runtime、事件订阅、审批请求、
+> 组件树和面板均由当前 crate 自己实现，旧 `tidev-tui-old` 已删除。
 
 ## 铁律
 
@@ -78,10 +77,8 @@ input/event/panels.rs       → App::handle_theme_panel_key() (按键)
 
 ## 3. 架构总览
 
-实现分布在两个 crate 中：
-
-- **`tidev-tui-old`** — 旧代码，不动，作为新 crate 的依赖提供公开类型
-- **`tidev-tui`** — 新架构实现，通过 `tidev_tui_old::*` 使用旧 crate 的 ThemeName / ThemePalette / ChatContext
+实现集中在 `tidev-tui` crate 中。它通过 `tidev-core::Runtime` 获取后端能力，
+组件之间通过 `Action` 通信，不再依赖旧 TUI crate。
 
 ```
 ┌─────────────────────────────────────────────┐
@@ -567,15 +564,14 @@ tidev-tui/src/
 │   ├── line.rs
 │   └── links.rs
 │
-└──── (theme/, state/, chat_context/ 等保留在 tidev-tui-old，通过 tidev_tui_old::* 导入)
+└──── (theme/, chat_context/ 等均为 tidev-tui 自有模块)
 ```
 
 render/ 和 input/ 目录不再存在，功能已并入组件。
 
 ## 11. 迁移路线
 
-> **实现变更：** `tidev-tui-new` 已完成重命名为 `tidev-tui`，旧 crate 为 `tidev-tui-old`。
-> 二进制入口已切换到新架构。
+> **实现状态：** TUI 迁移已完成，二进制入口使用当前 `tidev-tui` 架构。
 
 | 阶段 | 内容 | 风险 | 状态 |
 |---|---|---|---|---|
@@ -600,11 +596,11 @@ render/ 和 input/ 目录不再存在，功能已并入组件。
 | 5d | 迁移工具执行对话框（Permission, Question） | **高** | ✅ 已完成 |
 | 6 | 提取 **Chat** 组件（MessageList + 渲染管线，~6000 行） | **高** | ✅ 已完成 |
 | 7 | 提取 **Composer** 组件（1135 行的输入处理 + @mention + /command + snippet + paste） | **高** | ✅ 已完成 |
-| 8 | 全部迁移完成，删除 `tidev-tui-old` | — | ☐ 待做 |
+| 8 | 全部迁移完成并清理旧实现 | — | ✅ 已完成 |
 ### 11.1 当前状态
 
-- `cargo run` → 新 `tidev-tui`，新架构
-- `crates/tidev-tui-old/` 保留待删
+- `cargo run` → `tidev-tui`，当前架构
+- 旧 TUI 实现已删除
 
 每迁移一个组件，新 crate 中对应功能即可用。
 

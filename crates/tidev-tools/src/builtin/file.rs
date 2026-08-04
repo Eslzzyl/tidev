@@ -62,6 +62,7 @@ File references can only be relative, NEVER ABSOLUTE.",
     ]
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn execute_tool_call(
     workspace_root: &Path,
     config_dir: &Path,
@@ -280,6 +281,7 @@ fn file_change_output(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn read_path(
     workspace_root: &Path,
     config_dir: &Path,
@@ -521,10 +523,10 @@ fn attach_instructions(
         "\n\n<system-reminder>\n{}\n</system-reminder>",
         reminders.join("\n\n")
     ));
-    if let Some(sink) = instruction_sources {
-        if let Ok(mut sources) = sink.lock() {
-            sources.extend(source_names.iter().cloned());
-        }
+    if let Some(sink) = instruction_sources
+        && let Ok(mut sources) = sink.lock()
+    {
+        sources.extend(source_names.iter().cloned());
     }
 }
 

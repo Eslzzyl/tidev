@@ -247,13 +247,7 @@ pub async fn execute_tool_call(
             let session_id = ctx.session_id;
             let call_name = call.name.clone();
             safe_spawn_blocking_str(move || {
-                task::execute_tool_call(
-                    &workspace_root,
-                    &*store,
-                    session_id,
-                    &call_name,
-                    arguments,
-                )
+                task::execute_tool_call(&workspace_root, &*store, session_id, &call_name, arguments)
             })
             .await
         }

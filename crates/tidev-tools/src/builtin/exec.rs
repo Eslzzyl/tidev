@@ -226,8 +226,7 @@ async fn run_shell_streaming(
     let mut actual_command = command.to_string();
 
     // ── Layer 0: Plan mode command classification ────────────────────
-    if read_only && Classifier::global().classify(command) >= Safety::WriteOperation
-    {
+    if read_only && Classifier::global().classify(command) >= Safety::WriteOperation {
         log::info!(
             "plan mode blocked write command: {}",
             command.lines().next().unwrap_or(command)
@@ -486,8 +485,7 @@ fn run_shell_inner(
     let mut actual_command = command.to_string();
 
     // ── Layer 0: Plan mode command classification ────────────────────
-    if read_only && Classifier::global().classify(command) >= Safety::WriteOperation
-    {
+    if read_only && Classifier::global().classify(command) >= Safety::WriteOperation {
         log::info!(
             "plan mode blocked write command: {}",
             command.lines().next().unwrap_or(command)

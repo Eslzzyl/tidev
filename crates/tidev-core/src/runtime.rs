@@ -30,19 +30,19 @@ use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use crate::mode::Mode;
 use tidev_config::auth::ActiveModel;
 use tidev_config::{AppConfig, AuthStore, paths::ConfigPaths};
+use tidev_llm::message::{Message, MessageAttachment, MessageRole, QueuedUserMessage};
+use tidev_llm::reasoning::ThinkingLevelType;
 use tidev_search::FileSearchIndex;
 use tidev_storage::{MessageAppData, SessionStore};
-use tidev_llm::message::{Message, MessageAttachment, MessageRole, QueuedUserMessage};
-use crate::mode::Mode;
-use tidev_llm::reasoning::ThinkingLevelType;
 use tidev_tools::types::TodoItem;
 
 use tidev_agent::{AgentContext, ContextManager};
 
-use crate::backend_event::BackendEvent;
 use crate::approval::TuiRequest;
+use crate::backend_event::BackendEvent;
 use crate::mcp::McpManager;
 use crate::message_buf::CoreMessageBuffer;
 use crate::registry::ToolRegistry;
@@ -216,7 +216,9 @@ impl Runtime {
             .session_manager
             .load_session_messages(session_id)
             .unwrap_or_default();
-        let buf = Arc::new(RwLock::new(CoreMessageBuffer::from_session_messages(messages)));
+        let buf = Arc::new(RwLock::new(CoreMessageBuffer::from_session_messages(
+            messages,
+        )));
         bufs.insert(session_id, buf.clone());
         buf
     }
@@ -430,12 +432,7 @@ impl Runtime {
     }
 
     /// Submit a user prompt for a session.
-    pub async fn submit_prompt(
-        &self,
-        session_id: Uuid,
-        content: String,
-        mode: Mode,
-    ) -> Result<()> {
+    pub async fn submit_prompt(&self, session_id: Uuid, content: String, mode: Mode) -> Result<()> {
         self.submit_prompt_with_attachments(session_id, mode, content, Vec::new(), None)
             .await
     }
@@ -459,8 +456,10 @@ impl Runtime {
         let mut user_msg = Message::new(MessageRole::User, content);
         user_msg.attachments = attachments;
         user_msg.thinking_level = thinking_level;
-        let mut user_app_data = MessageAppData::default();
-        user_app_data.mode = Some(mode.as_str().to_string());
+        let user_app_data = MessageAppData {
+            mode: Some(mode.as_str().to_string()),
+            ..Default::default()
+        };
 
         // 1. If undo revert is active, discard hidden messages first.
         if let Ok(Some((revert_msg_id, _))) = self.session_manager.load_revert_state(session_id)
@@ -563,11 +562,7 @@ impl Runtime {
     ///
     /// `mode` should be the session's current mode; it is read from the last
     /// user message's `mode` field if `None` is passed.
-    pub async fn continue_session(
-        &self,
-        session_id: Uuid,
-        mode: Option<Mode>,
-    ) -> Result<()> {
+    pub async fn continue_session(&self, session_id: Uuid, mode: Option<Mode>) -> Result<()> {
         // Fast path: avoid DB reload if the session is already running.
         // The atomic check in start_agent_loop prevents TOCTOU.
         if self.is_session_busy(session_id) {
@@ -646,7 +641,9 @@ impl Runtime {
                 .await
                 .replace_all_with_session_messages(messages);
         } else {
-            let buf = Arc::new(RwLock::new(CoreMessageBuffer::from_session_messages(messages)));
+            let buf = Arc::new(RwLock::new(CoreMessageBuffer::from_session_messages(
+                messages,
+            )));
             bufs.insert(session_id, buf);
         }
     }
@@ -940,10 +937,8 @@ impl Runtime {
 
         // 2. Run compaction (async, no locks held on ContextManager).
         //    Capture prior compaction state before it gets overwritten.
-        let agent_event_tx = crate::backend_event::agent_event_channel(
-            session_id,
-            self.event_tx.clone(),
-        );
+        let agent_event_tx =
+            crate::backend_event::agent_event_channel(session_id, self.event_tx.clone());
         let (result, prior_summary, prior_retained_from) = {
             let cm_lock = cm.lock().await;
             let prior_summary = cm_lock.summary.clone();

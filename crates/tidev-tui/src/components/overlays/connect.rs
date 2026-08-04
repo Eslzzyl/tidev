@@ -193,13 +193,13 @@ impl Component for ConnectDialog {
                 KeyCode::Char('d') | KeyCode::Char('D')
                     if !key.modifiers.contains(KeyModifiers::CONTROL) =>
                 {
-                    if let Some(item) = self.visible_provider(self.selected) {
-                        if item.connected {
-                            self.phase = ConnectPhase::DisconnectConfirm {
-                                provider_id: item.provider_id.clone(),
-                                display_name: item.display_name.clone(),
-                            };
-                        }
+                    if let Some(item) = self.visible_provider(self.selected)
+                        && item.connected
+                    {
+                        self.phase = ConnectPhase::DisconnectConfirm {
+                            provider_id: item.provider_id.clone(),
+                            display_name: item.display_name.clone(),
+                        };
                     }
                     None
                 }
@@ -602,10 +602,10 @@ impl Component for ConnectDialog {
     }
 
     fn handle_paste(&mut self, text: &str) -> Option<Action> {
-        if !text.is_empty() {
-            if let ConnectPhase::ApiKey { buffer, .. } = &mut self.phase {
-                buffer.push_str(text);
-            }
+        if !text.is_empty()
+            && let ConnectPhase::ApiKey { buffer, .. } = &mut self.phase
+        {
+            buffer.push_str(text);
         }
         None
     }

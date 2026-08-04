@@ -1066,7 +1066,8 @@ impl SessionStore {
                 app_data.snapshot_hash,
                 compress_text(app_data.patch_files.as_deref().unwrap_or("")),
                 app_data.file_diffs.as_deref().map(compress_text),
-                app_data.mode
+                app_data
+                    .mode
                     .as_ref()
                     .map(|m| serde_json::to_string(m).unwrap_or_default()),
                 msg.thinking_level
@@ -2285,6 +2286,7 @@ impl SessionStore {
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
     use crate::database::Database;
@@ -2481,7 +2483,7 @@ mod tests {
             },
         );
         store
-            .append_messages_with_app_data(sid, &[msg.clone()], &app_data)
+            .append_messages_with_app_data(sid, std::slice::from_ref(&msg), &app_data)
             .unwrap();
 
         let loaded = store.load_message_app_data(sid).unwrap();
@@ -2518,7 +2520,7 @@ mod tests {
             },
         );
         source
-            .append_messages_with_app_data(sid, &[msg.clone()], &app_data)
+            .append_messages_with_app_data(sid, std::slice::from_ref(&msg), &app_data)
             .unwrap();
 
         let export_tmp = TempDir::new().unwrap();
@@ -2526,7 +2528,12 @@ mod tests {
         source.export_to_sqlite(&[sid], &export_path).unwrap();
 
         let (target, _target_tmp) = test_store();
-        assert_eq!(target.import_from_sqlite(&export_path, None, false).unwrap(), vec![sid]);
+        assert_eq!(
+            target
+                .import_from_sqlite(&export_path, None, false)
+                .unwrap(),
+            vec![sid]
+        );
         let loaded = target.load_message_app_data(sid).unwrap();
         assert_eq!(loaded[&msg.id].child_session_id, Some(child_id));
     }

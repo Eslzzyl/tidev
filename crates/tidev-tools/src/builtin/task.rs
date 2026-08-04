@@ -7,8 +7,8 @@ use crate::builtin::utils::decode_tool_args;
 use crate::todo_persistence::TodoPersistence;
 use crate::types::{TaskArgs, ToolDefinition, ToolPermission};
 
-/// Mirrors `tidev_core::agent_type::AgentType::parse` accepted names.
-/// Keep in sync when agent types are added/renamed (see tidev-core agent_type.rs).
+/// Mirrors the agent type parser's accepted names.
+/// Keep in sync when agent types are added or renamed.
 const SUBAGENT_TYPES: &[&str] = &["explorer", "librarian", "oracle", "fixer"];
 
 fn normalize_subagent_type(s: &str) -> Option<&'static str> {
@@ -54,7 +54,9 @@ pub fn execute_tool_call(
         )
     })?;
 
-    Ok(format!("Started {subagent_type} subagent task '{description}'"))
+    Ok(format!(
+        "Started {subagent_type} subagent task '{description}'"
+    ))
 }
 
 #[cfg(test)]
@@ -79,10 +81,7 @@ mod tests {
         for name in SUBAGENT_TYPES {
             assert_eq!(normalize_subagent_type(name), Some(*name));
             assert_eq!(normalize_subagent_type(&format!("@{name}")), Some(*name));
-            assert_eq!(
-                normalize_subagent_type(&name.to_uppercase()),
-                Some(*name)
-            );
+            assert_eq!(normalize_subagent_type(&name.to_uppercase()), Some(*name));
         }
         assert_eq!(normalize_subagent_type("general"), None);
         assert_eq!(normalize_subagent_type("unknown"), None);

@@ -170,6 +170,7 @@ impl ToolRegistry {
 
     /// Execute a built-in call through the generic agent registry while
     /// preserving the original host execution and streaming contract.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn execute_via_agent(
         &self,
         call: &ToolCall,

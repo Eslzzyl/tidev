@@ -14,8 +14,8 @@ use lru::LruCache;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use tidev_core::BackendEvent;
-use tidev_llm::message::{Message, MessageAttachment};
 use tidev_core::Mode as SessionMode;
+use tidev_llm::message::{Message, MessageAttachment};
 use uuid::Uuid;
 
 use crate::action::{Action, ChatAction, OverlayAction, OverlayKind, SessionAction};
@@ -278,9 +278,7 @@ impl MessageList {
         for msg in messages {
             if msg.role == tidev_llm::message::MessageRole::Tool
                 && msg.tool_name.as_deref() == Some("task")
-                && let Some(csid) = ctx
-                    .app_data(msg.id)
-                    .and_then(|data| data.child_session_id)
+                && let Some(csid) = ctx.app_data(msg.id).and_then(|data| data.child_session_id)
             {
                 self.completed_subagent_sessions.insert(msg.id, csid);
                 // Also map by assistant message ID for click hit-testing.
@@ -299,9 +297,7 @@ impl MessageList {
             }
 
             if msg.role == tidev_llm::message::MessageRole::Assistant {
-                let msg_csid = ctx
-                    .app_data(msg.id)
-                    .and_then(|data| data.child_session_id);
+                let msg_csid = ctx.app_data(msg.id).and_then(|data| data.child_session_id);
                 for tc in &msg.tool_calls {
                     if canonical_tool_name(&tc.name) == Some("task")
                         && !tool_result_ids.contains(tc.id.as_str())
@@ -370,10 +366,7 @@ impl MessageList {
                 msg.completed_at = Some(completed);
             }
             if let Some(mode) = mode {
-                let mut app_data = chat_context
-                    .app_data(msg_id)
-                    .cloned()
-                    .unwrap_or_default();
+                let mut app_data = chat_context.app_data(msg_id).cloned().unwrap_or_default();
                 app_data.mode = Some(mode.as_str().to_string());
                 chat_context.set_app_data(msg_id, app_data);
             }
@@ -831,10 +824,8 @@ impl MessageList {
                             .map(|m| m.id);
                         if let Some(msg_id) = tool_msg_id {
                             self.completed_subagent_sessions.insert(msg_id, csid);
-                            let mut app_data = chat_context
-                                .app_data(msg_id)
-                                .cloned()
-                                .unwrap_or_default();
+                            let mut app_data =
+                                chat_context.app_data(msg_id).cloned().unwrap_or_default();
                             app_data.child_session_id = Some(csid);
                             chat_context.set_app_data(msg_id, app_data);
                         }
@@ -850,10 +841,8 @@ impl MessageList {
                             .map(|m| m.id);
                         if let Some(msg_id) = assistant_msg_id {
                             self.completed_subagent_sessions.insert(msg_id, csid);
-                            let mut app_data = chat_context
-                                .app_data(msg_id)
-                                .cloned()
-                                .unwrap_or_default();
+                            let mut app_data =
+                                chat_context.app_data(msg_id).cloned().unwrap_or_default();
                             app_data.child_session_id = Some(csid);
                             chat_context.set_app_data(msg_id, app_data);
                         }
@@ -940,10 +929,15 @@ impl MessageList {
                 // and assistant message which require the chat_context.
                 // Sync child_session_id into the assistant message's app data
                 // so rebuild_subagent_state() can recover it from messages.
-                let assistant_id = chat_context.messages.iter().rev().find(|m| {
-                    m.role == tidev_llm::message::MessageRole::Assistant
-                        && m.tool_calls.iter().any(|tc| tc.id == *tool_call_id)
-                }).map(|msg| msg.id);
+                let assistant_id = chat_context
+                    .messages
+                    .iter()
+                    .rev()
+                    .find(|m| {
+                        m.role == tidev_llm::message::MessageRole::Assistant
+                            && m.tool_calls.iter().any(|tc| tc.id == *tool_call_id)
+                    })
+                    .map(|msg| msg.id);
                 if let Some(message_id) = assistant_id {
                     let mut app_data = chat_context
                         .app_data(message_id)
@@ -1496,11 +1490,8 @@ fn infer_subagent_status(event: &BackendEvent) -> Option<String> {
 /// Return whether the latest assistant tool-call message is still missing a
 /// result for at least one of its tool calls.
 fn latest_assistant_has_pending_tool_results(messages: &[Message]) -> bool {
-    let Some((assistant_idx, assistant)) = messages
-        .iter()
-        .enumerate()
-        .rev()
-        .find(|(_, message)| {
+    let Some((assistant_idx, assistant)) =
+        messages.iter().enumerate().rev().find(|(_, message)| {
             message.role == tidev_llm::message::MessageRole::Assistant
                 && !message.tool_calls.is_empty()
         })

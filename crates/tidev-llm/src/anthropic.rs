@@ -5,9 +5,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::{types::LlmProviderConfig, types::ToolDefinition};
 use crate::event::LlmEvent;
 use crate::message::{Message, MessageAttachment, MessageRole};
+use crate::{types::LlmProviderConfig, types::ToolDefinition};
 
 use log::{debug as log_debug, error as log_error};
 
@@ -142,15 +142,11 @@ pub(crate) async fn stream_anthropic(
                             let (visible, reasoning) = think_parser.push(&text);
                             if !visible.is_empty() {
                                 assistant_text.push_str(&visible);
-                                let _ = tx.send(LlmEvent::Delta {
-                                    content: visible,
-                                });
+                                let _ = tx.send(LlmEvent::Delta { content: visible });
                             }
                             if !reasoning.is_empty() {
                                 reasoning_text.push_str(&reasoning);
-                                let _ = tx.send(LlmEvent::ReasoningDelta {
-                                    content: reasoning,
-                                });
+                                let _ = tx.send(LlmEvent::ReasoningDelta { content: reasoning });
                             }
                         }
                         AnthropicDelta::InputJson { partial_json } => {
@@ -172,9 +168,7 @@ pub(crate) async fn stream_anthropic(
                             }
                             if thinking_blocks.contains(&index) {
                                 reasoning_text.push_str(&thinking);
-                                let _ = tx.send(LlmEvent::ReasoningDelta {
-                                    content: thinking,
-                                });
+                                let _ = tx.send(LlmEvent::ReasoningDelta { content: thinking });
                             }
                         }
                         AnthropicDelta::Signature { .. } => {

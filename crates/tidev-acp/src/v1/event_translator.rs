@@ -147,13 +147,13 @@ impl EventTranslator {
 
                 // If this is a todowrite tool call, emit a Plan notification
                 // so the client can display the updated task list.
-                if tool_call.name == "todowrite" {
-                    if let Some(plan) = todo_args_to_plan(&tool_call.arguments) {
-                        notifs.push(acp::SessionNotification::new(
-                            self.session_id.clone(),
-                            acp::SessionUpdate::Plan(plan),
-                        ));
-                    }
+                if tool_call.name == "todowrite"
+                    && let Some(plan) = todo_args_to_plan(&tool_call.arguments)
+                {
+                    notifs.push(acp::SessionNotification::new(
+                        self.session_id.clone(),
+                        acp::SessionUpdate::Plan(plan),
+                    ));
                 }
 
                 notifs

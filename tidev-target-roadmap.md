@@ -1,6 +1,6 @@
 # tidev 目标态路线图（tidev-types 拆分之后）
 
-**状态**: P5 清理与最终验证进行中
+**状态**: P5 清理与最终验证已完成
 **日期**: 2026-08-04
 **修订**: 2026-08-04（P4 收口）——补充 CoreContext 工具结果顺序约束；确定 v1 不提供通用 SubagentHost；明确 P0 请求字节捕获 harness 不纳入本轮
 **前置条件**: `tidev-types-split.md`（tidev-types 拆分）已完成并验收通过
@@ -59,7 +59,7 @@ tidev-acp ──→ core, llm, config, utils
 | P2 循环与 trait 去 tidev 化 | trait 7 方法（审批删除）、注入迁移、审批媒介归 core、AgentLoopConfig 无 mode | P1、P1.5 | 3–4 天 |
 | P3 内核组件迁入 | MessageBuffer / ContextManager / Tool trait / ToolRegistry / MCP 客户端进 tidev-agent | P1、P2 | 5–6 天 |
 | P4 默认运行时与收口 | AgentRuntime（无 ApprovalHandler）、CoreContext 收口、core 自有子代理策略、消费方示例（含 MCP） | P3 | 4–6 天 |
-| P5 清理与验证 | TODO 清除、文档同步、最终依赖图验证 | 全部 | 0.5–1 天 |
+| P5 清理与验证 | TODO 清除、文档同步、最终依赖图验证 | 全部 | 已完成 |
 
 **合计约 22–30 个工作日（5–6 周）**。阶段边界是自然的中途止损点：**每个阶段结束时工作区必须 `cargo check` + `cargo test --workspace` 全绿**（与拆分的一次性策略不同，本路线图按阶段增量交付；P1.5 例外——它与 P1 同属 llm 范围内的连锁改动，可合并为一次性迁移）。
 
@@ -195,6 +195,12 @@ tidev-acp ──→ core, llm, config, utils
 - 同步 rewrite-plan/architecture.md 与 D-005 等设计文档至目标态（含本轮修订：铁律定义、7 方法 trait、审批归位、MCP 入 agent）。
 - 最终 `cargo tree` 验证 §1 依赖图（叶子、无循环、agent 的 tidev 依赖仅 llm）。
 - 可选（用户决策）：tidev-llm / tidev-agent / tidev-protocol 相关类型的 crates.io 发布准备（版本、文档、license；届时评估 `tidev-` 前缀的品牌问题）。
+
+本轮完成项：
+
+- 全仓格式化、clippy 严格检查、workspace check、workspace tests 和消费方示例 smoke test 均通过。
+- `gaps.md` 中过时的 per-agent 模型配置和 TUI Runtime 缺口已按当前实现更新。
+- P0 请求字节捕获 harness 按决策不实现；字节级不变性仍由确定性构造、消息顺序回归测试和小步审查约束。
 
 ## 5. 执行顺序依据
 

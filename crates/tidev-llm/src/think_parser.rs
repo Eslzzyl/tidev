@@ -107,6 +107,7 @@ impl ThinkParser {
 /// Returns the maximum suffix of `text` that could be a partial `<think>` or
 /// `</think>` tag.  This prevents splitting a multi-chunk tag boundary.
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
 

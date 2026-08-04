@@ -99,6 +99,7 @@ pub(crate) struct BuiltinToolAdapter {
 }
 
 impl BuiltinToolAdapter {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         registry: ToolRegistry,
         call: ToolCall,
@@ -159,6 +160,7 @@ impl Tool for BuiltinToolAdapter {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn execute_host_call(
     registry: &ToolRegistry,
     call: &ToolCall,
@@ -205,6 +207,7 @@ async fn execute_host_call(
 }
 
 /// Dispatch one host tool through `tidev-agent`'s registry.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_builtin_via_agent(
     registry: &ToolRegistry,
     call: &ToolCall,
