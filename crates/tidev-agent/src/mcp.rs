@@ -1,19 +1,30 @@
 //! Generic Model Context Protocol client and tool registry.
 
 use std::collections::BTreeMap;
+use std::error::Error as StdError;
+use std::fmt::{Display, Formatter};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
-use http::{HeaderName, HeaderValue};
+use futures_util::StreamExt;
+use http::{HeaderMap, HeaderName, HeaderValue, header};
 use rmcp::model::{
     CallToolRequestParams, ClientCapabilities, ClientInfo, Implementation, Tool as McpToolModel,
 };
-use rmcp::service::{RoleClient, RunningService, ServiceExt};
+use rmcp::service::{RoleClient, RunningService, RxJsonRpcMessage, ServiceExt, TxJsonRpcMessage};
+use rmcp::transport::Transport;
 use rmcp::transport::child_process::TokioChildProcess;
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransport;
 use serde_json::{Map, Value};
+use sse_stream::SseStream;
 use tokio::process::Command;
+use tokio::sync::{mpsc, oneshot};
+use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
+use url::Url;
 
 use tidev_llm::ToolDefinition;
 use tidev_llm::message::{MessageAttachment, ToolCall, ToolExecutionResult, ToolMetadata};
@@ -37,8 +48,7 @@ pub enum McpServerSpec {
         url: String,
         headers: BTreeMap<String, String>,
     },
-    /// Compatibility name for a streamable HTTP server whose responses may use SSE.
-    /// Legacy SSE servers that require a GET endpoint handshake are not supported.
+    /// A legacy SSE server using a GET stream and a separate POST message endpoint.
     Sse {
         url: String,
         headers: BTreeMap<String, String>,
@@ -132,6 +142,239 @@ struct McpServerState {
 struct McpTool {
     registry: Weak<Mutex<McpRegistryInner>>,
     info: McpToolInfo,
+}
+
+const LEGACY_SSE_CHANNEL_CAPACITY: usize = 64;
+const LEGACY_SSE_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+#[derive(Debug)]
+struct LegacySseTransport {
+    shared: Arc<LegacySseShared>,
+    messages: mpsc::Receiver<RxJsonRpcMessage<RoleClient>>,
+    cancellation: CancellationToken,
+    reader: Option<JoinHandle<()>>,
+}
+
+#[derive(Debug)]
+struct LegacySseShared {
+    client: reqwest::Client,
+    endpoint: Url,
+    headers: HeaderMap,
+    closed: AtomicBool,
+}
+
+#[derive(Debug)]
+struct LegacySseError(anyhow::Error);
+
+impl Display for LegacySseError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+impl StdError for LegacySseError {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        self.0.source()
+    }
+}
+
+impl From<anyhow::Error> for LegacySseError {
+    fn from(error: anyhow::Error) -> Self {
+        Self(error)
+    }
+}
+
+impl LegacySseTransport {
+    async fn connect(url: &str, headers: HeaderMap) -> Result<Self> {
+        let base_url =
+            Url::parse(url).with_context(|| format!("invalid legacy SSE MCP URL '{url}'"))?;
+        let client = reqwest::Client::new();
+        let mut get_headers = headers.clone();
+        if !get_headers.contains_key(header::ACCEPT) {
+            get_headers.insert(
+                header::ACCEPT,
+                HeaderValue::from_static("text/event-stream"),
+            );
+        }
+        let response = client
+            .get(base_url.clone())
+            .headers(get_headers)
+            .send()
+            .await
+            .context("failed to open legacy SSE MCP stream")?
+            .error_for_status()
+            .context("legacy SSE MCP stream returned an error status")?;
+
+        let (message_tx, message_rx) = mpsc::channel(LEGACY_SSE_CHANNEL_CAPACITY);
+        let (endpoint_tx, endpoint_rx) = oneshot::channel();
+        let cancellation = CancellationToken::new();
+        let reader_cancellation = cancellation.clone();
+        let reader = tokio::spawn(async move {
+            let stream = response.bytes_stream();
+            if let Err(error) = run_legacy_sse_reader(
+                stream,
+                base_url,
+                endpoint_tx,
+                message_tx,
+                reader_cancellation,
+            )
+            .await
+            {
+                log::warn!("legacy SSE MCP reader stopped: {error:#}");
+            }
+        });
+
+        let endpoint = match tokio::time::timeout(LEGACY_SSE_CONNECT_TIMEOUT, endpoint_rx).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Err(anyhow::anyhow!("legacy SSE endpoint handshake was closed")),
+            Err(error) => Err(anyhow::Error::new(error)
+                .context("timed out waiting for the legacy SSE endpoint event")),
+        };
+        let endpoint = match endpoint {
+            Ok(endpoint) => endpoint,
+            Err(error) => {
+                cancellation.cancel();
+                let _ = reader.await;
+                return Err(error);
+            }
+        };
+
+        Ok(Self {
+            shared: Arc::new(LegacySseShared {
+                client,
+                endpoint,
+                headers,
+                closed: AtomicBool::new(false),
+            }),
+            messages: message_rx,
+            cancellation,
+            reader: Some(reader),
+        })
+    }
+}
+
+async fn run_legacy_sse_reader<S, D, E>(
+    stream: S,
+    base_url: Url,
+    endpoint_tx: oneshot::Sender<Result<Url>>,
+    message_tx: mpsc::Sender<RxJsonRpcMessage<RoleClient>>,
+    cancellation: CancellationToken,
+) -> Result<()>
+where
+    S: futures_util::Stream<Item = Result<D, E>>,
+    D: tokio_util::bytes::Buf,
+    E: StdError + Send + Sync + 'static,
+{
+    let mut stream = Box::pin(SseStream::from_bytes_stream(stream));
+    let mut endpoint_tx = Some(endpoint_tx);
+
+    while let Some(event) = tokio::select! {
+        _ = cancellation.cancelled() => return Ok(()),
+        event = stream.next() => event,
+    } {
+        let event = event.context("failed to parse a legacy SSE event")?;
+        match event.event.as_deref() {
+            Some("endpoint") => {
+                let data = event
+                    .data
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|data| !data.is_empty())
+                    .context("legacy SSE endpoint event has no URL")?;
+                let result = base_url
+                    .join(data)
+                    .context("legacy SSE endpoint event contains an invalid URL")?;
+                if let Some(sender) = endpoint_tx.take() {
+                    let _ = sender.send(Ok(result));
+                }
+            }
+            None | Some("message") => {
+                if endpoint_tx.is_some() {
+                    continue;
+                }
+                let Some(data) = event.data else {
+                    continue;
+                };
+                let message = serde_json::from_str(&data)
+                    .context("legacy SSE message event contains invalid JSON-RPC")?;
+                message_tx
+                    .send(message)
+                    .await
+                    .context("legacy SSE message receiver was closed")?;
+            }
+            Some(_) => continue,
+        }
+    }
+
+    if let Some(sender) = endpoint_tx {
+        let _ = sender.send(Err(anyhow::anyhow!(
+            "legacy SSE stream closed before the endpoint event"
+        )));
+    }
+    Ok(())
+}
+
+impl Transport<RoleClient> for LegacySseTransport {
+    type Error = LegacySseError;
+
+    fn send(
+        &mut self,
+        item: TxJsonRpcMessage<RoleClient>,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send + 'static {
+        let shared = self.shared.clone();
+        async move {
+            if shared.closed.load(Ordering::Acquire) {
+                return Err(LegacySseError(anyhow::anyhow!(
+                    "legacy SSE MCP transport is closed"
+                )));
+            }
+            let body =
+                serde_json::to_vec(&item).context("failed to encode MCP JSON-RPC message")?;
+            let mut headers = shared.headers.clone();
+            if !headers.contains_key(header::ACCEPT) {
+                headers.insert(
+                    header::ACCEPT,
+                    HeaderValue::from_static("application/json, text/event-stream"),
+                );
+            }
+            if !headers.contains_key(header::CONTENT_TYPE) {
+                headers.insert(
+                    header::CONTENT_TYPE,
+                    HeaderValue::from_static("application/json"),
+                );
+            }
+            let response = shared
+                .client
+                .post(shared.endpoint.clone())
+                .headers(headers)
+                .body(body)
+                .send()
+                .await
+                .context("failed to POST a legacy SSE MCP message")?;
+            if !response.status().is_success() {
+                return Err(LegacySseError(anyhow::anyhow!(
+                    "legacy SSE MCP message endpoint returned {}",
+                    response.status()
+                )));
+            }
+            Ok(())
+        }
+    }
+
+    async fn receive(&mut self) -> Option<RxJsonRpcMessage<RoleClient>> {
+        self.messages.recv().await
+    }
+
+    async fn close(&mut self) -> Result<(), Self::Error> {
+        if self.shared.closed.swap(true, Ordering::AcqRel) {
+            return Ok(());
+        }
+        self.cancellation.cancel();
+        if let Some(reader) = self.reader.take() {
+            reader.await.context("legacy SSE MCP reader task failed")?;
+        }
+        Ok(())
+    }
 }
 
 impl McpRegistry {
@@ -417,7 +660,7 @@ impl McpRegistry {
                     .await
                     .context("failed to connect to stdio MCP server")
             }
-            McpServerSpec::Http { url, headers } | McpServerSpec::Sse { url, headers } => {
+            McpServerSpec::Http { url, headers } => {
                 let custom_headers = Self::to_http_headers(headers)?;
                 let transport = StreamableHttpClientTransport::from_config(
                     rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig::with_uri(url.as_str())
@@ -427,6 +670,15 @@ impl McpRegistry {
                     .serve(transport)
                     .await
                     .context("failed to connect to HTTP MCP server")
+            }
+            McpServerSpec::Sse { url, headers } => {
+                let custom_headers = Self::to_http_headers(headers)?;
+                let custom_headers = Self::to_reqwest_headers(custom_headers);
+                let transport = LegacySseTransport::connect(url, custom_headers).await?;
+                client_info
+                    .serve(transport)
+                    .await
+                    .context("failed to connect to legacy SSE MCP server")
             }
         }
     }
@@ -444,6 +696,12 @@ impl McpRegistry {
                 Ok((header_name, header_value))
             })
             .collect()
+    }
+
+    fn to_reqwest_headers(
+        headers: std::collections::HashMap<HeaderName, HeaderValue>,
+    ) -> HeaderMap {
+        headers.into_iter().collect()
     }
 
     async fn load_tools(

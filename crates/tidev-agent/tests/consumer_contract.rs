@@ -88,36 +88,44 @@ fn provider_config(base_url: String) -> LlmProviderConfig {
 }
 
 async fn read_http_request(stream: &mut TcpStream) -> Result<Vec<u8>> {
+    Ok(read_http_request_parts(stream).await?.1)
+}
+
+async fn read_http_request_parts(stream: &mut TcpStream) -> Result<(String, Vec<u8>)> {
     let mut request = Vec::new();
     let mut chunk = [0_u8; 4096];
-    let (header_end, content_length) = loop {
+    let header_end = loop {
         let read = stream.read(&mut chunk).await?;
         if read == 0 {
-            anyhow::bail!("scripted provider closed before sending a request");
+            anyhow::bail!("fixture closed before sending a request");
         }
         request.extend_from_slice(&chunk[..read]);
         if let Some(header_end) = request.windows(4).position(|window| window == b"\r\n\r\n") {
-            let header_text = std::str::from_utf8(&request[..header_end])?;
-            let content_length = header_text
-                .lines()
-                .find_map(|line| {
-                    let (name, value) = line.split_once(':')?;
-                    (name.eq_ignore_ascii_case("content-length")).then_some(value.trim())
-                })
-                .context("scripted provider request has no content-length")?
-                .parse::<usize>()?;
-            break (header_end + 4, content_length);
+            break header_end + 4;
         }
     };
+
+    let header_text = std::str::from_utf8(&request[..header_end - 4])?.to_string();
+    let content_length = header_text
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            (name.eq_ignore_ascii_case("content-length")).then_some(value.trim())
+        })
+        .unwrap_or("0")
+        .parse::<usize>()?;
 
     while request.len() < header_end + content_length {
         let read = stream.read(&mut chunk).await?;
         if read == 0 {
-            anyhow::bail!("scripted provider closed in the request body");
+            anyhow::bail!("fixture closed in the request body");
         }
         request.extend_from_slice(&chunk[..read]);
     }
-    Ok(request[header_end..header_end + content_length].to_vec())
+    Ok((
+        header_text,
+        request[header_end..header_end + content_length].to_vec(),
+    ))
 }
 
 fn tool_call_response() -> String {
@@ -296,5 +304,168 @@ async fn independent_consumer_connects_stdio_mcp_and_calls_discovered_tool() -> 
         .await?;
     assert_eq!(result.output, "{\n  \"value\": \"fixture:hello\"\n}");
     registry.disconnect_server("fixture").await?;
+    Ok(())
+}
+
+fn has_fixture_header(headers: &str) -> bool {
+    headers.lines().any(|line| {
+        let Some((name, value)) = line.split_once(':') else {
+            return false;
+        };
+        name.eq_ignore_ascii_case("x-fixture-token") && value.trim() == "legacy-token"
+    })
+}
+
+fn has_header(headers: &str, expected_name: &str, expected_value: &str) -> bool {
+    headers.lines().any(|line| {
+        let Some((name, value)) = line.split_once(':') else {
+            return false;
+        };
+        name.eq_ignore_ascii_case(expected_name) && value.trim() == expected_value
+    })
+}
+
+async fn write_sse_message(stream: &mut TcpStream, message: &serde_json::Value) -> Result<()> {
+    let payload = format!(
+        "event: message\ndata: {}\n\n",
+        serde_json::to_string(message)?
+    );
+    stream.write_all(payload.as_bytes()).await?;
+    stream.flush().await?;
+    Ok(())
+}
+
+async fn legacy_sse_fixture(listener: TcpListener) -> Result<Vec<serde_json::Value>> {
+    let (mut sse_stream, _) = listener.accept().await?;
+    let (sse_headers, sse_body) = read_http_request_parts(&mut sse_stream).await?;
+    assert!(sse_headers.starts_with("GET /sse HTTP/1.1"));
+    assert!(sse_body.is_empty());
+    assert!(has_fixture_header(&sse_headers));
+    sse_stream
+        .write_all(
+            b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: keep-alive\r\n\r\n",
+        )
+        .await?;
+    sse_stream
+        .write_all(b"event: endpoint\ndata: /messages?session=legacy-fixture\n\n")
+        .await?;
+    sse_stream.flush().await?;
+
+    let mut requests = Vec::new();
+    loop {
+        let (mut post_stream, _) = listener.accept().await?;
+        let (headers, body) = read_http_request_parts(&mut post_stream).await?;
+        assert!(headers.starts_with("POST /messages?session=legacy-fixture HTTP/1.1"));
+        assert!(has_fixture_header(&headers));
+        assert!(has_header(
+            &headers,
+            "accept",
+            "application/json, text/event-stream"
+        ));
+        let request: serde_json::Value = serde_json::from_slice(&body)?;
+        requests.push(request.clone());
+        post_stream
+            .write_all(b"HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            .await?;
+        post_stream.shutdown().await?;
+
+        match request["method"].as_str() {
+            Some("initialize") => {
+                write_sse_message(
+                    &mut sse_stream,
+                    &serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": request["id"],
+                        "result": {
+                            "protocolVersion": "2025-11-25",
+                            "capabilities": {"tools": {}},
+                            "serverInfo": {"name": "legacy-fixture", "version": "1.0.0"}
+                        }
+                    }),
+                )
+                .await?;
+            }
+            Some("notifications/initialized") => {}
+            Some("tools/list") => {
+                write_sse_message(
+                    &mut sse_stream,
+                    &serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": request["id"],
+                        "result": {
+                            "tools": [{
+                                "name": "legacy_echo",
+                                "description": "Return a deterministic legacy SSE value.",
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {"text": {"type": "string"}},
+                                    "required": ["text"]
+                                }
+                            }]
+                        }
+                    }),
+                )
+                .await?;
+            }
+            Some("tools/call") => {
+                assert_eq!(request["params"]["name"], "legacy_echo");
+                assert_eq!(request["params"]["arguments"]["text"], "hello");
+                write_sse_message(
+                    &mut sse_stream,
+                    &serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": request["id"],
+                        "result": {
+                            "content": [{"type": "text", "text": "legacy:hello"}],
+                            "isError": false
+                        }
+                    }),
+                )
+                .await?;
+                break;
+            }
+            method => anyhow::bail!("unexpected legacy SSE method: {method:?}"),
+        }
+    }
+    Ok(requests)
+}
+
+#[tokio::test]
+async fn independent_consumer_connects_legacy_sse_and_calls_discovered_tool() -> Result<()> {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
+    let url = format!("http://{}/sse", listener.local_addr()?);
+    let fixture = tokio::spawn(legacy_sse_fixture(listener));
+    let registry = McpRegistry::new(BTreeMap::from([(
+        "legacy".into(),
+        McpServerSpec::Sse {
+            url,
+            headers: BTreeMap::from([("x-fixture-token".into(), "legacy-token".into())]),
+        },
+    )]));
+
+    registry.refresh_server("legacy").await?;
+    let summary = &registry.summaries()[0];
+    assert_eq!(summary.status, McpConnectionStatus::Connected);
+    assert_eq!(summary.tool_count, 1);
+    let definition = registry
+        .definition_for("mcp__legacy__legacy_echo")
+        .context("legacy SSE tool was not discovered")?;
+    let result = registry
+        .execute_call(&ToolCall {
+            id: "legacy-call".into(),
+            name: definition.name,
+            arguments: r#"{"text":"hello"}"#.into(),
+            thought_signature: None,
+        })
+        .await?;
+    assert_eq!(result.output, "legacy:hello");
+    registry.disconnect_server("legacy").await?;
+
+    let requests = fixture.await??;
+    assert_eq!(requests.len(), 4);
+    assert_eq!(requests[0]["method"], "initialize");
+    assert_eq!(requests[1]["method"], "notifications/initialized");
+    assert_eq!(requests[2]["method"], "tools/list");
+    assert_eq!(requests[3]["method"], "tools/call");
     Ok(())
 }

@@ -1,23 +1,22 @@
 # tidev 目标态路线图审查报告
 
 **审查日期**：2026-08-07<br>
-**Git 基线**：`470581d8`（`完成重构收口与最终验证`）<br>
+**Git 基线**：`3fa992e2`（`补齐目标态验收并更新审查报告`）<br>
 **审查对象**：基线之上的当前提交工作树<br>
 **参考文档**：[tidev-target-roadmap.md](tidev-target-roadmap.md)<br>
 **审查范围**：验证路线图目标状态与当前代码的一致性，记录已修复问题、仍存在的问题和潜在风险。
 
 ## 结论
 
-当前代码**尚未完全达到**路线图描述的目标状态。
+当前代码已经达到路线图描述的目标状态。
 
-当前工作树已经补齐并验证了 P1-01 至 P1-05、P2-01 和 P2-02 的实现与验收缺口：事件统一排队、工具调用顺序、消息稳定排序、MCP headers、事件字段保真、完整 agent loop 和真实 stdio MCP 调用均已有代码与针对性测试。这些修复已提交；legacy SSE 兼容性仍是明确的范围限制。
+当前工作树已经补齐并验证了 P1-01 至 P1-05、P2-01 和 P2-02 的实现与验收缺口：事件统一排队、工具调用顺序、消息稳定排序、MCP headers、事件字段保真、完整 agent loop、stdio MCP 调用和 legacy SSE 调用均已有代码与针对性测试。
 
 仍需关注的主要问题如下：
 
-- **R-01**：配置保留 `Sse` 历史名称，但当前实现只支持 streamable HTTP，不支持旧版 legacy SSE 的 GET/POST 握手；这一边界已在代码和配置文档中明确。
-- **后续兼容性工作**：若产品需要旧版 legacy SSE，需要单独引入对应 transport 和握手测试。
+- **无已确认的路线图阻塞项**：本次审查范围内的目标状态和消费方验收链路均已具备实现与测试证据。
 
-因此，当前判断是：路线图要求的结构和本地验收链路已经达到，**除 legacy SSE 兼容性限制外，目标状态已基本达成**。
+因此，当前判断是：路线图要求的结构和本地验收链路已经达到，**目标状态已达成**。
 
 ## 问题清单
 
@@ -108,11 +107,11 @@ provider 构造请求时仍调用该通用函数，例如 [openai.rs:415](crates
 
 该测试完全使用 loopback 和本地子进程，不依赖外部网络；它补齐了路线图要求的消费方完整链路证据。
 
-### R-01：`Sse` 配置变体的 legacy SSE 兼容性限制 ⚠️ 已确认范围限制
+### R-01：`Sse` 配置变体的 legacy SSE 兼容性限制 ✅ 已修复
 
-配置层仍提供 `McpServerConfig::Sse`，core 也会将其映射为 `McpServerSpec::Sse`。当前两个变体都明确使用 rmcp 的 `StreamableHttpClientTransport`，其 SSE 是 streamable HTTP 的响应格式，不是独立的 legacy SSE transport。
+配置层仍提供 `McpServerConfig::Sse`，core 会将其映射为 `McpServerSpec::Sse`。agent 现在为该变体使用独立的 `LegacySseTransport`，而 `McpServerSpec::Http` 继续使用 rmcp 的 `StreamableHttpClientTransport`。
 
-`rmcp 3.0.0` 没有独立的 legacy SSE client；旧版“先 GET `/sse` 获取 endpoint，再 POST `/messages`”握手未实现。因此 `sse` 配置只能用于提供 streamable HTTP 接口的服务器，旧版 legacy SSE 服务器仍会连接失败。代码注释和 [mcp-config.md](docs/dev/tidev/mcp-config.md) 已明确这一限制，避免把配置名称误解为完整 legacy SSE 支持。
+`LegacySseTransport` 完成旧版“先 GET `/sse` 获取 endpoint，再 POST `/messages`，由初始 SSE 长连接推送响应”的握手和消息收发，支持相对或绝对 endpoint URL，并复用配置 headers。`consumer_contract` 中的本地 HTTP fixture 已验证 initialize、`tools/list`、`tools/call`、GET/POST headers 和 registry 工具执行结果。
 
 ## 阶段目标判断
 
@@ -122,9 +121,9 @@ provider 构造请求时仍调用该通用函数，例如 [openai.rs:415](crates
 | P1 | 已达到 | 三层事件类型、转换函数、ShellOutput 本地化、顺序总线和逐字段转换测试均已存在。 |
 | P1.5 | 基本达到 | app-data 通道、v40 `child_session_id` 回填、orphan 顺序、稳定持久化排序和通用完整输出标记均已实现。 |
 | P2 | 已达到 | `AgentContext` 已为 7 个方法，审批策略在 core；事件字段保真、完整 loop、tool call 顺序和持久化均有回归测试。 |
-| P3 | 已达到（legacy SSE 除外） | MessageBuffer、ContextManager、ToolRegistry、MCP registry 已进入 agent，headers 已贯通；stdio MCP 初始化、发现和调用已有真实子进程测试。 |
+| P3 | 已达到 | MessageBuffer、ContextManager、ToolRegistry、MCP registry 已进入 agent，headers 已贯通；stdio 和 legacy SSE MCP 初始化、发现和调用均已有真实本地 fixture 测试。 |
 | P4 | 已达到 | AgentRuntime、CoreContext、core 子代理策略和只依赖 agent 的消费方路径均已落位并验证。 |
-| P5 | 已达到（legacy SSE 除外） | fmt、workspace check/test/clippy 和消费方示例均已通过，文档与依赖边界已同步。 |
+| P5 | 已达到 | fmt、workspace check/test/clippy 和消费方示例均已通过，文档与依赖边界已同步。 |
 
 ## 已确认的结构性目标
 
@@ -150,7 +149,7 @@ cargo test -p tidev-agent --test consumer_contract --no-fail-fast
 cargo run -p tidev-agent --example minimal_agent
 ```
 
-`cargo test --workspace --all-targets` 共通过 **873 个测试**，无失败；其中新增消费方集成测试通过 **2 个测试**，覆盖 scripted provider 的两轮 loop 和真实 stdio MCP fixture。消费方 smoke test 输出为：
+`cargo test --workspace --all-targets` 共通过 **874 个测试**，无失败；其中新增消费方集成测试通过 **3 个测试**，覆盖 scripted provider 的两轮 loop、真实 stdio MCP fixture 和 legacy SSE MCP fixture。消费方 smoke test 输出为：
 
 ```text
 echo result: hello from tidev-agent
@@ -160,9 +159,8 @@ echo result: hello from tidev-agent
 
 ## 建议的后续优先级
 
-1. 若产品需要支持旧版 legacy SSE，再单独引入 legacy SSE client transport，并补充 GET/POST 握手集成测试；当前路线图的 streamable HTTP 目标不包含该兼容层。
-2. 后续若实现 legacy SSE，补充独立 transport、GET/POST 握手和真实 server 集成测试。
+1. 后续可继续扩展 legacy SSE 的断线重连、Last-Event-ID 和服务端主动通知场景；这些不属于当前路线图目标的阻塞项。
 
 ## 审查边界
 
-本报告记录的是当前代码状态和潜在问题，不把“常规测试全绿”解释为自动具备 legacy SSE 兼容性。P1-01 至 P2-02 的修复和本报告已包含在当前提交中。
+本报告记录的是当前代码状态和潜在问题，不把“常规测试全绿”解释为自动具备协议兼容性；legacy SSE 的关键握手和工具调用已有独立本地测试证据。P1-01 至 P2-02 的修复、本次 R-01 修复和本报告均纳入本次变更。

@@ -34,8 +34,7 @@ pub enum McpServerConfig {
         #[serde(default)]
         headers: BTreeMap<String, String>,
     },
-    /// Compatibility name for a streamable HTTP server whose responses may use SSE.
-    /// Legacy SSE servers that require a GET endpoint handshake are not supported.
+    /// A legacy SSE server using a GET stream and a separate POST message endpoint.
     Sse {
         url: String,
         #[serde(default)]
