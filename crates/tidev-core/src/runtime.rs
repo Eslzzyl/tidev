@@ -42,7 +42,7 @@ use tidev_tools::types::TodoItem;
 use tidev_agent::{AgentContext, ContextManager};
 
 use crate::approval::TuiRequest;
-use crate::backend_event::BackendEvent;
+use crate::backend_event::{BackendEvent, CoreEventBus};
 use crate::mcp::McpManager;
 use crate::message_buf::CoreMessageBuffer;
 use crate::registry::ToolRegistry;
@@ -109,6 +109,9 @@ pub struct Runtime {
     /// Event channel (sender → UI). Messages are fanned out to every
     /// registered subscriber (see [`Runtime::event_rx`]).
     event_tx: UnboundedSender<BackendEvent>,
+    /// Ordered event buses keyed by session. Agent and backend events for a
+    /// session must enter the frontend channel through the same FIFO queue.
+    event_buses: Arc<Mutex<HashMap<Uuid, CoreEventBus>>>,
     /// Registered event subscribers. Each call to [`Runtime::event_rx`]
     /// adds one; dead senders are pruned by the fan-out task.
     event_subscribers: Arc<Mutex<Vec<UnboundedSender<BackendEvent>>>>,
@@ -183,6 +186,15 @@ impl Runtime {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         self.event_subscribers.lock().await.push(tx);
         rx
+    }
+
+    /// Get (or create) the ordered event bus for a session.
+    pub(crate) async fn event_bus(&self, session_id: Uuid) -> CoreEventBus {
+        let mut buses = self.event_buses.lock().await;
+        buses
+            .entry(session_id)
+            .or_insert_with(|| CoreEventBus::new(self.event_tx.clone(), session_id))
+            .clone()
     }
 
     /// Subscribe to frontend requests (tool approval etc.).
@@ -483,10 +495,13 @@ impl Runtime {
             };
             self.session_manager
                 .save_revert_state(session_id, Uuid::nil(), None)?;
-            let _ = self.event_tx.send(BackendEvent::MessagesTruncated {
-                session_id,
-                kept_count: pos,
-            });
+            let _ =
+                self.event_bus(session_id)
+                    .await
+                    .send_backend(BackendEvent::MessagesTruncated {
+                        session_id,
+                        kept_count: pos,
+                    });
         }
 
         // 2. Persist the user message.
@@ -512,11 +527,14 @@ impl Runtime {
         let q_thinking = user_msg.thinking_level.clone();
 
         // 3. Notify the TUI so it can display the message.
-        let _ = self.event_tx.send(BackendEvent::UserMessageCreated {
-            session_id,
-            message: Box::new(user_msg),
-            app_data: Box::new(event_app_data),
-        });
+        let _ = self
+            .event_bus(session_id)
+            .await
+            .send_backend(BackendEvent::UserMessageCreated {
+                session_id,
+                message: Box::new(user_msg),
+                app_data: Box::new(event_app_data),
+            });
 
         // 4. Check if this session already has a loop running.
         // Fast path: avoid queue_user_message when possible.
@@ -676,6 +694,7 @@ impl Runtime {
             .insert(session_id, cancel.clone());
         let buffer = self.message_buffer(session_id).await;
         let context_manager = self.context_manager(session_id).await;
+        let event_bus = self.event_bus(session_id).await;
 
         // Compose or load the system prompt (mode-agnostic — see inject_mode_reminder).
         let (system_prompt, session_start_hash) = {
@@ -705,7 +724,7 @@ impl Runtime {
             self.tool_registry.clone(),
             context_manager,
             buffer,
-            self.event_tx.clone(),
+            event_bus,
             self.request_tx.clone(),
             session_id,
             mode,
@@ -907,10 +926,11 @@ impl Runtime {
         use crate::agent_ctx::to_llm_provider_config;
 
         // 1. Collect the inputs: messages, context manager, model config, tools.
-        let messages = {
+        let mut messages = {
             let buf = self.message_buffer(session_id).await;
             buf.read().await.load().to_vec()
         };
+        crate::agent_ctx::restore_full_tool_output_semantics(&mut messages);
         let cm = self.context_manager(session_id).await;
         let model_config = {
             let active = self.active_model.read().unwrap();
@@ -937,8 +957,7 @@ impl Runtime {
 
         // 2. Run compaction (async, no locks held on ContextManager).
         //    Capture prior compaction state before it gets overwritten.
-        let agent_event_tx =
-            crate::backend_event::agent_event_channel(session_id, self.event_tx.clone());
+        let event_bus = self.event_bus(session_id).await;
         let (result, prior_summary, prior_retained_from) = {
             let cm_lock = cm.lock().await;
             let prior_summary = cm_lock.summary.clone();
@@ -950,11 +969,11 @@ impl Runtime {
                     &tools,
                     &messages,
                     session_id,
-                    Some(agent_event_tx),
+                    Some(event_bus.agent_sender()),
                 )
                 .await
                 .inspect_err(|e| {
-                    let _ = self.event_tx.send(BackendEvent::ContextCompacted {
+                    let _ = event_bus.send_backend(BackendEvent::ContextCompacted {
                         session_id,
                         compacted: false,
                         manual: stream_request_id.is_some(),
@@ -996,7 +1015,7 @@ impl Runtime {
         //    compact() via event_tx when streaming, but for consistency we
         //    always send the final event here as well).
         let model_id = active_model.model_id.clone();
-        let _ = self.event_tx.send(BackendEvent::ContextCompacted {
+        let _ = event_bus.send_backend(BackendEvent::ContextCompacted {
             session_id,
             compacted: true,
             manual: stream_request_id.is_some(),
@@ -1089,27 +1108,33 @@ impl Runtime {
         }
 
         // 5. Notify TUI.
-        let _ = self.event_tx.send(BackendEvent::ContextCompacted {
-            session_id,
-            compacted: true,
-            manual: false,
-            summary: None,
-            retained_from: 0,
-            model_id: None,
-            completed_at: None,
-            error: None,
-        });
+        let _ = self
+            .event_bus(session_id)
+            .await
+            .send_backend(BackendEvent::ContextCompacted {
+                session_id,
+                compacted: true,
+                manual: false,
+                summary: None,
+                retained_from: 0,
+                model_id: None,
+                completed_at: None,
+                error: None,
+            });
 
         let message_content = messages
             .iter()
             .find(|m| m.id == target_id)
             .map(|m| m.content.clone())
             .unwrap_or_default();
-        let _ = self.event_tx.send(BackendEvent::UndoCompleted {
-            session_id,
-            target_id,
-            message_content,
-        });
+        let _ = self
+            .event_bus(session_id)
+            .await
+            .send_backend(BackendEvent::UndoCompleted {
+                session_id,
+                target_id,
+                message_content,
+            });
 
         Ok(())
     }
@@ -1132,22 +1157,28 @@ impl Runtime {
         cm_lock.retained_from = 0;
         drop(cm_lock);
 
-        let _ = self.event_tx.send(BackendEvent::ContextCompacted {
-            session_id,
-            compacted: true,
-            manual: false,
-            summary: None,
-            retained_from: 0,
-            model_id: None,
-            completed_at: None,
-            error: None,
-        });
+        let _ = self
+            .event_bus(session_id)
+            .await
+            .send_backend(BackendEvent::ContextCompacted {
+                session_id,
+                compacted: true,
+                manual: false,
+                summary: None,
+                retained_from: 0,
+                model_id: None,
+                completed_at: None,
+                error: None,
+            });
 
-        let _ = self.event_tx.send(BackendEvent::UndoCompleted {
-            session_id,
-            target_id: Uuid::nil(),
-            message_content: String::new(),
-        });
+        let _ = self
+            .event_bus(session_id)
+            .await
+            .send_backend(BackendEvent::UndoCompleted {
+                session_id,
+                target_id: Uuid::nil(),
+                message_content: String::new(),
+            });
 
         Ok(())
     }
@@ -1445,6 +1476,7 @@ impl RuntimeBuilder {
             buffers: Arc::new(Mutex::new(HashMap::new())),
             context_managers: Arc::new(Mutex::new(HashMap::new())),
             event_tx,
+            event_buses: Arc::new(Mutex::new(HashMap::new())),
             event_subscribers,
             request_tx,
             request_subscribers,

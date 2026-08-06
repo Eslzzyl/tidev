@@ -14,13 +14,13 @@ use tokio::sync::mpsc::unbounded_channel;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use tidev_agent::tidev_llm::message::{Message, ToolCall, ToolExecutionResult};
+use tidev_agent::tidev_llm::reasoning::ThinkingLevelType;
+use tidev_agent::tidev_llm::{ApiType, LlmClient, LlmProviderConfig, ToolDefinition};
 use tidev_agent::{
     AgentEvent, AgentRuntime, ContextManager, McpRegistry, McpServerSpec, MessageStore, Tool,
     ToolContext, ToolRegistry,
 };
-use tidev_llm::message::{Message, ToolCall, ToolExecutionResult};
-use tidev_llm::reasoning::ThinkingLevelType;
-use tidev_llm::{ApiType, LlmClient, LlmProviderConfig, ToolDefinition};
 
 struct MemoryStore {
     messages: Mutex<Vec<Message>>,
@@ -162,7 +162,7 @@ async fn main() -> Result<()> {
 
     let store = Arc::new(MemoryStore {
         messages: Mutex::new(vec![Message::new(
-            tidev_llm::message::MessageRole::User,
+            tidev_agent::tidev_llm::message::MessageRole::User,
             env::var("TIDEV_PROMPT").unwrap_or_else(|_| "Use echo to repeat hello".into()),
         )]),
     });

@@ -7,7 +7,7 @@ tidev 内置 MCP（Model Context Protocol）支持，用于连接外部 MCP 服�
 核心能力包括：
 
 - 管理多个 MCP 服务器连接
-- 支持 `stdio`、`http` 和 `sse` 三类传输方式
+- 支持 `stdio` 和 streamable HTTP；`sse` 是历史兼容名称
 - 自动从 MCP 服务器拉取工具列表并将它们暴露给 tidev 的工具执行系统
 - 通过现有工具权限机制，对 MCP 工具做 `read` / `search` / `execute` 的权限映射
 - 在终端 UI 中展示 MCP 服务器状态，并支持连接、断开、刷新、添加、编辑、删除
@@ -30,9 +30,10 @@ tidev 当前支持以下 MCP 服务器传输方式：
    - 启动一个子进程作为 MCP 客户端/服务器
    - 常用于本地 MCP 实现或基于 Node 的 MCP 服务器
 2. `http`
-   - 通过 HTTP/HTTPS 直接连接远端 MCP 服务
+   - 通过 HTTP/HTTPS 连接 streamable HTTP MCP 服务，响应可使用 JSON 或 SSE
 3. `sse`
-   - 通过 Server-Sent Events 连接 MCP 服务
+   - 历史兼容名称，仍按 streamable HTTP 连接；要求服务端提供当前 MCP streamable HTTP 接口
+   - 旧版 legacy SSE（先 GET `/sse` 获取 POST endpoint）未实现
 
 ## 4. 配置位置
 

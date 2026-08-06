@@ -99,12 +99,12 @@ mod tests {
     use std::path::{Path, PathBuf};
     use tokio::sync::mpsc::unbounded_channel;
 
-    use crate::event::AgentEvent;
+    use crate::event::AgentEventSender;
     use crate::tool::{Tool, ToolContext};
 
     struct StubContext {
         root: PathBuf,
-        event_tx: tokio::sync::mpsc::UnboundedSender<AgentEvent>,
+        event_tx: AgentEventSender,
     }
 
     impl ToolContext for StubContext {
@@ -112,7 +112,7 @@ mod tests {
             &self.root
         }
 
-        fn event_tx(&self) -> tokio::sync::mpsc::UnboundedSender<AgentEvent> {
+        fn event_tx(&self) -> AgentEventSender {
             self.event_tx.clone()
         }
     }
@@ -165,7 +165,7 @@ mod tests {
         let (event_tx, _event_rx) = unbounded_channel();
         let context = StubContext {
             root: PathBuf::from("/workspace"),
-            event_tx,
+            event_tx: event_tx.into(),
         };
 
         let definitions = registry.definitions();
@@ -199,7 +199,7 @@ mod tests {
         let (event_tx, _event_rx) = unbounded_channel();
         let context = StubContext {
             root: PathBuf::from("/workspace"),
-            event_tx,
+            event_tx: event_tx.into(),
         };
 
         let result = registry

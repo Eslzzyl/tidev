@@ -10,16 +10,19 @@ description = "Agent types and execution loop for tidev"
 tidev-llm = { path = "../tidev-llm" }
 serde = { version = "1", features = ["derive"] }
 async-trait = "0.1"
-tokio = { version = "1", features = ["sync", "rt", "macros", "process", "time"] }
+tokio = { version = "1", features = ["sync", "rt", "macros", "process", "time", "net", "io-util"] }
 tokio-util = "0.7"
 anyhow = "1"
+http = "1"
 serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 log = "0.4"
 rmcp = { version = "3.0.0", features = [
     "client",
+    "transport-io",
     "transport-child-process",
     "transport-streamable-http-client-reqwest",
 ] }
+schemars = "1"
 base64 = "0.23"

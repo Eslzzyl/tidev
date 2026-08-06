@@ -4,22 +4,21 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use async_trait::async_trait;
-use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
+use tokio::sync::mpsc::unbounded_channel;
 use tokio_util::sync::CancellationToken;
 
-use tidev_agent::{Tool, ToolContext};
+use tidev_agent::{AgentEvent, AgentEventSender, Tool, ToolContext};
 use tidev_llm::ToolDefinition;
 use tidev_llm::message::{ToolCall, ToolExecutionResult};
 use tidev_tools::ShellOutput;
 
 use crate::registry::ToolRegistry;
 use crate::tool_def::to_llm_tool_def;
-use tidev_agent::AgentEvent;
 
 /// Context passed to a host adapter while a generic tool dispatch is running.
 struct AdapterContext {
     workspace_root: PathBuf,
-    event_tx: UnboundedSender<AgentEvent>,
+    event_tx: AgentEventSender,
 }
 
 impl ToolContext for AdapterContext {
@@ -27,7 +26,7 @@ impl ToolContext for AdapterContext {
         &self.workspace_root
     }
 
-    fn event_tx(&self) -> UnboundedSender<AgentEvent> {
+    fn event_tx(&self) -> AgentEventSender {
         self.event_tx.clone()
     }
 }
@@ -35,7 +34,7 @@ impl ToolContext for AdapterContext {
 /// Forward shell output while retaining the old drain-before-completion rule.
 struct ShellOutputForwardGuard {
     shell_rx: tokio::sync::mpsc::UnboundedReceiver<ShellOutput>,
-    event_tx: UnboundedSender<AgentEvent>,
+    event_tx: AgentEventSender,
     request_id: u64,
     disarmed: bool,
 }
@@ -43,7 +42,7 @@ struct ShellOutputForwardGuard {
 impl ShellOutputForwardGuard {
     fn new(
         shell_rx: tokio::sync::mpsc::UnboundedReceiver<ShellOutput>,
-        event_tx: UnboundedSender<AgentEvent>,
+        event_tx: AgentEventSender,
         request_id: u64,
     ) -> Self {
         Self {
@@ -170,7 +169,7 @@ async fn execute_host_call(
     allow_outside: bool,
     sensitive_file_approved: bool,
     cancel: &CancellationToken,
-    event_tx: Option<UnboundedSender<AgentEvent>>,
+    event_tx: Option<AgentEventSender>,
 ) -> ToolExecutionResult {
     let Some(event_tx) = event_tx else {
         return registry
@@ -217,7 +216,7 @@ pub(crate) async fn execute_builtin_via_agent(
     allow_outside: bool,
     sensitive_file_approved: bool,
     cancel: &CancellationToken,
-    event_tx: Option<UnboundedSender<AgentEvent>>,
+    event_tx: Option<AgentEventSender>,
     stream_shell: bool,
 ) -> ToolExecutionResult {
     // Keep tidev-tools' user-facing parse error for malformed calls. The
@@ -274,7 +273,7 @@ pub(crate) async fn execute_builtin_via_agent(
     let mut agent_registry = tidev_agent::ToolRegistry::new(0);
     agent_registry.register(adapter);
 
-    let event_tx = event_tx.unwrap_or_else(|| unbounded_channel().0);
+    let event_tx = event_tx.unwrap_or_else(|| unbounded_channel().0.into());
     let context = AdapterContext {
         workspace_root: registry.workspace_root().to_path_buf(),
         event_tx,
@@ -306,7 +305,11 @@ mod tests {
             .unwrap();
         drop(shell_tx);
 
-        drop(ShellOutputForwardGuard::new(shell_rx, event_tx, 7));
+        drop(ShellOutputForwardGuard::new(
+            shell_rx,
+            event_tx.clone().into(),
+            7,
+        ));
 
         assert!(matches!(
             event_rx.try_recv(),

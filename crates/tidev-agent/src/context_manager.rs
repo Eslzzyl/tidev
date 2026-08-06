@@ -7,8 +7,6 @@
 //! - [`build_request_messages`]: builds the message list sent to the LLM,
 //!   skipping already-compacted messages and injecting the summary.
 
-use std::collections::HashMap;
-
 use anyhow::Result;
 use tidev_llm::message::{Message, MessageRole};
 use tidev_llm::{LlmClient, LlmProviderConfig, ToolDefinition};
@@ -195,7 +193,7 @@ impl ContextManager {
         tools: &[ToolDefinition],
         messages: &[Message],
         _session_id: Uuid,
-        event_tx: Option<tokio::sync::mpsc::UnboundedSender<AgentEvent>>,
+        event_tx: Option<crate::AgentEventSender>,
     ) -> Result<CompactionResult> {
         // 1. Build prefix (same logic as build_request_messages -> prefix cache hit).
         let mut compact_msgs = Vec::new();
@@ -240,7 +238,7 @@ impl ContextManager {
     /// Internal: build request messages from a raw message slice (without summary injection).
     fn build_request_messages_raw(&self, messages: &[Message]) -> Vec<Message> {
         let mut out = Vec::new();
-        let mut pending_tool_calls: HashMap<String, String> = HashMap::new();
+        let mut pending_tool_calls: Vec<(String, String)> = Vec::new();
         for msg in messages.iter().skip(self.retained_from) {
             if msg.streaming {
                 continue;
@@ -261,15 +259,21 @@ impl ContextManager {
                     if sanitized.content.is_empty() && sanitized.tool_calls.is_empty() {
                         continue;
                     }
-                    for tc in &sanitized.tool_calls {
-                        pending_tool_calls.insert(tc.id.clone(), tc.name.clone());
-                    }
+                    pending_tool_calls.extend(
+                        sanitized
+                            .tool_calls
+                            .iter()
+                            .map(|tc| (tc.id.clone(), tc.name.clone())),
+                    );
                     out.push(sanitized);
                 }
                 MessageRole::Tool => {
                     if let Some(tool_call_id) = &msg.tool_call_id
-                        && pending_tool_calls.remove(tool_call_id).is_some()
+                        && let Some(index) = pending_tool_calls
+                            .iter()
+                            .position(|(id, _)| id == tool_call_id)
                     {
+                        pending_tool_calls.remove(index);
                         out.push(msg.clone());
                     }
                 }
@@ -301,7 +305,7 @@ impl ContextManager {
         model: &LlmProviderConfig,
         tools: &[tidev_llm::ToolDefinition],
         messages: Vec<Message>,
-        event_tx: tokio::sync::mpsc::UnboundedSender<AgentEvent>,
+        event_tx: crate::AgentEventSender,
     ) -> Result<String> {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let llm_clone = llm.clone();
@@ -381,12 +385,11 @@ impl ContextManager {
     }
 
     /// Inject synthetic failure tool results for orphaned tool_calls.
-    fn drain_pending_tool_calls(out: &mut Vec<Message>, pending: &mut HashMap<String, String>) {
+    fn drain_pending_tool_calls(out: &mut Vec<Message>, pending: &mut Vec<(String, String)>) {
         if pending.is_empty() {
             return;
         }
-        // Collect to avoid borrow issues.
-        let orphans: Vec<(String, String)> = pending.drain().collect();
+        let orphans = std::mem::take(pending);
         for (tool_call_id, tool_name) in orphans {
             out.push(Message::tool_result(
                 &tool_call_id,
@@ -608,6 +611,32 @@ mod tests {
         assert_eq!(result[0].role, MessageRole::Assistant);
         assert_eq!(result[1].role, MessageRole::Tool);
         assert_eq!(result[1].tool_name.as_deref(), Some("shell"));
+    }
+
+    #[test]
+    fn build_request_messages_preserves_multiple_orphan_order() {
+        let calls = ["first", "second", "third"]
+            .into_iter()
+            .map(|id| ToolCall {
+                id: id.into(),
+                name: format!("tool-{id}"),
+                arguments: "{}".into(),
+                thought_signature: None,
+            })
+            .collect();
+        let buf = MessageBuffer::new(vec![assistant_with_tool_calls(calls)]);
+        let result = ContextManager::new().build_request_messages(&buf);
+
+        let result_ids: Vec<&str> = result[1..]
+            .iter()
+            .map(|message| message.tool_call_id.as_deref().unwrap())
+            .collect();
+        assert_eq!(result_ids, ["first", "second", "third"]);
+        let result_names: Vec<&str> = result[1..]
+            .iter()
+            .map(|message| message.tool_name.as_deref().unwrap())
+            .collect();
+        assert_eq!(result_names, ["tool-first", "tool-second", "tool-third"]);
     }
 
     #[test]

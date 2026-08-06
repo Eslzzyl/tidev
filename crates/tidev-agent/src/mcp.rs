@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex, Weak};
 
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
+use http::{HeaderName, HeaderValue};
 use rmcp::model::{
     CallToolRequestParams, ClientCapabilities, ClientInfo, Implementation, Tool as McpToolModel,
 };
@@ -32,9 +33,16 @@ pub enum McpServerSpec {
         env: BTreeMap<String, String>,
     },
     /// A streamable HTTP server.
-    Http { url: String },
-    /// An SSE server retained for compatibility with existing hosts.
-    Sse { url: String },
+    Http {
+        url: String,
+        headers: BTreeMap<String, String>,
+    },
+    /// Compatibility name for a streamable HTTP server whose responses may use SSE.
+    /// Legacy SSE servers that require a GET endpoint handshake are not supported.
+    Sse {
+        url: String,
+        headers: BTreeMap<String, String>,
+    },
 }
 
 impl McpServerSpec {
@@ -409,14 +417,33 @@ impl McpRegistry {
                     .await
                     .context("failed to connect to stdio MCP server")
             }
-            McpServerSpec::Http { url } | McpServerSpec::Sse { url } => {
-                let transport = StreamableHttpClientTransport::from_uri(url.as_str());
+            McpServerSpec::Http { url, headers } | McpServerSpec::Sse { url, headers } => {
+                let custom_headers = Self::to_http_headers(headers)?;
+                let transport = StreamableHttpClientTransport::from_config(
+                    rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig::with_uri(url.as_str())
+                        .custom_headers(custom_headers),
+                );
                 client_info
                     .serve(transport)
                     .await
                     .context("failed to connect to HTTP MCP server")
             }
         }
+    }
+
+    fn to_http_headers(
+        headers: &BTreeMap<String, String>,
+    ) -> Result<std::collections::HashMap<HeaderName, HeaderValue>> {
+        headers
+            .iter()
+            .map(|(name, value)| {
+                let header_name = HeaderName::from_bytes(name.as_bytes())
+                    .with_context(|| format!("invalid MCP HTTP header name '{name}'"))?;
+                let header_value = HeaderValue::from_str(value)
+                    .with_context(|| format!("invalid MCP HTTP header value for '{name}'"))?;
+                Ok((header_name, header_value))
+            })
+            .collect()
     }
 
     async fn load_tools(
@@ -752,6 +779,32 @@ mod tests {
             "mcp__my_server__read_file"
         );
         assert_eq!(mcp_name("!!!", "???"), "mcp__mcp__mcp");
+    }
+
+    #[test]
+    fn http_headers_are_converted_for_rmcp() {
+        let headers = BTreeMap::from([
+            ("Authorization".to_string(), "Bearer token".to_string()),
+            ("X-Trace".to_string(), "trace-1".to_string()),
+        ]);
+        let converted = McpRegistry::to_http_headers(&headers).unwrap();
+
+        assert_eq!(
+            converted
+                .get(&HeaderName::from_static("authorization"))
+                .unwrap(),
+            "Bearer token"
+        );
+        assert_eq!(
+            converted.get(&HeaderName::from_static("x-trace")).unwrap(),
+            "trace-1"
+        );
+    }
+
+    #[test]
+    fn invalid_http_headers_are_rejected_before_connecting() {
+        let headers = BTreeMap::from([("invalid header".to_string(), "value".to_string())]);
+        assert!(McpRegistry::to_http_headers(&headers).is_err());
     }
 
     #[test]

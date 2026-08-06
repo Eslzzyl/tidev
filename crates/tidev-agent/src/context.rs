@@ -9,7 +9,6 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use async_trait::async_trait;
-use tokio::sync::mpsc::UnboundedSender;
 use tokio_util::sync::CancellationToken;
 
 use tidev_llm::ToolDefinition;
@@ -18,7 +17,7 @@ use tidev_llm::message::{
 };
 use tidev_llm::reasoning::ThinkingLevelType;
 
-use crate::event::AgentEvent;
+use crate::event::AgentEventSender;
 
 // ---------------------------------------------------------------------------
 // AgentLoopConfig
@@ -33,7 +32,7 @@ pub struct AgentLoopConfig {
     /// Thinking / reasoning level.
     pub thinking_level: ThinkingLevelType,
     /// Channel for sending real-time events to the frontend.
-    pub event_tx: UnboundedSender<AgentEvent>,
+    pub event_tx: AgentEventSender,
     /// Cancellation token for cooperative termination.
     pub cancel: CancellationToken,
     /// Queue of user messages that arrived while the loop was busy.
@@ -58,7 +57,7 @@ pub trait AgentContext: Send + Sync {
     fn tools(&self) -> Vec<ToolDefinition>;
 
     /// Return the event channel for sending real-time events to the frontend.
-    fn event_tx(&self) -> UnboundedSender<AgentEvent>;
+    fn event_tx(&self) -> AgentEventSender;
 
     /// Stream a single LLM turn and return the completed [`AssistantTurn`].
     ///

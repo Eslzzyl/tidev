@@ -29,9 +29,18 @@ pub enum McpServerConfig {
         env: BTreeMap<String, String>,
     },
     /// A server accessible via HTTP POST.
-    Http { url: String },
-    /// A server accessible via Server-Sent Events.
-    Sse { url: String },
+    Http {
+        url: String,
+        #[serde(default)]
+        headers: BTreeMap<String, String>,
+    },
+    /// Compatibility name for a streamable HTTP server whose responses may use SSE.
+    /// Legacy SSE servers that require a GET endpoint handshake are not supported.
+    Sse {
+        url: String,
+        #[serde(default)]
+        headers: BTreeMap<String, String>,
+    },
 }
 
 impl McpServerConfig {
@@ -102,14 +111,16 @@ mod tests {
     fn test_mcp_server_config_http_roundtrip() {
         let config = McpServerConfig::Http {
             url: "https://example.com/mcp".into(),
+            headers: BTreeMap::from([("Authorization".into(), "Bearer token".into())]),
         };
 
         let toml_str = toml::to_string_pretty(&config).unwrap();
         let parsed: McpServerConfig = toml::from_str(&toml_str).unwrap();
 
         match parsed {
-            McpServerConfig::Http { url } => {
+            McpServerConfig::Http { url, headers } => {
                 assert_eq!(url, "https://example.com/mcp");
+                assert_eq!(headers.get("Authorization").unwrap(), "Bearer token");
             }
             other => panic!("expected Http, got {other:?}"),
         }
@@ -119,14 +130,16 @@ mod tests {
     fn test_mcp_server_config_sse_roundtrip() {
         let config = McpServerConfig::Sse {
             url: "http://localhost:8080/sse".into(),
+            headers: BTreeMap::new(),
         };
 
         let toml_str = toml::to_string_pretty(&config).unwrap();
         let parsed: McpServerConfig = toml::from_str(&toml_str).unwrap();
 
         match parsed {
-            McpServerConfig::Sse { url } => {
+            McpServerConfig::Sse { url, headers } => {
                 assert_eq!(url, "http://localhost:8080/sse");
+                assert!(headers.is_empty());
             }
             other => panic!("expected Sse, got {other:?}"),
         }
@@ -142,9 +155,11 @@ mod tests {
         };
         let http = McpServerConfig::Http {
             url: "http://e.com".into(),
+            headers: BTreeMap::new(),
         };
         let sse = McpServerConfig::Sse {
             url: "http://e.com/sse".into(),
+            headers: BTreeMap::new(),
         };
 
         assert_eq!(stdio.kind_label(), "stdio");

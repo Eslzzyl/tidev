@@ -4,12 +4,10 @@ use std::path::Path;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use tokio::sync::mpsc::UnboundedSender;
-
 use tidev_llm::ToolDefinition;
 use tidev_llm::message::ToolExecutionResult;
 
-use crate::event::AgentEvent;
+use crate::event::AgentEventSender;
 
 /// Host capabilities exposed to a generic tool implementation.
 pub trait ToolContext: Send + Sync {
@@ -17,7 +15,7 @@ pub trait ToolContext: Send + Sync {
     fn workspace_root(&self) -> &Path;
 
     /// Return the event channel used by the tool implementation.
-    fn event_tx(&self) -> UnboundedSender<AgentEvent>;
+    fn event_tx(&self) -> AgentEventSender;
 }
 
 /// A protocol-level tool implementation.

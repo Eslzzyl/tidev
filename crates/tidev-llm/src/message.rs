@@ -120,6 +120,10 @@ pub fn tool_output_preview(tool_name: Option<&str>, output: &str) -> String {
 // ToolMetadata & FileChangeInfo
 // ---------------------------------------------------------------------------
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FileChangeInfo {
     pub path: String,
@@ -148,6 +152,11 @@ pub struct ToolMetadata {
     /// provider-specific items on the next turn.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub responses_output_items: Vec<serde_json::Value>,
+    /// Preserve the complete tool output when constructing a provider request.
+    /// Hosts set this generic protocol property when previewing would lose
+    /// information required by the next turn.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub preserve_full_output: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -173,6 +182,9 @@ impl ToolExecutionResult {
     }
 
     pub fn preview_for_storage(&self, tool_name: Option<&str>) -> Self {
+        if self.metadata.preserve_full_output {
+            return self.clone();
+        }
         let output = tool_output_preview(tool_name, &self.output);
         if output == self.output {
             return self.clone();
@@ -735,6 +747,14 @@ mod tests {
                 .output
                 .starts_with("[shell output truncated: 9000 chars]")
         );
+    }
+
+    #[test]
+    fn preview_for_storage_preserves_marked_output() {
+        let mut result = ToolExecutionResult::new("x".repeat(9_000));
+        result.metadata.preserve_full_output = true;
+        let previewed = result.preview_for_storage(Some("delegate"));
+        assert_eq!(previewed, result);
     }
 
     // ── MessageRole ─────────────────────────────────────────────────────

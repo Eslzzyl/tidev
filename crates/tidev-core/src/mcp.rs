@@ -137,8 +137,14 @@ fn to_agent_spec(workspace_root: &Path, config: &McpServerConfig) -> McpServerSp
                 .map(|cwd| resolve_workspace_path(workspace_root, cwd)),
             env: env.clone(),
         },
-        McpServerConfig::Http { url } => McpServerSpec::Http { url: url.clone() },
-        McpServerConfig::Sse { url } => McpServerSpec::Sse { url: url.clone() },
+        McpServerConfig::Http { url, headers } => McpServerSpec::Http {
+            url: url.clone(),
+            headers: headers.clone(),
+        },
+        McpServerConfig::Sse { url, headers } => McpServerSpec::Sse {
+            url: url.clone(),
+            headers: headers.clone(),
+        },
     }
 }
 
@@ -207,5 +213,21 @@ mod tests {
         );
         let spec = manager.agent_registry().server_spec("srv").unwrap();
         assert!(matches!(spec, McpServerSpec::Stdio { .. }));
+    }
+
+    #[test]
+    fn http_headers_round_trip_to_agent_spec() {
+        let config = McpServerConfig::Http {
+            url: "https://example.com/mcp".into(),
+            headers: BTreeMap::from([("Authorization".into(), "Bearer token".into())]),
+        };
+        let spec = to_agent_spec(Path::new("/workspace"), &config);
+
+        assert!(matches!(
+            spec,
+            McpServerSpec::Http { url, headers }
+                if url == "https://example.com/mcp"
+                    && headers.get("Authorization") == Some(&"Bearer token".to_string())
+        ));
     }
 }

@@ -1016,11 +1016,25 @@ fn acp_mcp_server_to_config(
         }
         acp::McpServer::Http(s) => Some((
             s.name.clone(),
-            tidev_config::mcp::McpServerConfig::Http { url: s.url.clone() },
+            tidev_config::mcp::McpServerConfig::Http {
+                url: s.url.clone(),
+                headers: s
+                    .headers
+                    .iter()
+                    .map(|header| (header.name.clone(), header.value.clone()))
+                    .collect(),
+            },
         )),
         acp::McpServer::Sse(s) => Some((
             s.name.clone(),
-            tidev_config::mcp::McpServerConfig::Sse { url: s.url.clone() },
+            tidev_config::mcp::McpServerConfig::Sse {
+                url: s.url.clone(),
+                headers: s
+                    .headers
+                    .iter()
+                    .map(|header| (header.name.clone(), header.value.clone()))
+                    .collect(),
+            },
         )),
         _ => {
             log::warn!("ACP: unsupported MCP server type, skipping");

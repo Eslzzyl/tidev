@@ -1172,7 +1172,7 @@ impl SessionStore {
              output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, \
              tokens_per_second, thinking_level, \
              reasoning_started_at, reasoning_completed_at \
-             FROM messages WHERE session_id = ?1 ORDER BY created_at ASC",
+             FROM messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC",
             )?;
 
             // ── Phase 1: collect raw rows (no decompression) ──────────
@@ -1414,7 +1414,7 @@ impl SessionStore {
                  output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, \
                  tokens_per_second, thinking_level, \
                  reasoning_started_at, reasoning_completed_at \
-                 FROM messages WHERE session_id = ?1 ORDER BY created_at DESC LIMIT 1",
+                 FROM messages WHERE session_id = ?1 ORDER BY created_at DESC, rowid DESC LIMIT 1",
             )?;
             let mut rows = stmt.query_map(params![session_id.to_string()], |row| {
                 Ok(Self::build_message_from_row(row))
@@ -1663,7 +1663,7 @@ impl SessionStore {
                         cache_read_tokens, cache_write_tokens, model_id, tokens_per_second, \
                         snapshot_hash, CAST(patch_files AS BLOB), CAST(file_diffs AS BLOB), \
                         mode, thinking_level, child_session_id \
-                 FROM messages WHERE session_id IN ({placeholder})"
+                 FROM messages WHERE session_id IN ({placeholder}) ORDER BY created_at ASC, rowid ASC"
             );
             let params: Vec<&dyn rusqlite::types::ToSql> = sid_strs
                 .iter()
@@ -1949,7 +1949,7 @@ impl SessionStore {
                         input_tokens, output_tokens, total_tokens, cache_read_tokens, \
                         cache_write_tokens, model_id, tokens_per_second, snapshot_hash, \
                         patch_files, file_diffs, mode, thinking_level, child_session_id \
-                 FROM messages WHERE session_id IN ({imp_placeholder})"
+                 FROM messages WHERE session_id IN ({imp_placeholder}) ORDER BY created_at ASC, rowid ASC"
             );
             let mut stmt = import_conn.prepare(&sql)?;
             let rows = stmt
@@ -2464,6 +2464,28 @@ mod tests {
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].role, MessageRole::User);
         assert_eq!(messages[0].content, "Hello, world!");
+    }
+
+    #[test]
+    fn message_reload_preserves_insert_order_for_equal_timestamps() {
+        let (store, _tmp) = test_store();
+        let sid = create_test_session(&store, "/workspace", "equal timestamp test");
+        let timestamp = Utc::now();
+        let mut messages = Vec::new();
+        for content in ["first", "second", "third"] {
+            let mut message = Message::new(MessageRole::User, content);
+            message.created_at = timestamp;
+            messages.push(message);
+        }
+
+        store.append_messages(sid, &messages).unwrap();
+        let loaded = store.load_messages(sid).unwrap();
+
+        let contents: Vec<&str> = loaded
+            .iter()
+            .map(|message| message.content.as_str())
+            .collect();
+        assert_eq!(contents, ["first", "second", "third"]);
     }
 
     #[test]

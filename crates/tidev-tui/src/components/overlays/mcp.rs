@@ -34,6 +34,7 @@ struct ServerDraft {
     cwd: String,
     env: String,
     url: String,
+    headers: String,
 }
 
 impl ServerDraft {
@@ -46,6 +47,7 @@ impl ServerDraft {
             cwd: String::new(),
             env: String::new(),
             url: String::new(),
+            headers: String::new(),
         }
     }
 
@@ -82,10 +84,22 @@ impl ServerDraft {
                     anyhow::bail!("URL is required for HTTP/SSE servers");
                 }
                 let url = self.url.trim().to_string();
+                let headers: BTreeMap<String, String> = self
+                    .headers
+                    .lines()
+                    .filter_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        let name = name.trim();
+                        if name.is_empty() {
+                            return None;
+                        }
+                        Some((name.to_string(), value.trim().to_string()))
+                    })
+                    .collect();
                 if self.kind == "http" {
-                    Ok(McpServerConfig::Http { url })
+                    Ok(McpServerConfig::Http { url, headers })
                 } else {
-                    Ok(McpServerConfig::Sse { url })
+                    Ok(McpServerConfig::Sse { url, headers })
                 }
             }
             other => anyhow::bail!("unknown MCP server kind '{other}'"),
@@ -256,11 +270,21 @@ impl McpServerPanel {
                         .collect::<Vec<_>>()
                         .join("\n");
                 }
-                McpServerConfig::Http { url } => {
+                McpServerConfig::Http { url, headers } => {
                     draft.url = url;
+                    draft.headers = headers
+                        .iter()
+                        .map(|(name, value)| format!("{name}: {value}"))
+                        .collect::<Vec<_>>()
+                        .join("\n");
                 }
-                McpServerConfig::Sse { url } => {
+                McpServerConfig::Sse { url, headers } => {
                     draft.url = url;
+                    draft.headers = headers
+                        .iter()
+                        .map(|(name, value)| format!("{name}: {value}"))
+                        .collect::<Vec<_>>()
+                        .join("\n");
                 }
             }
         }
@@ -334,7 +358,7 @@ impl Component for McpServerPanel {
                     return self.save_draft();
                 }
                 KeyCode::Tab | KeyCode::Down => {
-                    self.edit_scroll = (self.edit_scroll + 1).min(6);
+                    self.edit_scroll = (self.edit_scroll + 1).min(7);
                     return Some(Action::Noop);
                 }
                 KeyCode::Up => {
@@ -621,6 +645,7 @@ impl McpServerPanel {
             ("Cwd", &self.edit_draft.cwd, 4),
             ("Env", &self.edit_draft.env, 5),
             ("URL", &self.edit_draft.url, 6),
+            ("Header", &self.edit_draft.headers, 7),
         ];
 
         let field_start_y = inner.y;
@@ -719,6 +744,7 @@ impl EditField for ServerDraft {
             4 => f(&mut self.cwd),
             5 => f(&mut self.env),
             6 => f(&mut self.url),
+            7 => f(&mut self.headers),
             _ => {}
         }
     }
@@ -763,11 +789,14 @@ mod tests {
         draft.kind = "http".to_string();
         draft.name = "http-server".to_string();
         draft.url = "https://mcp.example.com".to_string();
+        draft.headers = "Authorization: Bearer token\nX-Trace: trace-1".to_string();
 
         let config = draft.to_config().unwrap();
         match config {
-            McpServerConfig::Http { url } => {
+            McpServerConfig::Http { url, headers } => {
                 assert_eq!(url, "https://mcp.example.com");
+                assert_eq!(headers.get("Authorization").unwrap(), "Bearer token");
+                assert_eq!(headers.get("X-Trace").unwrap(), "trace-1");
             }
             other => panic!("expected Http, got {other:?}"),
         }
@@ -782,7 +811,7 @@ mod tests {
 
         let config = draft.to_config().unwrap();
         match config {
-            McpServerConfig::Sse { url } => {
+            McpServerConfig::Sse { url, .. } => {
                 assert_eq!(url, "http://localhost:8080/sse");
             }
             other => panic!("expected Sse, got {other:?}"),

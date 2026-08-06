@@ -619,6 +619,11 @@ async fn merge_mcp_servers(runtime: &Runtime, servers: &[acp::McpServer]) {
                 server.name.clone(),
                 tidev_config::mcp::McpServerConfig::Http {
                     url: server.url.clone(),
+                    headers: server
+                        .headers
+                        .iter()
+                        .map(|header| (header.name.clone(), header.value.clone()))
+                        .collect(),
                 },
             )),
             acp::McpServer::Stdio(server) => Some((

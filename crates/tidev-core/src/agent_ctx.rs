@@ -18,9 +18,10 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::agent_type::{AgentDefinition, AgentType};
-use crate::backend_event::{BackendEvent, agent_event_channel, agent_event_to_backend_event};
+use crate::backend_event::{BackendEvent, CoreEventBus};
 use tidev_agent::{
-    AgentContext, AgentEvent, AgentLoopConfig, ContextManager, llm_event_to_agent_event,
+    AgentContext, AgentEvent, AgentEventSender, AgentLoopConfig, ContextManager,
+    llm_event_to_agent_event,
 };
 use tidev_config::auth::ActiveModel;
 use tidev_config::{AppConfig, AuthStore};
@@ -107,6 +108,25 @@ fn read_only_tool_names() -> HashSet<&'static str> {
 fn is_read_only(name: &str) -> bool {
     read_only_tool_names()
         .contains(tidev_utils::tool_name::canonical_tool_name(name).unwrap_or(name))
+}
+
+/// Restore the generic full-output marker for legacy subagent messages.
+///
+/// Older sessions persisted only the product tool name. The marker is applied
+/// in the product layer before any request is built so those sessions retain
+/// their historical provider input after the LLM layer is product-neutral.
+pub(crate) fn restore_full_tool_output_semantics(messages: &mut [Message]) {
+    for message in messages {
+        if message.role == MessageRole::Tool && message.tool_name.as_deref() == Some("task") {
+            message.metadata.preserve_full_output = true;
+        }
+    }
+}
+
+fn mark_full_tool_result(tool_call: &ToolCall, result: &mut ToolExecutionResult) {
+    if tidev_utils::tool_name::canonical_tool_name(&tool_call.name) == Some("task") {
+        result.metadata.preserve_full_output = true;
+    }
 }
 
 /// Restore the model's tool-call order after concurrent execution.
@@ -282,8 +302,8 @@ pub struct CoreContext {
     context_manager: Arc<Mutex<ContextManager>>,
     /// Per-session message buffer (the in-memory cache / single source of truth).
     buffer: Arc<RwLock<CoreMessageBuffer>>,
-    /// Channel for sending events to the UI.
-    event_tx: UnboundedSender<BackendEvent>,
+    /// Ordered event bus for this session.
+    event_bus: CoreEventBus,
     /// Channel for sending UI requests (tool approval etc.).
     request_tx: UnboundedSender<TuiRequest>,
     /// This loop's session ID.
@@ -330,13 +350,13 @@ pub struct CoreContext {
 impl CoreContext {
     /// Create a new CoreContext with all required resources.
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub(crate) fn new(
         llm: LlmClient,
         session_manager: SessionManager,
         tool_registry: Arc<ToolRegistry>,
         context_manager: Arc<Mutex<ContextManager>>,
         buffer: Arc<RwLock<CoreMessageBuffer>>,
-        event_tx: UnboundedSender<BackendEvent>,
+        event_bus: CoreEventBus,
         request_tx: UnboundedSender<TuiRequest>,
         session_id: Uuid,
         mode: Mode,
@@ -358,7 +378,7 @@ impl CoreContext {
             tool_registry,
             context_manager,
             buffer,
-            event_tx,
+            event_bus,
             request_tx,
             session_id,
             mode,
@@ -381,7 +401,7 @@ impl CoreContext {
 
     /// Helper: emit an event; logging the error is sufficient (UI may have gone away).
     fn emit(&self, event: BackendEvent) {
-        let _ = self.event_tx.send(event);
+        let _ = self.event_bus.send_backend(event);
     }
 
     /// Inject new instruction files into the last user message.
@@ -639,9 +659,12 @@ impl CoreContext {
         &self,
         session_id: Uuid,
         tool_calls: &[ToolCall],
-        results: Vec<(ToolCall, ToolExecutionResult)>,
+        mut results: Vec<(ToolCall, ToolExecutionResult)>,
     ) -> Result<Vec<(ToolCall, ToolExecutionResult)>> {
         self.collect_instruction_sources(session_id).await?;
+        for (tool_call, result) in &mut results {
+            mark_full_tool_result(tool_call, result);
+        }
         Ok(order_tool_results(tool_calls, results))
     }
 
@@ -792,8 +815,8 @@ impl AgentContext for CoreContext {
         self.tools.iter().map(to_llm_tool_def).collect()
     }
 
-    fn event_tx(&self) -> UnboundedSender<AgentEvent> {
-        agent_event_channel(self.session_id, self.event_tx.clone())
+    fn event_tx(&self) -> AgentEventSender {
+        self.event_bus.agent_sender()
     }
 
     fn workspace_root(&self) -> &std::path::Path {
@@ -832,8 +855,7 @@ impl AgentContext for CoreContext {
             tokio::select! {
                 _ = self.cancel.cancelled() => {
                     handle.abort();
-                    self.emit(BackendEvent::StreamEnd {
-                        session_id: self.session_id,
+                    let _ = self.event_bus.agent_sender().send(AgentEvent::StreamEnd {
                         request_id,
                         reasoning_started_at: None,
                         reasoning_completed_at: None,
@@ -844,10 +866,7 @@ impl AgentContext for CoreContext {
                     match event {
                         Some(ev) => {
                             let ev = llm_event_to_agent_event(ev, request_id);
-                            self.emit(agent_event_to_backend_event(
-                                ev.clone(),
-                                self.session_id,
-                            ));
+                            let _ = self.event_bus.agent_sender().send(ev.clone());
                             match ev {
                                 AgentEvent::Delta { content, .. } => {
                                     turn.content.push_str(&content);
@@ -1113,7 +1132,7 @@ impl AgentContext for CoreContext {
             let mut guard = ToolCompletedGuard::new(
                 session_id,
                 request_id,
-                Some(self.event_tx.clone()),
+                Some(self.event_bus.clone()),
                 agent_event_rx,
                 tc.clone(),
             );
@@ -1125,7 +1144,7 @@ impl AgentContext for CoreContext {
                 allow_outside,
                 sensitive_approved,
                 &self.cancel,
-                Some(agent_event_tx),
+                Some(agent_event_tx.into()),
                 true,
             );
 
@@ -1188,7 +1207,7 @@ impl AgentContext for CoreContext {
                     active_model: self.active_model.clone(),
                     workspace_root: self.workspace_root.clone(),
                     config_dir: self.config_dir.clone(),
-                    event_tx: self.event_tx.clone(),
+                    event_bus: self.event_bus.clone(),
                     mode: self.mode,
                     system_prompt: self.system_prompt.clone(),
                     snapshot: self.snapshot.clone(),
@@ -1447,7 +1466,7 @@ impl AgentContext for CoreContext {
 
     async fn load_messages(&self, session_id: Uuid) -> Result<Vec<Message>> {
         // 1. Check if compaction is needed (brief lock).
-        let (needs_compact, msgs_to_compact) = {
+        let (needs_compact, mut msgs_to_compact) = {
             let cm = self.context_manager.lock().await;
             let buf = self.buffer.read().await;
             let needs = cm.needs_compaction(
@@ -1462,6 +1481,9 @@ impl AgentContext for CoreContext {
             };
             (needs, msgs)
         };
+        if needs_compact {
+            restore_full_tool_output_semantics(&mut msgs_to_compact);
+        }
 
         // 2. If compaction is needed, perform it (no locks held during LLM call).
         if needs_compact {
@@ -1537,6 +1559,7 @@ impl AgentContext for CoreContext {
             .await?;
         self.inject_mode_reminder_impl(session_id, &mut messages)
             .await?;
+        restore_full_tool_output_semantics(&mut messages);
         Ok(messages)
     }
 }
@@ -1552,7 +1575,7 @@ impl AgentContext for CoreContext {
 struct ToolCompletedGuard {
     session_id: Uuid,
     request_id: u64,
-    event_tx: Option<UnboundedSender<BackendEvent>>,
+    event_bus: Option<CoreEventBus>,
     agent_event_rx: Option<UnboundedReceiver<AgentEvent>>,
     tool_call: ToolCall,
     disarmed: bool,
@@ -1562,14 +1585,14 @@ impl ToolCompletedGuard {
     fn new(
         session_id: Uuid,
         request_id: u64,
-        event_tx: Option<UnboundedSender<BackendEvent>>,
+        event_bus: Option<CoreEventBus>,
         agent_event_rx: UnboundedReceiver<AgentEvent>,
         tool_call: ToolCall,
     ) -> Self {
         Self {
             session_id,
             request_id,
-            event_tx,
+            event_bus,
             agent_event_rx: Some(agent_event_rx),
             tool_call,
             disarmed: false,
@@ -1581,8 +1604,8 @@ impl ToolCompletedGuard {
             return;
         };
         while let Ok(event) = agent_event_rx.try_recv() {
-            if let Some(ref tx) = self.event_tx {
-                let _ = tx.send(agent_event_to_backend_event(event, self.session_id));
+            if let Some(ref bus) = self.event_bus {
+                let _ = bus.agent_sender().send(event);
             }
         }
     }
@@ -1596,8 +1619,8 @@ impl Drop for ToolCompletedGuard {
     fn drop(&mut self) {
         if !self.disarmed {
             self.drain_agent_events();
-            if let Some(ref tx) = self.event_tx {
-                let _ = tx.send(BackendEvent::ToolCompleted {
+            if let Some(ref bus) = self.event_bus {
+                let _ = bus.send_backend(BackendEvent::ToolCompleted {
                     session_id: self.session_id,
                     request_id: self.request_id,
                     tool_call: self.tool_call.clone(),
@@ -1632,7 +1655,7 @@ mod tool_event_order_tests {
         drop(ToolCompletedGuard::new(
             session_id,
             7,
-            Some(backend_tx),
+            Some(CoreEventBus::new(backend_tx, session_id)),
             agent_rx,
             ToolCall::default(),
         ));
@@ -1702,7 +1725,7 @@ struct SubagentSpawner {
     active_model: ActiveModel,
     workspace_root: PathBuf,
     config_dir: PathBuf,
-    event_tx: UnboundedSender<BackendEvent>,
+    event_bus: CoreEventBus,
     mode: Mode,
     system_prompt: String,
     snapshot: Option<SnapshotService>,
@@ -1819,17 +1842,19 @@ async fn execute_task_tool(
         .context("failed to seed child session")?;
 
     // 6. Emit SubagentStatus that the child has started (parent session).
-    let _ = spawner.event_tx.send(BackendEvent::SubagentStatus {
-        session_id: config.parent_session_id,
-        request_id: config.parent_request_id,
-        tool_call_id: config.tool_call.id.clone(),
-        child_session_id,
-        status_text: format!("Started {:?} subagent", agent_type),
-        current_tool_call: None,
-        assistant_message: Box::new(None),
-        content_delta: None,
-        reasoning_delta: None,
-    });
+    let _ = spawner
+        .event_bus
+        .send_backend(BackendEvent::SubagentStatus {
+            session_id: config.parent_session_id,
+            request_id: config.parent_request_id,
+            tool_call_id: config.tool_call.id.clone(),
+            child_session_id,
+            status_text: format!("Started {:?} subagent", agent_type),
+            current_tool_call: None,
+            assistant_message: Box::new(None),
+            content_delta: None,
+            reasoning_delta: None,
+        });
 
     // Persist the child association as application data on the parent
     // assistant message so it survives session reloads without entering the
@@ -1874,7 +1899,7 @@ async fn execute_task_tool(
         spawner.tool_registry,
         Arc::new(Mutex::new(ContextManager::new())),
         child_buffer.clone(),
-        spawner.event_tx.clone(),
+        spawner.event_bus.for_session(child_session_id),
         // Subagents auto-approve (parent handles UI permissions).
         tokio::sync::mpsc::unbounded_channel().0,
         child_session_id,
@@ -2039,5 +2064,44 @@ mod child_session_app_data_tests {
             Some(child_session_id)
         );
         assert_eq!(child_session_id_for_tool_call(&buffer, "missing"), None);
+    }
+}
+
+#[cfg(test)]
+mod full_tool_output_semantics_tests {
+    use super::*;
+
+    fn tool_call(name: &str) -> ToolCall {
+        ToolCall {
+            id: format!("call-{name}"),
+            name: name.to_string(),
+            arguments: "{}".to_string(),
+            thought_signature: None,
+        }
+    }
+
+    #[test]
+    fn legacy_task_messages_restore_full_output_marker() {
+        let mut message = Message::tool_result(
+            "call-task",
+            "task",
+            ToolExecutionResult::new("complete output"),
+        );
+
+        restore_full_tool_output_semantics(std::slice::from_mut(&mut message));
+
+        assert!(message.metadata.preserve_full_output);
+    }
+
+    #[test]
+    fn only_task_results_receive_full_output_marker() {
+        let mut task_result = ToolExecutionResult::new("complete output");
+        let mut regular_result = ToolExecutionResult::new("previewable output");
+
+        mark_full_tool_result(&tool_call("task"), &mut task_result);
+        mark_full_tool_result(&tool_call("shell"), &mut regular_result);
+
+        assert!(task_result.metadata.preserve_full_output);
+        assert!(!regular_result.metadata.preserve_full_output);
     }
 }

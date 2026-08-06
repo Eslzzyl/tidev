@@ -7,7 +7,6 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use chrono::Utc;
-use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
@@ -17,7 +16,7 @@ use tidev_llm::{LlmClient, LlmProviderConfig, ToolDefinition};
 
 use crate::context::{AgentContext, AgentLoopConfig};
 use crate::context_manager::ContextManager;
-use crate::event::{AgentEvent, llm_event_to_agent_event};
+use crate::event::{AgentEvent, AgentEventSender, llm_event_to_agent_event};
 use crate::loop_::run_agent_loop;
 use crate::message_buf::MessageBuffer;
 use crate::registry::ToolRegistry;
@@ -46,7 +45,7 @@ pub struct AgentRuntime {
     context_manager: Arc<Mutex<ContextManager>>,
     messages: Arc<Mutex<MessageBuffer>>,
     store: Arc<dyn MessageStore>,
-    event_tx: UnboundedSender<AgentEvent>,
+    event_tx: AgentEventSender,
     workspace_root: PathBuf,
     cancel: CancellationToken,
 }
@@ -63,7 +62,7 @@ impl AgentRuntime {
         messages: Vec<Message>,
         store: Arc<dyn MessageStore>,
         workspace_root: PathBuf,
-        event_tx: UnboundedSender<AgentEvent>,
+        event_tx: impl Into<AgentEventSender>,
         cancel: CancellationToken,
     ) -> Self {
         Self {
@@ -74,7 +73,7 @@ impl AgentRuntime {
             context_manager: Arc::new(Mutex::new(context_manager)),
             messages: Arc::new(Mutex::new(MessageBuffer::new(messages))),
             store,
-            event_tx,
+            event_tx: event_tx.into(),
             workspace_root,
             cancel,
         }
@@ -90,7 +89,7 @@ impl AgentRuntime {
         store: Arc<dyn MessageStore>,
         session_id: uuid::Uuid,
         workspace_root: PathBuf,
-        event_tx: UnboundedSender<AgentEvent>,
+        event_tx: impl Into<AgentEventSender>,
         cancel: CancellationToken,
     ) -> Result<Self> {
         let messages = store
@@ -147,7 +146,7 @@ impl AgentRuntime {
     }
 
     /// Return this runtime's event channel.
-    pub fn event_sender(&self) -> UnboundedSender<AgentEvent> {
+    pub fn event_sender(&self) -> AgentEventSender {
         self.event_tx.clone()
     }
 
@@ -212,7 +211,7 @@ impl AgentRuntime {
 
 struct RuntimeToolContext {
     workspace_root: PathBuf,
-    event_tx: UnboundedSender<AgentEvent>,
+    event_tx: AgentEventSender,
 }
 
 impl ToolContext for AgentRuntime {
@@ -220,7 +219,7 @@ impl ToolContext for AgentRuntime {
         &self.workspace_root
     }
 
-    fn event_tx(&self) -> UnboundedSender<AgentEvent> {
+    fn event_tx(&self) -> AgentEventSender {
         self.event_tx.clone()
     }
 }
@@ -230,7 +229,7 @@ impl ToolContext for RuntimeToolContext {
         &self.workspace_root
     }
 
-    fn event_tx(&self) -> UnboundedSender<AgentEvent> {
+    fn event_tx(&self) -> AgentEventSender {
         self.event_tx.clone()
     }
 }
@@ -241,7 +240,7 @@ impl AgentContext for AgentRuntime {
         self.tools.definitions()
     }
 
-    fn event_tx(&self) -> UnboundedSender<AgentEvent> {
+    fn event_tx(&self) -> AgentEventSender {
         self.event_tx.clone()
     }
 

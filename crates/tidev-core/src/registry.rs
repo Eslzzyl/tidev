@@ -13,7 +13,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use tidev_agent::AgentEvent;
+use tidev_agent::AgentEventSender;
 use tidev_llm::message::{ToolCall, ToolExecutionResult};
 use tidev_tools::types::ToolDefinition;
 
@@ -180,7 +180,7 @@ impl ToolRegistry {
         allow_outside: bool,
         sensitive_file_approved: bool,
         cancel: &CancellationToken,
-        event_tx: Option<UnboundedSender<AgentEvent>>,
+        event_tx: Option<AgentEventSender>,
         stream_shell: bool,
     ) -> ToolExecutionResult {
         execute_builtin_via_agent(
