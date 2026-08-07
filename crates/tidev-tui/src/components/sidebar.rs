@@ -467,7 +467,7 @@ mod tests {
 
     fn test_palette() -> ThemePalette {
         ThemePalette {
-            name: crate::theme::ThemeName::Dark,
+            is_dark: true,
             background: ratatui::style::Color::Rgb(0, 0, 0),
             panel: ratatui::style::Color::Rgb(10, 10, 10),
             panel_alt: ratatui::style::Color::Rgb(20, 20, 20),

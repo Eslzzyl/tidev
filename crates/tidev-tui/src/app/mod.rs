@@ -13,8 +13,9 @@ mod tools;
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
-use crate::theme::ThemePalette;
+use crate::theme::{ThemePalette, resolve_palette};
 use ratatui::layout::Rect;
+use tidev_config::ThemeCatalog;
 use tidev_core::Mode as SessionMode;
 use tidev_core::{ApprovedTool, ToolCallWithViolations};
 use tidev_core::{BackendEvent, TuiResponse};
@@ -65,6 +66,7 @@ pub struct App {
     pub(crate) runtime: tidev_core::Runtime,
     overlays: OverlayStack,
     current_palette: ThemePalette,
+    theme_catalog: ThemeCatalog,
     should_quit: bool,
     /// Pending scroll target set by ChatAction::ScrollTo (consumed by Chat component).
     scroll_target: Option<uuid::Uuid>,
@@ -197,8 +199,10 @@ impl App {
         request_rx: tokio::sync::mpsc::UnboundedReceiver<tidev_core::TuiRequest>,
         event_rx: tokio::sync::mpsc::UnboundedReceiver<BackendEvent>,
     ) -> Self {
-        let theme_str = runtime.config().theme;
-        let current_palette = ThemePalette::from_name(&theme_str);
+        let theme_catalog =
+            ThemeCatalog::load(runtime.config_dir()).expect("bundled theme presets must parse");
+        let theme_str = runtime.config().theme.clone();
+        let current_palette = resolve_palette(&theme_catalog, &theme_str);
 
         // Capture before runtime is moved into Self.
         let file_index = runtime.file_search_index();
@@ -213,6 +217,7 @@ impl App {
             runtime,
             overlays: OverlayStack::new(),
             current_palette,
+            theme_catalog,
             should_quit: false,
             scroll_target: None,
             pending_input_copy: None,

@@ -9,6 +9,7 @@ pub mod mcp;
 pub mod paths;
 pub mod provider;
 pub mod reasoning;
+pub mod theme;
 pub mod types;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -33,6 +34,7 @@ static PRESETS_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/../../presets");
 
 pub use crate::reasoning::ThinkingLevelType;
 pub use crate::reasoning::ThinkingMatcher;
+pub use crate::theme::{ThemeCatalog, ThemeColor, ThemeDefinition};
 pub use crate::types::ApiType;
 
 // ---------------------------------------------------------------------------

@@ -13,8 +13,9 @@
 //!    3_500  alias contains query
 //!    1_000  empty query (show all)
 
+use tidev_config::ThemeCatalog;
+
 use crate::action::{Action, ChatAction, OverlayAction, OverlayKind, SessionAction, ThemeAction};
-use crate::theme::ThemeName;
 
 // ---------------------------------------------------------------------------
 // CommandAction
@@ -413,7 +414,11 @@ fn command_fragment(input: &str) -> Option<&str> {
 ///
 /// Called by the App when a `/command` text is submitted (not typed).
 /// Returns `None` if the command should be treated as a regular prompt.
-pub(crate) fn execute_command(action: CommandAction, args: &[String]) -> Vec<Action> {
+pub(crate) fn execute_command(
+    action: CommandAction,
+    args: &[String],
+    catalog: &ThemeCatalog,
+) -> Vec<Action> {
     match action {
         CommandAction::Connect => {
             vec![Action::Overlay(OverlayAction::Open(
@@ -450,10 +455,13 @@ pub(crate) fn execute_command(action: CommandAction, args: &[String]) -> Vec<Act
                 vec![Action::Overlay(OverlayAction::Open(
                     OverlayKind::ThemePanel,
                 ))]
-            } else if let Some(theme) = ThemeName::parse(&args.join(" ")) {
-                vec![Action::Theme(ThemeAction::Set(theme))]
             } else {
-                vec![]
+                let name = args.join(" ");
+                if catalog.get(&name).is_some() {
+                    vec![Action::Theme(ThemeAction::Set(name))]
+                } else {
+                    vec![]
+                }
             }
         }
         CommandAction::Undo => {
@@ -507,6 +515,10 @@ pub(crate) fn execute_command(action: CommandAction, args: &[String]) -> Vec<Act
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_catalog() -> ThemeCatalog {
+        ThemeCatalog::load(std::path::Path::new("/nonexistent")).expect("bundled themes parse")
+    }
 
     #[test]
     fn test_parse_invocation() {
@@ -592,13 +604,30 @@ mod tests {
 
     #[test]
     fn test_thinking_commands_execute() {
+        let catalog = test_catalog();
         assert!(matches!(
-            execute_command(CommandAction::ExpandThinking, &[]).as_slice(),
+            execute_command(CommandAction::ExpandThinking, &[], &catalog).as_slice(),
             [Action::Chat(ChatAction::ExpandAllThinking)]
         ));
         assert!(matches!(
-            execute_command(CommandAction::CollapseThinking, &[]).as_slice(),
+            execute_command(CommandAction::CollapseThinking, &[], &catalog).as_slice(),
             [Action::Chat(ChatAction::CollapseAllThinking)]
+        ));
+    }
+
+    #[test]
+    fn test_theme_command_executes() {
+        let catalog = test_catalog();
+        assert!(matches!(
+            execute_command(CommandAction::Theme, &["dark".into()], &catalog).as_slice(),
+            [Action::Theme(ThemeAction::Set(name))] if name == "dark"
+        ));
+        assert!(execute_command(CommandAction::Theme, &["nope".into()], &catalog).is_empty());
+        assert!(matches!(
+            execute_command(CommandAction::Theme, &[], &catalog).as_slice(),
+            [Action::Overlay(OverlayAction::Open(
+                OverlayKind::ThemePanel
+            ))]
         ));
     }
 

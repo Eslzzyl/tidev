@@ -3985,6 +3985,7 @@ dependencies = [
  "anyhow",
  "dirs",
  "include_dir",
+ "log",
  "serde",
  "serde_json",
  "tidev-llm",

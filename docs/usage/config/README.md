@@ -54,17 +54,69 @@ key under the default provider.
 
 ### theme
 
-The colour theme of the terminal UI. Supported values:
+The colour theme of the terminal UI. The value is a theme id matching a theme
+file in the bundled `themes/` directory or in `~/.config/tidev/themes/`.
+
+Bundled themes:
 
 - `dark`
 - `light`
 - `nord`
 - `one-dark`
-- `catppuccin`
+- `mocha`
 - `solarized`
 - `orng`
 - `github`
 - `material`
+- `everforest`
+- `everforest-light`
+- `dusk`
+- `gruvbox`
+- `gruvbox-light`
+- `tokyo-night`
+- `rose-pine`
+- `rose-pine-dawn`
+- `contrast`
+
+#### Custom themes
+
+Place a TOML file in `~/.config/tidev/themes/` — the file stem is the theme
+id — and reference it with `theme = "my-theme"`. A user theme with the same
+id as a bundled theme overrides it.
+
+Example `~/.config/tidev/themes/my-theme.toml`:
+
+```toml
+dark = true
+# Optional syntect theme key for code highlighting; defaults to a dark/light
+# built-in theme when omitted.
+syntax_theme = "base16-ocean.dark"
+
+background = "#0c1017"
+panel = "#131924"
+panel_alt = "#19202c"
+panel_light = "#232d3c"
+text = "#e5e7eb"
+muted = "#8692a6"
+border = "#334155"
+accent = "#2dd4bf"
+accent_soft = "#64748b"
+success = "#22c55e"
+warning = "#fbbf24"
+error = "#f87171"
+diff_add = "#9bcd97"
+diff_delete = "#fc533a"
+selection_bg = "#2dd4bf"
+selection_fg = "#ffffff"
+mode_build = "#2dd4bf"
+mode_plan = "#64748b"
+```
+
+All color fields are 6-digit hex strings; the leading `#` is optional, so
+both `"0c1017"` and `"#0c1017"` work (double-click selection of a color code
+usually omits the `#`). Unknown fields are rejected so typos are reported
+instead of silently ignored; a theme file that fails to parse is skipped with
+a warning.
 
 ### instructions
 

@@ -1,6 +1,5 @@
 use super::*;
 
-use crate::theme::ThemeName;
 use tidev_core::agent_type::AgentType;
 
 use crate::action::{Action, OverlayAction, OverlayKind};
@@ -29,9 +28,11 @@ impl App {
         let kind_for_update = kind.clone();
         let component: Option<Box<dyn Component>> = match kind {
             OverlayKind::ThemePanel => {
-                let current =
-                    ThemeName::parse(self.current_palette.name.as_str()).unwrap_or(ThemeName::Dark);
-                Some(Box::new(ThemePanel::new(current)))
+                let current = self.runtime.config().theme.clone();
+                Some(Box::new(ThemePanel::new(
+                    self.theme_catalog.clone(),
+                    current,
+                )))
             }
             OverlayKind::AgentsPanel => Some(Box::new(AgentsPanel::new())),
             OverlayKind::SkillsPanel => {

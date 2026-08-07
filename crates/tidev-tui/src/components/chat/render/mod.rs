@@ -226,7 +226,7 @@ mod tests {
 
     fn test_palette() -> ThemePalette {
         ThemePalette {
-            name: crate::theme::ThemeName::Dark,
+            is_dark: true,
             background: Color::Rgb(0, 0, 0),
             panel: Color::Rgb(10, 10, 10),
             panel_alt: Color::Rgb(20, 20, 20),

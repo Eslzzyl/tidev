@@ -138,7 +138,7 @@ mod tests {
     use crate::components::overlays::theme::ThemePanel;
     use crate::components::overlays::undo::UndoConfirmDialog;
     use crate::components::overlays::workspace::WorkspaceBoundaryDialog;
-    use crate::theme::{ThemeName, ThemePalette};
+    use crate::theme::ThemePalette;
 
     // ---------------------------------------------------------------------------
     // Mock overlay for routing tests
@@ -165,7 +165,7 @@ mod tests {
 
     fn test_palette() -> ThemePalette {
         ThemePalette {
-            name: ThemeName::Dark,
+            is_dark: true,
             background: Color::Rgb(0, 0, 0),
             panel: Color::Rgb(10, 10, 10),
             panel_alt: Color::Rgb(20, 20, 20),
@@ -418,7 +418,9 @@ mod tests {
 
     #[test]
     fn theme_panel_does_not_use_main_area() {
-        let panel = ThemePanel::new(ThemeName::Dark);
+        let catalog = tidev_config::ThemeCatalog::load(std::path::Path::new("/nonexistent"))
+            .expect("bundled themes parse");
+        let panel = ThemePanel::new(catalog, "dark".to_string());
         assert!(!panel.overlay_uses_main_area());
     }
 

@@ -1,32 +1,12 @@
 use ratatui::style::Color;
 
+use tidev_config::{ThemeCatalog, ThemeDefinition};
 use tidev_core::Mode as SessionMode;
 
-mod name;
-pub use name::ThemeName;
-
-mod contrast;
-mod dark;
-mod dusk;
-mod everforest;
-mod everforest_light;
-mod github;
-mod gruvbox;
-mod gruvbox_light;
-mod light;
-mod material;
-mod mocha;
-mod nord;
-mod one_dark;
-mod orng;
-mod rose_pine;
-mod rose_pine_dawn;
-mod solarized;
-mod tokyo_night;
-
+/// Fully-resolved UI colors for one theme.
 #[derive(Clone, Copy, Debug)]
 pub struct ThemePalette {
-    pub name: ThemeName,
+    pub is_dark: bool,
     pub background: Color,
     pub panel: Color,
     pub panel_alt: Color,
@@ -59,28 +39,30 @@ pub fn mix_colors(fg: Color, bg: Color, weight: f32) -> Color {
 }
 
 impl ThemePalette {
-    pub fn from_name(value: &str) -> Self {
-        let name = ThemeName::parse(value).unwrap_or(ThemeName::Dark);
-        crate::markdown::set_syntax_theme_by_name(name);
-        match name {
-            ThemeName::Dark => Self::dark(),
-            ThemeName::Light => Self::light(),
-            ThemeName::Nord => Self::nord(),
-            ThemeName::OneDark => Self::one_dark(),
-            ThemeName::Mocha => Self::mocha(),
-            ThemeName::Solarized => Self::solarized(),
-            ThemeName::Orng => Self::orng(),
-            ThemeName::Github => Self::github(),
-            ThemeName::Material => Self::material(),
-            ThemeName::Everforest => Self::everforest(),
-            ThemeName::EverforestLight => Self::everforest_light(),
-            ThemeName::Dusk => Self::dusk(),
-            ThemeName::Gruvbox => Self::gruvbox(),
-            ThemeName::GruvboxLight => Self::gruvbox_light(),
-            ThemeName::TokyoNight => Self::tokyo_night(),
-            ThemeName::RosePine => Self::rose_pine(),
-            ThemeName::RosePineDawn => Self::rose_pine_dawn(),
-            ThemeName::Contrast => Self::contrast(),
+    /// Build a palette from a theme definition and apply its syntax theme.
+    pub fn from_definition(def: &ThemeDefinition) -> Self {
+        crate::markdown::set_syntax_theme_by_key(def.syntax_theme_key());
+        let color = |c: tidev_config::ThemeColor| Color::Rgb(c.0, c.1, c.2);
+        Self {
+            is_dark: def.dark,
+            background: color(def.background),
+            panel: color(def.panel),
+            panel_alt: color(def.panel_alt),
+            panel_light: color(def.panel_light),
+            text: color(def.text),
+            muted: color(def.muted),
+            border: color(def.border),
+            accent: color(def.accent),
+            accent_soft: color(def.accent_soft),
+            success: color(def.success),
+            warning: color(def.warning),
+            error: color(def.error),
+            diff_add: color(def.diff_add),
+            diff_delete: color(def.diff_delete),
+            selection_bg: color(def.selection_bg),
+            selection_fg: color(def.selection_fg),
+            mode_build: color(def.mode_build),
+            mode_plan: color(def.mode_plan),
         }
     }
 
@@ -95,10 +77,23 @@ impl ThemePalette {
     /// Lightens on dark themes, darkens on light themes, so the card appears
     /// to "lift" on hover without changing hue.
     pub fn hover_bg(&self, base: Color) -> Color {
-        if self.name.is_dark() {
+        if self.is_dark {
             mix_colors(Color::Rgb(255, 255, 255), base, 0.08)
         } else {
             mix_colors(Color::Rgb(0, 0, 0), base, 0.06)
         }
     }
+}
+
+/// Resolve a theme id against the catalog, falling back to the bundled
+/// `dark` theme when the id is unknown.
+pub fn resolve_palette(catalog: &ThemeCatalog, id: &str) -> ThemePalette {
+    if catalog.get(id).is_none() {
+        log::warn!("unknown theme {id:?}, falling back to \"dark\"");
+    }
+    let def = catalog
+        .get(id)
+        .or_else(|| catalog.get("dark"))
+        .expect("bundled dark theme must exist");
+    ThemePalette::from_definition(def)
 }

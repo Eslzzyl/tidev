@@ -17,8 +17,6 @@ use syntect::highlighting::Theme;
 use syntect::highlighting::ThemeSet;
 use syntect::parsing::{SyntaxReference, SyntaxSet};
 
-use crate::theme::ThemeName;
-
 const MAX_HIGHLIGHT_BYTES: usize = 512 * 1024;
 const MAX_HIGHLIGHT_LINES: usize = 10_000;
 
@@ -66,33 +64,12 @@ fn theme_lock() -> &'static RwLock<Theme> {
     THEME.get_or_init(|| RwLock::new(default_theme()))
 }
 
-pub(crate) fn theme_name_to_syntax_theme(name: ThemeName) -> Theme {
-    let themes = &theme_set().themes;
-    let theme_key = match name {
-        ThemeName::Dark => "base16-ocean.dark",
-        ThemeName::Light => "InspiredGitHub",
-        ThemeName::Nord => "base16-ocean.dark",
-        ThemeName::OneDark => "base16-ocean.dark",
-        ThemeName::Mocha => "base16-mocha.dark",
-        ThemeName::Solarized => "Solarized (dark)",
-        ThemeName::Orng => "InspiredGitHub",
-        ThemeName::Github => "InspiredGitHub",
-        ThemeName::Material => "InspiredGitHub",
-        ThemeName::Everforest => "base16-eighties.dark",
-        ThemeName::EverforestLight => "InspiredGitHub",
-        ThemeName::Dusk => "base16-mocha.dark",
-        ThemeName::Gruvbox => "base16-eighties.dark",
-        ThemeName::GruvboxLight => "InspiredGitHub",
-        ThemeName::TokyoNight => "base16-ocean.dark",
-        ThemeName::RosePine => "base16-ocean.dark",
-        ThemeName::RosePineDawn => "InspiredGitHub",
-        ThemeName::Contrast => "base16-eighties.dark",
-    };
-    themes.get(theme_key).cloned().unwrap_or_else(default_theme)
-}
-
-pub(crate) fn set_syntax_theme_by_name(name: ThemeName) {
-    let theme = theme_name_to_syntax_theme(name);
+pub(crate) fn set_syntax_theme_by_key(key: &str) {
+    let theme = theme_set()
+        .themes
+        .get(key)
+        .cloned()
+        .unwrap_or_else(default_theme);
     set_syntax_theme(theme);
 }
 

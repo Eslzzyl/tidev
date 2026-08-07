@@ -5,7 +5,7 @@
 
 use std::path::Path;
 
-use crate::theme::{ThemeName, ThemePalette};
+use crate::theme::ThemePalette;
 use diffy::{Line as DiffLine, Patch};
 use ratatui::prelude::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -496,34 +496,17 @@ fn marker_style(kind: DiffLineKind, palette: ThemePalette) -> Style {
 fn cell_bg(kind: DiffLineKind, palette: ThemePalette) -> Option<ratatui::style::Color> {
     match kind {
         DiffLineKind::Context => None,
-        DiffLineKind::Delete => Some(if is_dark_theme(palette.name) {
+        DiffLineKind::Delete => Some(if palette.is_dark {
             ratatui::style::Color::Rgb(DARK_DEL_BG.0, DARK_DEL_BG.1, DARK_DEL_BG.2)
         } else {
             ratatui::style::Color::Rgb(LIGHT_DEL_BG.0, LIGHT_DEL_BG.1, LIGHT_DEL_BG.2)
         }),
-        DiffLineKind::Insert => Some(if is_dark_theme(palette.name) {
+        DiffLineKind::Insert => Some(if palette.is_dark {
             ratatui::style::Color::Rgb(DARK_ADD_BG.0, DARK_ADD_BG.1, DARK_ADD_BG.2)
         } else {
             ratatui::style::Color::Rgb(LIGHT_ADD_BG.0, LIGHT_ADD_BG.1, LIGHT_ADD_BG.2)
         }),
     }
-}
-
-fn is_dark_theme(name: ThemeName) -> bool {
-    matches!(
-        name,
-        ThemeName::Dark
-            | ThemeName::Nord
-            | ThemeName::OneDark
-            | ThemeName::Mocha
-            | ThemeName::Solarized
-            | ThemeName::Everforest
-            | ThemeName::Dusk
-            | ThemeName::Gruvbox
-            | ThemeName::TokyoNight
-            | ThemeName::RosePine
-            | ThemeName::Contrast
-    )
 }
 
 fn apply_bg(mut line: Line<'static>, bg: Option<ratatui::style::Color>) -> Line<'static> {
@@ -602,7 +585,9 @@ mod tests {
     use super::*;
 
     fn palette() -> ThemePalette {
-        ThemePalette::dark()
+        let catalog = tidev_config::ThemeCatalog::load(std::path::Path::new("/nonexistent"))
+            .expect("bundled themes parse");
+        ThemePalette::from_definition(catalog.get("dark").expect("dark theme bundled"))
     }
 
     fn flatten_lines(lines: &[Line<'static>]) -> Vec<String> {

@@ -1,12 +1,12 @@
 //! ThemePanel component — theme selection panel.
 
-use crate::theme::ThemeName;
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::{Constraint, Layout, Margin, Position, Rect};
 use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph};
+use tidev_config::ThemeCatalog;
 use unicode_width::UnicodeWidthStr;
 
 use crate::action::{Action, OverlayAction, OverlayKind, ThemeAction};
@@ -17,82 +17,88 @@ use crate::utils::centered_rect;
 #[derive(Clone, Debug)]
 pub(crate) enum DisplayItem {
     Header(&'static str),
-    Theme(ThemeName),
+    Theme(String),
 }
 
 pub(crate) struct ThemePanel {
+    catalog: ThemeCatalog,
     display_items: Vec<DisplayItem>,
     selected_index: usize,
-    preview_theme: ThemeName,
-    original_theme: ThemeName,
+    preview_theme: String,
+    original_theme: String,
     query: String,
     confirmed: bool,
 }
 
 impl ThemePanel {
-    pub(crate) fn new(current: ThemeName) -> Self {
-        let display_items = Self::build_display("");
-        let selected_index = display_items
-            .iter()
-            .position(|item| matches!(item, DisplayItem::Theme(t) if *t == current))
-            .unwrap_or(0);
-
-        Self {
-            display_items,
-            selected_index,
-            preview_theme: current,
+    pub(crate) fn new(catalog: ThemeCatalog, current: String) -> Self {
+        let mut panel = Self {
+            catalog,
+            display_items: Vec::new(),
+            selected_index: 0,
+            preview_theme: current.clone(),
             original_theme: current,
             query: String::new(),
             confirmed: false,
-        }
+        };
+        panel.display_items = panel.build_display("");
+        panel.selected_index = panel
+            .display_items
+            .iter()
+            .position(|item| matches!(item, DisplayItem::Theme(t) if *t == panel.preview_theme))
+            .unwrap_or(0);
+        panel
     }
 
-    fn build_display(query: &str) -> Vec<DisplayItem> {
-        let all = ThemeName::all();
+    fn build_display(&self, query: &str) -> Vec<DisplayItem> {
         let q = query.trim().to_lowercase();
-        let matches_query = |t: &ThemeName| -> bool { q.is_empty() || t.as_str().contains(&q) };
+        let matches_query = |t: &str| -> bool { q.is_empty() || t.contains(&q) };
 
         let mut items = Vec::new();
 
-        let light: Vec<_> = all
+        let light: Vec<_> = self
+            .catalog
             .iter()
-            .filter(|t| !t.is_dark() && matches_query(t))
+            .filter(|(id, def)| !def.dark && matches_query(id))
+            .map(|(id, _)| id.to_string())
             .collect();
         if !light.is_empty() {
             items.push(DisplayItem::Header("Light"));
             for t in light {
-                items.push(DisplayItem::Theme(*t));
+                items.push(DisplayItem::Theme(t));
             }
         }
 
-        let dark: Vec<_> = all
+        let dark: Vec<_> = self
+            .catalog
             .iter()
-            .filter(|t| t.is_dark() && matches_query(t))
+            .filter(|(id, def)| def.dark && matches_query(id))
+            .map(|(id, _)| id.to_string())
             .collect();
         if !dark.is_empty() {
             items.push(DisplayItem::Header("Dark"));
             for t in dark {
-                items.push(DisplayItem::Theme(*t));
+                items.push(DisplayItem::Theme(t));
             }
         }
 
         if items.is_empty() {
-            return Self::build_display("");
+            return self.build_display("");
         }
 
         items
     }
 
     fn rebuild(&mut self) {
-        let old_preview = self.preview_theme;
-        self.display_items = Self::build_display(&self.query);
+        let old_preview = self.preview_theme.clone();
+        self.display_items = self.build_display(&self.query);
         self.selected_index = self
             .display_items
             .iter()
             .position(|item| matches!(item, DisplayItem::Theme(t) if *t == old_preview))
             .unwrap_or(0);
         if let Some(DisplayItem::Theme(t)) = self.display_items.get(self.selected_index) {
-            self.preview_theme = *t;
+            self.preview_theme = t.clone();
         }
     }
 
@@ -104,11 +110,9 @@ impl ThemePanel {
                 idx = len;
             }
             idx -= 1;
-            if matches!(self.display_items[idx], DisplayItem::Theme(_)) {
+            if let DisplayItem::Theme(t) = &self.display_items[idx] {
                 self.selected_index = idx;
-                if let DisplayItem::Theme(t) = self.display_items[idx] {
-                    self.preview_theme = t;
-                }
+                self.preview_theme = t.clone();
                 return;
             }
         }
@@ -119,11 +123,9 @@ impl ThemePanel {
         let mut idx = self.selected_index;
         for _ in 0..len {
             idx = (idx + 1) % len;
-            if matches!(self.display_items[idx], DisplayItem::Theme(_)) {
+            if let DisplayItem::Theme(t) = &self.display_items[idx] {
                 self.selected_index = idx;
-                if let DisplayItem::Theme(t) = self.display_items[idx] {
-                    self.preview_theme = t;
-                }
+                self.preview_theme = t.clone();
                 return;
             }
         }
@@ -153,30 +155,38 @@ impl Component for ThemePanel {
         }
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => {
-                let prev = self.preview_theme;
+                let prev = self.preview_theme.clone();
                 self.move_up();
                 if self.preview_theme != prev {
-                    Some(Action::Theme(ThemeAction::Preview(self.preview_theme)))
+                    Some(Action::Theme(ThemeAction::Preview(
+                        self.preview_theme.clone(),
+                    )))
                 } else {
                     None
                 }
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                let prev = self.preview_theme;
+                let prev = self.preview_theme.clone();
                 self.move_down();
                 if self.preview_theme != prev {
-                    Some(Action::Theme(ThemeAction::Preview(self.preview_theme)))
+                    Some(Action::Theme(ThemeAction::Preview(
+                        self.preview_theme.clone(),
+                    )))
                 } else {
                     None
                 }
             }
             KeyCode::Backspace => {
                 self.backspace_query();
-                Some(Action::Theme(ThemeAction::Preview(self.preview_theme)))
+                Some(Action::Theme(ThemeAction::Preview(
+                    self.preview_theme.clone(),
+                )))
             }
             KeyCode::Char(ch) if !ch.is_control() => {
                 self.append_query(ch);
-                Some(Action::Theme(ThemeAction::Preview(self.preview_theme)))
+                Some(Action::Theme(ThemeAction::Preview(
+                    self.preview_theme.clone(),
+                )))
             }
             KeyCode::Enter => {
                 self.confirmed = true;
@@ -205,19 +215,23 @@ impl Component for ThemePanel {
 
         match mouse.kind {
             MouseEventKind::ScrollUp => {
-                let prev = self.preview_theme;
+                let prev = self.preview_theme.clone();
                 self.move_up();
                 if self.preview_theme != prev {
-                    Some(Action::Theme(ThemeAction::Preview(self.preview_theme)))
+                    Some(Action::Theme(ThemeAction::Preview(
+                        self.preview_theme.clone(),
+                    )))
                 } else {
                     None
                 }
             }
             MouseEventKind::ScrollDown => {
-                let prev = self.preview_theme;
+                let prev = self.preview_theme.clone();
                 self.move_down();
                 if self.preview_theme != prev {
-                    Some(Action::Theme(ThemeAction::Preview(self.preview_theme)))
+                    Some(Action::Theme(ThemeAction::Preview(
+                        self.preview_theme.clone(),
+                    )))
                 } else {
                     None
                 }
@@ -241,10 +255,10 @@ impl Component for ThemePanel {
                     && matches!(self.display_items[idx], DisplayItem::Theme(_))
                 {
                     self.selected_index = idx;
-                    if let DisplayItem::Theme(t) = self.display_items[idx] {
-                        self.preview_theme = t;
+                    if let DisplayItem::Theme(t) = &self.display_items[idx] {
+                        self.preview_theme = t.clone();
                     }
-                    Some(Action::Theme(ThemeAction::Set(self.preview_theme)))
+                    Some(Action::Theme(ThemeAction::Set(self.preview_theme.clone())))
                 } else {
                     Some(Action::Noop)
                 }
@@ -257,10 +271,12 @@ impl Component for ThemePanel {
         match action {
             Action::Overlay(OverlayAction::Close(OverlayKind::ThemePanel)) => {
                 if self.confirmed {
-                    vec![Action::Theme(ThemeAction::Set(self.preview_theme))]
+                    vec![Action::Theme(ThemeAction::Set(self.preview_theme.clone()))]
                 } else if self.preview_theme != self.original_theme {
-                    self.preview_theme = self.original_theme;
-                    vec![Action::Theme(ThemeAction::Preview(self.original_theme))]
+                    self.preview_theme = self.original_theme.clone();
+                    vec![Action::Theme(ThemeAction::Preview(
+                        self.original_theme.clone(),
+                    ))]
                 } else {
                     vec![]
                 }

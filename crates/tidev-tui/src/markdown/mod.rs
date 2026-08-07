@@ -20,7 +20,7 @@ use unicode_width::UnicodeWidthStr;
 
 pub(crate) use highlight::highlight_code_to_lines;
 pub use highlight::highlight_code_to_lines_for_path;
-pub(crate) use highlight::set_syntax_theme_by_name;
+pub(crate) use highlight::set_syntax_theme_by_key;
 
 use line::line_to_static;
 use wrap::RtOptions;

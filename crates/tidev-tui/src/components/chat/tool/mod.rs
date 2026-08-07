@@ -1073,7 +1073,7 @@ mod tests {
 
     fn test_palette() -> ThemePalette {
         ThemePalette {
-            name: crate::theme::ThemeName::Dark,
+            is_dark: true,
             background: Color::Reset,
             panel: Color::Reset,
             panel_alt: Color::Reset,

@@ -7,7 +7,6 @@ use std::path::PathBuf;
 
 use uuid::Uuid;
 
-use crate::theme::ThemeName;
 use tidev_llm::message::MessageAttachment;
 
 /// Panel action identifiers (launcher target).
@@ -77,8 +76,8 @@ pub(crate) enum OverlayAction {
 /// Theme management actions.
 #[derive(Clone, Debug)]
 pub(crate) enum ThemeAction {
-    Set(ThemeName),
-    Preview(ThemeName),
+    Set(String),
+    Preview(String),
 }
 
 /// Search provider panel actions.

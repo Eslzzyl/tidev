@@ -1,7 +1,7 @@
 use super::*;
 
 use crate::context::UpdateContext;
-use crate::theme::ThemePalette;
+use crate::theme::resolve_palette;
 use tidev_core::ApprovedTool;
 use tidev_core::Mode as SessionMode;
 use tidev_llm::message::{MessageRole, ToolExecutionResult};
@@ -39,12 +39,11 @@ impl App {
                     }
                 }
                 Action::Theme(ThemeAction::Preview(name)) => {
-                    self.current_palette = ThemePalette::from_name(name.as_str());
+                    self.current_palette = resolve_palette(&self.theme_catalog, &name);
                 }
                 Action::Theme(ThemeAction::Set(name)) => {
-                    self.current_palette = ThemePalette::from_name(name.as_str());
-                    self.runtime
-                        .update_config(|cfg| cfg.set_theme(name.as_str()));
+                    self.current_palette = resolve_palette(&self.theme_catalog, &name);
+                    self.runtime.update_config(|cfg| cfg.set_theme(&name));
                     let _ = self.runtime.save_config();
                 }
                 Action::Search(SearchAction::SwitchProvider(provider)) => {
@@ -655,6 +654,7 @@ impl App {
                                     crate::components::composer::command_palette::execute_command(
                                         spec.action,
                                         &args,
+                                        &self.theme_catalog,
                                     );
                                 for action in actions {
                                     self.process_action(action);
