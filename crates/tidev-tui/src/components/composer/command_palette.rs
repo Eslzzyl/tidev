@@ -288,6 +288,13 @@ pub(crate) struct CommandPaletteState {
     pub query: String,
     pub selected_index: usize,
     pub suggestions: Vec<CommandSuggestion>,
+    /// Whether the user has manually navigated the selection (↑/↓).
+    ///
+    /// While `false`, `sync` keeps the top-ranked suggestion selected so the
+    /// selection always tracks the best match for the typed query. Once the
+    /// user navigates, the selection is preserved by name across query
+    /// changes, and reset only when the query is shortened again.
+    user_moved: bool,
 }
 
 impl CommandPaletteState {
@@ -297,6 +304,7 @@ impl CommandPaletteState {
             query: String::new(),
             selected_index: 0,
             suggestions: Vec::new(),
+            user_moved: false,
         }
     }
 
@@ -305,6 +313,7 @@ impl CommandPaletteState {
         self.query.clear();
         self.selected_index = 0;
         self.suggestions.clear();
+        self.user_moved = false;
     }
 
     pub fn sync(&mut self, input: &str, registry: &CommandRegistry) {
@@ -314,11 +323,22 @@ impl CommandPaletteState {
         };
 
         self.visible = true;
-        self.query = fragment.to_string();
+        // A shortened query means the user is restarting their search:
+        // drop manual navigation so the top-ranked suggestion is selected.
+        if fragment.len() < self.query.len() {
+            self.user_moved = false;
+        }
         let previous = self.selected_command_name();
+        self.query = fragment.to_string();
         self.suggestions = registry.suggestions(fragment);
 
         if self.suggestions.is_empty() {
+            self.selected_index = 0;
+            return;
+        }
+
+        if !self.user_moved {
+            // No manual navigation: always follow the best match.
             self.selected_index = 0;
             return;
         }
@@ -343,6 +363,7 @@ impl CommandPaletteState {
         if self.suggestions.is_empty() {
             return;
         }
+        self.user_moved = true;
         let len = self.suggestions.len() as isize;
         let current = self.selected_index as isize;
         let next = (current + delta).rem_euclid(len);
@@ -573,5 +594,52 @@ mod tests {
             execute_command(CommandAction::CollapseThinking, &[]).as_slice(),
             [Action::Chat(ChatAction::CollapseAllThinking)]
         ));
+    }
+
+    #[test]
+    fn test_default_selection_follows_best_match() {
+        let reg = CommandRegistry::new();
+        let mut state = CommandPaletteState::new();
+
+        // Typing / -> /e -> /ex without manual navigation: the selection
+        // always tracks the top-ranked suggestion, so /ex lands on "exit".
+        state.sync("/", &reg);
+        state.sync("/e", &reg);
+        state.sync("/ex", &reg);
+        assert_eq!(state.selected().map(|s| s.spec.name), Some("exit"));
+    }
+
+    #[test]
+    fn test_manual_selection_is_preserved_by_name() {
+        let reg = CommandRegistry::new();
+        let mut state = CommandPaletteState::new();
+
+        // At "/" all commands share the same score and sort by name, so the
+        // first entries are agents(0), collapse-thinking(1), compact(2).
+        state.sync("/", &reg);
+        state.move_selection(1);
+        state.move_selection(1);
+        assert_eq!(state.selected().map(|s| s.spec.name), Some("compact"));
+
+        // Keep typing: "compact" stays selected as long as it still matches.
+        state.sync("/co", &reg);
+        assert_eq!(state.selected().map(|s| s.spec.name), Some("compact"));
+    }
+
+    #[test]
+    fn test_shortened_query_resets_manual_selection() {
+        let reg = CommandRegistry::new();
+        let mut state = CommandPaletteState::new();
+
+        state.sync("/co", &reg);
+        state.move_selection(1); // manual navigation
+        assert!(state.user_moved);
+        assert_eq!(state.selected().map(|s| s.spec.name), Some("connect"));
+
+        // Deleting back to "/c" resets the manual flag; the selection
+        // follows the top-ranked suggestion again.
+        state.sync("/c", &reg);
+        assert!(!state.user_moved);
+        assert_eq!(state.selected().map(|s| s.spec.name), Some("compact"));
     }
 }
