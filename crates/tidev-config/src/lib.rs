@@ -130,6 +130,8 @@ impl AgentConfig {
 pub struct ShellConfig {
     #[serde(default)]
     pub windows_shell: Option<String>,
+    #[serde(default)]
+    pub unix_shell: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

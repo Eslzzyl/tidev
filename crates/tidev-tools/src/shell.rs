@@ -1,13 +1,17 @@
 //! Shell detection and selection for command execution.
 //!
-//! On Unix, always uses `sh -lc`.
+//! On macOS and other Unix systems, uses `sh -lc` by default (on macOS this
+//! is bash running in POSIX mode).
+//! On Linux, auto-detects `bash` first, falling back to `sh`, because
+//! dash-based `sh` rejects common bashisms.
 //! On Windows, auto-detects `pwsh` (PowerShell 7+) first, falling back to
-//! `powershell` (Windows PowerShell 5.1).  Users can override via
-//! `config.shell.windows_shell` in `config.toml`.
+//! `powershell` (Windows PowerShell 5.1).  Users can override the detection
+//! on any platform via `config.shell.windows_shell` / `config.shell.unix_shell`
+//! in `config.toml`.
 //!
 //! # Initialization
 //!
-//! Call [`init`] once at engine startup with the optional user override from
+//! Call [`init`] once at engine startup with the optional user overrides from
 //! the `[shell]` config section.  The shell tool in `exec.rs` then reads the
 //! resolved shell via [`get`].
 
@@ -42,20 +46,23 @@ static RESOLVED: OnceLock<ResolvedShell> = OnceLock::new();
 ///
 /// Must be called once at engine startup, after the config has been loaded.
 ///
-/// * `config_shell` – optional user override from `config.shell.windows_shell`.
+/// * `windows_shell` – optional user override from `config.shell.windows_shell`.
+/// * `unix_shell` – optional user override from `config.shell.unix_shell`.
 #[cfg(windows)]
-pub fn init(config_shell: Option<String>) {
-    RESOLVED.get_or_init(|| resolve(config_shell));
+pub fn init(windows_shell: Option<String>, _unix_shell: Option<String>) {
+    RESOLVED.get_or_init(|| resolve(windows_shell));
 }
 
-/// Non-Windows: always `sh -lc`, ignores config.
-#[cfg(not(windows))]
-pub fn init(_config_shell: Option<String>) {
-    RESOLVED.get_or_init(|| ResolvedShell {
-        program: "sh".into(),
-        arg: "-lc".into(),
-        display_name: "sh".into(),
-    });
+/// Linux: auto-detect `bash`, fall back to `sh`.
+#[cfg(all(not(windows), target_os = "linux"))]
+pub fn init(_windows_shell: Option<String>, unix_shell: Option<String>) {
+    RESOLVED.get_or_init(|| resolve_linux(unix_shell));
+}
+
+/// macOS and other Unix: always `sh -lc` unless overridden by config.
+#[cfg(all(not(windows), not(target_os = "linux")))]
+pub fn init(_windows_shell: Option<String>, unix_shell: Option<String>) {
+    RESOLVED.get_or_init(|| resolve_default(unix_shell));
 }
 
 /// Return the resolved shell configuration.
@@ -69,18 +76,105 @@ pub fn get() -> &'static ResolvedShell {
         .expect("shell::init() must be called before shell::get()")
 }
 
-#[cfg(windows)]
-fn classify_shell_display_name(program: &str) -> String {
-    let name = std::path::Path::new(program)
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("");
-    match name.to_lowercase().as_str() {
-        "bash" | "sh" | "zsh" | "fish" | "dash" | "ksh" => format!("Bash ({program})"),
-        "pwsh" => format!("PowerShell 7+ ({program})"),
-        "powershell" => format!("Windows PowerShell 5.1 ({program})"),
-        "nu" => format!("Nushell ({program})"),
-        _ => format!("Custom shell ({program})"),
+// ---------------------------------------------------------------------------
+// Shared resolution helpers (non-Windows)
+// ---------------------------------------------------------------------------
+
+/// Build a `ResolvedShell` from a user-configured program path.
+///
+/// The argument and display name are inferred from the executable name.
+#[cfg(not(windows))]
+fn resolve_from_config(shell: String) -> ResolvedShell {
+    let arg = infer_shell_arg(&shell);
+    let display_name = classify_shell_display_name(&shell);
+    ResolvedShell {
+        program: shell,
+        arg,
+        display_name,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Resolution logic (Linux)
+// ---------------------------------------------------------------------------
+
+/// Look for `bash` on PATH.
+#[cfg(target_os = "linux")]
+fn find_bash() -> Option<std::path::PathBuf> {
+    let paths = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&paths) {
+        let bash = dir.join("bash");
+        if bash.is_file() {
+            return Some(bash);
+        }
+    }
+
+    // Also check common install locations for bash.
+    for candidate in ["/bin/bash", "/usr/bin/bash"] {
+        let bash = std::path::Path::new(candidate);
+        if bash.is_file() {
+            return Some(bash.to_path_buf());
+        }
+    }
+
+    None
+}
+
+/// Resolve the shell to use on Linux.
+///
+/// Priority:
+/// 1. User-configured value from `config.shell.unix_shell`.
+/// 2. `bash` on PATH (handles bashisms that dash-based `sh` rejects).
+/// 3. `sh` (POSIX fallback).
+#[cfg(target_os = "linux")]
+fn resolve_linux(config_shell: Option<String>) -> ResolvedShell {
+    // 1. User-configured value (from config.toml) takes priority.
+    if let Some(shell) = config_shell {
+        return resolve_from_config(shell);
+    }
+
+    // 2. Try bash first.
+    if let Some(bash_path) = find_bash() {
+        let path_str = bash_path.to_string_lossy().to_string();
+        log::info!("Auto-detected shell: Bash ({path_str})");
+        log::info!("Set shell.unix_shell in config.toml to override.");
+        return ResolvedShell {
+            program: path_str.clone(),
+            arg: "-lc".into(),
+            display_name: format!("Bash ({path_str})"),
+        };
+    }
+
+    // 3. Fall back to POSIX sh.
+    log::info!("bash not found. Falling back to sh.");
+    ResolvedShell {
+        program: "sh".into(),
+        arg: "-lc".into(),
+        display_name: "sh".into(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Resolution logic (macOS and other Unix)
+// ---------------------------------------------------------------------------
+
+/// Resolve the shell to use on macOS and other Unix systems.
+///
+/// Priority:
+/// 1. User-configured value from `config.shell.unix_shell`.
+/// 2. `sh` (on macOS this is bash running in POSIX mode).
+#[cfg(all(not(windows), not(target_os = "linux")))]
+fn resolve_default(config_shell: Option<String>) -> ResolvedShell {
+    // 1. User-configured value (from config.toml) takes priority.
+    if let Some(shell) = config_shell {
+        return resolve_from_config(shell);
+    }
+
+    // 2. Default to POSIX sh.
+    ResolvedShell {
+        program: "sh".into(),
+        arg: "-lc".into(),
+        display_name: "sh".into(),
     }
 }
 
@@ -152,9 +246,27 @@ fn resolve(config_shell: Option<String>) -> ResolvedShell {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
+
+/// Classify a shell executable for a human-readable display name.
+fn classify_shell_display_name(program: &str) -> String {
+    let name = std::path::Path::new(program)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+    match name.to_lowercase().as_str() {
+        "bash" | "sh" | "zsh" | "fish" | "dash" | "ksh" => format!("Bash ({program})"),
+        "pwsh" => format!("PowerShell 7+ ({program})"),
+        "powershell" => format!("Windows PowerShell 5.1 ({program})"),
+        "nu" => format!("Nushell ({program})"),
+        _ => format!("Custom shell ({program})"),
+    }
+}
+
 /// Infer the shell argument (`-lc`, `-NoProfile -Command`, `/C`, …) from
 /// the executable name the user provided.
-#[cfg(windows)]
 fn infer_shell_arg(program: &str) -> String {
     let name = std::path::Path::new(program)
         .file_stem()
@@ -167,5 +279,41 @@ fn infer_shell_arg(program: &str) -> String {
         "nu" => "-c".into(),
         // Default to `-lc` since most custom shells are POSIX-like.
         _ => "-lc".into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn infer_shell_arg_known_shells() {
+        assert_eq!(infer_shell_arg("bash"), "-lc");
+        assert_eq!(infer_shell_arg("/bin/sh"), "-lc");
+        assert_eq!(infer_shell_arg("zsh"), "-lc");
+        assert_eq!(infer_shell_arg("powershell"), "-NoProfile -Command");
+        assert_eq!(
+            infer_shell_arg("C:/Program Files/PowerShell/7/pwsh.exe"),
+            "-NoProfile -Command"
+        );
+        assert_eq!(infer_shell_arg("cmd.exe"), "/C");
+        assert_eq!(infer_shell_arg("nu"), "-c");
+        assert_eq!(infer_shell_arg("myshell"), "-lc");
+    }
+
+    #[test]
+    fn classify_shell_display_name_known_shells() {
+        assert_eq!(classify_shell_display_name("bash"), "Bash (bash)");
+        assert_eq!(
+            classify_shell_display_name("/opt/homebrew/bin/zsh"),
+            "Bash (/opt/homebrew/bin/zsh)"
+        );
+        assert_eq!(classify_shell_display_name("pwsh"), "PowerShell 7+ (pwsh)");
+        assert_eq!(
+            classify_shell_display_name("powershell"),
+            "Windows PowerShell 5.1 (powershell)"
+        );
+        assert_eq!(classify_shell_display_name("nu"), "Nushell (nu)");
+        assert_eq!(classify_shell_display_name("fish"), "Bash (fish)");
     }
 }
