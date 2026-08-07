@@ -229,8 +229,12 @@ const SENSITIVE_FILE_NAME: &str = ".tidev/sensitive.txt";
 /// workspace root — they will be matched against absolute paths.
 pub fn load_sensitive_patterns(workspace_root: &Path) -> Vec<String> {
     let path = workspace_root.join(SENSITIVE_FILE_NAME);
-    let content = match std::fs::read_to_string(&path) {
-        Ok(c) => c,
+    let content = match std::fs::read(&path).and_then(|bytes| {
+        crate::encoding::decode_text(&bytes)
+            .map(|document| document.into_text())
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+    }) {
+        Ok(content) => content,
         Err(_) => return Vec::new(),
     };
 

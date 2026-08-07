@@ -1,11 +1,8 @@
 use anyhow::{Context, Result, bail};
 use globset::GlobBuilder;
-use grep::{
-    regex::RegexMatcherBuilder,
-    searcher::{SearcherBuilder, sinks},
-};
 use ignore::WalkBuilder;
 use rayon::prelude::*;
+use regex::Regex;
 use serde_json::Value;
 use std::time::UNIX_EPOCH;
 use std::{
@@ -199,9 +196,8 @@ fn grep_paths(
         );
     }
 
-    let matcher = RegexMatcherBuilder::new()
-        .build(pattern)
-        .with_context(|| format!("invalid regular expression '{pattern}'"))?;
+    let matcher =
+        Regex::new(pattern).with_context(|| format!("invalid regular expression '{pattern}'"))?;
     let include_matcher = match include {
         Some(include) => Some(
             GlobBuilder::new(include)
@@ -265,19 +261,47 @@ fn grep_paths(
                 .unwrap_or(UNIX_EPOCH);
             let path_owned = path.clone();
             let mut file_hits = Vec::new();
-            let sink = sinks::Lossy(|line_number, line| {
+            let bytes = match std::fs::read(path) {
+                Ok(bytes) => bytes,
+                Err(_) => {
+                    skipped.fetch_add(1, Ordering::Relaxed);
+                    return None;
+                }
+            };
+            let document = match tidev_utils::encoding::decode_text(&bytes) {
+                Ok(document) => document,
+                Err(_) => {
+                    skipped.fetch_add(1, Ordering::Relaxed);
+                    return None;
+                }
+            };
+
+            for (index, raw_line) in document.text().split_inclusive('\n').enumerate() {
+                let line = raw_line.trim_end_matches(&['\r', '\n'][..]);
+                if matcher.is_match(line) {
+                    file_hits.push(SearchHit {
+                        path: path_owned.clone(),
+                        line_number: (index + 1) as u64,
+                        line_text: line.to_string(),
+                        modified_at,
+                    });
+                }
+            }
+
+            if document.text().is_empty() && matcher.is_match("") {
                 file_hits.push(SearchHit {
-                    path: path_owned.clone(),
-                    line_number,
-                    line_text: line.to_string(),
+                    path: path_owned,
+                    line_number: 1,
+                    line_text: String::new(),
                     modified_at,
                 });
-                Ok(true)
-            });
+            }
 
-            // Create a new Searcher for each thread (not thread-safe)
-            let mut searcher = SearcherBuilder::new().line_number(true).build();
-            if searcher.search_path(matcher.clone(), path, sink).is_err() {
+            if file_hits.is_empty() {
+                return Some(file_hits);
+            }
+
+            if file_hits.iter().any(|hit| hit.line_number == 0) {
                 skipped.fetch_add(1, Ordering::Relaxed);
                 return None;
             }

@@ -3,6 +3,8 @@
 use std::path::Path;
 use std::process::Command;
 
+use tidev_utils::encoding::decode_command_output;
+
 /// Operating system type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OsType {
@@ -126,7 +128,7 @@ fn detect_kernel_version() -> Option<String> {
     if let Ok(output) = Command::new("uname").arg("-r").output()
         && output.status.success()
     {
-        let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let version = decode_command_output(&output.stdout).trim().to_string();
         if !version.is_empty() {
             return Some(version);
         }

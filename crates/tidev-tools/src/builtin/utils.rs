@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use anyhow::{Context, Result};
 use serde_json::Value;
 use std::path::Path;
+use tidev_utils::encoding::{TextDocument, decode_text};
 
 use crate::types::ToolArgs;
 
@@ -14,9 +15,18 @@ use crate::types::ToolArgs;
 
 /// Read a file's text content, treating a missing file as empty.
 pub(super) fn read_existing_text(path: &Path) -> Result<String> {
-    match std::fs::read_to_string(path) {
-        Ok(contents) => Ok(contents),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+    Ok(read_existing_document(path)?
+        .map(TextDocument::into_text)
+        .unwrap_or_default())
+}
+
+/// Read a text document while retaining its source encoding for a later write.
+pub(super) fn read_existing_document(path: &Path) -> Result<Option<TextDocument>> {
+    match std::fs::read(path) {
+        Ok(bytes) => decode_text(&bytes)
+            .map(Some)
+            .with_context(|| format!("failed to decode {}", path.display())),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error).with_context(|| format!("failed to read {}", path.display())),
     }
 }

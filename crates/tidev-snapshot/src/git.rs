@@ -6,6 +6,8 @@ use anyhow::{Context, Result, bail};
 use std::{collections::HashSet, ffi::OsString, fs, path::Path, process::Command};
 use tokio::task::JoinSet;
 
+use tidev_utils::encoding::{decode_command_output, decode_text};
+
 /// Directories ignored by default in snapshot operations.
 pub const DEFAULT_IGNORED_DIRS: &[&str] = &[
     ".git",
@@ -38,6 +40,35 @@ pub const DEFAULT_IGNORED_DIRS: &[&str] = &[
     ".gnupg",
     ".aws",
 ];
+
+fn parse_nul_paths(bytes: &[u8]) -> Result<Vec<String>> {
+    bytes
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .map(|path| {
+            String::from_utf8(path.to_vec()).context("git returned a path that is not valid UTF-8")
+        })
+        .collect()
+}
+
+fn parse_nul_name_status(bytes: &[u8]) -> Result<Vec<(String, String)>> {
+    let fields = bytes
+        .split(|byte| *byte == 0)
+        .filter(|field| !field.is_empty())
+        .collect::<Vec<_>>();
+    let mut result = Vec::with_capacity(fields.len() / 2);
+    for pair in fields.chunks_exact(2) {
+        let status =
+            String::from_utf8(pair[0].to_vec()).context("git returned a non-UTF-8 diff status")?;
+        let path = String::from_utf8(pair[1].to_vec())
+            .context("git returned a path that is not valid UTF-8")?;
+        result.push((status, path));
+    }
+    if fields.len() % 2 != 0 {
+        bail!("git returned an incomplete NUL-delimited name-status record");
+    }
+    Ok(result)
+}
 
 // ---------------------------------------------------------------------------
 // Repo initialisation
@@ -95,9 +126,10 @@ pub fn sync_exclude(gitdir: &Path, worktree: &Path, extra: &[String]) -> Result<
     let mut content = String::new();
 
     if source_exclude.exists()
-        && let Ok(text) = fs::read_to_string(&source_exclude)
+        && let Ok(bytes) = fs::read(&source_exclude)
+        && let Ok(document) = decode_text(&bytes)
     {
-        content.push_str(&text);
+        content.push_str(document.text());
     }
 
     for item in extra {
@@ -181,17 +213,10 @@ pub async fn find_changed_files(gitdir: &Path, worktree: &Path) -> Result<Vec<St
         );
     }
 
-    let tracked: Vec<String> = String::from_utf8_lossy(&diff_output.stdout)
-        .split('\0')
-        .filter(|s| !s.is_empty())
-        .map(String::from)
-        .collect();
-
-    let untracked: Vec<String> = String::from_utf8_lossy(&untracked_output.stdout)
-        .split('\0')
-        .filter(|s| !s.is_empty())
-        .filter(|s| !should_ignore_path(s))
-        .map(String::from)
+    let tracked = parse_nul_paths(&diff_output.stdout)?;
+    let untracked: Vec<String> = parse_nul_paths(&untracked_output.stdout)?
+        .into_iter()
+        .filter(|path| !should_ignore_path(path))
         .collect();
 
     let mut all = tracked;
@@ -261,11 +286,7 @@ pub fn check_ignored(gitdir: &Path, worktree: &Path, files: &[String]) -> Result
         .context("failed to wait for git check-ignore")?;
 
     if result.status.code() == Some(0) || result.status.code() == Some(1) {
-        let ignored: HashSet<String> = String::from_utf8_lossy(&result.stdout)
-            .split('\0')
-            .filter(|s| !s.is_empty())
-            .map(String::from)
-            .collect();
+        let ignored: HashSet<String> = parse_nul_paths(&result.stdout)?.into_iter().collect();
         return Ok(ignored);
     }
 
@@ -425,7 +446,7 @@ pub fn write_tree(gitdir: &Path) -> Result<String> {
         );
     }
 
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    Ok(decode_command_output(&output.stdout).trim().to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -451,6 +472,7 @@ pub fn diff_cached_names(gitdir: &Path, worktree: &Path, hash: &str) -> Result<V
             "--cached",
             "--no-ext-diff",
             "--name-only",
+            "-z",
             hash,
             "--",
             ".",
@@ -458,11 +480,7 @@ pub fn diff_cached_names(gitdir: &Path, worktree: &Path, hash: &str) -> Result<V
         .output()
         .context("failed to run git diff --cached")?;
 
-    Ok(String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect())
+    parse_nul_paths(&output.stdout)
 }
 
 pub fn diff_cached(gitdir: &Path, worktree: &Path, hash: &str) -> Result<String> {
@@ -490,7 +508,7 @@ pub fn diff_cached(gitdir: &Path, worktree: &Path, hash: &str) -> Result<String>
         .output()
         .context("failed to run git diff --cached")?;
 
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    Ok(decode_command_output(&output.stdout).trim().to_string())
 }
 
 pub fn diff_name_status(
@@ -516,6 +534,7 @@ pub fn diff_name_status(
             "diff",
             "--no-ext-diff",
             "--name-status",
+            "-z",
             "--no-renames",
             from,
             to,
@@ -525,14 +544,7 @@ pub fn diff_name_status(
         .output()
         .context("failed to run git diff --name-status")?;
 
-    let mut result = Vec::new();
-    for line in String::from_utf8_lossy(&output.stdout).lines() {
-        let parts: Vec<&str> = line.split('\t').collect();
-        if parts.len() >= 2 {
-            result.push((parts[0].to_string(), parts[1].to_string()));
-        }
-    }
-    Ok(result)
+    parse_nul_name_status(&output.stdout)
 }
 
 pub fn diff_numstat(
@@ -558,6 +570,7 @@ pub fn diff_numstat(
             "diff",
             "--no-ext-diff",
             "--numstat",
+            "-z",
             "--no-renames",
             from,
             to,
@@ -568,15 +581,27 @@ pub fn diff_numstat(
         .context("failed to run git diff --numstat")?;
 
     let mut result = Vec::new();
-    for line in String::from_utf8_lossy(&output.stdout).lines() {
-        let parts: Vec<&str> = line.split('\t').collect();
-        if parts.len() >= 3 {
-            result.push((
-                parts[0].to_string(),
-                parts[1].to_string(),
-                parts[2].to_string(),
-            ));
-        }
+    for record in output
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|record| !record.is_empty())
+    {
+        let first_tab = record
+            .iter()
+            .position(|byte| *byte == b'\t')
+            .context("git returned an invalid numstat record")?;
+        let second_tab = record[first_tab + 1..]
+            .iter()
+            .position(|byte| *byte == b'\t')
+            .map(|position| first_tab + 1 + position)
+            .context("git returned an invalid numstat record")?;
+        let additions = String::from_utf8(record[..first_tab].to_vec())
+            .context("git returned non-UTF-8 numstat additions")?;
+        let deletions = String::from_utf8(record[first_tab + 1..second_tab].to_vec())
+            .context("git returned non-UTF-8 numstat deletions")?;
+        let path = String::from_utf8(record[second_tab + 1..].to_vec())
+            .context("git returned a path that is not valid UTF-8")?;
+        result.push((additions, deletions, path));
     }
     Ok(result)
 }

@@ -1,8 +1,8 @@
 //! External editor integration — detect editors, create temp files,
 //! suspend/resume the TUI, and wait for the editor to finish.
 
-use std::path::PathBuf;
 use std::process::Command;
+use std::{io, path::PathBuf};
 
 use anyhow::Context;
 use tidev_config::UiConfig;
@@ -138,7 +138,10 @@ impl TempEditFile {
     }
 
     pub fn read(&self) -> std::io::Result<String> {
-        std::fs::read_to_string(&self.path)
+        let bytes = std::fs::read(&self.path)?;
+        tidev_utils::encoding::decode_text(&bytes)
+            .map(|document| document.into_text())
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
     }
 }
 

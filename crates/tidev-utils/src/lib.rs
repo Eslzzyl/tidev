@@ -6,7 +6,8 @@
 //! ## Modules
 //!
 //! * [`path`] — path canonicalization, workspace-boundary checking, display helpers
-//! * [`encoding`] — command output byte decoding to UTF-8
+//! * [`encoding`] — text and command output decoding to UTF-8 with legacy
+//!   encoding detection and source-encoding preservation
 
 pub mod encoding;
 pub mod path;

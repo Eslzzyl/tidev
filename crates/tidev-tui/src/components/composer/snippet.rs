@@ -57,13 +57,13 @@ impl SnippetState {
 
         // Global snippets: ~/.config/tidev/snippets.txt
         let global_path = config_dir.join("snippets.txt");
-        if let Ok(content) = std::fs::read_to_string(&global_path) {
+        if let Ok(content) = read_text_file(&global_path) {
             Self::parse_snippets_from_content(&content, &mut snippets);
         }
 
         // Workspace snippets: <workspace_root>/.tidev/snippets.txt
         let workspace_path = workspace_root.join(".tidev").join("snippets.txt");
-        if let Ok(content) = std::fs::read_to_string(&workspace_path) {
+        if let Ok(content) = read_text_file(&workspace_path) {
             Self::parse_snippets_from_content(&content, &mut snippets);
         }
 
@@ -270,6 +270,11 @@ impl SnippetState {
             None
         }
     }
+}
+
+fn read_text_file(path: &Path) -> anyhow::Result<String> {
+    let bytes = std::fs::read(path)?;
+    Ok(tidev_utils::encoding::decode_text(&bytes)?.into_text())
 }
 
 // ---------------------------------------------------------------------------

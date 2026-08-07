@@ -331,6 +331,7 @@ async fn run_shell_streaming(
 
     let mut raw_bytes: Vec<u8> = Vec::new();
     let mut output_buf = String::new();
+    let mut output_truncated = false;
     let mut read_buf = [0u8; 8192];
 
     // ── Async read loop with cancellation and timeout ─────────────────
@@ -388,19 +389,13 @@ async fn run_shell_streaming(
                 match result {
                     Ok(0) => break 'read_loop, // EOF
                     Ok(n) => {
-                        raw_bytes.extend_from_slice(&read_buf[..n]);
-                        output_buf = decode_command_output(&raw_bytes);
-
-                        // Align raw_bytes to character boundary when truncated
-                        if raw_bytes.len() > max_output_bytes {
-                            let truncated_str: String =
-                                output_buf.chars().take(max_output_bytes).collect();
-                            let byte_len = truncated_str.len();
-                            raw_bytes.truncate(byte_len);
-                            output_buf = truncated_str;
-                            if raw_bytes.len() > max_output_bytes {
-                                raw_bytes.truncate(max_output_bytes);
-                                output_buf = decode_command_output(&raw_bytes);
+                        if !output_truncated {
+                            raw_bytes.extend_from_slice(&read_buf[..n]);
+                            output_buf = decode_command_output(&raw_bytes);
+                            if output_buf.len() > max_output_bytes {
+                                truncate_in_place(&mut output_buf, max_output_bytes);
+                                output_truncated = true;
+                                raw_bytes.clear();
                             }
                         }
 
@@ -604,6 +599,7 @@ fn run_shell_inner(
     let (chunk_tx, chunk_rx) = mpsc::channel::<Vec<u8>>();
     let mut raw_bytes: Vec<u8> = Vec::new();
     let mut output_buf = String::new();
+    let mut output_truncated = false;
 
     if let Some(stdout_handle) = process.stdout.take() {
         thread::spawn(move || {
@@ -676,24 +672,15 @@ fn run_shell_inner(
 
         match chunk_rx.recv_timeout(Duration::from_millis(100)) {
             Ok(chunk) => {
-                raw_bytes.extend_from_slice(&chunk);
-                // Decode output from raw bytes, tolerating non-UTF-8
-                // encoding when UTF-8 decoding fails.
-                output_buf = decode_command_output(&raw_bytes);
-
-                // If the string was truncated in a previous iteration, align
-                // raw_bytes to match so we don't accumulate forever.
-                if raw_bytes.len() > max_output_bytes {
-                    // Find the byte boundary corresponding to max_output_bytes chars
-                    let truncated_str: String = output_buf.chars().take(max_output_bytes).collect();
-                    let byte_len = truncated_str.len();
-                    raw_bytes.truncate(byte_len);
-                    output_buf = truncated_str;
-                    if raw_bytes.len() > max_output_bytes {
-                        // Safety: ensure raw_bytes doesn't exceed max
-                        raw_bytes.truncate(max_output_bytes);
-                        // Re-decode after truncation
-                        output_buf = decode_command_output(&raw_bytes);
+                if !output_truncated {
+                    raw_bytes.extend_from_slice(&chunk);
+                    // Decode output from raw bytes, tolerating non-UTF-8
+                    // encoding when UTF-8 decoding fails.
+                    output_buf = decode_command_output(&raw_bytes);
+                    if output_buf.len() > max_output_bytes {
+                        truncate_in_place(&mut output_buf, max_output_bytes);
+                        output_truncated = true;
+                        raw_bytes.clear();
                     }
                 }
 

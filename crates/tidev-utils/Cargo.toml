@@ -8,14 +8,13 @@ description = "Shared utility functions for tidev"
 
 [dependencies]
 anyhow = "1"
+chardetng = "0.1"
 dunce = "1"
 dirs = "6"
+encoding_rs = "0.8"
 globset = "0.4"
 log = "0.4"
 serde_json = "1"
-
-[target.'cfg(windows)'.dependencies]
-encoding_rs = "0.8"
 
 [dev-dependencies]
 tempfile = "3"

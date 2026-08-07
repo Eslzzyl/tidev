@@ -10,6 +10,10 @@ use std::time::Duration;
 use tokio::time::timeout;
 use url::Url;
 
+use tidev_utils::encoding::{
+    DecodeOptions, decode_command_output, decode_text_lossy_with_options, encoding_from_label,
+};
+
 use crate::types::WebFetchArgs;
 
 const FETCH_DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -50,10 +54,13 @@ pub async fn fetch(args: WebFetchArgs) -> Result<String> {
         .await
         .context("fetch request timed out")??;
 
-    let mime = response
+    let content_type = response
         .headers()
         .get(CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+    let mime = content_type
+        .as_deref()
         .and_then(|value| value.split(';').next())
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -78,7 +85,7 @@ pub async fn fetch(args: WebFetchArgs) -> Result<String> {
         return Ok(format!("Image fetched successfully ({})", mime));
     }
 
-    let body = String::from_utf8_lossy(&bytes).into_owned();
+    let body = decode_response_body(&bytes, content_type.as_deref());
     let output = match format {
         WebFetchFormat::Html => body,
         WebFetchFormat::Markdown => {
@@ -155,6 +162,34 @@ pub async fn fetch(args: WebFetchArgs) -> Result<String> {
     }
 
     Ok(content)
+}
+
+fn decode_response_body(bytes: &[u8], content_type: Option<&str>) -> String {
+    let explicit_encoding = content_type
+        .and_then(response_charset)
+        .and_then(encoding_from_label);
+    match explicit_encoding {
+        Some(encoding) => decode_text_lossy_with_options(
+            bytes,
+            DecodeOptions {
+                fallback_encoding: Some(encoding),
+                allow_heuristic: false,
+            },
+        )
+        .into_text(),
+        None => decode_command_output(bytes),
+    }
+}
+
+fn response_charset(content_type: &str) -> Option<&str> {
+    content_type.split(';').skip(1).find_map(|parameter| {
+        let (name, value) = parameter.split_once('=')?;
+        if name.trim().eq_ignore_ascii_case("charset") {
+            Some(value.trim().trim_matches('"').trim_matches('\''))
+        } else {
+            None
+        }
+    })
 }
 
 async fn fetch_response(http: &Client, url: &Url, headers: HeaderMap) -> Result<reqwest::Response> {
@@ -251,4 +286,25 @@ fn markdown_to_text(markdown: &str) -> String {
     }
 
     output.trim().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_quoted_charset_parameter() {
+        assert_eq!(
+            response_charset("text/html; charset=\"gb2312\""),
+            Some("gb2312")
+        );
+    }
+
+    #[test]
+    fn decodes_gbk_response_body_from_charset() {
+        assert_eq!(
+            decode_response_body(&[0xC4, 0xE3, 0xBA, 0xC3], Some("text/plain; charset=gbk")),
+            "你好"
+        );
+    }
 }

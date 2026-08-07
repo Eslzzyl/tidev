@@ -3,13 +3,14 @@ use diffy::DiffOptions;
 use serde_json::Value;
 use std::{
     fs,
-    io::BufRead,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
 
 use super::apply_patch;
-use super::utils::{display_workspace_relative, read_existing_text, resolve_workspace_path};
+use super::utils::{
+    display_workspace_relative, read_existing_document, read_existing_text, resolve_workspace_path,
+};
 use crate::builtin::utils::decode_tool_args;
 use crate::types::{ApplyPatchArgs, EditArgs, ReadArgs, ToolDefinition, ToolPermission, WriteArgs};
 use tidev_instructions::resolve_nearby_instructions;
@@ -376,13 +377,18 @@ pub(super) fn read_path(
     }
 
     // Treat as text file
-    let file = fs::File::open(&path).with_context(|| {
+    let bytes = fs::read(&path).with_context(|| {
         format!(
             "failed to read {}",
             display_workspace_relative(workspace_root, &path)
         )
     })?;
-    let mut reader = std::io::BufReader::new(file);
+    let document = tidev_utils::encoding::decode_text(&bytes).with_context(|| {
+        format!(
+            "failed to decode {}",
+            display_workspace_relative(workspace_root, &path)
+        )
+    })?;
 
     let has_requested_range = offset.is_some() || limit.is_some();
     let offset = offset.unwrap_or(1);
@@ -399,18 +405,20 @@ pub(super) fn read_path(
     let mut bytes = 0;
     let mut cut = false;
     let mut more = false;
-    let mut raw_line = String::new();
+    let all_lines: Vec<&str> = if document.text().is_empty() {
+        Vec::new()
+    } else {
+        document.text().split_inclusive('\n').collect()
+    };
 
-    while reader.read_line(&mut raw_line)? > 0 {
-        total_lines += 1;
+    for (index, raw_line) in all_lines.iter().enumerate() {
+        total_lines = index + 1;
         if total_lines < offset as usize {
-            raw_line.clear();
             continue;
         }
 
         if lines.len() >= limit as usize {
             more = true;
-            raw_line.clear();
             continue;
         }
 
@@ -425,15 +433,11 @@ pub(super) fn read_path(
 
         bytes += size;
         lines.push(text);
-        raw_line.clear();
     }
 
-    // After the loop: if cut was triggered, finish counting lines to get accurate file total
+    // After the loop: if cut was triggered, use the decoded line count for an accurate total.
     if cut {
-        while reader.read_line(&mut raw_line)? > 0 {
-            total_lines += 1;
-            raw_line.clear();
-        }
+        total_lines = all_lines.len();
     }
 
     if total_lines < offset as usize && !(total_lines == 0 && offset == 1) {
@@ -599,7 +603,11 @@ pub(super) fn write_file(
         })?;
     }
 
-    fs::write(&path, content).with_context(|| {
+    let encoded = match read_existing_document(&path)? {
+        Some(document) => document.encode_updated(content)?,
+        None => content.as_bytes().to_vec(),
+    };
+    fs::write(&path, encoded).with_context(|| {
         format!(
             "failed to write {}",
             display_workspace_relative(workspace_root, &path)
@@ -671,15 +679,29 @@ pub(super) fn edit_file(
 ) -> Result<ToolExecutionResult> {
     let path = resolve_workspace_path(workspace_root, relative_path.as_ref(), allow_outside)?;
     let original_exists = path.exists();
-    let old_contents = fs::read_to_string(&path).with_context(|| {
+    let document = read_existing_document(&path)
+        .with_context(|| {
+            format!(
+                "failed to read {}",
+                display_workspace_relative(workspace_root, &path)
+            )
+        })?
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "failed to read {}: file not found",
+                display_workspace_relative(workspace_root, &path)
+            )
+        })?;
+    let old_contents = document.text().to_string();
+
+    let new_contents = apply_edit_contents(&old_contents, old_text, new_text, replace_all)?;
+    let encoded = document.encode_updated(&new_contents).with_context(|| {
         format!(
-            "failed to read {}",
+            "failed to encode {}",
             display_workspace_relative(workspace_root, &path)
         )
     })?;
-
-    let new_contents = apply_edit_contents(&old_contents, old_text, new_text, replace_all)?;
-    fs::write(&path, &new_contents).with_context(|| {
+    fs::write(&path, encoded).with_context(|| {
         format!(
             "failed to write {}",
             display_workspace_relative(workspace_root, &path)
@@ -1257,13 +1279,18 @@ pub fn read_file_for_at_reference(
     }
 
     // Treat as text file with truncation
-    let file = fs::File::open(&path).with_context(|| {
+    let bytes = fs::read(&path).with_context(|| {
         format!(
             "failed to read {}",
             display_workspace_relative(workspace_root, &path)
         )
     })?;
-    let mut reader = std::io::BufReader::new(file);
+    let document = tidev_utils::encoding::decode_text(&bytes).with_context(|| {
+        format!(
+            "failed to decode {}",
+            display_workspace_relative(workspace_root, &path)
+        )
+    })?;
 
     const DEFAULT_READ_LIMIT: i64 = 2000;
     const MAX_BYTES: usize = 50 * 1024;
@@ -1276,18 +1303,20 @@ pub fn read_file_for_at_reference(
     let mut bytes = 0;
     let mut cut = false;
     let mut more = false;
-    let mut raw_line = String::new();
+    let all_lines: Vec<&str> = if document.text().is_empty() {
+        Vec::new()
+    } else {
+        document.text().split_inclusive('\n').collect()
+    };
 
-    while reader.read_line(&mut raw_line)? > 0 {
-        total_lines += 1;
+    for (index, raw_line) in all_lines.iter().enumerate() {
+        total_lines = index + 1;
         if total_lines < offset as usize {
-            raw_line.clear();
             continue;
         }
 
         if lines.len() >= limit as usize {
             more = true;
-            raw_line.clear();
             continue;
         }
 
@@ -1302,15 +1331,11 @@ pub fn read_file_for_at_reference(
 
         bytes += size;
         lines.push(text);
-        raw_line.clear();
     }
 
-    // After the loop: if cut was triggered, finish counting lines to get accurate file total
+    // After the loop: if cut was triggered, use the decoded line count for an accurate total.
     if cut {
-        while reader.read_line(&mut raw_line)? > 0 {
-            total_lines += 1;
-            raw_line.clear();
-        }
+        total_lines = all_lines.len();
     }
 
     let start = offset as usize;

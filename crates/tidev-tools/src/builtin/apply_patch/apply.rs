@@ -13,7 +13,7 @@ use diffy::DiffOptions;
 use super::parser::{Hunk, UpdateFileChunk};
 use super::seek_sequence::seek_sequence;
 use crate::builtin::utils::{
-    display_workspace_relative, read_existing_text, resolve_workspace_path,
+    display_workspace_relative, read_existing_document, resolve_workspace_path,
 };
 
 /// Result of applying a patch — which files were added / modified / deleted.
@@ -156,12 +156,20 @@ fn apply_update_file(
         );
     }
 
-    let old_content = read_existing_text(&abs_path).with_context(|| {
-        format!(
-            "failed to read {}",
-            display_workspace_relative(workspace_root, &abs_path)
-        )
-    })?;
+    let document = read_existing_document(&abs_path)
+        .with_context(|| {
+            format!(
+                "failed to read {}",
+                display_workspace_relative(workspace_root, &abs_path)
+            )
+        })?
+        .ok_or_else(|| {
+            anyhow!(
+                "File does not exist: {}",
+                display_workspace_relative(workspace_root, &abs_path)
+            )
+        })?;
+    let old_content = document.text().to_string();
 
     // Compute new content from chunks
     let new_content = derive_new_contents(workspace_root, &abs_path, &old_content, chunks)?;
@@ -178,7 +186,13 @@ fn apply_update_file(
             })?;
         }
         // Write to destination
-        fs::write(&dest, &new_content).with_context(|| {
+        let encoded = document.encode_updated(&new_content).with_context(|| {
+            format!(
+                "failed to encode {}",
+                display_workspace_relative(workspace_root, &dest)
+            )
+        })?;
+        fs::write(&dest, encoded).with_context(|| {
             format!(
                 "failed to write {}",
                 display_workspace_relative(workspace_root, &dest)
@@ -204,7 +218,13 @@ fn apply_update_file(
                 )
             })?;
         }
-        fs::write(&abs_path, &new_content).with_context(|| {
+        let encoded = document.encode_updated(&new_content).with_context(|| {
+            format!(
+                "failed to encode {}",
+                display_workspace_relative(workspace_root, &abs_path)
+            )
+        })?;
+        fs::write(&abs_path, encoded).with_context(|| {
             format!(
                 "failed to write {}",
                 display_workspace_relative(workspace_root, &abs_path)

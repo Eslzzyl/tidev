@@ -4185,6 +4185,7 @@ name = "tidev-utils"
 version = "0.8.0"
 dependencies = [
  "anyhow",
+ "chardetng",
  "dirs",
  "dunce",
  "encoding_rs",

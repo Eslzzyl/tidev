@@ -94,14 +94,16 @@ fn build_one(workspace_root: &Path, relative: &str) -> Result<Option<MessageAtta
     }
 
     // ── Binary (non-image) ───────────────────────────────────────────
-    if is_binary(&absolute) {
+    let bytes = std::fs::read(&absolute).with_context(|| format!("failed to read {absolute:?}"))?;
+    if is_binary_bytes(&bytes) {
         log::warn!("build_attachment: skipping binary file {absolute:?}");
         return Ok(None);
     }
 
     // ── Text file ────────────────────────────────────────────────────
-    let content = std::fs::read_to_string(&absolute)
-        .with_context(|| format!("failed to read {absolute:?}"))?;
+    let content = tidev_utils::encoding::decode_text(&bytes)
+        .with_context(|| format!("failed to decode {absolute:?}"))?
+        .into_text();
 
     // Truncated tool-output snippet for the agent context.
     let tool_output = truncate_file_content(&content);
@@ -128,16 +130,11 @@ fn image_mime_from_path(path: &Path) -> Option<&'static str> {
 }
 
 /// Quick binary-detection: look for a null byte in the first 8 KiB.
-fn is_binary(path: &Path) -> bool {
-    use std::io::Read;
-    let Ok(mut file) = std::fs::File::open(path) else {
+fn is_binary_bytes(bytes: &[u8]) -> bool {
+    if bytes.starts_with(&[0xFF, 0xFE]) || bytes.starts_with(&[0xFE, 0xFF]) {
         return false;
-    };
-    let mut buf = [0u8; 8192];
-    let Ok(n) = file.read(&mut buf) else {
-        return false;
-    };
-    buf[..n].contains(&0)
+    }
+    bytes.iter().take(8192).any(|byte| *byte == 0)
 }
 
 /// Truncate file content for the tool-output field.
@@ -287,8 +284,7 @@ mod tests {
 
     #[test]
     fn test_is_binary() {
-        // Use the current file as a known-text file.
-        assert!(!is_binary(Path::new(file!())));
+        assert!(!is_binary_bytes(b"plain text"));
     }
 
     #[test]

@@ -361,9 +361,18 @@ fn discover_skill_files(root: &Path) -> Vec<PathBuf> {
 
 fn parse_skill_file(path: &Path) -> Result<SkillInfo, ()> {
     log::debug!("parse_skill_file: path={}", path.display());
-    let raw_content = fs::read_to_string(path).map_err(|e| {
+    let bytes = fs::read(path).map_err(|e| {
         log::debug!("parse_skill_file: read error for {}: {}", path.display(), e);
     })?;
+    let raw_content = tidev_utils::encoding::decode_text(&bytes)
+        .map(|document| document.into_text())
+        .map_err(|e| {
+            log::debug!(
+                "parse_skill_file: decode error for {}: {}",
+                path.display(),
+                e
+            );
+        })?;
     let parent = path.parent().ok_or_else(|| {
         log::debug!("parse_skill_file: no parent for {}", path.display());
     })?;
@@ -448,7 +457,10 @@ fn load_additional_skill_source(raw_source: &str, workspace_root: &Path) -> Opti
     }
 
     let resolved = resolve_local_skill_source(workspace_root, raw_source)?;
-    let content = fs::read_to_string(&resolved).ok()?;
+    let bytes = fs::read(&resolved).ok()?;
+    let content = tidev_utils::encoding::decode_text(&bytes)
+        .ok()
+        .map(|document| document.into_text())?;
     parse_skill_content(
         resolved.clone(),
         resolved.parent().map(Path::to_path_buf),

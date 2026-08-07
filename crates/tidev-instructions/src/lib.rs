@@ -23,6 +23,13 @@ use std::time::Duration;
 
 use tidev_utils::path::canonicalize_display;
 
+fn read_text_file(path: &Path) -> Result<String> {
+    let bytes = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
+    tidev_utils::encoding::decode_text(&bytes)
+        .map(|document| document.into_text())
+        .with_context(|| format!("failed to decode {}", path.display()))
+}
+
 /// Instruction file names to search for, in order of precedence.
 const INSTRUCTION_FILES: &[&str] = &[
     "AGENTS.md",
@@ -56,7 +63,7 @@ pub fn system_prompt_and_sources(
     let paths = system_paths(workspace_root, config_dir, instructions)?;
 
     for path in paths {
-        if let Ok(content) = fs::read_to_string(&path)
+        if let Ok(content) = read_text_file(&path)
             && !content.trim().is_empty()
         {
             sections.push(format!(
@@ -117,7 +124,7 @@ pub fn system_prompt_and_sources_with_cache(
                 path_str,
                 cache.keys().collect::<Vec<_>>(),
             );
-            if let Ok(content) = fs::read_to_string(&path)
+            if let Ok(content) = read_text_file(&path)
                 && !content.trim().is_empty()
             {
                 new_cache.insert(path_str.clone(), content.clone());
@@ -234,7 +241,7 @@ pub fn resolve_nearby_instructions(
             }
 
             if candidate.exists()
-                && let Ok(content) = fs::read_to_string(&candidate)
+                && let Ok(content) = read_text_file(&candidate)
                 && !content.trim().is_empty()
             {
                 seen.insert(canonical.clone());
