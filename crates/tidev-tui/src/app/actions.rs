@@ -787,6 +787,18 @@ impl App {
                                 composer.set_text(text.clone());
                             }
                         }
+                        ChatAction::ExpandAllThinking | ChatAction::CollapseAllThinking => {
+                            // The welcome page has no session to operate on: no-op,
+                            // matching Undo/Redo/Compact behaviour in that state.
+                            if self.screen != AppScreen::Welcome
+                                && let Some(ref mut chat) = self.message_list
+                            {
+                                let ctx = UpdateContext {
+                                    runtime: &mut self.runtime,
+                                };
+                                queue.extend(chat.update(&Action::Chat(action), &ctx));
+                            }
+                        }
                         _ => {
                             // Forward other chat actions (scroll, stream, etc.) to MessageList.
                             if let Some(ref mut chat) = self.message_list {
