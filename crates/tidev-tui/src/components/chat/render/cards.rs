@@ -8,7 +8,9 @@ use tidev_llm::message::{COMPACTION_MESSAGE_LABEL, Message, MessageRole};
 use unicode_width::UnicodeWidthStr;
 
 use crate::diff_render::render_unified_diff_text;
+use crate::hyperlink::{HyperlinkLine, annotate_web_urls_in_line};
 use crate::markdown;
+use crate::markdown::markdown_to_hyperlink_lines;
 use crate::markdown::{WrapOptions, word_wrap_line};
 
 use super::thinking::{is_reasoning_collapsed, render_reasoning_lines, thinking_duration_str};
@@ -23,7 +25,7 @@ pub(super) fn render_assistant_cards(
     messages: &[Message],
     content_width: usize,
     is_round_end: bool,
-) -> Vec<(Color, Vec<Line<'static>>)> {
+) -> Vec<(Color, Vec<HyperlinkLine>)> {
     let palette = ctx.palette;
     let body_lines =
         render_assistant_body_lines(ctx, message, messages, content_width, is_round_end);
@@ -44,7 +46,7 @@ fn render_assistant_body_lines(
     messages: &[Message],
     content_width: usize,
     is_round_end: bool,
-) -> Vec<Line<'static>> {
+) -> Vec<HyperlinkLine> {
     let palette = ctx.palette;
     let mut lines = Vec::new();
 
@@ -65,7 +67,7 @@ fn render_assistant_body_lines(
             duration.as_deref(),
         ));
         if !message.content.trim().is_empty() {
-            lines.push(Line::from(""));
+            lines.push(HyperlinkLine::new(Line::from("")));
         }
     }
 
@@ -75,7 +77,7 @@ fn render_assistant_body_lines(
             render_unified_diff_text(&message.content, content_width, palette, 4)
         {
             for dl in &diff_lines {
-                lines.push(dl.clone());
+                lines.push(HyperlinkLine::new(dl.clone()));
             }
         } else {
             let md = markdown::render_markdown_text_with_width_and_cwd(
@@ -83,9 +85,7 @@ fn render_assistant_body_lines(
                 Some(content_width),
                 Some(ctx.workspace_root),
             );
-            for md_line in md.lines.iter() {
-                lines.push(md_line.clone());
-            }
+            lines.extend(markdown_to_hyperlink_lines(&md));
         }
     }
 
@@ -95,10 +95,10 @@ fn render_assistant_body_lines(
         && message.reasoning.trim().is_empty()
         && message.tool_calls.is_empty()
     {
-        lines.push(Line::from(Span::styled(
+        lines.push(HyperlinkLine::new(Line::from(Span::styled(
             "(empty)",
             Style::default().fg(palette.muted),
-        )));
+        ))));
     }
 
     // 4. Metadata footer at round end (model · thinking level · duration · t/s · time · mode)
@@ -178,10 +178,10 @@ fn render_assistant_body_lines(
             let suffix = parts.join(" · ");
             let text_width = UnicodeWidthStr::width(suffix.as_str());
             let padding = content_width.saturating_sub(text_width);
-            lines.push(Line::from(Span::styled(
+            lines.push(HyperlinkLine::new(Line::from(Span::styled(
                 format!("{}{}", " ".repeat(padding), suffix),
                 Style::default().fg(palette.accent_soft),
-            )));
+            ))));
         }
     }
 
@@ -193,7 +193,7 @@ fn render_user_shell_card(
     ctx: &RenderContext,
     message: &Message,
     content_width: usize,
-) -> Vec<(Color, Vec<Line<'static>>)> {
+) -> Vec<(Color, Vec<HyperlinkLine>)> {
     let palette = ctx.palette;
 
     let display_content = strip_system_reminder_tags(&message.content);
@@ -213,13 +213,22 @@ fn render_user_shell_card(
     let prefix_style = Style::default().fg(mode_color).add_modifier(Modifier::BOLD);
 
     let mut lines = Vec::new();
-    lines.push(Line::from(vec![Span::styled("┃ ", prefix_style)]));
+    lines.push(HyperlinkLine::new(Line::from(vec![Span::styled(
+        "┃ ",
+        prefix_style,
+    )])));
     for line in &content_lines {
         let mut spans = vec![Span::styled("┃ ", prefix_style)];
-        spans.extend(line.spans.iter().cloned());
-        lines.push(Line::from(spans));
+        spans.extend(line.line.spans.iter().cloned());
+        lines.push(HyperlinkLine {
+            line: Line::from(spans),
+            hyperlinks: line.hyperlinks.clone(),
+        });
     }
-    lines.push(Line::from(vec![Span::styled("┃ ", prefix_style)]));
+    lines.push(HyperlinkLine::new(Line::from(vec![Span::styled(
+        "┃ ",
+        prefix_style,
+    )])));
 
     vec![(palette.panel_alt, lines)]
 }
@@ -231,7 +240,7 @@ fn render_error_card(
     ctx: &RenderContext,
     message: &Message,
     content_width: usize,
-) -> Vec<(Color, Vec<Line<'static>>)> {
+) -> Vec<(Color, Vec<HyperlinkLine>)> {
     let palette = ctx.palette;
     let mut lines = Vec::new();
 
@@ -251,7 +260,7 @@ fn render_error_card(
             collapsed,
             duration.as_deref(),
         ));
-        lines.push(Line::from(""));
+        lines.push(HyperlinkLine::new(Line::from("")));
     }
 
     // 2. Error text
@@ -269,24 +278,26 @@ fn render_error_card(
 
     for line_text in error_text.lines() {
         if line_text.is_empty() {
-            lines.push(Line::from(""));
+            lines.push(HyperlinkLine::new(Line::from("")));
             continue;
         }
         let wrapped = wrap_text_lines(line_text, text_width, usize::MAX);
         for (i, wrapped_line) in wrapped.iter().enumerate() {
             let prefix = if i == 0 { "!" } else { " " };
-            lines.push(Line::from(vec![
+            // Annotate after the final spans are built so hyperlink columns
+            // are relative to the rendered line.
+            lines.push(annotate_web_urls_in_line(Line::from(vec![
                 Span::styled(format!("{} ", prefix), prefix_style),
                 Span::styled(wrapped_line.clone(), error_style),
-            ]));
+            ])));
         }
     }
 
     if lines.is_empty() {
-        lines.push(Line::from(vec![
+        lines.push(annotate_web_urls_in_line(Line::from(vec![
             Span::styled("! ", prefix_style),
             Span::styled("Request cancelled.", error_style),
-        ]));
+        ])));
     }
 
     // 3. No card background — just the error text in error colour.
@@ -299,7 +310,7 @@ pub(super) fn render_system_card(
     message: &Message,
     content_width: usize,
     is_round_end: bool,
-) -> Vec<(Color, Vec<Line<'static>>)> {
+) -> Vec<(Color, Vec<HyperlinkLine>)> {
     let palette = ctx.palette;
     let content = &message.content;
 
@@ -324,12 +335,12 @@ pub(super) fn render_system_card(
             )
             .into_iter()
             .map(|l| {
-                Line::from(
+                HyperlinkLine::new(Line::from(
                     l.spans
                         .into_iter()
                         .map(|s| Span::styled(s.content.to_string(), s.style))
                         .collect::<Vec<_>>(),
-                )
+                ))
             }),
         );
         return vec![(palette.background, lines)];
@@ -349,15 +360,13 @@ pub(super) fn render_system_card(
             palette,
         ));
         if !summary.is_empty() {
-            lines.push(Line::from(""));
+            lines.push(HyperlinkLine::new(Line::from("")));
             let md = markdown::render_markdown_text_with_width_and_cwd(
                 summary,
                 Some(content_width),
                 Some(ctx.workspace_root),
             );
-            for md_line in md.lines.iter() {
-                lines.push(md_line.clone());
-            }
+            lines.extend(markdown_to_hyperlink_lines(&md));
         }
         // Metadata footer for compaction (same style as assistant)
         if is_round_end && !message.streaming {
@@ -403,10 +412,10 @@ pub(super) fn render_system_card(
                 let suffix = parts.join(" · ");
                 let text_width = UnicodeWidthStr::width(suffix.as_str());
                 let padding = content_width.saturating_sub(text_width);
-                lines.push(Line::from(Span::styled(
+                lines.push(HyperlinkLine::new(Line::from(Span::styled(
                     format!("{}{}", " ".repeat(padding), suffix),
                     Style::default().fg(palette.accent_soft),
-                )));
+                ))));
             }
         }
         return vec![(palette.background, lines)];
@@ -426,13 +435,13 @@ pub(super) fn render_tool_card(
     ctx: &RenderContext,
     message: &Message,
     content_width: usize,
-) -> Vec<(Color, Vec<Line<'static>>)> {
+) -> Vec<(Color, Vec<HyperlinkLine>)> {
     let palette = ctx.palette;
     let tool_name = message.tool_name.clone().unwrap_or_else(|| "tool".into());
     let mut lines = Vec::new();
 
     // Header line
-    lines.push(Line::from(vec![
+    lines.push(HyperlinkLine::new(Line::from(vec![
         Span::styled("Tool: ", Style::default().fg(palette.accent_soft)),
         Span::styled(
             tool_name,
@@ -440,13 +449,13 @@ pub(super) fn render_tool_card(
                 .fg(palette.text)
                 .add_modifier(Modifier::BOLD),
         ),
-    ]));
+    ])));
 
     // Separator
-    lines.push(Line::from(vec![Span::styled(
+    lines.push(HyperlinkLine::new(Line::from(vec![Span::styled(
         "─".repeat(content_width.min(40)),
         Style::default().fg(palette.muted),
-    )]));
+    )])));
 
     // Output content (markdown-rendered), with system-reminder tags stripped
     let display_content = crate::utils::strip_system_reminder_tags(&message.content);
@@ -462,7 +471,7 @@ pub(super) fn render_single_card(
     message: &Message,
     content_width: usize,
     is_round_end: bool,
-) -> Vec<(Color, Vec<Line<'static>>)> {
+) -> Vec<(Color, Vec<HyperlinkLine>)> {
     match message.role {
         MessageRole::User | MessageRole::Shell => {
             render_user_shell_card(ctx, message, content_width)
@@ -483,19 +492,19 @@ fn render_text_body_lines(
     ctx: &RenderContext,
     text: &str,
     content_width: usize,
-) -> Vec<Line<'static>> {
+) -> Vec<HyperlinkLine> {
     if text.trim().is_empty() {
-        vec![Line::from(Span::styled(
+        vec![HyperlinkLine::new(Line::from(Span::styled(
             "(empty)",
             Style::default().fg(ctx.palette.muted),
-        ))]
+        )))]
     } else {
         let md = markdown::render_markdown_text_with_width_and_cwd(
             text,
             Some(content_width),
             Some(ctx.workspace_root),
         );
-        md.lines.to_vec()
+        markdown_to_hyperlink_lines(&md)
     }
 }
 

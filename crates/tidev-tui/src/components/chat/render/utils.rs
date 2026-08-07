@@ -3,6 +3,8 @@ use super::*;
 use std::sync::LazyLock;
 use std::time::Instant;
 
+use crate::hyperlink::HyperlinkLine;
+use crate::markdown::WrapOptions;
 use crate::theme::ThemePalette;
 use fancy_regex::Regex;
 use ratatui::prelude::{Modifier, Style};
@@ -53,22 +55,30 @@ enum MessageBadgeKind {
 }
 
 pub(super) fn decorate_card_lines(
-    lines: Vec<Line<'static>>,
+    lines: Vec<HyperlinkLine>,
     bg: Color,
     geom: &CardGeom,
-) -> Vec<Line<'static>> {
+) -> Vec<HyperlinkLine> {
     let bg_style = Style::default().bg(bg);
     let left_prefix = " ".repeat(geom.left);
     lines
         .into_iter()
-        .map(|line| {
-            let has_visual_prefix = line.spans.first().is_some_and(|s| s.content == "┃ ");
+        .map(|mut line| {
+            let has_visual_prefix = line.line.spans.first().is_some_and(|s| s.content == "┃ ");
+            // Hyperlink columns are relative to the content line start; the
+            // prepended padding (or the existing "┃ " visual prefix) shifts
+            // every column right by its width.
+            let shift = if has_visual_prefix {
+                UnicodeWidthStr::width("┃ ")
+            } else {
+                geom.left
+            };
             let mut spans = if has_visual_prefix {
-                Vec::with_capacity(line.spans.len() + 1)
+                Vec::with_capacity(line.line.spans.len() + 1)
             } else {
                 vec![Span::styled(left_prefix.clone(), bg_style)]
             };
-            for mut span in line.spans {
+            for mut span in line.line.spans {
                 if span.style.bg.is_none() {
                     span.style = span.style.bg(bg);
                 }
@@ -83,22 +93,29 @@ pub(super) fn decorate_card_lines(
             if remaining > 0 {
                 spans.push(Span::styled(" ".repeat(remaining), bg_style));
             }
-            Line::from(spans)
+            line.line = Line::from(spans);
+            if shift > 0 {
+                for hyperlink in &mut line.hyperlinks {
+                    hyperlink.columns =
+                        hyperlink.columns.start + shift..hyperlink.columns.end + shift;
+                }
+            }
+            line
         })
         .collect()
 }
 
 pub(super) fn track_selectable_region(
     regions: &mut Vec<SelectableRegionRange>,
-    card_lines: &[Line<'static>],
+    card_lines: &[HyperlinkLine],
     start_line: usize,
 ) {
     let first_content = card_lines
         .iter()
-        .position(|l| l.spans.iter().any(|s| !s.content.is_empty()));
+        .position(|l| l.line.spans.iter().any(|s| !s.content.is_empty()));
     let last_content = card_lines
         .iter()
-        .rposition(|l| l.spans.iter().any(|s| !s.content.is_empty()));
+        .rposition(|l| l.line.spans.iter().any(|s| !s.content.is_empty()));
     if let (Some(first), Some(last)) = (first_content, last_content) {
         regions.push(SelectableRegionRange {
             start_line: start_line + first,
@@ -109,18 +126,18 @@ pub(super) fn track_selectable_region(
     }
 }
 
-pub(super) fn build_header_lines(is_subsession: bool, palette: ThemePalette) -> Vec<Line<'static>> {
+pub(super) fn build_header_lines(is_subsession: bool, palette: ThemePalette) -> Vec<HyperlinkLine> {
     if is_subsession {
         vec![
-            Line::from(Span::styled(
+            HyperlinkLine::new(Line::from(Span::styled(
                 "SUBSESSION active — viewing a child session.",
                 Style::default().fg(palette.accent_soft),
-            )),
-            Line::from(Span::styled(
+            ))),
+            HyperlinkLine::new(Line::from(Span::styled(
                 "Press Ctrl+X then Up arrow to return to the parent session.",
                 Style::default().fg(palette.muted),
-            )),
-            Line::from(""),
+            ))),
+            HyperlinkLine::new(Line::from("")),
         ]
     } else {
         Vec::new()
@@ -190,7 +207,11 @@ fn shorten_by_width(s: &str, max_width: usize) -> String {
 
 /// Wrap `text` into at most `max_lines` lines of `max_width` columns each.
 /// Newlines are collapsed into spaces. Word boundaries are preferred for
-/// line breaks; hard-breaks are used when a single word exceeds max_width.
+/// line breaks; URL-like tokens are kept intact whenever they fit on a line
+/// (an over-wide URL is hard-broken at the width boundary so no line exceeds
+/// `max_width`); hard-breaks are used when a single word exceeds max_width.
+/// When content is truncated by `max_lines`, the last line is shortened with
+/// an ellipsis.
 pub fn wrap_text_lines(text: &str, max_width: usize, max_lines: usize) -> Vec<String> {
     if max_width == 0 || max_lines == 0 {
         return vec![];
@@ -207,57 +228,27 @@ pub fn wrap_text_lines(text: &str, max_width: usize, max_lines: usize) -> Vec<St
         return vec!["".to_string()];
     }
 
-    let mut lines: Vec<String> = Vec::new();
-    let mut remaining = trimmed;
+    let line = Line::from(trimmed.to_string());
+    let wrapped = crate::markdown::adaptive_wrap_line(
+        &line,
+        WrapOptions::new(max_width).break_words(true),
+    );
+    let mut lines: Vec<String> = wrapped
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>()
+        })
+        .collect();
 
-    while !remaining.is_empty() && lines.len() < max_lines {
-        let remaining_width = char_width(remaining);
-
-        if lines.len() == max_lines - 1 {
-            if remaining_width > max_width {
-                lines.push(shorten_by_width(remaining, max_width));
-            } else {
-                lines.push(remaining.to_string());
-            }
-            break;
-        }
-
-        if remaining_width <= max_width {
-            lines.push(remaining.to_string());
-            break;
-        }
-
-        let mut width_so_far: usize = 0;
-        let mut break_pos: Option<usize> = None;
-        let mut hard_break: usize = 0;
-
-        for (i, ch) in remaining.char_indices() {
-            let cw = UnicodeWidthChar::width(ch).unwrap_or(0);
-            if width_so_far + cw > max_width {
-                hard_break = i;
-                break;
-            }
-            width_so_far += cw;
-            if ch.is_whitespace() {
-                break_pos = Some(i);
-            }
-            hard_break = i + ch.len_utf8();
-        }
-
-        if let Some(sp) = break_pos {
-            if sp > 0 {
-                lines.push(remaining[..sp].to_string());
-                remaining = remaining[sp..].trim_start();
-            } else {
-                remaining = remaining[sp + 1..].trim_start();
-            }
-        } else if hard_break > 0 && hard_break < remaining.len() {
-            lines.push(remaining[..hard_break].to_string());
-            remaining = &remaining[hard_break..];
-        } else {
-            lines.push(remaining.to_string());
-            break;
-        }
+    if lines.len() > max_lines {
+        lines.truncate(max_lines);
+        // Content continues beyond the kept lines: mark the truncation with
+        // an ellipsis.
+        let last = &mut lines[max_lines - 1];
+        *last = shorten_by_width(&format!("{last} …"), max_width);
     }
 
     if lines.is_empty() {
@@ -270,10 +261,10 @@ pub fn wrap_text_lines(text: &str, max_width: usize, max_lines: usize) -> Vec<St
 /// Post-process rendered markdown lines to replace badge text with styled spans.
 /// Scans each span for `@path` and `[size TYPE]` patterns and splits the span
 /// at badge boundaries, applying bold accent for AtReference and white-on-teal
-/// for Image badges.
-pub(super) fn apply_badge_styling(lines: &mut [Line<'static>], palette: ThemePalette) {
+/// for Image badges. Hyperlink ranges are unaffected (spans are only split).
+pub(super) fn apply_badge_styling(lines: &mut [HyperlinkLine], palette: ThemePalette) {
     for line in lines.iter_mut() {
-        let old_spans: Vec<Span<'static>> = line.spans.drain(..).collect();
+        let old_spans: Vec<Span<'static>> = line.line.spans.drain(..).collect();
         for span in old_spans {
             let text = span.content.to_string();
             let mut parts: Vec<(String, Style)> = Vec::new();
@@ -337,7 +328,7 @@ pub(super) fn apply_badge_styling(lines: &mut [Line<'static>], palette: ThemePal
             }
 
             for (content, style) in parts {
-                line.spans.push(Span::styled(content, style));
+                line.line.spans.push(Span::styled(content, style));
             }
         }
     }
@@ -349,13 +340,13 @@ pub(super) fn render_compaction_divider_line(
     label: &str,
     width: usize,
     palette: ThemePalette,
-) -> Line<'static> {
+) -> HyperlinkLine {
     let label_width = UnicodeWidthStr::width(label);
     if width <= label_width.saturating_add(2) {
-        return Line::from(Span::styled(
+        return HyperlinkLine::new(Line::from(Span::styled(
             label.to_string(),
             Style::default().fg(palette.accent_soft),
-        ));
+        )));
     }
 
     let remaining = width - label_width - 2;
@@ -382,5 +373,5 @@ pub(super) fn render_compaction_divider_line(
         ));
     }
 
-    Line::from(spans)
+    HyperlinkLine::new(Line::from(spans))
 }

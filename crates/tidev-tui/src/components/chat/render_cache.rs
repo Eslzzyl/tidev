@@ -4,8 +4,9 @@
 //! re-rendering only happens when content changes.
 
 use ratatui::style::Color;
-use ratatui::text::Line;
 use uuid::Uuid;
+
+use crate::hyperlink::HyperlinkLine;
 
 // ---------------------------------------------------------------------------
 // MessageRenderCacheKey / Kind / Value / Entry
@@ -34,10 +35,10 @@ pub(crate) struct MessageRenderCacheKey {
 /// Value stored in the render cache.
 #[derive(Clone, Debug)]
 pub(crate) enum MessageRenderCacheValue {
-    /// Rendered card lines (each card has a background colour + lines).
-    Cards(Vec<(Color, Vec<Line<'static>>)>),
-    /// Rendered tool result lines + associated selectable regions.
-    ToolResult(Vec<Line<'static>>, Vec<SelectableRegionRange>),
+    /// Rendered card lines (each card has a background colour + hyperlink lines).
+    Cards(Vec<(Color, Vec<HyperlinkLine>)>),
+    /// Rendered tool result hyperlink lines + associated selectable regions.
+    ToolResult(Vec<HyperlinkLine>, Vec<SelectableRegionRange>),
 }
 
 /// A single entry in the render cache.

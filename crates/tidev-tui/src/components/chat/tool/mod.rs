@@ -29,6 +29,7 @@ use crate::ansi::ansi_to_styled_line;
 use crate::components::chat::render::RenderContext;
 use crate::components::chat::render_cache::SelectableRegionRange;
 use crate::diff_render::render_unified_diff_text;
+use crate::hyperlink::{HyperlinkLine, annotate_web_urls_in_line};
 use crate::markdown::{WrapOptions, render_markdown_text_with_width_and_cwd, word_wrap_line};
 use crate::utils::expand_tabs;
 
@@ -39,6 +40,14 @@ use summary::{render_tool_call_summary_line_inner, summarize_tool_call};
 use todo::{TodoItem, render_todos_checkbox_list};
 use utils::tool_output_is_error;
 use web::{render_webfetch_result_lines, render_websearch_result_lines};
+
+/// Wrap plain text lines as hyperlink lines, annotating bare web URLs.
+///
+/// Used at the boundary of plain-text tool rendering so URLs in tool output
+/// become clickable. Code/diff content is never passed through here.
+fn hyper_lines(lines: Vec<Line<'static>>) -> Vec<HyperlinkLine> {
+    lines.into_iter().map(annotate_web_urls_in_line).collect()
+}
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -60,7 +69,7 @@ pub(crate) fn render_tool_call_with_result(
     is_streaming: bool,
     ctx: &RenderContext,
     is_expanded: bool,
-) -> (Vec<Line<'static>>, Vec<SelectableRegionRange>) {
+) -> (Vec<HyperlinkLine>, Vec<SelectableRegionRange>) {
     let palette = ctx.palette;
     let canonical_name = canonical_tool_name(&tool_call.name).unwrap_or(&tool_call.name);
 
@@ -109,13 +118,13 @@ pub(crate) fn render_tool_call_with_result(
     // Summary-only tools (read/glob/grep/skill)
     if matches!(canonical_name, "grep" | "glob" | "read" | "skill") {
         return (
-            render_tool_call_summary_line_inner(
+            hyper_lines(render_tool_call_summary_line_inner(
                 tool_call,
                 tool_result,
                 content_width,
                 palette,
                 ctx,
-            ),
+            )),
             Vec::new(),
         );
     }
@@ -144,8 +153,8 @@ pub(crate) fn render_tool_call_with_result(
         (Vec::new(), None, vec![])
     };
 
-    let mut lines = Vec::new();
-    lines.push(Line::from(""));
+    let mut lines: Vec<HyperlinkLine> = Vec::new();
+    lines.push(HyperlinkLine::new(Line::from("")));
 
     // For write/edit/apply_patch that have live line count info, skip the
     // generic "Preparing" state and show title + progress directly.
@@ -159,13 +168,13 @@ pub(crate) fn render_tool_call_with_result(
     if is_pending && !has_live_progress {
         // No live progress data yet → show generic preparing state
         let preparing_text = preparing_text_for_tool(canonical_name);
-        lines.push(Line::from(vec![
+        lines.push(HyperlinkLine::new(Line::from(vec![
             Span::styled(
                 format!("{} ", ctx.spinner),
                 Style::default().fg(palette.accent_soft),
             ),
             Span::styled(preparing_text, Style::default().fg(palette.muted)),
-        ]));
+        ])));
     } else {
         // Arguments complete or write/edit with live progress: show header
 
@@ -197,7 +206,7 @@ pub(crate) fn render_tool_call_with_result(
             ctx.workspace_root,
             result_suffix,
         );
-        lines.extend(call_lines);
+        lines.extend(hyper_lines(call_lines));
     }
 
     // Task tool with no result and not pending → cancelled, suppress card.
@@ -242,15 +251,15 @@ pub(crate) fn render_tool_call_with_result(
             }
             _ => unreachable!(),
         };
-        lines.push(Line::from(vec![
+        lines.push(HyperlinkLine::new(Line::from(vec![
             Span::styled(
                 format!("{} ", ctx.spinner),
                 Style::default().fg(palette.accent_soft),
             ),
             Span::styled(progress_text, Style::default().fg(palette.muted)),
-        ]));
+        ])));
     } else if !result_lines.is_empty() {
-        lines.push(Line::from(""));
+        lines.push(HyperlinkLine::new(Line::from("")));
         let offset = lines.len();
         for r in &mut regions {
             r.start_line += offset;
@@ -259,7 +268,7 @@ pub(crate) fn render_tool_call_with_result(
         lines.extend(result_lines);
     }
 
-    lines.push(Line::from(""));
+    lines.push(HyperlinkLine::new(Line::from("")));
     (lines, regions)
 }
 
@@ -549,7 +558,7 @@ fn render_tool_result_detail_lines(
     content_width: usize,
     ctx: &RenderContext,
     is_expanded: bool,
-) -> (Vec<Line<'static>>, Option<i32>, Vec<SelectableRegionRange>) {
+) -> (Vec<HyperlinkLine>, Option<i32>, Vec<SelectableRegionRange>) {
     let palette = ctx.palette;
     // Strip system-reminder tags injected by instruction file discovery
     let output = crate::utils::strip_system_reminder_tags(&message.content);
@@ -568,7 +577,11 @@ fn render_tool_result_detail_lines(
     // Question tool results: render Q&A pairs
     if canonical_name == "question" {
         return (
-            render_question_result_pairs(effective_output, content_width, palette),
+            hyper_lines(render_question_result_pairs(
+                effective_output,
+                content_width,
+                palette,
+            )),
             None,
             vec![],
         );
@@ -620,7 +633,7 @@ fn render_tool_result_detail_lines(
             line_offset += 1;
         }
 
-        return (lines, None, regions);
+        return (hyper_lines(lines), None, regions);
     }
 
     // Try to render diff from metadata (preferred, not truncated)
@@ -630,7 +643,11 @@ fn render_tool_result_detail_lines(
         && let Some((diff_lines, regions)) =
             render_unified_diff_text(diff, content_width, palette, 4)
     {
-        return (diff_lines, None, regions);
+        return (
+            diff_lines.into_iter().map(HyperlinkLine::new).collect(),
+            None,
+            regions,
+        );
     }
 
     // Fallback: try to render diff from output (may be truncated)
@@ -639,7 +656,11 @@ fn render_tool_result_detail_lines(
         && let Some((diff_lines, regions)) =
             render_unified_diff_text(effective_output, content_width, palette, 4)
     {
-        return (diff_lines, None, regions);
+        return (
+            diff_lines.into_iter().map(HyperlinkLine::new).collect(),
+            None,
+            regions,
+        );
     }
 
     // todowrite: render checkbox list
@@ -670,7 +691,11 @@ fn render_tool_result_detail_lines(
                 })
                 .collect();
             return (
-                render_todos_checkbox_list(&todos, content_width, palette),
+                hyper_lines(render_todos_checkbox_list(
+                    &todos,
+                    content_width,
+                    palette,
+                )),
                 None,
                 vec![],
             );
@@ -731,7 +756,7 @@ pub(crate) fn render_output_preview_lines(
     palette: ThemePalette,
     is_expanded: bool,
     is_error: bool,
-) -> Vec<Line<'static>> {
+) -> Vec<HyperlinkLine> {
     let mut lines = Vec::new();
 
     let total_output_lines = output.lines().count();
@@ -792,7 +817,7 @@ pub(crate) fn render_output_preview_lines(
         )));
     }
 
-    lines
+    hyper_lines(lines)
 }
 
 // ---------------------------------------------------------------------------
@@ -1115,7 +1140,7 @@ mod tests {
 
         let rendered: String = lines
             .iter()
-            .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+            .flat_map(|l| l.line.spans.iter().map(|s| s.content.as_ref()))
             .collect();
 
         assert!(rendered.contains("Read"), "Should contain 'Read' label");
@@ -1145,7 +1170,7 @@ mod tests {
 
         let rendered2: String = lines2
             .iter()
-            .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+            .flat_map(|l| l.line.spans.iter().map(|s| s.content.as_ref()))
             .collect();
 
         assert!(rendered2.contains("Read"), "Should contain 'Read' label");

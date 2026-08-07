@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use crate::chat_context::ChatContext;
+use crate::hyperlink::HyperlinkLine;
 use ratatui::prelude::Style;
 use ratatui::text::{Line, Span};
 use rayon::prelude::*;
@@ -182,7 +183,7 @@ fn compute_and_cache_block(
 /// Scan card lines for image badge patterns and record their positions
 /// along with the associated message attachment index.
 fn scan_image_badges(
-    card_lines: &[Line<'static>],
+    card_lines: &[HyperlinkLine],
     msg: &Message,
     card_start_line: usize,
 ) -> Vec<ImageBadgeInfo> {
@@ -198,7 +199,12 @@ fn scan_image_badges(
     let mut infos = Vec::new();
     let mut url_idx = 0;
     for (line_offset, line) in card_lines.iter().enumerate() {
-        let line_text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        let line_text: String = line
+            .line
+            .spans
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect();
         let mut search_start = 0;
         while let Ok(Some(m)) = IMAGE_BADGE_RE.find(&line_text[search_start..]) {
             let abs_start = search_start + m.start();
@@ -234,7 +240,7 @@ fn render_block_from_cache(
     inline_running_card_ranges: &mut Vec<InlineRunningCardRange>,
     image_badge_infos: &mut Vec<ImageBadgeInfo>,
     thinking_header_infos: &mut Vec<(Uuid, usize)>,
-) -> Vec<Line<'static>> {
+) -> Vec<HyperlinkLine> {
     let content_width = geom.content();
     let cards_key = MessageRenderCacheKey {
         session_id: Uuid::default(),
@@ -250,7 +256,7 @@ fn render_block_from_cache(
     if messages.get(block.message_start_idx).is_some_and(|m| {
         m.role == MessageRole::User && is_first_user_message(messages, block.message_start_idx)
     }) {
-        lines.push(Line::from(""));
+        lines.push(HyperlinkLine::new(Line::from("")));
     }
 
     let role = messages[block.message_start_idx].role.clone();
@@ -320,7 +326,7 @@ fn render_block_from_cache(
     let msg = &messages[block.message_start_idx];
     if matches!(msg.role, MessageRole::Assistant) && !msg.tool_calls.is_empty() {
         // Blank line between assistant body and tool calls
-        lines.push(Line::from(""));
+        lines.push(HyperlinkLine::new(Line::from("")));
         // Build tool_results_by_id for completion checks
         let tool_results_by_id: HashMap<String, &Message> = {
             let mut map = HashMap::new();
@@ -370,13 +376,15 @@ fn render_block_from_cache(
                 is_round_end,
                 kind: MessageRenderCacheKind::ToolCall(tc.id.clone()),
             };
-            let (tool_lines, tool_regions): (Vec<Line<'static>>, Vec<SelectableRegionRange>) =
-                if let Some(entry) = cache.peek(&tool_key) {
-                    match &entry.value {
-                        MessageRenderCacheValue::ToolResult(tl, tr) => (tl.clone(), tr.clone()),
-                        _ => (Vec::new(), Vec::new()),
-                    }
-                } else {
+            let (tool_lines, tool_regions): (
+                Vec<HyperlinkLine>,
+                Vec<SelectableRegionRange>,
+            ) = if let Some(entry) = cache.peek(&tool_key) {
+                match &entry.value {
+                    MessageRenderCacheValue::ToolResult(tl, tr) => (tl.clone(), tr.clone()),
+                    _ => (Vec::new(), Vec::new()),
+                }
+            } else {
                     // Cache miss — render directly.
                     let tool_result = tool_results_by_id.get(&tc.id).copied();
                     let is_expanded = ctx.expanded_tool_results.contains(&block.message_id);
@@ -748,7 +756,7 @@ pub(super) fn messages_text(
     let messages = chat_context.visible_messages();
     let content_width = geom.content();
 
-    let mut lines: Vec<Line<'static>> = Vec::new();
+    let mut lines: Vec<HyperlinkLine> = Vec::new();
     let mut selectable_regions: Vec<SelectableRegionRange> = Vec::new();
     let mut card_bounds: Vec<(Uuid, usize, usize)> = Vec::new();
     let mut inline_running_card_ranges: Vec<InlineRunningCardRange> = Vec::new();
@@ -762,14 +770,14 @@ pub(super) fn messages_text(
     // Empty state
     if messages.is_empty() {
         lines.extend(header_lines);
-        let empty_line = Line::from(Span::styled(
+        let empty_line = HyperlinkLine::new(Line::from(Span::styled(
             "No messages yet.",
             Style::default().fg(ctx.palette.muted),
-        ));
+        )));
         lines.push(empty_line);
         let total = lines.len().max(1);
         return RenderOutput {
-            lines,
+            hyperlink_lines: lines,
             total_lines: total,
             render_scroll: 0,
             effective_scroll: 0,
@@ -786,7 +794,7 @@ pub(super) fn messages_text(
 
     // Pre-compute retrying hint lines (if any) so we can include its height
     // in the scroll calculation before determining which blocks are visible.
-    let mut precomputed_hint_lines: Vec<Line<'static>> = Vec::new();
+    let mut precomputed_hint_lines: Vec<HyperlinkLine> = Vec::new();
     if let Some((attempt, max_attempts, reason, deadline)) = retrying_hint.as_ref() {
         let now = Instant::now();
         let remaining = if *deadline > now {
@@ -826,6 +834,10 @@ pub(super) fn messages_text(
         card_lines.push(Line::from(""));
         card_lines.extend(retry_lines);
         card_lines.push(Line::from(""));
+        let card_lines: Vec<HyperlinkLine> = card_lines
+            .into_iter()
+            .map(crate::hyperlink::annotate_web_urls_in_line)
+            .collect();
 
         precomputed_hint_lines = decorate_card_lines(card_lines, palette.panel_light, &geom);
     }
@@ -873,7 +885,7 @@ pub(super) fn messages_text(
     }
 
     for _ in 0..padding_lines {
-        lines.push(Line::from(""));
+        lines.push(HyperlinkLine::new(Line::from("")));
     }
 
     let mut current_line_offset = lines.len();
@@ -899,7 +911,7 @@ pub(super) fn messages_text(
         current_line_offset = lines.len();
         // Neutral inter-block spacing between every pair of blocks.
         if block_idx + 1 < visible_blocks.len() {
-            lines.push(Line::from(""));
+            lines.push(HyperlinkLine::new(Line::from("")));
             current_line_offset += 1;
         }
     }
@@ -911,7 +923,7 @@ pub(super) fn messages_text(
     }
 
     RenderOutput {
-        lines,
+        hyperlink_lines: lines,
         total_lines: total_overall_lines,
         render_scroll,
         effective_scroll: scroll,

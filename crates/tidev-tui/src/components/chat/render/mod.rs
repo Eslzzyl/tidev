@@ -2,7 +2,10 @@
 //!
 //! Orchestrates layout index updates, cache lookups, block rendering, and
 //! scroll management. Messages are rendered with markdown formatting, cached
-//! in an LRU, and only re-rendered when content or width changes.
+//! in an LRU, and only re-rendered when content or width changes. Hyperlink
+//! annotations travel alongside the rendered lines (`HyperlinkLine`) and are
+//! injected into the frame buffer as OSC 8 sequences after the paragraph is
+//! drawn.
 
 mod blocks;
 mod cards;
@@ -16,6 +19,7 @@ use std::path::Path;
 use std::time::Instant;
 
 use crate::chat_context::ChatContext;
+use crate::hyperlink::{HyperlinkLine, HyperlinkRange, mark_buffer_hyperlinks};
 use crate::theme::ThemePalette;
 use ratatui::layout::Rect;
 use ratatui::prelude::{Frame, Style};
@@ -63,7 +67,9 @@ pub(crate) struct RenderContext<'a> {
 
 /// Every piece of data produced by the rendering pipeline.
 pub(crate) struct RenderOutput {
-    pub lines: Vec<Line<'static>>,
+    /// Rendered lines with hyperlink annotations, index-aligned with the
+    /// visible window (line `i` is drawn at row `area.y + i - render_scroll`).
+    pub hyperlink_lines: Vec<HyperlinkLine>,
     pub total_lines: usize,
     pub render_scroll: usize,
     pub effective_scroll: usize,
@@ -159,12 +165,20 @@ pub(crate) fn render_messages(
     *out_render_content_area = content_area;
     *out_render_scroll = output.render_scroll;
 
-    // Render the message text as a Paragraph widget
-    let text = ratatui::text::Text::from(output.lines);
+    // Render the message text as a Paragraph widget, then inject OSC 8
+    // hyperlinks into the frame buffer. Lines are pre-wrapped, so each
+    // logical line occupies exactly one row at `area.y + i - render_scroll`.
+    let (lines, line_links): (Vec<Line<'static>>, Vec<Vec<HyperlinkRange>>) = output
+        .hyperlink_lines
+        .into_iter()
+        .map(|hl| (hl.line, hl.hyperlinks))
+        .unzip();
+    let text = ratatui::text::Text::from(lines);
     let paragraph = Paragraph::new(text)
         .style(Style::default().bg(ctx.palette.background))
         .scroll((output.render_scroll as u16, 0));
     frame.render_widget(paragraph, content_area);
+    mark_buffer_hyperlinks(frame.buffer_mut(), content_area, &line_links, output.render_scroll);
 
     // Scrollbar
     if let Some(sb) = scrollbar_rect {
@@ -294,8 +308,8 @@ mod tests {
 
         // Print rendered lines for manual inspection
         eprintln!("\n=== Rendered lines ===");
-        for (i, line) in output.lines.iter().enumerate() {
-            let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        for (i, line) in output.hyperlink_lines.iter().enumerate() {
+            let text: String = line.line.spans.iter().map(|s| s.content.as_ref()).collect();
             let display = if text.trim().is_empty() {
                 "(empty)".to_string()
             } else {
@@ -310,8 +324,8 @@ mod tests {
         let mut blank_count = 0usize;
         let mut passed_footer = false;
 
-        for line in &output.lines {
-            let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        for line in &output.hyperlink_lines {
+            let text: String = line.line.spans.iter().map(|s| s.content.as_ref()).collect();
             let trimmed = text.trim();
 
             if trimmed.contains("test · 0s") || trimmed.contains("test-model") {
@@ -346,6 +360,66 @@ mod tests {
     }
 
     #[test]
+    fn user_card_hyperlink_ranges_survive_decoration() {
+        let palette = test_palette();
+        let expanded = HashSet::new();
+        let subagents = Vec::new();
+        let collapsed = HashSet::new();
+        let ctx = test_render_ctx(&palette, &expanded, &subagents, &collapsed);
+
+        let msgs = vec![user_msg("See https://example.com/a", 1)];
+        let chat_ctx = ChatContext::new(
+            Uuid::from_u128(100),
+            "test".into(),
+            msgs,
+            None,
+            "test-model".into(),
+            "test-provider".into(),
+        );
+
+        let geom = CardGeom::new(80);
+        let mut index = MessageLayoutIndex::new();
+        let mut cache = lru::LruCache::new(std::num::NonZeroUsize::new(64).unwrap());
+        update_layout_index(&mut index, &mut cache, &chat_ctx.messages, &geom, &ctx);
+
+        let output = messages_text(
+            &chat_ctx,
+            &mut index,
+            &mut cache,
+            &ctx,
+            geom,
+            0,
+            200,
+            false,
+            &None,
+        );
+
+        // The user card renders as "┃ See https://example.com/a"; the link
+        // range recorded by the markdown writer must be shifted by the "┃ "
+        // prefix (via decorate_card_lines) so columns match the visible text.
+        let mut found = false;
+        for hl in &output.hyperlink_lines {
+            for link in &hl.hyperlinks {
+                let text: String = hl
+                    .line
+                    .spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect();
+                assert_eq!(link.destination, "https://example.com/a");
+                let byte_start = text.find("https://example.com/a").expect("visible URL");
+                let col_start: usize = text[..byte_start]
+                    .chars()
+                    .map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(0))
+                    .sum();
+                assert_eq!(link.columns.start, col_start, "line text: {text:?}");
+                found = true;
+            }
+        }
+        assert!(found, "expected a hyperlink in the user card");
+    }
+
+    #[test]
     fn assistant_footer_includes_request_thinking_level() {
         let palette = test_palette();
         let expanded = HashSet::new();
@@ -374,9 +448,9 @@ mod tests {
             &chat_ctx, &mut index, &mut cache, &ctx, geom, 0, 200, false, &None,
         );
         let rendered: String = output
-            .lines
+            .hyperlink_lines
             .iter()
-            .flat_map(|line| line.spans.iter())
+            .flat_map(|line| line.line.spans.iter())
             .map(|span| span.content.as_ref())
             .collect();
 
@@ -398,7 +472,7 @@ mod tests {
         let lines = &cards[0].1;
         // Should be exactly 1 line (the instruction text itself)
         assert_eq!(lines.len(), 1, "short instruction should not wrap");
-        let rendered: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        let rendered: String = lines[0].line.spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(rendered.starts_with("󱁤"), "should start with icon");
         assert!(rendered.contains("AGENTS.md"), "should contain path");
 
@@ -416,12 +490,12 @@ mod tests {
         );
 
         // First line should start with icon
-        let first: String = lines2[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        let first: String = lines2[0].line.spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(first.starts_with("󱁤"), "first line should start with icon");
 
         // Continuation lines should be indented (have leading whitespace)
         for (i, line) in lines2[1..].iter().enumerate() {
-            let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+            let text: String = line.line.spans.iter().map(|s| s.content.as_ref()).collect();
             assert!(
                 text.starts_with("   "),
                 "continuation line {} should be indented with 3 spaces, got: {:?}",
@@ -433,7 +507,7 @@ mod tests {
         // None of the lines should exceed the content_width in display width
         use unicode_width::UnicodeWidthStr;
         for (i, line) in lines2.iter().enumerate() {
-            let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+            let text: String = line.line.spans.iter().map(|s| s.content.as_ref()).collect();
             let w = UnicodeWidthStr::width(text.as_str());
             assert!(
                 w <= 30,

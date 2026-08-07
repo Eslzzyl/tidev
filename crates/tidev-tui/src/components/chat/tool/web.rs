@@ -1,6 +1,9 @@
 use super::webfetch::strip_webfetch_content;
 use super::*;
 
+use crate::hyperlink::HyperlinkLine;
+use crate::markdown::markdown_to_hyperlink_lines;
+
 // ---------------------------------------------------------------------------
 // Web search result rendering
 // ---------------------------------------------------------------------------
@@ -11,14 +14,14 @@ pub(super) fn render_websearch_result_lines(
     palette: ThemePalette,
     is_expanded: bool,
     is_error: bool,
-) -> Vec<Line<'static>> {
+) -> Vec<HyperlinkLine> {
     let mut lines = Vec::new();
 
     if output.trim().is_empty() {
-        lines.push(Line::from(Span::styled(
+        lines.push(HyperlinkLine::new(Line::from(Span::styled(
             "(no results)",
             Style::default().fg(palette.muted),
-        )));
+        ))));
         return lines;
     }
 
@@ -26,23 +29,23 @@ pub(super) fn render_websearch_result_lines(
         return render_output_preview_lines(output, content_width, palette, is_expanded, true);
     }
 
-    lines.push(Line::from(vec![Span::styled(
+    lines.push(HyperlinkLine::new(Line::from(vec![Span::styled(
         "Search Results",
         Style::default().fg(palette.accent_soft),
-    )]));
-    lines.push(Line::from(""));
+    )])));
+    lines.push(HyperlinkLine::new(Line::from("")));
 
     let rendered = render_markdown_text_with_width_and_cwd(output, Some(content_width), None);
-    let md_lines: Vec<Line<'static>> = rendered.lines.clone();
+    let md_lines: Vec<HyperlinkLine> = markdown_to_hyperlink_lines(&rendered);
 
     if is_expanded {
         let has_lines = !md_lines.is_empty();
         lines.extend(md_lines);
         if has_lines {
-            lines.push(Line::from(vec![Span::styled(
+            lines.push(HyperlinkLine::new(Line::from(vec![Span::styled(
                 "▲ Click to collapse",
                 Style::default().fg(palette.muted),
-            )]));
+            )])));
         }
     } else {
         let max_preview = TOOL_OUTPUT_PREVIEW_LINES;
@@ -51,13 +54,13 @@ pub(super) fn render_websearch_result_lines(
             lines.extend(md_lines);
         } else {
             lines.extend(md_lines.into_iter().take(max_preview));
-            lines.push(Line::from(vec![Span::styled(
+            lines.push(HyperlinkLine::new(Line::from(vec![Span::styled(
                 format!(
                     "  ▼ {} more line(s) — Click to expand",
                     line_count - max_preview
                 ),
                 Style::default().fg(palette.muted),
-            )]));
+            )])));
         }
     }
 
@@ -74,14 +77,14 @@ pub(super) fn render_webfetch_result_lines(
     palette: ThemePalette,
     is_expanded: bool,
     is_error: bool,
-) -> Vec<Line<'static>> {
+) -> Vec<HyperlinkLine> {
     let mut lines = Vec::new();
 
     if output.trim().is_empty() {
-        lines.push(Line::from(Span::styled(
+        lines.push(HyperlinkLine::new(Line::from(Span::styled(
             "(empty page)",
             Style::default().fg(palette.muted),
-        )));
+        ))));
         return lines;
     }
 
@@ -89,25 +92,25 @@ pub(super) fn render_webfetch_result_lines(
         return render_output_preview_lines(output, content_width, palette, is_expanded, true);
     }
 
-    lines.push(Line::from(vec![Span::styled(
+    lines.push(HyperlinkLine::new(Line::from(vec![Span::styled(
         "Page Content",
         Style::default().fg(palette.accent_soft),
-    )]));
-    lines.push(Line::from(""));
+    )])));
+    lines.push(HyperlinkLine::new(Line::from("")));
 
     // Strip line-number prefixes and metadata footers for clean TUI display
     let clean = strip_webfetch_content(output);
     let rendered = render_markdown_text_with_width_and_cwd(&clean, Some(content_width), None);
-    let md_lines: Vec<Line<'static>> = rendered.lines.clone();
+    let md_lines: Vec<HyperlinkLine> = markdown_to_hyperlink_lines(&rendered);
 
     if is_expanded {
         let has_lines = !md_lines.is_empty();
         lines.extend(md_lines);
         if has_lines {
-            lines.push(Line::from(vec![Span::styled(
+            lines.push(HyperlinkLine::new(Line::from(vec![Span::styled(
                 "▲ Click to collapse",
                 Style::default().fg(palette.muted),
-            )]));
+            )])));
         }
     } else {
         let max_preview = TOOL_OUTPUT_PREVIEW_LINES;
@@ -116,13 +119,13 @@ pub(super) fn render_webfetch_result_lines(
             lines.extend(md_lines);
         } else {
             lines.extend(md_lines.into_iter().take(max_preview));
-            lines.push(Line::from(vec![Span::styled(
+            lines.push(HyperlinkLine::new(Line::from(vec![Span::styled(
                 format!(
                     "  ▼ {} more line(s) — Click to expand",
                     line_count - max_preview
                 ),
                 Style::default().fg(palette.muted),
-            )]));
+            )])));
         }
     }
 

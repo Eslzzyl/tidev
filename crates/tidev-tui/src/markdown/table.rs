@@ -5,13 +5,14 @@ use ratatui::text::Line;
 use ratatui::text::Span;
 use unicode_width::UnicodeWidthStr;
 
-use super::line::push_owned_lines;
-use super::wrap::{RtOptions, word_wrap_line};
+use super::line::line_to_static;
+use super::wrap::{RtOptions, adaptive_wrap_line};
+use crate::hyperlink::{HyperlinkLine, remap_wrapped_line};
 
 #[derive(Clone, Debug)]
 pub(super) struct TableRowState {
     pub(super) is_header: bool,
-    pub(super) cells: Vec<Line<'static>>,
+    pub(super) cells: Vec<HyperlinkLine>,
 }
 
 #[derive(Clone, Debug)]
@@ -62,13 +63,13 @@ impl TableState {
         }
     }
 
-    pub(super) fn push_cell(&mut self, cell: Line<'static>) {
+    pub(super) fn push_cell(&mut self, cell: HyperlinkLine) {
         if let Some(row) = self.current_row.as_mut() {
             row.cells.push(cell);
         }
     }
 
-    pub(super) fn render(mut self, wrap_width: Option<usize>) -> Vec<Line<'static>> {
+    pub(super) fn render(mut self, wrap_width: Option<usize>) -> Vec<HyperlinkLine> {
         self.finish_row();
         if self.rows.is_empty() {
             return Vec::new();
@@ -121,22 +122,30 @@ impl TableState {
             None => natural_widths,
         };
 
-        let mut out = Vec::new();
-        out.push(self.render_border_line('┌', '┬', '┐', &widths));
+        let mut out: Vec<HyperlinkLine> = Vec::new();
+        out.push(HyperlinkLine::new(
+            self.render_border_line('┌', '┬', '┐', &widths),
+        ));
         out.extend(self.render_row_block(&header_row, &widths, true));
 
         if !body_rows.is_empty() {
-            out.push(self.render_border_line('├', '┼', '┤', &widths));
+            out.push(HyperlinkLine::new(
+                self.render_border_line('├', '┼', '┤', &widths),
+            ));
 
             for (index, row) in body_rows.iter().enumerate() {
                 out.extend(self.render_row_block(row, &widths, false));
                 if index + 1 < body_rows.len() {
-                    out.push(self.render_border_line('├', '┼', '┤', &widths));
+                    out.push(HyperlinkLine::new(
+                        self.render_border_line('├', '┼', '┤', &widths),
+                    ));
                 }
             }
         }
 
-        out.push(self.render_border_line('└', '┴', '┘', &widths));
+        out.push(HyperlinkLine::new(
+            self.render_border_line('└', '┴', '┘', &widths),
+        ));
         out
     }
 
@@ -150,7 +159,7 @@ impl TableState {
 
         for row in std::iter::once(header_row).chain(body_rows.iter()) {
             for (index, cell) in row.cells.iter().enumerate().take(column_count) {
-                widths[index] = widths[index].max(display_line_width(cell).max(1));
+                widths[index] = widths[index].max(display_line_width(&cell.line).max(1));
             }
         }
 
@@ -162,20 +171,23 @@ impl TableState {
         row: &TableRowState,
         widths: &[usize],
         is_header: bool,
-    ) -> Vec<Line<'static>> {
-        let wrapped_cells: Vec<Vec<Line<'static>>> = row
+    ) -> Vec<HyperlinkLine> {
+        let wrapped_cells: Vec<Vec<HyperlinkLine>> = row
             .cells
             .iter()
             .enumerate()
             .map(|(index, cell)| {
                 let width = widths.get(index).copied().unwrap_or(1).max(1);
-                let wrapped = word_wrap_line(cell, RtOptions::new(width).break_words(true));
-                let mut owned = Vec::new();
-                push_owned_lines(&wrapped, &mut owned);
-                if owned.is_empty() {
-                    vec![Line::default()]
+                let wrapped = adaptive_wrap_line(
+                    &cell.line,
+                    RtOptions::new(width).break_words(true),
+                );
+                let owned: Vec<Line<'static>> = wrapped.iter().map(line_to_static).collect();
+                let remapped = remap_wrapped_line(cell, owned);
+                if remapped.is_empty() {
+                    vec![HyperlinkLine::new(Line::default())]
                 } else {
-                    owned
+                    remapped
                 }
             })
             .collect();
@@ -189,29 +201,46 @@ impl TableState {
 
         let mut out = Vec::with_capacity(row_height);
         for line_index in 0..row_height {
-            let mut spans = self.prefix.clone();
-            spans.push(Span::raw("│"));
+            let mut row_line = HyperlinkLine::new(Line::default());
+            for span in &self.prefix {
+                row_line.line.push_span(span.clone());
+            }
+            row_line.line.push_span(Span::raw("│"));
+            // Column start = prefix width + the "│" separator.
+            let mut column_start = display_line_width(&Line::from(self.prefix.clone())) + 1;
 
             for (column_index, &width) in widths.iter().enumerate() {
-                spans.push(Span::raw(" "));
+                row_line.line.push_span(Span::raw(" "));
+                column_start += 1;
                 let cell_line = wrapped_cells
                     .get(column_index)
                     .and_then(|lines| lines.get(line_index))
                     .cloned()
                     .unwrap_or_default();
-                spans.extend(pad_cell_spans(
-                    cell_line,
+                let (cell_spans, left_pad) = pad_hyperlink_cell(
+                    cell_line.clone(),
                     width,
                     self.alignments
                         .get(column_index)
                         .copied()
                         .unwrap_or(Alignment::Left),
-                ));
-                spans.push(Span::raw(" "));
-                spans.push(Span::raw("│"));
+                );
+                let shift = column_start + left_pad;
+                for span in cell_spans {
+                    row_line.line.push_span(span);
+                }
+                for mut hyperlink in cell_line.hyperlinks {
+                    hyperlink.columns =
+                        hyperlink.columns.start + shift..hyperlink.columns.end + shift;
+                    row_line.hyperlinks.push(hyperlink);
+                }
+                column_start += width + 1;
+                row_line.line.push_span(Span::raw(" "));
+                row_line.line.push_span(Span::raw("│"));
+                column_start += 1;
             }
 
-            out.push(Line::from_iter(spans).style(row_style));
+            out.push(row_line.style(row_style));
         }
 
         out
@@ -243,7 +272,7 @@ impl TableState {
         header_row: &TableRowState,
         body_rows: &[TableRowState],
         available_width: usize,
-    ) -> Vec<Line<'static>> {
+    ) -> Vec<HyperlinkLine> {
         if body_rows.is_empty() {
             return Vec::new();
         }
@@ -252,12 +281,16 @@ impl TableState {
         let mut out = Vec::new();
         for (row_index, row) in body_rows.iter().enumerate() {
             if row_index > 0 {
-                out.push(Line::default());
+                out.push(HyperlinkLine::new(Line::default()));
             }
 
-            out.push(self.render_border_line('┌', '─', '┐', &[card_width]));
+            out.push(HyperlinkLine::new(
+                self.render_border_line('┌', '─', '┐', &[card_width]),
+            ));
             out.extend(self.render_stacked_row(header_row, row, card_width));
-            out.push(self.render_border_line('└', '─', '┘', &[card_width]));
+            out.push(HyperlinkLine::new(
+                self.render_border_line('└', '─', '┘', &[card_width]),
+            ));
         }
 
         out
@@ -268,7 +301,7 @@ impl TableState {
         header_row: &TableRowState,
         row: &TableRowState,
         card_width: usize,
-    ) -> Vec<Line<'static>> {
+    ) -> Vec<HyperlinkLine> {
         let label_style = self.base_style.add_modifier(Modifier::BOLD);
         let mut out = Vec::new();
         let column_count = header_row.cells.len().max(row.cells.len());
@@ -277,26 +310,50 @@ impl TableState {
             let label = header_row
                 .cells
                 .get(index)
-                .map(line_to_plain_text)
+                .map(|cell| line_to_plain_text(&cell.line))
                 .filter(|value| !value.is_empty())
                 .unwrap_or_else(|| format!("Column {}", index + 1));
             let value = row.cells.get(index).cloned().unwrap_or_default();
 
-            let mut field = Line::from(vec![Span::styled(format!("{label}: "), label_style)]);
-            field.spans.extend(value.spans);
+            let mut field = HyperlinkLine::new(Line::from(vec![Span::styled(
+                format!("{label}: "),
+                label_style,
+            )]));
+            let shift = field.width();
+            for span in &value.line.spans {
+                field.line.push_span(span.clone());
+            }
+            for mut hyperlink in value.hyperlinks {
+                hyperlink.columns =
+                    hyperlink.columns.start + shift..hyperlink.columns.end + shift;
+                field.hyperlinks.push(hyperlink);
+            }
 
-            let wrapped = word_wrap_line(&field, RtOptions::new(card_width).break_words(true));
-            let mut owned = Vec::new();
-            push_owned_lines(&wrapped, &mut owned);
+            let wrapped = adaptive_wrap_line(&field.line, RtOptions::new(card_width).break_words(true));
+            let owned: Vec<Line<'static>> = wrapped.iter().map(line_to_static).collect();
 
-            for line in owned {
-                let mut spans = self.prefix.clone();
-                spans.push(Span::raw("│"));
-                spans.push(Span::raw(" "));
-                spans.extend(pad_cell_spans(line, card_width, Alignment::Left));
-                spans.push(Span::raw(" "));
-                spans.push(Span::raw("│"));
-                out.push(Line::from_iter(spans).style(self.base_style));
+            for line in remap_wrapped_line(&field, owned) {
+                let (cell_spans, left_pad) = pad_hyperlink_cell(line.clone(), card_width, Alignment::Left);
+                let mut row_line = HyperlinkLine::new(Line::default());
+                for span in &self.prefix {
+                    row_line.line.push_span(span.clone());
+                }
+                row_line.line.push_span(Span::raw("│"));
+                row_line.line.push_span(Span::raw(" "));
+                // Content starts at prefix width + "│" + " ".
+                let shift =
+                    display_line_width(&Line::from(self.prefix.clone())) + 2 + left_pad;
+                for span in cell_spans {
+                    row_line.line.push_span(span);
+                }
+                for mut hyperlink in line.hyperlinks {
+                    hyperlink.columns =
+                        hyperlink.columns.start + shift..hyperlink.columns.end + shift;
+                    row_line.hyperlinks.push(hyperlink);
+                }
+                row_line.line.push_span(Span::raw(" "));
+                row_line.line.push_span(Span::raw("│"));
+                out.push(row_line.style(self.base_style));
             }
         }
 
@@ -362,8 +419,14 @@ pub(super) fn display_line_width(line: &Line<'_>) -> usize {
         .sum()
 }
 
-fn pad_cell_spans(cell: Line<'static>, width: usize, alignment: Alignment) -> Vec<Span<'static>> {
-    let cell_width = display_line_width(&cell);
+/// Pad a cell to `width` columns, returning the padded spans and the number
+/// of leading padding columns (needed to shift hyperlink ranges).
+fn pad_hyperlink_cell(
+    cell: HyperlinkLine,
+    width: usize,
+    alignment: Alignment,
+) -> (Vec<Span<'static>>, usize) {
+    let cell_width = display_line_width(&cell.line);
     let padding = width.saturating_sub(cell_width);
     let (left_pad, right_pad) = match alignment {
         Alignment::Center => (padding / 2, padding.saturating_sub(padding / 2)),
@@ -375,10 +438,10 @@ fn pad_cell_spans(cell: Line<'static>, width: usize, alignment: Alignment) -> Ve
     if left_pad > 0 {
         spans.push(Span::from(" ".repeat(left_pad)));
     }
-    spans.extend(cell.spans);
+    spans.extend(cell.line.spans);
     if right_pad > 0 {
         spans.push(Span::from(" ".repeat(right_pad)));
     }
 
-    spans
+    (spans, left_pad)
 }

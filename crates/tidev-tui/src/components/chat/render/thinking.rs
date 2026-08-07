@@ -7,6 +7,7 @@ use ratatui::text::{Line, Span};
 use tidev_llm::message::Message;
 use uuid::Uuid;
 
+use crate::hyperlink::HyperlinkLine;
 use crate::markdown;
 
 /// Compute the thinking duration string for display.
@@ -64,6 +65,8 @@ pub(super) fn is_reasoning_collapsed(
 /// Render reasoning content with ┃ prefix, dimmed colours, and the
 /// Thinking:/Thought: label.  Matches the old implementation exactly.
 /// When `collapsed` is true, only the header line is rendered.
+/// Hyperlink columns are relative to the line start (before the "┃ " prefix);
+/// `decorate_card_lines` shifts them by the visual prefix width.
 pub(super) fn render_reasoning_lines(
     ctx: &RenderContext,
     reasoning: &str,
@@ -71,7 +74,7 @@ pub(super) fn render_reasoning_lines(
     is_streaming: bool,
     collapsed: bool,
     duration: Option<&str>,
-) -> Vec<Line<'static>> {
+) -> Vec<HyperlinkLine> {
     let palette = ctx.palette;
     let mut lines = Vec::new();
 
@@ -108,7 +111,7 @@ pub(super) fn render_reasoning_lines(
         format!("{}{}{}", label, duration_suffix, fold_indicator),
         label_italic_style,
     ));
-    lines.push(Line::from(header_spans));
+    lines.push(HyperlinkLine::new(Line::from(header_spans)));
 
     // If collapsed or empty, stop here
     if collapsed || reasoning.trim().is_empty() {
@@ -124,10 +127,11 @@ pub(super) fn render_reasoning_lines(
     );
 
     // Skip leading blank lines
-    let mut rendered_lines = rendered.lines.clone().into_iter();
+    let mut rendered_lines = markdown::markdown_to_hyperlink_lines(&rendered).into_iter();
     let mut first_line = rendered_lines.next();
     while let Some(ref line) = first_line {
         if line
+            .line
             .spans
             .iter()
             .all(|s| s.content.trim().is_empty() && s.style == Style::default())
@@ -141,7 +145,7 @@ pub(super) fn render_reasoning_lines(
     // First content line
     if let Some(line) = first_line {
         let mut spans = vec![Span::styled("┃ ", label_style)];
-        for mut span in line.spans {
+        for mut span in line.line.spans {
             if let Some(fg) = span.style.fg {
                 span.style = span
                     .style
@@ -151,13 +155,16 @@ pub(super) fn render_reasoning_lines(
             }
             spans.push(span);
         }
-        lines.push(Line::from(spans));
+        lines.push(HyperlinkLine {
+            line: Line::from(spans),
+            hyperlinks: line.hyperlinks,
+        });
     }
 
     // Subsequent lines
     for line in rendered_lines {
         let mut spans = vec![Span::styled("┃ ", label_style)];
-        for mut span in line.spans {
+        for mut span in line.line.spans {
             if let Some(fg) = span.style.fg {
                 span.style = span
                     .style
@@ -167,7 +174,10 @@ pub(super) fn render_reasoning_lines(
             }
             spans.push(span);
         }
-        lines.push(Line::from(spans));
+        lines.push(HyperlinkLine {
+            line: Line::from(spans),
+            hyperlinks: line.hyperlinks,
+        });
     }
 
     lines

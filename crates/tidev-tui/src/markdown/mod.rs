@@ -5,6 +5,7 @@ mod styles;
 mod table;
 mod wrap;
 
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::LazyLock;
@@ -15,18 +16,22 @@ use pulldown_cmark::{
 };
 use ratatui::style::Style;
 use ratatui::text::{Line, Span, Text};
+use unicode_width::UnicodeWidthStr;
 
 pub(crate) use highlight::highlight_code_to_lines;
 pub use highlight::highlight_code_to_lines_for_path;
 pub(crate) use highlight::set_syntax_theme_by_name;
 
-use line::push_owned_lines;
-use wrap::{RtOptions, adaptive_wrap_line};
-pub use wrap::{RtOptions as WrapOptions, adaptive_wrap_lines, word_wrap_line};
+use line::line_to_static;
+use wrap::RtOptions;
+pub use wrap::{RtOptions as WrapOptions, adaptive_wrap_line, adaptive_wrap_lines, word_wrap_line};
 
 pub use links::is_local_path_like_link;
 
 use crate::ansi::strip_ansi;
+use crate::hyperlink::{
+    HyperlinkLine, HyperlinkRange, annotate_web_urls_in_line, remap_wrapped_line, web_destination,
+};
 use crate::utils::expand_tabs;
 use links::{render_local_link_target, should_render_link_destination};
 use styles::MarkdownStyles;
@@ -41,7 +46,37 @@ pub fn render_markdown_text(input: &str) -> Text<'static> {
 pub(crate) fn render_markdown_text_with_width(input: &str, width: Option<usize>) -> Text<'static> {
     let cwd = std::env::current_dir().ok();
     let arc = render_markdown_text_with_width_and_cwd(input, width, cwd.as_deref());
-    arc.as_ref().clone()
+    arc.text.clone()
+}
+
+/// Rendered markdown output: the styled lines plus per-line hyperlink ranges.
+///
+/// `line_links` is index-aligned with `text.lines`: each entry lists the
+/// hyperlink ranges of the corresponding line in display columns.
+pub(crate) struct MarkdownRender {
+    pub text: Text<'static>,
+    pub line_links: Vec<Vec<HyperlinkRange>>,
+}
+
+impl Deref for MarkdownRender {
+    type Target = Text<'static>;
+
+    fn deref(&self) -> &Text<'static> {
+        &self.text
+    }
+}
+
+/// Convert a rendered markdown output into hyperlink-annotated lines.
+pub(crate) fn markdown_to_hyperlink_lines(md: &MarkdownRender) -> Vec<HyperlinkLine> {
+    md.text
+        .lines
+        .iter()
+        .zip(md.line_links.iter())
+        .map(|(line, links)| HyperlinkLine {
+            line: line.clone(),
+            hyperlinks: links.clone(),
+        })
+        .collect()
 }
 
 /// Cache key for the markdown render cache: (content_hash, wrap_width, cwd_hash)
@@ -52,7 +87,7 @@ type MarkdownCacheKey = (blake3::Hash, Option<usize>, blake3::Hash);
 /// when neither content, terminal width, nor workspace has changed.
 /// Wrapped in `Arc` so repeated cache hits share the same allocation.
 static MARKDOWN_RENDER_CACHE: LazyLock<
-    Mutex<std::collections::HashMap<MarkdownCacheKey, Arc<Text<'static>>>>,
+    Mutex<std::collections::HashMap<MarkdownCacheKey, Arc<MarkdownRender>>>,
 > = LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
 
 /// Maximum number of entries in the markdown render cache.
@@ -62,7 +97,7 @@ pub fn render_markdown_text_with_width_and_cwd(
     input: &str,
     width: Option<usize>,
     cwd: Option<&Path>,
-) -> Arc<Text<'static>> {
+) -> Arc<MarkdownRender> {
     let content_hash = blake3::hash(input.as_bytes());
     let cwd_hash = blake3::hash(cwd.map(|p| p.as_os_str().as_encoded_bytes()).unwrap_or(b""));
 
@@ -84,7 +119,10 @@ pub fn render_markdown_text_with_width_and_cwd(
     writer.run();
 
     // Cache the result
-    let result = Arc::new(writer.text);
+    let result = Arc::new(MarkdownRender {
+        text: writer.text,
+        line_links: writer.line_links,
+    });
     {
         let mut cache = MARKDOWN_RENDER_CACHE.lock().unwrap();
         // Evict oldest entry if cache is full
@@ -131,6 +169,8 @@ where
 {
     iter: I,
     text: Text<'static>,
+    /// Per-line hyperlink ranges, index-aligned with `text.lines`.
+    line_links: Vec<Vec<HyperlinkRange>>,
     styles: MarkdownStyles,
     inline_styles: Vec<Style>,
     indent_stack: Vec<IndentContext>,
@@ -145,7 +185,7 @@ where
     cwd: Option<PathBuf>,
     line_ends_with_local_link_target: bool,
     pending_local_link_soft_break: bool,
-    current_line_content: Option<Line<'static>>,
+    current_line_content: Option<HyperlinkLine>,
     current_initial_indent: Vec<Span<'static>>,
     current_subsequent_indent: Vec<Span<'static>>,
     current_line_style: Style,
@@ -164,6 +204,7 @@ where
         Self {
             iter,
             text: Text::default(),
+            line_links: Vec::new(),
             styles: MarkdownStyles::default(),
             inline_styles: Vec::new(),
             indent_stack: Vec::new(),
@@ -375,7 +416,9 @@ where
     fn end_table(&mut self) {
         self.flush_current_line();
         if let Some(table) = self.table_state.take() {
-            self.text.lines.extend(table.render(self.wrap_width));
+            for line in table.render(self.wrap_width) {
+                self.push_output_line(line);
+            }
         }
         self.in_table_cell = false;
         self.needs_newline = true;
@@ -416,7 +459,7 @@ where
     fn start_table_cell(&mut self) {
         self.flush_current_line();
         self.in_table_cell = true;
-        self.current_line_content = Some(Line::default());
+        self.current_line_content = Some(HyperlinkLine::new(Line::default()));
         self.current_initial_indent.clear();
         self.current_subsequent_indent.clear();
         self.current_line_style = self
@@ -438,7 +481,7 @@ where
         let mut parts = stripped.split('\n').peekable();
         while let Some(part) = parts.next() {
             if !part.is_empty() {
-                self.push_span(Span::styled(expand_tabs(part, self.tab_width), style));
+                self.push_text_spans(&expand_tabs(part, self.tab_width), style);
             }
             if parts.peek().is_some() {
                 self.push_span(Span::from(" "));
@@ -475,11 +518,8 @@ where
             if index > 0 {
                 self.push_line(Line::default());
             }
-            let span = Span::styled(
-                expand_tabs(line, self.tab_width),
-                self.inline_styles.last().copied().unwrap_or_default(),
-            );
-            self.push_span(span);
+            let style = self.inline_styles.last().copied().unwrap_or_default();
+            self.push_text_spans(&expand_tabs(line, self.tab_width), style);
         }
         self.needs_newline = false;
     }
@@ -693,8 +733,16 @@ where
     fn pop_link(&mut self) {
         if let Some(link) = self.link.take() {
             if link.show_destination {
+                // The visible destination suffix is annotated with its own
+                // destination so the rendered URL is clickable.
+                let destination = link.destination.clone();
                 self.push_span(" (".into());
-                self.push_span(Span::styled(link.destination, self.styles.link));
+                let mut destination_line = HyperlinkLine::new(Line::default());
+                destination_line.push_span(
+                    Span::styled(destination.clone(), self.styles.link),
+                    Some(&destination),
+                );
+                self.push_annotated(destination_line);
                 self.push_span(")".into());
             } else if let Some(local_target_display) = link.local_target_display {
                 if self.pending_marker_line {
@@ -734,17 +782,17 @@ where
             }
 
             let style = self.current_line_style;
-            let line = line.style(style);
+            let mut line = line.style(style);
 
             let should_wrap =
-                self.wrap_width.is_some_and(|width| width > 0) && !line.spans.is_empty();
+                self.wrap_width.is_some_and(|width| width > 0) && !line.line.spans.is_empty();
 
             if should_wrap {
                 let width = self.wrap_width.expect("wrap_width checked above");
                 if self.current_line_in_code_block {
                     // Code blocks should be wrapped as a whole line to preserve multiple spans (colors)
                     let wrapped = word_wrap_line(
-                        &line,
+                        &line.line,
                         RtOptions::new(width)
                             .initial_indent(Line::from(self.current_initial_indent.clone()))
                             .subsequent_indent(Line::from(self.current_subsequent_indent.clone()))
@@ -758,22 +806,38 @@ where
                             .into_iter()
                             .map(|s| Span::styled(s.content.to_string(), s.style))
                             .collect();
-                        self.text.lines.push(Line::from(owned_spans).style(style));
+                        self.push_output_line(HyperlinkLine::new(
+                            Line::from(owned_spans).style(style),
+                        ));
                     }
                 } else {
                     let wrapped = adaptive_wrap_line(
-                        &line,
+                        &line.line,
                         RtOptions::new(width)
                             .initial_indent(Line::from(self.current_initial_indent.clone()))
                             .subsequent_indent(Line::from(self.current_subsequent_indent.clone())),
                     );
-                    push_owned_lines(&wrapped, &mut self.text.lines);
+                    let owned: Vec<Line<'static>> = wrapped.iter().map(line_to_static).collect();
+                    for remapped in remap_wrapped_line(&line, owned) {
+                        self.push_output_line(remapped.style(style));
+                    }
                 }
             } else {
                 let mut spans = self.current_initial_indent.clone();
-                let mut line = line;
-                spans.append(&mut line.spans);
-                self.text.lines.push(Line::from_iter(spans).style(style));
+                let shift: usize = spans
+                    .iter()
+                    .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
+                    .sum();
+                spans.append(&mut line.line.spans);
+                let mut line = HyperlinkLine {
+                    line: Line::from_iter(spans).style(style),
+                    hyperlinks: line.hyperlinks,
+                };
+                for hyperlink in &mut line.hyperlinks {
+                    hyperlink.columns =
+                        hyperlink.columns.start + shift..hyperlink.columns.end + shift;
+                }
+                self.push_output_line(line);
             }
             self.current_initial_indent.clear();
             self.current_subsequent_indent.clear();
@@ -798,7 +862,7 @@ where
         self.current_initial_indent = self.prefix_spans(was_pending);
         self.current_subsequent_indent = self.prefix_spans(false);
         self.current_line_style = style;
-        self.current_line_content = Some(line);
+        self.current_line_content = Some(HyperlinkLine::new(line));
         self.current_line_in_code_block = self.in_code_block;
         self.line_ends_with_local_link_target = false;
 
@@ -807,19 +871,67 @@ where
 
     fn push_span(&mut self, span: Span<'static>) {
         if self.in_table_cell && self.current_line_content.is_none() {
-            self.current_line_content = Some(Line::default());
+            self.current_line_content = Some(HyperlinkLine::new(Line::default()));
         }
         if let Some(line) = self.current_line_content.as_mut() {
-            line.push_span(span);
+            line.line.push_span(span);
         } else {
             self.push_line(Line::from(vec![span]));
         }
     }
 
+    /// Append `appended` to the current line, shifting its hyperlink columns
+    /// by the current line width.
+    fn push_annotated(&mut self, mut appended: HyperlinkLine) {
+        if self.current_line_content.is_none() {
+            self.push_line(Line::default());
+        }
+        if let Some(line) = self.current_line_content.as_mut() {
+            let shift = line.width();
+            line.line.spans.append(&mut appended.line.spans);
+            line.hyperlinks
+                .extend(appended.hyperlinks.into_iter().map(|mut link| {
+                    link.columns = link.columns.start + shift..link.columns.end + shift;
+                    link
+                }));
+        }
+    }
+
+    /// Push a text span, annotating hyperlinks according to the current
+    /// context:
+    /// - inside a link with a web destination → the span carries that
+    ///   destination (both the label and the visible destination suffix);
+    /// - inside a non-web link or a code block → plain text (no links);
+    /// - otherwise → bare web URLs are detected and annotated.
+    fn push_text_spans(&mut self, text: &str, style: Style) {
+        let span = Span::styled(text.to_string(), style);
+        let destination = self
+            .link
+            .as_ref()
+            .and_then(|link| web_destination(&link.destination));
+        let annotated = if let Some(destination) = destination {
+            let mut annotated = HyperlinkLine::new(Line::default());
+            annotated.push_span(span, Some(&destination));
+            annotated
+        } else if self.link.is_some() || self.in_code_block {
+            HyperlinkLine::new(Line::from(span))
+        } else {
+            annotate_web_urls_in_line(Line::from(span))
+        };
+        self.push_annotated(annotated);
+    }
+
+    /// Push a finished output line, keeping `line_links` aligned with `text.lines`.
+    fn push_output_line(&mut self, line: HyperlinkLine) {
+        let links = line.hyperlinks;
+        self.text.lines.push(line.line);
+        self.line_links.push(links);
+    }
+
     fn push_blank_line(&mut self) {
         self.flush_current_line();
         if self.indent_stack.iter().all(|context| context.is_list) {
-            self.text.lines.push(Line::default());
+            self.push_output_line(HyperlinkLine::new(Line::default()));
         } else {
             self.push_line(Line::default());
             self.flush_current_line();
@@ -946,5 +1058,128 @@ mod tests {
         assert!(rendered.iter().any(|line| line.contains("Count:")));
         assert!(rendered.iter().any(|line| line.contains("long")));
         assert!(rendered.last().is_some_and(|line| line.starts_with('└')));
+    }
+
+    #[test]
+    fn annotates_explicit_web_link_label_and_visible_destination() {
+        let md = render_markdown_text_with_width_and_cwd(
+            "[tidev](https://example.com/a)",
+            Some(80),
+            None,
+        );
+        let rendered = lines_to_strings(&md);
+        assert_eq!(rendered, vec!["tidev (https://example.com/a)".to_string()]);
+
+        let links = &md.line_links[0];
+        // Both the label and the visible destination carry the destination.
+        assert_eq!(links.len(), 2);
+        assert_eq!(links[0].columns, 0..5);
+        assert_eq!(links[0].destination, "https://example.com/a");
+        assert_eq!(links[1].columns, 7..28);
+        assert_eq!(links[1].destination, "https://example.com/a");
+    }
+
+    #[test]
+    fn annotates_bare_urls_in_plain_text() {
+        let md = render_markdown_text_with_width_and_cwd("See https://example.com/a now", Some(80), None);
+        let rendered = lines_to_strings(&md);
+        assert_eq!(rendered, vec!["See https://example.com/a now".to_string()]);
+
+        let links = &md.line_links[0];
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].columns, 4..25);
+        assert_eq!(links[0].destination, "https://example.com/a");
+    }
+
+    #[test]
+    fn does_not_annotate_inline_code() {
+        let md = render_markdown_text_with_width_and_cwd("`https://example.com/a`", Some(80), None);
+        assert!(md.line_links.iter().all(|links| links.is_empty()));
+    }
+
+    #[test]
+    fn does_not_annotate_local_path_links() {
+        let md = render_markdown_text_with_width_and_cwd(
+            "See [file](/workspace/project/src/lib.rs:12) for details.",
+            Some(80),
+            Some(Path::new("/workspace/project")),
+        );
+        assert!(md.line_links.iter().all(|links| links.is_empty()));
+    }
+
+    #[test]
+    fn link_ranges_remap_across_wrapped_rows() {
+        let md = render_markdown_text_with_width_and_cwd(
+            "word [label](https://example.com/very/long/path/that/wraps)",
+            Some(20),
+            None,
+        );
+        // The URL token is wider than the row, so adaptive wrapping hard-
+        // breaks it across rows. Every rendered fragment must carry the full
+        // destination.
+        let rendered: Vec<String> = md
+            .text
+            .lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect();
+        let full: String = rendered.iter().flat_map(|s| s.chars()).collect();
+        assert!(
+            full.contains("https://example.com/very/long/path/that/wraps"),
+            "URL content must be preserved across rows: {rendered:?}"
+        );
+
+        let mut found = 0usize;
+        for links in &md.line_links {
+            for link in links {
+                assert_eq!(link.destination, "https://example.com/very/long/path/that/wraps");
+                found += 1;
+            }
+        }
+        assert!(
+            found >= 2,
+            "expected the URL to wrap across rows, got {found} range(s)"
+        );
+    }
+
+    #[test]
+    fn annotates_table_cell_links_with_column_shift() {
+        let md = render_markdown_text_with_width_and_cwd(
+            "| Site |\n|------|\n| [tidev](https://example.com/a) |\n",
+            Some(80),
+            None,
+        );
+        // The table renders as a bordered row; the cell link ranges must be
+        // shifted past the border + padding.
+        let rendered = lines_to_strings(&md);
+        let row = rendered
+            .iter()
+            .find(|line| line.contains("tidev"))
+            .expect("table row with the link");
+        // `str::find` returns a byte offset; hyperlink columns are display
+        // columns, so convert the prefix to display width.
+        let url_byte = row.find("https://example.com/a").expect("visible URL");
+        let url_col: usize = row[..url_byte]
+            .chars()
+            .map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(0))
+            .sum();
+        let url_width = unicode_width::UnicodeWidthStr::width("https://example.com/a");
+        let links: Vec<_> = md.line_links.iter().flatten().collect();
+        assert!(!links.is_empty(), "expected at least one annotated link");
+        // The URL link covers exactly the visible URL columns.
+        let url_link = links
+            .iter()
+            .find(|link| link.columns.start == url_col)
+            .unwrap_or_else(|| panic!("no link at column {url_col}: {links:?} in {row:?}"));
+        assert_eq!(url_link.columns.end, url_col + url_width);
+        // The label link sits before the " (url)" suffix.
+        assert!(links
+            .iter()
+            .any(|link| link.columns.end <= url_col && link.destination == "https://example.com/a"));
     }
 }

@@ -330,6 +330,9 @@ fn apply_selection_style(
 /// symbol, while trailing cells have `symbol = None` — but `Cell::symbol()`
 /// returns `" "` for `None`, which would insert spurious spaces.  We use
 /// `UnicodeWidthStr::width()` to skip trailing cells.
+///
+/// OSC 8 hyperlink sequences injected into buffer cells are stripped so
+/// copied text stays clean.
 fn extract_row_text(buffer: &Buffer, y: u16, start_x: u16, end_x: u16) -> String {
     let mut text = String::new();
     let mut x = start_x;
@@ -337,9 +340,9 @@ fn extract_row_text(buffer: &Buffer, y: u16, start_x: u16, end_x: u16) -> String
         let Some(cell) = buffer.cell((x, y)) else {
             break;
         };
-        let symbol = cell.symbol();
-        text.push_str(symbol);
-        let width = UnicodeWidthStr::width(symbol).max(1) as u16;
+        let symbol = crate::hyperlink::strip_osc8(cell.symbol());
+        text.push_str(&symbol);
+        let width = UnicodeWidthStr::width(symbol.as_str()).max(1) as u16;
         x = x.saturating_add(width);
         if x == 0 {
             break;

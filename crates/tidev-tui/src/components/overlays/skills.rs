@@ -5,7 +5,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::{Constraint, Layout, Margin, Position, Rect};
-use ratatui::prelude::{Frame, Modifier, Style, Text};
+use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph};
 use unicode_width::UnicodeWidthStr;
@@ -14,6 +14,7 @@ use crate::action::{Action, OverlayAction, OverlayKind};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
 use crate::markdown::render_markdown_text_with_width_and_cwd;
+use crate::markdown::MarkdownRender;
 use crate::utils::{centered_rect, render_scrollbar};
 
 #[derive(Clone, Debug)]
@@ -31,7 +32,7 @@ pub(crate) struct SkillsPanel {
     list_scroll: usize,
     preview_scroll: usize,
     query_active: bool,
-    cached_preview: Option<(String, Arc<Text<'static>>)>,
+    cached_preview: Option<(String, Arc<MarkdownRender>)>,
     preview_content_width: usize,
 }
 
