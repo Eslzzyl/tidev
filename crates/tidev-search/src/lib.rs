@@ -871,14 +871,10 @@ fn find_subsequence_indices_ascii(haystack: &str, needle: &str) -> Option<Vec<us
     let mut matched_indices = Vec::with_capacity(needle_bytes.len());
 
     for &needle_byte in needle_bytes {
-        match memchr::memchr(needle_byte, &haystack_bytes[haystack_index..]) {
-            Some(offset) => {
-                haystack_index += offset;
-                matched_indices.push(haystack_index);
-                haystack_index += 1;
-            }
-            None => return None,
-        }
+        let offset = memchr::memchr(needle_byte, &haystack_bytes[haystack_index..])?;
+        haystack_index += offset;
+        matched_indices.push(haystack_index);
+        haystack_index += 1;
     }
 
     Some(matched_indices)

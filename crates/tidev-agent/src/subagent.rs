@@ -307,7 +307,7 @@ mod tests {
 
     #[tokio::test]
     async fn returns_subagent_results_in_parent_call_order() {
-        let calls = vec![call("slow"), call("fast")];
+        let calls = [call("slow"), call("fast")];
         let sink = Arc::new(TestEventSink {
             completed: Mutex::new(Vec::new()),
         });

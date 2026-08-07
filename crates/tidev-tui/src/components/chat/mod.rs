@@ -487,7 +487,6 @@ impl MessageList {
             match event {
                 BackendEvent::ToolCallUpdated {
                     tool_call,
-                    request_id: _,
                     ..
                 } => {
                     if tool_call.name == "task" {
@@ -733,7 +732,6 @@ impl MessageList {
             }
             BackendEvent::ToolCallUpdated {
                 tool_call,
-                request_id: _,
                 ..
             } => {
                 // Recovery path: if TurnStarting was missed but a streaming

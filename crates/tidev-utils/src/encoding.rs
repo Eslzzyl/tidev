@@ -147,7 +147,7 @@ pub fn decode_text_lossy_with_options(bytes: &[u8], options: DecodeOptions) -> T
 
 fn decode_utf16(bytes: &[u8], little_endian: bool) -> (String, bool) {
     let mut units = Vec::with_capacity(bytes.len().div_ceil(2));
-    let mut had_decode_errors = bytes.len() % 2 != 0;
+    let mut had_decode_errors = !bytes.len().is_multiple_of(2);
     for chunk in bytes.chunks_exact(2) {
         let unit = if little_endian {
             u16::from_le_bytes([chunk[0], chunk[1]])
@@ -181,10 +181,10 @@ fn detect_encoding(bytes: &[u8], options: DecodeOptions) -> (&'static Encoding, 
     if bytes.starts_with(&[0xFE, 0xFF]) {
         return (encoding_rs::UTF_16BE, Bom::Utf16Be, &bytes[2..]);
     }
-    if !options.allow_heuristic {
-        if let Some(encoding) = options.fallback_encoding {
-            return (encoding, Bom::None, bytes);
-        }
+    if !options.allow_heuristic
+        && let Some(encoding) = options.fallback_encoding
+    {
+        return (encoding, Bom::None, bytes);
     }
     // ISO-2022-JP uses ASCII escape sequences, so its bytes are also valid
     // UTF-8. Recognize its state-switch sequences before the UTF-8 fast path.
@@ -268,7 +268,7 @@ fn system_codepage_encoding() -> Option<&'static Encoding> {
     #[cfg(windows)]
     {
         let cp = unsafe { GetACP() };
-        return codepage_to_encoding(cp);
+        codepage_to_encoding(cp)
     }
 
     #[cfg(not(windows))]

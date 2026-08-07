@@ -351,7 +351,7 @@ impl AgentContext for AgentRuntime {
                 .await?;
             let marker = Message::compaction(&compaction.summary);
             self.store
-                .save_messages(session_id, &[marker.clone()])
+                .save_messages(session_id, std::slice::from_ref(&marker))
                 .await?;
             let mut messages = self
                 .messages

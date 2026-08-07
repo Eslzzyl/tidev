@@ -92,7 +92,7 @@ pub fn is_git_repo(workspace_root: &Path) -> bool {
 fn detect_os_type() -> OsType {
     #[cfg(target_os = "windows")]
     {
-        return OsType::Windows;
+        OsType::Windows
     }
 
     #[cfg(target_os = "macos")]
@@ -102,7 +102,7 @@ fn detect_os_type() -> OsType {
 
     #[cfg(target_os = "linux")]
     {
-        return OsType::Linux;
+        OsType::Linux
     }
 
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]

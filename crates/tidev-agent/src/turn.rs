@@ -24,6 +24,7 @@ pub struct StreamTurnOptions {
 /// so product hosts do not need to duplicate protocol handling. The returned
 /// turn contains the same fields that were accumulated from the provider
 /// stream, including opaque Responses API output items.
+#[allow(clippy::too_many_arguments)]
 pub async fn stream_turn(
     llm: &LlmClient,
     mut model: LlmProviderConfig,
