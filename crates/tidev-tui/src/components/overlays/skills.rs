@@ -13,8 +13,8 @@ use unicode_width::UnicodeWidthStr;
 use crate::action::{Action, OverlayAction, OverlayKind};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
-use crate::markdown::render_markdown_text_with_width_and_cwd;
 use crate::markdown::MarkdownRender;
+use crate::markdown::render_markdown_text_with_width_and_cwd;
 use crate::utils::{centered_rect, render_scrollbar};
 
 #[derive(Clone, Debug)]

@@ -1081,7 +1081,11 @@ mod tests {
 
     #[test]
     fn annotates_bare_urls_in_plain_text() {
-        let md = render_markdown_text_with_width_and_cwd("See https://example.com/a now", Some(80), None);
+        let md = render_markdown_text_with_width_and_cwd(
+            "See https://example.com/a now",
+            Some(80),
+            None,
+        );
         let rendered = lines_to_strings(&md);
         assert_eq!(rendered, vec!["See https://example.com/a now".to_string()]);
 
@@ -1137,7 +1141,10 @@ mod tests {
         let mut found = 0usize;
         for links in &md.line_links {
             for link in links {
-                assert_eq!(link.destination, "https://example.com/very/long/path/that/wraps");
+                assert_eq!(
+                    link.destination,
+                    "https://example.com/very/long/path/that/wraps"
+                );
                 found += 1;
             }
         }
@@ -1178,8 +1185,11 @@ mod tests {
             .unwrap_or_else(|| panic!("no link at column {url_col}: {links:?} in {row:?}"));
         assert_eq!(url_link.columns.end, url_col + url_width);
         // The label link sits before the " (url)" suffix.
-        assert!(links
-            .iter()
-            .any(|link| link.columns.end <= url_col && link.destination == "https://example.com/a"));
+        assert!(
+            links
+                .iter()
+                .any(|link| link.columns.end <= url_col
+                    && link.destination == "https://example.com/a")
+        );
     }
 }

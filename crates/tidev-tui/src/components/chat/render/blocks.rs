@@ -199,12 +199,7 @@ fn scan_image_badges(
     let mut infos = Vec::new();
     let mut url_idx = 0;
     for (line_offset, line) in card_lines.iter().enumerate() {
-        let line_text: String = line
-            .line
-            .spans
-            .iter()
-            .map(|s| s.content.as_ref())
-            .collect();
+        let line_text: String = line.line.spans.iter().map(|s| s.content.as_ref()).collect();
         let mut search_start = 0;
         while let Ok(Some(m)) = IMAGE_BADGE_RE.find(&line_text[search_start..]) {
             let abs_start = search_start + m.start();
@@ -376,15 +371,13 @@ fn render_block_from_cache(
                 is_round_end,
                 kind: MessageRenderCacheKind::ToolCall(tc.id.clone()),
             };
-            let (tool_lines, tool_regions): (
-                Vec<HyperlinkLine>,
-                Vec<SelectableRegionRange>,
-            ) = if let Some(entry) = cache.peek(&tool_key) {
-                match &entry.value {
-                    MessageRenderCacheValue::ToolResult(tl, tr) => (tl.clone(), tr.clone()),
-                    _ => (Vec::new(), Vec::new()),
-                }
-            } else {
+            let (tool_lines, tool_regions): (Vec<HyperlinkLine>, Vec<SelectableRegionRange>) =
+                if let Some(entry) = cache.peek(&tool_key) {
+                    match &entry.value {
+                        MessageRenderCacheValue::ToolResult(tl, tr) => (tl.clone(), tr.clone()),
+                        _ => (Vec::new(), Vec::new()),
+                    }
+                } else {
                     // Cache miss — render directly.
                     let tool_result = tool_results_by_id.get(&tc.id).copied();
                     let is_expanded = ctx.expanded_tool_results.contains(&block.message_id);

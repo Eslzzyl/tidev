@@ -538,9 +538,7 @@ fn split_mixed_url_word(text: &str, word: MixedUrlWord, line_limit: usize) -> Ve
     let mut pieces = Vec::new();
     for piece in source.break_apart(line_limit.max(1)) {
         let end = offset + piece.word.len();
-        pieces.push(MixedUrlWord {
-            range: offset..end,
-        });
+        pieces.push(MixedUrlWord { range: offset..end });
         offset = end;
     }
     pieces
@@ -964,11 +962,11 @@ mod tests {
             Line::from("https://example.com/search?q=very+long+query+string&page=1&limit=50");
         let out = adaptive_wrap_line(&line, RtOptions::new(45));
         assert_eq!(out.len(), 2);
-        assert_eq!(concat_line(&out[0]), "https://example.com/search?q=very+long+query+");
         assert_eq!(
-            concat_line(&out[1]),
-            "string&page=1&limit=50"
+            concat_line(&out[0]),
+            "https://example.com/search?q=very+long+query+"
         );
+        assert_eq!(concat_line(&out[1]), "string&page=1&limit=50");
     }
 
     #[test]
@@ -991,7 +989,10 @@ mod tests {
         // hard-broken (content preserved) instead of spanning an over-wide line.
         let full: String = out.iter().map(concat_line).collect();
         assert!(full.contains("https://example.com/very/long/path"));
-        assert!(out.iter().all(|l| UnicodeWidthStr::width(concat_line(l).as_str()) <= 20));
+        assert!(
+            out.iter()
+                .all(|l| UnicodeWidthStr::width(concat_line(l).as_str()) <= 20)
+        );
     }
 
     #[test]

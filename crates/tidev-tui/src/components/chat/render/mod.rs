@@ -178,7 +178,12 @@ pub(crate) fn render_messages(
         .style(Style::default().bg(ctx.palette.background))
         .scroll((output.render_scroll as u16, 0));
     frame.render_widget(paragraph, content_area);
-    mark_buffer_hyperlinks(frame.buffer_mut(), content_area, &line_links, output.render_scroll);
+    mark_buffer_hyperlinks(
+        frame.buffer_mut(),
+        content_area,
+        &line_links,
+        output.render_scroll,
+    );
 
     // Scrollbar
     if let Some(sb) = scrollbar_rect {
@@ -383,15 +388,7 @@ mod tests {
         update_layout_index(&mut index, &mut cache, &chat_ctx.messages, &geom, &ctx);
 
         let output = messages_text(
-            &chat_ctx,
-            &mut index,
-            &mut cache,
-            &ctx,
-            geom,
-            0,
-            200,
-            false,
-            &None,
+            &chat_ctx, &mut index, &mut cache, &ctx, geom, 0, 200, false, &None,
         );
 
         // The user card renders as "┃ See https://example.com/a"; the link
@@ -400,12 +397,7 @@ mod tests {
         let mut found = false;
         for hl in &output.hyperlink_lines {
             for link in &hl.hyperlinks {
-                let text: String = hl
-                    .line
-                    .spans
-                    .iter()
-                    .map(|s| s.content.as_ref())
-                    .collect();
+                let text: String = hl.line.spans.iter().map(|s| s.content.as_ref()).collect();
                 assert_eq!(link.destination, "https://example.com/a");
                 let byte_start = text.find("https://example.com/a").expect("visible URL");
                 let col_start: usize = text[..byte_start]
@@ -472,7 +464,12 @@ mod tests {
         let lines = &cards[0].1;
         // Should be exactly 1 line (the instruction text itself)
         assert_eq!(lines.len(), 1, "short instruction should not wrap");
-        let rendered: String = lines[0].line.spans.iter().map(|s| s.content.as_ref()).collect();
+        let rendered: String = lines[0]
+            .line
+            .spans
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect();
         assert!(rendered.starts_with("󱁤"), "should start with icon");
         assert!(rendered.contains("AGENTS.md"), "should contain path");
 
@@ -490,7 +487,12 @@ mod tests {
         );
 
         // First line should start with icon
-        let first: String = lines2[0].line.spans.iter().map(|s| s.content.as_ref()).collect();
+        let first: String = lines2[0]
+            .line
+            .spans
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect();
         assert!(first.starts_with("󱁤"), "first line should start with icon");
 
         // Continuation lines should be indented (have leading whitespace)

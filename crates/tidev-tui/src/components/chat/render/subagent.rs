@@ -53,16 +53,19 @@ pub(crate) fn render_running_subagent_lines(
         ),
     ]);
     lines.extend(
-        adaptive_wrap_line(&header_line, WrapOptions::new(content_width).break_words(true))
-            .into_iter()
-            .map(|l| {
-                HyperlinkLine::new(Line::from(
-                    l.spans
-                        .into_iter()
-                        .map(|s| Span::styled(s.content.to_string(), s.style))
-                        .collect::<Vec<_>>(),
-                ))
-            }),
+        adaptive_wrap_line(
+            &header_line,
+            WrapOptions::new(content_width).break_words(true),
+        )
+        .into_iter()
+        .map(|l| {
+            HyperlinkLine::new(Line::from(
+                l.spans
+                    .into_iter()
+                    .map(|s| Span::styled(s.content.to_string(), s.style))
+                    .collect::<Vec<_>>(),
+            ))
+        }),
     );
 
     // Status line with 2-space indent

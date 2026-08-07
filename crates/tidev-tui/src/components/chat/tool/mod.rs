@@ -691,11 +691,7 @@ fn render_tool_result_detail_lines(
                 })
                 .collect();
             return (
-                hyper_lines(render_todos_checkbox_list(
-                    &todos,
-                    content_width,
-                    palette,
-                )),
+                hyper_lines(render_todos_checkbox_list(&todos, content_width, palette)),
                 None,
                 vec![],
             );

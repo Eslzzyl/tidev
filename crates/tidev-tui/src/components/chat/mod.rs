@@ -503,10 +503,7 @@ impl MessageList {
         let session_id = event.session_id();
         if self.active_session_id == Some(session_id) {
             match event {
-                BackendEvent::ToolCallUpdated {
-                    tool_call,
-                    ..
-                } => {
+                BackendEvent::ToolCallUpdated { tool_call, .. } => {
                     if tool_call.name == "task" {
                         let desc = extract_task_description(&tool_call.arguments);
                         let sub_type = extract_subagent_type(&tool_call.arguments);
@@ -767,10 +764,7 @@ impl MessageList {
                 }
                 self.dirty = true;
             }
-            BackendEvent::ToolCallUpdated {
-                tool_call,
-                ..
-            } => {
+            BackendEvent::ToolCallUpdated { tool_call, .. } => {
                 // Recovery path: if TurnStarting was missed but a streaming
                 // Assistant message exists (created by Delta recovery), pick
                 // it up so we add the tool call to the right message.
@@ -944,8 +938,13 @@ impl MessageList {
             } => {
                 let deadline =
                     Instant::now() + Duration::from_secs(retry_after_secs.unwrap_or(0) as u64);
-                self.retrying_hint =
-                    Some((session_id, *attempt, *max_attempts, reason.clone(), deadline));
+                self.retrying_hint = Some((
+                    session_id,
+                    *attempt,
+                    *max_attempts,
+                    reason.clone(),
+                    deadline,
+                ));
                 self.dirty = true;
             }
             BackendEvent::Finished { .. } => {
@@ -1187,7 +1186,11 @@ impl MessageList {
                 continue;
             }
             total += 1;
-            let toggled = if collapsed { !default_collapse } else { default_collapse };
+            let toggled = if collapsed {
+                !default_collapse
+            } else {
+                default_collapse
+            };
             let state_changed = if toggled {
                 self.thinking_collapsed_overrides.insert(msg.id)
             } else {
@@ -1614,7 +1617,9 @@ fn append_interruption_notice(messages: &mut Vec<Message>) {
 /// thinking blocks in the session, `changed` how many actually flipped state.
 fn thinking_command_notice(verb: &str, total: usize, changed: usize) -> Vec<Action> {
     if total == 0 {
-        vec![Action::Notice("No thinking blocks in this session".to_string())]
+        vec![Action::Notice(
+            "No thinking blocks in this session".to_string(),
+        )]
     } else if changed == 0 {
         vec![Action::Notice(format!(
             "All thinking blocks are already {verb}"
@@ -1665,12 +1670,14 @@ mod tests {
         let mut list = message_list_with_thinking();
         let (total, changed) = list.set_all_thinking_collapsed(false, true);
         assert_eq!((total, changed), (2, 2));
-        assert!(list
-            .thinking_collapsed_overrides
-            .contains(&Uuid::from_u128(2)));
-        assert!(list
-            .thinking_collapsed_overrides
-            .contains(&Uuid::from_u128(3)));
+        assert!(
+            list.thinking_collapsed_overrides
+                .contains(&Uuid::from_u128(2))
+        );
+        assert!(
+            list.thinking_collapsed_overrides
+                .contains(&Uuid::from_u128(3))
+        );
         assert!(list.dirty);
 
         // Idempotent: second invocation changes nothing.
@@ -1690,12 +1697,14 @@ mod tests {
         let mut list = message_list_with_thinking();
         let (total, changed) = list.set_all_thinking_collapsed(true, false);
         assert_eq!((total, changed), (2, 2));
-        assert!(list
-            .thinking_collapsed_overrides
-            .contains(&Uuid::from_u128(2)));
-        assert!(list
-            .thinking_collapsed_overrides
-            .contains(&Uuid::from_u128(3)));
+        assert!(
+            list.thinking_collapsed_overrides
+                .contains(&Uuid::from_u128(2))
+        );
+        assert!(
+            list.thinking_collapsed_overrides
+                .contains(&Uuid::from_u128(3))
+        );
 
         // default_collapse = true: overrides stay empty (default is collapsed).
         let mut list = message_list_with_thinking();
@@ -1710,23 +1719,27 @@ mod tests {
         let (total, _) = list.set_all_thinking_collapsed(false, true);
         assert_eq!(total, 2);
         // The user message (id 1) has no reasoning and must not be tracked.
-        assert!(!list
-            .thinking_collapsed_overrides
-            .contains(&Uuid::from_u128(1)));
+        assert!(
+            !list
+                .thinking_collapsed_overrides
+                .contains(&Uuid::from_u128(1))
+        );
     }
 
     #[test]
     fn thinking_commands_mark_dirty_blocks_only_when_changed() {
         let mut list = message_list_with_thinking();
         list.set_all_thinking_collapsed(false, true);
-        assert!(list
-            .layout_index
-            .dirty_messages
-            .contains(&Uuid::from_u128(2)));
-        assert!(list
-            .layout_index
-            .dirty_messages
-            .contains(&Uuid::from_u128(3)));
+        assert!(
+            list.layout_index
+                .dirty_messages
+                .contains(&Uuid::from_u128(2))
+        );
+        assert!(
+            list.layout_index
+                .dirty_messages
+                .contains(&Uuid::from_u128(3))
+        );
         list.layout_index.dirty_messages.clear();
         list.set_all_thinking_collapsed(false, true);
         assert!(list.layout_index.dirty_messages.is_empty());

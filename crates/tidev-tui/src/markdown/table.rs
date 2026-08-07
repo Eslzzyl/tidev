@@ -178,10 +178,8 @@ impl TableState {
             .enumerate()
             .map(|(index, cell)| {
                 let width = widths.get(index).copied().unwrap_or(1).max(1);
-                let wrapped = adaptive_wrap_line(
-                    &cell.line,
-                    RtOptions::new(width).break_words(true),
-                );
+                let wrapped =
+                    adaptive_wrap_line(&cell.line, RtOptions::new(width).break_words(true));
                 let owned: Vec<Line<'static>> = wrapped.iter().map(line_to_static).collect();
                 let remapped = remap_wrapped_line(cell, owned);
                 if remapped.is_empty() {
@@ -284,13 +282,19 @@ impl TableState {
                 out.push(HyperlinkLine::new(Line::default()));
             }
 
-            out.push(HyperlinkLine::new(
-                self.render_border_line('┌', '─', '┐', &[card_width]),
-            ));
+            out.push(HyperlinkLine::new(self.render_border_line(
+                '┌',
+                '─',
+                '┐',
+                &[card_width],
+            )));
             out.extend(self.render_stacked_row(header_row, row, card_width));
-            out.push(HyperlinkLine::new(
-                self.render_border_line('└', '─', '┘', &[card_width]),
-            ));
+            out.push(HyperlinkLine::new(self.render_border_line(
+                '└',
+                '─',
+                '┘',
+                &[card_width],
+            )));
         }
 
         out
@@ -324,16 +328,17 @@ impl TableState {
                 field.line.push_span(span.clone());
             }
             for mut hyperlink in value.hyperlinks {
-                hyperlink.columns =
-                    hyperlink.columns.start + shift..hyperlink.columns.end + shift;
+                hyperlink.columns = hyperlink.columns.start + shift..hyperlink.columns.end + shift;
                 field.hyperlinks.push(hyperlink);
             }
 
-            let wrapped = adaptive_wrap_line(&field.line, RtOptions::new(card_width).break_words(true));
+            let wrapped =
+                adaptive_wrap_line(&field.line, RtOptions::new(card_width).break_words(true));
             let owned: Vec<Line<'static>> = wrapped.iter().map(line_to_static).collect();
 
             for line in remap_wrapped_line(&field, owned) {
-                let (cell_spans, left_pad) = pad_hyperlink_cell(line.clone(), card_width, Alignment::Left);
+                let (cell_spans, left_pad) =
+                    pad_hyperlink_cell(line.clone(), card_width, Alignment::Left);
                 let mut row_line = HyperlinkLine::new(Line::default());
                 for span in &self.prefix {
                     row_line.line.push_span(span.clone());
@@ -341,8 +346,7 @@ impl TableState {
                 row_line.line.push_span(Span::raw("│"));
                 row_line.line.push_span(Span::raw(" "));
                 // Content starts at prefix width + "│" + " ".
-                let shift =
-                    display_line_width(&Line::from(self.prefix.clone())) + 2 + left_pad;
+                let shift = display_line_width(&Line::from(self.prefix.clone())) + 2 + left_pad;
                 for span in cell_spans {
                     row_line.line.push_span(span);
                 }

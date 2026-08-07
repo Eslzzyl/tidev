@@ -580,8 +580,14 @@ mod tests {
             reg.parse_invocation("/collapse-thinking").map(|(n, _)| n),
             Some("collapse-thinking".to_string())
         );
-        assert_eq!(reg.command("expand").map(|s| s.action), Some(CommandAction::ExpandThinking));
-        assert_eq!(reg.command("collapse").map(|s| s.action), Some(CommandAction::CollapseThinking));
+        assert_eq!(
+            reg.command("expand").map(|s| s.action),
+            Some(CommandAction::ExpandThinking)
+        );
+        assert_eq!(
+            reg.command("collapse").map(|s| s.action),
+            Some(CommandAction::CollapseThinking)
+        );
     }
 
     #[test]

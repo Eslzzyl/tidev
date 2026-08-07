@@ -127,7 +127,8 @@ pub(crate) fn remap_wrapped_line(
         if index > 0 {
             let trimmed = source_text[source_byte..].trim_start_matches(char::is_whitespace);
             let skipped = source_text[source_byte..].len() - trimmed.len();
-            source_column += UnicodeWidthStr::width(&source_text[source_byte..source_byte + skipped]);
+            source_column +=
+                UnicodeWidthStr::width(&source_text[source_byte..source_byte + skipped]);
             source_byte += skipped;
         }
 
@@ -188,7 +189,8 @@ fn push_link_range(line: &mut HyperlinkLine, range: Range<usize>, link: &Hyperli
         previous.columns.end = range.end;
         return;
     }
-    line.hyperlinks.push(HyperlinkRange::web(range, link.destination.clone()));
+    line.hyperlinks
+        .push(HyperlinkRange::web(range, link.destination.clone()));
 }
 
 /// Find bare web URLs in `text`, returning display-column ranges.
@@ -251,7 +253,11 @@ pub(crate) fn web_links_in_text(text: &str) -> Vec<HyperlinkRange> {
                 break;
             }
             let scheme = &raw_token[scheme_start..scheme_end];
-            if !scheme.chars().next().is_some_and(|c| c.is_ascii_alphabetic()) {
+            if !scheme
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_alphabetic())
+            {
                 // Not a real scheme (e.g. "1://…"); skip past the separator.
                 candidate_offset = scheme_end + 3;
                 if candidate_offset >= raw_token.len() {
@@ -264,7 +270,13 @@ pub(crate) fn web_links_in_text(text: &str) -> Vec<HyperlinkRange> {
             let trimmed_end = trailing_url_end(candidate);
             let candidate = &candidate[..trimmed_end];
             if let Some(destination) = web_destination(candidate) {
-                push_web_link(&mut links, text, raw_start + scheme_start, candidate, destination);
+                push_web_link(
+                    &mut links,
+                    text,
+                    raw_start + scheme_start,
+                    candidate,
+                    destination,
+                );
             }
             // Continue scanning after this candidate for further URLs.
             candidate_offset = scheme_start + candidate.len();
@@ -291,8 +303,25 @@ fn push_web_link(
 fn is_leading_punctuation(ch: char) -> bool {
     matches!(
         ch,
-        '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>' | ',' | '.' | ';' | ':' | '!' | '\'' | '"'
-            | '（' | '【' | '《' | '「' | '『'
+        '(' | ')'
+            | '['
+            | ']'
+            | '{'
+            | '}'
+            | '<'
+            | '>'
+            | ','
+            | '.'
+            | ';'
+            | ':'
+            | '!'
+            | '\''
+            | '"'
+            | '（'
+            | '【'
+            | '《'
+            | '「'
+            | '『'
     )
 }
 
@@ -524,10 +553,7 @@ mod tests {
 
     #[test]
     fn strip_osc8_removes_embedded_sequences() {
-        let input = format!(
-            "a{}b",
-            osc8_hyperlink("https://example.com/", "link")
-        );
+        let input = format!("a{}b", osc8_hyperlink("https://example.com/", "link"));
         assert_eq!(strip_osc8(&input), "alinkb");
     }
 
@@ -567,10 +593,7 @@ mod tests {
         }
         let links_by_line = vec![
             vec![],
-            vec![HyperlinkRange::web(
-                0..4,
-                "https://example.com".to_string(),
-            )],
+            vec![HyperlinkRange::web(0..4, "https://example.com".to_string())],
         ];
         mark_buffer_hyperlinks(&mut buf, area, &links_by_line, /*scroll_rows*/ 0);
         let cell = &buf[(0, 1)];

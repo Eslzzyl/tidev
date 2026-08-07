@@ -229,10 +229,8 @@ pub fn wrap_text_lines(text: &str, max_width: usize, max_lines: usize) -> Vec<St
     }
 
     let line = Line::from(trimmed.to_string());
-    let wrapped = crate::markdown::adaptive_wrap_line(
-        &line,
-        WrapOptions::new(max_width).break_words(true),
-    );
+    let wrapped =
+        crate::markdown::adaptive_wrap_line(&line, WrapOptions::new(max_width).break_words(true));
     let mut lines: Vec<String> = wrapped
         .iter()
         .map(|line| {
