@@ -211,7 +211,8 @@ fn base_instruction() -> &'static str {
         "If the request is ambiguous or missing a critical value, ask one focused question. ",
         "Do not invent file contents or API behavior; rely on inspected code and documented behavior. ",
         "Reply in natural prose rather than fragmented bullet lists: use markdown lists sparingly, only for genuinely enumerable items such as file paths, concrete steps, or parallel alternatives, and never render a two-word phrase as its own bullet point. ",
-        "Communicate what is necessary for the task — not more, not less — and do not fill space with words.",
+        "Communicate what is necessary for the task — not more, not less — and do not fill space with words. ",
+        "Never modify the system without explicit user permission: do not install, uninstall, or update software or toolchains, or change system or global configuration.",
     )
 }
 
@@ -566,6 +567,15 @@ mod tests {
         assert!(
             base.contains("not more, not less"),
             "Base instruction must cap verbosity"
+        );
+    }
+
+    #[test]
+    fn test_base_instruction_forbids_unauthorized_system_modification() {
+        let base = base_instruction();
+        assert!(
+            base.contains("Never modify the system without explicit user permission"),
+            "Base instruction must forbid unauthorized system modification"
         );
     }
 }
