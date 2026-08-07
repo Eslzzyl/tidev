@@ -61,6 +61,10 @@ pub(crate) enum ChatAction {
     SetInput(String),
     ScrollTo(Uuid),
     ScrollDelta(isize),
+    /// Expand every thinking block in the current session (one-shot).
+    ExpandAllThinking,
+    /// Collapse every thinking block in the current session (one-shot).
+    CollapseAllThinking,
 }
 
 /// Overlay (panel/dialog) management.

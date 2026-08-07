@@ -1121,6 +1121,54 @@ impl MessageList {
     ) -> Option<usize> {
         self.layout_index.find_scroll_offset(messages, target_id)
     }
+
+    /// Force every visible thinking block in the active session into the given
+    /// fold state (backing the expand/collapse-all commands).
+    ///
+    /// A message's effective state is `default_collapse XOR toggled` (see
+    /// `render::thinking::is_reasoning_collapsed`), so forcing a state means
+    /// inserting or removing the message id in `thinking_collapsed_overrides`
+    /// to invert the default when needed. Affected blocks are marked dirty so
+    /// the next frame re-renders them with the new fold state; unchanged blocks
+    /// are left untouched (idempotent).
+    ///
+    /// Returns `(total_thinking_blocks, changed_blocks)`.
+    fn set_all_thinking_collapsed(
+        &mut self,
+        collapsed: bool,
+        default_collapse: bool,
+    ) -> (usize, usize) {
+        let session_id = match self.active_session_id {
+            Some(id) => id,
+            None => return (0, 0),
+        };
+        let Some(ctx) = self.chat_contexts.get(&session_id) else {
+            return (0, 0);
+        };
+
+        let mut total = 0;
+        let mut changed = 0;
+        for msg in ctx.visible_messages() {
+            if msg.reasoning.trim().is_empty() {
+                continue;
+            }
+            total += 1;
+            let toggled = if collapsed { !default_collapse } else { default_collapse };
+            let state_changed = if toggled {
+                self.thinking_collapsed_overrides.insert(msg.id)
+            } else {
+                self.thinking_collapsed_overrides.remove(&msg.id)
+            };
+            if state_changed {
+                changed += 1;
+                self.layout_index.mark_dirty(msg.id);
+            }
+        }
+        if changed > 0 {
+            self.dirty = true;
+        }
+        (total, changed)
+    }
 }
 
 impl Component for MessageList {
@@ -1167,7 +1215,7 @@ impl Component for MessageList {
         }
     }
 
-    fn update(&mut self, action: &Action, _ctx: &UpdateContext) -> Vec<Action> {
+    fn update(&mut self, action: &Action, ctx: &UpdateContext) -> Vec<Action> {
         match action {
             Action::Chat(ChatAction::ScrollDelta(delta)) => {
                 if self.active_session_id.is_some() {
@@ -1195,6 +1243,16 @@ impl Component for MessageList {
                 self.follow_tail = false;
                 self.dirty = true;
                 vec![]
+            }
+            Action::Chat(ChatAction::ExpandAllThinking) => {
+                let default_collapse = ctx.runtime.config().ui.collapse_thinking;
+                let (total, changed) = self.set_all_thinking_collapsed(false, default_collapse);
+                thinking_command_notice("expanded", total, changed)
+            }
+            Action::Chat(ChatAction::CollapseAllThinking) => {
+                let default_collapse = ctx.runtime.config().ui.collapse_thinking;
+                let (total, changed) = self.set_all_thinking_collapsed(true, default_collapse);
+                thinking_command_notice("collapsed", total, changed)
             }
 
             _ => vec![],
@@ -1514,4 +1572,145 @@ fn append_interruption_notice(messages: &mut Vec<Message>) {
     );
     err_msg.completed_at = Some(Utc::now());
     messages.push(err_msg);
+}
+
+/// Build the status notice for the expand/collapse-all-thinking commands.
+///
+/// `verb` is the past-tense action ("expanded"/"collapsed"); `total` counts
+/// thinking blocks in the session, `changed` how many actually flipped state.
+fn thinking_command_notice(verb: &str, total: usize, changed: usize) -> Vec<Action> {
+    if total == 0 {
+        vec![Action::Notice("No thinking blocks in this session".to_string())]
+    } else if changed == 0 {
+        vec![Action::Notice(format!(
+            "All thinking blocks are already {verb}"
+        ))]
+    } else {
+        vec![Action::Notice(format!("{verb} {changed} thinking blocks"))]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn user_msg(id: u128) -> Message {
+        let mut msg = Message::new(tidev_llm::message::MessageRole::User, "hello");
+        msg.id = Uuid::from_u128(id);
+        msg
+    }
+
+    fn assistant_msg_with_reasoning(id: u128) -> Message {
+        let mut msg = Message::new(tidev_llm::message::MessageRole::Assistant, "response");
+        msg.id = Uuid::from_u128(id);
+        msg.reasoning = "deep thoughts".to_string();
+        msg
+    }
+
+    fn message_list_with_thinking() -> MessageList {
+        let mut list = MessageList::new();
+        let ctx = ChatContext::new(
+            Uuid::from_u128(100),
+            "test".into(),
+            vec![
+                user_msg(1),
+                assistant_msg_with_reasoning(2),
+                assistant_msg_with_reasoning(3),
+            ],
+            None,
+            "model".into(),
+            "provider".into(),
+        );
+        list.set_chat_context(ctx);
+        list
+    }
+
+    #[test]
+    fn expand_all_thinking_forces_expanded_state() {
+        // default_collapse = true: overrides must invert the default → inserted.
+        let mut list = message_list_with_thinking();
+        let (total, changed) = list.set_all_thinking_collapsed(false, true);
+        assert_eq!((total, changed), (2, 2));
+        assert!(list
+            .thinking_collapsed_overrides
+            .contains(&Uuid::from_u128(2)));
+        assert!(list
+            .thinking_collapsed_overrides
+            .contains(&Uuid::from_u128(3)));
+        assert!(list.dirty);
+
+        // Idempotent: second invocation changes nothing.
+        let (total, changed) = list.set_all_thinking_collapsed(false, true);
+        assert_eq!((total, changed), (2, 0));
+
+        // default_collapse = false: overrides stay empty (default is expanded).
+        let mut list = message_list_with_thinking();
+        let (total, changed) = list.set_all_thinking_collapsed(false, false);
+        assert_eq!((total, changed), (2, 0));
+        assert!(list.thinking_collapsed_overrides.is_empty());
+    }
+
+    #[test]
+    fn collapse_all_thinking_forces_collapsed_state() {
+        // default_collapse = false: overrides must invert the default → inserted.
+        let mut list = message_list_with_thinking();
+        let (total, changed) = list.set_all_thinking_collapsed(true, false);
+        assert_eq!((total, changed), (2, 2));
+        assert!(list
+            .thinking_collapsed_overrides
+            .contains(&Uuid::from_u128(2)));
+        assert!(list
+            .thinking_collapsed_overrides
+            .contains(&Uuid::from_u128(3)));
+
+        // default_collapse = true: overrides stay empty (default is collapsed).
+        let mut list = message_list_with_thinking();
+        let (total, changed) = list.set_all_thinking_collapsed(true, true);
+        assert_eq!((total, changed), (2, 0));
+        assert!(list.thinking_collapsed_overrides.is_empty());
+    }
+
+    #[test]
+    fn thinking_commands_skip_messages_without_reasoning() {
+        let mut list = message_list_with_thinking();
+        let (total, _) = list.set_all_thinking_collapsed(false, true);
+        assert_eq!(total, 2);
+        // The user message (id 1) has no reasoning and must not be tracked.
+        assert!(!list
+            .thinking_collapsed_overrides
+            .contains(&Uuid::from_u128(1)));
+    }
+
+    #[test]
+    fn thinking_commands_mark_dirty_blocks_only_when_changed() {
+        let mut list = message_list_with_thinking();
+        list.set_all_thinking_collapsed(false, true);
+        assert!(list
+            .layout_index
+            .dirty_messages
+            .contains(&Uuid::from_u128(2)));
+        assert!(list
+            .layout_index
+            .dirty_messages
+            .contains(&Uuid::from_u128(3)));
+        list.layout_index.dirty_messages.clear();
+        list.set_all_thinking_collapsed(false, true);
+        assert!(list.layout_index.dirty_messages.is_empty());
+    }
+
+    #[test]
+    fn thinking_command_notice_wording() {
+        assert!(matches!(
+            thinking_command_notice("expanded", 0, 0).as_slice(),
+            [Action::Notice(text)] if text == "No thinking blocks in this session"
+        ));
+        assert!(matches!(
+            thinking_command_notice("expanded", 2, 0).as_slice(),
+            [Action::Notice(text)] if text == "All thinking blocks are already expanded"
+        ));
+        assert!(matches!(
+            thinking_command_notice("collapsed", 2, 2).as_slice(),
+            [Action::Notice(text)] if text == "collapsed 2 thinking blocks"
+        ));
+    }
 }

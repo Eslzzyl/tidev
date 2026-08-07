@@ -41,6 +41,10 @@ pub(crate) enum CommandAction {
     /// Backend features not yet available in the new architecture.
     Compact,
     Init,
+    /// Expand every thinking block in the current session.
+    ExpandThinking,
+    /// Collapse every thinking block in the current session.
+    CollapseThinking,
 }
 
 // ---------------------------------------------------------------------------
@@ -173,6 +177,18 @@ pub(crate) static COMMANDS: &[CommandSpec] = &[
         aliases: &[],
         description: "Analyze project and create AGENTS.md",
         action: CommandAction::Init,
+    },
+    CommandSpec {
+        name: "expand-thinking",
+        aliases: &["expand", "show-thinking"],
+        description: "Expand all thinking blocks in the current session",
+        action: CommandAction::ExpandThinking,
+    },
+    CommandSpec {
+        name: "collapse-thinking",
+        aliases: &["collapse", "hide-thinking"],
+        description: "Collapse all thinking blocks in the current session",
+        action: CommandAction::CollapseThinking,
     },
 ];
 
@@ -454,6 +470,12 @@ pub(crate) fn execute_command(action: CommandAction, args: &[String]) -> Vec<Act
             let prompt = tidev_core::prompts::init_command_with_args(&args.join(" "));
             vec![Action::Chat(ChatAction::SetInput(prompt))]
         }
+        CommandAction::ExpandThinking => {
+            vec![Action::Chat(ChatAction::ExpandAllThinking)]
+        }
+        CommandAction::CollapseThinking => {
+            vec![Action::Chat(ChatAction::CollapseAllThinking)]
+        }
     }
 }
 
@@ -524,5 +546,32 @@ mod tests {
         assert_eq!(command_fragment("/connect"), Some("connect"));
         assert!(command_fragment("/session name").is_none());
         assert!(command_fragment("plain text").is_none());
+    }
+
+    #[test]
+    fn test_thinking_commands_registered() {
+        let reg = CommandRegistry::new();
+        assert_eq!(
+            reg.parse_invocation("/expand-thinking").map(|(n, _)| n),
+            Some("expand-thinking".to_string())
+        );
+        assert_eq!(
+            reg.parse_invocation("/collapse-thinking").map(|(n, _)| n),
+            Some("collapse-thinking".to_string())
+        );
+        assert_eq!(reg.command("expand").map(|s| s.action), Some(CommandAction::ExpandThinking));
+        assert_eq!(reg.command("collapse").map(|s| s.action), Some(CommandAction::CollapseThinking));
+    }
+
+    #[test]
+    fn test_thinking_commands_execute() {
+        assert!(matches!(
+            execute_command(CommandAction::ExpandThinking, &[]).as_slice(),
+            [Action::Chat(ChatAction::ExpandAllThinking)]
+        ));
+        assert!(matches!(
+            execute_command(CommandAction::CollapseThinking, &[]).as_slice(),
+            [Action::Chat(ChatAction::CollapseAllThinking)]
+        ));
     }
 }
