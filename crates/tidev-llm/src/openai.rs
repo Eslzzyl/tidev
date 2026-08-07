@@ -645,6 +645,168 @@ fn user_message_content(model: &LlmProviderConfig, message: &Message) -> Result<
     Ok(serde_json::Value::Array(parts))
 }
 
+#[derive(Clone, Debug, Deserialize)]
+struct ChatCompletionStreamResponse {
+    #[serde(default)]
+    choices: Vec<ChatCompletionChoice>,
+    #[serde(default)]
+    usage: Option<ChatCompletionUsage>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct ChatCompletionUsage {
+    #[serde(rename = "prompt_tokens", default)]
+    input_tokens: u32,
+    #[serde(rename = "completion_tokens", default)]
+    output_tokens: u32,
+    #[serde(rename = "total_tokens", default)]
+    total_tokens: u32,
+    #[serde(default)]
+    prompt_tokens_details: Option<PromptTokensDetails>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct PromptTokensDetails {
+    #[serde(default)]
+    cached_tokens: u32,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct ChatCompletionChoice {
+    #[serde(default)]
+    delta: ChatCompletionDelta,
+    #[serde(default)]
+    finish_reason: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct ChatCompletionDelta {
+    #[serde(default)]
+    content: Option<String>,
+    /// Accept both `reasoning` (OpenCode Go, some providers) and
+    /// `reasoning_content` (DeepSeek, standard) field names.
+    #[serde(default, alias = "reasoning")]
+    reasoning_content: Option<String>,
+    /// Newer OpenAI Chat Completions API returns structured reasoning
+    /// sections in this array (e.g. gpt-5.6-luna interleaved thinking).
+    #[serde(default)]
+    reasoning_details: Option<Vec<ReasoningDetail>>,
+    #[serde(default)]
+    tool_calls: Option<Vec<ChatCompletionToolCallDelta>>,
+}
+
+/// A single reasoning section from the `reasoning_details` array.
+#[derive(Clone, Debug, Default, Deserialize)]
+struct ReasoningDetail {
+    /// `reasoning.summary` → content in `summary` field,
+    /// `reasoning.text` → content in `text` field,
+    /// `reasoning.encrypted` → encrypted content, cannot be read.
+    #[serde(rename = "type")]
+    detail_type: String,
+    #[serde(default)]
+    summary: Option<String>,
+    #[serde(default)]
+    text: Option<String>,
+    /// Provider format identifier, e.g. `"openai-responses-v1"`.
+    #[serde(default)]
+    #[allow(dead_code)]
+    format: Option<String>,
+    /// Position in the reasoning sequence for interleaved thinking.
+    #[serde(default)]
+    #[allow(dead_code)]
+    index: Option<usize>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct ChatCompletionToolCallDelta {
+    #[serde(default)]
+    index: Option<usize>,
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    function: Option<ChatCompletionToolCallFunctionDelta>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct ChatCompletionToolCallFunctionDelta {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    arguments: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct ChatCompletionResponse {
+    #[serde(default)]
+    choices: Vec<ChatCompletionResponseChoice>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct ChatCompletionResponseChoice {
+    #[serde(default)]
+    message: ChatCompletionResponseMessage,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct ChatCompletionResponseMessage {
+    #[serde(default)]
+    content: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct ChatToolSpec {
+    #[serde(rename = "type")]
+    kind: String,
+    function: ChatToolFunctionSpec,
+}
+
+impl From<&ToolDefinition> for ChatToolSpec {
+    fn from(definition: &ToolDefinition) -> Self {
+        Self {
+            kind: "function".to_string(),
+            function: ChatToolFunctionSpec {
+                name: definition.name.to_string(),
+                description: definition.description.clone(),
+                parameters: definition.parameters.clone(),
+            },
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct ChatToolFunctionSpec {
+    name: String,
+    description: String,
+    parameters: serde_json::Value,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct ChatToolCallPayload {
+    id: String,
+    #[serde(rename = "type")]
+    kind: String,
+    function: ChatToolCallFunctionPayload,
+}
+
+impl From<&ToolCall> for ChatToolCallPayload {
+    fn from(call: &ToolCall) -> Self {
+        Self {
+            id: call.id.clone(),
+            kind: "function".to_string(),
+            function: ChatToolCallFunctionPayload {
+                name: call.name.clone(),
+                arguments: call.arguments.clone(),
+            },
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct ChatToolCallFunctionPayload {
+    name: String,
+    arguments: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -963,166 +1125,4 @@ mod tests {
         assert_eq!(details[1].detail_type, "reasoning.summary");
         assert_eq!(details[1].summary.as_deref(), Some("## Implementation"));
     }
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct ChatCompletionStreamResponse {
-    #[serde(default)]
-    choices: Vec<ChatCompletionChoice>,
-    #[serde(default)]
-    usage: Option<ChatCompletionUsage>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct ChatCompletionUsage {
-    #[serde(rename = "prompt_tokens", default)]
-    input_tokens: u32,
-    #[serde(rename = "completion_tokens", default)]
-    output_tokens: u32,
-    #[serde(rename = "total_tokens", default)]
-    total_tokens: u32,
-    #[serde(default)]
-    prompt_tokens_details: Option<PromptTokensDetails>,
-}
-
-#[derive(Clone, Debug, Default, Deserialize)]
-struct PromptTokensDetails {
-    #[serde(default)]
-    cached_tokens: u32,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct ChatCompletionChoice {
-    #[serde(default)]
-    delta: ChatCompletionDelta,
-    #[serde(default)]
-    finish_reason: Option<String>,
-}
-
-#[derive(Clone, Debug, Default, Deserialize)]
-struct ChatCompletionDelta {
-    #[serde(default)]
-    content: Option<String>,
-    /// Accept both `reasoning` (OpenCode Go, some providers) and
-    /// `reasoning_content` (DeepSeek, standard) field names.
-    #[serde(default, alias = "reasoning")]
-    reasoning_content: Option<String>,
-    /// Newer OpenAI Chat Completions API returns structured reasoning
-    /// sections in this array (e.g. gpt-5.6-luna interleaved thinking).
-    #[serde(default)]
-    reasoning_details: Option<Vec<ReasoningDetail>>,
-    #[serde(default)]
-    tool_calls: Option<Vec<ChatCompletionToolCallDelta>>,
-}
-
-/// A single reasoning section from the `reasoning_details` array.
-#[derive(Clone, Debug, Default, Deserialize)]
-struct ReasoningDetail {
-    /// `reasoning.summary` → content in `summary` field,
-    /// `reasoning.text` → content in `text` field,
-    /// `reasoning.encrypted` → encrypted content, cannot be read.
-    #[serde(rename = "type")]
-    detail_type: String,
-    #[serde(default)]
-    summary: Option<String>,
-    #[serde(default)]
-    text: Option<String>,
-    /// Provider format identifier, e.g. `"openai-responses-v1"`.
-    #[serde(default)]
-    #[allow(dead_code)]
-    format: Option<String>,
-    /// Position in the reasoning sequence for interleaved thinking.
-    #[serde(default)]
-    #[allow(dead_code)]
-    index: Option<usize>,
-}
-
-#[derive(Clone, Debug, Default, Deserialize)]
-struct ChatCompletionToolCallDelta {
-    #[serde(default)]
-    index: Option<usize>,
-    #[serde(default)]
-    id: Option<String>,
-    #[serde(default)]
-    function: Option<ChatCompletionToolCallFunctionDelta>,
-}
-
-#[derive(Clone, Debug, Default, Deserialize)]
-struct ChatCompletionToolCallFunctionDelta {
-    #[serde(default)]
-    name: Option<String>,
-    #[serde(default)]
-    arguments: Option<String>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct ChatCompletionResponse {
-    #[serde(default)]
-    choices: Vec<ChatCompletionResponseChoice>,
-}
-
-#[derive(Clone, Debug, Default, Deserialize)]
-struct ChatCompletionResponseChoice {
-    #[serde(default)]
-    message: ChatCompletionResponseMessage,
-}
-
-#[derive(Clone, Debug, Default, Deserialize)]
-struct ChatCompletionResponseMessage {
-    #[serde(default)]
-    content: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-struct ChatToolSpec {
-    #[serde(rename = "type")]
-    kind: String,
-    function: ChatToolFunctionSpec,
-}
-
-impl From<&ToolDefinition> for ChatToolSpec {
-    fn from(definition: &ToolDefinition) -> Self {
-        Self {
-            kind: "function".to_string(),
-            function: ChatToolFunctionSpec {
-                name: definition.name.to_string(),
-                description: definition.description.clone(),
-                parameters: definition.parameters.clone(),
-            },
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize)]
-struct ChatToolFunctionSpec {
-    name: String,
-    description: String,
-    parameters: serde_json::Value,
-}
-
-#[derive(Clone, Debug, Serialize)]
-struct ChatToolCallPayload {
-    id: String,
-    #[serde(rename = "type")]
-    kind: String,
-    function: ChatToolCallFunctionPayload,
-}
-
-impl From<&ToolCall> for ChatToolCallPayload {
-    fn from(call: &ToolCall) -> Self {
-        Self {
-            id: call.id.clone(),
-            kind: "function".to_string(),
-            function: ChatToolCallFunctionPayload {
-                name: call.name.clone(),
-                arguments: call.arguments.clone(),
-            },
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize)]
-struct ChatToolCallFunctionPayload {
-    name: String,
-    arguments: String,
 }
