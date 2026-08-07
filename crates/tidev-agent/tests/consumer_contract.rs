@@ -4,12 +4,13 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use serde::Deserialize;
 use tidev_agent::tidev_llm::message::{Message, MessageRole, ToolCall, ToolExecutionResult};
 use tidev_agent::tidev_llm::reasoning::ThinkingLevelType;
 use tidev_agent::tidev_llm::{ApiType, LlmClient, LlmProviderConfig, ToolDefinition};
 use tidev_agent::{
-    AgentEvent, AgentRuntime, ContextManager, McpConnectionStatus, McpRegistry, McpServerSpec,
-    MessageStore, Tool, ToolContext, ToolRegistry,
+    AgentContext, AgentEvent, AgentRuntime, ContextManager, McpConnectionStatus, McpRegistry,
+    McpServerSpec, MessageStore, Tool, ToolContext, ToolRegistry,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -176,12 +177,58 @@ fn final_response() -> String {
     format!("data: {chunk}\n\ndata: [DONE]\n\n")
 }
 
-async fn scripted_provider(listener: TcpListener) -> Result<Vec<serde_json::Value>> {
+fn second_tool_call_response() -> String {
+    let first = serde_json::json!({
+        "id": "scripted-2",
+        "object": "chat.completion.chunk",
+        "created": 2,
+        "model": "scripted-model",
+        "choices": [{
+            "index": 0,
+            "delta": {
+                "role": "assistant",
+                "tool_calls": [{
+                    "index": 0,
+                    "id": "call-echo-2",
+                    "type": "function",
+                    "function": {
+                        "name": "echo",
+                        "arguments": "{\"text\":\"second scripted call\"}"
+                    }
+                }]
+            },
+            "finish_reason": null
+        }]
+    });
+    let second = serde_json::json!({
+        "id": "scripted-2",
+        "object": "chat.completion.chunk",
+        "created": 2,
+        "model": "scripted-model",
+        "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]
+    });
+    format!("data: {first}\n\ndata: {second}\n\ndata: [DONE]\n\n")
+}
+
+#[derive(Deserialize)]
+struct RawChatRequest<'a> {
+    #[serde(borrow)]
+    messages: &'a serde_json::value::RawValue,
+    #[serde(borrow)]
+    tools: &'a serde_json::value::RawValue,
+}
+
+async fn scripted_provider(listener: TcpListener) -> Result<Vec<Vec<u8>>> {
     let mut requests = Vec::new();
-    for response in [tool_call_response(), final_response()] {
+    for response in [
+        tool_call_response(),
+        second_tool_call_response(),
+        final_response(),
+        final_response(),
+    ] {
         let (mut stream, _) = listener.accept().await?;
         let body = read_http_request(&mut stream).await?;
-        requests.push(serde_json::from_slice(&body)?);
+        requests.push(body);
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
             response.len(),
@@ -190,6 +237,23 @@ async fn scripted_provider(listener: TcpListener) -> Result<Vec<serde_json::Valu
         stream.write_all(response.as_bytes()).await?;
     }
     Ok(requests)
+}
+
+async fn compaction_provider(listener: TcpListener) -> Result<Vec<u8>> {
+    let (mut stream, _) = listener.accept().await?;
+    let body = read_http_request(&mut stream).await?;
+    let response = serde_json::json!({
+        "id": "compaction-1",
+        "choices": [{"message": {"content": "compacted conversation summary"}}]
+    })
+    .to_string();
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        response.len(),
+        response
+    );
+    stream.write_all(response.as_bytes()).await?;
+    Ok(body)
 }
 
 #[tokio::test]
@@ -205,12 +269,13 @@ async fn independent_consumer_runs_full_loop_against_scripted_provider() -> Resu
     });
     let mut registry = ToolRegistry::new(64 * 1024);
     registry.register(EchoTool);
+    let registry = Arc::new(registry);
     let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
     let runtime = AgentRuntime::new(
         session_id,
         LlmClient::new(false, 0, false, 0)?,
-        provider_config(base_url),
-        Arc::new(registry),
+        provider_config(base_url.clone()),
+        registry.clone(),
         ContextManager::new(),
         store.messages.lock().unwrap().clone(),
         store.clone(),
@@ -227,25 +292,13 @@ async fn independent_consumer_runs_full_loop_against_scripted_provider() -> Resu
         )
         .await?;
 
-    let requests = provider.await??;
-    assert_eq!(requests.len(), 2);
-    assert_eq!(requests[0]["messages"][1]["content"], "Please use echo.");
-    let second_messages = requests[1]["messages"].as_array().unwrap();
-    assert!(second_messages.iter().any(|message| {
-        message["role"] == "assistant" && message["tool_calls"][0]["function"]["name"] == "echo"
-    }));
-    assert!(
-        second_messages
-            .iter()
-            .any(|message| { message["role"] == "tool" && message["tool_call_id"] == "call-echo" })
-    );
-
     let stored = runtime.stored_messages();
-    assert_eq!(stored.len(), 4);
+    assert_eq!(stored.len(), 6);
     assert_eq!(stored[2].role, MessageRole::Tool);
     assert_eq!(stored[2].content, "hello from scripted provider");
-    assert_eq!(stored[3].content, "tool result received");
-    assert_eq!(store.saves.lock().unwrap().len(), 3);
+    assert_eq!(stored[4].content, "second scripted call");
+    assert_eq!(stored[5].content, "tool result received");
+    assert_eq!(store.saves.lock().unwrap().len(), 5);
 
     let mut events = Vec::new();
     while let Ok(event) = event_rx.try_recv() {
@@ -266,8 +319,160 @@ async fn independent_consumer_runs_full_loop_against_scripted_provider() -> Resu
             .iter()
             .filter(|event| matches!(event, AgentEvent::Finished { .. }))
             .count(),
-        2
+        3
     );
+
+    let (reload_event_tx, _reload_event_rx) = tokio::sync::mpsc::unbounded_channel();
+    let reloaded = AgentRuntime::from_store(
+        LlmClient::new(false, 0, false, 0)?,
+        provider_config(base_url),
+        registry,
+        ContextManager::new(),
+        store.clone(),
+        session_id,
+        PathBuf::from("/tmp/tidev-agent-fixture"),
+        reload_event_tx,
+        CancellationToken::new(),
+    )
+    .await?;
+    reloaded
+        .run(
+            "You are a test assistant.".into(),
+            ThinkingLevelType::None,
+            Arc::new(Mutex::new(VecDeque::new())),
+        )
+        .await?;
+    assert_eq!(reloaded.stored_messages().len(), 7);
+    assert_eq!(store.saves.lock().unwrap().len(), 6);
+
+    let requests = provider.await??;
+    assert_eq!(requests.len(), 4);
+    let parsed_requests: Vec<serde_json::Value> = requests
+        .iter()
+        .map(|body| serde_json::from_slice(body))
+        .collect::<serde_json::Result<_>>()?;
+    assert_eq!(
+        parsed_requests[0]["messages"][1]["content"],
+        "Please use echo."
+    );
+    let second_messages = parsed_requests[1]["messages"].as_array().unwrap();
+    assert!(second_messages.iter().any(|message| {
+        message["role"] == "assistant" && message["tool_calls"][0]["function"]["name"] == "echo"
+    }));
+    assert!(
+        second_messages
+            .iter()
+            .any(|message| { message["role"] == "tool" && message["tool_call_id"] == "call-echo" })
+    );
+    let third_messages = parsed_requests[2]["messages"].as_array().unwrap();
+    assert!(
+        third_messages.iter().any(|message| {
+            message["role"] == "tool" && message["tool_call_id"] == "call-echo-2"
+        })
+    );
+
+    let raw_requests: Vec<RawChatRequest<'_>> = requests
+        .iter()
+        .map(|body| serde_json::from_slice(body))
+        .collect::<serde_json::Result<_>>()?;
+    let first_messages: Vec<&serde_json::value::RawValue> =
+        serde_json::from_str(raw_requests[0].messages.get())?;
+    let second_messages: Vec<&serde_json::value::RawValue> =
+        serde_json::from_str(raw_requests[1].messages.get())?;
+    let third_messages: Vec<&serde_json::value::RawValue> =
+        serde_json::from_str(raw_requests[2].messages.get())?;
+    let fourth_messages: Vec<&serde_json::value::RawValue> =
+        serde_json::from_str(raw_requests[3].messages.get())?;
+    assert_eq!(
+        first_messages
+            .iter()
+            .map(|message| message.get())
+            .collect::<Vec<_>>(),
+        second_messages[..2]
+            .iter()
+            .map(|message| message.get())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        second_messages
+            .iter()
+            .map(|message| message.get())
+            .collect::<Vec<_>>(),
+        third_messages[..second_messages.len()]
+            .iter()
+            .map(|message| message.get())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        third_messages
+            .iter()
+            .map(|message| message.get())
+            .collect::<Vec<_>>(),
+        fourth_messages[..third_messages.len()]
+            .iter()
+            .map(|message| message.get())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(raw_requests[0].tools.get(), raw_requests[1].tools.get());
+    assert_eq!(raw_requests[1].tools.get(), raw_requests[2].tools.get());
+    assert_eq!(raw_requests[2].tools.get(), raw_requests[3].tools.get());
+    Ok(())
+}
+
+#[tokio::test]
+async fn independent_consumer_sends_compaction_request_through_provider() -> Result<()> {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
+    let base_url = format!("http://{}/v1", listener.local_addr()?);
+    let provider = tokio::spawn(compaction_provider(listener));
+
+    let session_id = Uuid::from_u128(0x12);
+    let mut old_message = Message::new(MessageRole::User, "conversation before compaction");
+    old_message.input_tokens = Some(6_000);
+    let store = Arc::new(RecordingStore {
+        messages: Mutex::new(vec![old_message]),
+        saves: Mutex::new(Vec::new()),
+    });
+    let model = {
+        let mut model = provider_config(base_url);
+        model.context_window = 10_000;
+        model
+    };
+    let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
+    let runtime = AgentRuntime::new(
+        session_id,
+        LlmClient::new(false, 0, false, 0)?,
+        model,
+        Arc::new(ToolRegistry::new(64 * 1024)),
+        ContextManager::new(),
+        store.messages.lock().unwrap().clone(),
+        store.clone(),
+        PathBuf::from("/tmp/tidev-agent-fixture"),
+        event_tx,
+        CancellationToken::new(),
+    );
+
+    let prepared = runtime.load_messages(session_id).await?;
+    assert_eq!(prepared.len(), 1);
+    assert!(
+        prepared[0]
+            .content
+            .contains("compacted conversation summary")
+    );
+    assert_eq!(runtime.stored_messages().len(), 2);
+
+    let body = provider.await??;
+    let request: serde_json::Value = serde_json::from_slice(&body)?;
+    let messages = request["messages"].as_array().unwrap();
+    assert!(messages.iter().any(|message| {
+        message["content"]
+            .as_str()
+            .is_some_and(|content| content.contains("conversation before compaction"))
+    }));
+    assert!(messages.iter().any(|message| {
+        message["content"].as_str().is_some_and(|content| {
+            content.contains("Please provide a detailed summary of the conversation history above")
+        })
+    }));
     Ok(())
 }
 

@@ -581,7 +581,7 @@ fn find_fuzzy_suggestions(workspace_root: &Path, relative_path: &Path) -> Result
         .map(|(_, name)| {
             let mut p = parent.to_path_buf();
             p.push(name);
-            p.to_string_lossy().to_string()
+            p.to_string_lossy().replace('\\', "/")
         })
         .collect())
 }

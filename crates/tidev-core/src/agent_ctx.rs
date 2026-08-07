@@ -6,22 +6,23 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock as StdRwLock};
+use std::sync::{Arc, Mutex as StdMutex, RwLock as StdRwLock};
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use chrono::Utc;
 use serde_json::Value;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::agent_type::{AgentDefinition, AgentType};
+use crate::agent_type::AgentType;
 use crate::backend_event::{BackendEvent, CoreEventBus};
 use tidev_agent::{
-    AgentContext, AgentEvent, AgentEventSender, AgentLoopConfig, ContextManager,
-    llm_event_to_agent_event,
+    AgentContext, AgentDefinition, AgentEventSender, AgentLoopConfig, ContextManager,
+    StreamTurnOptions, SubagentEventSink, SubagentExecution, SubagentExecutor, ToolCallExecutor,
+    execute_subagent_calls, execute_tool_calls, order_tool_results, stream_turn,
 };
 use tidev_config::auth::ActiveModel;
 use tidev_config::{AppConfig, AuthStore};
@@ -127,34 +128,6 @@ fn mark_full_tool_result(tool_call: &ToolCall, result: &mut ToolExecutionResult)
     if tidev_utils::tool_name::canonical_tool_name(&tool_call.name) == Some("task") {
         result.metadata.preserve_full_output = true;
     }
-}
-
-/// Restore the model's tool-call order after concurrent execution.
-///
-/// Completion events are intentionally emitted as tools finish, but persisted
-/// tool-result messages must follow the order used by the assistant message.
-/// Otherwise the next request can contain a different protocol message order.
-fn order_tool_results(
-    tool_calls: &[ToolCall],
-    results: Vec<(ToolCall, ToolExecutionResult)>,
-) -> Vec<(ToolCall, ToolExecutionResult)> {
-    let mut pending: Vec<Option<(ToolCall, ToolExecutionResult)>> =
-        results.into_iter().map(Some).collect();
-    let mut ordered = Vec::with_capacity(pending.len());
-
-    for tool_call in tool_calls {
-        if let Some(index) = pending.iter().position(|entry| {
-            entry
-                .as_ref()
-                .is_some_and(|(result_call, _)| result_call.id == tool_call.id)
-        }) {
-            ordered.push(pending[index].take().expect("matched result must exist"));
-        }
-    }
-
-    // Keep unexpected results observable instead of silently dropping them.
-    ordered.extend(pending.into_iter().flatten());
-    ordered
 }
 
 /// Recover a subagent association from the assistant tool call that produced
@@ -345,6 +318,111 @@ pub struct CoreContext {
     /// persisted immediately, while the replay notification is appended after
     /// the corresponding tool results to preserve message order.
     pending_instruction_sources: Arc<Mutex<Vec<String>>>,
+}
+
+/// Executes already-approved, non-task calls through tidev's host registry.
+/// Authorization and subagent dispatch remain outside this adapter.
+struct CoreToolExecutor {
+    registry: Arc<ToolRegistry>,
+    session_id: Uuid,
+    request_id: u64,
+    mode: Mode,
+    cancel: CancellationToken,
+    event_tx: AgentEventSender,
+    permissions: HashMap<String, (bool, bool)>,
+}
+
+/// Executes tidev task calls through the generic subagent scheduler.
+struct CoreSubagentExecutor {
+    spawners: StdMutex<HashMap<String, SubagentSpawner>>,
+    parent_session_id: Uuid,
+    parent_request_id: u64,
+}
+
+#[async_trait]
+impl SubagentExecutor for CoreSubagentExecutor {
+    async fn execute(
+        &self,
+        tool_call: ToolCall,
+        child_session_id: Option<Uuid>,
+        cancel: CancellationToken,
+    ) -> Result<SubagentExecution> {
+        let spawner = self
+            .spawners
+            .lock()
+            .map_err(|_| anyhow::anyhow!("subagent spawner map is poisoned"))?
+            .remove(&tool_call.id)
+            .context("subagent spawner was not prepared")?;
+        let (result, child_session_id) = execute_task_tool(
+            spawner,
+            SubagentConfig {
+                tool_call,
+                child_session_id,
+                parent_session_id: self.parent_session_id,
+                parent_request_id: self.parent_request_id,
+                cancel_token: cancel,
+            },
+        )
+        .await?;
+        Ok(SubagentExecution {
+            result,
+            child_session_id: Some(child_session_id),
+        })
+    }
+}
+
+/// Preserve tidev's child-session metadata while the generic scheduler owns
+/// task cancellation and completion ordering.
+struct CoreSubagentEventSink {
+    event_bus: CoreEventBus,
+    session_id: Uuid,
+}
+
+impl SubagentEventSink for CoreSubagentEventSink {
+    fn tool_completed(
+        &self,
+        request_id: u64,
+        tool_call: &ToolCall,
+        result: &ToolExecutionResult,
+        child_session_id: Option<Uuid>,
+    ) {
+        self.event_bus.send_backend(BackendEvent::ToolCompleted {
+            session_id: self.session_id,
+            request_id,
+            tool_call: tool_call.clone(),
+            result: Box::new(result.clone()),
+            child_session_id,
+        });
+    }
+}
+
+#[async_trait]
+impl ToolCallExecutor for CoreToolExecutor {
+    fn is_read_only(&self, tool_call: &ToolCall) -> bool {
+        is_read_only(&tool_call.name)
+    }
+
+    async fn execute(&self, tool_call: ToolCall) -> Result<ToolExecutionResult> {
+        let (allow_outside, sensitive_file_approved) = self
+            .permissions
+            .get(&tool_call.id)
+            .copied()
+            .unwrap_or((false, false));
+        Ok(self
+            .registry
+            .execute_via_agent(
+                &tool_call,
+                self.session_id,
+                self.request_id,
+                self.mode,
+                allow_outside,
+                sensitive_file_approved,
+                &self.cancel,
+                Some(self.event_tx.clone()),
+                !is_read_only(&tool_call.name),
+            )
+            .await)
+    }
 }
 
 impl CoreContext {
@@ -831,124 +909,21 @@ impl AgentContext for CoreContext {
         thinking_level: &ThinkingLevelType,
         request_id: u64,
     ) -> Result<AssistantTurn> {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let llm = self.llm.clone();
-        let mut model = self.model_config.clone();
-        model.system_prompt = Some(system_prompt.to_string());
-        let llm_tools: Vec<tidev_llm::ToolDefinition> =
-            self.tools.iter().map(to_llm_tool_def).collect();
-        let tl = thinking_level.clone();
-        let msgs = messages.to_vec();
-
-        // Spawn the streaming LLM call.
-        let handle = tokio::spawn(async move {
-            llm.stream_chat(model, msgs, llm_tools, tx, tl).await;
-        });
-
-        let mut turn = AssistantTurn {
-            created_at: Some(Utc::now()),
-            ..Default::default()
-        };
-
-        // Race: cancel token vs LLM events.
-        loop {
-            tokio::select! {
-                _ = self.cancel.cancelled() => {
-                    handle.abort();
-                    let _ = self.event_bus.agent_sender().send(AgentEvent::StreamEnd {
-                        request_id,
-                        reasoning_started_at: None,
-                        reasoning_completed_at: None,
-                    });
-                    return Err(anyhow::anyhow!("Stream cancelled by user"));
-                }
-                event = rx.recv() => {
-                    match event {
-                        Some(ev) => {
-                            let ev = llm_event_to_agent_event(ev, request_id);
-                            let _ = self.event_bus.agent_sender().send(ev.clone());
-                            match ev {
-                                AgentEvent::Delta { content, .. } => {
-                                    turn.content.push_str(&content);
-                                    // reasoning → content transition
-                                    if turn.reasoning_started_at.is_some()
-                                        && turn.reasoning_completed_at.is_none()
-                                    {
-                                        turn.reasoning_completed_at = Some(Utc::now());
-                                    }
-                                }
-                                AgentEvent::ReasoningDelta { content, .. } => {
-                                    if turn.reasoning_started_at.is_none() {
-                                        turn.reasoning_started_at = Some(Utc::now());
-                                    }
-                                    turn.reasoning.push_str(&content);
-                                }
-                                AgentEvent::ToolCallUpdated { tool_call, .. } => {
-                                    turn.upsert_tool_call(tool_call);
-                                    // reasoning → tool-call transition
-                                    if turn.reasoning_started_at.is_some()
-                                        && turn.reasoning_completed_at.is_none()
-                                    {
-                                        turn.reasoning_completed_at = Some(Utc::now());
-                                    }
-                                }
-                                AgentEvent::UsageStats {
-                                    input_tokens,
-                                    output_tokens,
-                                    total_tokens,
-                                    cache_read_tokens,
-                                    cache_write_tokens,
-                                    model_id,
-                                    duration_ms,
-                                    ..
-                                } => {
-                                    turn.input_tokens = Some(input_tokens);
-                                    turn.output_tokens = Some(output_tokens);
-                                    turn.total_tokens = Some(total_tokens);
-                                    turn.cache_read_tokens = Some(cache_read_tokens);
-                                    turn.cache_write_tokens = Some(cache_write_tokens);
-                                    turn.model_id = Some(model_id);
-                                    if let Some(ms) = duration_ms {
-                                        turn.tokens_per_second =
-                                            Some(output_tokens as f32 / (ms as f32 / 1000.0));
-                                    }
-                                }
-                                AgentEvent::Finished { turn: finished_turn, .. } => {
-                                    // The Responses provider carries opaque output items on the
-                                    // final event because they are not represented by deltas.
-                                    turn.responses_output_items =
-                                        finished_turn.responses_output_items.clone();
-                                    // reasoning -> turn-end transition
-                                    if turn.reasoning_started_at.is_some()
-                                        && turn.reasoning_completed_at.is_none()
-                                    {
-                                        turn.reasoning_completed_at = Some(Utc::now());
-                                    }
-                                    break;
-                                }
-                                AgentEvent::StreamEnd { .. } => {
-                                    // reasoning → turn-end transition
-                                    if turn.reasoning_started_at.is_some()
-                                        && turn.reasoning_completed_at.is_none()
-                                    {
-                                        turn.reasoning_completed_at = Some(Utc::now());
-                                    }
-                                    break;
-                                }
-                                AgentEvent::Failed { error, .. } => {
-                                    return Err(anyhow::anyhow!("LLM error: {error}"));
-                                }
-                                _ => {}
-                            }
-                        }
-                        None => break,
-                    }
-                }
-            }
-        }
-
-        turn.completed_at = Some(Utc::now());
-        Ok(turn)
+        stream_turn(
+            &self.llm,
+            self.model_config.clone(),
+            messages,
+            &self.tools.iter().map(to_llm_tool_def).collect::<Vec<_>>(),
+            system_prompt,
+            thinking_level,
+            request_id,
+            &self.event_bus.agent_sender(),
+            &self.cancel,
+            StreamTurnOptions {
+                emit_stream_end_on_cancel: true,
+            },
+        )
+        .await
     }
 
     // -----------------------------------------------------------------------
@@ -976,10 +951,11 @@ impl AgentContext for CoreContext {
             }
         }
 
-        // Separate approved calls into task, read-only, and write groups.
+        // Separate approved calls into task calls and ordinary calls. The
+        // generic agent scheduler handles ordinary read/write execution.
         let mut task_calls: Vec<(ToolCall, Option<Uuid>)> = Vec::new();
-        let mut read_only: Vec<(ToolCall, bool, bool)> = Vec::new();
-        let mut write: Vec<(ToolCall, bool, bool)> = Vec::new();
+        let mut ordinary_calls = Vec::new();
+        let mut permissions = HashMap::new();
 
         for approved in approved_tools {
             if approved.rejection.is_some() {
@@ -990,184 +966,33 @@ impl AgentContext for CoreContext {
 
             if tidev_utils::tool_name::canonical_tool_name(&tc.name) == Some("task") {
                 task_calls.push((tc, approved.child_session_id));
-            } else if is_read_only(&tc.name) {
-                read_only.push((tc, approved.allow_outside, approved.sensitive_file_approved));
             } else {
-                write.push((tc, approved.allow_outside, approved.sensitive_file_approved));
+                permissions.insert(
+                    tc.id.clone(),
+                    (approved.allow_outside, approved.sensitive_file_approved),
+                );
+                ordinary_calls.push(tc);
             }
         }
 
-        // --- Read-only tools: parallel execution with immediate cancellation ---
-        //
-        // Uses JoinSet so that on cancellation every spawned tool task is
-        // aborted (dropping in-flight HTTP connections, blocking reads, etc.)
-        // and a synthetic "User cancelled" result is emitted for each.
-        if !read_only.is_empty() {
-            if self.cancel.is_cancelled() {
-                for (tc, _, _) in &read_only {
-                    self.emit(BackendEvent::ToolCompleted {
-                        session_id,
-                        request_id,
-                        tool_call: tc.clone(),
-                        result: Box::new(ToolExecutionResult::new("User cancelled the request")),
-                        child_session_id: None,
-                    });
-                    results.push((
-                        tc.clone(),
-                        ToolExecutionResult::new("User cancelled the request"),
-                    ));
-                }
-                return self
-                    .finish_tool_execution(session_id, tool_calls, results)
-                    .await;
-            }
-
-            let mut pending_tcs: Vec<ToolCall> =
-                read_only.iter().map(|(tc, _, _)| tc.clone()).collect();
-            let mut join_set = tokio::task::JoinSet::new();
-
-            // Notify TUI that read-only tools have started executing.
-            for (tc, _, _) in &read_only {
-                self.emit(BackendEvent::ToolStarting {
-                    session_id,
-                    request_id,
-                    tool_call: tc.clone(),
-                });
-            }
-
-            for (tc, allow_outside, sensitive_approved) in read_only {
-                let reg = self.tool_registry.clone();
-                let sid = session_id;
-                let mode = self.mode;
-                let cancel = self.cancel.clone();
-                join_set.spawn(async move {
-                    let result = reg
-                        .execute_via_agent(
-                            &tc,
-                            sid,
-                            request_id,
-                            mode,
-                            allow_outside,
-                            sensitive_approved,
-                            &cancel,
-                            None,
-                            false,
-                        )
-                        .await;
-                    (tc, result)
-                });
-            }
-
-            loop {
-                tokio::select! {
-                    _ = self.cancel.cancelled() => {
-                        // Abort every in-flight tool task immediately.
-                        join_set.abort_all();
-                        for tc in pending_tcs {
-                            self.emit(BackendEvent::ToolCompleted {
-                                session_id,
-                                request_id,
-                                tool_call: tc.clone(),
-                                result: Box::new(ToolExecutionResult::new("User cancelled the request")),
-                                child_session_id: None,
-                            });
-                            results.push((
-                                tc,
-                                ToolExecutionResult::new("User cancelled the request"),
-                            ));
-                        }
-                        return self
-                            .finish_tool_execution(session_id, tool_calls, results)
-                            .await;
-                    }
-                    result = join_set.join_next() => {
-                        match result {
-                            Some(Ok((tc, result))) => {
-                                pending_tcs.retain(|t| t.id != tc.id);
-                                self.emit(BackendEvent::ToolCompleted {
-                                    session_id,
-                                    request_id,
-                                    tool_call: tc.clone(),
-                                    result: Box::new(result.clone()),
-                                    child_session_id: None,
-                                });
-                                results.push((tc, result));
-                            }
-                            Some(Err(join_err)) => {
-                                return Err(anyhow::anyhow!("Task join error: {join_err}"));
-                            }
-                            None => break,
-                        }
-                    }
-                }
-            }
-        }
-
-        // --- Write tools: serial execution with immediate cancellation ---
-        for (tc, allow_outside, sensitive_approved) in write {
-            if self.cancel.is_cancelled() {
-                self.emit(BackendEvent::ToolCompleted {
-                    session_id,
-                    request_id,
-                    tool_call: tc.clone(),
-                    result: Box::new(ToolExecutionResult::new("User cancelled the request")),
-                    child_session_id: None,
-                });
-                results.push((tc, ToolExecutionResult::new("User cancelled the request")));
-                continue;
-            }
-
-            // Notify TUI that this tool has started executing.
-            self.emit(BackendEvent::ToolStarting {
-                session_id,
-                request_id,
-                tool_call: tc.clone(),
-            });
-
-            let (agent_event_tx, agent_event_rx) =
-                tokio::sync::mpsc::unbounded_channel::<AgentEvent>();
-            // Declare the completion guard before the future so cancellation
-            // drops the future first, allowing its adapter to forward any
-            // queued ShellOutput before the guard emits ToolCompleted.
-            let mut guard = ToolCompletedGuard::new(
-                session_id,
-                request_id,
-                Some(self.event_bus.clone()),
-                agent_event_rx,
-                tc.clone(),
-            );
-            let tool_fut = self.tool_registry.execute_via_agent(
-                &tc,
-                session_id,
-                request_id,
-                self.mode,
-                allow_outside,
-                sensitive_approved,
-                &self.cancel,
-                Some(agent_event_tx.into()),
-                true,
-            );
-
-            // Directly await the tool. We do NOT use a select! with a cancel
-            // branch here because doing so would drop the in-flight JoinHandle
-            // for spawned tools (shell), causing the spawned task's result
-            // to be lost. Instead, the tool receives the CancellationToken
-            // internally and responds to cancellation itself (shell kills
-            // the child process and returns partial output). Other write tools
-            // (write/edit/apply_patch/todowrite) are fast spawn_blocking
-            // operations that complete in milliseconds anyway.
-            let result = tool_fut.await;
-            guard.drain_agent_events();
-            guard.disarm();
-            self.emit(BackendEvent::ToolCompleted {
-                session_id,
-                request_id,
-                tool_call: tc.clone(),
-                result: Box::new(result.clone()),
-                child_session_id: None,
-            });
-            results.push((tc, result));
-        }
+        let executor = Arc::new(CoreToolExecutor {
+            registry: self.tool_registry.clone(),
+            session_id,
+            request_id,
+            mode: self.mode,
+            cancel: self.cancel.clone(),
+            event_tx: self.event_bus.agent_sender(),
+            permissions,
+        });
+        let ordinary_results = execute_tool_calls(
+            executor,
+            &ordinary_calls,
+            &self.event_bus.agent_sender(),
+            &self.cancel,
+            request_id,
+        )
+        .await?;
+        results.extend(ordinary_results);
 
         // --- Task tools (subagents): parallel with immediate cancellation ---
         // When subagent is disabled by config, return an error instead of spawning.
@@ -1188,18 +1013,16 @@ impl AgentContext for CoreContext {
         }
 
         if !task_calls.is_empty() {
-            let mut pending_tcs = task_calls.clone();
             // Drop guard persists "User cancelled" if h.abort() kills this task.
             let mut cancel_guard = CancelPersistGuard {
                 session_manager: self.session_manager.clone(),
                 buffer: self.buffer.clone(),
                 session_id,
-                tool_calls: pending_tcs.iter().map(|(tc, _)| tc.clone()).collect(),
+                tool_calls: task_calls.iter().map(|(tc, _)| tc.clone()).collect(),
                 disarmed: false,
             };
-            let mut join_set = tokio::task::JoinSet::new();
-            for (tc, child_session_id) in task_calls {
-                let cancel = self.cancel.child_token();
+            let mut spawners = HashMap::with_capacity(task_calls.len());
+            for (tc, _) in &task_calls {
                 let spawner = SubagentSpawner {
                     session_manager: self.session_manager.clone(),
                     tool_registry: self.tool_registry.clone(),
@@ -1216,112 +1039,24 @@ impl AgentContext for CoreContext {
                     session_start_hash: self.session_start_hash.lock().await.clone(),
                     buffer: self.buffer.clone(),
                 };
-                join_set.spawn(async move {
-                    execute_task_tool(
-                        spawner,
-                        SubagentConfig {
-                            tool_call: tc.clone(),
-                            child_session_id,
-                            parent_session_id: session_id,
-                            parent_request_id: request_id,
-                            cancel_token: cancel,
-                        },
-                    )
-                    .await
-                    .map(|(result, child_session_id)| (tc, result, child_session_id))
-                });
+                spawners.insert(tc.id.clone(), spawner);
             }
 
-            loop {
-                tokio::select! {
-                    _ = self.cancel.cancelled() => {
-                        // Abort every subagent task. Because JoinSet owns the
-                        // tasks, dropping it cascades: the subagent future is
-                        // dropped, which drops the child agent loop, which
-                        // drops the child JoinSet, which aborts the child's
-                        // tools — recursively to any depth.
-                        join_set.abort_all();
-                        for (tc, child_session_id) in pending_tcs {
-                            self.emit(BackendEvent::ToolCompleted {
-                                session_id,
-                                request_id,
-                                tool_call: tc.clone(),
-                                result: Box::new(ToolExecutionResult::new("User cancelled the request")),
-                                child_session_id,
-                            });
-                            results.push((
-                                tc,
-                                ToolExecutionResult::new("User cancelled the request"),
-                            ));
-                        }
-                        cancel_guard.disarmed = true;
-                        return self
-                            .finish_tool_execution(session_id, tool_calls, results)
-                            .await;
-                    }
-                    result = join_set.join_next() => {
-                        match result {
-                            Some(Ok(Ok((tc, result, child_session_id)))) => {
-                                pending_tcs.retain(|(t, _)| t.id != tc.id);
-                                if self.cancel.is_cancelled() {
-                                    // Already cancelled — push synthetic result.
-                                    results.push((
-                                        tc,
-                                        ToolExecutionResult::new("User cancelled the request"),
-                                    ));
-                                } else {
-                                    self.emit(BackendEvent::ToolCompleted {
-                                        session_id,
-                                        request_id,
-                                        tool_call: tc.clone(),
-                                        result: Box::new(result.clone()),
-                                        child_session_id: Some(child_session_id),
-                                    });
-                                    results.push((tc, result));
-                                }
-                            }
-                            Some(Ok(Err(e))) => {
-                                if self.cancel.is_cancelled() {
-                                    // Cancelled subagent with error: push
-                                    // synthetic results for all remaining.
-                                    join_set.abort_all();
-                                    for (tc, child_session_id) in pending_tcs {
-                                        self.emit(BackendEvent::ToolCompleted {
-                                            session_id,
-                                            request_id,
-                                            tool_call: tc.clone(),
-                                            result: Box::new(ToolExecutionResult::new(
-                                                "User cancelled the request",
-                                            )),
-                                            child_session_id,
-                                        });
-                                        results.push((
-                                            tc,
-                                            ToolExecutionResult::new(
-                                                "User cancelled the request",
-                                            ),
-                                        ));
-                                    }
-                                    cancel_guard.disarmed = true;
-                                    return self
-                                        .finish_tool_execution(session_id, tool_calls, results)
-                                        .await;
-                                } else {
-                                    cancel_guard.disarmed = true;
-                                    return Err(e);
-                                }
-                            }
-                            Some(Err(join_err)) => {
-                                cancel_guard.disarmed = true;
-                                return Err(anyhow::anyhow!(
-                                    "Subagent join error: {join_err}"
-                                ));
-                            }
-                            None => break,
-                        }
-                    }
-                }
-            }
+            let executor = Arc::new(CoreSubagentExecutor {
+                spawners: StdMutex::new(spawners),
+                parent_session_id: session_id,
+                parent_request_id: request_id,
+            });
+            let event_sink = Arc::new(CoreSubagentEventSink {
+                event_bus: self.event_bus.clone(),
+                session_id,
+            });
+
+            let subagent_results =
+                execute_subagent_calls(executor, &task_calls, event_sink, &self.cancel, request_id)
+                    .await;
+            cancel_guard.disarmed = true;
+            results.extend(subagent_results?);
             cancel_guard.disarmed = true;
         }
 
@@ -1465,93 +1200,66 @@ impl AgentContext for CoreContext {
     }
 
     async fn load_messages(&self, session_id: Uuid) -> Result<Vec<Message>> {
-        // 1. Check if compaction is needed (brief lock).
-        let (needs_compact, mut msgs_to_compact) = {
-            let cm = self.context_manager.lock().await;
+        let mut compaction_messages = {
             let buf = self.buffer.read().await;
-            let needs = cm.needs_compaction(
-                buf.protocol(),
-                self.model_config.context_window,
-                self.model_config.max_output_tokens,
-            );
-            let msgs = if needs {
-                buf.load().to_vec()
-            } else {
-                Vec::new()
-            };
-            (needs, msgs)
+            buf.protocol().load().to_vec()
         };
-        if needs_compact {
-            restore_full_tool_output_semantics(&mut msgs_to_compact);
-        }
+        restore_full_tool_output_semantics(&mut compaction_messages);
 
-        // 2. If compaction is needed, perform it (no locks held during LLM call).
-        if needs_compact {
-            // Capture prior compaction state before compact overwrites it.
-            let (prior_summary, prior_retained_from) = {
-                let cm = self.context_manager.lock().await;
-                (cm.summary.clone(), cm.retained_from)
-            };
-            let tools: Vec<tidev_llm::ToolDefinition> = self
-                .tool_registry
-                .definitions_for_model(&self.active_model)
-                .iter()
-                .map(to_llm_tool_def)
-                .collect();
-            let result = {
-                let mut compact_model = self.model_config.clone();
-                compact_model.system_prompt = Some(self.system_prompt.clone());
-                let cm = self.context_manager.lock().await;
-                cm.compact(
-                    &self.llm,
-                    &compact_model,
-                    &tools,
-                    &msgs_to_compact,
-                    self.session_id,
-                    None,
-                )
-                .await?
-            };
+        let tools: Vec<tidev_llm::ToolDefinition> = self
+            .tool_registry
+            .definitions_for_model(&self.active_model)
+            .iter()
+            .map(to_llm_tool_def)
+            .collect();
+        let mut compact_model = self.model_config.clone();
+        compact_model.system_prompt = Some(self.system_prompt.clone());
 
-            // 3. Update state + persist + append marker + emit event.
-            {
-                let mut cm = self.context_manager.lock().await;
-                cm.apply_compaction(result.summary.clone(), result.retained_from);
-            }
+        let (prior_summary, prior_retained_from) = {
+            let cm = self.context_manager.lock().await;
+            (cm.summary.clone(), cm.retained_from)
+        };
+        let prepared = {
+            let buf = self.buffer.read().await;
+            let mut cm = self.context_manager.lock().await;
+            cm.prepare_request_messages(
+                &self.llm,
+                &compact_model,
+                &tools,
+                buf.protocol(),
+                Some(&compaction_messages),
+                None,
+            )
+            .await?
+        };
+
+        if let Some(result) = prepared.compaction {
             self.session_manager.update_context_state(
                 self.session_id,
                 Some(&result.summary),
                 result.retained_from,
             )?;
 
-            // Append compaction marker for undo support.
-            {
-                let mut marker = Message::compaction(&result.summary);
-                marker.metadata.prior_summary = prior_summary;
-                marker.metadata.prior_retained_from = Some(prior_retained_from);
-                self.buffer.write().await.append(marker.clone());
-                self.session_manager
-                    .append_message(self.session_id, &marker)?;
-            }
-            let model_id = self.active_model.model_id.clone();
+            let mut marker = Message::compaction(&result.summary);
+            marker.metadata.prior_summary = prior_summary;
+            marker.metadata.prior_retained_from = Some(prior_retained_from);
+            self.buffer.write().await.append(marker.clone());
+            self.session_manager
+                .append_message(self.session_id, &marker)?;
+
             self.emit(BackendEvent::ContextCompacted {
                 session_id: self.session_id,
                 compacted: true,
                 manual: false,
                 summary: Some(result.summary),
                 retained_from: result.retained_from,
-                model_id: Some(model_id),
+                model_id: Some(self.active_model.model_id.clone()),
                 completed_at: Some(Utc::now()),
                 error: None,
             });
         }
 
-        // 4. Return the prepared message view.
-        let cm = self.context_manager.lock().await;
-        let buf = self.buffer.read().await;
-        let mut messages = cm.build_request_messages(buf.protocol());
-        drop(buf);
-        drop(cm);
+        let mut messages = prepared.messages;
 
         // Keep both injections in the same order as the original agent loop:
         // instruction files first, then the mode reminder.
@@ -1561,113 +1269,6 @@ impl AgentContext for CoreContext {
             .await?;
         restore_full_tool_output_semantics(&mut messages);
         Ok(messages)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// RAII guard that ensures ToolCompleted is always emitted on abort.
-// ---------------------------------------------------------------------------
-
-/// RAII guard: sends `BackendEvent::ToolCompleted` on drop if not disarmed.
-///
-/// Ensures the TUI is always notified that a tool has completed, even when
-/// the `execute_tools` future is force-dropped (e.g. by `JoinHandle::abort()`).
-struct ToolCompletedGuard {
-    session_id: Uuid,
-    request_id: u64,
-    event_bus: Option<CoreEventBus>,
-    agent_event_rx: Option<UnboundedReceiver<AgentEvent>>,
-    tool_call: ToolCall,
-    disarmed: bool,
-}
-
-impl ToolCompletedGuard {
-    fn new(
-        session_id: Uuid,
-        request_id: u64,
-        event_bus: Option<CoreEventBus>,
-        agent_event_rx: UnboundedReceiver<AgentEvent>,
-        tool_call: ToolCall,
-    ) -> Self {
-        Self {
-            session_id,
-            request_id,
-            event_bus,
-            agent_event_rx: Some(agent_event_rx),
-            tool_call,
-            disarmed: false,
-        }
-    }
-
-    fn drain_agent_events(&mut self) {
-        let Some(agent_event_rx) = self.agent_event_rx.as_mut() else {
-            return;
-        };
-        while let Ok(event) = agent_event_rx.try_recv() {
-            if let Some(ref bus) = self.event_bus {
-                let _ = bus.agent_sender().send(event);
-            }
-        }
-    }
-
-    fn disarm(&mut self) {
-        self.disarmed = true;
-    }
-}
-
-impl Drop for ToolCompletedGuard {
-    fn drop(&mut self) {
-        if !self.disarmed {
-            self.drain_agent_events();
-            if let Some(ref bus) = self.event_bus {
-                let _ = bus.send_backend(BackendEvent::ToolCompleted {
-                    session_id: self.session_id,
-                    request_id: self.request_id,
-                    tool_call: self.tool_call.clone(),
-                    result: Box::new(ToolExecutionResult::new("User cancelled the request")),
-                    child_session_id: None,
-                });
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-mod tool_event_order_tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn guard_drains_shell_output_before_tool_completed() {
-        let session_id = Uuid::new_v4();
-        let (backend_tx, mut backend_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (agent_tx, agent_rx) = tokio::sync::mpsc::unbounded_channel();
-        agent_tx
-            .send(AgentEvent::ShellOutput {
-                request_id: 7,
-                tool_call_id: "call-1".to_string(),
-                content: "partial output".to_string(),
-                finished: true,
-                exit_code: Some(0),
-            })
-            .unwrap();
-        drop(agent_tx);
-
-        drop(ToolCompletedGuard::new(
-            session_id,
-            7,
-            Some(CoreEventBus::new(backend_tx, session_id)),
-            agent_rx,
-            ToolCall::default(),
-        ));
-
-        assert!(matches!(
-            backend_rx.recv().await,
-            Some(BackendEvent::ShellOutput { .. })
-        ));
-        assert!(matches!(
-            backend_rx.recv().await,
-            Some(BackendEvent::ToolCompleted { request_id: 7, .. })
-        ));
     }
 }
 
@@ -1956,7 +1557,6 @@ async fn execute_task_tool(
 
 fn build_agent_def(agent_type: AgentType, parent_prompt: &str) -> AgentDefinition {
     AgentDefinition {
-        agent_type,
         display_name: agent_type.display_name().to_string(),
         description: agent_type.description().to_string(),
         system_prompt: format!(

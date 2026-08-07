@@ -18,7 +18,7 @@ reqwest = { version = "0.13", default-features = false, features = ["json", "rus
 futures-util = "0.3"
 sse-stream = "0.2"
 url = "2"
-serde_json = "1"
+serde_json = { version = "1", features = ["raw_value"] }
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 log = "0.4"

@@ -192,7 +192,7 @@ pub fn display_workspace_relative(workspace_root: &Path, path: &Path) -> String 
     if relative.as_os_str().is_empty() {
         ".".to_string()
     } else {
-        relative.display().to_string()
+        relative.display().to_string().replace('\\', "/")
     }
 }
 

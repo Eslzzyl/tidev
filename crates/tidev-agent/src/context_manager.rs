@@ -35,6 +35,14 @@ pub struct CompactionResult {
     pub retained_from: usize,
 }
 
+/// Result of preparing the next protocol request.
+pub struct ContextPreparation {
+    /// Protocol messages ready for the provider request.
+    pub messages: Vec<Message>,
+    /// A compaction performed while preparing the request, if any.
+    pub compaction: Option<CompactionResult>,
+}
+
 // ---------------------------------------------------------------------------
 // ContextManager
 // ---------------------------------------------------------------------------
@@ -45,7 +53,7 @@ pub struct CompactionResult {
 /// and the current summary. The message view seen by the LLM is constructed
 /// by [`build_request_messages`], which skips messages before `retained_from`
 /// and prepends the summary (if any).
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ContextManager {
     pub summary: Option<String>,
     pub retained_from: usize,
@@ -287,6 +295,38 @@ impl ContextManager {
     pub fn apply_compaction(&mut self, summary: String, retained_from: usize) {
         self.summary = Some(summary);
         self.retained_from = retained_from;
+    }
+
+    /// Compact when necessary and build the next provider request view.
+    ///
+    /// `compaction_messages` allows a host to apply protocol-only compatibility
+    /// normalization before the generic compaction call. The host must keep the
+    /// same message order and bytes used by its normal request pipeline.
+    pub async fn prepare_request_messages(
+        &mut self,
+        llm: &LlmClient,
+        model: &LlmProviderConfig,
+        tools: &[ToolDefinition],
+        buffer: &MessageBuffer,
+        compaction_messages: Option<&[Message]>,
+        event_tx: Option<crate::AgentEventSender>,
+    ) -> Result<ContextPreparation> {
+        let mut compaction = None;
+        if self.needs_compaction(buffer, model.context_window, model.max_output_tokens) {
+            let messages = compaction_messages
+                .map(ToOwned::to_owned)
+                .unwrap_or_else(|| buffer.load().to_vec());
+            let result = self
+                .compact(llm, model, tools, &messages, uuid::Uuid::nil(), event_tx)
+                .await?;
+            self.apply_compaction(result.summary.clone(), result.retained_from);
+            compaction = Some(result);
+        }
+
+        Ok(ContextPreparation {
+            messages: self.build_request_messages(buffer),
+            compaction,
+        })
     }
     async fn compact_non_streaming(
         &self,

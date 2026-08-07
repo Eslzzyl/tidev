@@ -7,6 +7,8 @@
 
 use serde::{Deserialize, Serialize};
 
+pub use tidev_agent::{AgentDefinition, AgentOverride};
+
 /// The built-in agent types supported by tidev.
 ///
 /// Each agent type has a specialized system prompt, default tool permissions,
@@ -122,60 +124,11 @@ impl AgentType {
 // AgentDefinition
 // ---------------------------------------------------------------------------
 
-/// A fully configured agent definition with resolved system prompt and tool
-/// settings.  Model-level configuration (provider, API key, etc.) is managed
-/// by tidev-core's [`AgentContext`].
-#[derive(Clone, Debug)]
-pub struct AgentDefinition {
-    /// The agent type.
-    pub agent_type: AgentType,
-    /// Human-readable display name (e.g. "explorer").
-    pub display_name: String,
-    /// Short description for tool definitions and UI.
-    pub description: String,
-    /// The system prompt sent to the LLM.
-    pub system_prompt: String,
-    /// Optional tool name restrictions. `None` = all tools allowed.
-    pub allowed_tools: Option<Vec<String>>,
-    /// Temperature override. `None` = use default for agent type.
-    pub temperature: Option<f32>,
-    /// Whether this agent is read-only.
-    pub read_only: bool,
-}
-
-impl AgentDefinition {
-    /// Build the bootstrap message content for a sub-agent session.
-    pub fn bootstrap_content(&self) -> String {
-        self.system_prompt.clone()
-    }
-}
-
-// ---------------------------------------------------------------------------
-// AgentOverride
-// ---------------------------------------------------------------------------
-
-/// Configuration overrides for a specific agent type.
-///
-/// These can be loaded from `config.toml` to customise individual agents.
-/// Model-level overrides (provider, API key) are handled by tidev-core.
-#[derive(Clone, Debug, Default)]
-pub struct AgentOverride {
-    /// Custom system prompt that replaces the default entirely.
-    pub custom_prompt: Option<String>,
-    /// Extra text appended to the default system prompt.
-    pub append_prompt: Option<String>,
-    /// Override temperature.
-    pub temperature: Option<f32>,
-    /// Override tool restrictions. `Some(vec![])` = no tools allowed.
-    pub allowed_tools: Option<Vec<String>>,
-}
-
 /// Create a default [`AgentDefinition`] for the given agent type, using the
 /// system prompt from tidev-agent's prompt templates.
 fn default_definition(agent_type: AgentType) -> AgentDefinition {
     let system_prompt = system_prompt(agent_type);
     AgentDefinition {
-        agent_type,
         display_name: agent_type.display_name().to_string(),
         description: agent_type.description().to_string(),
         system_prompt,
@@ -187,7 +140,7 @@ fn default_definition(agent_type: AgentType) -> AgentDefinition {
     }
 }
 
-/// Create an [`AgentDefinition`] from an [`AgentType`] with optional overrides.
+/// Create an [`AgentDefinition`] from a tidev [`AgentType`] with optional overrides.
 pub fn create_agent(agent_type: AgentType, overrides: Option<&AgentOverride>) -> AgentDefinition {
     let mut def = default_definition(agent_type);
 
@@ -506,7 +459,6 @@ mod tests {
     #[test]
     fn test_agent_definition_bootstrap_content() {
         let def = AgentDefinition {
-            agent_type: AgentType::Explorer,
             display_name: "explorer".into(),
             description: "test".into(),
             system_prompt: "You are an explorer.".into(),

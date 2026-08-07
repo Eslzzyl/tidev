@@ -6,8 +6,6 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use chrono::Utc;
-use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
 use tidev_llm::message::{AssistantTurn, Message, ToolCall, ToolExecutionResult};
@@ -16,11 +14,15 @@ use tidev_llm::{LlmClient, LlmProviderConfig, ToolDefinition};
 
 use crate::context::{AgentContext, AgentLoopConfig};
 use crate::context_manager::ContextManager;
-use crate::event::{AgentEvent, AgentEventSender, llm_event_to_agent_event};
+#[cfg(test)]
+use crate::event::AgentEvent;
+use crate::event::AgentEventSender;
 use crate::loop_::run_agent_loop;
 use crate::message_buf::MessageBuffer;
 use crate::registry::ToolRegistry;
+use crate::scheduler::{ToolCallExecutor, execute_tool_calls};
 use crate::tool::ToolContext;
+use crate::turn::{StreamTurnOptions, stream_turn};
 
 /// Persistence boundary for a generic agent runtime.
 #[async_trait]
@@ -30,6 +32,20 @@ pub trait MessageStore: Send + Sync {
 
     /// Persist protocol messages in the order supplied by the runtime.
     async fn save_messages(&self, session_id: uuid::Uuid, messages: &[Message]) -> Result<()>;
+
+    /// Persist the generic context-compaction state for one session.
+    ///
+    /// Stores that do not persist context metadata may keep the default no-op
+    /// implementation. Product hosts with undo or session reload support
+    /// should override it.
+    async fn save_context_state(
+        &self,
+        _session_id: uuid::Uuid,
+        _summary: Option<&str>,
+        _retained_from: usize,
+    ) -> Result<()> {
+        Ok(())
+    }
 }
 
 /// A ready-to-use [`AgentContext`] implementation.
@@ -165,10 +181,6 @@ impl AgentRuntime {
         self.tools.execute(call, self).await
     }
 
-    fn emit(&self, event: AgentEvent) {
-        let _ = self.event_tx.send(event);
-    }
-
     fn ensure_session(&self, session_id: uuid::Uuid) -> Result<()> {
         if session_id != self.session_id {
             anyhow::bail!(
@@ -178,34 +190,6 @@ impl AgentRuntime {
             );
         }
         Ok(())
-    }
-
-    fn cancelled_result() -> ToolExecutionResult {
-        ToolExecutionResult::new("User cancelled the request")
-    }
-
-    fn error_result(error: anyhow::Error) -> ToolExecutionResult {
-        ToolExecutionResult::new(format!("Error: tool call failed: {error:#}"))
-    }
-
-    fn emit_tool_starting(&self, request_id: u64, tool_call: &ToolCall) {
-        self.emit(AgentEvent::ToolStarting {
-            request_id,
-            tool_call: tool_call.clone(),
-        });
-    }
-
-    fn emit_tool_completed(
-        &self,
-        request_id: u64,
-        tool_call: &ToolCall,
-        result: &ToolExecutionResult,
-    ) {
-        self.emit(AgentEvent::ToolCompleted {
-            request_id,
-            tool_call: tool_call.clone(),
-            result: Box::new(result.clone()),
-        });
     }
 }
 
@@ -234,6 +218,22 @@ impl ToolContext for RuntimeToolContext {
     }
 }
 
+struct RuntimeToolExecutor {
+    tools: Arc<ToolRegistry>,
+    context: RuntimeToolContext,
+}
+
+#[async_trait]
+impl ToolCallExecutor for RuntimeToolExecutor {
+    fn is_read_only(&self, tool_call: &ToolCall) -> bool {
+        self.tools.is_read_only(&tool_call.name).unwrap_or(false)
+    }
+
+    async fn execute(&self, tool_call: ToolCall) -> Result<ToolExecutionResult> {
+        self.tools.execute(&tool_call, &self.context).await
+    }
+}
+
 #[async_trait]
 impl AgentContext for AgentRuntime {
     fn tools(&self) -> Vec<ToolDefinition> {
@@ -255,92 +255,19 @@ impl AgentContext for AgentRuntime {
         thinking_level: &ThinkingLevelType,
         request_id: u64,
     ) -> Result<AssistantTurn> {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let llm = self.llm.clone();
-        let mut model = self.model.clone();
-        model.system_prompt = Some(system_prompt.to_string());
-        let tools = self.tools.definitions();
-        let messages = messages.to_vec();
-        let thinking_level = thinking_level.clone();
-
-        let handle = tokio::spawn(async move {
-            llm.stream_chat(model, messages, tools, tx, thinking_level)
-                .await;
-        });
-
-        let mut turn = AssistantTurn {
-            created_at: Some(Utc::now()),
-            ..Default::default()
-        };
-
-        loop {
-            tokio::select! {
-                _ = self.cancel.cancelled() => {
-                    handle.abort();
-                    return Err(anyhow::anyhow!("Stream cancelled by user"));
-                }
-                event = rx.recv() => {
-                    let Some(event) = event else { break };
-                    let event = llm_event_to_agent_event(event, request_id);
-                    self.emit(event.clone());
-                    match event {
-                        AgentEvent::Delta { content, .. } => {
-                            turn.content.push_str(&content);
-                            if turn.reasoning_started_at.is_some()
-                                && turn.reasoning_completed_at.is_none()
-                            {
-                                turn.reasoning_completed_at = Some(Utc::now());
-                            }
-                        }
-                        AgentEvent::ReasoningDelta { content, .. } => {
-                            if turn.reasoning_started_at.is_none() {
-                                turn.reasoning_started_at = Some(Utc::now());
-                            }
-                            turn.reasoning.push_str(&content);
-                        }
-                        AgentEvent::ToolCallUpdated { tool_call, .. } => {
-                            turn.upsert_tool_call(tool_call);
-                            if turn.reasoning_started_at.is_some()
-                                && turn.reasoning_completed_at.is_none()
-                            {
-                                turn.reasoning_completed_at = Some(Utc::now());
-                            }
-                        }
-                        AgentEvent::UsageStats {
-                            input_tokens,
-                            output_tokens,
-                            total_tokens,
-                            cache_read_tokens,
-                            cache_write_tokens,
-                            model_id,
-                            duration_ms,
-                            ..
-                        } => {
-                            turn.input_tokens = Some(input_tokens);
-                            turn.output_tokens = Some(output_tokens);
-                            turn.total_tokens = Some(total_tokens);
-                            turn.cache_read_tokens = Some(cache_read_tokens);
-                            turn.cache_write_tokens = Some(cache_write_tokens);
-                            turn.model_id = Some(model_id);
-                            if let Some(ms) = duration_ms.filter(|ms| *ms > 0) {
-                                turn.tokens_per_second = Some(output_tokens as f32 / (ms as f32 / 1000.0));
-                            }
-                        }
-                        AgentEvent::Finished { turn: finished_turn, .. } => {
-                            turn.responses_output_items = finished_turn.responses_output_items.clone();
-                            break;
-                        }
-                        AgentEvent::Failed { error, .. } => {
-                            return Err(anyhow::anyhow!("LLM error: {error}"));
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
-
-        turn.completed_at = Some(Utc::now());
-        Ok(turn)
+        stream_turn(
+            &self.llm,
+            self.model.clone(),
+            messages,
+            &self.tools.definitions(),
+            system_prompt,
+            thinking_level,
+            request_id,
+            &self.event_tx,
+            &self.cancel,
+            StreamTurnOptions::default(),
+        )
+        .await
     }
 
     async fn execute_tools(
@@ -350,106 +277,21 @@ impl AgentContext for AgentRuntime {
         request_id: u64,
     ) -> Result<Vec<(ToolCall, ToolExecutionResult)>> {
         self.ensure_session(session_id)?;
-        let mut results: Vec<Option<(ToolCall, ToolExecutionResult)>> =
-            (0..tool_calls.len()).map(|_| None).collect();
-        let mut read_only = Vec::new();
-        let mut write = Vec::new();
-
-        for (index, tool_call) in tool_calls.iter().cloned().enumerate() {
-            if self.tools.is_read_only(&tool_call.name).unwrap_or(false) {
-                read_only.push((index, tool_call));
-            } else {
-                write.push((index, tool_call));
-            }
-        }
-
-        if !read_only.is_empty() {
-            if self.cancel.is_cancelled() {
-                for (index, tool_call) in read_only {
-                    let result = Self::cancelled_result();
-                    self.emit_tool_completed(request_id, &tool_call, &result);
-                    results[index] = Some((tool_call, result));
-                }
-            } else {
-                let mut pending = vec![false; tool_calls.len()];
-                let mut tasks = JoinSet::new();
-                for (index, tool_call) in read_only {
-                    pending[index] = true;
-                    self.emit_tool_starting(request_id, &tool_call);
-                    let registry = self.tools.clone();
-                    let context = RuntimeToolContext {
-                        workspace_root: self.workspace_root.clone(),
-                        event_tx: self.event_tx.clone(),
-                    };
-                    tasks.spawn(async move {
-                        let result = registry
-                            .execute(&tool_call, &context)
-                            .await
-                            .unwrap_or_else(Self::error_result);
-                        (index, tool_call, result)
-                    });
-                }
-
-                loop {
-                    tokio::select! {
-                        _ = self.cancel.cancelled() => {
-                            tasks.abort_all();
-                            for (index, tool_call) in tool_calls.iter().cloned().enumerate() {
-                                if pending[index] {
-                                    let result = Self::cancelled_result();
-                                    self.emit_tool_completed(request_id, &tool_call, &result);
-                                    results[index] = Some((tool_call, result));
-                                }
-                            }
-                            break;
-                        }
-                        joined = tasks.join_next() => {
-                            match joined {
-                                Some(Ok((index, tool_call, result))) => {
-                                    pending[index] = false;
-                                    self.emit_tool_completed(request_id, &tool_call, &result);
-                                    results[index] = Some((tool_call, result));
-                                }
-                                Some(Err(error)) => {
-                                    if let Some(index) = pending.iter().position(|is_pending| *is_pending) {
-                                        pending[index] = false;
-                                        let tool_call = tool_calls[index].clone();
-                                        let result = ToolExecutionResult::new(format!("Error: tool task failed: {error}"));
-                                        self.emit_tool_completed(request_id, &tool_call, &result);
-                                        results[index] = Some((tool_call, result));
-                                    }
-                                }
-                                None => break,
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        for (index, tool_call) in write {
-            if self.cancel.is_cancelled() {
-                let result = Self::cancelled_result();
-                self.emit_tool_completed(request_id, &tool_call, &result);
-                results[index] = Some((tool_call, result));
-                continue;
-            }
-
-            self.emit_tool_starting(request_id, &tool_call);
-            let context = RuntimeToolContext {
+        let executor = Arc::new(RuntimeToolExecutor {
+            tools: self.tools.clone(),
+            context: RuntimeToolContext {
                 workspace_root: self.workspace_root.clone(),
                 event_tx: self.event_tx.clone(),
-            };
-            let result = self
-                .tools
-                .execute(&tool_call, &context)
-                .await
-                .unwrap_or_else(Self::error_result);
-            self.emit_tool_completed(request_id, &tool_call, &result);
-            results[index] = Some((tool_call, result));
-        }
-
-        Ok(results.into_iter().flatten().collect())
+            },
+        });
+        execute_tool_calls(
+            executor,
+            tool_calls,
+            &self.event_tx,
+            &self.cancel,
+            request_id,
+        )
+        .await
     }
 
     async fn save_messages(&self, session_id: uuid::Uuid, messages: &[Message]) -> Result<()> {
@@ -467,15 +309,57 @@ impl AgentContext for AgentRuntime {
 
     async fn load_messages(&self, session_id: uuid::Uuid) -> Result<Vec<Message>> {
         self.ensure_session(session_id)?;
-        let buffer = self
-            .messages
-            .lock()
-            .map_err(|_| anyhow::anyhow!("agent message buffer is poisoned"))?;
-        let context_manager = self
-            .context_manager
-            .lock()
-            .map_err(|_| anyhow::anyhow!("agent context manager is poisoned"))?;
-        Ok(context_manager.build_request_messages(&buffer))
+        let buffer = {
+            let messages = self
+                .messages
+                .lock()
+                .map_err(|_| anyhow::anyhow!("agent message buffer is poisoned"))?;
+            MessageBuffer::new(messages.load().to_vec())
+        };
+        let mut context_manager = {
+            let context_manager = self
+                .context_manager
+                .lock()
+                .map_err(|_| anyhow::anyhow!("agent context manager is poisoned"))?;
+            context_manager.clone()
+        };
+        let prepared = context_manager
+            .prepare_request_messages(
+                &self.llm,
+                &self.model,
+                &self.tools.definitions(),
+                &buffer,
+                None,
+                None,
+            )
+            .await?;
+        {
+            let mut shared_context_manager = self
+                .context_manager
+                .lock()
+                .map_err(|_| anyhow::anyhow!("agent context manager is poisoned"))?;
+            *shared_context_manager = context_manager;
+        }
+
+        if let Some(compaction) = prepared.compaction.as_ref() {
+            self.store
+                .save_context_state(
+                    session_id,
+                    Some(&compaction.summary),
+                    compaction.retained_from,
+                )
+                .await?;
+            let marker = Message::compaction(&compaction.summary);
+            self.store
+                .save_messages(session_id, &[marker.clone()])
+                .await?;
+            let mut messages = self
+                .messages
+                .lock()
+                .map_err(|_| anyhow::anyhow!("agent message buffer is poisoned"))?;
+            messages.append(marker);
+        }
+        Ok(prepared.messages)
     }
 }
 
@@ -547,7 +431,7 @@ mod tests {
             thinking_level: ThinkingLevelType::None,
             extra_body: None,
             max_output_tokens: 128,
-            context_window: 1024,
+            context_window: 0,
             temperature: None,
             supports_images: false,
             supports_parallel_tool_calls: true,
