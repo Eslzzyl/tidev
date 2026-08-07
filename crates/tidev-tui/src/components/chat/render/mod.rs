@@ -101,7 +101,7 @@ pub(crate) fn render_messages(
     spinner_start: Instant,
     hovered_card: Option<Uuid>,
     hovered_inline_subagent: Option<usize>,
-    retrying_hint: &Option<(u32, u32, String, Instant)>,
+    retrying_hint: &Option<(Uuid, u32, u32, String, Instant)>,
     thinking_collapsed_overrides: &HashSet<Uuid>,
     default_collapse_thinking: bool,
     out_card_bounds: &mut Vec<(Uuid, usize, usize)>,
@@ -293,7 +293,7 @@ mod tests {
 
         update_layout_index(&mut index, &mut cache, &chat_ctx.messages, &geom, &ctx);
 
-        let retrying_hint: Option<(u32, u32, String, Instant)> = None;
+        let retrying_hint: Option<(Uuid, u32, u32, String, Instant)> = None;
         let output = messages_text(
             &chat_ctx,
             &mut index,

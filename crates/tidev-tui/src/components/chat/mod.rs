@@ -110,7 +110,9 @@ pub(crate) struct MessageList {
     running_tools: Vec<RunningToolInfo>,
 
     // ── Retrying hint (persistent inline display) ──
-    retrying_hint: Option<(u32, u32, String, Instant)>,
+    // Carries the session_id that owns the hint so stream activity from
+    // other sessions never clears it (and vice versa).
+    retrying_hint: Option<(Uuid, u32, u32, String, Instant)>,
 
     // ── Image badge bounds for mouse hit-testing ──
     image_badge_bounds: Vec<(Rect, Uuid, usize)>,
@@ -477,6 +479,22 @@ impl MessageList {
         self.dirty = true;
     }
 
+    /// Clear the retrying hint when the session that owns it resumes
+    /// streaming (or finishes/fails), so the card disappears as soon as a
+    /// retry succeeds instead of lingering until the end of the turn.
+    /// The hint is cleared only for the session that set it — activity from
+    /// other sessions must not dismiss it.
+    fn clear_retrying_hint_if(&mut self, session_id: Uuid) {
+        if self
+            .retrying_hint
+            .as_ref()
+            .is_some_and(|(hint_session, ..)| *hint_session == session_id)
+        {
+            self.retrying_hint = None;
+            self.dirty = true;
+        }
+    }
+
     /// Handle a backend event for streaming or tool results.
     pub fn handle_backend_event(&mut self, event: &BackendEvent) {
         // ── 0. Track task subagents only for the currently-active session ─
@@ -590,6 +608,25 @@ impl MessageList {
         {
             exec.status_text = text;
             self.dirty = true;
+        }
+
+        // ── 1.5 Clear the retrying hint on stream resumption ────────────
+        // There is no dedicated "retry succeeded" event: a successful retry
+        // simply resumes the stream. Dismiss the hint as soon as the owning
+        // session produces stream activity (or ends its stream), instead of
+        // letting the card linger until the end of the turn. Must run BEFORE
+        // the chat_context routing below, which holds a mutable borrow of
+        // self.chat_contexts.
+        match event {
+            BackendEvent::Delta { .. }
+            | BackendEvent::ReasoningDelta { .. }
+            | BackendEvent::ToolCallUpdated { .. }
+            | BackendEvent::Finished { .. }
+            | BackendEvent::Failed { .. }
+            | BackendEvent::StreamEnd { .. } => {
+                self.clear_retrying_hint_if(session_id);
+            }
+            _ => {}
         }
 
         // ── 2. Route to chat_context ───────────────────────────────────
@@ -907,11 +944,11 @@ impl MessageList {
             } => {
                 let deadline =
                     Instant::now() + Duration::from_secs(retry_after_secs.unwrap_or(0) as u64);
-                self.retrying_hint = Some((*attempt, *max_attempts, reason.clone(), deadline));
+                self.retrying_hint =
+                    Some((session_id, *attempt, *max_attempts, reason.clone(), deadline));
                 self.dirty = true;
             }
             BackendEvent::Finished { .. } => {
-                self.retrying_hint = None;
                 self.dirty = true;
             }
             BackendEvent::SubagentStatus {
@@ -1020,7 +1057,6 @@ impl MessageList {
                 }
             }
             BackendEvent::Failed { .. } => {
-                self.retrying_hint = None;
                 self.dirty = true;
             }
             _ => {}

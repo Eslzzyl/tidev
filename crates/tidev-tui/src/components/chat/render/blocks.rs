@@ -751,7 +751,7 @@ pub(super) fn messages_text(
     scroll: usize,
     viewport: usize,
     follow_tail: bool,
-    retrying_hint: &Option<(u32, u32, String, Instant)>,
+    retrying_hint: &Option<(Uuid, u32, u32, String, Instant)>,
 ) -> RenderOutput {
     let messages = chat_context.visible_messages();
     let content_width = geom.content();
@@ -795,7 +795,7 @@ pub(super) fn messages_text(
     // Pre-compute retrying hint lines (if any) so we can include its height
     // in the scroll calculation before determining which blocks are visible.
     let mut precomputed_hint_lines: Vec<HyperlinkLine> = Vec::new();
-    if let Some((attempt, max_attempts, reason, deadline)) = retrying_hint.as_ref() {
+    if let Some((_, attempt, max_attempts, reason, deadline)) = retrying_hint.as_ref() {
         let now = Instant::now();
         let remaining = if *deadline > now {
             deadline.duration_since(now).as_secs()
