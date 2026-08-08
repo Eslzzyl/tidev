@@ -281,14 +281,21 @@ impl Component for SearchPanel {
 
         let overlay = centered_rect(area.width.min(60), area.height.min(20), area);
 
+        // Scrolls inside the panel are consumed so they never reach the chat
+        // behind; scrolls elsewhere fall through (mirrors the PgUp/PgDn
+        // pattern for keyboard events).
+        if !overlay.contains(position) {
+            return None;
+        }
+
         match mouse.kind {
             MouseEventKind::ScrollUp => {
                 self.move_selection(-1);
-                None
+                Some(Action::Consumed)
             }
             MouseEventKind::ScrollDown => {
                 self.move_selection(1);
-                None
+                Some(Action::Consumed)
             }
             MouseEventKind::Down(MouseButton::Left) => {
                 if self.editing_api_key.is_some() {

@@ -234,6 +234,13 @@ impl Component for SkillsPanel {
             vertical: 1,
         });
 
+        // Scrolls inside the panel are consumed so they never reach the chat
+        // behind; scrolls elsewhere fall through (mirrors the PgUp/PgDn
+        // pattern for keyboard events).
+        if !overlay.contains(position) {
+            return None;
+        }
+
         let inner_w = inner.width as usize;
         let split_x = (inner_w * 35 / 100) as u16;
         let in_left = position.x < inner.x + split_x;
@@ -245,7 +252,7 @@ impl Component for SkillsPanel {
                 } else {
                     self.scroll_preview_up(3);
                 }
-                None
+                Some(Action::Consumed)
             }
             MouseEventKind::ScrollDown => {
                 if in_left {
@@ -253,7 +260,7 @@ impl Component for SkillsPanel {
                 } else {
                     self.scroll_preview_down(3);
                 }
-                None
+                Some(Action::Consumed)
             }
             MouseEventKind::Down(MouseButton::Left) => {
                 if in_left {

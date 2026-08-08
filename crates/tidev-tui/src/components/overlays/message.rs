@@ -197,14 +197,21 @@ impl Component for MessagePanel {
 
         let overlay = centered_rect(area.width.min(112), area.height.min(36), area);
 
+        // Scrolls inside the panel are consumed so they never reach the chat
+        // behind; scrolls elsewhere fall through (mirrors the PgUp/PgDn
+        // pattern for keyboard events).
+        if !overlay.contains(position) {
+            return None;
+        }
+
         match mouse.kind {
             MouseEventKind::ScrollUp => {
                 self.move_selection(-1);
-                None
+                Some(Action::Consumed)
             }
             MouseEventKind::ScrollDown => {
                 self.move_selection(1);
-                None
+                Some(Action::Consumed)
             }
             MouseEventKind::Down(MouseButton::Left) => {
                 let inner = overlay.inner(Margin {

@@ -352,14 +352,21 @@ impl Component for SettingsPanel {
             vertical: 1,
         });
 
+        // Scrolls inside the panel are consumed so they never reach the chat
+        // behind; scrolls elsewhere fall through (mirrors the PgUp/PgDn
+        // pattern for keyboard events).
+        if !overlay.contains(position) {
+            return None;
+        }
+
         match mouse.kind {
             MouseEventKind::ScrollUp => {
                 self.move_up();
-                None
+                Some(Action::Consumed)
             }
             MouseEventKind::ScrollDown => {
                 self.move_down();
-                None
+                Some(Action::Consumed)
             }
             MouseEventKind::Down(MouseButton::Left) => {
                 let local_y = position.y.saturating_sub(inner.y);

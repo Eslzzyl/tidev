@@ -448,14 +448,22 @@ impl Component for SessionPanel {
         if !area.contains(position) {
             return None;
         }
+        // Scrolls inside the panel are consumed so they never reach the chat
+        // behind; scrolls elsewhere fall through (mirrors the PgUp/PgDn
+        // pattern for keyboard events). The main panel rect also covers the
+        // sub-dialogs rendered on top of it.
+        let overlay = centered_rect(area.width.min(112), area.height.min(36), area);
+        if !overlay.contains(position) {
+            return None;
+        }
         match mouse.kind {
             MouseEventKind::ScrollUp => {
                 self.move_selection(-1);
-                None
+                Some(Action::Consumed)
             }
             MouseEventKind::ScrollDown => {
                 self.move_selection(1);
-                None
+                Some(Action::Consumed)
             }
             _ => Some(Action::Noop),
         }

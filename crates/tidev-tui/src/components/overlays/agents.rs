@@ -102,14 +102,21 @@ impl Component for AgentsPanel {
         if !area.contains(position) {
             return None;
         }
+        // Scrolls inside the panel are consumed so they never reach the chat
+        // behind; scrolls elsewhere fall through (mirrors the PgUp/PgDn
+        // pattern for keyboard events).
+        let overlay = centered_rect(70, 24, area);
+        if !overlay.contains(position) {
+            return None;
+        }
         match mouse.kind {
             MouseEventKind::ScrollUp => {
                 self.scroll_up(3);
-                None
+                Some(Action::Consumed)
             }
             MouseEventKind::ScrollDown => {
                 self.scroll_down(3);
-                None
+                Some(Action::Consumed)
             }
             _ => Some(Action::Noop),
         }
