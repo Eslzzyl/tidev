@@ -12,7 +12,7 @@
   通过 `Runtime::submit_prompt`、`event_rx` 和 `request_rx` 完成请求、事件
   和审批交互。
 - 图片 base64 编码：`MessageAttachment::Image` 保留原始字节，各 provider
-  在请求构造时完成编码，详见 `rewrite-plan/issues/image-base64-encoding.md`。
+  在请求构造时完成编码。
 
 本轮明确不纳入：
 
