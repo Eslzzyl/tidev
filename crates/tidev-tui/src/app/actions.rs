@@ -38,9 +38,6 @@ impl App {
                         self.subagent_enabled = self.runtime.config().subagent.enabled;
                     }
                 }
-                Action::Theme(ThemeAction::Preview(name)) => {
-                    self.current_palette = resolve_palette(&self.theme_catalog, &name);
-                }
                 Action::Theme(ThemeAction::Set(name)) => {
                     self.current_palette = resolve_palette(&self.theme_catalog, &name);
                     self.runtime.update_config(|cfg| cfg.set_theme(&name));
@@ -814,6 +811,7 @@ impl App {
                     self.set_notice(msg);
                 }
                 Action::Noop => {}
+                Action::Consumed => {}
                 // ── Tool approval pipeline ──
                 Action::WorkspaceBoundaryResponse {
                     path,

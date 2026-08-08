@@ -50,10 +50,12 @@ enum RowKind {
 }
 
 const WIDE_LAYOUT_THRESHOLD: usize = 100;
-const DARK_ADD_BG: (u8, u8, u8) = (33, 58, 43);
-const DARK_DEL_BG: (u8, u8, u8) = (74, 34, 29);
-const LIGHT_ADD_BG: (u8, u8, u8) = (218, 251, 225);
-const LIGHT_DEL_BG: (u8, u8, u8) = (255, 235, 233);
+/// Background tints for diff added/removed rows. Shared with the theme
+/// panel's diff preview so it matches real diff rendering exactly.
+pub(crate) const DARK_ADD_BG: (u8, u8, u8) = (33, 58, 43);
+pub(crate) const DARK_DEL_BG: (u8, u8, u8) = (74, 34, 29);
+pub(crate) const LIGHT_ADD_BG: (u8, u8, u8) = (218, 251, 225);
+pub(crate) const LIGHT_DEL_BG: (u8, u8, u8) = (255, 235, 233);
 
 pub(crate) fn render_unified_diff_text(
     text: &str,

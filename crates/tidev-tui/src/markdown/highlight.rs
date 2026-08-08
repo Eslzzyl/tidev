@@ -25,7 +25,9 @@ static THEME_SET: OnceLock<ThemeSet> = OnceLock::new();
 static THEME: OnceLock<RwLock<Theme>> = OnceLock::new();
 static HIGHLIGHT_CACHE: OnceLock<RwLock<LruCache<HighlightCacheKey, Vec<Line<'static>>>>> =
     OnceLock::new();
-static HIGHLIGHT_CACHE_GEN: AtomicU64 = AtomicU64::new(0);
+/// Bumped every time the active syntax theme changes so caches keyed by
+/// this generation (syntax highlighting, markdown rendering) are invalidated.
+pub(crate) static HIGHLIGHT_CACHE_GEN: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 struct HighlightCacheKey {

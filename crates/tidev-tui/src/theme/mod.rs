@@ -3,6 +3,8 @@ use ratatui::style::Color;
 use tidev_config::{ThemeCatalog, ThemeDefinition};
 use tidev_core::Mode as SessionMode;
 
+pub(crate) mod preview;
+
 /// Fully-resolved UI colors for one theme.
 #[derive(Clone, Copy, Debug)]
 pub struct ThemePalette {

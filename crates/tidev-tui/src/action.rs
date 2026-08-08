@@ -77,7 +77,6 @@ pub(crate) enum OverlayAction {
 #[derive(Clone, Debug)]
 pub(crate) enum ThemeAction {
     Set(String),
-    Preview(String),
 }
 
 /// Search provider panel actions.
@@ -232,4 +231,8 @@ pub(crate) enum Action {
     /// Show a one-line status notice at the bottom of the screen.
     Notice(String),
     Noop,
+    /// The event was consumed by an overlay with no side effect (e.g. a
+    /// scroll tick inside a panel that is already at its edge). Unlike
+    /// `Noop`, this prevents scroll fall-through to the chat area.
+    Consumed,
 }

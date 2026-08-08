@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::LazyLock;
 use std::sync::Mutex;
+use std::sync::atomic::Ordering;
 
 use pulldown_cmark::{
     Alignment, CodeBlockKind, CowStr, Event, HeadingLevel, Options, Parser, Tag, TagEnd,
@@ -21,6 +22,7 @@ use unicode_width::UnicodeWidthStr;
 pub(crate) use highlight::highlight_code_to_lines;
 pub use highlight::highlight_code_to_lines_for_path;
 pub(crate) use highlight::set_syntax_theme_by_key;
+pub(crate) use highlight::HIGHLIGHT_CACHE_GEN;
 
 use line::line_to_static;
 use wrap::RtOptions;
@@ -79,12 +81,18 @@ pub(crate) fn markdown_to_hyperlink_lines(md: &MarkdownRender) -> Vec<HyperlinkL
         .collect()
 }
 
-/// Cache key for the markdown render cache: (content_hash, wrap_width, cwd_hash)
-type MarkdownCacheKey = (blake3::Hash, Option<usize>, blake3::Hash);
+/// Cache key for the markdown render cache:
+/// (content_hash, wrap_width, cwd_hash, syntax_theme_gen)
+///
+/// The syntax theme generation is part of the key because code fences inside
+/// the markdown are highlighted with the current syntect theme; without it
+/// the cached output would keep stale colors after a theme switch.
+type MarkdownCacheKey = (blake3::Hash, Option<usize>, blake3::Hash, u64);
 
 /// Content-hash based cache for rendered markdown output.
-/// Keyed by (blake3::Hash of input, width, cwd_hash) to avoid re-parsing markdown
-/// when neither content, terminal width, nor workspace has changed.
+/// Keyed by (blake3::Hash of input, width, cwd_hash, syntax_theme_gen) to
+/// avoid re-parsing markdown when neither content, terminal width, workspace
+/// nor syntax theme has changed.
 /// Wrapped in `Arc` so repeated cache hits share the same allocation.
 static MARKDOWN_RENDER_CACHE: LazyLock<
     Mutex<std::collections::HashMap<MarkdownCacheKey, Arc<MarkdownRender>>>,
@@ -100,11 +108,12 @@ pub fn render_markdown_text_with_width_and_cwd(
 ) -> Arc<MarkdownRender> {
     let content_hash = blake3::hash(input.as_bytes());
     let cwd_hash = blake3::hash(cwd.map(|p| p.as_os_str().as_encoded_bytes()).unwrap_or(b""));
+    let theme_gen = HIGHLIGHT_CACHE_GEN.load(Ordering::SeqCst);
 
     // Check cache
     {
         let cache = MARKDOWN_RENDER_CACHE.lock().unwrap();
-        if let Some(cached) = cache.get(&(content_hash, width, cwd_hash)) {
+        if let Some(cached) = cache.get(&(content_hash, width, cwd_hash, theme_gen)) {
             return cached.clone();
         }
     }
@@ -132,7 +141,7 @@ pub fn render_markdown_text_with_width_and_cwd(
                 cache.remove(&key);
             }
         }
-        cache.insert((content_hash, width, cwd_hash), result.clone());
+        cache.insert((content_hash, width, cwd_hash, theme_gen), result.clone());
     }
 
     // Return Arc (callers share via clone or clone inner on demand)
