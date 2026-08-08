@@ -9,4 +9,4 @@
 
 ## 参考
 
-旧代码位于 `_archive/v0.6.x/crates/tidev-engine/src/tooling/file_read_tracker.rs`。
+旧代码位于 `last-full` 标签：`crates/tidev-engine/src/tooling/file_read_tracker.rs`。

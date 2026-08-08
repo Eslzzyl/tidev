@@ -114,7 +114,7 @@ Dev-dependencies（只对 test 可见）：
 - 数据库维护（VACUUM / ANALYZE 不报错）
 - Migration 版本管理 + 幂等性（in-memory SQLite）
 
-参考 archive：`_archive/v0.6.x/crates/tidev-storage/src/tests.rs`（23 个测试的完整模式）
+参考 `last-full` 标签：`crates/tidev-storage/src/tests.rs`（23 个测试的完整模式）
 
 ### 2.2 `tidev-core`（当前 4 → 目标 ~35）
 
@@ -131,7 +131,7 @@ Dev-dependencies（只对 test 可见）：
 - Revert marker 之后的消息可见性
 - System prompt 注入
 
-参考 archive：`_archive/v0.6.x/crates/tidev-engine/src/context.rs`
+参考 `last-full` 标签：`crates/tidev-engine/src/context.rs`
 
 #### `session.rs`
 
@@ -145,7 +145,7 @@ Dev-dependencies（只对 test 可见）：
 - Compaction prior-state 解析
 - `ToolMetadata` JSON round-trip
 
-参考 archive：`_archive/v0.6.x/crates/tidev-session/src/session.rs`
+参考 `last-full` 标签：`crates/tidev-session/src/session.rs`
 
 #### `runtime.rs`
 
@@ -162,7 +162,7 @@ Dev-dependencies（只对 test 可见）：
 - Session 自动保存（检查 storage 层调用）
 - Context compaction 触发
 
-参考 archive：`_archive/v0.6.x/crates/tidev-engine/src/agent/runtime/tests.rs`
+参考 `last-full` 标签：`crates/tidev-engine/src/agent/runtime/tests.rs`
 
 #### `undo.rs`
 
@@ -175,7 +175,7 @@ Dev-dependencies（只对 test 可见）：
 - 更改检测（文件修改/新增/删除）
 - 非 git 目录的行为
 
-参考 archive：`_archive/v0.6.x/crates/tidev-tui/src/core/undo.rs`
+参考 `last-full` 标签：`crates/tidev-tui/src/core/undo.rs`
 
 #### `registry.rs`
 

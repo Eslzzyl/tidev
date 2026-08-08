@@ -25,4 +25,4 @@ tidev_tools::execute() → HookEngine::on_post_tool_use() → 追加到 result �
 
 ## 参考
 
-旧代码位于 `_archive/v0.6.x/crates/tidev-engine/src/hooks/`，约 207 行（engine.rs）+ 配置 + 匹配 + 执行器。
+旧代码位于 `last-full` 标签：`crates/tidev-engine/src/hooks/`，约 207 行（engine.rs）+ 配置 + 匹配 + 执行器。
