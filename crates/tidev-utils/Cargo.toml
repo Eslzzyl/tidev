@@ -8,7 +8,7 @@ description = "Shared utility functions for tidev"
 
 [dependencies]
 anyhow = "1"
-chardetng = "0.1"
+chardetng = "1.0"
 dunce = "1"
 dirs = "6"
 encoding_rs = "0.8"

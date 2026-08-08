@@ -6,7 +6,7 @@
 //! strict UTF-8 parsers; these helpers are for text-like external data only.
 
 use anyhow::{Result, bail};
-use chardetng::EncodingDetector;
+use chardetng::{EncodingDetector, Iso2022JpDetection, Utf8Detection};
 use encoding_rs::{Encoding, UTF_8};
 
 /// A byte-order mark that was present in the source document.
@@ -196,12 +196,10 @@ fn detect_encoding(bytes: &[u8], options: DecodeOptions) -> (&'static Encoding, 
     }
 
     if options.allow_heuristic && !bytes.is_empty() {
-        let mut detector = EncodingDetector::new();
+        let mut detector = EncodingDetector::new(Iso2022JpDetection::Allow);
         detector.feed(bytes, true);
-        let (encoding, certain) = detector.guess_assess(None, false);
-        if certain {
-            return (encoding, Bom::None, bytes);
-        }
+        let encoding = detector.guess(None, Utf8Detection::Deny);
+        return (encoding, Bom::None, bytes);
     }
 
     (options.fallback_encoding.unwrap_or(UTF_8), Bom::None, bytes)

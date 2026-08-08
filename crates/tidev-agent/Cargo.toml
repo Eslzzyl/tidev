@@ -22,7 +22,7 @@ serde_json = { version = "1", features = ["raw_value"] }
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 log = "0.4"
-rmcp = { version = "3.0.0", features = [
+rmcp = { version = "3.1.1", features = [
     "client",
     "transport-io",
     "transport-child-process",
