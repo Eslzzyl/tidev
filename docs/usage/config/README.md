@@ -142,7 +142,9 @@ A list of skill sources. Each entry can be a local file path (relative to the
 workspace root or absolute) or an HTTP/HTTPS URL pointing to a `SKILL.md` file.
 Skills are also discovered automatically from the `.opencode/skills`,
 `.claude/skills`, and `.agents/skills` directories relative to the workspace
-root.
+root and its ancestor directories. The global directories
+`~/.config/tidev/skills`, `~/.agents/skills`, and `~/.claude/skills` are always
+scanned as well, regardless of configuration.
 
 ## [ui]
 

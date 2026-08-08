@@ -14,6 +14,9 @@ use tidev_utils::path::canonicalize_display;
 
 const SKILL_FILE_NAME: &str = "SKILL.md";
 const SKILL_ROOTS: &[&str] = &[".opencode/skills", ".claude/skills", ".agents/skills"];
+/// Home-directory skill roots, always scanned as default global locations
+/// regardless of configuration.
+const HOME_SKILL_ROOTS: &[&str] = &[".agents/skills", ".claude/skills"];
 const MAX_COMPANION_FILES: usize = 10;
 
 static CATALOG: OnceLock<Arc<SkillCatalogInner>> = OnceLock::new();
@@ -41,18 +44,20 @@ pub struct SkillCatalog {
 fn discover_inner(
     workspace_root: &Path,
     config_dir: &Path,
+    home_dir: Option<&Path>,
     extra_sources: &[String],
     worktree: Option<&Path>,
 ) -> SkillCatalogInner {
     log::debug!(
-        "discover_inner: start, worktree={:?}",
+        "discover_inner: start, home_dir={:?}, worktree={:?}",
+        home_dir.map(|p| p.display().to_string()),
         worktree.map(|p| p.display().to_string())
     );
     let mut skills = Vec::new();
     let mut seen_names = HashSet::new();
     let mut seen_locations = HashSet::new();
 
-    let roots = candidate_roots(workspace_root, config_dir, worktree);
+    let roots = candidate_roots(workspace_root, config_dir, home_dir, worktree);
     log::debug!(
         "discover_inner: candidate_roots returned {} roots",
         roots.len()
@@ -158,9 +163,10 @@ impl SkillCatalog {
         worktree: Option<&Path>,
     ) -> Self {
         log::debug!(
-            "SkillCatalog::discover: workspace_root={}, config_dir={}, skill_sources={:?}, SKILL_ROOTS={:?}, worktree={:?}",
+            "SkillCatalog::discover: workspace_root={}, config_dir={}, home_dir={:?}, skill_sources={:?}, SKILL_ROOTS={:?}, worktree={:?}",
             workspace_root.display(),
             config_dir.display(),
+            dirs::home_dir().map(|p| p.display().to_string()),
             skill_sources,
             SKILL_ROOTS,
             worktree.map(|p| p.display().to_string())
@@ -169,7 +175,13 @@ impl SkillCatalog {
             .get_or_init(|| {
                 let start = std::time::Instant::now();
                 log::info!("SkillCatalog::discover: initializing catalog (first call)");
-                let inner = discover_inner(workspace_root, config_dir, skill_sources, worktree);
+                let inner = discover_inner(
+                    workspace_root,
+                    config_dir,
+                    dirs::home_dir().as_deref(),
+                    skill_sources,
+                    worktree,
+                );
                 log::info!(
                     "SkillCatalog::discover: catalog initialized with {} skills in {:?}",
                     inner.skills.len(),
@@ -236,12 +248,14 @@ impl SkillCatalog {
 fn candidate_roots(
     workspace_root: &Path,
     config_dir: &Path,
+    home_dir: Option<&Path>,
     worktree: Option<&Path>,
 ) -> Vec<PathBuf> {
     log::debug!(
-        "candidate_roots: workspace_root={}, config_dir={}, worktree={:?}",
+        "candidate_roots: workspace_root={}, config_dir={}, home_dir={:?}, worktree={:?}",
         workspace_root.display(),
         config_dir.display(),
+        home_dir.map(|p| p.display().to_string()),
         worktree.map(|p| p.display().to_string())
     );
     let mut roots = Vec::new();
@@ -307,6 +321,35 @@ fn candidate_roots(
                 canonical.display()
             );
             roots.push(canonical);
+        }
+    }
+
+    // Default global roots in the user's home directory, always scanned
+    // regardless of configuration. Dedup via canonical path handles the case
+    // where the workspace (or one of its ancestors) is the home directory
+    // itself, in which case the ancestor walk already found these roots.
+    if let Some(home) = home_dir {
+        for root in HOME_SKILL_ROOTS {
+            let candidate = home.join(root);
+            log::debug!(
+                "candidate_roots: checking home global root={}",
+                candidate.display()
+            );
+            if !candidate.is_dir() {
+                log::debug!("candidate_roots: not a directory, skip");
+                continue;
+            }
+
+            let canonical = canonicalize_display(&candidate);
+            if seen.insert(canonical.clone()) {
+                log::info!(
+                    "candidate_roots: found home global skill directory: {}",
+                    canonical.display()
+                );
+                roots.push(canonical);
+            } else {
+                log::debug!("candidate_roots: already seen, skip");
+            }
         }
     }
 
@@ -617,4 +660,75 @@ pub(crate) fn is_valid_skill_name(name: &str) -> bool {
     name.chars().all(|character| {
         character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-'
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write_skill(root: &Path, name: &str) {
+        fs::create_dir_all(root.join(name)).unwrap();
+        fs::write(
+            root.join(name).join(SKILL_FILE_NAME),
+            format!(
+                "---\nname: {name}\ndescription: test skill {name}\n---\nBody of {name}.\n"
+            ),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn discovers_home_global_roots_outside_workspace() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = tmp.path().join("work");
+        fs::create_dir_all(&workspace).unwrap();
+        let home = tmp.path().join("home");
+        fs::create_dir_all(&home).unwrap();
+        let config_dir = home.join(".config").join("tidev");
+        fs::create_dir_all(&config_dir).unwrap();
+
+        write_skill(&home.join(".agents").join("skills"), "agents-skill");
+        write_skill(&home.join(".claude").join("skills"), "claude-skill");
+
+        let catalog = discover_inner(&workspace, &config_dir, Some(&home), &[], None);
+        let names: Vec<&str> = catalog.skills.iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            names.contains(&"agents-skill"),
+            "expected agents-skill in {names:?}"
+        );
+        assert!(
+            names.contains(&"claude-skill"),
+            "expected claude-skill in {names:?}"
+        );
+    }
+
+    #[test]
+    fn home_global_roots_deduplicated_when_workspace_is_home() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        fs::create_dir_all(&home).unwrap();
+        let config_dir = home.join(".config").join("tidev");
+        fs::create_dir_all(&config_dir).unwrap();
+
+        // Workspace is the home directory itself: the ancestor walk already
+        // finds .agents/skills and .claude/skills, so the explicit home roots
+        // must dedup rather than double-load.
+        let workspace = home.clone();
+        write_skill(&home.join(".agents").join("skills"), "agents-skill");
+        write_skill(&home.join(".claude").join("skills"), "claude-skill");
+
+        let catalog = discover_inner(&workspace, &config_dir, Some(&home), &[], None);
+        let agents: Vec<&SkillInfo> = catalog
+            .skills
+            .iter()
+            .filter(|s| s.name == "agents-skill")
+            .collect();
+        let claude: Vec<&SkillInfo> = catalog
+            .skills
+            .iter()
+            .filter(|s| s.name == "claude-skill")
+            .collect();
+        assert_eq!(agents.len(), 1);
+        assert_eq!(claude.len(), 1);
+    }
 }
