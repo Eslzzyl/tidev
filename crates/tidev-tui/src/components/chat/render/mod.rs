@@ -210,6 +210,10 @@ mod tests {
     use super::*;
     use blocks::update_layout_index;
     use cards::render_system_card;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use ratatui::buffer::Buffer;
+    use ratatui::prelude::Widget;
     use ratatui::style::Color;
     use std::path::Path;
     use tidev_llm::message::{Message, MessageRole};
@@ -416,6 +420,161 @@ mod tests {
             }
         }
         assert!(found, "expected a hyperlink in the user card");
+    }
+
+    #[test]
+    fn assistant_wrapped_hyperlink_reaches_every_rendered_row() {
+        let palette = test_palette();
+        let expanded = HashSet::new();
+        let subagents = Vec::new();
+        let collapsed = HashSet::new();
+        let ctx = test_render_ctx(&palette, &expanded, &subagents, &collapsed);
+
+        let destination = "https://example.com/very/long/path/that/wraps";
+        let mut message = assistant_msg("", &format!("See [label]({destination})"), 2);
+        message.model_id = Some("test-model".into());
+        let chat_ctx = ChatContext::new(
+            Uuid::from_u128(100),
+            "test".into(),
+            vec![message],
+            None,
+            "test-model".into(),
+            "test-provider".into(),
+        );
+
+        let geom = CardGeom::new(20);
+        let mut index = MessageLayoutIndex::new();
+        let mut cache = lru::LruCache::new(std::num::NonZeroUsize::new(64).unwrap());
+        update_layout_index(&mut index, &mut cache, &chat_ctx.messages, &geom, &ctx);
+
+        let output = messages_text(
+            &chat_ctx, &mut index, &mut cache, &ctx, geom, 0, 200, false, &None,
+        );
+        let linked_rows: Vec<_> = output
+            .hyperlink_lines
+            .iter()
+            .filter(|line| {
+                line.hyperlinks
+                    .iter()
+                    .any(|link| link.destination == destination && !link.columns.is_empty())
+            })
+            .collect();
+        assert!(
+            linked_rows.len() >= 2,
+            "expected URL ranges on multiple rows"
+        );
+
+        let area = Rect::new(0, 0, 20, output.hyperlink_lines.len() as u16);
+        let mut buffer = Buffer::empty(area);
+        let lines: Vec<_> = output
+            .hyperlink_lines
+            .iter()
+            .map(|line| line.line.clone())
+            .collect();
+        let links: Vec<_> = output
+            .hyperlink_lines
+            .iter()
+            .map(|line| line.hyperlinks.clone())
+            .collect();
+        Paragraph::new(ratatui::text::Text::from(lines)).render(area, &mut buffer);
+        mark_buffer_hyperlinks(&mut buffer, area, &links, 0);
+
+        for row in 0..area.height {
+            if output.hyperlink_lines[row as usize]
+                .hyperlinks
+                .iter()
+                .any(|link| link.destination == destination)
+            {
+                assert!(
+                    (0..area.width).any(|column| buffer[(column, row)]
+                        .symbol()
+                        .contains("\x1b]8;;https://example.com/")),
+                    "row {row} has a link range but no OSC-8 cell"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn render_messages_marks_wrapped_assistant_links_in_the_actual_frame() {
+        let palette = test_palette();
+        let expanded = HashSet::new();
+        let subagents = Vec::new();
+        let collapsed = HashSet::new();
+        let ctx = test_render_ctx(&palette, &expanded, &subagents, &collapsed);
+        let destination = "https://example.com/very/long/path/that/wraps";
+        let mut message = assistant_msg("", &format!("See [label]({destination})"), 3);
+        message.model_id = Some("test-model".into());
+        let chat_ctx = ChatContext::new(
+            Uuid::from_u128(101),
+            "test".into(),
+            vec![message],
+            None,
+            "test-model".into(),
+            "test-provider".into(),
+        );
+
+        let area = Rect::new(0, 0, 40, 10);
+        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
+        let mut index = MessageLayoutIndex::new();
+        let mut cache = lru::LruCache::new(std::num::NonZeroUsize::new(64).unwrap());
+        let mut scroll_offset = 0;
+        let mut follow_tail = false;
+        let mut expanded_tool_results = HashSet::new();
+        let mut card_bounds = Vec::new();
+        let mut selectable_regions = Vec::new();
+        let mut inline_running_card_ranges = Vec::new();
+        let mut image_badge_infos = Vec::new();
+        let mut thinking_header_infos = Vec::new();
+        let mut render_content_area = Rect::default();
+        let mut render_scroll = 0;
+
+        terminal
+            .draw(|frame| {
+                render_messages(
+                    frame,
+                    area,
+                    Path::new("/tmp"),
+                    &mut index,
+                    &mut cache,
+                    &chat_ctx,
+                    palette,
+                    &mut scroll_offset,
+                    &mut follow_tail,
+                    &mut expanded_tool_results,
+                    &subagents,
+                    Instant::now(),
+                    None,
+                    None,
+                    &None,
+                    &collapsed,
+                    false,
+                    false,
+                    &mut card_bounds,
+                    &mut selectable_regions,
+                    &mut inline_running_card_ranges,
+                    &mut image_badge_infos,
+                    &mut thinking_header_infos,
+                    &mut render_content_area,
+                    &mut render_scroll,
+                    false,
+                );
+            })
+            .unwrap();
+
+        let linked_rows: HashSet<u16> = (0..area.height)
+            .filter(|row| {
+                (0..area.width).any(|column| {
+                    terminal.backend().buffer()[(column, *row)]
+                        .symbol()
+                        .contains("\x1b]8;;https://example.com/")
+                })
+            })
+            .collect();
+        assert!(
+            linked_rows.len() >= 2,
+            "expected OSC-8 cells on multiple actual frame rows, got {linked_rows:?}"
+        );
     }
 
     #[test]

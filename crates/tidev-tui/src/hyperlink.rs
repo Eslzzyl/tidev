@@ -5,6 +5,7 @@
 //! affect geometry. Ported from Codex's `terminal_hyperlinks` module and
 //! adapted to tidev's pre-wrapped chat rendering (one logical line per row).
 
+use std::num::NonZeroU16;
 use std::ops::Range;
 
 use ratatui::buffer::{Buffer, CellDiffOption};
@@ -442,7 +443,7 @@ pub(crate) fn mark_buffer_hyperlinks(
             continue;
         }
         let row = line_index as isize - scroll_rows as isize;
-        if row < 0 || row as u16 >= area.height {
+        if row < 0 || row >= area.height as isize {
             continue;
         }
         let y = area.y + row as u16;
@@ -451,7 +452,7 @@ pub(crate) fn mark_buffer_hyperlinks(
                 continue;
             };
             for column in link.columns.clone() {
-                if column as u16 >= area.width {
+                if column >= usize::from(area.width) {
                     continue;
                 }
                 let x = area.x + column as u16;
@@ -459,7 +460,16 @@ pub(crate) fn mark_buffer_hyperlinks(
                 if cell.diff_option == CellDiffOption::Skip || cell.symbol().trim().is_empty() {
                     continue;
                 }
+                let visible_width = UnicodeWidthStr::width(cell.symbol())
+                    .max(1)
+                    .min(u16::MAX as usize) as u16;
                 cell.set_symbol(&osc8_hyperlink(&destination, cell.symbol()));
+                // OSC 8 bytes live in the cell symbol, but do not occupy terminal columns.
+                // Preserve the original width so ratatui's buffer diff does not skip cells
+                // following the escape sequence.
+                cell.set_diff_option(CellDiffOption::ForcedWidth(
+                    NonZeroU16::new(visible_width).expect("visible width is non-zero"),
+                ));
             }
         }
     }
@@ -468,6 +478,8 @@ pub(crate) fn mark_buffer_hyperlinks(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::backend::Backend;
+    use ratatui::backend::CrosstermBackend;
 
     #[test]
     fn only_web_destinations_receive_osc8() {
@@ -604,6 +616,69 @@ mod tests {
         assert!(buf[(3, 1)].symbol().contains("\x1b]8;;"));
         assert_eq!(buf[(4, 1)].symbol(), " ");
         assert_eq!(buf[(0, 0)].symbol(), "h");
+    }
+
+    #[test]
+    fn mark_buffer_hyperlinks_preserves_buffer_diff_geometry() {
+        let area = Rect::new(0, 0, 10, 2);
+        let previous = Buffer::empty(area);
+        let mut current = Buffer::empty(area);
+        for (column, ch) in "link!".chars().enumerate() {
+            current[(column as u16, 0)].set_symbol(&ch.to_string());
+            current[(column as u16, 1)].set_symbol(&ch.to_string());
+        }
+
+        mark_buffer_hyperlinks(
+            &mut current,
+            area,
+            &[
+                vec![HyperlinkRange::web(0..4, "https://example.com".to_string())],
+                vec![HyperlinkRange::web(0..4, "https://example.com".to_string())],
+            ],
+            0,
+        );
+
+        let diffs: Vec<_> = previous.diff_iter(&current).collect();
+        let positions: Vec<_> = diffs.iter().map(|(x, y, _)| (*x, *y)).collect();
+        assert_eq!(
+            positions,
+            vec![
+                (0, 0),
+                (1, 0),
+                (2, 0),
+                (3, 0),
+                (4, 0),
+                (0, 1),
+                (1, 1),
+                (2, 1),
+                (3, 1),
+                (4, 1),
+            ]
+        );
+        assert!(
+            diffs[..4]
+                .iter()
+                .all(|(_, _, cell)| cell.symbol().contains("\x1b]8;;https://example.com\x07"))
+        );
+        assert_eq!(diffs[4].2.symbol(), "!");
+        assert!(
+            diffs[5..9]
+                .iter()
+                .all(|(_, _, cell)| cell.symbol().contains("\x1b]8;;https://example.com\x07"))
+        );
+        assert_eq!(diffs[9].2.symbol(), "!");
+        assert_eq!(
+            current[(0, 0)].diff_option,
+            CellDiffOption::ForcedWidth(NonZeroU16::new(1).unwrap())
+        );
+
+        let mut output = Vec::new();
+        {
+            let mut backend = CrosstermBackend::new(&mut output);
+            backend.draw(previous.diff_iter(&current)).unwrap();
+        }
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("\x1b]8;;https://example.com\x07"));
     }
 
     #[test]
