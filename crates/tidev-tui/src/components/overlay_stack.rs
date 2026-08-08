@@ -198,6 +198,7 @@ mod tests {
             thinking_level: None,
             subagent_disabled: false,
             collapse_thinking: false,
+            collapse_diffs: false,
             workspace_root,
         }
     }

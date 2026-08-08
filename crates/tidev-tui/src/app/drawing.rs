@@ -257,6 +257,7 @@ impl App {
                 thinking_level: None,
                 subagent_disabled: !self.subagent_enabled,
                 collapse_thinking: self.runtime.config().ui.collapse_thinking,
+                collapse_diffs: self.runtime.config().ui.collapse_diffs,
                 workspace_root: self.runtime.workspace_root(),
             };
             self.overlays.draw(frame, area, area, &draw_ctx);
@@ -369,6 +370,7 @@ impl App {
                 thinking_level: None,
                 subagent_disabled: !self.subagent_enabled,
                 collapse_thinking: self.runtime.config().ui.collapse_thinking,
+                collapse_diffs: self.runtime.config().ui.collapse_diffs,
                 workspace_root: self.runtime.workspace_root(),
             };
             chat.draw(frame, content_area, &draw_ctx);
@@ -432,6 +434,7 @@ impl App {
                 thinking_level: Some(&active_model.thinking_level),
                 subagent_disabled: !self.subagent_enabled,
                 collapse_thinking: self.runtime.config().ui.collapse_thinking,
+                collapse_diffs: self.runtime.config().ui.collapse_diffs,
                 workspace_root: self.runtime.workspace_root(),
             };
             composer.draw(frame, bottom_area, &draw_ctx);
@@ -450,6 +453,7 @@ impl App {
             thinking_level: None,
             subagent_disabled: !self.subagent_enabled,
             collapse_thinking: self.runtime.config().ui.collapse_thinking,
+            collapse_diffs: self.runtime.config().ui.collapse_diffs,
             workspace_root: self.runtime.workspace_root(),
         };
         // ── Sidebar ───────────────────────────────────────────────────
@@ -690,6 +694,7 @@ impl App {
                 thinking_level: Some(&active_model.thinking_level),
                 subagent_disabled: !self.subagent_enabled,
                 collapse_thinking: self.runtime.config().ui.collapse_thinking,
+                collapse_diffs: self.runtime.config().ui.collapse_diffs,
                 workspace_root: self.runtime.workspace_root(),
             };
             composer.draw(frame, sections[2], &draw_ctx);

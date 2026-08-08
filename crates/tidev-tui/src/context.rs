@@ -29,6 +29,9 @@ pub(crate) struct DrawContext<'a> {
     pub subagent_disabled: bool,
     /// Whether thinking content is collapsed by default (from config).
     pub collapse_thinking: bool,
+    /// Whether edit/write/apply_patch diffs are collapsed to per-file
+    /// +N/-M summaries by default (from config).
+    pub collapse_diffs: bool,
     /// Workspace root path, used for path clipping in tool renders.
     pub workspace_root: &'a Path,
 }

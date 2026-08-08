@@ -17,6 +17,7 @@ mod webfetch;
 use std::path::Path;
 
 use crate::theme::ThemePalette;
+use diffy::{Line as DiffLine, Patch};
 use ratatui::prelude::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use tidev_llm::message::{Message, ToolCall};
@@ -28,7 +29,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::ansi::ansi_to_styled_line;
 use crate::components::chat::render::RenderContext;
 use crate::components::chat::render_cache::SelectableRegionRange;
-use crate::diff_render::render_unified_diff_text;
+use crate::diff_render::{render_unified_diff_text, split_diff_sections};
 use crate::hyperlink::{HyperlinkLine, annotate_web_urls_in_line};
 use crate::markdown::{WrapOptions, render_markdown_text_with_width_and_cwd, word_wrap_line};
 use crate::utils::expand_tabs;
@@ -146,6 +147,31 @@ pub(crate) fn render_tool_call_with_result(
         return (lines, Vec::new());
     }
 
+    // Diff fold state for write/edit/apply_patch cards with a completed
+    // result. The effective state is `config default XOR user toggled`, where
+    // membership in `expanded_tool_results` marks a card the user clicked —
+    // the same model as thinking collapse.
+    let diff_collapsed =
+        if matches!(canonical_name, "write" | "edit" | "apply_patch") && tool_result.is_some() {
+            Some(if is_expanded {
+                !ctx.default_collapse_diffs
+            } else {
+                ctx.default_collapse_diffs
+            })
+        } else {
+            None
+        };
+
+    // Collapsed diff cards render as one line per file with +N/-M counts,
+    // replacing the title and the full diff entirely (no padding lines).
+    if diff_collapsed == Some(true)
+        && let Some(result_msg) = tool_result
+        && let Some(summary) =
+            render_diff_summary_lines(result_msg, content_width, palette, canonical_name)
+    {
+        return (summary, Vec::new());
+    }
+
     // Get result lines and exit code (for shell)
     let (result_lines, exit_code, mut regions) = if let Some(result_msg) = tool_result {
         render_tool_result_detail_lines(result_msg, content_width, ctx, is_expanded)
@@ -198,7 +224,7 @@ pub(crate) fn render_tool_call_with_result(
             None
         };
 
-        let call_lines = render_tool_call_lines(
+        let mut call_lines = render_tool_call_lines(
             tool_call,
             content_width,
             palette,
@@ -206,6 +232,15 @@ pub(crate) fn render_tool_call_with_result(
             ctx.workspace_root,
             result_suffix,
         );
+        // Fold indicator on the title (▼ expanded), mirroring thinking. Only
+        // shown when the result actually carries a diff to toggle.
+        if diff_collapsed == Some(false)
+            && tool_result.is_some_and(tool_result_has_diff)
+            && let Some(last) = call_lines.last_mut()
+        {
+            last.spans
+                .push(Span::styled("  ▼", Style::default().fg(palette.muted)));
+        }
         lines.extend(hyper_lines(call_lines));
     }
 
@@ -820,6 +855,293 @@ pub(crate) fn render_output_preview_lines(
 // Utility helpers
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Collapsed diff summary (write/edit/apply_patch)
+// ---------------------------------------------------------------------------
+
+/// Whether a tool result carries renderable diff data (structured file
+/// changes or a unified diff in metadata). Used to decide whether a diff
+/// card is foldable at all.
+pub(crate) fn tool_result_has_diff(result_msg: &Message) -> bool {
+    !result_msg.metadata.file_changes.is_empty() || result_msg.metadata.diff.is_some()
+}
+
+/// Build collapsed per-file summary lines for edit/write/apply_patch results.
+///
+/// Each file becomes a single line: operation label, path, and +N/-M counts
+/// (zero sides omitted). Returns None when no diff is available or the result
+/// is an error, so callers fall back to the normal rendering.
+fn render_diff_summary_lines(
+    message: &Message,
+    content_width: usize,
+    palette: ThemePalette,
+    canonical_name: &str,
+) -> Option<Vec<HyperlinkLine>> {
+    let output = crate::utils::strip_system_reminder_tags(&message.content);
+    if tool_output_is_error(&output) {
+        return None;
+    }
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    let mut first = true;
+
+    // Structured per-file changes (apply_patch): exact paths and operations.
+    if canonical_name == "apply_patch" && !message.metadata.file_changes.is_empty() {
+        for change in &message.metadata.file_changes {
+            let label = match change.operation.as_str() {
+                "A" => "Write",
+                "M" => "Edit",
+                "D" => "Delete",
+                _ => "Edit",
+            };
+            let (adds, dels) = change
+                .diff
+                .as_deref()
+                .and_then(count_diff_section_lines)
+                .unwrap_or((0, 0));
+            push_diff_summary_line(
+                &mut lines,
+                &mut first,
+                label,
+                change.path.clone(),
+                adds,
+                dels,
+                palette,
+                content_width,
+            );
+        }
+        return Some(hyper_lines(lines));
+    }
+
+    // Unified diff in metadata (edit/write; apply_patch fallback).
+    if let Some(diff) = message.metadata.diff.as_ref() {
+        for section in split_diff_sections(diff) {
+            if let Some((adds, dels)) = count_diff_section_lines(&section) {
+                let path = diff_section_file_path(&section)
+                    .or_else(|| message.metadata.filepath.clone())
+                    .unwrap_or_else(|| "(unknown)".to_string());
+                push_diff_summary_line(
+                    &mut lines,
+                    &mut first,
+                    diff_section_operation(&section),
+                    path,
+                    adds,
+                    dels,
+                    palette,
+                    content_width,
+                );
+            }
+        }
+        return if lines.is_empty() {
+            None
+        } else {
+            Some(hyper_lines(lines))
+        };
+    }
+
+    // Output fallback: only used when the text actually parses as a diff.
+    let mut any = false;
+    for section in split_diff_sections(&output) {
+        if let Some((adds, dels)) = count_diff_section_lines(&section) {
+            any = true;
+            let path = diff_section_file_path(&section)
+                .or_else(|| message.metadata.filepath.clone())
+                .unwrap_or_else(|| "(unknown)".to_string());
+            push_diff_summary_line(
+                &mut lines,
+                &mut first,
+                diff_section_operation(&section),
+                path,
+                adds,
+                dels,
+                palette,
+                content_width,
+            );
+        }
+    }
+    any.then(|| hyper_lines(lines))
+}
+
+/// Append one per-file summary line, carrying the ▶ fold indicator on the
+/// first line of the card.
+#[allow(clippy::too_many_arguments)]
+fn push_diff_summary_line(
+    lines: &mut Vec<Line<'static>>,
+    is_first: &mut bool,
+    label: &str,
+    path: String,
+    adds: usize,
+    dels: usize,
+    palette: ThemePalette,
+    content_width: usize,
+) {
+    lines.extend(build_diff_summary_line(
+        label,
+        &path,
+        adds,
+        dels,
+        palette,
+        if *is_first { Some("▶") } else { None },
+        content_width,
+    ));
+    *is_first = false;
+}
+
+/// Build a single wrapped summary line for one file:
+/// `Edit  src/main.rs  +12 -3  ▶` (zero count sides omitted).
+fn build_diff_summary_line(
+    label: &str,
+    path: &str,
+    adds: usize,
+    dels: usize,
+    palette: ThemePalette,
+    fold_indicator: Option<&str>,
+    content_width: usize,
+) -> Vec<Line<'static>> {
+    let mut spans = vec![
+        Span::styled(
+            format!("{} ", label),
+            Style::default().fg(palette.accent_soft),
+        ),
+        Span::styled(
+            path.to_string(),
+            Style::default()
+                .fg(palette.text)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ];
+    if adds > 0 {
+        spans.push(Span::styled(
+            format!("  +{}", adds),
+            Style::default().fg(palette.success),
+        ));
+    }
+    if dels > 0 {
+        spans.push(Span::styled(
+            format!("  -{}", dels),
+            Style::default().fg(palette.error),
+        ));
+    }
+    if let Some(indicator) = fold_indicator {
+        spans.push(Span::styled(
+            format!("  {}", indicator),
+            Style::default().fg(palette.muted),
+        ));
+    }
+    wrap_tool_title(Line::from(spans), content_width, "  ")
+}
+
+/// Count added/deleted lines in a unified diff section.
+///
+/// Parses with diffy for complete diffs; falls back to a prefix scan for
+/// truncated output, but only when the text actually looks like a diff so
+/// arbitrary tool output never produces bogus counts.
+fn count_diff_section_lines(section: &str) -> Option<(usize, usize)> {
+    if let Ok(patch) = Patch::from_str(section) {
+        // diffy parses arbitrary text as an empty patch; without hunks the
+        // text is not a real diff.
+        if patch.hunks().is_empty() {
+            return None;
+        }
+        let mut adds = 0usize;
+        let mut dels = 0usize;
+        for hunk in patch.hunks() {
+            for line in hunk.lines() {
+                match line {
+                    DiffLine::Insert(_) => adds += 1,
+                    DiffLine::Delete(_) => dels += 1,
+                    DiffLine::Context(_) => {}
+                }
+            }
+        }
+        return Some((adds, dels));
+    }
+    let looks_like_diff = section.lines().any(|l| {
+        l.starts_with("diff --git")
+            || l.starts_with("--- ")
+            || l.starts_with("+++ ")
+            || l.starts_with("@@")
+    });
+    if !looks_like_diff {
+        return None;
+    }
+    let mut adds = 0usize;
+    let mut dels = 0usize;
+    for line in section.lines() {
+        if line.starts_with('+') && !line.starts_with("+++") {
+            adds += 1;
+        } else if line.starts_with('-') && !line.starts_with("---") {
+            dels += 1;
+        }
+    }
+    Some((adds, dels))
+}
+
+/// Extract the file path from a unified diff section, preferring the new
+/// (b/) side and skipping `/dev/null` placeholders.
+fn diff_section_file_path(section: &str) -> Option<String> {
+    // `diff --git a/foo b/foo` header (paths may be quoted when spaced).
+    for line in section.lines() {
+        if let Some(rest) = line.strip_prefix("diff --git ") {
+            for token in rest.split_whitespace() {
+                let token = token.trim_matches('"');
+                if let Some(path) = token.strip_prefix("b/") {
+                    return Some(path.to_string());
+                }
+            }
+            for token in rest.split_whitespace() {
+                let token = token.trim_matches('"');
+                if let Some(path) = token.strip_prefix("a/") {
+                    return Some(path.to_string());
+                }
+            }
+        }
+    }
+    // `+++ b/foo` / `--- a/foo` headers.
+    for line in section.lines() {
+        if let Some(path) = line.strip_prefix("+++ ").map(str::trim)
+            && path != "/dev/null"
+            && !path.is_empty()
+        {
+            return Some(path.strip_prefix("b/").unwrap_or(path).to_string());
+        }
+    }
+    for line in section.lines() {
+        if let Some(path) = line.strip_prefix("--- ").map(str::trim)
+            && path != "/dev/null"
+            && !path.is_empty()
+        {
+            return Some(path.strip_prefix("a/").unwrap_or(path).to_string());
+        }
+    }
+    None
+}
+
+/// Infer the operation label for a diff section from its `---`/`+++`
+/// headers: Write for new files, Delete for removed files, Edit otherwise.
+fn diff_section_operation(section: &str) -> &'static str {
+    let mut has_old = false;
+    let mut has_new = false;
+    for line in section.lines() {
+        if let Some(path) = line.strip_prefix("--- ").map(str::trim)
+            && path != "/dev/null"
+            && !path.is_empty()
+        {
+            has_old = true;
+        } else if let Some(path) = line.strip_prefix("+++ ").map(str::trim)
+            && path != "/dev/null"
+            && !path.is_empty()
+        {
+            has_new = true;
+        }
+    }
+    match (has_old, has_new) {
+        (false, true) => "Write",
+        (true, false) => "Delete",
+        _ => "Edit",
+    }
+}
+
 /// Count lines in a partial JSON string field (works on incomplete JSON during streaming).
 ///
 /// Searches for `"field":` and reads the string value, counting both JSON `\n` escapes
@@ -1117,6 +1439,7 @@ mod tests {
             hovered_inline_subagent: None,
             thinking_collapsed_overrides: &empty_set,
             default_collapse_thinking: false,
+            default_collapse_diffs: false,
             message_app_data: None,
         };
         // Normal read output (no instruction files)
@@ -1208,5 +1531,150 @@ mod tests {
     #[test]
     fn partial_patch_file_paths_ignores_non_patch_arguments() {
         assert!(partial_patch_file_paths(r#"{"file_path":"src/main.rs"#).is_empty());
+    }
+
+    #[test]
+    fn diff_summary_counts_added_and_deleted_lines() {
+        let diff = "--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,5 +1,6 @@\n fn main() {\n-old line\n+new line 1\n+new line 2\n }\n";
+        assert_eq!(count_diff_section_lines(diff), Some((2, 1)));
+        assert_eq!(diff_section_file_path(diff).as_deref(), Some("src/main.rs"));
+        assert_eq!(diff_section_operation(diff), "Edit");
+    }
+
+    #[test]
+    fn diff_summary_new_and_deleted_files() {
+        let new_file = "--- \n+++ b/src/new.rs\n@@ -0,0 +1,2 @@\n+a\n+b\n";
+        assert_eq!(count_diff_section_lines(new_file), Some((2, 0)));
+        assert_eq!(
+            diff_section_file_path(new_file).as_deref(),
+            Some("src/new.rs")
+        );
+        assert_eq!(diff_section_operation(new_file), "Write");
+
+        let deleted = "--- a/src/old.rs\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-gone\n";
+        assert_eq!(count_diff_section_lines(deleted), Some((0, 1)));
+        assert_eq!(
+            diff_section_file_path(deleted).as_deref(),
+            Some("src/old.rs")
+        );
+        assert_eq!(diff_section_operation(deleted), "Delete");
+    }
+
+    #[test]
+    fn diff_summary_truncated_diff_falls_back_to_prefix_scan() {
+        // Incomplete hunk: diffy parsing fails, the prefix scan must still
+        // produce counts for the lines that are present.
+        let truncated =
+            "--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,3 +1,3 @@\n fn main() {\n-old\n+new\n";
+        assert_eq!(count_diff_section_lines(truncated), Some((1, 1)));
+    }
+
+    #[test]
+    fn diff_summary_rejects_non_diff_text() {
+        assert_eq!(
+            count_diff_section_lines("Success. Updated the following files:\nA src/x\n"),
+            None
+        );
+        assert_eq!(
+            diff_section_file_path("Success. Updated the following files:\nA src/x\n"),
+            None
+        );
+    }
+
+    #[test]
+    fn collapsed_write_diff_renders_single_summary_line() {
+        let tool_call = ToolCall {
+            id: "call_1".into(),
+            name: "write".into(),
+            arguments: r#"{"file_path": "src/main.rs", "content": "let x = 1;\nlet y = 2;\n"}"#
+                .into(),
+            thought_signature: None,
+        };
+        // write = new file: empty original header, all lines added.
+        let mut result = ToolExecutionResult::new("Write src/main.rs");
+        result.metadata.diff =
+            Some("--- \n+++ b/src/main.rs\n@@ -0,0 +1,2 @@\n+let x = 1;\n+let y = 2;\n".into());
+        let result_msg = Message::tool_result("call_1", "write", result);
+
+        let palette = test_palette();
+        let empty_set = HashSet::new();
+        let ctx = RenderContext {
+            palette,
+            spinner: ".",
+            workspace_root: Path::new("/test"),
+            expanded_tool_results: &empty_set,
+            hovered_card: None,
+            model_display_name: "test",
+            running_subagents: &[],
+            hovered_inline_subagent: None,
+            thinking_collapsed_overrides: &empty_set,
+            default_collapse_thinking: false,
+            default_collapse_diffs: true,
+            message_app_data: None,
+        };
+
+        let (lines, _regions) =
+            render_tool_call_with_result(&tool_call, Some(&result_msg), 80, false, &ctx, false);
+
+        let rendered: String = lines
+            .iter()
+            .flat_map(|l| l.line.spans.iter().map(|s| s.content.as_ref()))
+            .collect();
+
+        assert_eq!(lines.len(), 1, "collapsed card should be a single line");
+        assert!(rendered.contains("Write"), "should contain Write label");
+        assert!(rendered.contains("src/main.rs"), "should contain the path");
+        assert!(rendered.contains("+2"), "should show added line count");
+        assert!(rendered.contains("▶"), "should show fold indicator");
+        assert!(
+            !rendered.contains("let x"),
+            "diff body must not leak into the summary"
+        );
+    }
+
+    #[test]
+    fn expanded_diff_card_shows_fold_indicator_on_title() {
+        let tool_call = ToolCall {
+            id: "call_1".into(),
+            name: "edit".into(),
+            arguments: r#"{"file_path": "src/main.rs", "old_string": "a", "new_string": "b"}"#
+                .into(),
+            thought_signature: None,
+        };
+        let mut result = ToolExecutionResult::new("Edit src/main.rs");
+        result.metadata.diff =
+            Some("--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,1 +1,2 @@\n-a\n+b\n+c\n".into());
+        let result_msg = Message::tool_result("call_1", "edit", result);
+
+        let palette = test_palette();
+        let empty_set = HashSet::new();
+        let ctx = RenderContext {
+            palette,
+            spinner: ".",
+            workspace_root: Path::new("/test"),
+            expanded_tool_results: &empty_set,
+            hovered_card: None,
+            model_display_name: "test",
+            running_subagents: &[],
+            hovered_inline_subagent: None,
+            thinking_collapsed_overrides: &empty_set,
+            default_collapse_thinking: false,
+            default_collapse_diffs: false,
+            message_app_data: None,
+        };
+
+        let (lines, _regions) =
+            render_tool_call_with_result(&tool_call, Some(&result_msg), 80, false, &ctx, false);
+
+        let rendered: String = lines
+            .iter()
+            .flat_map(|l| l.line.spans.iter().map(|s| s.content.as_ref()))
+            .collect();
+
+        assert!(rendered.contains("▼"), "expanded title should show ▼");
+        assert!(
+            rendered.contains("- a") && rendered.contains("+ b"),
+            "full diff should still render when expanded"
+        );
     }
 }

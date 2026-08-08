@@ -403,9 +403,13 @@ fn render_block_from_cache(
                             Some("read" | "grep" | "glob" | "skill" | "question" | "todowrite") => {
                                 false
                             }
+                            // write/edit/apply_patch: foldable whenever a diff
+                            // is available (summary vs full diff). Without a
+                            // diff they fall through to the preview renderer,
+                            // which is expandable past the preview threshold.
                             Some("write" | "edit" | "apply_patch") => {
-                                m.metadata.diff.is_none()
-                                    && m.content.lines().count() > tool::TOOL_OUTPUT_PREVIEW_LINES
+                                tool::tool_result_has_diff(m)
+                                    || m.content.lines().count() > tool::TOOL_OUTPUT_PREVIEW_LINES
                             }
                             _ => m.content.lines().count() > tool::TOOL_OUTPUT_PREVIEW_LINES,
                         }

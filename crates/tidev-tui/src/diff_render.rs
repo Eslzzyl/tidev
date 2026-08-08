@@ -89,7 +89,10 @@ pub(crate) fn render_unified_diff_text(
     rendered_any.then_some((out, regions))
 }
 
-fn split_diff_sections(text: &str) -> Vec<String> {
+/// Split a unified diff into per-file sections on `diff --git ` markers.
+/// A text without such markers is returned as a single section, so callers
+/// can treat every section uniformly (one file each).
+pub(crate) fn split_diff_sections(text: &str) -> Vec<String> {
     let mut sections = Vec::new();
     let mut current = String::new();
 

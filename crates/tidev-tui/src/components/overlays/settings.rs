@@ -46,6 +46,7 @@ pub(crate) enum SettingKey {
     AllowOutsideWorkspaceAccess,
     SubagentEnabled,
     CollapseThinking,
+    CollapseDiffs,
 }
 
 #[derive(Clone, Debug)]
@@ -165,6 +166,15 @@ impl SettingsPanel {
                     .to_string(),
                 setting_type: SettingType::Toggle(config.ui.collapse_thinking),
                 key: SettingKey::CollapseThinking,
+                disabled: false,
+            },
+            SettingItem {
+                name: "Collapse Diffs".to_string(),
+                description: "Collapse edit/write/apply_patch diffs to per-file +N/-M \
+                              summaries by default. Click a card to toggle."
+                    .to_string(),
+                setting_type: SettingType::Toggle(config.ui.collapse_diffs),
+                key: SettingKey::CollapseDiffs,
                 disabled: false,
             },
         ];
@@ -296,6 +306,11 @@ impl SettingsPanel {
                 SettingKey::CollapseThinking => {
                     if let SettingType::Toggle(val) = item.setting_type {
                         config.ui.collapse_thinking = val;
+                    }
+                }
+                SettingKey::CollapseDiffs => {
+                    if let SettingType::Toggle(val) = item.setting_type {
+                        config.ui.collapse_diffs = val;
                     }
                 }
             }

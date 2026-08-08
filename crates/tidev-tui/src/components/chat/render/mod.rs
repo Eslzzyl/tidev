@@ -58,6 +58,10 @@ pub(crate) struct RenderContext<'a> {
     pub thinking_collapsed_overrides: &'a HashSet<Uuid>,
     /// Default collapse state for thinking content (from config).
     pub default_collapse_thinking: bool,
+    /// Default collapse state for edit/write/apply_patch diffs (from config).
+    /// A diff card's effective state is `default XOR toggled`, where
+    /// membership in `expanded_tool_results` marks a card the user toggled.
+    pub default_collapse_diffs: bool,
     pub message_app_data: Option<&'a HashMap<Uuid, tidev_core::MessageAppData>>,
 }
 
@@ -104,6 +108,7 @@ pub(crate) fn render_messages(
     retrying_hint: &Option<(Uuid, u32, u32, String, Instant)>,
     thinking_collapsed_overrides: &HashSet<Uuid>,
     default_collapse_thinking: bool,
+    default_collapse_diffs: bool,
     out_card_bounds: &mut Vec<(Uuid, usize, usize)>,
     out_selectable_regions: &mut Vec<SelectableRegionRange>,
     out_inline_running_card_ranges: &mut Vec<InlineRunningCardRange>,
@@ -131,6 +136,7 @@ pub(crate) fn render_messages(
         hovered_inline_subagent,
         thinking_collapsed_overrides,
         default_collapse_thinking,
+        default_collapse_diffs,
         message_app_data: Some(&chat_context.message_app_data),
     };
 
@@ -265,6 +271,7 @@ mod tests {
             hovered_inline_subagent: None,
             thinking_collapsed_overrides: collapsed,
             default_collapse_thinking: false,
+            default_collapse_diffs: false,
             message_app_data: None,
         }
     }

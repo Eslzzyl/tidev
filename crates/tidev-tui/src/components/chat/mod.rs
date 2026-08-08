@@ -1344,6 +1344,7 @@ impl Component for MessageList {
             &self.retrying_hint,
             &self.thinking_collapsed_overrides,
             ctx.collapse_thinking,
+            ctx.collapse_diffs,
             &mut self.card_bounds,
             &mut self.selectable_regions,
             &mut inline_running_card_ranges,

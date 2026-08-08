@@ -338,6 +338,10 @@ pub struct UiConfig {
     pub tab_width: usize,
     #[serde(default)]
     pub collapse_thinking: bool,
+    /// Collapse edit/write/apply_patch diffs to per-file +N/-M summaries by
+    /// default. Click a tool card to toggle the fold state.
+    #[serde(default)]
+    pub collapse_diffs: bool,
 }
 
 fn default_scroll_speed() -> f32 {
@@ -357,6 +361,7 @@ impl Default for UiConfig {
             external_editor: None,
             tab_width: 4,
             collapse_thinking: false,
+            collapse_diffs: false,
         }
     }
 }
