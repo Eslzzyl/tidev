@@ -707,6 +707,7 @@ mod tests {
             session_id: sid(),
             message: Box::new(msg),
             app_data: Box::new(tidev_core::MessageAppData::default()),
+            queued: false,
         });
         assert_eq!(notifs.len(), 1);
         match &notifs[0].update {

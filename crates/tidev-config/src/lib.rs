@@ -325,6 +325,30 @@ impl Default for LogConfig {
 // UiConfig
 // ---------------------------------------------------------------------------
 
+/// What to do with a user message submitted while the session's agent loop
+/// is busy (the model is still executing a turn).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SendWhileBusy {
+    /// Wait until the current turn (all requests and tool calls) finishes,
+    /// then send the message as the start of a new turn.
+    #[default]
+    Queue,
+    /// Persist the message immediately and insert it into the running turn
+    /// at the next request boundary, without interrupting the in-flight
+    /// model stream.
+    Steer,
+}
+
+impl SendWhileBusy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Queue => "queue",
+            Self::Steer => "steer",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct UiConfig {
     pub sidebar_width: u16,
@@ -342,6 +366,10 @@ pub struct UiConfig {
     /// default. Click a tool card to toggle the fold state.
     #[serde(default)]
     pub collapse_diffs: bool,
+    /// How to handle a user message submitted while the session's agent
+    /// loop is busy. See [`SendWhileBusy`].
+    #[serde(default)]
+    pub send_while_busy: SendWhileBusy,
 }
 
 fn default_scroll_speed() -> f32 {
@@ -362,6 +390,7 @@ impl Default for UiConfig {
             tab_width: 4,
             collapse_thinking: false,
             collapse_diffs: false,
+            send_while_busy: SendWhileBusy::Queue,
         }
     }
 }
@@ -966,5 +995,39 @@ enabled = true
         assert!(keys.contains("ui"));
         assert!(keys.contains("agent"));
         assert!(!keys.contains("logging"));
+    }
+
+    #[test]
+    fn send_while_busy_defaults_to_queue() {
+        let config = AppConfig::default();
+        assert_eq!(config.ui.send_while_busy, SendWhileBusy::Queue);
+        assert_eq!(config.ui.send_while_busy.as_str(), "queue");
+    }
+
+    #[test]
+    fn send_while_busy_parses_lowercase_values() {
+        let base = r#"
+default_provider = "openai"
+default_model = "gpt-4o-mini"
+[ui]
+sidebar_width = 40
+welcome_width = 90
+max_input_lines = 6
+"#;
+        let config: AppConfig = toml::from_str(&format!("{base}send_while_busy = \"steer\"\n"))
+            .expect("config with steer should parse");
+        assert_eq!(config.ui.send_while_busy, SendWhileBusy::Steer);
+
+        let config: AppConfig = toml::from_str(&format!("{base}send_while_busy = \"queue\"\n"))
+            .expect("config with queue should parse");
+        assert_eq!(config.ui.send_while_busy, SendWhileBusy::Queue);
+    }
+
+    #[test]
+    fn send_while_busy_serializes_round_trip() {
+        let config = AppConfig::default();
+        let serialized = toml::to_string(&config).expect("config should serialize");
+        let parsed: AppConfig = toml::from_str(&serialized).expect("config should round-trip");
+        assert_eq!(parsed.ui.send_while_busy, SendWhileBusy::Queue);
     }
 }

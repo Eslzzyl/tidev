@@ -4,7 +4,7 @@
 //! `TIDEV_MCP_COMMAND` to connect an optional stdio MCP server; its discovered
 //! tools are registered beside the built-in echo tool.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 use std::env;
 use std::sync::{Arc, Mutex};
 
@@ -203,11 +203,11 @@ async fn main() -> Result<()> {
     }
 
     if env::var("TIDEV_RUN").as_deref() == Ok("1") {
-        let queue = Arc::new(Mutex::new(VecDeque::new()));
+        let steer_signal = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let run = runtime.run(
             "You are a concise tool-using assistant.".into(),
             ThinkingLevelType::None,
-            queue,
+            steer_signal,
         );
         tokio::pin!(run);
         loop {

@@ -19,7 +19,7 @@ use tidev_config::ThemeCatalog;
 use tidev_core::Mode as SessionMode;
 use tidev_core::{ApprovedTool, ToolCallWithViolations};
 use tidev_core::{BackendEvent, TuiResponse};
-use tidev_llm::message::{COMPACTION_MESSAGE_LABEL, Message, MessageAttachment, MessageRole};
+use tidev_llm::message::{COMPACTION_MESSAGE_LABEL, Message, MessageRole};
 use tidev_llm::reasoning::ThinkingLevelType;
 use tidev_tools::types::TodoItem;
 use uuid::Uuid;
@@ -149,8 +149,10 @@ pub struct App {
     /// Abort confirmation deadline (set on first Esc press, consumed on second).
     abort_confirmation_deadline: Option<Instant>,
 
-    /// Queue of prompts waiting to be sent (when a request is already in progress).
-    pending_prompt_queue: Vec<QueuedPrompt>,
+    /// User messages submitted while their session was busy (queued or
+    /// steered). Shown as a pending preview above the composer until the
+    /// next TurnStarting event commits them into the visible history.
+    pending_inputs: Vec<PendingInput>,
 
     /// Cached bounds for queued prompt card mouse hit-testing.
     queued_card_bounds: Vec<(usize, Rect)>,
@@ -183,14 +185,23 @@ pub struct App {
     image_picker: Option<Picker>,
 }
 
-/// A prompt queued for submission when the current request finishes.
+/// A user message submitted while its session was busy.
+///
+/// The core decides delivery from the `send_while_busy` config: queued
+/// messages wait for the current turn to finish, steering messages are
+/// inserted at the next request boundary. Either way the TUI shows the
+/// message as a pending preview until the next `TurnStarting` event
+/// commits it into the visible history.
 #[derive(Clone, Debug)]
-struct QueuedPrompt {
-    prompt: String,
-    attachments: Vec<MessageAttachment>,
+pub(crate) struct PendingInput {
     session_id: Uuid,
+    message: Message,
+    app_data: tidev_core::MessageAppData,
+    /// True for steering messages (next request boundary); false for
+    /// queued messages (next turn).
+    steered: bool,
+    /// Session mode the message was submitted under (from app data).
     mode: SessionMode,
-    thinking_level: ThinkingLevelType,
 }
 
 impl App {
@@ -241,7 +252,7 @@ impl App {
             context_usage_cache: HashMap::new(),
             toast: None,
             abort_confirmation_deadline: None,
-            pending_prompt_queue: Vec::new(),
+            pending_inputs: Vec::new(),
             queued_card_bounds: Vec::new(),
             hovered_queued_index: None,
             pending_compacts: HashSet::new(),
@@ -447,8 +458,8 @@ impl App {
             self.pending_modes.remove(&sid);
         }
 
-        // Clear queued prompts (all — they were for the user's current intent).
-        self.pending_prompt_queue.clear();
+        // Clear pending inputs (all — they were for the user's current intent).
+        self.pending_inputs.clear();
 
         // Reset abort state.
         self.abort_confirmation_deadline = None;
@@ -456,43 +467,45 @@ impl App {
         self.set_notice("Request cancelled");
     }
 
-    pub(crate) fn has_pending_prompts(&self) -> bool {
-        !self.pending_prompt_queue.is_empty()
+    /// Record a user message submitted while its session was busy. The
+    /// message is shown as a pending preview until the next `TurnStarting`
+    /// event commits it into the visible history.
+    pub(crate) fn add_pending_input(
+        &mut self,
+        session_id: Uuid,
+        message: Message,
+        app_data: tidev_core::MessageAppData,
+        steered: bool,
+    ) {
+        let mode = app_data
+            .mode
+            .as_deref()
+            .and_then(|m| m.parse::<SessionMode>().ok())
+            .unwrap_or(SessionMode::Build);
+        self.pending_inputs.push(PendingInput {
+            session_id,
+            message,
+            app_data,
+            steered,
+            mode,
+        });
     }
 
-    /// Submit queued prompts now that their session's request has finished.
-    ///
-    /// Only submits prompts for sessions that are not currently busy.
-    /// Other sessions' prompts remain queued.
-    pub(crate) fn flush_pending_prompt_queue(&mut self) {
+    /// Take the pending inputs for a session, in submission order. Called
+    /// on `TurnStarting` — the session's next request is about to sample,
+    /// so the messages are now part of the conversation and must be
+    /// committed into the visible history.
+    pub(crate) fn take_pending_inputs(&mut self, session_id: Uuid) -> Vec<PendingInput> {
+        let mut taken = Vec::new();
         let mut i = 0;
-        while i < self.pending_prompt_queue.len() {
-            let session_id = self.pending_prompt_queue[i].session_id;
-            if self.runtime.is_session_busy(session_id) {
+        while i < self.pending_inputs.len() {
+            if self.pending_inputs[i].session_id == session_id {
+                taken.push(self.pending_inputs.remove(i));
+            } else {
                 i += 1;
-                continue;
             }
-            let queued = self.pending_prompt_queue.remove(i);
-            let text = queued.prompt;
-            let attachments = queued.attachments;
-            let mode = queued.mode;
-            let thinking_level = queued.thinking_level;
-            let rt = self.runtime.clone();
-            tokio::spawn(async move {
-                if let Err(e) = rt
-                    .submit_prompt_with_attachments(
-                        session_id,
-                        mode,
-                        text,
-                        attachments,
-                        Some(thinking_level),
-                    )
-                    .await
-                {
-                    log::error!("flush queued prompt failed: {e}");
-                }
-            });
         }
+        taken
     }
 
     /// Start compaction immediately (push streaming message, spawn task).

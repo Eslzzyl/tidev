@@ -265,14 +265,6 @@ impl Tui {
                 }
             }
 
-            // ── Phase 2.5: Fallback flush for pending prompts ─────────
-            //
-            // Per-frame: flush queued prompts for any session whose loop
-            // has finished since the last frame.
-            if app.has_pending_prompts() {
-                app.flush_pending_prompt_queue();
-            }
-
             // ── Phase 2.6: Refresh active-session list for the UI ──────
             let active = app.runtime.active_sessions();
             app.set_active_sessions(active);

@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -288,7 +288,7 @@ async fn independent_consumer_runs_full_loop_against_scripted_provider() -> Resu
         .run(
             "You are a test assistant.".into(),
             ThinkingLevelType::None,
-            Arc::new(Mutex::new(VecDeque::new())),
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
         )
         .await?;
 
@@ -339,7 +339,7 @@ async fn independent_consumer_runs_full_loop_against_scripted_provider() -> Resu
         .run(
             "You are a test assistant.".into(),
             ThinkingLevelType::None,
-            Arc::new(Mutex::new(VecDeque::new())),
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
         )
         .await?;
     assert_eq!(reloaded.stored_messages().len(), 7);
@@ -672,5 +672,101 @@ async fn independent_consumer_connects_legacy_sse_and_calls_discovered_tool() ->
     assert_eq!(requests[1]["method"], "notifications/initialized");
     assert_eq!(requests[2]["method"], "tools/list");
     assert_eq!(requests[3]["method"], "tools/call");
+    Ok(())
+}
+
+/// A scripted provider that serves: tool call → final response → final response.
+async fn steer_provider(listener: TcpListener) -> Result<Vec<Vec<u8>>> {
+    let mut requests = Vec::new();
+    for response in [tool_call_response(), final_response(), final_response()] {
+        let (mut stream, _) = listener.accept().await?;
+        let body = read_http_request(&mut stream).await?;
+        requests.push(body);
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            response.len(),
+            response
+        );
+        stream.write_all(response.as_bytes()).await?;
+    }
+    Ok(requests)
+}
+
+/// Setting the steering signal while the loop is running must keep the loop
+/// alive after the model stops responding, so the next iteration picks up
+/// the persisted steer message.
+#[tokio::test]
+async fn steer_signal_keeps_loop_alive_for_next_turn() -> Result<()> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
+    let base_url = format!("http://{}/v1", listener.local_addr()?);
+    let provider = tokio::spawn(steer_provider(listener));
+
+    let session_id = Uuid::from_u128(0x21);
+    let store = Arc::new(RecordingStore {
+        messages: Mutex::new(vec![Message::new(MessageRole::User, "Please use echo.")]),
+        saves: Mutex::new(Vec::new()),
+    });
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+    let steer_signal = Arc::new(AtomicBool::new(false));
+    let runtime = AgentRuntime::new(
+        session_id,
+        LlmClient::new(false, 0, false, 0)?,
+        provider_config(base_url),
+        Arc::new({
+            let mut registry = ToolRegistry::new(64 * 1024);
+            registry.register(EchoTool);
+            registry
+        }),
+        ContextManager::new(),
+        store.messages.lock().unwrap().clone(),
+        store.clone(),
+        PathBuf::from("/tmp/tidev-agent-fixture"),
+        event_tx,
+        CancellationToken::new(),
+    );
+
+    let run_task = tokio::spawn({
+        let steer_signal = steer_signal.clone();
+        async move {
+            runtime
+                .run(
+                    "You are a test assistant.".into(),
+                    ThinkingLevelType::None,
+                    steer_signal,
+                )
+                .await
+        }
+    });
+
+    // Wait for the first tool execution, then steer a message in: the
+    // model's second response (no tool calls) must keep the loop alive.
+    loop {
+        match event_rx.recv().await {
+            Some(AgentEvent::ToolCompleted { .. }) => break,
+            Some(_) => continue,
+            None => anyhow::bail!("event channel closed before tool completion"),
+        }
+    }
+    steer_signal.store(true, Ordering::SeqCst);
+
+    run_task.await??;
+
+    // Three requests: tool call, final response (steer keeps the loop
+    // alive), and the follow-up request for the steered message.
+    let requests = provider.await??;
+    assert_eq!(requests.len(), 3, "steer must trigger a follow-up request");
+
+    // The follow-up request must carry the tool result from the previous
+    // turn (the persisted history is replayed verbatim).
+    let third: serde_json::Value = serde_json::from_slice(&requests[2])?;
+    let messages = third["messages"].as_array().unwrap();
+    assert!(
+        messages.iter().any(|m| m["content"]
+            .as_str()
+            .is_some_and(|c| c.contains("hello from scripted provider"))),
+        "follow-up request must include the persisted tool result"
+    );
     Ok(())
 }

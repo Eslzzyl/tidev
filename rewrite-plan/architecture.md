@@ -193,6 +193,42 @@ session 和自己的消息 buffer，并通过 core 的 BackendEvent 通道向前
 
 已经发送到前端的内容不回滚；取消结果仍按原始 tool call 顺序持久化。
 
+## 忙时消息调度（排队 / 引导）
+
+术语：一轮（turn）指 run_agent_loop 的完整生命周期——从用户消息落库到
+模型停止响应，可能包含多次请求和工具执行；一次请求（request）指 loop
+的一次迭代（一次 stream_turn）。tidev 代码里 "turn" 一词用于指代一次
+请求（stream_turn、AssistantTurn、TurnStarting{request_id}），讨论调度
+语义时以"轮/请求"区分。
+
+用户消息提交时若会话忙（agent loop 运行中），由 `Runtime` 按
+`config.ui.send_while_busy` 决定调度，前端不参与：
+
+- **排队（queue，默认）**：消息内容进入 `pending_prompts` 队列（不写入
+  buffer/DB，也不进任何请求）；当前一轮不续命、自然结束；loop 退出后
+  host 把队列条目持久化并继续下一轮。插入点 = 一轮结束后。
+- **引导（steer）**：消息立即持久化到 buffer/DB（内容追加
+  `<system-reminder>` 后缀，见 `prompts::steer_reminder`），并置位该
+  session 的 `steer_signals`；loop 在一轮终点（无工具调用分支）消费信号
+  续命，下一轮 `load_messages` 原样包含新消息。插入点 = 一次请求后，
+  不截断在途模型流。工具执行期间提交的引导消息在工具结果后的下一轮
+  请求生效。
+
+调度状态全部在 core：`pending_prompts`（内容队列）、`steer_signals`
+（续命信号，SessionLoopGuard drop 时清理）、`start_agent_loop` 的
+spawn 外层循环（一轮结束后持久化排队条目并继续）。TUI 只负责展示：
+`UserMessageCreated{queued:true}` 的消息显示在输入框上方的 pending
+预览区，`TurnStarting` 时按序提交进对话历史。
+
+取消语义：排队条目随 `cancel`/`cancel_session` 丢弃（与旧 TUI 行为
+一致）；引导消息已持久化，不可撤回。
+
+字节不变性：排队消息在进入 buffer 前不参与任何请求，进入后字节原样；
+引导消息提交即入库、重放原样；两者都不改变历史前缀的请求字节。引导
+消息的 system-reminder 在持久化时写入消息文本（后缀），与 mode
+reminder 的前缀注入（inject_mode_reminder_impl）互不干扰；TUI 渲染
+时经 strip_system_reminder_tags 剥离。
+
 ## 实施状态和验收
 
 已完成：

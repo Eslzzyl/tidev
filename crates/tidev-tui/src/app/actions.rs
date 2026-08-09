@@ -628,7 +628,7 @@ impl App {
                     self.active_approval_session = None;
                     self.abort_confirmation_deadline = None;
                     self.context_usage = None;
-                    self.pending_prompt_queue.clear();
+                    self.pending_inputs.clear();
                     self.pending_compacts.clear();
                     self.compacting_sessions.clear();
                     self.shown_instruction_sources.clear();
@@ -677,25 +677,11 @@ impl App {
                             // composer spans).
                             final_attachments.extend(attachments);
 
-                            // If there's already an active request, queue the prompt.
-                            if self.has_active_request() {
-                                let sid = self.current_session_id.unwrap_or(uuid::Uuid::nil());
-                                let queued_mode =
-                                    self.pending_modes.get(&sid).copied().unwrap_or(self.mode);
-                                self.pending_prompt_queue.push(QueuedPrompt {
-                                    prompt: text.clone(),
-                                    attachments: final_attachments.clone(),
-                                    session_id: sid,
-                                    mode: queued_mode,
-                                    thinking_level: self.thinking_level.clone(),
-                                });
-                                let queued_count = self.pending_prompt_queue.len();
-                                self.set_notice(format!(
-                                    "Prompt queued ({} pending)",
-                                    queued_count
-                                ));
-                                return;
-                            }
+                            // The runtime decides delivery: when the session's
+                            // agent loop is busy, the `send_while_busy` config
+                            // determines whether the message is queued (next
+                            // turn) or steered (next request boundary). No
+                            // TUI-side queue is involved.
 
                             // If no active session, create one and enter Chat mode.
                             let session_id = self.current_session_id;

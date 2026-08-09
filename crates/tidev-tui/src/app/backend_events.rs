@@ -1,6 +1,7 @@
 use super::*;
 
 use chrono::Utc;
+use std::collections::HashSet;
 use tidev_core::BackendEvent;
 use uuid::Uuid;
 
@@ -156,8 +157,19 @@ impl App {
                 session_id,
                 message,
                 app_data,
+                queued,
             } => {
-                if let Some(ref mut chat) = self.message_list {
+                if queued {
+                    // Submitted while the session was busy (queued or
+                    // steered). The message is not yet part of any request —
+                    // show it as a pending preview above the composer until
+                    // the next TurnStarting commits it into history.
+                    // The delivery mode is derived from the runtime config
+                    // that the submission was made under.
+                    let steered = self.runtime.config().ui.send_while_busy
+                        == tidev_config::SendWhileBusy::Steer;
+                    self.add_pending_input(session_id, *message, *app_data, steered);
+                } else if let Some(ref mut chat) = self.message_list {
                     if let Some(ref mut ctx) = chat.active_chat_context_mut()
                         && ctx.session_id == session_id
                     {
@@ -235,19 +247,55 @@ impl App {
                     self.todos = todos;
                 }
             }
-            BackendEvent::StreamEnd { session_id, .. } => {
-                // Flush queued prompts for sessions that are no longer busy.
-                self.flush_pending_prompt_queue();
-
-                // If a compact was queued and no request is active, run it now.
-                if self.pending_compacts.remove(&session_id) && !self.has_active_request() {
-                    self.execute_compact();
+            BackendEvent::TurnStarting { session_id, .. } => {
+                // Commit queued/steered user messages into the visible
+                // history. This request's assistant placeholder was already
+                // pushed by the chat component's own TurnStarting handling,
+                // so insert the pending messages before it.
+                let is_active = self
+                    .message_list
+                    .as_ref()
+                    .and_then(|c| c.active_chat_context())
+                    .is_some_and(|ctx| ctx.session_id == session_id);
+                if is_active {
+                    let pending = self.take_pending_inputs(session_id);
+                    if !pending.is_empty()
+                        && let Some(ref mut chat) = self.message_list
+                        && let Some(ref mut ctx) = chat.active_chat_context_mut()
+                        && ctx.session_id == session_id
+                    {
+                        let existing: HashSet<Uuid> = ctx.messages.iter().map(|m| m.id).collect();
+                        let mut insert_at = ctx
+                            .messages
+                            .iter()
+                            .rposition(|m| m.streaming)
+                            .unwrap_or(ctx.messages.len());
+                        for p in pending {
+                            // Skip messages already present (e.g. loaded from
+                            // the store after a session switch).
+                            if existing.contains(&p.message.id) {
+                                continue;
+                            }
+                            let message_id = p.message.id;
+                            ctx.messages.insert(insert_at, p.message);
+                            ctx.message_app_data.insert(message_id, p.app_data);
+                            insert_at += 1;
+                        }
+                        chat.invalidate_layout();
+                    }
                 }
             }
+            BackendEvent::StreamEnd { session_id, .. }
+                if self.pending_compacts.remove(&session_id) && !self.has_active_request() =>
+            {
+                // If a compact was queued and no request is active, run it now.
+                self.execute_compact();
+            }
+            BackendEvent::StreamEnd { .. } => {}
             _ => {
                 // Events already forwarded to MessageList above:
                 //   Delta, ReasoningDelta, ToolCallUpdated, Finished, ToolCompleted,
-                //   SubagentStatus, TurnStarting, SidebarSnapshotReady,
+                //   SubagentStatus, SidebarSnapshotReady,
                 //   ShellOutput, ContextCompacted
             }
         }

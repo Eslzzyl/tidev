@@ -500,10 +500,8 @@ mod tests {
     #[test]
     fn render_messages_marks_wrapped_assistant_links_in_the_actual_frame() {
         let palette = test_palette();
-        let expanded = HashSet::new();
         let subagents = Vec::new();
-        let collapsed = HashSet::new();
-        let ctx = test_render_ctx(&palette, &expanded, &subagents, &collapsed);
+        let collapsed: HashSet<Uuid> = HashSet::new();
         let destination = "https://example.com/very/long/path/that/wraps";
         let mut message = assistant_msg("", &format!("See [label]({destination})"), 3);
         message.model_id = Some("test-model".into());

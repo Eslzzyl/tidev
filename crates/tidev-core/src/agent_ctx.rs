@@ -1525,8 +1525,8 @@ async fn execute_task_tool(
         event_tx: child_ctx.event_tx(),
         cancel: config.cancel_token.clone(),
         // Subagents run in isolation — they don't process main-session
-        // user messages, so give them a fresh empty queue.
-        queued_messages: Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
+        // user messages, so the steering signal never fires.
+        steer_signal: Arc::new(std::sync::atomic::AtomicBool::new(false)),
     };
 
     // 8. Run the inner loop.

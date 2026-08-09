@@ -292,6 +292,7 @@ mod tests {
     fn theme_color_rejects_bad_hex() {
         #[derive(Deserialize)]
         struct Wrapper {
+            #[allow(dead_code)]
             color: ThemeColor,
         }
         for value in [

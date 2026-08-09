@@ -20,6 +20,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock, RwLock as StdRwLock};
 use std::time::{Duration, Instant};
 
@@ -32,8 +33,8 @@ use uuid::Uuid;
 
 use crate::mode::Mode;
 use tidev_config::auth::ActiveModel;
-use tidev_config::{AppConfig, AuthStore, paths::ConfigPaths};
-use tidev_llm::message::{Message, MessageAttachment, MessageRole, QueuedUserMessage};
+use tidev_config::{AppConfig, AuthStore, SendWhileBusy, paths::ConfigPaths};
+use tidev_llm::message::{Message, MessageAttachment, MessageRole};
 use tidev_llm::reasoning::ThinkingLevelType;
 use tidev_search::FileSearchIndex;
 use tidev_storage::{MessageAppData, SessionStore};
@@ -127,11 +128,20 @@ pub struct Runtime {
     /// Set of session IDs with active agent loops.
     busy_sessions: Arc<std::sync::Mutex<HashSet<Uuid>>>,
 
-    /// Per-session queues of user messages waiting to be picked up by
-    /// the agent loop. Populated when the loop is running; drained by
-    /// the agent loop one-at-a-time so each queued message triggers a
-    /// new LLM turn.
-    queued_messages: Arc<std::sync::Mutex<HashMap<Uuid, VecDeque<QueuedUserMessage>>>>,
+    /// Per-session queues of user messages submitted while the session's
+    /// agent loop was busy.
+    ///
+    /// Steering entries are persisted to the message buffer immediately by
+    /// `submit_prompt_with_attachments` and only serve as a keep-alive
+    /// signal for the running loop (see `steer_signals`). Queueing entries
+    /// are drained by the host after the loop exits, persisted, and start
+    /// the next turn.
+    pending_prompts: Arc<std::sync::Mutex<HashMap<Uuid, VecDeque<PendingPrompt>>>>,
+    /// Per-session steering signals. Set when a steering message is
+    /// submitted while the loop is running; consumed by the loop at the
+    /// end of a turn without tool calls so it keeps running instead of
+    /// exiting.
+    steer_signals: Arc<std::sync::Mutex<HashMap<Uuid, Arc<AtomicBool>>>>,
 
     /// Guards the check-and-start sequence in submit_prompt / continue_session
     /// to prevent a TOCTOU race where two tasks both see is_session_busy=false
@@ -156,6 +166,7 @@ struct SessionLoopGuard {
     busy_sessions: Arc<std::sync::Mutex<HashSet<Uuid>>>,
     handles: Arc<std::sync::Mutex<HashMap<Uuid, tokio::task::JoinHandle<()>>>>,
     cancels: Arc<std::sync::Mutex<HashMap<Uuid, CancellationToken>>>,
+    steer_signals: Arc<std::sync::Mutex<HashMap<Uuid, Arc<AtomicBool>>>>,
 }
 
 impl Drop for SessionLoopGuard {
@@ -163,7 +174,34 @@ impl Drop for SessionLoopGuard {
         self.handles.lock().unwrap().remove(&self.session_id);
         self.cancels.lock().unwrap().remove(&self.session_id);
         self.busy_sessions.lock().unwrap().remove(&self.session_id);
+        self.steer_signals.lock().unwrap().remove(&self.session_id);
     }
+}
+
+/// How a user message submitted while the agent loop is busy is delivered.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DeliveryMode {
+    /// Wait until the current turn (all requests and tool calls) finishes,
+    /// then start a new turn with the message.
+    Queue,
+    /// Persist immediately and insert into the running turn at the next
+    /// request boundary, without interrupting the in-flight stream.
+    Steer,
+}
+
+/// A user message submitted while the session's agent loop was busy.
+///
+/// The host decides delivery from the `send_while_busy` config: steering
+/// entries are persisted to the buffer at submission time (the entry is
+/// only a keep-alive signal), queueing entries are persisted after the
+/// current turn exits.
+#[derive(Clone, Debug)]
+struct PendingPrompt {
+    delivery: DeliveryMode,
+    mode: Mode,
+    content: String,
+    attachments: Vec<MessageAttachment>,
+    thinking_level: Option<ThinkingLevelType>,
 }
 
 impl Runtime {
@@ -457,6 +495,15 @@ impl Runtime {
     ///
     /// `mode` is the session mode at submission time, used to tag the message
     /// and to construct the agent loop context.
+    ///
+    /// When the session's agent loop is already running, the `send_while_busy`
+    /// config decides the delivery:
+    ///
+    /// - `steer`: the message is persisted immediately (with a
+    ///   `<system-reminder>` suffix) and inserted into the running turn at the
+    ///   next request boundary, without interrupting the in-flight stream.
+    /// - `queue`: the message is held in the pending queue and only persisted
+    ///   after the current turn exits, starting the next turn.
     pub async fn submit_prompt_with_attachments(
         &self,
         session_id: Uuid,
@@ -465,16 +512,22 @@ impl Runtime {
         attachments: Vec<MessageAttachment>,
         thinking_level: Option<ThinkingLevelType>,
     ) -> Result<()> {
-        let mut user_msg = Message::new(MessageRole::User, content);
-        user_msg.attachments = attachments;
-        user_msg.thinking_level = thinking_level;
-        let user_app_data = MessageAppData {
-            mode: Some(mode.as_str().to_string()),
-            ..Default::default()
+        // Decide delivery before mutating anything. start_agent_loop
+        // re-checks busy under a mutex for atomicity.
+        let delivery = if self.is_session_busy(session_id) {
+            match self.config.read().unwrap().ui.send_while_busy {
+                SendWhileBusy::Steer => Some(DeliveryMode::Steer),
+                SendWhileBusy::Queue => Some(DeliveryMode::Queue),
+            }
+        } else {
+            None
         };
 
         // 1. If undo revert is active, discard hidden messages first.
-        if let Ok(Some((revert_msg_id, _))) = self.session_manager.load_revert_state(session_id)
+        //    Only when starting a new turn — truncating the buffer while a
+        //    loop is running would change the running loop's request bytes.
+        if delivery.is_none()
+            && let Ok(Some((revert_msg_id, _))) = self.session_manager.load_revert_state(session_id)
             && revert_msg_id != Uuid::nil()
         {
             let buf = self.message_buffer(session_id).await;
@@ -504,72 +557,143 @@ impl Runtime {
                     });
         }
 
-        // 2. Persist the user message.
-        {
-            let buf = self.message_buffer(session_id).await;
-            buf.write()
-                .await
-                .append_with_app_data(user_msg.clone(), user_app_data.clone());
+        // 2. Build the user message. Steering messages carry a
+        //    system-reminder suffix so the model keeps advancing the task
+        //    while adjusting direction.
+        let mut user_msg = Message::new(MessageRole::User, content);
+        user_msg.attachments = attachments;
+        user_msg.thinking_level = thinking_level;
+        if delivery == Some(DeliveryMode::Steer) {
+            user_msg.content = format!(
+                "{}\n\n{}",
+                user_msg.content,
+                crate::prompts::steer_reminder()
+            );
         }
-        self.session_manager.append_messages_with_app_data(
-            session_id,
-            std::slice::from_ref(&user_msg),
-            &[(user_msg.id, user_app_data)].into_iter().collect(),
-        )?;
-        let event_app_data = MessageAppData {
+        let user_app_data = MessageAppData {
             mode: Some(mode.as_str().to_string()),
             ..Default::default()
         };
 
-        // Capture values needed for the queue before user_msg is moved.
-        let q_content = user_msg.content.clone();
-        let q_attachments = user_msg.attachments.clone();
-        let q_thinking = user_msg.thinking_level.clone();
+        let event_app_data = user_app_data.clone();
 
-        // 3. Notify the TUI so it can display the message.
-        let _ = self
-            .event_bus(session_id)
-            .await
-            .send_backend(BackendEvent::UserMessageCreated {
-                session_id,
-                message: Box::new(user_msg),
-                app_data: Box::new(event_app_data),
-            });
-
-        // 4. Check if this session already has a loop running.
-        // Fast path: avoid queue_user_message when possible.
-        // The atomic check-and-start in start_agent_loop prevents TOCTOU.
-        if self.is_session_busy(session_id) {
-            self.queue_user_message(session_id, q_content, q_attachments, q_thinking);
-            return Ok(());
+        match delivery {
+            // 4a. Steering: persist now and signal the running loop. The
+            //     next load_messages() in the loop picks the message up.
+            Some(DeliveryMode::Steer) => {
+                let buf = self.message_buffer(session_id).await;
+                self.persist_user_message(session_id, &buf, &user_msg, &user_app_data)
+                    .await?;
+                let _ = self.event_bus(session_id).await.send_backend(
+                    BackendEvent::UserMessageCreated {
+                        session_id,
+                        message: Box::new(user_msg),
+                        app_data: Box::new(event_app_data),
+                        queued: true,
+                    },
+                );
+                self.push_pending_prompt(
+                    session_id,
+                    DeliveryMode::Steer,
+                    mode,
+                    String::new(),
+                    Vec::new(),
+                    None,
+                );
+                Ok(())
+            }
+            // 4b. Queueing: hold the content in the pending queue. The host
+            //     persists it after the current turn exits and starts the
+            //     next turn.
+            Some(DeliveryMode::Queue) => {
+                let q_content = user_msg.content.clone();
+                let q_attachments = user_msg.attachments.clone();
+                let q_thinking = user_msg.thinking_level.clone();
+                let _ = self.event_bus(session_id).await.send_backend(
+                    BackendEvent::UserMessageCreated {
+                        session_id,
+                        message: Box::new(user_msg),
+                        app_data: Box::new(event_app_data),
+                        queued: true,
+                    },
+                );
+                self.push_pending_prompt(
+                    session_id,
+                    DeliveryMode::Queue,
+                    mode,
+                    q_content,
+                    q_attachments,
+                    q_thinking,
+                );
+                Ok(())
+            }
+            // 4c. Idle: persist and spawn the loop.
+            None => {
+                let buf = self.message_buffer(session_id).await;
+                self.persist_user_message(session_id, &buf, &user_msg, &user_app_data)
+                    .await?;
+                let _ = self.event_bus(session_id).await.send_backend(
+                    BackendEvent::UserMessageCreated {
+                        session_id,
+                        message: Box::new(user_msg),
+                        app_data: Box::new(event_app_data),
+                        queued: false,
+                    },
+                );
+                self.start_agent_loop(session_id, mode).await
+            }
         }
-
-        // 5. Build CoreContext + AgentLoopConfig and spawn the loop.
-        // start_agent_loop re-checks busy under a mutex for atomicity.
-        self.start_agent_loop(session_id, mode).await
     }
 
-    /// Enqueue a user message for the agent loop to process.
-    ///
-    /// The agent loop pops queued messages one-at-a-time after turns
-    /// without tool calls, continuing the loop instead of exiting.
-    /// This ensures each queued message triggers a new LLM turn.
-    fn queue_user_message(
+    /// Persist a user message to the in-memory buffer and the store,
+    /// paired with its application data.
+    async fn persist_user_message(
         &self,
         session_id: Uuid,
+        buf: &Arc<RwLock<CoreMessageBuffer>>,
+        msg: &Message,
+        app_data: &MessageAppData,
+    ) -> Result<()> {
+        buf.write()
+            .await
+            .append_with_app_data(msg.clone(), app_data.clone());
+        self.session_manager.append_messages_with_app_data(
+            session_id,
+            std::slice::from_ref(msg),
+            &[(msg.id, app_data.clone())].into_iter().collect(),
+        )
+    }
+
+    /// Register a pending prompt for a busy session.
+    ///
+    /// Steering entries set the session's steering signal so the running
+    /// loop keeps going (their content is already persisted); queueing
+    /// entries are drained by the host after the loop exits.
+    fn push_pending_prompt(
+        &self,
+        session_id: Uuid,
+        delivery: DeliveryMode,
+        mode: Mode,
         content: String,
         attachments: Vec<MessageAttachment>,
         thinking_level: Option<ThinkingLevelType>,
     ) {
-        let mut queue = self.queued_messages.lock().unwrap();
+        let mut queue = self.pending_prompts.lock().unwrap();
         queue
             .entry(session_id)
             .or_default()
-            .push_back(QueuedUserMessage {
+            .push_back(PendingPrompt {
+                delivery,
+                mode,
                 content,
                 attachments,
                 thinking_level,
             });
+        if delivery == DeliveryMode::Steer
+            && let Some(signal) = self.steer_signals.lock().unwrap().get(&session_id)
+        {
+            signal.store(true, Ordering::SeqCst);
+        }
     }
 
     /// Continue an existing session without adding a new user message.
@@ -692,7 +816,6 @@ impl Runtime {
             .lock()
             .unwrap()
             .insert(session_id, cancel.clone());
-        let buffer = self.message_buffer(session_id).await;
         let context_manager = self.context_manager(session_id).await;
         let event_bus = self.event_bus(session_id).await;
 
@@ -718,6 +841,11 @@ impl Runtime {
         let llm_config = crate::agent_ctx::to_llm_provider_config(&active_model);
 
         let filtered_tools = self.tool_registry.definitions_for_model(&active_model);
+        // The buffer is shared with the spawned task (for persisting queued
+        // prompts after a turn) and moved into the CoreContext.
+        let buffer = self.message_buffer(session_id).await;
+        let buffer_for_queued = buffer.clone();
+        let session_manager = self.session_manager.clone();
         let ctx = crate::agent_ctx::CoreContext::new(
             self.llm.clone(),
             self.session_manager.clone(),
@@ -741,9 +869,21 @@ impl Runtime {
             self.paths.config_dir.clone(),
         );
 
-        // Extract a per-session queue for this loop to drain.
-        let per_session_queue: Arc<std::sync::Mutex<VecDeque<QueuedUserMessage>>> = {
-            let mut qmap = self.queued_messages.lock().unwrap();
+        // Create the steering signal for this loop run. Steering messages
+        // submitted while the loop is busy set it; run_agent_loop consumes
+        // it at the end of a turn without tool calls so the loop keeps
+        // running instead of exiting.
+        let steer_signal = Arc::new(AtomicBool::new(false));
+        self.steer_signals
+            .lock()
+            .unwrap()
+            .insert(session_id, steer_signal.clone());
+
+        // Extract the per-session pending prompts for this loop run.
+        // Steering entries are consumed as keep-alive signals by the loop;
+        // queueing entries are persisted by the host after the loop exits.
+        let per_session_queue: Arc<std::sync::Mutex<VecDeque<PendingPrompt>>> = {
+            let mut qmap = self.pending_prompts.lock().unwrap();
             Arc::new(std::sync::Mutex::new(
                 qmap.remove(&session_id).unwrap_or_default(),
             ))
@@ -755,14 +895,15 @@ impl Runtime {
             thinking_level: active_model.thinking_level.clone(),
             event_tx: ctx.event_tx(),
             cancel: cancel.clone(),
-            queued_messages: per_session_queue.clone(),
+            steer_signal: steer_signal.clone(),
         };
 
         // Clone Arcs for the guard before they move into the spawn.
         let busy_sessions = self.busy_sessions.clone();
         let handles = self.run_loop_handles.clone();
         let cancels = self.active_loop_cancels.clone();
-        let qmap_restore = self.queued_messages.clone();
+        let steer_signals = self.steer_signals.clone();
+        let qmap_restore = self.pending_prompts.clone();
 
         let join = tokio::spawn(async move {
             let _guard = SessionLoopGuard {
@@ -770,19 +911,77 @@ impl Runtime {
                 busy_sessions: busy_sessions.clone(),
                 handles: handles.clone(),
                 cancels: cancels.clone(),
+                steer_signals: steer_signals.clone(),
             };
-            if let Err(e) = tidev_agent::run_agent_loop(&ctx, loop_config).await {
-                log::error!("agent loop for session {session_id} exited with error: {e}");
+            // The outer loop keeps the session busy across turns: after
+            // run_agent_loop exits (the model stopped responding), queued
+            // prompts are persisted and the loop runs again for the next
+            // turn. Steering messages never reach this point — they were
+            // persisted at submission time and the loop consumed their
+            // keep-alive signals.
+            loop {
+                if cancel.is_cancelled() {
+                    break;
+                }
+                if let Err(e) = tidev_agent::run_agent_loop(&ctx, loop_config.clone()).await {
+                    log::error!("agent loop for session {session_id} exited with error: {e}");
+                }
+                // Drain prompts queued while the loop was running. Steering
+                // entries were already consumed as keep-alive signals and
+                // their messages are persisted — only queueing entries
+                // remain to be persisted here.
+                let queued: Vec<PendingPrompt> = per_session_queue
+                    .lock()
+                    .unwrap()
+                    .drain(..)
+                    .filter(|p| p.delivery == DeliveryMode::Queue)
+                    .collect();
+                if queued.is_empty() {
+                    break;
+                }
+                // Persist queued prompts (buffer + store) so the next
+                // loop iteration's load_messages() picks them up.
+                let mut failed = false;
+                for prompt in queued {
+                    let mut msg = Message::new(MessageRole::User, prompt.content);
+                    msg.attachments = prompt.attachments;
+                    msg.thinking_level = prompt.thinking_level;
+                    let app_data = MessageAppData {
+                        mode: Some(prompt.mode.as_str().to_string()),
+                        ..Default::default()
+                    };
+                    buffer_for_queued
+                        .write()
+                        .await
+                        .append_with_app_data(msg.clone(), app_data.clone());
+                    if let Err(e) = session_manager.append_messages_with_app_data(
+                        session_id,
+                        std::slice::from_ref(&msg),
+                        &[(msg.id, app_data)].into_iter().collect(),
+                    ) {
+                        log::error!(
+                            "failed to persist queued prompt for session {session_id}: {e}"
+                        );
+                        failed = true;
+                        break;
+                    }
+                }
+                if failed {
+                    break;
+                }
+                // Loop again — the next run_agent_loop loads the persisted
+                // prompts and starts the next turn.
             }
-            // On normal exit, restore any remaining queued messages back
-            // to the per-session map so they aren't lost.
-            let remaining: Vec<QueuedUserMessage> =
+            // On exit, restore any remaining pending prompts back to the
+            // per-session map so they aren't lost (e.g. on cancellation or
+            // a persistence failure).
+            let remaining: Vec<PendingPrompt> =
                 per_session_queue.lock().unwrap().drain(..).collect();
             if !remaining.is_empty() {
                 let mut map = qmap_restore.lock().unwrap();
                 let q = map.entry(session_id).or_default();
-                for msg in remaining {
-                    q.push_back(msg);
+                for prompt in remaining {
+                    q.push_back(prompt);
                 }
             }
         });
@@ -822,6 +1021,9 @@ impl Runtime {
         }
 
         self.busy_sessions.lock().unwrap().clear();
+        // Queued (non-steered) prompts are abandoned on cancellation —
+        // steering messages were already persisted and cannot be retracted.
+        self.pending_prompts.lock().unwrap().clear();
 
         // 2. Drop handles without aborting — the loops will exit naturally
         //    after detecting the cancellation token.
@@ -843,6 +1045,11 @@ impl Runtime {
         }
 
         self.busy_sessions.lock().unwrap().remove(&session_id);
+        // Queued (non-steered) prompts for this session are abandoned on
+        // cancellation — steering messages were already persisted and
+        // cannot be retracted.
+        self.pending_prompts.lock().unwrap().remove(&session_id);
+        self.steer_signals.lock().unwrap().remove(&session_id);
 
         // 2. Drop the handle without aborting — the loop will detect the
         //    cancellation token and shut down gracefully, letting in-flight
@@ -1485,11 +1692,193 @@ impl RuntimeBuilder {
             request_subscribers,
             run_loop_handles: Arc::new(std::sync::Mutex::new(HashMap::new())),
             busy_sessions: Arc::new(std::sync::Mutex::new(HashSet::new())),
-            queued_messages: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            pending_prompts: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            steer_signals: Arc::new(std::sync::Mutex::new(HashMap::new())),
             session_start_lock: Arc::new(std::sync::Mutex::new(())),
             cleanup_cancel,
             workspace_root,
             file_search_index: OnceLock::new(),
         })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tidev_config::SendWhileBusy;
+
+    /// Build a runtime in a fresh temp directory using the bundled
+    /// deepseek provider preset (no API key required for metadata).
+    async fn make_test_runtime() -> Runtime {
+        let dir = std::env::temp_dir().join(format!("tidev-runtime-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("temp dir should be created");
+        let config_toml =
+            "default_provider = \"deepseek\"\ndefault_model = \"deepseek-v4-flash\"\n";
+        std::fs::write(dir.join("config.toml"), config_toml).expect("config should be written");
+        Runtime::builder()
+            .workspace_root(dir.clone())
+            .config_dir(dir.clone())
+            .data_dir(dir.clone())
+            .build()
+            .await
+            .expect("runtime should build")
+    }
+
+    async fn recv_created_event(
+        rx: &mut tokio::sync::mpsc::UnboundedReceiver<BackendEvent>,
+    ) -> BackendEvent {
+        tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+            .await
+            .expect("user message event should arrive")
+            .expect("channel should stay open")
+    }
+
+    #[tokio::test]
+    async fn busy_queue_holds_prompt_without_persisting() {
+        let rt = make_test_runtime().await;
+        let sid = rt.create_default_session("queue test").unwrap();
+        let mut events = rt.event_rx().await;
+
+        // Simulate a running loop for this session.
+        rt.busy_sessions.lock().unwrap().insert(sid);
+        rt.config.write().unwrap().ui.send_while_busy = SendWhileBusy::Queue;
+
+        rt.submit_prompt_with_attachments(
+            sid,
+            Mode::Build,
+            "queued message".into(),
+            Vec::new(),
+            None,
+        )
+        .await
+        .expect("submit should succeed");
+
+        // The message must NOT be persisted — it waits for the turn to end.
+        let buf = rt.message_buffer(sid).await;
+        let messages = buf.read().await.load().to_vec();
+        assert!(
+            messages.is_empty(),
+            "queued prompt must not enter the buffer"
+        );
+
+        // It must be held in the pending queue with delivery=Queue.
+        let pending = rt.pending_prompts.lock().unwrap().get(&sid).cloned();
+        let pending = pending.expect("queued prompt should be registered");
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].delivery, DeliveryMode::Queue);
+        assert_eq!(pending[0].content, "queued message");
+
+        // The frontend must be told it is queued.
+        match recv_created_event(&mut events).await {
+            BackendEvent::UserMessageCreated { queued, .. } => assert!(queued),
+            other => panic!("expected UserMessageCreated, got {other:?}"),
+        }
+
+        // Cancellation abandons queued prompts.
+        rt.cancel_session(sid).await;
+        assert!(rt.pending_prompts.lock().unwrap().get(&sid).is_none());
+    }
+
+    #[tokio::test]
+    async fn busy_steer_persists_with_reminder_and_sets_signal() {
+        let rt = make_test_runtime().await;
+        let sid = rt.create_default_session("steer test").unwrap();
+        let mut events = rt.event_rx().await;
+
+        // Simulate a running loop that holds the steering signal.
+        rt.busy_sessions.lock().unwrap().insert(sid);
+        let signal = Arc::new(AtomicBool::new(false));
+        rt.steer_signals.lock().unwrap().insert(sid, signal.clone());
+        rt.config.write().unwrap().ui.send_while_busy = SendWhileBusy::Steer;
+
+        rt.submit_prompt_with_attachments(
+            sid,
+            Mode::Build,
+            "steer message".into(),
+            Vec::new(),
+            None,
+        )
+        .await
+        .expect("submit should succeed");
+
+        // The message must be persisted immediately, with a
+        // system-reminder suffix appended.
+        let buf = rt.message_buffer(sid).await;
+        let messages = buf.read().await.load().to_vec();
+        assert_eq!(messages.len(), 1);
+        assert!(messages[0].content.starts_with("steer message"));
+        assert!(
+            messages[0].content.contains("<system-reminder>"),
+            "steering message must carry a system-reminder: {}",
+            messages[0].content
+        );
+
+        // The keep-alive signal must be set for the running loop.
+        assert!(signal.load(Ordering::SeqCst));
+
+        // The frontend must be told the message is pending (queued=true).
+        match recv_created_event(&mut events).await {
+            BackendEvent::UserMessageCreated { queued, .. } => assert!(queued),
+            other => panic!("expected UserMessageCreated, got {other:?}"),
+        }
+
+        rt.cancel_session(sid).await;
+    }
+
+    #[tokio::test]
+    async fn idle_submit_persists_and_starts_loop() {
+        let rt = make_test_runtime().await;
+        let sid = rt.create_default_session("idle test").unwrap();
+        let mut events = rt.event_rx().await;
+
+        rt.config.write().unwrap().ui.send_while_busy = SendWhileBusy::Steer;
+
+        rt.submit_prompt_with_attachments(sid, Mode::Build, "fresh turn".into(), Vec::new(), None)
+            .await
+            .expect("submit should succeed");
+
+        // Idle submission persists without a reminder and starts a loop.
+        let buf = rt.message_buffer(sid).await;
+        let messages = buf.read().await.load().to_vec();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].content, "fresh turn");
+        assert!(!messages[0].content.contains("<system-reminder>"));
+        assert!(rt.is_session_busy(sid), "loop should be running");
+
+        match recv_created_event(&mut events).await {
+            BackendEvent::UserMessageCreated { queued, .. } => assert!(!queued),
+            other => panic!("expected UserMessageCreated, got {other:?}"),
+        }
+
+        rt.cancel_session(sid).await;
+        // Cancellation must not leave stale steering signals behind.
+        assert!(rt.steer_signals.lock().unwrap().get(&sid).is_none());
+    }
+
+    #[tokio::test]
+    async fn busy_steer_without_signal_falls_back_to_next_submission() {
+        let rt = make_test_runtime().await;
+        let sid = rt.create_default_session("signal-less steer").unwrap();
+
+        // Busy, but no loop holds a signal (e.g. the loop exited just
+        // before the submission). The entry is still registered so the
+        // next start_agent_loop drains it as a keep-alive signal.
+        rt.busy_sessions.lock().unwrap().insert(sid);
+        rt.config.write().unwrap().ui.send_while_busy = SendWhileBusy::Steer;
+
+        rt.submit_prompt_with_attachments(sid, Mode::Build, "late steer".into(), Vec::new(), None)
+            .await
+            .expect("submit should succeed");
+
+        let pending = rt.pending_prompts.lock().unwrap().get(&sid).cloned();
+        let pending = pending.expect("steer entry should be registered");
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].delivery, DeliveryMode::Steer);
+
+        rt.cancel_session(sid).await;
     }
 }

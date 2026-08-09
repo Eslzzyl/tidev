@@ -47,6 +47,7 @@ pub(crate) enum SettingKey {
     SubagentEnabled,
     CollapseThinking,
     CollapseDiffs,
+    SendWhileBusy,
 }
 
 #[derive(Clone, Debug)]
@@ -177,6 +178,19 @@ impl SettingsPanel {
                 key: SettingKey::CollapseDiffs,
                 disabled: false,
             },
+            SettingItem {
+                name: "Send While Busy".to_string(),
+                description: format!("When busy: {}", config.ui.send_while_busy.as_str()),
+                setting_type: SettingType::Cycle {
+                    options: vec!["queue".to_string(), "steer".to_string()],
+                    selected: match config.ui.send_while_busy {
+                        tidev_config::SendWhileBusy::Queue => 0,
+                        tidev_config::SendWhileBusy::Steer => 1,
+                    },
+                },
+                key: SettingKey::SendWhileBusy,
+                disabled: false,
+            },
         ];
 
         Self {
@@ -222,7 +236,11 @@ impl SettingsPanel {
                     selected: sel,
                 } => {
                     *sel = (*sel + 1) % options.len();
-                    item.description = format!("Log level: {}", options[*sel]);
+                    item.description = match item.key {
+                        SettingKey::LogLevel => format!("Log level: {}", options[*sel]),
+                        SettingKey::SendWhileBusy => format!("When busy: {}", options[*sel]),
+                        _ => item.description.clone(),
+                    };
                 }
                 SettingType::Number { .. } => {}
             }
@@ -311,6 +329,19 @@ impl SettingsPanel {
                 SettingKey::CollapseDiffs => {
                     if let SettingType::Toggle(val) = item.setting_type {
                         config.ui.collapse_diffs = val;
+                    }
+                }
+                SettingKey::SendWhileBusy => {
+                    if let SettingType::Cycle {
+                        ref options,
+                        selected,
+                    } = item.setting_type
+                        && selected < options.len()
+                    {
+                        config.ui.send_while_busy = match options[selected].as_str() {
+                            "steer" => tidev_config::SendWhileBusy::Steer,
+                            _ => tidev_config::SendWhileBusy::Queue,
+                        };
                     }
                 }
             }

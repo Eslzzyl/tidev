@@ -14,7 +14,8 @@ use unicode_width::UnicodeWidthStr;
 
 impl App {
     pub(crate) fn footer_status_text(&self) -> String {
-        let queued_count = self.pending_prompt_queue.len();
+        let queued_count = self.pending_inputs.iter().filter(|p| !p.steered).count();
+        let steered_count = self.pending_inputs.len() - queued_count;
 
         // 1. Esc again to stop (abort confirmation)
         if self.has_active_request()
@@ -152,12 +153,17 @@ impl App {
             let is_pending_compact = self
                 .current_session_id
                 .is_some_and(|sid| self.pending_compacts.contains(&sid));
-            let extra = match (queued_count, is_pending_compact) {
-                (0, false) => String::new(),
-                (1, false) => " · queued 1".to_string(),
-                (q, false) => format!(" · queued {q}"),
-                (0, true) => " · compact pending".to_string(),
-                (q, true) => format!(" · queued {q} · compact pending"),
+            let extra = match (queued_count, steered_count, is_pending_compact) {
+                (0, 0, false) => String::new(),
+                (1, 0, false) => " · queued 1".to_string(),
+                (q, 0, false) => format!(" · queued {q}"),
+                (0, 1, false) => " · steer 1".to_string(),
+                (0, s, false) => format!(" · steer {s}"),
+                (q, s, false) => format!(" · queued {q} · steer {s}"),
+                (0, 0, true) => " · compact pending".to_string(),
+                (q, 0, true) => format!(" · queued {q} · compact pending"),
+                (0, s, true) => format!(" · steer {s} · compact pending"),
+                (q, s, true) => format!(" · queued {q} · steer {s} · compact pending"),
             };
             let status = format!("{status}{extra}");
 
@@ -177,8 +183,9 @@ impl App {
             return status;
         }
 
-        // 4. Queued messages or compact pending (not streaming)
+        // 4. Pending messages or compact pending (not streaming)
         let has_pending = queued_count > 0
+            || steered_count > 0
             || self
                 .current_session_id
                 .is_some_and(|sid| self.pending_compacts.contains(&sid));
@@ -191,13 +198,22 @@ impl App {
             } else {
                 ""
             };
-            let status = if queued_count == 1 {
-                format!("1 queued message{compact_part}")
-            } else if queued_count > 1 {
-                format!("{queued_count} queued messages{compact_part}")
-            } else {
-                "compact pending".to_string()
-            };
+            let mut parts: Vec<String> = Vec::new();
+            if queued_count > 0 {
+                parts.push(if queued_count == 1 {
+                    "1 queued message".to_string()
+                } else {
+                    format!("{queued_count} queued messages")
+                });
+            }
+            if steered_count > 0 {
+                parts.push(if steered_count == 1 {
+                    "1 steering message".to_string()
+                } else {
+                    format!("{steered_count} steering messages")
+                });
+            }
+            let status = format!("{}{compact_part}", parts.join(" · "));
             if let Some(ref t) = token_status {
                 return format!("{status} · {t}");
             }
@@ -309,14 +325,15 @@ impl App {
 
         // Calculate queued prompts area height (frozen area above input box).
         let queued_height = if !is_subsession {
-            let count = self.pending_prompt_queue.len();
+            let count = self.pending_inputs.len();
             if count > 0 {
                 let visible = count.min(MAX_VISIBLE_QUEUED_PROMPTS);
                 let text_width = main_area.width.saturating_sub(5).max(1) as usize;
                 let mut inner: usize = 0;
-                for (i, q) in self.pending_prompt_queue.iter().take(visible).enumerate() {
+                for (i, q) in self.pending_inputs.iter().take(visible).enumerate() {
                     // +1 for mode header line
-                    let wrapped = wrap_text_lines(&q.prompt, text_width, MAX_QUEUED_PROMPT_LINES);
+                    let wrapped =
+                        wrap_text_lines(&q.message.content, text_width, MAX_QUEUED_PROMPT_LINES);
                     inner += 1 + wrapped.len();
                     // Separator between items (not after last)
                     if i + 1 < visible {
@@ -737,18 +754,19 @@ impl App {
         }
     }
 
-    /// Render a frozen area above the composer showing queued (pending) prompts.
-    /// Each queued message is word-wrapped into up to [`MAX_QUEUED_PROMPT_LINES`] lines.
-    /// Cards are separated by a thin rule. Each card is independently hover-highlighted.
+    /// Render a frozen area above the composer showing pending (queued or
+    /// steered) user messages. Each message is word-wrapped into up to
+    /// [`MAX_QUEUED_PROMPT_LINES`] lines. Cards are separated by a thin rule.
+    /// Each card is independently hover-highlighted.
     fn render_queued_prompts(&mut self, frame: &mut Frame<'_>, area: Rect) {
         let palette = &self.current_palette;
-        let count = self.pending_prompt_queue.len();
+        let count = self.pending_inputs.len();
         let visible = count.min(MAX_VISIBLE_QUEUED_PROMPTS);
 
-        // Build title: " QUEUE " badge with background color + count
+        // Build title: " PENDING " badge with background color + count
         let title = Line::from(vec![
             Span::styled(
-                " QUEUE ",
+                " PENDING ",
                 Style::default()
                     .bg(palette.selection_bg)
                     .fg(palette.selection_fg)
@@ -784,13 +802,15 @@ impl App {
 
         let mut y_offset: u16 = 0;
 
-        for (i, queued) in self.pending_prompt_queue.iter().take(visible).enumerate() {
+        for (i, pending) in self.pending_inputs.iter().take(visible).enumerate() {
             if y_offset as usize >= inner_height {
                 break;
             }
 
+            // Strip system-reminder tags from steering messages for display.
+            let display_text = crate::utils::strip_system_reminder_tags(&pending.message.content);
             // Word-wrap the prompt into up to MAX_QUEUED_PROMPT_LINES lines
-            let wrapped_lines = wrap_text_lines(&queued.prompt, width, MAX_QUEUED_PROMPT_LINES);
+            let wrapped_lines = wrap_text_lines(&display_text, width, MAX_QUEUED_PROMPT_LINES);
             // +1 for mode header line
             let row_text_height = 1 + wrapped_lines.len();
             let has_separator = i + 1 < visible;
@@ -822,13 +842,27 @@ impl App {
                 );
             }
 
-            // ── Mode header ──────────────────────────────────────────
-            let mode_color = palette.border_mode_color(queued.mode);
-            frame.render_widget(
-                Paragraph::new(Line::from(Span::styled(
-                    queued.mode.title(),
+            // ── Mode header: delivery type + mode ─────────────────────
+            let delivery_label = if pending.steered { "STEER" } else { "QUEUE" };
+            let mode_color = palette.border_mode_color(pending.mode);
+            let header_line = Line::from(vec![
+                Span::styled(
+                    format!("{delivery_label} "),
+                    Style::default()
+                        .fg(if pending.steered {
+                            palette.accent
+                        } else {
+                            palette.muted
+                        })
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    pending.mode.title(),
                     Style::default().fg(mode_color).add_modifier(Modifier::BOLD),
-                ))),
+                ),
+            ]);
+            frame.render_widget(
+                Paragraph::new(header_line),
                 Rect::new(inner.x, inner.y + y_offset, inner.width, 1),
             );
             y_offset += 1;

@@ -3,18 +3,16 @@
 //!
 //! tidev-agent defines the loop skeleton; tidev-core implements [`AgentContext`].
 
-use std::collections::VecDeque;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use anyhow::Result;
 use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
 
 use tidev_llm::ToolDefinition;
-use tidev_llm::message::{
-    AssistantTurn, Message, QueuedUserMessage, ToolCall, ToolExecutionResult,
-};
+use tidev_llm::message::{AssistantTurn, Message, ToolCall, ToolExecutionResult};
 use tidev_llm::reasoning::ThinkingLevelType;
 
 use crate::event::AgentEventSender;
@@ -24,6 +22,7 @@ use crate::event::AgentEventSender;
 // ---------------------------------------------------------------------------
 
 /// Configuration for a single invocation of [`run_agent_loop`].
+#[derive(Clone)]
 pub struct AgentLoopConfig {
     /// The session this agent loop is running in.
     pub session_id: uuid::Uuid,
@@ -35,12 +34,14 @@ pub struct AgentLoopConfig {
     pub event_tx: AgentEventSender,
     /// Cancellation token for cooperative termination.
     pub cancel: CancellationToken,
-    /// Queue of user messages that arrived while the loop was busy.
+    /// Steering signal for user messages that arrived while the loop was busy.
     ///
-    /// Populated by [`Runtime::submit_prompt_with_attachments`] when the loop
-    /// is running; checked by [`run_agent_loop`] after turns without tool
-    /// calls. Each queued message triggers one additional loop iteration.
-    pub queued_messages: Arc<Mutex<VecDeque<QueuedUserMessage>>>,
+    /// Steering messages are persisted to the message buffer immediately by
+    /// the host; this signal only tells [`run_agent_loop`] that such a message
+    /// exists, so the loop must keep running instead of exiting after a turn
+    /// without tool calls. The next iteration's `load_messages` picks the
+    /// message up naturally.
+    pub steer_signal: Arc<AtomicBool>,
 }
 
 // ---------------------------------------------------------------------------

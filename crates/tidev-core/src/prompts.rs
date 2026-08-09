@@ -46,6 +46,22 @@ pub fn build_switch_reminder() -> String {
     )
 }
 
+/// Reminder appended to a user message that was steered into a running turn.
+///
+/// Steering messages are submitted while the agent loop is busy and are
+/// inserted at the next request boundary without interrupting the in-flight
+/// model stream. The reminder tells the model to keep advancing the task
+/// while adjusting direction according to the message.
+///
+/// The reminder is appended as a suffix (mode reminders are injected as a
+/// prefix by `inject_mode_reminder_impl`) so both can coexist on the same
+/// message. It is persisted with the message so the request bytes stay
+/// stable across replays; the TUI strips the tag for display.
+pub fn steer_reminder() -> String {
+    "<system-reminder>\nThis is a steering message from the user. Continue the current task and adjust your direction according to this message.\n</system-reminder>"
+        .to_string()
+}
+
 /// Generate the `/init` command text with `$ARGUMENTS` replaced by the
 /// given args, so the user can pre-fill the prompt before editing.
 pub fn init_command_with_args(args: &str) -> String {

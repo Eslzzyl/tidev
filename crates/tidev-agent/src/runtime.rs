@@ -1,6 +1,5 @@
 //! Default runtime implementation for the generic agent loop.
 
-use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -131,7 +130,7 @@ impl AgentRuntime {
         &self,
         system_prompt: String,
         thinking_level: ThinkingLevelType,
-        queued_messages: Arc<Mutex<VecDeque<tidev_llm::message::QueuedUserMessage>>>,
+        steer_signal: Arc<std::sync::atomic::AtomicBool>,
     ) -> Result<()> {
         run_agent_loop(
             self,
@@ -141,7 +140,7 @@ impl AgentRuntime {
                 thinking_level,
                 event_tx: self.event_tx.clone(),
                 cancel: self.cancel.clone(),
-                queued_messages,
+                steer_signal,
             },
         )
         .await

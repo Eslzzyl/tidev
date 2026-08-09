@@ -13,3 +13,5 @@ thinking 可折叠
 presets.toml 拆分
 
 根据不同的模型插入可选的优化提示词
+
+已实现：忙时发送模式（`send_while_busy`，排队/引导）——见 `architecture.md` 的"忙时消息调度"一节。

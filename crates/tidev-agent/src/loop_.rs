@@ -81,30 +81,23 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
             }
         };
 
-        // ─── 7. No tool calls → check for queued messages ────────────────
+        // ─── 7. No tool calls → check for steered messages ───────────────
         if turn.tool_calls.is_empty() {
             let msg = build_assistant_message(&turn);
             ctx.save_messages(session_id, &[msg]).await?;
 
-            // Check for user messages queued while this turn was running.
-            // The messages themselves are already persisted in the buffer
-            // by submit_prompt_with_attachments — the queue entries serve
-            // as a signal: "there's new work, keep the loop alive".
+            // Check for user messages steered into this session while the
+            // turn was running. Steering messages are persisted to the
+            // buffer by the host immediately — the signal only keeps the
+            // loop alive so the next load_messages() picks them up.
             //
-            // We drain ALL queued entries at once since load_messages()
-            // will include every persisted message regardless.  A single
-            // extra iteration suffices.
-            let has_queued = {
-                let mut queue = config.queued_messages.lock().unwrap();
-                if queue.is_empty() {
-                    false
-                } else {
-                    queue.clear();
-                    true
-                }
-            };
-
-            if has_queued {
+            // Queued (non-steered) messages do NOT set this signal: the
+            // host drains them after the loop exits and starts a fresh
+            // loop for the next turn.
+            if config
+                .steer_signal
+                .swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
                 // Finalise the current turn before starting a new one.
                 let _ = event_tx.send(AgentEvent::StreamEnd {
                     request_id,

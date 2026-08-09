@@ -23,7 +23,7 @@ impl App {
         // 0. Abort confirmation: double-Esc to cancel current request.
         if key.code == KeyCode::Esc
             && self.overlays.is_empty()
-            && (self.has_active_request() || !self.pending_prompt_queue.is_empty())
+            && (self.has_active_request() || !self.pending_inputs.is_empty())
         {
             if self
                 .abort_confirmation_deadline
@@ -179,7 +179,7 @@ impl App {
             self.runtime.is_session_busy(sid) || self.pending_approvals.contains_key(&sid)
         });
 
-        if is_busy || !self.pending_prompt_queue.is_empty() {
+        if is_busy || !self.pending_inputs.is_empty() {
             // Request in progress: defer mode switch until request completes.
             let new_mode = self.mode.toggle();
             if let Some(sid) = self.current_session_id {

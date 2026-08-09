@@ -104,6 +104,11 @@ pub enum BackendEvent {
         session_id: Uuid,
         message: Box<Message>,
         app_data: Box<MessageAppData>,
+        /// True when the message was submitted while the session's agent loop
+        /// was busy (queued or steered). The message is not yet part of any
+        /// request — the frontend should show it as pending rather than
+        /// committing it to the visible history.
+        queued: bool,
     },
     UndoCompleted {
         session_id: Uuid,
