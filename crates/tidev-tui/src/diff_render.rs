@@ -50,12 +50,6 @@ enum RowKind {
 }
 
 const WIDE_LAYOUT_THRESHOLD: usize = 100;
-/// Background tints for diff added/removed rows. Shared with the theme
-/// panel's diff preview so it matches real diff rendering exactly.
-pub(crate) const DARK_ADD_BG: (u8, u8, u8) = (33, 58, 43);
-pub(crate) const DARK_DEL_BG: (u8, u8, u8) = (74, 34, 29);
-pub(crate) const LIGHT_ADD_BG: (u8, u8, u8) = (218, 251, 225);
-pub(crate) const LIGHT_DEL_BG: (u8, u8, u8) = (255, 235, 233);
 
 pub(crate) fn render_unified_diff_text(
     text: &str,
@@ -393,6 +387,13 @@ fn render_cell_lines(
     out
 }
 
+/// Render one diff body cell as a single line.
+///
+/// When the file's language is recognized the content is syntax-highlighted
+/// and the diff foreground colors are intentionally NOT applied on top — the
+/// diff is conveyed by the row background tint and, for deletions, a DIM
+/// modifier. The `diff_add`/`diff_delete` foreground colors only apply to
+/// plain (non-highlighted) rows and to the +/- markers.
 fn render_cell_content(
     cell: &DiffCell,
     syntax_path: Option<&Path>,
@@ -411,9 +412,9 @@ fn render_cell_content(
     let style = match cell.kind {
         DiffLineKind::Context => Style::default().fg(palette.text),
         DiffLineKind::Delete => Style::default()
-            .fg(palette.error)
+            .fg(palette.diff_delete)
             .add_modifier(Modifier::DIM),
-        DiffLineKind::Insert => Style::default().fg(palette.success),
+        DiffLineKind::Insert => Style::default().fg(palette.diff_add),
     };
 
     Line::from(vec![Span::styled(cell.text.clone(), style)])
@@ -493,24 +494,16 @@ fn blank_prefix(line_number_width: usize) -> Line<'static> {
 fn marker_style(kind: DiffLineKind, palette: ThemePalette) -> Style {
     match kind {
         DiffLineKind::Context => Style::default().fg(palette.muted),
-        DiffLineKind::Delete => Style::default().fg(palette.error),
-        DiffLineKind::Insert => Style::default().fg(palette.success),
+        DiffLineKind::Delete => Style::default().fg(palette.diff_delete),
+        DiffLineKind::Insert => Style::default().fg(palette.diff_add),
     }
 }
 
 fn cell_bg(kind: DiffLineKind, palette: ThemePalette) -> Option<ratatui::style::Color> {
     match kind {
         DiffLineKind::Context => None,
-        DiffLineKind::Delete => Some(if palette.is_dark {
-            ratatui::style::Color::Rgb(DARK_DEL_BG.0, DARK_DEL_BG.1, DARK_DEL_BG.2)
-        } else {
-            ratatui::style::Color::Rgb(LIGHT_DEL_BG.0, LIGHT_DEL_BG.1, LIGHT_DEL_BG.2)
-        }),
-        DiffLineKind::Insert => Some(if palette.is_dark {
-            ratatui::style::Color::Rgb(DARK_ADD_BG.0, DARK_ADD_BG.1, DARK_ADD_BG.2)
-        } else {
-            ratatui::style::Color::Rgb(LIGHT_ADD_BG.0, LIGHT_ADD_BG.1, LIGHT_ADD_BG.2)
-        }),
+        DiffLineKind::Delete => Some(palette.diff_delete_bg),
+        DiffLineKind::Insert => Some(palette.diff_add_bg),
     }
 }
 

@@ -180,6 +180,8 @@ mod tests {
             error: Color::Rgb(200, 0, 0),
             diff_add: Color::Rgb(0, 200, 0),
             diff_delete: Color::Rgb(200, 0, 0),
+            diff_add_bg: Color::Rgb(0, 80, 0),
+            diff_delete_bg: Color::Rgb(80, 0, 0),
             selection_bg: Color::Rgb(0, 200, 200),
             selection_fg: Color::Rgb(255, 255, 255),
             mode_build: Color::Rgb(0, 200, 200),

@@ -70,8 +70,24 @@ pub struct ThemeDefinition {
     pub success: ThemeColor,
     pub warning: ThemeColor,
     pub error: ThemeColor,
+    /// Diff added-line foreground: body text of insert rows, +/- markers,
+    /// sidebar change counts and the theme panel's diff swatch. Syntax-
+    /// highlighted diff content keeps its highlighting colors instead.
     pub diff_add: ThemeColor,
+    /// Diff deleted-line foreground: body text of delete rows, +/- markers,
+    /// sidebar change counts and the theme panel's diff swatch. Syntax-
+    /// highlighted diff content keeps its highlighting colors instead.
     pub diff_delete: ThemeColor,
+    /// Optional background tint for diff added rows. When absent, a built-in
+    /// default derived from `dark` is used (dark themes get the dark set,
+    /// light themes the light set).
+    #[serde(default)]
+    pub diff_add_bg: Option<ThemeColor>,
+    /// Optional background tint for diff deleted rows. When absent, a
+    /// built-in default derived from `dark` is used (dark themes get the
+    /// dark set, light themes the light set).
+    #[serde(default)]
+    pub diff_delete_bg: Option<ThemeColor>,
     pub selection_bg: ThemeColor,
     pub selection_fg: ThemeColor,
     pub mode_build: ThemeColor,

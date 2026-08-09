@@ -482,6 +482,8 @@ mod tests {
             error: ratatui::style::Color::Rgb(200, 0, 0),
             diff_add: ratatui::style::Color::Rgb(0, 200, 0),
             diff_delete: ratatui::style::Color::Rgb(200, 0, 0),
+            diff_add_bg: ratatui::style::Color::Rgb(0, 80, 0),
+            diff_delete_bg: ratatui::style::Color::Rgb(80, 0, 0),
             selection_bg: ratatui::style::Color::Rgb(0, 200, 200),
             selection_fg: ratatui::style::Color::Rgb(255, 255, 255),
             mode_build: ratatui::style::Color::Rgb(0, 200, 200),

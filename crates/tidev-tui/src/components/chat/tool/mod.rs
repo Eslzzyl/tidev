@@ -1013,13 +1013,13 @@ fn build_diff_summary_line(
     if adds > 0 {
         spans.push(Span::styled(
             format!("  +{}", adds),
-            Style::default().fg(palette.success),
+            Style::default().fg(palette.diff_add),
         ));
     }
     if dels > 0 {
         spans.push(Span::styled(
             format!("  -{}", dels),
-            Style::default().fg(palette.error),
+            Style::default().fg(palette.diff_delete),
         ));
     }
     if let Some(indicator) = fold_indicator {
@@ -1410,6 +1410,8 @@ mod tests {
             error: Color::Reset,
             diff_add: Color::Reset,
             diff_delete: Color::Reset,
+            diff_add_bg: Color::Reset,
+            diff_delete_bg: Color::Reset,
             selection_bg: Color::Reset,
             selection_fg: Color::Reset,
             mode_build: Color::Reset,

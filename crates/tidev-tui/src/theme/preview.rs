@@ -11,7 +11,7 @@ use ratatui::text::{Line, Span};
 use tidev_config::ThemeDefinition;
 use unicode_width::UnicodeWidthStr;
 
-use crate::diff_render::{render_unified_diff_text, DARK_ADD_BG, DARK_DEL_BG, LIGHT_ADD_BG, LIGHT_DEL_BG};
+use crate::diff_render::render_unified_diff_text;
 use crate::markdown::{highlight_code_to_lines, render_markdown_text_with_width_and_cwd};
 use crate::theme::ThemePalette;
 
@@ -239,36 +239,26 @@ index abc1234..def5678 100644
     } else {
         // Fallback: simple styled rows. Should never trigger — the snippet
         // above is a valid unified diff — but keep the preview robust.
-        let (del_bg, add_bg) = if palette.is_dark {
-            (
-                Color::Rgb(DARK_DEL_BG.0, DARK_DEL_BG.1, DARK_DEL_BG.2),
-                Color::Rgb(DARK_ADD_BG.0, DARK_ADD_BG.1, DARK_ADD_BG.2),
-            )
-        } else {
-            (
-                Color::Rgb(LIGHT_DEL_BG.0, LIGHT_DEL_BG.1, LIGHT_DEL_BG.2),
-                Color::Rgb(LIGHT_ADD_BG.0, LIGHT_ADD_BG.1, LIGHT_ADD_BG.2),
-            )
-        };
+        let (del_bg, add_bg) = (palette.diff_delete_bg, palette.diff_add_bg);
         for line in [
             Line::from(vec![Span::styled(
                 "    let items = vec![1, 2, 3];",
                 Style::default().fg(palette.text),
             )]),
             Line::from(vec![
-                Span::styled("-", Style::default().fg(palette.error)),
+                Span::styled("-", Style::default().fg(palette.diff_delete)),
                 Span::styled(
                     " let total: i32 = items.iter().sum();",
                     Style::default()
-                        .fg(palette.error)
+                        .fg(palette.diff_delete)
                         .add_modifier(Modifier::DIM),
                 ),
             ]),
             Line::from(vec![
-                Span::styled("+", Style::default().fg(palette.success)),
+                Span::styled("+", Style::default().fg(palette.diff_add)),
                 Span::styled(
                     " let total: i64 = items.iter().map(|&x| x as i64).sum();",
-                    Style::default().fg(palette.success),
+                    Style::default().fg(palette.diff_add),
                 ),
             ]),
             Line::from(vec![Span::styled(
@@ -384,11 +374,7 @@ fn section_header(palette: ThemePalette, label: &str, width: usize) -> Line<'sta
 
 /// One row of the sample chat card: `│ content │` with the content padded
 /// (or truncated with an ellipsis) to fit the card width.
-fn card_row(
-    palette: ThemePalette,
-    content: Vec<Span<'static>>,
-    width: usize,
-) -> Line<'static> {
+fn card_row(palette: ThemePalette, content: Vec<Span<'static>>, width: usize) -> Line<'static> {
     let content_w = width.saturating_sub(4);
     let mut spans: Vec<Span<'static>> = Vec::new();
     let mut used = 0usize;
@@ -404,10 +390,7 @@ fn card_row(
         spans.push(span);
     }
     if used < content_w {
-        spans.push(Span::styled(
-            " ".repeat(content_w - used),
-            Style::default(),
-        ));
+        spans.push(Span::styled(" ".repeat(content_w - used), Style::default()));
     }
     let mut line = vec![Span::styled("│ ", Style::default().fg(palette.border))];
     line.extend(spans);
@@ -476,14 +459,21 @@ mod tests {
         assert!(text.contains("base16-ocean.dark"));
         // Every palette entry renders as a swatch with its hex code
         for hex in [
-            "#000000", "#111111", "#222222", "#333333", "#eeeeee", "#aaaaaa", "#444444",
-            "#00aaff", "#66ccff", "#00cc00", "#cccc00", "#cc0000", "#00ff00", "#ff0000",
-            "#0055ff", "#ffffff", "#00cccc", "#88aaaa",
+            "#000000", "#111111", "#222222", "#333333", "#eeeeee", "#aaaaaa", "#444444", "#00aaff",
+            "#66ccff", "#00cc00", "#cccc00", "#cc0000", "#00ff00", "#ff0000", "#0055ff", "#ffffff",
+            "#00cccc", "#88aaaa",
         ] {
             assert!(text.contains(hex), "missing swatch hex {hex}");
         }
         // Sample sections are present
-        for label in ["Messages", "Syntax Highlighting", "Diff", "Mode", "Surfaces", "Markdown"] {
+        for label in [
+            "Messages",
+            "Syntax Highlighting",
+            "Diff",
+            "Mode",
+            "Surfaces",
+            "Markdown",
+        ] {
             assert!(text.contains(label), "missing section {label}");
         }
         // Selection row uses the theme's selection colors
