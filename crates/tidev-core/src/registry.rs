@@ -141,8 +141,7 @@ impl ToolRegistry {
 
     /// Return all available tool definitions (unfiltered, without MCP tools).
     pub fn definitions(&self) -> Vec<ToolDefinition> {
-        let skill_description = self.skills.tool_description();
-        tidev_tools::tool_definitions(skill_description)
+        tidev_tools::tool_definitions()
     }
 
     /// Return tool definitions filtered for the given model.
@@ -153,7 +152,7 @@ impl ToolRegistry {
     ///
     /// MCP tools from connected servers are appended at the end.
     pub fn definitions_for_model(&self, model: &ActiveModel) -> Vec<ToolDefinition> {
-        let mut definitions = tidev_tools::tool_definitions(self.skills.tool_description());
+        let mut definitions = tidev_tools::tool_definitions();
         if model.use_apply_patch() {
             definitions.retain(|d| d.name != "edit" && d.name != "write");
         } else {

@@ -57,7 +57,7 @@ pub mod todo;
 pub mod utils;
 pub mod web;
 
-pub fn definitions(skill_description: String) -> Vec<ToolDefinition> {
+pub fn definitions() -> Vec<ToolDefinition> {
     let mut definitions = Vec::new();
     definitions.extend(file::definitions());
     definitions.extend(search::definitions());
@@ -72,7 +72,7 @@ pub fn definitions(skill_description: String) -> Vec<ToolDefinition> {
     ));
     definitions.push(ToolDefinition::new::<SkillArgs>(
         "skill",
-        skill_description,
+        crate::skills::SKILL_TOOL_DESCRIPTION,
         ToolPermission::Session,
     ));
     definitions
@@ -264,7 +264,7 @@ pub async fn execute_tool_call(
             .await
         }
 
-        // ── Skill rendering ────────────────────────────────────────────
+        // ── Skill access (list / load / read skill files) ───────────────
         Some("skill") => {
             let args = match parse_arguments::<SkillArgs>(&call.name, arguments) {
                 Ok(a) => a,
@@ -272,9 +272,26 @@ pub async fn execute_tool_call(
                     return ToolExecutionResult::new(format!("Error: {e:#}"));
                 }
             };
-            let skill_name = args.name.clone();
             let skills = ctx.skills.clone();
-            safe_spawn_blocking_str(move || skills.render_skill(&skill_name)).await
+            let max_output_bytes = ctx.max_output_bytes;
+            let SkillArgs {
+                name,
+                path,
+                offset,
+                limit,
+            } = args;
+            safe_spawn_blocking_str(move || match (name.as_deref(), path.as_deref()) {
+                (None, None) => skills.list_skills(
+                    offset.unwrap_or(1).max(1) as usize,
+                    limit.unwrap_or(crate::skills::DEFAULT_SKILL_PAGE_SIZE as i64) as usize,
+                ),
+                (None, Some(_)) => Err(anyhow::anyhow!(
+                    "skill: a path requires a skill name to read from"
+                )),
+                (Some(name), None) => skills.render_skill(name),
+                (Some(name), Some(path)) => skills.read_skill_file(name, path, max_output_bytes),
+            })
+            .await
         }
 
         // ── Web search / fetch (async, runs inline for abort support) ──

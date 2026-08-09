@@ -829,6 +829,7 @@ impl Runtime {
                     let sp = crate::agent_ctx::compose_system_prompt(
                         crate::agent_type::AgentType::General,
                         &self.workspace_root,
+                        &self.skills,
                     );
                     // Persist system prompt to the session record.
                     self.session_manager.update_system_prompt(session_id, &sp)?;

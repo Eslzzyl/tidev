@@ -102,16 +102,29 @@ pub(super) fn render_tool_call_summary_line_inner(
             )
         }
         "skill" => {
-            let name = string_field("name").unwrap_or_default();
-            (
-                "Loaded skill",
-                vec![Span::styled(
-                    name,
-                    Style::default()
-                        .fg(palette.text)
-                        .add_modifier(Modifier::BOLD),
-                )],
-            )
+            let name = string_field("name");
+            let path = string_field("path");
+            match (name, path) {
+                (Some(name), Some(path)) => (
+                    "Read skill",
+                    vec![Span::styled(
+                        format!("{name}/{path}"),
+                        Style::default()
+                            .fg(palette.text)
+                            .add_modifier(Modifier::BOLD),
+                    )],
+                ),
+                (Some(name), None) => (
+                    "Loaded skill",
+                    vec![Span::styled(
+                        name,
+                        Style::default()
+                            .fg(palette.text)
+                            .add_modifier(Modifier::BOLD),
+                    )],
+                ),
+                (None, _) => ("Listed skills", Vec::new()),
+            }
         }
         _ => {
             let summary = summarize_tool_call(tool_call, content_width);
@@ -311,6 +324,18 @@ pub(super) fn compute_tool_result_suffix(
         "skill" => {
             if tool_output_is_error(output) {
                 " → error".to_string()
+            } else if output.starts_with("Available skills") {
+                // List mode: report the catalog total when the page header
+                // carries it ("showing A-B of N").
+                let total = output
+                    .split("of ")
+                    .nth(1)
+                    .and_then(|s| s.split([')', ':']).next())
+                    .and_then(|s| s.trim().parse::<usize>().ok());
+                match total {
+                    Some(n) => format!(" → {n} available"),
+                    None => " → listed".to_string(),
+                }
             } else {
                 let content_lines: Vec<_> = output
                     .lines()

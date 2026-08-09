@@ -53,13 +53,17 @@ use crate::tool_def::to_llm_tool_def;
 /// Compose the complete system prompt for a session.
 ///
 /// Assembled once at session creation and stored in `AgentLoopConfig.system_prompt`.
-/// Includes: base agent prompt + environment info.
+/// Includes: base agent prompt + environment info + the skill catalog section.
+/// The catalog is frozen here for the session lifetime (persisted with the
+/// session and never rebuilt), so the bytes stay stable for prompt caching;
+/// the live catalog remains queryable through the `skill` tool's list mode.
 /// Instruction files (AGENTS.md etc.) are injected into user messages via
 /// `<system-reminder>` tags instead (see `inject_instructions`).
 /// Mode reminders are injected into user messages instead (see `inject_mode_reminder`).
 pub fn compose_system_prompt(
     agent_type: crate::agent_type::AgentType,
     workspace_root: &std::path::Path,
+    skills: &tidev_tools::SkillCatalog,
 ) -> String {
     let base_prompt = crate::agent_type::system_prompt(agent_type);
 
@@ -90,6 +94,8 @@ pub fn compose_system_prompt(
 
     let mut prompt = base_prompt;
     prompt.push_str(&env_block);
+    prompt.push_str("\n\n");
+    prompt.push_str(&skills.catalog_section());
 
     prompt
 }

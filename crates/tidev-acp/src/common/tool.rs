@@ -67,9 +67,10 @@ pub(crate) fn tool_title(tc: &ToolCall) -> String {
             _ => "Fetch web page".to_string(),
         },
         Some("todowrite") => "Update todo list".to_string(),
-        Some("skill") => match string_arg("name") {
-            Some(name) if !name.is_empty() => format!("Load skill {name}"),
-            _ => "Load skill".to_string(),
+        Some("skill") => match (string_arg("name"), string_arg("path")) {
+            (Some(name), Some(path)) => format!("Read skill {name}/{path}"),
+            (Some(name), None) => format!("Load skill {name}"),
+            _ => "List skills".to_string(),
         },
         _ => tc.name.clone(),
     }

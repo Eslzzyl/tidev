@@ -483,9 +483,12 @@ impl ToolArgs for TodoItem {
 }
 
 tool_args! {
-    /// Load a skill by name.
+    /// Load a skill, list skills, or read a file inside a skill's directory.
     pub struct SkillArgs {
-        name: string("Skill name to load"),
+        name: optional_string("Skill name to load (omit to list available skills)"),
+        path: optional_string("Path relative to the skill directory to read (omit to load the skill's main document)"),
+        offset: optional_integer("1-based offset into the skill list for pagination (only used when listing)"),
+        limit: optional_integer("Maximum number of skills to list per page (default 20, max 100)"),
     }
 }
 

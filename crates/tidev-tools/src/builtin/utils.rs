@@ -32,7 +32,7 @@ pub(super) fn read_existing_document(path: &Path) -> Result<Option<TextDocument>
 }
 
 /// Truncate a string in-place at a UTF-8 boundary, appending `[truncated]`.
-pub(super) fn truncate_in_place(value: &mut String, max_bytes: usize) {
+pub(crate) fn truncate_in_place(value: &mut String, max_bytes: usize) {
     if value.len() <= max_bytes {
         return;
     }

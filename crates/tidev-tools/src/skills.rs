@@ -1,16 +1,16 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use ignore::WalkBuilder;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use std::{
     collections::HashSet,
     fs,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
 };
 
 use reqwest::blocking::Client;
 
-use tidev_utils::path::canonicalize_display;
+use tidev_utils::path::{canonicalize_display, canonicalize_for_comparison};
 
 const SKILL_FILE_NAME: &str = "SKILL.md";
 const SKILL_ROOTS: &[&str] = &[".opencode/skills", ".claude/skills", ".agents/skills"];
@@ -18,6 +18,19 @@ const SKILL_ROOTS: &[&str] = &[".opencode/skills", ".claude/skills", ".agents/sk
 /// regardless of configuration.
 const HOME_SKILL_ROOTS: &[&str] = &[".agents/skills", ".claude/skills"];
 const MAX_COMPANION_FILES: usize = 10;
+/// Default page size for listing skills through the `skill` tool.
+pub const DEFAULT_SKILL_PAGE_SIZE: usize = 20;
+/// Upper bound for a single skill listing page.
+pub const MAX_SKILL_PAGE_SIZE: usize = 100;
+/// Static description for the `skill` tool. The live skill catalog is never
+/// embedded here: it is injected into the system prompt once at session
+/// creation (see [`SkillCatalog::catalog_section`]) and can be re-listed on
+/// demand by calling the tool without a name.
+pub const SKILL_TOOL_DESCRIPTION: &str = "Load a reusable skill or read a file inside a skill's directory. Call with no arguments to \
+     list available skills (optional offset/limit paginate the list). Call with `name` to load \
+     the skill's main document (SKILL.md). Call with `name` and `path` (relative to the skill's \
+     directory) to read a companion file such as a doc or script. Paths are confined to the \
+     skill's own directory.";
 
 static CATALOG: OnceLock<Arc<SkillCatalogInner>> = OnceLock::new();
 
@@ -205,21 +218,101 @@ impl SkillCatalog {
         self.inner.skills.iter().find(|skill| skill.name == name)
     }
 
-    pub fn tool_description(&self) -> String {
+    /// The "Available skills" block injected into the system prompt once at
+    /// session creation. The block is persisted with the session and stays
+    /// byte-identical for its entire lifetime, so it never participates in
+    /// per-turn re-composition. The live catalog can still be queried through
+    /// [`SkillCatalog::list_skills`].
+    pub fn catalog_section(&self) -> String {
+        let mut section = String::from("Available skills:");
         if self.inner.skills.is_empty() {
-            return String::from("Load a reusable skill by name. No skills were discovered.");
+            section.push_str(" none discovered.");
+            return section;
         }
-
-        let mut description = String::from("Load a reusable skill by name. Available skills:\n");
         for skill in &self.inner.skills {
-            description.push_str("- ");
-            description.push_str(&skill.name);
-            description.push_str(": ");
-            description.push_str(skill.description.trim());
-            description.push('\n');
+            section.push_str("\n- ");
+            section.push_str(&skill.name);
+            section.push_str(": ");
+            section.push_str(skill.description.trim());
+        }
+        section
+    }
+
+    /// List the live skill catalog as a paginated text page. `offset` is
+    /// 1-based; `limit` is clamped to [`MAX_SKILL_PAGE_SIZE`]. The returned
+    /// text carries a footer pointing at the next page when more remain.
+    pub fn list_skills(&self, offset: usize, limit: usize) -> Result<String> {
+        let total = self.inner.skills.len();
+        let offset = offset.max(1);
+        let limit = limit.clamp(1, MAX_SKILL_PAGE_SIZE);
+        let start = offset - 1;
+        let end = start.saturating_add(limit).min(total);
+
+        if start >= total {
+            return Ok(format!(
+                "Available skills: no skills at offset {offset} (total {total})."
+            ));
         }
 
-        description.trim_end().to_string()
+        let mut output = format!(
+            "Available skills (showing {}-{} of {}):\n",
+            offset, end, total
+        );
+        for skill in &self.inner.skills[start..end] {
+            output.push_str(&format!("- {}: {}\n", skill.name, skill.description.trim()));
+        }
+        if end < total {
+            output.push_str(&format!(
+                "(use the skill tool with offset={} to list the next page)",
+                end + 1
+            ));
+        }
+
+        Ok(output.trim_end().to_string())
+    }
+
+    /// Read a file inside a skill's directory, or list a directory when
+    /// `relative_path` points at one. The path must stay within the skill
+    /// directory: absolute paths, `..` traversal, and symlink escapes are
+    /// rejected so this tool never reads outside the skill's own files.
+    ///
+    /// `max_output_bytes` bounds the returned text.
+    pub fn read_skill_file(
+        &self,
+        name: &str,
+        relative_path: &str,
+        max_output_bytes: usize,
+    ) -> Result<String> {
+        let skill = self
+            .get(name)
+            .with_context(|| format!("unknown skill '{name}'"))?;
+        let resolved = resolve_skill_relative_path(&skill.directory, relative_path)?;
+
+        if resolved.is_dir() {
+            return list_skill_directory(relative_path, &resolved);
+        }
+
+        if !resolved.is_file() {
+            bail!(
+                "failed to read {} in skill '{}': file not found",
+                relative_path,
+                name
+            );
+        }
+
+        let bytes = fs::read(&resolved)
+            .with_context(|| format!("failed to read {} in skill '{name}'", relative_path))?;
+
+        // Mirror the generic read tool: reject binary content.
+        if bytes.iter().take(1024).any(|&byte| byte == 0) {
+            bail!("Cannot read binary file: {relative_path}");
+        }
+
+        let document = tidev_utils::encoding::decode_text(&bytes)
+            .with_context(|| format!("failed to decode {} in skill '{name}'", relative_path))?;
+        let mut text = document.into_text();
+        crate::builtin::utils::truncate_in_place(&mut text, max_output_bytes);
+        Ok(text)
     }
 
     pub fn render_skill(&self, name: &str) -> Result<String> {
@@ -236,13 +329,80 @@ impl SkillCatalog {
             output.push_str("\n\n## Companion files\n");
             for file in &skill.companion_files {
                 output.push_str("- ");
-                output.push_str(&file.display().to_string());
+                output.push_str(&file.display().to_string().replace('\\', "/"));
                 output.push('\n');
             }
+            output.push_str(&format!(
+                "\nRead a companion file by calling the skill tool with name \"{}\" and path set \
+                 to its path relative to the skill directory (e.g. \"docs/guide.md\").",
+                skill.name
+            ));
         }
 
         Ok(output)
     }
+}
+
+/// Resolve a skill-relative path against the skill directory, rejecting any
+/// path that escapes it: absolute paths, `.`/`..` segments are checked at the
+/// component level, and the canonicalized result must remain inside the
+/// canonicalized skill directory (which also blocks symlink escapes).
+fn resolve_skill_relative_path(skill_dir: &Path, relative_path: &str) -> Result<PathBuf> {
+    let path = Path::new(relative_path);
+    if path.as_os_str().is_empty() {
+        bail!("path must not be empty");
+    }
+    if path.is_absolute() {
+        bail!("path must be relative to the skill directory");
+    }
+
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                bail!("path '{relative_path}' escapes the skill directory")
+            }
+            Component::RootDir | Component::Prefix(_) => {
+                bail!("path must be relative to the skill directory")
+            }
+            Component::Normal(_) => {}
+        }
+    }
+
+    let resolved = skill_dir.join(path);
+    let canonical_dir = canonicalize_for_comparison(skill_dir);
+    let canonical_resolved = canonicalize_for_comparison(&resolved);
+    if !canonical_resolved.starts_with(&canonical_dir) {
+        bail!("path '{relative_path}' escapes the skill directory");
+    }
+    Ok(resolved)
+}
+
+/// Render a directory listing inside a skill, mirroring the generic read
+/// tool's format but with the header shown relative to the skill directory.
+fn list_skill_directory(relative_path: &str, resolved: &Path) -> Result<String> {
+    let mut entries = Vec::new();
+    for entry in fs::read_dir(resolved)
+        .with_context(|| format!("failed to read directory {relative_path}"))?
+    {
+        let entry = entry.with_context(|| format!("failed to read entry in {relative_path}"))?;
+        let file_type = entry
+            .file_type()
+            .with_context(|| format!("failed to inspect {}", entry.path().display()))?;
+        let mut name = entry.file_name().to_string_lossy().to_string();
+        if file_type.is_dir() {
+            name.push('/');
+        }
+        entries.push(name);
+    }
+
+    entries.sort();
+
+    if entries.is_empty() {
+        return Ok("(empty)".to_string());
+    }
+    let header = relative_path.replace('\\', "/");
+    Ok(format!("{header}/\n{}", entries.join("\n")))
 }
 
 fn candidate_roots(
@@ -728,5 +888,143 @@ mod tests {
             .collect();
         assert_eq!(agents.len(), 1);
         assert_eq!(claude.len(), 1);
+    }
+
+    fn skill_info(name: &str, dir: &Path) -> SkillInfo {
+        SkillInfo {
+            name: name.to_string(),
+            description: format!("test skill {name}"),
+            directory: dir.to_path_buf(),
+            location: dir.join(SKILL_FILE_NAME),
+            content: format!("Body of {name}."),
+            companion_files: Vec::new(),
+        }
+    }
+
+    fn catalog_from_skills(skills: Vec<SkillInfo>) -> SkillCatalog {
+        SkillCatalog {
+            inner: Arc::new(SkillCatalogInner { skills }),
+        }
+    }
+
+    #[test]
+    fn catalog_section_lists_skills_or_reports_none() {
+        assert_eq!(
+            SkillCatalog::default().catalog_section(),
+            "Available skills: none discovered."
+        );
+
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("demo");
+        let catalog =
+            catalog_from_skills(vec![skill_info("demo", &dir), skill_info("alpha", &dir)]);
+        let section = catalog.catalog_section();
+        assert_eq!(
+            section,
+            "Available skills:\n- demo: test skill demo\n- alpha: test skill alpha"
+        );
+    }
+
+    #[test]
+    fn list_skills_paginates_the_live_catalog() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("demo");
+        let skills: Vec<SkillInfo> = (0..5)
+            .map(|i| skill_info(&format!("skill-{i}"), &dir))
+            .collect();
+        let catalog = catalog_from_skills(skills);
+
+        let page1 = catalog.list_skills(1, 2).unwrap();
+        assert!(page1.contains("showing 1-2 of 5"));
+        assert!(page1.contains("- skill-0: test skill skill-0"));
+        assert!(page1.contains("- skill-1:"));
+        assert!(page1.contains("offset=3"));
+
+        let page2 = catalog.list_skills(3, 2).unwrap();
+        assert!(page2.contains("showing 3-4 of 5"));
+
+        let page3 = catalog.list_skills(5, 2).unwrap();
+        assert!(page3.contains("showing 5-5 of 5"));
+        assert!(!page3.contains("offset="));
+
+        let beyond = catalog.list_skills(99, 2).unwrap();
+        assert!(beyond.contains("no skills at offset 99"));
+    }
+
+    #[test]
+    fn read_skill_file_reads_inside_the_skill_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("demo");
+        fs::create_dir_all(dir.join("docs")).unwrap();
+        fs::write(dir.join("docs").join("guide.md"), "# Guide\n\nHello").unwrap();
+        let catalog = catalog_from_skills(vec![skill_info("demo", &dir)]);
+
+        let content = catalog
+            .read_skill_file("demo", "docs/guide.md", 1024)
+            .unwrap();
+        assert_eq!(content, "# Guide\n\nHello");
+
+        let err = catalog.read_skill_file("unknown", "docs/guide.md", 1024);
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn read_skill_file_lists_skill_directories() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("demo");
+        fs::create_dir_all(dir.join("docs")).unwrap();
+        fs::create_dir_all(dir.join("scripts")).unwrap();
+        fs::write(dir.join("docs").join("guide.md"), "x").unwrap();
+        fs::write(dir.join("scripts").join("run.sh"), "#!/bin/sh\n").unwrap();
+        let catalog = catalog_from_skills(vec![skill_info("demo", &dir)]);
+
+        let listing = catalog.read_skill_file("demo", ".", 1024).unwrap();
+        assert!(listing.contains("docs/"), "listing was: {listing}");
+        assert!(listing.contains("scripts/"), "listing was: {listing}");
+
+        let docs = catalog.read_skill_file("demo", "docs", 1024).unwrap();
+        assert!(docs.contains("docs/\n"), "listing was: {docs}");
+        assert!(docs.contains("guide.md"), "listing was: {docs}");
+    }
+
+    #[test]
+    fn read_skill_file_rejects_escaping_paths() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("demo");
+        fs::create_dir_all(&dir).unwrap();
+        let catalog = catalog_from_skills(vec![skill_info("demo", &dir)]);
+
+        assert!(catalog.read_skill_file("demo", "", 1024).is_err());
+        assert!(catalog.read_skill_file("demo", "..", 1024).is_err());
+        assert!(
+            catalog
+                .read_skill_file("demo", "../secret.txt", 1024)
+                .is_err()
+        );
+        assert!(catalog.read_skill_file("demo", "a/../../b", 1024).is_err());
+
+        let absolute = dir.join("SKILL.md");
+        assert!(
+            catalog
+                .read_skill_file("demo", absolute.to_str().unwrap(), 1024)
+                .is_err()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_skill_file_rejects_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let outside = tmp.path().join("outside.txt");
+        fs::write(&outside, "secret").unwrap();
+        let dir = tmp.path().join("demo");
+        fs::create_dir_all(&dir).unwrap();
+        symlink(&outside, dir.join("link.txt")).unwrap();
+        let catalog = catalog_from_skills(vec![skill_info("demo", &dir)]);
+
+        let err = catalog.read_skill_file("demo", "link.txt", 1024);
+        assert!(err.is_err(), "symlink escape must be rejected");
     }
 }
