@@ -21,7 +21,7 @@ use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
 use crate::markdown::set_syntax_theme_by_key;
 use crate::theme::preview::build_preview_lines;
-use crate::theme::{resolve_palette, ThemePalette};
+use crate::theme::{ThemePalette, resolve_palette};
 use crate::utils::{centered_rect, render_scrollbar};
 
 #[derive(Clone, Debug)]
@@ -559,10 +559,7 @@ impl Component for ThemePanel {
                             .style(Style::default().bg(palette.panel_alt)),
                         )
                     };
-                    frame.render_widget(
-                        bg_block,
-                        Rect::new(list_area.x, y, list_area.width, 1),
-                    );
+                    frame.render_widget(bg_block, Rect::new(list_area.x, y, list_area.width, 1));
                     let name = format!("  {}", t.as_str());
                     frame.render_widget(
                         Paragraph::new(Line::from(Span::styled(name, text_style))),
@@ -575,14 +572,7 @@ impl Component for ThemePanel {
         if let Some(sb_area) = list_scrollbar_area
             && display_len > list_height
         {
-            render_scrollbar(
-                frame,
-                sb_area,
-                scroll,
-                display_len,
-                palette,
-                false,
-            );
+            render_scrollbar(frame, sb_area, scroll, display_len, palette, false);
         }
 
         // ── Right Pane: Preview ──
@@ -675,8 +665,7 @@ impl Component for ThemePanel {
         }
 
         // ── Footer hints ──
-        let hints =
-            "↑/↓: navigate  •  ←/→: scroll preview  •  type: search  •  Enter: apply  •  Esc: close";
+        let hints = "↑/↓: navigate  •  ←/→: scroll preview  •  type: search  •  Enter: apply  •  Esc: close";
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 format!("  {}", hints),

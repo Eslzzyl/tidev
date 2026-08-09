@@ -19,10 +19,10 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span, Text};
 use unicode_width::UnicodeWidthStr;
 
+pub(crate) use highlight::HIGHLIGHT_CACHE_GEN;
 pub(crate) use highlight::highlight_code_to_lines;
 pub use highlight::highlight_code_to_lines_for_path;
 pub(crate) use highlight::set_syntax_theme_by_key;
-pub(crate) use highlight::HIGHLIGHT_CACHE_GEN;
 
 use line::line_to_static;
 use wrap::RtOptions;

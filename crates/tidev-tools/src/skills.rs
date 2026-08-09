@@ -670,9 +670,7 @@ mod tests {
         fs::create_dir_all(root.join(name)).unwrap();
         fs::write(
             root.join(name).join(SKILL_FILE_NAME),
-            format!(
-                "---\nname: {name}\ndescription: test skill {name}\n---\nBody of {name}.\n"
-            ),
+            format!("---\nname: {name}\ndescription: test skill {name}\n---\nBody of {name}.\n"),
         )
         .unwrap();
     }
