@@ -389,7 +389,7 @@ impl MessageList {
         if let Some(msg) = chat_context.messages.iter_mut().rev().find(|m| m.streaming) {
             msg.role = tidev_llm::message::MessageRole::Error;
             msg.content = format!("Request failed: {error}");
-            msg.completed_at = Some(Utc::now());
+            finalize_message_timing(msg, Utc::now());
             if let Some(mid) = msg_id {
                 self.layout_index.mark_dirty(mid);
             }
@@ -414,6 +414,9 @@ impl MessageList {
         let finalized_idx = self
             .streaming_buffer
             .finalise_message(&mut chat_context.messages);
+        if let Some(idx) = finalized_idx {
+            finalize_message_timing(&mut chat_context.messages[idx], Utc::now());
+        }
 
         // Remove the message if it's empty, whether it was just finalized or
         // already finalized by a prior StreamEnd event.
@@ -735,6 +738,7 @@ impl MessageList {
                 reasoning_completed_at,
                 ..
             } => {
+                let completed_at = Utc::now();
                 let is_active_session = self.active_session_id == Some(session_id);
                 let msg_id = if is_active_session {
                     self.streaming_buffer.current_message_id
@@ -746,8 +750,15 @@ impl MessageList {
                         .finalise_message(&mut chat_context.messages);
                     if let Some(mid) = msg_id {
                         if let Some(msg) = chat_context.messages.iter_mut().find(|m| m.id == mid) {
-                            msg.reasoning_started_at = *reasoning_started_at;
-                            msg.reasoning_completed_at = *reasoning_completed_at;
+                            // Preserve timestamps already captured by the UI when
+                            // cancellation emits a StreamEnd without timing data.
+                            if let Some(started) = *reasoning_started_at {
+                                msg.reasoning_started_at = Some(started);
+                            }
+                            if let Some(completed) = *reasoning_completed_at {
+                                msg.reasoning_completed_at = Some(completed);
+                            }
+                            finalize_message_timing(msg, completed_at);
                         }
                         self.layout_index.mark_dirty(mid);
                     }
@@ -757,8 +768,13 @@ impl MessageList {
                         m.streaming && m.role == tidev_llm::message::MessageRole::Assistant
                     }) {
                         chat_context.messages[idx].streaming = false;
-                        chat_context.messages[idx].reasoning_started_at = *reasoning_started_at;
-                        chat_context.messages[idx].reasoning_completed_at = *reasoning_completed_at;
+                        if let Some(started) = *reasoning_started_at {
+                            chat_context.messages[idx].reasoning_started_at = Some(started);
+                        }
+                        if let Some(completed) = *reasoning_completed_at {
+                            chat_context.messages[idx].reasoning_completed_at = Some(completed);
+                        }
+                        finalize_message_timing(&mut chat_context.messages[idx], completed_at);
                         self.layout_index.mark_dirty(chat_context.messages[idx].id);
                     }
                 }
@@ -1603,6 +1619,15 @@ fn latest_assistant_has_pending_tool_results(messages: &[Message]) -> bool {
     })
 }
 
+/// Freeze terminal timing fields without overwriting timestamps supplied by the
+/// provider or captured by an earlier UI event.
+fn finalize_message_timing(message: &mut Message, completed_at: DateTime<Utc>) {
+    message.completed_at.get_or_insert(completed_at);
+    if message.reasoning_started_at.is_some() {
+        message.reasoning_completed_at.get_or_insert(completed_at);
+    }
+}
+
 fn append_interruption_notice(messages: &mut Vec<Message>) {
     let mut err_msg = Message::new(
         tidev_llm::message::MessageRole::Error,
@@ -1760,5 +1785,83 @@ mod tests {
             thinking_command_notice("collapsed", 2, 2).as_slice(),
             [Action::Notice(text)] if text == "collapsed 2 thinking blocks"
         ));
+    }
+
+    #[test]
+    fn interrupted_stream_freezes_message_timing() {
+        let session_id = Uuid::from_u128(200);
+        let started_at = Utc::now() - chrono::Duration::seconds(2);
+        let mut assistant = Message::streaming(
+            tidev_llm::message::MessageRole::Assistant,
+            "partial response",
+        );
+        assistant.reasoning = "partial reasoning".to_string();
+        assistant.reasoning_started_at = Some(started_at);
+        let assistant_id = assistant.id;
+
+        let mut list = MessageList::new();
+        list.set_chat_context(ChatContext::new(
+            session_id,
+            "test".into(),
+            vec![user_msg(1), assistant],
+            None,
+            "model".into(),
+            "provider".into(),
+        ));
+
+        list.append_interrupted_message();
+
+        let message = list
+            .active_chat_context()
+            .unwrap()
+            .messages
+            .iter()
+            .find(|message| message.id == assistant_id)
+            .unwrap();
+        assert!(!message.streaming);
+        assert!(message.completed_at.is_some());
+        assert_eq!(message.reasoning_completed_at, message.completed_at);
+    }
+
+    #[test]
+    fn stream_end_without_timing_preserves_existing_reasoning_start() {
+        let session_id = Uuid::from_u128(201);
+        let started_at = Utc::now() - chrono::Duration::seconds(2);
+        let mut assistant = Message::streaming(
+            tidev_llm::message::MessageRole::Assistant,
+            "partial response",
+        );
+        assistant.reasoning = "partial reasoning".to_string();
+        assistant.reasoning_started_at = Some(started_at);
+        let assistant_id = assistant.id;
+
+        let mut list = MessageList::new();
+        list.set_chat_context(ChatContext::new(
+            session_id,
+            "test".into(),
+            vec![user_msg(1), assistant],
+            None,
+            "model".into(),
+            "provider".into(),
+        ));
+
+        list.handle_backend_event(&BackendEvent::StreamEnd {
+            session_id,
+            request_id: 1,
+            reasoning_started_at: None,
+            reasoning_completed_at: None,
+        });
+
+        let message = list
+            .active_chat_context()
+            .unwrap()
+            .messages
+            .iter()
+            .find(|message| message.id == assistant_id)
+            .unwrap();
+        assert!(!message.streaming);
+        assert_eq!(message.reasoning_started_at, Some(started_at));
+        assert!(message.completed_at.is_some());
+        assert_eq!(message.reasoning_completed_at, message.completed_at);
     }
 }
