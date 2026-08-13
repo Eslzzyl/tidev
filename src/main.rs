@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use uuid::Uuid;
 
 mod cli;
+mod headless;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -20,6 +21,25 @@ struct Cli {
 enum Command {
     /// Start the TUI (default when no subcommand is given)
     Tui,
+
+    /// Run one agent session without starting the TUI
+    Run {
+        /// Workspace root (defaults to the current directory)
+        #[arg(long)]
+        workspace: Option<PathBuf>,
+
+        /// User instruction for this run
+        #[arg(long, conflicts_with_all = ["instruction_file", "stdin"])]
+        instruction: Option<String>,
+
+        /// Read the user instruction from a file
+        #[arg(long, conflicts_with_all = ["instruction", "stdin"])]
+        instruction_file: Option<PathBuf>,
+
+        /// Read the user instruction from stdin
+        #[arg(long, conflicts_with_all = ["instruction", "instruction_file"])]
+        stdin: bool,
+    },
 
     // ── Session portability ─────────────────────────────────────────
     /// Start as an ACP agent over stdio
@@ -181,6 +201,12 @@ async fn main() -> Result<()> {
     match Cli::parse().command {
         None => tidev_tui::run().await,
         Some(Command::Tui) => tidev_tui::run().await,
+        Some(Command::Run {
+            workspace,
+            instruction,
+            instruction_file,
+            stdin,
+        }) => headless::run(workspace, instruction, instruction_file, stdin).await,
         Some(Command::Acp) => tidev_acp::run_acp_agent().await,
 
         // ── Export ──────────────────────────────────────────────

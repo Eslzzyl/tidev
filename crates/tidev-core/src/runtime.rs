@@ -21,13 +21,13 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, OnceLock, RwLock as StdRwLock};
+use std::sync::{Arc, Mutex as StdMutex, OnceLock, RwLock as StdRwLock};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use chrono::Utc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{Mutex, Notify, RwLock};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -143,6 +143,11 @@ pub struct Runtime {
     /// exiting.
     steer_signals: Arc<std::sync::Mutex<HashMap<Uuid, Arc<AtomicBool>>>>,
 
+    /// Completion notifications for frontends that await a full session run.
+    session_idle_notifies: Arc<StdMutex<HashMap<Uuid, Arc<Notify>>>>,
+    /// Error from the most recent full session run, if any.
+    session_outcomes: Arc<StdMutex<HashMap<Uuid, Option<String>>>>,
+
     /// Guards the check-and-start sequence in submit_prompt / continue_session
     /// to prevent a TOCTOU race where two tasks both see is_session_busy=false
     /// and both call start_agent_loop for the same session.
@@ -167,6 +172,7 @@ struct SessionLoopGuard {
     handles: Arc<std::sync::Mutex<HashMap<Uuid, tokio::task::JoinHandle<()>>>>,
     cancels: Arc<std::sync::Mutex<HashMap<Uuid, CancellationToken>>>,
     steer_signals: Arc<std::sync::Mutex<HashMap<Uuid, Arc<AtomicBool>>>>,
+    idle_notify: Arc<Notify>,
 }
 
 impl Drop for SessionLoopGuard {
@@ -175,6 +181,7 @@ impl Drop for SessionLoopGuard {
         self.cancels.lock().unwrap().remove(&self.session_id);
         self.busy_sessions.lock().unwrap().remove(&self.session_id);
         self.steer_signals.lock().unwrap().remove(&self.session_id);
+        self.idle_notify.notify_waiters();
     }
 }
 
@@ -754,6 +761,35 @@ impl Runtime {
         self.busy_sessions.lock().unwrap().contains(&session_id)
     }
 
+    /// Wait until the session's outer agent loop has completely exited.
+    pub async fn wait_for_session(&self, session_id: Uuid) -> Result<()> {
+        let notify = {
+            let mut notifies = self.session_idle_notifies.lock().unwrap();
+            notifies
+                .entry(session_id)
+                .or_insert_with(|| Arc::new(Notify::new()))
+                .clone()
+        };
+
+        loop {
+            let notified = notify.notified();
+            if !self.is_session_busy(session_id) {
+                if let Some(error) = self
+                    .session_outcomes
+                    .lock()
+                    .unwrap()
+                    .get(&session_id)
+                    .cloned()
+                    .flatten()
+                {
+                    anyhow::bail!(error);
+                }
+                return Ok(());
+            }
+            notified.await;
+        }
+    }
+
     /// List all session IDs with active agent loops.
     pub fn active_sessions(&self) -> Vec<Uuid> {
         self.busy_sessions.lock().unwrap().iter().copied().collect()
@@ -891,6 +927,17 @@ impl Runtime {
             .lock()
             .unwrap()
             .insert(session_id, steer_signal.clone());
+        self.session_outcomes
+            .lock()
+            .unwrap()
+            .insert(session_id, None);
+        let idle_notify = self
+            .session_idle_notifies
+            .lock()
+            .unwrap()
+            .entry(session_id)
+            .or_insert_with(|| Arc::new(Notify::new()))
+            .clone();
 
         // Extract the per-session pending prompts for this loop run.
         // Steering entries are consumed as keep-alive signals by the loop;
@@ -917,6 +964,7 @@ impl Runtime {
         let cancels = self.active_loop_cancels.clone();
         let steer_signals = self.steer_signals.clone();
         let qmap_restore = self.pending_prompts.clone();
+        let session_outcomes = self.session_outcomes.clone();
 
         let join = tokio::spawn(async move {
             let _guard = SessionLoopGuard {
@@ -925,7 +973,9 @@ impl Runtime {
                 handles: handles.clone(),
                 cancels: cancels.clone(),
                 steer_signals: steer_signals.clone(),
+                idle_notify,
             };
+            let mut loop_error = None;
             // The outer loop keeps the session busy across turns: after
             // run_agent_loop exits (the model stopped responding), queued
             // prompts are persisted and the loop runs again for the next
@@ -937,6 +987,7 @@ impl Runtime {
                     break;
                 }
                 if let Err(e) = tidev_agent::run_agent_loop(&ctx, loop_config.clone()).await {
+                    loop_error = Some(e.to_string());
                     log::error!("agent loop for session {session_id} exited with error: {e}");
                 }
                 // Drain prompts queued while the loop was running. Steering
@@ -997,6 +1048,10 @@ impl Runtime {
                     q.push_back(prompt);
                 }
             }
+            session_outcomes
+                .lock()
+                .unwrap()
+                .insert(session_id, loop_error);
         });
 
         // Store handle, then mark session busy.
@@ -1707,6 +1762,8 @@ impl RuntimeBuilder {
             busy_sessions: Arc::new(std::sync::Mutex::new(HashSet::new())),
             pending_prompts: Arc::new(std::sync::Mutex::new(HashMap::new())),
             steer_signals: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            session_idle_notifies: Arc::new(StdMutex::new(HashMap::new())),
+            session_outcomes: Arc::new(StdMutex::new(HashMap::new())),
             session_start_lock: Arc::new(std::sync::Mutex::new(())),
             cleanup_cancel,
             workspace_root,

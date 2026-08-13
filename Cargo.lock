@@ -4060,6 +4060,7 @@ dependencies = [
  "tidev-acp",
  "tidev-config",
  "tidev-core",
+ "tidev-llm",
  "tidev-storage",
  "tidev-tui",
  "tidev-utils",

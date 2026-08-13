@@ -47,6 +47,7 @@ chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 tidev-core = { path = "crates/tidev-core" }
+tidev-llm = { path = "crates/tidev-llm" }
 tidev-config = { path = "crates/tidev-config" }
 tidev-storage = { path = "crates/tidev-storage" }
 tidev-tui = { path = "crates/tidev-tui" }
