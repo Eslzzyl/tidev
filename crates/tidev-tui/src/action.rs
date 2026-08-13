@@ -92,6 +92,38 @@ pub(crate) enum SearchAction {
     },
 }
 
+/// Settings that can be changed from the settings panel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SettingKey {
+    NotificationEnabled,
+    LoggingEnabled,
+    LogLevel,
+    SaveRequestBody,
+    SaveResponseBody,
+    ScrollSpeed,
+    AllowSensitiveFileAccess,
+    AllowOutsideWorkspaceAccess,
+    SubagentEnabled,
+    CollapseThinking,
+    CollapseDiffs,
+    SendWhileBusy,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum SettingValue {
+    Bool(bool),
+    Number(f32),
+    Choice(String),
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum SettingsAction {
+    Change {
+        key: SettingKey,
+        value: SettingValue,
+    },
+}
+
 /// Connect/configure LLM provider actions.
 #[derive(Clone, Debug)]
 pub(crate) enum ConnectAction {
@@ -203,6 +235,7 @@ pub(crate) enum Action {
     Overlay(OverlayAction),
     Theme(ThemeAction),
     Search(SearchAction),
+    Settings(SettingsAction),
     Connect(ConnectAction),
     Mcp(McpAction),
 

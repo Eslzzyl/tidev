@@ -8,12 +8,80 @@ use tidev_llm::message::{MessageRole, ToolExecutionResult};
 
 use crate::action::{
     Action, BoundaryDecision, ChatAction, ConnectAction, McpAction, OverlayAction, OverlayKind,
-    SearchAction, SensitiveFileDecision, SessionAction, ThemeAction,
+    SearchAction, SensitiveFileDecision, SessionAction, SettingKey, SettingValue, SettingsAction,
+    ThemeAction,
 };
 use crate::component::Component;
 
 use crate::components::chat::MessageList;
 use tidev_utils::session::title_from_prompt;
+
+fn apply_setting_change(
+    config: &mut tidev_config::AppConfig,
+    key: SettingKey,
+    value: SettingValue,
+) -> bool {
+    match (key, value) {
+        (SettingKey::NotificationEnabled, SettingValue::Bool(value)) => {
+            config.notifications.enabled = value;
+            true
+        }
+        (SettingKey::LoggingEnabled, SettingValue::Bool(value)) => {
+            config.logging.enabled = value;
+            true
+        }
+        (SettingKey::LogLevel, SettingValue::Choice(value))
+            if matches!(value.as_str(), "DEBUG" | "INFO" | "WARN" | "ERROR") =>
+        {
+            config.logging.level = value;
+            true
+        }
+        (SettingKey::SaveRequestBody, SettingValue::Bool(value)) => {
+            config.logging.save_request_body = value;
+            true
+        }
+        (SettingKey::SaveResponseBody, SettingValue::Bool(value)) => {
+            config.logging.save_response_body = value;
+            true
+        }
+        (SettingKey::ScrollSpeed, SettingValue::Number(value)) if (1.0..=10.0).contains(&value) => {
+            config.ui.scroll_speed = value;
+            true
+        }
+        (SettingKey::AllowSensitiveFileAccess, SettingValue::Bool(value)) => {
+            config.access_control.allow_sensitive_file_access = value;
+            true
+        }
+        (SettingKey::AllowOutsideWorkspaceAccess, SettingValue::Bool(value)) => {
+            config.access_control.allow_outside_workspace_access = value;
+            true
+        }
+        (SettingKey::SubagentEnabled, SettingValue::Bool(value)) => {
+            config.subagent.enabled = value;
+            true
+        }
+        (SettingKey::CollapseThinking, SettingValue::Bool(value)) => {
+            config.ui.collapse_thinking = value;
+            true
+        }
+        (SettingKey::CollapseDiffs, SettingValue::Bool(value)) => {
+            config.ui.collapse_diffs = value;
+            true
+        }
+        (SettingKey::SendWhileBusy, SettingValue::Choice(value)) => match value.as_str() {
+            "queue" => {
+                config.ui.send_while_busy = tidev_config::SendWhileBusy::Queue;
+                true
+            }
+            "steer" => {
+                config.ui.send_while_busy = tidev_config::SendWhileBusy::Steer;
+                true
+            }
+            _ => false,
+        },
+        _ => false,
+    }
+}
 
 impl App {
     pub(crate) fn process_action(&mut self, action: Action) {
@@ -28,15 +96,45 @@ impl App {
                 }
                 Action::Overlay(OverlayAction::Close(kind)) => {
                     let is_model_panel = kind == OverlayKind::ModelPanel;
-                    let is_settings_panel = kind == OverlayKind::SettingsPanel;
                     self.close_overlay(kind, &mut queue);
                     if is_model_panel && let Some(ref mut composer) = self.composer {
                         let model = self.runtime.active_model();
                         composer.set_model_supports_images(model.supports_images);
                     }
-                    if is_settings_panel {
-                        self.subagent_enabled = self.runtime.config().subagent.enabled;
+                }
+                Action::Settings(SettingsAction::Change { key, value }) => {
+                    let change = SettingsAction::Change {
+                        key,
+                        value: value.clone(),
+                    };
+                    let previous = self.runtime.config();
+                    let valid = {
+                        let mut changed = false;
+                        self.runtime.update_config(|config| {
+                            changed = apply_setting_change(config, key, value.clone());
+                        });
+                        changed
+                    };
+
+                    if !valid {
+                        self.set_notice("Invalid settings value");
+                        continue;
                     }
+
+                    if let Err(error) = self.runtime.save_config() {
+                        self.runtime.update_config(|config| *config = previous);
+                        self.set_notice(format!("Failed to save settings: {error}"));
+                        continue;
+                    }
+
+                    let config = self.runtime.config();
+                    self.desktop_notifications
+                        .apply_config(&config.notifications);
+
+                    let ctx = UpdateContext {
+                        runtime: &mut self.runtime,
+                    };
+                    queue.extend(self.overlays.update_all(&Action::Settings(change), &ctx));
                 }
                 Action::Theme(ThemeAction::Set(name)) => {
                     self.current_palette = resolve_palette(&self.theme_catalog, &name);

@@ -330,10 +330,22 @@ impl Runtime {
         self.config.read().unwrap().clone()
     }
 
-    /// Atomically update the application configuration.
-    /// Optionally saves to disk if `save` is true.
+    /// Atomically update the application configuration and refresh consumers
+    /// that keep derived runtime state.
     pub fn update_config(&self, f: impl FnOnce(&mut AppConfig)) {
-        f(&mut self.config.write().unwrap());
+        let logging = {
+            let mut config = self.config.write().unwrap();
+            f(&mut config);
+            config.logging.clone()
+        };
+
+        self.llm.update_debug_config(tidev_llm::LlmDebugConfig {
+            save_request_body: logging.save_request_body,
+            max_request_files: logging.max_request_files,
+            save_response_body: logging.save_response_body,
+            max_response_files: logging.max_response_files,
+        });
+        tidev_logging::reload(&self.paths.data_dir, &logging);
     }
 
     /// Save the current config to disk.

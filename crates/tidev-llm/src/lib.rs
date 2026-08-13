@@ -25,8 +25,19 @@ pub use types::{ApiType, LlmProviderConfig, ToolDefinition};
 
 use anyhow::{Context, Result};
 use reqwest::Client;
-use std::time::Duration;
+use std::{
+    sync::{Arc, RwLock},
+    time::Duration,
+};
 use tokio::sync::mpsc::UnboundedSender;
+
+#[derive(Clone, Debug)]
+pub struct LlmDebugConfig {
+    pub save_request_body: bool,
+    pub max_request_files: usize,
+    pub save_response_body: bool,
+    pub max_response_files: usize,
+}
 
 use crate::message::Message;
 
@@ -39,10 +50,31 @@ use error::{MAX_RETRIES, backoff_delay, backoff_sleep, classify_anyhow_error};
 #[derive(Clone, Debug)]
 pub struct LlmClient {
     http: Client,
-    pub save_request_body: bool,
-    pub max_request_files: usize,
-    pub save_response_body: bool,
-    pub max_response_files: usize,
+    debug_config: Arc<RwLock<LlmDebugConfig>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{LlmClient, LlmDebugConfig};
+
+    #[test]
+    fn cloned_clients_share_debug_configuration() {
+        let client = LlmClient::new(false, 1, false, 1).expect("client should build");
+        let clone = client.clone();
+
+        clone.update_debug_config(LlmDebugConfig {
+            save_request_body: true,
+            max_request_files: 9,
+            save_response_body: true,
+            max_response_files: 7,
+        });
+
+        let current = client.debug_config();
+        assert!(current.save_request_body);
+        assert_eq!(current.max_request_files, 9);
+        assert!(current.save_response_body);
+        assert_eq!(current.max_response_files, 7);
+    }
 }
 
 impl LlmClient {
@@ -63,11 +95,31 @@ impl LlmClient {
 
         Ok(Self {
             http,
-            save_request_body,
-            max_request_files,
-            save_response_body,
-            max_response_files,
+            debug_config: Arc::new(RwLock::new(LlmDebugConfig {
+                save_request_body,
+                max_request_files,
+                save_response_body,
+                max_response_files,
+            })),
         })
+    }
+
+    pub fn update_debug_config(&self, config: LlmDebugConfig) {
+        if let Ok(mut current) = self.debug_config.write() {
+            *current = config;
+        }
+    }
+
+    fn debug_config(&self) -> LlmDebugConfig {
+        self.debug_config
+            .read()
+            .map(|config| config.clone())
+            .unwrap_or_else(|_| LlmDebugConfig {
+                save_request_body: false,
+                max_request_files: 0,
+                save_response_body: false,
+                max_response_files: 0,
+            })
     }
 
     /// Get a reference to the HTTP client for reuse.
@@ -167,6 +219,7 @@ impl LlmClient {
         tools: Vec<ToolDefinition>,
         tx: Option<UnboundedSender<LlmEvent>>,
     ) -> Result<String> {
+        let debug = self.debug_config();
         for attempt in 1..=MAX_RETRIES {
             let result = match model.api_type {
                 ApiType::Anthropic => {
@@ -175,10 +228,10 @@ impl LlmClient {
                         model.clone(),
                         messages.clone(),
                         tools.clone(),
-                        self.save_request_body,
-                        self.max_request_files,
-                        self.save_response_body,
-                        self.max_response_files,
+                        debug.save_request_body,
+                        debug.max_request_files,
+                        debug.save_response_body,
+                        debug.max_response_files,
                     )
                     .await
                 }
@@ -188,10 +241,10 @@ impl LlmClient {
                         model.clone(),
                         messages.clone(),
                         tools.clone(),
-                        self.save_request_body,
-                        self.max_request_files,
-                        self.save_response_body,
-                        self.max_response_files,
+                        debug.save_request_body,
+                        debug.max_request_files,
+                        debug.save_response_body,
+                        debug.max_response_files,
                     )
                     .await
                 }
@@ -202,10 +255,10 @@ impl LlmClient {
                         messages.clone(),
                         tools.clone(),
                         tx.as_ref(),
-                        self.save_request_body,
-                        self.max_request_files,
-                        self.save_response_body,
-                        self.max_response_files,
+                        debug.save_request_body,
+                        debug.max_request_files,
+                        debug.save_response_body,
+                        debug.max_response_files,
                     )
                     .await
                 }
@@ -215,10 +268,10 @@ impl LlmClient {
                         model.clone(),
                         messages.clone(),
                         tools.clone(),
-                        self.save_request_body,
-                        self.max_request_files,
-                        self.save_response_body,
-                        self.max_response_files,
+                        debug.save_request_body,
+                        debug.max_request_files,
+                        debug.save_response_body,
+                        debug.max_response_files,
                     )
                     .await
                 }
@@ -266,6 +319,7 @@ impl LlmClient {
         tx: UnboundedSender<LlmEvent>,
         thinking_level: crate::reasoning::ThinkingLevelType,
     ) -> Result<()> {
+        let debug = self.debug_config();
         match model.api_type {
             ApiType::Anthropic => {
                 anthropic::stream_anthropic(
@@ -274,10 +328,10 @@ impl LlmClient {
                     messages,
                     tools,
                     tx,
-                    self.save_request_body,
-                    self.max_request_files,
-                    self.save_response_body,
-                    self.max_response_files,
+                    debug.save_request_body,
+                    debug.max_request_files,
+                    debug.save_response_body,
+                    debug.max_response_files,
                 )
                 .await
             }
@@ -289,10 +343,10 @@ impl LlmClient {
                     tools,
                     tx,
                     thinking_level,
-                    self.save_request_body,
-                    self.max_request_files,
-                    self.save_response_body,
-                    self.max_response_files,
+                    debug.save_request_body,
+                    debug.max_request_files,
+                    debug.save_response_body,
+                    debug.max_response_files,
                 )
                 .await
             }
@@ -303,10 +357,10 @@ impl LlmClient {
                     messages,
                     tools,
                     tx,
-                    self.save_request_body,
-                    self.max_request_files,
-                    self.save_response_body,
-                    self.max_response_files,
+                    debug.save_request_body,
+                    debug.max_request_files,
+                    debug.save_response_body,
+                    debug.max_response_files,
                 )
                 .await
             }
@@ -317,10 +371,10 @@ impl LlmClient {
                     messages,
                     tools,
                     tx,
-                    self.save_request_body,
-                    self.max_request_files,
-                    self.save_response_body,
-                    self.max_response_files,
+                    debug.save_request_body,
+                    debug.max_request_files,
+                    debug.save_response_body,
+                    debug.max_response_files,
                 )
                 .await
             }

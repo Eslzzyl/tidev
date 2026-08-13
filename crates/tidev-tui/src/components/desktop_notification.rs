@@ -160,26 +160,30 @@ pub(crate) struct NotificationManager {
 
 impl NotificationManager {
     pub fn new(config: &NotificationConfig) -> Self {
-        let backend = if config.enabled {
+        let mut manager = Self {
+            enabled: config.enabled,
+            backend: None,
+            condition: NotificationCondition::default(),
+            focused: AtomicBool::new(true),
+        };
+        manager.apply_config(config);
+        manager
+    }
+
+    pub fn apply_config(&mut self, config: &NotificationConfig) {
+        self.enabled = config.enabled;
+        self.condition = NotificationCondition::parse(&config.condition);
+        self.backend = if config.enabled {
             Some(DesktopNotificationBackend::for_method(&config.method))
         } else {
             None
         };
-
-        let condition = NotificationCondition::parse(&config.condition);
         log::info!(
             "NotificationManager: enabled={}, method={}, condition={:?}",
             config.enabled,
             config.method,
-            condition
+            self.condition
         );
-
-        Self {
-            enabled: config.enabled,
-            backend,
-            condition,
-            focused: AtomicBool::new(true),
-        }
     }
 
     pub fn set_focused(&self, focused: bool) {

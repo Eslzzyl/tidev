@@ -80,8 +80,6 @@ pub struct App {
     pending_modes: HashMap<Uuid, SessionMode>,
     /// Current thinking level for the active model.
     thinking_level: ThinkingLevelType,
-    /// Whether the subagent (task tool) is enabled.
-    subagent_enabled: bool,
     /// Status notice shown at the bottom of the screen (plain text, no timeout).
     last_notice: Option<(String, Instant)>,
     /// Transient popup notifications (auto-expire).
@@ -222,7 +220,6 @@ impl App {
         let supports_images = runtime.active_model().supports_images;
         let thinking_level = runtime.active_model().thinking_level.clone();
         let notif_config = runtime.config().notifications.clone();
-        let subagent_enabled = runtime.config().subagent.enabled;
 
         Self {
             runtime,
@@ -236,7 +233,6 @@ impl App {
             mode: SessionMode::Build,
             pending_modes: HashMap::new(),
             thinking_level,
-            subagent_enabled,
             last_notice: None,
             notifications: NotificationState::new(),
             desktop_notifications: NotificationManager::new(&notif_config),

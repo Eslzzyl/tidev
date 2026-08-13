@@ -133,29 +133,53 @@ impl Log for TidevLogger {
 /// If the global logger has already been set, this is a no-op (the second
 /// `set_logger` call returns an error which is silently ignored).
 pub fn init(data_dir: &Path, config: &LogConfig) {
-    if config.enabled {
-        let log_path = data_dir.join("tidev.log");
+    let state = build_state(data_dir, config);
+    if let Some(mutex) = LOG_STATE.get() {
+        if let Ok(mut current) = mutex.lock() {
+            *current = state;
+        }
+    } else {
+        let _ = LOG_STATE.set(Mutex::new(state));
+    }
+
+    let _ = log::set_logger(&LOGGER);
+    log::set_max_level(level_to_filter(&config.level));
+}
+
+/// Reload the logger configuration without replacing the global logger.
+pub fn reload(data_dir: &Path, config: &LogConfig) {
+    let state = build_state(data_dir, config);
+    if let Some(mutex) = LOG_STATE.get() {
+        if let Ok(mut current) = mutex.lock() {
+            *current = state;
+        }
+    } else {
+        let _ = LOG_STATE.set(Mutex::new(state));
+    }
+
+    log::set_max_level(level_to_filter(&config.level));
+}
+
+fn build_state(data_dir: &Path, config: &LogConfig) -> LogState {
+    let log_path = data_dir.join("tidev.log");
+    let file = if config.enabled {
         if let Some(parent) = log_path.parent() {
             let _ = fs::create_dir_all(parent);
         }
-
-        let file = OpenOptions::new()
+        OpenOptions::new()
             .create(true)
             .append(true)
             .open(&log_path)
-            .ok();
+            .ok()
+    } else {
+        None
+    };
 
-        if let Some(file) = file {
-            let _ = LOG_STATE.set(Mutex::new(LogState {
-                config: config.clone(),
-                log_path,
-                file: Some(file),
-            }));
-        }
+    LogState {
+        config: config.clone(),
+        log_path,
+        file,
     }
-
-    let max_level = level_to_filter(&config.level);
-    let _ = log::set_logger(&LOGGER).map(|()| log::set_max_level(max_level));
 }
 
 #[cfg(test)]

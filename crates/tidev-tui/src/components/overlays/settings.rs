@@ -1,24 +1,18 @@
-//! SettingsPanel component — settings panel.
-//!
-//! Mirrors the old `tidev_tui::ui::settings_panel` module with a self-contained
-//! Component implementation. All value types are re-defined here to avoid
-//! depending on private types from the old crate.
+//! Settings panel with categorized navigation and immediate persistence.
 
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, MouseButton, MouseEvent, MouseEventKind};
-use ratatui::layout::{Margin, Position, Rect};
+use ratatui::layout::{Constraint, Layout, Margin, Position, Rect};
 use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Clear, List, ListItem};
+use ratatui::widgets::{Block, Clear, List, ListItem, ListState, Paragraph, Wrap};
+use unicode_width::UnicodeWidthStr;
 
-use crate::action::{Action, OverlayAction, OverlayKind};
+use crate::action::{Action, OverlayAction, OverlayKind, SettingKey, SettingValue, SettingsAction};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
+use crate::theme::ThemePalette;
 use crate::utils::centered_rect;
-
-// ---------------------------------------------------------------------------
-// Value types (redefined, matching the old crate)
-// ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug)]
 pub(crate) enum SettingType {
@@ -34,318 +28,406 @@ pub(crate) enum SettingType {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum SettingKey {
-    NotificationEnabled,
-    LoggingEnabled,
-    LogLevel,
-    SaveRequestBody,
-    SaveResponseBody,
-    ScrollSpeed,
-    AllowSensitiveFileAccess,
-    AllowOutsideWorkspaceAccess,
-    SubagentEnabled,
-    CollapseThinking,
-    CollapseDiffs,
-    SendWhileBusy,
-}
-
 #[derive(Clone, Debug)]
 pub(crate) struct SettingItem {
     pub name: String,
     pub description: String,
     pub setting_type: SettingType,
     pub key: SettingKey,
-    pub disabled: bool,
 }
 
-// ---------------------------------------------------------------------------
-// SettingsPanel component
-// ---------------------------------------------------------------------------
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CategoryId {
+    Interface,
+    Notifications,
+    Logging,
+    Security,
+    Agents,
+}
 
-pub(crate) struct SettingsPanel {
-    selected_index: usize,
+struct SettingCategory {
+    id: CategoryId,
+    name: &'static str,
     items: Vec<SettingItem>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FocusPane {
+    Categories,
+    Settings,
+}
+
+struct DropdownState {
+    key: SettingKey,
+    selected: usize,
+    options: Vec<String>,
+}
+
+struct PanelLayout {
+    overlay: Rect,
+    inner: Rect,
+    body: Rect,
+    left: Rect,
+    right: Rect,
+    category_list: Rect,
+    settings_list: Rect,
+    detail: Rect,
+}
+
+pub(crate) struct SettingsPanel {
+    category_index: usize,
+    item_index: usize,
+    focus: FocusPane,
+    categories: Vec<SettingCategory>,
+    dropdown: Option<DropdownState>,
+}
+
 impl SettingsPanel {
-    /// Build the settings items from the current config.
     pub(crate) fn new(config: &tidev_config::AppConfig) -> Self {
         let log_levels = vec![
-            "DEBUG".to_string(),
-            "INFO".to_string(),
-            "WARN".to_string(),
-            "ERROR".to_string(),
+            String::from("DEBUG"),
+            String::from("INFO"),
+            String::from("WARN"),
+            String::from("ERROR"),
         ];
         let log_level_index = log_levels
             .iter()
-            .position(|l| l == &config.logging.level.to_uppercase())
+            .position(|level| level == &config.logging.level.to_uppercase())
             .unwrap_or(1);
 
-        let items = vec![
-            SettingItem {
-                name: "Notifications".to_string(),
-                description: "Enable system notifications".to_string(),
-                setting_type: SettingType::Toggle(config.notifications.enabled),
-                key: SettingKey::NotificationEnabled,
-                disabled: false,
-            },
-            SettingItem {
-                name: "Logging".to_string(),
-                description: "Enable debug logging to file".to_string(),
-                setting_type: SettingType::Toggle(config.logging.enabled),
-                key: SettingKey::LoggingEnabled,
-                disabled: false,
-            },
-            SettingItem {
-                name: "Log Level".to_string(),
-                description: format!("Log level: {}", log_levels[log_level_index]),
-                setting_type: SettingType::Cycle {
-                    options: log_levels,
-                    selected: log_level_index,
-                },
-                key: SettingKey::LogLevel,
-                disabled: false,
-            },
-            SettingItem {
-                name: "Save Request Body".to_string(),
-                description: "Save LLM request bodies to /tmp/tidev-requests/ for debugging"
-                    .to_string(),
-                setting_type: SettingType::Toggle(config.logging.save_request_body),
-                key: SettingKey::SaveRequestBody,
-                disabled: false,
-            },
-            SettingItem {
-                name: "Save Response Body".to_string(),
-                description:
-                    "Save LLM streaming response payloads to /tmp/tidev-responses/ for debugging"
-                        .to_string(),
-                setting_type: SettingType::Toggle(config.logging.save_response_body),
-                key: SettingKey::SaveResponseBody,
-                disabled: false,
-            },
-            SettingItem {
-                name: "Scroll Speed".to_string(),
-                description: format!("Scroll speed multiplier: {:.1}", config.ui.scroll_speed),
-                setting_type: SettingType::Number {
-                    value: config.ui.scroll_speed,
-                    min: 1.0,
-                    max: 10.0,
-                },
-                key: SettingKey::ScrollSpeed,
-                disabled: false,
-            },
-            SettingItem {
-                name: "Allow Sensitive File Access".to_string(),
-                description: "Allow reading sensitive files without confirmation".to_string(),
-                setting_type: SettingType::Toggle(
-                    config.access_control.allow_sensitive_file_access,
-                ),
-                key: SettingKey::AllowSensitiveFileAccess,
-                disabled: false,
-            },
-            SettingItem {
-                name: "Allow Outside Workspace Access".to_string(),
-                description: "Allow accessing files outside workspace without confirmation"
-                    .to_string(),
-                setting_type: SettingType::Toggle(
-                    config.access_control.allow_outside_workspace_access,
-                ),
-                key: SettingKey::AllowOutsideWorkspaceAccess,
-                disabled: false,
-            },
-            SettingItem {
-                name: "Subagent".to_string(),
-                description: "Enable subagent (task tool)".to_string(),
-                setting_type: SettingType::Toggle(config.subagent.enabled),
-                key: SettingKey::SubagentEnabled,
-                disabled: false,
-            },
-            SettingItem {
-                name: "Collapse Thinking".to_string(),
-                description: "Collapse thinking content by default. Click header to toggle."
-                    .to_string(),
-                setting_type: SettingType::Toggle(config.ui.collapse_thinking),
-                key: SettingKey::CollapseThinking,
-                disabled: false,
-            },
-            SettingItem {
-                name: "Collapse Diffs".to_string(),
-                description: "Collapse edit/write/apply_patch diffs to per-file +N/-M \
-                              summaries by default. Click a card to toggle."
-                    .to_string(),
-                setting_type: SettingType::Toggle(config.ui.collapse_diffs),
-                key: SettingKey::CollapseDiffs,
-                disabled: false,
-            },
-            SettingItem {
-                name: "Send While Busy".to_string(),
-                description: format!("When busy: {}", config.ui.send_while_busy.as_str()),
-                setting_type: SettingType::Cycle {
-                    options: vec!["queue".to_string(), "steer".to_string()],
-                    selected: match config.ui.send_while_busy {
-                        tidev_config::SendWhileBusy::Queue => 0,
-                        tidev_config::SendWhileBusy::Steer => 1,
+        let categories = vec![
+            SettingCategory {
+                id: CategoryId::Interface,
+                name: "Interface",
+                items: vec![
+                    SettingItem {
+                        name: String::from("Scroll speed"),
+                        description: String::from("Scroll speed multiplier for chat navigation"),
+                        setting_type: SettingType::Number {
+                            value: config.ui.scroll_speed,
+                            min: 1.0,
+                            max: 10.0,
+                        },
+                        key: SettingKey::ScrollSpeed,
                     },
-                },
-                key: SettingKey::SendWhileBusy,
-                disabled: false,
+                    SettingItem {
+                        name: String::from("Collapse thinking"),
+                        description: String::from(
+                            "Collapse thinking content by default for newly rendered messages",
+                        ),
+                        setting_type: SettingType::Toggle(config.ui.collapse_thinking),
+                        key: SettingKey::CollapseThinking,
+                    },
+                    SettingItem {
+                        name: String::from("Collapse diffs"),
+                        description: String::from(
+                            "Collapse edit, write, and patch diffs by default",
+                        ),
+                        setting_type: SettingType::Toggle(config.ui.collapse_diffs),
+                        key: SettingKey::CollapseDiffs,
+                    },
+                    SettingItem {
+                        name: String::from("Send while busy"),
+                        description: String::from(
+                            "Choose whether messages wait in a queue or steer the running turn",
+                        ),
+                        setting_type: SettingType::Cycle {
+                            options: vec![String::from("queue"), String::from("steer")],
+                            selected: match config.ui.send_while_busy {
+                                tidev_config::SendWhileBusy::Queue => 0,
+                                tidev_config::SendWhileBusy::Steer => 1,
+                            },
+                        },
+                        key: SettingKey::SendWhileBusy,
+                    },
+                ],
+            },
+            SettingCategory {
+                id: CategoryId::Notifications,
+                name: "Notifications",
+                items: vec![SettingItem {
+                    name: String::from("Desktop notifications"),
+                    description: String::from("Show terminal or desktop notifications"),
+                    setting_type: SettingType::Toggle(config.notifications.enabled),
+                    key: SettingKey::NotificationEnabled,
+                }],
+            },
+            SettingCategory {
+                id: CategoryId::Logging,
+                name: "Logging",
+                items: vec![
+                    SettingItem {
+                        name: String::from("Logging"),
+                        description: String::from(
+                            "Enable writing debug logs to the tidev data directory",
+                        ),
+                        setting_type: SettingType::Toggle(config.logging.enabled),
+                        key: SettingKey::LoggingEnabled,
+                    },
+                    SettingItem {
+                        name: String::from("Log level"),
+                        description: String::from("Set the minimum level written by the logger"),
+                        setting_type: SettingType::Cycle {
+                            options: log_levels,
+                            selected: log_level_index,
+                        },
+                        key: SettingKey::LogLevel,
+                    },
+                    SettingItem {
+                        name: String::from("Save request body"),
+                        description: String::from(
+                            "Save serialized LLM request bodies for debugging",
+                        ),
+                        setting_type: SettingType::Toggle(config.logging.save_request_body),
+                        key: SettingKey::SaveRequestBody,
+                    },
+                    SettingItem {
+                        name: String::from("Save response body"),
+                        description: String::from("Save raw LLM response payloads for debugging"),
+                        setting_type: SettingType::Toggle(config.logging.save_response_body),
+                        key: SettingKey::SaveResponseBody,
+                    },
+                ],
+            },
+            SettingCategory {
+                id: CategoryId::Security,
+                name: "Security",
+                items: vec![
+                    SettingItem {
+                        name: String::from("Allow sensitive file access"),
+                        description: String::from(
+                            "Allow reading sensitive files without confirmation",
+                        ),
+                        setting_type: SettingType::Toggle(
+                            config.access_control.allow_sensitive_file_access,
+                        ),
+                        key: SettingKey::AllowSensitiveFileAccess,
+                    },
+                    SettingItem {
+                        name: String::from("Allow outside workspace access"),
+                        description: String::from(
+                            "Allow accessing files outside the workspace without confirmation",
+                        ),
+                        setting_type: SettingType::Toggle(
+                            config.access_control.allow_outside_workspace_access,
+                        ),
+                        key: SettingKey::AllowOutsideWorkspaceAccess,
+                    },
+                ],
+            },
+            SettingCategory {
+                id: CategoryId::Agents,
+                name: "Agents",
+                items: vec![SettingItem {
+                    name: String::from("Subagent"),
+                    description: String::from("Allow the task tool to spawn subagents"),
+                    setting_type: SettingType::Toggle(config.subagent.enabled),
+                    key: SettingKey::SubagentEnabled,
+                }],
             },
         ];
 
         Self {
-            selected_index: 0,
-            items,
+            category_index: 0,
+            item_index: 0,
+            focus: FocusPane::Categories,
+            categories,
+            dropdown: None,
         }
     }
 
-    // ── Navigation helpers ──
+    fn layout(area: Rect) -> PanelLayout {
+        let overlay = centered_rect(area.width.min(100), area.height.saturating_sub(2), area);
+        let inner = overlay.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
+        let body = Rect::new(
+            inner.x,
+            inner.y + 2,
+            inner.width,
+            inner.height.saturating_sub(3),
+        );
+        let columns = Layout::horizontal([
+            Constraint::Percentage(30),
+            Constraint::Length(1),
+            Constraint::Min(1),
+        ])
+        .split(body);
+        let left = columns[0];
+        let right = columns[2];
 
-    fn move_up(&mut self) {
-        if self.selected_index > 0 {
-            self.selected_index -= 1;
-        } else {
-            self.selected_index = self.items.len().saturating_sub(1);
+        let category_list = Rect::new(
+            left.x,
+            left.y + 2,
+            left.width,
+            left.height.saturating_sub(2),
+        );
+        let settings_content = Rect::new(
+            right.x,
+            right.y + 2,
+            right.width,
+            right.height.saturating_sub(2),
+        );
+        let detail_height = settings_content.height.min(3);
+        let settings_list = Rect::new(
+            settings_content.x,
+            settings_content.y,
+            settings_content.width,
+            settings_content.height.saturating_sub(detail_height),
+        );
+        let detail = Rect::new(
+            settings_content.x,
+            settings_content.y + settings_list.height,
+            settings_content.width,
+            detail_height,
+        );
+
+        PanelLayout {
+            overlay,
+            inner,
+            body,
+            left,
+            right,
+            category_list,
+            settings_list,
+            detail,
         }
     }
 
-    fn move_down(&mut self) {
-        if self.selected_index < self.items.len().saturating_sub(1) {
-            self.selected_index += 1;
-        } else {
-            self.selected_index = 0;
-        }
+    fn current_category(&self) -> Option<&SettingCategory> {
+        self.categories.get(self.category_index)
     }
 
-    /// Toggle for Toggle / Cycle type.
-    fn toggle_selected(&mut self) {
-        let selected = self.selected_index;
-        let Some(item) = self.items.get(selected) else {
+    fn current_item(&self) -> Option<&SettingItem> {
+        self.current_category()?.items.get(self.item_index)
+    }
+
+    fn move_category(&mut self, delta: isize) {
+        if self.categories.is_empty() {
+            return;
+        }
+        let len = self.categories.len() as isize;
+        self.category_index = (self.category_index as isize + delta).rem_euclid(len) as usize;
+        self.item_index = 0;
+    }
+
+    fn move_item(&mut self, delta: isize) {
+        let Some(category) = self.current_category() else {
             return;
         };
-        if item.disabled {
+        if category.items.is_empty() {
             return;
         }
-        if let Some(item) = self.items.get_mut(selected) {
-            match &mut item.setting_type {
-                SettingType::Toggle(val) => {
-                    *val = !*val;
-                }
-                SettingType::Cycle {
-                    options,
-                    selected: sel,
-                } => {
-                    *sel = (*sel + 1) % options.len();
-                    item.description = match item.key {
-                        SettingKey::LogLevel => format!("Log level: {}", options[*sel]),
-                        SettingKey::SendWhileBusy => format!("When busy: {}", options[*sel]),
-                        _ => item.description.clone(),
-                    };
-                }
-                SettingType::Number { .. } => {}
+        let len = category.items.len() as isize;
+        self.item_index = (self.item_index as isize + delta).rem_euclid(len) as usize;
+    }
+
+    fn setting_change(&self, value: SettingValue) -> Option<Action> {
+        let key = self.current_item()?.key;
+        Some(Action::Settings(SettingsAction::Change { key, value }))
+    }
+
+    fn toggle_current(&self) -> Option<Action> {
+        let SettingType::Toggle(value) = &self.current_item()?.setting_type else {
+            return None;
+        };
+        self.setting_change(SettingValue::Bool(!*value))
+    }
+
+    fn adjust_current(&self, delta: isize) -> Option<Action> {
+        let item = self.current_item()?;
+        let value = match &item.setting_type {
+            SettingType::Number { value, min, max } => {
+                SettingValue::Number((*value + delta as f32).clamp(*min, *max))
             }
-        }
+            SettingType::Cycle { options, selected } if !options.is_empty() => {
+                let len = options.len() as isize;
+                let index = (*selected as isize + delta).rem_euclid(len) as usize;
+                SettingValue::Choice(options[index].clone())
+            }
+            _ => return None,
+        };
+        self.setting_change(value)
     }
 
-    /// Increase value for Number type only.
-    fn increase_selected(&mut self) {
-        if let Some(item) = self.items.get_mut(self.selected_index)
-            && let SettingType::Number { value, min: _, max } = &mut item.setting_type
-        {
-            *value = (*value + 1.0).min(*max);
-            item.description = format!("Scroll speed multiplier: {:.1}", *value);
-        }
+    fn open_dropdown(&mut self) {
+        let Some(item) = self.current_item() else {
+            return;
+        };
+        let SettingType::Cycle { options, selected } = &item.setting_type else {
+            return;
+        };
+        self.dropdown = Some(DropdownState {
+            key: item.key,
+            selected: *selected,
+            options: options.clone(),
+        });
     }
 
-    /// Decrease value for Number type only.
-    fn decrease_selected(&mut self) {
-        if let Some(item) = self.items.get_mut(self.selected_index)
-            && let SettingType::Number { value, min, max: _ } = &mut item.setting_type
-        {
-            *value = (*value - 1.0).max(*min);
-            item.description = format!("Scroll speed multiplier: {:.1}", *value);
-        }
+    fn dropdown_action(&mut self) -> Option<Action> {
+        let dropdown = self.dropdown.take()?;
+        let value = dropdown.options.get(dropdown.selected)?.clone();
+        Some(Action::Settings(SettingsAction::Change {
+            key: dropdown.key,
+            value: SettingValue::Choice(value),
+        }))
     }
 
-    /// Apply current items to an AppConfig.
-    fn apply_to_config(items: &[SettingItem], config: &mut tidev_config::AppConfig) {
-        for item in items {
-            match item.key {
-                SettingKey::NotificationEnabled => {
-                    if let SettingType::Toggle(val) = item.setting_type {
-                        config.notifications.enabled = val;
-                    }
+    fn update_item(&mut self, key: SettingKey, value: &SettingValue) {
+        for category in &mut self.categories {
+            for item in &mut category.items {
+                if item.key != key {
+                    continue;
                 }
-                SettingKey::LoggingEnabled => {
-                    if let SettingType::Toggle(val) = item.setting_type {
-                        config.logging.enabled = val;
+                match (&mut item.setting_type, value) {
+                    (SettingType::Toggle(current), SettingValue::Bool(value)) => *current = *value,
+                    (SettingType::Number { value: current, .. }, SettingValue::Number(value)) => {
+                        *current = *value
                     }
-                }
-                SettingKey::LogLevel => {
-                    if let SettingType::Cycle {
-                        ref options,
-                        selected,
-                    } = item.setting_type
-                        && selected < options.len()
-                    {
-                        config.logging.level = options[selected].clone();
+                    (SettingType::Cycle { options, selected }, SettingValue::Choice(value)) => {
+                        if let Some(index) = options.iter().position(|option| option == value) {
+                            *selected = index;
+                        }
                     }
-                }
-                SettingKey::SaveRequestBody => {
-                    if let SettingType::Toggle(val) = item.setting_type {
-                        config.logging.save_request_body = val;
-                    }
-                }
-                SettingKey::SaveResponseBody => {
-                    if let SettingType::Toggle(val) = item.setting_type {
-                        config.logging.save_response_body = val;
-                    }
-                }
-                SettingKey::ScrollSpeed => {
-                    if let SettingType::Number { value, .. } = item.setting_type {
-                        config.ui.scroll_speed = value;
-                    }
-                }
-                SettingKey::AllowSensitiveFileAccess => {
-                    if let SettingType::Toggle(val) = item.setting_type {
-                        config.access_control.allow_sensitive_file_access = val;
-                    }
-                }
-                SettingKey::AllowOutsideWorkspaceAccess => {
-                    if let SettingType::Toggle(val) = item.setting_type {
-                        config.access_control.allow_outside_workspace_access = val;
-                    }
-                }
-                SettingKey::SubagentEnabled => {
-                    if let SettingType::Toggle(val) = item.setting_type {
-                        config.subagent.enabled = val;
-                    }
-                }
-                SettingKey::CollapseThinking => {
-                    if let SettingType::Toggle(val) = item.setting_type {
-                        config.ui.collapse_thinking = val;
-                    }
-                }
-                SettingKey::CollapseDiffs => {
-                    if let SettingType::Toggle(val) = item.setting_type {
-                        config.ui.collapse_diffs = val;
-                    }
-                }
-                SettingKey::SendWhileBusy => {
-                    if let SettingType::Cycle {
-                        ref options,
-                        selected,
-                    } = item.setting_type
-                        && selected < options.len()
-                    {
-                        config.ui.send_while_busy = match options[selected].as_str() {
-                            "steer" => tidev_config::SendWhileBusy::Steer,
-                            _ => tidev_config::SendWhileBusy::Queue,
-                        };
-                    }
+                    _ => {}
                 }
             }
         }
+        self.dropdown = None;
+    }
+
+    fn visible_start(&self, height: usize) -> usize {
+        let count = self.current_category().map(|c| c.items.len()).unwrap_or(0);
+        let height = height.max(1);
+        self.item_index
+            .saturating_sub(height.saturating_sub(1))
+            .min(count.saturating_sub(height))
+    }
+
+    fn dropdown_rect(&self, layout: &PanelLayout) -> Option<Rect> {
+        let dropdown = self.dropdown.as_ref()?;
+        let width = dropdown
+            .options
+            .iter()
+            .map(|option| option.width())
+            .max()
+            .unwrap_or(4)
+            .saturating_add(6) as u16;
+        let width = width.min(layout.right.width.max(1));
+        let start = self.visible_start(layout.settings_list.height as usize);
+        let row_y = layout
+            .settings_list
+            .y
+            .saturating_add(self.item_index.saturating_sub(start) as u16);
+        let height = (dropdown.options.len() as u16).saturating_add(2);
+        let y = if row_y.saturating_add(height) <= layout.right.bottom() {
+            row_y
+        } else {
+            row_y.saturating_sub(height.saturating_sub(1))
+        };
+        let x = layout.right.right().saturating_sub(width);
+        Some(Rect::new(x, y, width, height.min(layout.overlay.height)))
     }
 }
 
@@ -358,69 +440,164 @@ impl Component for SettingsPanel {
         if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
             return None;
         }
-        match key.code {
-            KeyCode::Up | KeyCode::Char('k') => {
-                self.move_up();
-                None
+
+        if let Some(dropdown) = &mut self.dropdown {
+            match key.code {
+                KeyCode::Up | KeyCode::Char('k') => {
+                    if !dropdown.options.is_empty() {
+                        dropdown.selected = (dropdown.selected + dropdown.options.len() - 1)
+                            % dropdown.options.len();
+                    }
+                    None
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    if !dropdown.options.is_empty() {
+                        dropdown.selected = (dropdown.selected + 1) % dropdown.options.len();
+                    }
+                    None
+                }
+                KeyCode::Enter | KeyCode::Char(' ') => self.dropdown_action(),
+                KeyCode::Esc | KeyCode::Left => {
+                    self.dropdown = None;
+                    None
+                }
+                _ => None,
             }
-            KeyCode::Down | KeyCode::Char('j') => {
-                self.move_down();
-                None
+        } else {
+            match key.code {
+                KeyCode::Up | KeyCode::Char('k') => {
+                    if self.focus == FocusPane::Categories {
+                        self.move_category(-1);
+                    } else {
+                        self.move_item(-1);
+                    }
+                    None
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    if self.focus == FocusPane::Categories {
+                        self.move_category(1);
+                    } else {
+                        self.move_item(1);
+                    }
+                    None
+                }
+                KeyCode::Left => {
+                    if self.focus == FocusPane::Settings {
+                        if let Some(action) = self.adjust_current(-1) {
+                            Some(action)
+                        } else {
+                            self.focus = FocusPane::Categories;
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                }
+                KeyCode::Right => {
+                    if self.focus == FocusPane::Categories {
+                        self.focus = FocusPane::Settings;
+                        None
+                    } else {
+                        self.adjust_current(1)
+                    }
+                }
+                KeyCode::Tab => {
+                    self.focus = match self.focus {
+                        FocusPane::Categories => FocusPane::Settings,
+                        FocusPane::Settings => FocusPane::Categories,
+                    };
+                    None
+                }
+                KeyCode::Enter => {
+                    if self.focus == FocusPane::Categories {
+                        self.focus = FocusPane::Settings;
+                        None
+                    } else {
+                        match self.current_item().map(|item| &item.setting_type) {
+                            Some(SettingType::Cycle { .. }) => {
+                                self.open_dropdown();
+                                None
+                            }
+                            Some(SettingType::Toggle(_)) => self.toggle_current(),
+                            _ => None,
+                        }
+                    }
+                }
+                KeyCode::Char(' ') if self.focus == FocusPane::Settings => self.toggle_current(),
+                KeyCode::Esc | KeyCode::Char('q') => Some(Action::Overlay(OverlayAction::Close(
+                    OverlayKind::SettingsPanel,
+                ))),
+                _ => None,
             }
-            KeyCode::Enter | KeyCode::Char(' ') => {
-                self.toggle_selected();
-                None
-            }
-            KeyCode::Left => {
-                self.decrease_selected();
-                None
-            }
-            KeyCode::Right => {
-                self.increase_selected();
-                None
-            }
-            KeyCode::Esc | KeyCode::Char('q') => Some(Action::Overlay(OverlayAction::Close(
-                OverlayKind::SettingsPanel,
-            ))),
-            _ => None,
         }
     }
 
     fn handle_mouse_event(&mut self, mouse: MouseEvent, area: Rect) -> Option<Action> {
         let position = Position::new(mouse.column, mouse.row);
-        if !area.contains(position) {
+        let layout = Self::layout(area);
+        if !layout.overlay.contains(position) {
             return None;
         }
 
-        let overlay = centered_rect(64, 22, area);
-        let inner = overlay.inner(Margin {
-            horizontal: 1,
-            vertical: 1,
-        });
-
-        // Scrolls inside the panel are consumed so they never reach the chat
-        // behind; scrolls elsewhere fall through (mirrors the PgUp/PgDn
-        // pattern for keyboard events).
-        if !overlay.contains(position) {
-            return None;
+        if let Some(dropdown_rect) = self.dropdown_rect(&layout) {
+            if dropdown_rect.contains(position) {
+                if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
+                    let row = position.y.saturating_sub(dropdown_rect.y + 1) as usize;
+                    if let Some(dropdown) = &mut self.dropdown
+                        && row < dropdown.options.len()
+                    {
+                        dropdown.selected = row;
+                        return self.dropdown_action();
+                    }
+                }
+                return Some(Action::Consumed);
+            }
+            if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+                self.dropdown = None;
+                return Some(Action::Consumed);
+            }
         }
 
         match mouse.kind {
             MouseEventKind::ScrollUp => {
-                self.move_up();
+                if layout.category_list.contains(position) {
+                    self.move_category(-1);
+                } else if layout.settings_list.contains(position) {
+                    self.move_item(-1);
+                }
                 Some(Action::Consumed)
             }
             MouseEventKind::ScrollDown => {
-                self.move_down();
+                if layout.category_list.contains(position) {
+                    self.move_category(1);
+                } else if layout.settings_list.contains(position) {
+                    self.move_item(1);
+                }
                 Some(Action::Consumed)
             }
             MouseEventKind::Down(MouseButton::Left) => {
-                let local_y = position.y.saturating_sub(inner.y);
-                // Each item renders as 2 lines, so row = local_y / 2
-                let row = (local_y / 2) as usize;
-                if row < self.items.len() {
-                    self.selected_index = row;
-                    self.toggle_selected();
+                if layout.category_list.contains(position) {
+                    let index = position.y.saturating_sub(layout.category_list.y) as usize;
+                    if index < self.categories.len() {
+                        self.category_index = index;
+                        self.item_index = 0;
+                        self.focus = FocusPane::Categories;
+                    }
+                } else if layout.settings_list.contains(position) {
+                    let start = self.visible_start(layout.settings_list.height as usize);
+                    let index = start + position.y.saturating_sub(layout.settings_list.y) as usize;
+                    if self
+                        .current_category()
+                        .is_some_and(|category| index < category.items.len())
+                    {
+                        self.item_index = index;
+                        self.focus = FocusPane::Settings;
+                        match self.current_item().map(|item| &item.setting_type) {
+                            Some(SettingType::Toggle(_)) => return self.toggle_current(),
+                            Some(SettingType::Cycle { .. }) => self.open_dropdown(),
+                            _ => {}
+                        }
+                    }
                 }
                 Some(Action::Noop)
             }
@@ -428,95 +605,199 @@ impl Component for SettingsPanel {
         }
     }
 
-    fn update(&mut self, action: &Action, ctx: &UpdateContext) -> Vec<Action> {
-        match action {
-            Action::Overlay(OverlayAction::Close(OverlayKind::SettingsPanel)) => {
-                let items = self.items.clone();
-                ctx.runtime.update_config(|cfg| {
-                    Self::apply_to_config(&items, cfg);
-                });
-                let _ = ctx.runtime.save_config();
-                vec![]
-            }
-            _ => vec![],
+    fn update(&mut self, action: &Action, _ctx: &UpdateContext) -> Vec<Action> {
+        if let Action::Settings(SettingsAction::Change { key, value }) = action {
+            self.update_item(*key, value);
         }
+        vec![]
     }
 
     fn draw(&mut self, frame: &mut Frame, rect: Rect, ctx: &DrawContext) {
         let palette = ctx.palette;
-        // 8 items × ~2 lines each = 22 rows
-        let overlay = centered_rect(64, 24, rect);
-        frame.render_widget(Clear, overlay);
+        let layout = Self::layout(rect);
 
-        let panel_block = Block::default().style(Style::default().bg(palette.panel_alt));
-        frame.render_widget(panel_block, overlay);
+        frame.render_widget(Clear, layout.overlay);
+        frame.render_widget(
+            Block::default().style(Style::default().bg(palette.panel_alt)),
+            layout.overlay,
+        );
 
-        let inner = overlay.inner(Margin {
-            horizontal: 1,
-            vertical: 1,
-        });
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![Span::styled(
+                " Settings ",
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
+            )]))
+            .style(Style::default().bg(palette.panel_alt)),
+            Rect::new(layout.inner.x, layout.inner.y, layout.inner.width, 1),
+        );
 
-        let list_items: Vec<ListItem> = self
-            .items
+        let separator: Vec<Line> = (0..layout.body.height)
+            .map(|_| Line::from(Span::styled("│", Style::default().fg(palette.border))))
+            .collect();
+        frame.render_widget(
+            Paragraph::new(separator),
+            Rect::new(layout.left.right(), layout.body.y, 1, layout.body.height),
+        );
+
+        for (area, title) in [
+            (layout.left, "Categories"),
+            (
+                layout.right,
+                self.current_category()
+                    .map(|c| c.name)
+                    .unwrap_or("Settings"),
+            ),
+        ] {
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    format!("  {title}"),
+                    Style::default()
+                        .fg(palette.accent)
+                        .add_modifier(Modifier::BOLD),
+                )))
+                .style(Style::default().bg(palette.panel_alt)),
+                Rect::new(area.x, area.y, area.width, 1),
+            );
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    "─".repeat(area.width as usize),
+                    Style::default().fg(palette.border),
+                )))
+                .style(Style::default().bg(palette.panel_alt)),
+                Rect::new(area.x, area.y + 1, area.width, 1),
+            );
+        }
+
+        let category_items: Vec<ListItem> = self
+            .categories
             .iter()
-            .map(|item| {
-                let fg = if item.disabled {
-                    palette.muted
+            .map(|category| {
+                let selected =
+                    category.id == self.current_category().map(|c| c.id).unwrap_or(category.id);
+                let style = if selected && self.focus == FocusPane::Categories {
+                    Style::default()
+                        .bg(palette.selection_bg)
+                        .fg(palette.selection_fg)
+                        .add_modifier(Modifier::BOLD)
+                } else if selected {
+                    Style::default()
+                        .fg(palette.accent)
+                        .add_modifier(Modifier::BOLD)
                 } else {
-                    palette.text
+                    Style::default().fg(palette.text)
                 };
-                let status: String = match &item.setting_type {
-                    SettingType::Toggle(true) => "[x]".to_string(),
-                    SettingType::Toggle(false) => "[ ]".to_string(),
-                    SettingType::Number { .. } => "[~]".to_string(),
-                    SettingType::Cycle { options, selected } => {
-                        let current = options.get(*selected).map(|s| s.as_str()).unwrap_or("?");
-                        format!("[{current}]")
-                    }
-                };
-                ListItem::new(vec![
-                    Line::from(vec![
-                        Span::styled(
-                            format!(" {} ", status),
-                            Style::default()
-                                .fg(match &item.setting_type {
-                                    SettingType::Toggle(true) => {
-                                        if item.disabled {
-                                            palette.muted
-                                        } else {
-                                            palette.accent
-                                        }
-                                    }
-                                    _ => palette.muted,
-                                })
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                        Span::styled(
-                            &item.name,
-                            Style::default().fg(fg).add_modifier(Modifier::BOLD),
-                        ),
-                    ]),
-                    Line::from(vec![
-                        Span::raw("    "),
-                        Span::styled(&item.description, Style::default().fg(palette.muted)),
-                    ]),
-                ])
+                ListItem::new(Line::from(Span::styled(
+                    format!("  {}  {}", if selected { "›" } else { " " }, category.name),
+                    style,
+                )))
             })
             .collect();
+        let mut category_state = ListState::default();
+        category_state.select(Some(self.category_index));
+        frame.render_stateful_widget(
+            List::new(category_items)
+                .style(Style::default().bg(palette.panel_alt))
+                .highlight_style(
+                    Style::default()
+                        .bg(palette.selection_bg)
+                        .fg(palette.selection_fg),
+                ),
+            layout.category_list,
+            &mut category_state,
+        );
 
-        let list = List::new(list_items)
-            .style(Style::default().bg(palette.panel_alt).fg(palette.text))
-            .highlight_style(
-                Style::default()
-                    .bg(palette.selection_bg)
-                    .fg(palette.selection_fg)
-                    .add_modifier(Modifier::BOLD),
+        let start = self.visible_start(layout.settings_list.height as usize);
+        let selected_key = self.current_item().map(|current| current.key);
+        let focus = self.focus;
+        let visible_lines: Vec<Line> = self
+            .current_category()
+            .map(|category| {
+                category
+                    .items
+                    .iter()
+                    .skip(start)
+                    .take(layout.settings_list.height as usize)
+                    .map(|item| {
+                        format_setting_line(
+                            item,
+                            layout.settings_list.width as usize,
+                            palette,
+                            Some(item.key) == selected_key && focus == FocusPane::Settings,
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        frame.render_widget(
+            Paragraph::new(visible_lines).style(Style::default().bg(palette.panel_alt)),
+            layout.settings_list,
+        );
+
+        if let Some(item) = self.current_item() {
+            frame.render_widget(
+                Paragraph::new(vec![
+                    Line::from(Span::styled(
+                        format!("  {}", item.name),
+                        Style::default()
+                            .fg(palette.muted)
+                            .add_modifier(Modifier::BOLD),
+                    )),
+                    Line::from(Span::styled(
+                        format!("  {}", item.description),
+                        Style::default().fg(palette.muted),
+                    )),
+                ])
+                .wrap(Wrap { trim: true })
+                .style(Style::default().bg(palette.panel_alt)),
+                layout.detail,
             );
+        }
 
-        let mut list_state = ratatui::widgets::ListState::default();
-        list_state.select(Some(self.selected_index));
+        let footer = "↑/↓ navigate  ←/→ change  Tab switch pane  Enter edit  Esc close";
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                format!("  {footer}"),
+                Style::default().fg(palette.muted),
+            )))
+            .style(Style::default().bg(palette.panel_alt)),
+            Rect::new(
+                layout.inner.x,
+                layout.inner.bottom().saturating_sub(1),
+                layout.inner.width,
+                1,
+            ),
+        );
 
-        frame.render_stateful_widget(list, inner, &mut list_state);
+        if let Some(dropdown_rect) = self.dropdown_rect(&layout) {
+            frame.render_widget(Clear, dropdown_rect);
+            let options = self
+                .dropdown
+                .as_ref()
+                .map(|dropdown| {
+                    dropdown
+                        .options
+                        .iter()
+                        .map(|option| ListItem::new(option.clone()))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let mut state = ListState::default();
+            state.select(self.dropdown.as_ref().map(|dropdown| dropdown.selected));
+            frame.render_stateful_widget(
+                List::new(options)
+                    .block(Block::bordered().style(Style::default().bg(palette.panel_alt)))
+                    .highlight_style(
+                        Style::default()
+                            .bg(palette.selection_bg)
+                            .fg(palette.selection_fg)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                dropdown_rect,
+                &mut state,
+            );
+        }
     }
 
     fn is_overlay(&self) -> bool {
@@ -530,4 +811,74 @@ impl Component for SettingsPanel {
     fn blocks_input(&self) -> bool {
         true
     }
+}
+
+fn format_setting_line(
+    item: &SettingItem,
+    width: usize,
+    palette: ThemePalette,
+    selected: bool,
+) -> Line<'static> {
+    let base_style = if selected {
+        Style::default()
+            .bg(palette.selection_bg)
+            .fg(palette.selection_fg)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().bg(palette.panel_alt).fg(palette.text)
+    };
+    let name = format!("  {}", item.name);
+    let (value, value_style) = match &item.setting_type {
+        // Keep both states five columns wide so adjacent rows stay aligned.
+        SettingType::Toggle(true) => (
+            String::from("● ON "),
+            if selected {
+                base_style
+            } else {
+                base_style.fg(palette.accent).add_modifier(Modifier::BOLD)
+            },
+        ),
+        SettingType::Toggle(false) => (
+            String::from("○ OFF"),
+            if selected {
+                base_style
+            } else {
+                base_style.fg(palette.muted)
+            },
+        ),
+        SettingType::Number { value, .. } => (
+            format!("{value:.1}×"),
+            if selected {
+                base_style
+            } else {
+                base_style.fg(palette.accent).add_modifier(Modifier::BOLD)
+            },
+        ),
+        SettingType::Cycle {
+            options,
+            selected: selected_index,
+        } => (
+            format!(
+                "▾ {}",
+                options
+                    .get(*selected_index)
+                    .map(String::as_str)
+                    .unwrap_or("?")
+            ),
+            if selected {
+                base_style
+            } else {
+                base_style.fg(palette.accent).add_modifier(Modifier::BOLD)
+            },
+        ),
+    };
+    let gap = width
+        .saturating_sub(name.width())
+        .saturating_sub(value.width())
+        .max(1);
+    Line::from(vec![
+        Span::styled(name, base_style),
+        Span::styled(" ".repeat(gap), base_style),
+        Span::styled(value, value_style),
+    ])
 }
