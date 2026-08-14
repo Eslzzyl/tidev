@@ -6,13 +6,12 @@ use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
-use unicode_width::UnicodeWidthStr;
 use uuid::Uuid;
 
 use crate::action::{Action, OverlayAction, OverlayKind, SessionAction};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
-use crate::utils::{centered_rect, paste_from_clipboard};
+use crate::utils::{centered_rect, paste_from_clipboard, wrapped_input_tail};
 
 pub(crate) struct RenameDialog {
     session_id: Uuid,
@@ -160,10 +159,11 @@ impl Component for RenameDialog {
         );
 
         // Input field
+        let (visible_lines, cursor) = wrapped_input_tail(&self.buffer, sections[4]);
         let input_text = if self.buffer.is_empty() {
-            "New session title..."
+            "New session title...".to_string()
         } else {
-            &self.buffer
+            visible_lines.join("\n")
         };
         frame.render_widget(
             Paragraph::new(input_text)
@@ -171,10 +171,7 @@ impl Component for RenameDialog {
                 .wrap(Wrap { trim: false }),
             sections[4],
         );
-        let text_w = UnicodeWidthStr::width(input_text) as u16;
-        let col = text_w % sections[4].width;
-        let row = text_w / sections[4].width;
-        frame.set_cursor_position((sections[4].x + col, sections[4].y + row));
+        frame.set_cursor_position(cursor);
 
         // Bottom hint
         frame.render_widget(
@@ -194,6 +191,10 @@ impl Component for RenameDialog {
     }
 
     fn blocks_input(&self) -> bool {
+        true
+    }
+
+    fn wants_terminal_cursor(&self) -> bool {
         true
     }
 

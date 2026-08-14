@@ -35,6 +35,13 @@ impl OverlayStack {
         self.overlays.is_empty()
     }
 
+    /// Only the topmost overlay may own the terminal cursor.
+    pub fn wants_terminal_cursor(&self) -> bool {
+        self.overlays
+            .last()
+            .is_some_and(|overlay| overlay.wants_terminal_cursor())
+    }
+
     /// Route a key event top-first.
     pub fn handle_key_event(&mut self, key: KeyEvent) -> Option<Action> {
         for overlay in self.overlays.iter_mut().rev() {

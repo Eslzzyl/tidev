@@ -14,7 +14,6 @@ use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph};
 use tidev_config::ThemeCatalog;
-use unicode_width::UnicodeWidthStr;
 
 use crate::action::{Action, OverlayAction, OverlayKind, ThemeAction};
 use crate::component::Component;
@@ -22,7 +21,7 @@ use crate::context::{DrawContext, InitContext, UpdateContext};
 use crate::markdown::set_syntax_theme_by_key;
 use crate::theme::preview::build_preview_lines;
 use crate::theme::{ThemePalette, resolve_palette};
-use crate::utils::{centered_rect, render_scrollbar};
+use crate::utils::{centered_rect, render_scrollbar, single_line_input_cursor};
 
 #[derive(Clone, Debug)]
 pub(crate) enum DisplayItem {
@@ -404,10 +403,12 @@ impl Component for ThemePanel {
         );
 
         // ── Search row ──
+        let search_area = Rect::new(inner.x, inner.y + 1, inner.width, 1);
+        let (visible_query, cursor) = single_line_input_cursor(search_area, 2, &self.query);
         let search_text = if self.query.is_empty() {
             "  Type to search...".to_string()
         } else {
-            format!("  {}", self.query)
+            format!("  {visible_query}")
         };
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
@@ -415,14 +416,9 @@ impl Component for ThemePanel {
                 Style::default().fg(palette.muted),
             )]))
             .style(Style::default().bg(palette.panel_alt)),
-            Rect::new(inner.x, inner.y + 1, inner.width, 1),
+            search_area,
         );
-        if !self.query.is_empty() {
-            frame.set_cursor_position((
-                inner.x + 2 + self.query.as_str().width() as u16,
-                inner.y + 1,
-            ));
-        }
+        frame.set_cursor_position(cursor);
 
         // ── Divider below search ──
         let divider_y = inner.y + 2;
@@ -685,6 +681,10 @@ impl Component for ThemePanel {
     }
 
     fn blocks_input(&self) -> bool {
+        true
+    }
+
+    fn wants_terminal_cursor(&self) -> bool {
         true
     }
 }

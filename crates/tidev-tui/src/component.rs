@@ -90,4 +90,13 @@ pub(crate) trait Component {
     fn overlay_uses_main_area(&self) -> bool {
         false
     }
+
+    /// Whether this component currently owns the terminal cursor.
+    ///
+    /// This is deliberately separate from keyboard focus: a list or
+    /// confirmation dialog can own keyboard input while still requiring the
+    /// terminal cursor to remain hidden.
+    fn wants_terminal_cursor(&self) -> bool {
+        false
+    }
 }

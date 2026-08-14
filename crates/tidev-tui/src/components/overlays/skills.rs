@@ -8,14 +8,13 @@ use ratatui::layout::{Constraint, Layout, Margin, Position, Rect};
 use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph};
-use unicode_width::UnicodeWidthStr;
 
 use crate::action::{Action, OverlayAction, OverlayKind};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
 use crate::markdown::MarkdownRender;
 use crate::markdown::render_markdown_text_with_width_and_cwd;
-use crate::utils::{centered_rect, render_scrollbar};
+use crate::utils::{centered_rect, render_scrollbar, single_line_input_cursor};
 
 #[derive(Clone, Debug)]
 pub(crate) struct SkillItem {
@@ -373,8 +372,10 @@ impl Component for SkillsPanel {
         );
 
         // ── Left Pane: List ──
+        let filter_area = Rect::new(left_area.x, left_area.y, left_area.width, 1);
+        let (visible_query, cursor) = single_line_input_cursor(filter_area, 10, &self.query);
         let filter_text = if self.query_active {
-            format!("  Search: {}", self.query)
+            format!("  Search: {visible_query}")
         } else if self.query.is_empty() {
             "  Search... (/)".to_string()
         } else {
@@ -388,13 +389,10 @@ impl Component for SkillsPanel {
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(filter_text, filter_style)]))
                 .style(Style::default().bg(palette.panel_alt)),
-            Rect::new(left_area.x, left_area.y, left_area.width, 1),
+            filter_area,
         );
         if self.query_active {
-            frame.set_cursor_position((
-                left_area.x + 11 + self.query.as_str().width() as u16,
-                left_area.y,
-            ));
+            frame.set_cursor_position(cursor);
         }
 
         // Name column header
@@ -611,5 +609,9 @@ impl Component for SkillsPanel {
     }
     fn blocks_input(&self) -> bool {
         true
+    }
+
+    fn wants_terminal_cursor(&self) -> bool {
+        self.query_active
     }
 }

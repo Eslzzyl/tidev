@@ -9,12 +9,11 @@ use ratatui::layout::{Margin, Rect};
 use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, List, ListItem, ListState, Paragraph};
-use unicode_width::UnicodeWidthStr;
 
 use crate::action::{Action, OverlayAction, OverlayKind, PanelAction};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
-use crate::utils::centered_rect;
+use crate::utils::{centered_rect, single_line_input_cursor};
 
 // ---------------------------------------------------------------------------
 // Panel entries
@@ -240,10 +239,12 @@ impl Component for PanelLauncher {
         });
 
         // Search bar
+        let (visible_query, cursor) =
+            single_line_input_cursor(Rect::new(inner.x, inner.y, inner.width, 1), 2, &self.query);
         let search_text = if self.query.is_empty() {
             "  Type to filter panels...".to_string()
         } else {
-            format!("  {}", self.query)
+            format!("  {visible_query}")
         };
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
@@ -253,9 +254,7 @@ impl Component for PanelLauncher {
             .style(Style::default().bg(palette.panel_alt)),
             Rect::new(inner.x, inner.y, inner.width, 1),
         );
-        if !self.query.is_empty() {
-            frame.set_cursor_position((inner.x + 2 + self.query.as_str().width() as u16, inner.y));
-        }
+        frame.set_cursor_position(cursor);
 
         // Divider
         let divider_y = inner.y + 1;
@@ -305,5 +304,9 @@ impl Component for PanelLauncher {
 
     fn blocks_input(&self) -> bool {
         true
+    }
+
+    fn wants_terminal_cursor(&self) -> bool {
+        self.visible
     }
 }

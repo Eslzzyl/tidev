@@ -19,7 +19,7 @@ use tidev_config::auth::{ActiveModel, ModelSummary};
 use crate::action::{Action, OverlayAction, OverlayKind};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
-use crate::utils::centered_rect;
+use crate::utils::{centered_rect, single_line_input_cursor};
 use unicode_width::UnicodeWidthStr;
 
 // ---------------------------------------------------------------------------
@@ -671,18 +671,17 @@ impl Component for ModelPanel {
         // ── Search box ──
         let search_style = Style::default().bg(palette.panel_alt);
         let prefix = " Search models: ";
+        let (visible_query, cursor) =
+            single_line_input_cursor(sections[3], prefix.width() as u16, &self.query);
         frame.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::styled(prefix, Style::default().fg(palette.muted)),
-                Span::styled(&self.query, Style::default().fg(palette.text)),
+                Span::styled(visible_query, Style::default().fg(palette.text)),
             ]))
             .style(search_style),
             sections[3],
         );
-        frame.set_cursor_position((
-            sections[3].x + prefix.width() as u16 + self.query.as_str().width() as u16,
-            sections[3].y,
-        ));
+        frame.set_cursor_position(cursor);
 
         // ── Model list ──
         let items = &self.items_cache;
@@ -913,6 +912,10 @@ impl Component for ModelPanel {
     }
 
     fn blocks_input(&self) -> bool {
+        true
+    }
+
+    fn wants_terminal_cursor(&self) -> bool {
         true
     }
 }

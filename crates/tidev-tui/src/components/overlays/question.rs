@@ -9,12 +9,11 @@ use anyhow::Result;
 use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
 use textwrap::wrap;
 use tidev_tools::types::QuestionInfo;
-use unicode_width::UnicodeWidthStr;
 
 use crate::action::{Action, OverlayAction, OverlayKind};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
-use crate::utils::bottom_centered_rect;
+use crate::utils::{bottom_centered_rect, wrapped_input_tail};
 
 // ---------------------------------------------------------------------------
 // Component
@@ -631,17 +630,15 @@ impl Component for QuestionDialog {
         // Custom input area (editing mode)
         if self.editing_custom {
             let input_style = Style::default().bg(palette.background).fg(palette.text);
+            let (visible_lines, cursor) =
+                wrapped_input_tail(self.current_custom_input(), sections[3]);
             frame.render_widget(
-                Paragraph::new(self.current_custom_input())
+                Paragraph::new(visible_lines.join("\n"))
                     .style(input_style)
                     .wrap(Wrap { trim: false }),
                 sections[3],
             );
-            let input = self.current_custom_input();
-            let text_w = UnicodeWidthStr::width(input) as u16;
-            let col = text_w % sections[3].width;
-            let row = text_w / sections[3].width;
-            frame.set_cursor_position((sections[3].x + col, sections[3].y + row));
+            frame.set_cursor_position(cursor);
         }
 
         // Footer
@@ -674,6 +671,10 @@ impl Component for QuestionDialog {
 
     fn overlay_uses_main_area(&self) -> bool {
         true
+    }
+
+    fn wants_terminal_cursor(&self) -> bool {
+        self.editing_custom
     }
 }
 

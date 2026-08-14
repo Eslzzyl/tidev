@@ -300,6 +300,27 @@ impl Tui {
                 self.terminal
                     .draw(|frame| app.draw(frame))
                     .context("failed to render frame")?;
+                // Ratatui normally hides the cursor when a frame does not
+                // request a position. Enforce the application-level policy
+                // as well: some terminals otherwise retain the cursor from
+                // the preceding composer frame when a display-only overlay
+                // is opened.
+                if let Some(position) = app.composer_cursor_position() {
+                    self.terminal
+                        .set_cursor_position(position)
+                        .context("failed to restore composer cursor position")?;
+                    self.terminal
+                        .show_cursor()
+                        .context("failed to show composer cursor")?;
+                } else if app.wants_terminal_cursor() {
+                    self.terminal
+                        .show_cursor()
+                        .context("failed to show terminal cursor")?;
+                } else {
+                    self.terminal
+                        .hide_cursor()
+                        .context("failed to hide terminal cursor")?;
+                }
                 app.mark_clean();
                 app.last_spinner_frame = (app.spinner_elapsed().as_millis() / 100) as u64;
                 last_render = now;

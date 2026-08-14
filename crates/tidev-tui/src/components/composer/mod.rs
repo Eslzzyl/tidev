@@ -144,6 +144,8 @@ pub(crate) struct Composer {
     /// Screen rect of the text input area (set during draw, used for mouse
     /// hit-testing on image badges and mouse interaction).
     pub(crate) last_text_area: Rect,
+    /// Cursor position produced by the most recent composer render.
+    pub(crate) last_cursor_position: Option<Position>,
     /// Whether a mouse drag is in progress in the input area.
     input_dragging: bool,
 }
@@ -173,6 +175,7 @@ impl Composer {
             last_input_width: 0,
             last_visible_lines: 0,
             last_text_area: Rect::default(),
+            last_cursor_position: None,
             input_dragging: false,
         }
     }

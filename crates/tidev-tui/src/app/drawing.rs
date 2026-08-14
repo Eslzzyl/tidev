@@ -251,6 +251,8 @@ impl App {
         let palette = self.current_palette;
         let area = frame.area();
         self.terminal_area = area;
+        self.cursor_rendered = false;
+        self.composer_cursor_position = None;
 
         // Background
         frame.render_widget(
@@ -260,6 +262,13 @@ impl App {
 
         if self.screen == AppScreen::Welcome {
             self.draw_welcome(frame);
+            if self.overlays.is_empty() {
+                self.composer_cursor_position = self
+                    .composer
+                    .as_ref()
+                    .and_then(|composer| composer.last_cursor_position);
+                self.cursor_rendered = self.composer_cursor_position.is_some();
+            }
             // Draw overlays on top of welcome content.
             let draw_ctx = DrawContext {
                 palette,
@@ -438,6 +447,7 @@ impl App {
             if composer.has_popup() {
                 composer.sync_autocomplete();
             }
+            self.cursor_rendered = self.overlays.is_empty();
             let active_model = self.runtime.active_model();
             let draw_ctx = DrawContext {
                 palette,
@@ -455,6 +465,7 @@ impl App {
                 workspace_root: self.runtime.workspace_root(),
             };
             composer.draw(frame, bottom_area, &draw_ctx);
+            self.composer_cursor_position = composer.last_cursor_position;
         }
 
         // Build DrawContext for overlays
@@ -701,7 +712,7 @@ impl App {
             let active_model = self.runtime.active_model();
             let draw_ctx = DrawContext {
                 palette,
-                focused: true,
+                focused: self.overlays.is_empty(),
                 mode: self.mode,
                 pending_mode: self
                     .current_session_id

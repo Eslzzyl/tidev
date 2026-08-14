@@ -19,7 +19,7 @@ use tidev_core::mcp::{McpConnectionStatus, McpManager, McpServerSummary};
 use crate::action::{Action, McpAction, OverlayAction, OverlayKind};
 use crate::component::Component;
 use crate::context::{DrawContext, UpdateContext};
-use crate::utils::{centered_rect, render_scrollbar};
+use crate::utils::{centered_rect, render_scrollbar, single_line_input_cursor};
 
 // ---------------------------------------------------------------------------
 // Editor state for adding / editing a server
@@ -341,6 +341,10 @@ impl Component for McpServerPanel {
         true
     }
 
+    fn wants_terminal_cursor(&self) -> bool {
+        self.query_active || self.editing
+    }
+
     fn handle_key_event(&mut self, key: KeyEvent) -> Option<Action> {
         if key.kind != KeyEventKind::Press {
             return None;
@@ -496,10 +500,13 @@ impl Component for McpServerPanel {
 
         // ── Query bar ──────────────────────────────────────────────────
         if self.query_active {
+            let query_area = Rect::new(inner.x, inner.y, inner.width, 1);
+            let (visible_query, cursor) = single_line_input_cursor(query_area, 8, &self.query);
             let query_bar =
-                Paragraph::new(Line::from(Span::raw(format!("Filter: {}█", self.query))))
+                Paragraph::new(Line::from(Span::raw(format!("Filter: {visible_query}"))))
                     .style(Style::default().fg(Color::Cyan));
-            frame.render_widget(query_bar, Rect::new(inner.x, inner.y, inner.width, 1));
+            frame.render_widget(query_bar, query_area);
+            frame.set_cursor_position(cursor);
         }
 
         // ── Item list ──────────────────────────────────────────────────
@@ -670,8 +677,10 @@ impl McpServerPanel {
                 Style::default().fg(Color::White)
             };
 
+            let field_area = Rect::new(inner.x, y, inner.width, 1);
+            let (visible_value, cursor) = single_line_input_cursor(field_area, 10, value);
             let display_value = if is_active {
-                format!("{}█", value)
+                visible_value.to_string()
             } else {
                 value.to_string()
             };
@@ -682,8 +691,11 @@ impl McpServerPanel {
                     colon,
                     Span::styled(display_value, value_style),
                 ])),
-                Rect::new(inner.x, y, inner.width, 1),
+                field_area,
             );
+            if is_active {
+                frame.set_cursor_position(cursor);
+            }
         }
 
         // ── Error message ─────────────────────────────────────────────

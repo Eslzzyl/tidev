@@ -13,7 +13,7 @@ use ratatui::widgets::{Block, Clear, List, ListItem, Paragraph};
 use crate::action::{Action, OverlayAction, OverlayKind, SearchAction};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
-use crate::utils::centered_rect;
+use crate::utils::{centered_rect, single_line_input_cursor};
 
 // ---------------------------------------------------------------------------
 // Built-in provider metadata
@@ -421,20 +421,16 @@ impl Component for SearchPanel {
                 sections[0],
             );
 
-            // Render the actual input text (right-aligned to show end)
-            let input_width = sections[0].width.saturating_sub(2);
-            let text = &self.input_buffer;
-            let display = if text.len() > input_width as usize {
-                &text[text.len().saturating_sub(input_width as usize)..]
-            } else {
-                text.as_str()
-            };
+            // Keep the label and input on separate rows. The visible input is
+            // the trailing portion that fits before the real terminal cursor.
+            let input_area = Rect::new(sections[0].x, sections[0].y + 1, sections[0].width, 1);
+            let (display, cursor) = single_line_input_cursor(input_area, 0, &self.input_buffer);
             frame.render_widget(
                 Paragraph::new(display.to_string())
                     .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
-                sections[0],
+                input_area,
             );
-            frame.set_cursor_position((sections[0].right().saturating_sub(1), sections[0].y));
+            frame.set_cursor_position(cursor);
 
             // Footer
             let footer = Line::from(vec![
@@ -542,5 +538,9 @@ impl Component for SearchPanel {
 
     fn blocks_input(&self) -> bool {
         true
+    }
+
+    fn wants_terminal_cursor(&self) -> bool {
+        self.editing_api_key.is_some()
     }
 }

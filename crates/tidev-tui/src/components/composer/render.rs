@@ -23,6 +23,7 @@ pub(crate) fn draw_composer(
     area: Rect,
     ctx: &DrawContext,
 ) {
+    composer.last_cursor_position = None;
     let palette = ctx.palette;
 
     // ── Background fill ─────────────────────────────────────────────
@@ -423,7 +424,9 @@ pub(crate) fn draw_composer(
             .y
             .saturating_add(cursor_line.min(text_area.height.saturating_sub(1)));
 
-        frame.set_cursor_position(Position::new(cursor_x, cursor_y));
+        let position = Position::new(cursor_x, cursor_y);
+        composer.last_cursor_position = Some(position);
+        frame.set_cursor_position(position);
     }
 }
 

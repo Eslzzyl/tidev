@@ -19,7 +19,7 @@ use uuid::Uuid;
 use crate::action::{Action, ChatAction, OverlayAction, OverlayKind};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
-use crate::utils::{centered_rect, strip_system_reminder_tags};
+use crate::utils::{centered_rect, single_line_input_cursor, strip_system_reminder_tags};
 use unicode_width::UnicodeWidthStr;
 
 // ---------------------------------------------------------------------------
@@ -304,18 +304,17 @@ impl Component for MessagePanel {
         // ── Search input ──
         let input_style = Style::default().bg(palette.panel_alt);
         let prefix = " Search user messages: ";
+        let (visible_query, cursor) =
+            single_line_input_cursor(sections[2], prefix.width() as u16, &self.query);
         frame.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::styled(prefix, Style::default().fg(palette.muted)),
-                Span::styled(&self.query, Style::default().fg(palette.text)),
+                Span::styled(visible_query, Style::default().fg(palette.text)),
             ]))
             .style(input_style),
             sections[2],
         );
-        frame.set_cursor_position((
-            sections[2].x + prefix.width() as u16 + self.query.as_str().width() as u16,
-            sections[2].y,
-        ));
+        frame.set_cursor_position(cursor);
 
         // ── Message list ──
         let matches = self.matching_indices();
@@ -413,6 +412,10 @@ impl Component for MessagePanel {
     }
 
     fn blocks_input(&self) -> bool {
+        true
+    }
+
+    fn wants_terminal_cursor(&self) -> bool {
         true
     }
 }

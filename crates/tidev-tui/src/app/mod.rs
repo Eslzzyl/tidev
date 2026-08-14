@@ -14,7 +14,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 use crate::theme::{ThemePalette, resolve_palette};
-use ratatui::layout::Rect;
+use ratatui::layout::{Position, Rect};
 use tidev_config::ThemeCatalog;
 use tidev_core::Mode as SessionMode;
 use tidev_core::{ApprovedTool, ToolCallWithViolations};
@@ -93,6 +93,15 @@ pub struct App {
 
     /// Chat message list component.
     pub(crate) message_list: Option<MessageList>,
+
+    /// Whether the most recently rendered frame contains the Composer's
+    /// terminal cursor. This is set during `draw`, alongside the actual
+    /// Composer render branch, rather than inferred from session metadata.
+    cursor_rendered: bool,
+
+    /// Exact Composer cursor position from the most recent draw, if the
+    /// Composer was the active cursor owner.
+    composer_cursor_position: Option<Position>,
 
     /// Text input composer.
     pub(crate) composer: Option<Composer>,
@@ -259,6 +268,8 @@ impl App {
             spinner_start: Instant::now(),
             last_spinner_frame: 0,
             message_list: None,
+            cursor_rendered: false,
+            composer_cursor_position: None,
             sidebar: Sidebar::new(),
             mouse_selection: MouseSelection::default(),
             last_selection_auto_scroll: None,
@@ -295,6 +306,22 @@ impl App {
     pub fn is_dirty(&self) -> bool {
         self.message_list.as_ref().is_some_and(|c| c.is_dirty())
             || self.composer.as_ref().is_some_and(|c| c.is_dirty())
+    }
+
+    /// Whether the frame being rendered should leave the terminal cursor
+    /// visible. This is the single policy point used by the terminal layer
+    /// after each draw, so a display-only overlay can never retain a cursor
+    /// from the component beneath it.
+    pub(crate) fn wants_terminal_cursor(&self) -> bool {
+        if !self.overlays.is_empty() {
+            return self.overlays.wants_terminal_cursor();
+        }
+
+        self.cursor_rendered
+    }
+
+    pub(crate) fn composer_cursor_position(&self) -> Option<Position> {
+        self.composer_cursor_position
     }
 
     /// Mark all components as clean after rendering.

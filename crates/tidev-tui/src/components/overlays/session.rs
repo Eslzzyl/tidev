@@ -22,7 +22,7 @@ use uuid::Uuid;
 use crate::action::{Action, OverlayAction, OverlayKind, SessionAction};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
-use crate::utils::centered_rect;
+use crate::utils::{centered_rect, single_line_input_cursor};
 
 // ---------------------------------------------------------------------------
 // Enums & types
@@ -613,20 +613,20 @@ impl Component for SessionPanel {
         // Search input
         let input_style = Style::default().bg(palette.panel_alt);
         let prefix = " Search sessions: ";
+        let (visible_query, cursor) = single_line_input_cursor(
+            sections[2],
+            UnicodeWidthStr::width(prefix) as u16,
+            &self.query,
+        );
         frame.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::styled(prefix, Style::default().fg(palette.muted)),
-                Span::styled(&self.query, Style::default().fg(palette.text)),
+                Span::styled(visible_query, Style::default().fg(palette.text)),
             ]))
             .style(input_style),
             sections[2],
         );
-        frame.set_cursor_position((
-            sections[2].x
-                + UnicodeWidthStr::width(prefix) as u16
-                + self.query.as_str().width() as u16,
-            sections[2].y,
-        ));
+        frame.set_cursor_position(cursor);
 
         // Session list
         let matches = self.matching_indices();
@@ -804,6 +804,10 @@ impl Component for SessionPanel {
 
     fn blocks_input(&self) -> bool {
         true
+    }
+
+    fn wants_terminal_cursor(&self) -> bool {
+        matches!(self.dialog, SessionPanelDialog::None)
     }
 }
 

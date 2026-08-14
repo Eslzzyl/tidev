@@ -11,8 +11,7 @@ use tidev_config::provider::ProviderSource;
 use crate::action::{Action, ConnectAction, OverlayAction, OverlayKind};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
-use crate::utils::{centered_rect, paste_from_clipboard};
-use unicode_width::UnicodeWidthStr;
+use crate::utils::{centered_rect, paste_from_clipboard, single_line_input_cursor};
 
 /// Phase of the connect dialog.
 enum ConnectPhase {
@@ -380,10 +379,11 @@ impl Component for ConnectDialog {
                 .split(body);
 
                 // Search input
+                let (visible_query, cursor) = single_line_input_cursor(sections[0], 2, &self.query);
                 let search_display = if self.query.is_empty() {
                     "Search providers by id or display name... (type to filter)"
                 } else {
-                    self.query.as_str()
+                    visible_query
                 };
                 frame.render_widget(
                     Paragraph::new(Line::from(vec![
@@ -393,10 +393,7 @@ impl Component for ConnectDialog {
                     .style(Style::default().bg(palette.panel_alt)),
                     sections[0],
                 );
-                frame.set_cursor_position((
-                    sections[0].x + 2 + self.query.as_str().width() as u16,
-                    sections[0].y,
-                ));
+                frame.set_cursor_position(cursor);
 
                 // Hint
                 frame.render_widget(
@@ -529,10 +526,11 @@ impl Component for ConnectDialog {
                 );
 
                 // Key input
+                let (visible_key, cursor) = single_line_input_cursor(sections[2], 5, buffer);
                 let display = if buffer.is_empty() {
                     "Paste or type your API key..."
                 } else {
-                    buffer.as_str()
+                    visible_key
                 };
                 frame.render_widget(
                     Paragraph::new(Line::from(vec![
@@ -543,10 +541,7 @@ impl Component for ConnectDialog {
                     .wrap(Wrap { trim: false }),
                     sections[2],
                 );
-                frame.set_cursor_position((
-                    sections[2].x + 5 + buffer.as_str().width() as u16,
-                    sections[2].y,
-                ));
+                frame.set_cursor_position(cursor);
 
                 // Help
                 frame.render_widget(
@@ -599,6 +594,13 @@ impl Component for ConnectDialog {
 
     fn blocks_input(&self) -> bool {
         true
+    }
+
+    fn wants_terminal_cursor(&self) -> bool {
+        matches!(
+            self.phase,
+            ConnectPhase::ProviderPicker | ConnectPhase::ApiKey { .. }
+        )
     }
 
     fn handle_paste(&mut self, text: &str) -> Option<Action> {

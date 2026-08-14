@@ -1,11 +1,99 @@
 //! Utility functions copied from tidev-tui (private, self-contained).
 
-use ratatui::layout::Rect;
+use ratatui::layout::{Position, Rect};
 use ratatui::prelude::{Frame, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use crate::theme::ThemePalette;
+
+/// Return the suffix of `text` that fits in `max_width` terminal columns.
+/// The returned slice always starts at a UTF-8 character boundary.
+pub(crate) fn tail_fitting_width(text: &str, max_width: u16) -> &str {
+    let max_width = max_width as usize;
+    if unicode_width::UnicodeWidthStr::width(text) <= max_width {
+        return text;
+    }
+
+    let mut width = 0usize;
+    let mut start = text.len();
+    for (index, ch) in text.char_indices().rev() {
+        let char_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        if width.saturating_add(char_width) > max_width {
+            break;
+        }
+        width += char_width;
+        start = index;
+    }
+    &text[start..]
+}
+
+/// Pick the visible tail and cursor position for a one-line input field.
+/// One cell is reserved for the cursor so it never spills into the next row.
+pub(crate) fn single_line_input_cursor(
+    area: Rect,
+    prefix_width: u16,
+    text: &str,
+) -> (&str, Position) {
+    if area.width == 0 || area.height == 0 {
+        return ("", Position::new(area.x, area.y));
+    }
+
+    let cursor_limit = area.width.saturating_sub(1);
+    let input_start = prefix_width.min(cursor_limit);
+    let visible = tail_fitting_width(text, cursor_limit.saturating_sub(input_start));
+    let visible_width = unicode_width::UnicodeWidthStr::width(visible) as u16;
+    let cursor_x = area
+        .x
+        .saturating_add(input_start)
+        .saturating_add(visible_width)
+        .min(area.right().saturating_sub(1));
+    (visible, Position::new(cursor_x, area.y))
+}
+
+/// Renderable trailing visual lines and the matching cursor location for a
+/// bounded multi-line input. The caller renders the returned lines verbatim,
+/// avoiding a cursor that points beyond the visible input area.
+pub(crate) fn wrapped_input_tail(text: &str, area: Rect) -> (Vec<String>, Position) {
+    if area.width == 0 || area.height == 0 {
+        return (vec![String::new()], Position::new(area.x, area.y));
+    }
+
+    let width = area.width as usize;
+    let mut lines = vec![String::new()];
+    let mut column = 0usize;
+    for ch in text.chars() {
+        if ch == '\n' {
+            lines.push(String::new());
+            column = 0;
+            continue;
+        }
+        let char_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        if column > 0 && column.saturating_add(char_width) > width {
+            lines.push(String::new());
+            column = 0;
+        }
+        lines.last_mut().expect("input always has a line").push(ch);
+        column += char_width;
+        if column == width {
+            lines.push(String::new());
+            column = 0;
+        }
+    }
+
+    let visible_start = lines.len().saturating_sub(area.height as usize);
+    let cursor_y = area
+        .y
+        .saturating_add((lines.len() - 1 - visible_start) as u16);
+    let cursor_x = area
+        .x
+        .saturating_add(column as u16)
+        .min(area.right().saturating_sub(1));
+    (
+        lines.split_off(visible_start),
+        Position::new(cursor_x, cursor_y),
+    )
+}
 
 /// Try to read text from the system clipboard.
 ///
@@ -323,5 +411,35 @@ pub(crate) fn strip_system_reminder_tags(text: &str) -> String {
             break;
         }
     }
+
     result
+}
+
+#[cfg(test)]
+mod cursor_tests {
+    use super::*;
+
+    #[test]
+    fn single_line_cursor_keeps_cursor_inside_field() {
+        let area = Rect::new(10, 4, 8, 1);
+        let (visible, position) = single_line_input_cursor(area, 2, "abcdefghi");
+        assert_eq!(visible, "efghi");
+        assert_eq!(position, Position::new(17, 4));
+    }
+
+    #[test]
+    fn single_line_cursor_respects_wide_characters() {
+        let area = Rect::new(0, 0, 8, 1);
+        let (visible, position) = single_line_input_cursor(area, 1, "a界b");
+        assert_eq!(visible, "a界b");
+        assert_eq!(position, Position::new(5, 0));
+    }
+
+    #[test]
+    fn wrapped_input_cursor_scrolls_to_last_visible_line() {
+        let area = Rect::new(3, 2, 4, 2);
+        let (lines, position) = wrapped_input_tail("abcdefghi", area);
+        assert_eq!(lines, vec!["efgh", "i"]);
+        assert_eq!(position, Position::new(4, 3));
+    }
 }

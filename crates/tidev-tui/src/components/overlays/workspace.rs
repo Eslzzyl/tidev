@@ -16,12 +16,10 @@ use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
 
-use unicode_width::UnicodeWidthStr;
-
 use crate::action::{Action, BoundaryDecision, OverlayAction, OverlayKind};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
-use crate::utils::bottom_centered_rect;
+use crate::utils::{bottom_centered_rect, wrapped_input_tail};
 
 // ---------------------------------------------------------------------------
 // Phase
@@ -369,16 +367,14 @@ impl Component for WorkspaceBoundaryDialog {
 
                 // Input field
                 let input_style = Style::default().bg(palette.background).fg(palette.text);
+                let (visible_lines, cursor) = wrapped_input_tail(reason, sections[3]);
                 frame.render_widget(
-                    Paragraph::new(reason.clone())
+                    Paragraph::new(visible_lines.join("\n"))
                         .style(input_style)
                         .wrap(Wrap { trim: false }),
                     sections[3],
                 );
-                let text_w = UnicodeWidthStr::width(reason.as_str()) as u16;
-                let col = text_w % sections[3].width;
-                let row = text_w / sections[3].width;
-                frame.set_cursor_position((sections[3].x + col, sections[3].y + row));
+                frame.set_cursor_position(cursor);
 
                 // Help
                 frame.render_widget(
@@ -490,5 +486,9 @@ impl Component for WorkspaceBoundaryDialog {
 
     fn overlay_uses_main_area(&self) -> bool {
         true
+    }
+
+    fn wants_terminal_cursor(&self) -> bool {
+        matches!(self.phase, WbPhase::Input { .. })
     }
 }
