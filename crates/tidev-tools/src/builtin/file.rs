@@ -692,9 +692,9 @@ pub(super) fn edit_file(
                 display_workspace_relative(workspace_root, &path)
             )
         })?;
-    let old_contents = document.text().to_string();
+    let old_contents = document.text();
 
-    let new_contents = apply_edit_contents(&old_contents, old_text, new_text, replace_all)?;
+    let new_contents = apply_edit_contents(old_contents, old_text, new_text, replace_all)?;
     let encoded = document.encode_updated(&new_contents).with_context(|| {
         format!(
             "failed to encode {}",
@@ -711,7 +711,7 @@ pub(super) fn edit_file(
     Ok(file_change_output(
         workspace_root,
         &path,
-        &old_contents,
+        old_contents,
         &new_contents,
         "Edited",
         original_exists,
@@ -731,6 +731,18 @@ fn apply_edit_contents(
     let ending = detect_line_ending(contents);
     let old = convert_to_line_ending(&normalize_line_endings(old_text), ending);
     let new_text = convert_to_line_ending(&normalize_line_endings(new_text), ending);
+
+    // The exact candidate is always considered before fuzzy candidates. Resolve the
+    // common exact-match cases before constructing the fuzzy candidate list.
+    if let Some(index) = contents.find(&old) {
+        if replace_all {
+            return Ok(contents.replace(&old, &new_text));
+        }
+
+        if contents.rfind(&old) == Some(index) {
+            return Ok(replace_at(contents, index, &old, &new_text));
+        }
+    }
 
     let candidates = find_edit_candidates(contents, &old);
     let mut not_found = true;
@@ -785,14 +797,18 @@ fn convert_to_line_ending(text: &str, ending: &str) -> String {
 
 fn replace_first_occurrence(content: &str, old: &str, new_text: &str) -> String {
     if let Some(index) = content.find(old) {
-        let mut result = String::with_capacity(content.len() - old.len() + new_text.len());
-        result.push_str(&content[..index]);
-        result.push_str(new_text);
-        result.push_str(&content[index + old.len()..]);
-        result
+        replace_at(content, index, old, new_text)
     } else {
         content.to_string()
     }
+}
+
+fn replace_at(content: &str, index: usize, old: &str, new_text: &str) -> String {
+    let mut result = String::with_capacity(content.len() - old.len() + new_text.len());
+    result.push_str(&content[..index]);
+    result.push_str(new_text);
+    result.push_str(&content[index + old.len()..]);
+    result
 }
 
 fn find_edit_candidates(content: &str, old_text: &str) -> Vec<String> {
@@ -807,7 +823,6 @@ fn find_edit_candidates(content: &str, old_text: &str) -> Vec<String> {
     candidates.extend(escape_normalized_replacer(content, old_text));
     candidates.extend(trimmed_boundary_replacer(content, old_text));
     candidates.extend(context_aware_replacer(content, old_text));
-    candidates.extend(multi_occurrence_replacer(content, old_text));
 
     candidates.dedup();
     candidates
@@ -1220,19 +1235,6 @@ fn context_aware_replacer(content: &str, find: &str) -> Vec<String> {
     results
 }
 
-fn multi_occurrence_replacer(content: &str, find: &str) -> Vec<String> {
-    if find.is_empty() {
-        return Vec::new();
-    }
-    let mut results = Vec::new();
-    let mut offset = 0;
-    while let Some(index) = content[offset..].find(find) {
-        results.push(find.to_string());
-        offset += index + find.len();
-    }
-    results
-}
-
 /// Read file content for @ reference (like opencode's behavior).
 /// Applies truncation strategy: 2000 lines / 50KB max.
 /// Returns the tool output format similar to read tool results.
@@ -1374,6 +1376,25 @@ pub fn read_file_for_at_reference(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_exact_unique_edit_replaces_without_fuzzy_matching() {
+        let result = apply_edit_contents("alpha\nbeta\ngamma\n", "beta", "BETA", false).unwrap();
+        assert_eq!(result, "alpha\nBETA\ngamma\n");
+    }
+
+    #[test]
+    fn test_exact_duplicate_edit_requires_replace_all() {
+        let error = apply_edit_contents("foo\nfoo\n", "foo", "bar", false).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("Found multiple matches for oldString")
+        );
+
+        let result = apply_edit_contents("foo\nfoo\n", "foo", "bar", true).unwrap();
+        assert_eq!(result, "bar\nbar\n");
+    }
 
     /// Reproduces a panic in escape_normalized_replacer:
     /// when `find` (after unescaping) has more lines than `content`,

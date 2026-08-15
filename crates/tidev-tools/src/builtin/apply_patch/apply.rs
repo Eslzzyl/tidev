@@ -169,10 +169,10 @@ fn apply_update_file(
                 display_workspace_relative(workspace_root, &abs_path)
             )
         })?;
-    let old_content = document.text().to_string();
+    let old_content = document.text();
 
     // Compute new content from chunks
-    let new_content = derive_new_contents(workspace_root, &abs_path, &old_content, chunks)?;
+    let new_content = derive_new_contents(workspace_root, &abs_path, old_content, chunks)?;
 
     // Determine the final path (handle MoveTo)
     let final_path = if let Some(move_target) = move_target {
@@ -234,7 +234,7 @@ fn apply_update_file(
     };
 
     // Generate a unified diff for the output
-    let diff = generate_diff(&old_content, &new_content, &final_path, workspace_root);
+    let diff = generate_diff(old_content, &new_content, &final_path, workspace_root);
 
     if let Some(diff) = diff {
         result.diffs.insert(final_path.clone(), diff);
@@ -347,27 +347,40 @@ fn compute_replacements(
     Ok(replacements)
 }
 
-/// Apply replacements in reverse order so indices stay valid.
+/// Apply sorted, non-overlapping replacements in one linear pass.
 fn apply_replacements(
-    mut lines: Vec<String>,
+    lines: Vec<String>,
     replacements: &[(usize, usize, Vec<String>)],
 ) -> Vec<String> {
-    for (start_idx, old_len, new_segment) in replacements.iter().rev() {
-        let start_idx = *start_idx;
-        let old_len = *old_len;
+    // Replacements are sorted by their original positions. Rebuild the output
+    // once so unchanged lines are moved instead of repeatedly shifted by
+    // Vec::remove and Vec::insert.
+    let additional_capacity: usize = replacements
+        .iter()
+        .map(|(_, old_len, new_segment)| new_segment.len().saturating_sub(*old_len))
+        .sum();
+    let mut result = Vec::with_capacity(lines.len() + additional_capacity);
+    let mut remaining = lines.into_iter();
+    let mut cursor = 0;
 
-        for _ in 0..old_len {
-            if start_idx < lines.len() {
-                lines.remove(start_idx);
+    for (start_idx, old_len, new_segment) in replacements {
+        while cursor < *start_idx {
+            if let Some(line) = remaining.next() {
+                result.push(line);
             }
+            cursor += 1;
         }
 
-        for (offset, new_line) in new_segment.iter().enumerate() {
-            lines.insert(start_idx + offset, new_line.clone());
+        for _ in 0..*old_len {
+            remaining.next();
+            cursor += 1;
         }
+
+        result.extend(new_segment.iter().cloned());
     }
 
-    lines
+    result.extend(remaining);
+    result
 }
 
 /// Generate a unified diff string for the change (using diffy, already a dep).
@@ -392,4 +405,65 @@ fn generate_diff(
         return None;
     }
     Some(patch.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{apply_replacements, derive_new_contents};
+    use crate::builtin::apply_patch::UpdateFileChunk;
+
+    #[test]
+    fn apply_replacements_preserves_original_positions() {
+        let lines = vec!["a", "b", "c", "d"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        let replacements = vec![
+            (1, 1, vec![String::from("B")]),
+            (3, 1, vec![String::from("D1"), String::from("D2")]),
+        ];
+
+        assert_eq!(
+            apply_replacements(lines, &replacements),
+            vec!["a", "B", "c", "D1", "D2"]
+        );
+    }
+
+    #[test]
+    fn apply_replacements_preserves_order_of_same_position_insertions() {
+        let lines = vec![String::from("a")];
+        let replacements = vec![
+            (1, 0, vec![String::from("b")]),
+            (1, 0, vec![String::from("c")]),
+        ];
+
+        assert_eq!(
+            apply_replacements(lines, &replacements),
+            vec!["a", "b", "c"]
+        );
+    }
+
+    #[test]
+    fn derive_new_contents_applies_multiple_chunks() {
+        let workspace = tempfile::tempdir().unwrap();
+        let path = workspace.path().join("file.txt");
+        let chunks = vec![
+            UpdateFileChunk {
+                change_context: Some(String::from("a")),
+                old_lines: vec![String::from("b")],
+                new_lines: vec![String::from("B")],
+                is_end_of_file: false,
+            },
+            UpdateFileChunk {
+                change_context: Some(String::from("c")),
+                old_lines: vec![String::from("d")],
+                new_lines: vec![String::from("D1"), String::from("D2")],
+                is_end_of_file: false,
+            },
+        ];
+
+        let result = derive_new_contents(workspace.path(), &path, "a\nb\nc\nd\n", &chunks).unwrap();
+
+        assert_eq!(result, "a\nB\nc\nD1\nD2\n");
+    }
 }
