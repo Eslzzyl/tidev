@@ -238,6 +238,8 @@ pub(crate) enum Action {
     Settings(SettingsAction),
     Connect(ConnectAction),
     Mcp(McpAction),
+    /// Copy the most recent completed assistant message to the clipboard.
+    CopyLastAssistant,
 
     // ── Tool approval pipeline ──
     /// Result from a WorkspaceBoundaryDialog.

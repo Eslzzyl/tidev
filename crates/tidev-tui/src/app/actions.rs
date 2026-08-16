@@ -4,7 +4,7 @@ use crate::context::UpdateContext;
 use crate::theme::resolve_palette;
 use tidev_core::ApprovedTool;
 use tidev_core::Mode as SessionMode;
-use tidev_llm::message::{MessageRole, ToolExecutionResult};
+use tidev_llm::message::{Message, MessageRole, ToolExecutionResult};
 
 use crate::action::{
     Action, BoundaryDecision, ChatAction, ConnectAction, McpAction, OverlayAction, OverlayKind,
@@ -14,7 +14,20 @@ use crate::action::{
 use crate::component::Component;
 
 use crate::components::chat::MessageList;
+use crate::components::selection::copy_to_clipboard;
 use tidev_utils::session::title_from_prompt;
+
+fn last_copyable_assistant_content(messages: &[Message]) -> Option<String> {
+    messages
+        .iter()
+        .rev()
+        .find(|message| {
+            message.role == MessageRole::Assistant
+                && !message.streaming
+                && !message.content.is_empty()
+        })
+        .map(|message| message.content.clone())
+}
 
 fn apply_setting_change(
     config: &mut tidev_config::AppConfig,
@@ -90,6 +103,9 @@ impl App {
             match action {
                 Action::Quit => {
                     self.should_quit = true;
+                }
+                Action::CopyLastAssistant => {
+                    self.copy_last_assistant_message();
                 }
                 Action::Overlay(OverlayAction::Open(kind)) => {
                     self.open_overlay(kind);
@@ -1084,5 +1100,96 @@ impl App {
         if let Some(ref mut composer) = self.composer {
             composer.set_model_supports_images(model.supports_images);
         }
+    }
+
+    /// Copy the latest completed assistant response without involving the runtime.
+    ///
+    /// This is intentionally a TUI-only operation: `/copy` must never create a
+    /// user message or alter the bytes of a future LLM request.
+    fn copy_last_assistant_message(&mut self) {
+        let Some(session_id) = self.current_session_id else {
+            self.set_toast(
+                "Copy is available in an active session",
+                std::time::Duration::from_secs(3),
+            );
+            return;
+        };
+
+        let has_pending_input = self
+            .pending_inputs
+            .iter()
+            .any(|input| input.session_id == session_id);
+        let has_pending_compact = self.pending_compacts.contains(&session_id);
+        let is_compacting = self.compacting_sessions.contains(&session_id);
+        if self.has_active_request() || has_pending_input || has_pending_compact || is_compacting {
+            self.set_toast(
+                "Copy is available when idle",
+                std::time::Duration::from_secs(3),
+            );
+            return;
+        }
+
+        let content = self
+            .message_list
+            .as_ref()
+            .and_then(|chat| chat.active_chat_context())
+            .filter(|context| context.session_id == session_id)
+            .and_then(|context| last_copyable_assistant_content(context.visible_messages()));
+
+        let Some(content) = content else {
+            self.set_toast(
+                "No completed assistant message to copy",
+                std::time::Duration::from_secs(3),
+            );
+            return;
+        };
+
+        match copy_to_clipboard(&content) {
+            Ok(()) => self.set_toast(
+                "Assistant message copied to clipboard",
+                std::time::Duration::from_secs(3),
+            ),
+            Err(error) => self.set_toast(
+                format!("Copy failed: {error}"),
+                std::time::Duration::from_secs(5),
+            ),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::last_copyable_assistant_content;
+    use tidev_llm::message::{Message, MessageRole};
+
+    #[test]
+    fn last_copyable_assistant_content_uses_latest_completed_text() {
+        let mut streaming = Message::streaming(MessageRole::Assistant, "partial");
+        streaming.content = "partial".to_string();
+        let messages = vec![
+            Message::new(MessageRole::Assistant, "first"),
+            Message::new(MessageRole::Assistant, ""),
+            streaming,
+            Message::new(MessageRole::Assistant, "latest"),
+        ];
+
+        assert_eq!(
+            last_copyable_assistant_content(&messages).as_deref(),
+            Some("latest")
+        );
+    }
+
+    #[test]
+    fn last_copyable_assistant_content_skips_non_assistant_messages() {
+        let messages = vec![
+            Message::new(MessageRole::Assistant, "answer"),
+            Message::new(MessageRole::User, "follow-up"),
+            Message::new(MessageRole::Tool, "tool output"),
+        ];
+
+        assert_eq!(
+            last_copyable_assistant_content(&messages).as_deref(),
+            Some("answer")
+        );
     }
 }

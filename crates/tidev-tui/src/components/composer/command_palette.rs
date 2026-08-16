@@ -46,6 +46,8 @@ pub(crate) enum CommandAction {
     ExpandThinking,
     /// Collapse every thinking block in the current session.
     CollapseThinking,
+    /// Copy the most recent completed assistant message.
+    CopyLastAssistant,
 }
 
 // ---------------------------------------------------------------------------
@@ -190,6 +192,12 @@ pub(crate) static COMMANDS: &[CommandSpec] = &[
         aliases: &["collapse", "hide-thinking"],
         description: "Collapse all thinking blocks in the current session",
         action: CommandAction::CollapseThinking,
+    },
+    CommandSpec {
+        name: "copy",
+        aliases: &[],
+        description: "Copy the last completed assistant message",
+        action: CommandAction::CopyLastAssistant,
     },
 ];
 
@@ -505,6 +513,13 @@ pub(crate) fn execute_command(
         CommandAction::CollapseThinking => {
             vec![Action::Chat(ChatAction::CollapseAllThinking)]
         }
+        CommandAction::CopyLastAssistant => {
+            if args.is_empty() {
+                vec![Action::CopyLastAssistant]
+            } else {
+                vec![Action::Notice("Usage: /copy".to_string())]
+            }
+        }
     }
 }
 
@@ -603,6 +618,31 @@ mod tests {
     }
 
     #[test]
+    fn test_copy_command_registered_and_executes_without_arguments() {
+        let reg = CommandRegistry::new();
+        assert_eq!(
+            reg.command("copy").map(|spec| spec.action),
+            Some(CommandAction::CopyLastAssistant)
+        );
+
+        let catalog = test_catalog();
+        assert!(matches!(
+            execute_command(CommandAction::CopyLastAssistant, &[], &catalog).as_slice(),
+            [Action::CopyLastAssistant]
+        ));
+    }
+
+    #[test]
+    fn test_copy_command_rejects_arguments() {
+        let catalog = test_catalog();
+        assert!(matches!(
+            execute_command(CommandAction::CopyLastAssistant, &["extra".into()], &catalog)
+                .as_slice(),
+            [Action::Notice(message)] if message == "Usage: /copy"
+        ));
+    }
+
+    #[test]
     fn test_thinking_commands_execute() {
         let catalog = test_catalog();
         assert!(matches!(
@@ -667,14 +707,15 @@ mod tests {
         let mut state = CommandPaletteState::new();
 
         state.sync("/co", &reg);
-        state.move_selection(1); // manual navigation
+        state.move_selection(1); // manual navigation from `/copy` to `/compact`
         assert!(state.user_moved);
-        assert_eq!(state.selected().map(|s| s.spec.name), Some("connect"));
+        assert_eq!(state.selected().map(|s| s.spec.name), Some("compact"));
 
         // Deleting back to "/c" resets the manual flag; the selection
-        // follows the top-ranked suggestion again.
+        // follows the top-ranked suggestion again.  `/copy` is the
+        // highest-ranked `/c` command because its name is the shortest.
         state.sync("/c", &reg);
         assert!(!state.user_moved);
-        assert_eq!(state.selected().map(|s| s.spec.name), Some("compact"));
+        assert_eq!(state.selected().map(|s| s.spec.name), Some("copy"));
     }
 }
