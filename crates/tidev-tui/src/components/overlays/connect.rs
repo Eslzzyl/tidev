@@ -189,8 +189,10 @@ impl Component for ConnectDialog {
                 KeyCode::Char(c) if key.modifiers.contains(KeyModifiers::CONTROL) && c == 'p' => {
                     Some(Action::Connect(ConnectAction::PruneOrphans))
                 }
-                KeyCode::Char('d') | KeyCode::Char('D')
-                    if !key.modifiers.contains(KeyModifiers::CONTROL) =>
+                KeyCode::Char('d' | 'D')
+                    if key.modifiers.contains(KeyModifiers::CONTROL)
+                        && key.modifiers.contains(KeyModifiers::SHIFT)
+                        && !key.modifiers.contains(KeyModifiers::ALT) =>
                 {
                     if let Some(item) = self.visible_provider(self.selected)
                         && item.connected
@@ -487,7 +489,7 @@ impl Component for ConnectDialog {
                 // Help footer
                 frame.render_widget(
                     Paragraph::new(
-                        "↑↓ navigate · Enter select · D disconnect · Esc cancel · type to filter",
+                        "↑↓ navigate · Enter select · Ctrl+Shift+D disconnect · Esc cancel · type to filter",
                     )
                     .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                     sections[3],
