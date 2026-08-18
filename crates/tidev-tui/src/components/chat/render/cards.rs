@@ -60,6 +60,7 @@ fn render_assistant_body_lines(
         let duration = thinking_duration_str(message);
         lines.extend(render_reasoning_lines(
             ctx,
+            &message.id,
             &message.reasoning,
             content_width,
             message.streaming,
@@ -254,6 +255,7 @@ fn render_error_card(
         let duration = thinking_duration_str(message);
         lines.extend(render_reasoning_lines(
             ctx,
+            &message.id,
             &message.reasoning,
             content_width,
             message.streaming,

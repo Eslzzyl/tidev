@@ -18,6 +18,11 @@ pub enum AgentEvent {
         request_id: u64,
         content: String,
     },
+    ReasoningSummaryDelta {
+        request_id: u64,
+        content: String,
+        summary_index: Option<u32>,
+    },
     ToolCallUpdated {
         request_id: u64,
         tool_call: ToolCall,
@@ -132,6 +137,14 @@ pub fn llm_event_to_agent_event(event: LlmEvent, request_id: u64) -> AgentEvent 
         LlmEvent::ReasoningDelta { content } => AgentEvent::ReasoningDelta {
             request_id,
             content,
+        },
+        LlmEvent::ReasoningSummaryDelta {
+            content,
+            summary_index,
+        } => AgentEvent::ReasoningSummaryDelta {
+            request_id,
+            content,
+            summary_index,
         },
         LlmEvent::ToolCallUpdated { tool_call } => AgentEvent::ToolCallUpdated {
             request_id,

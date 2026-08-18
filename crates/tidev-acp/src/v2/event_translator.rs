@@ -103,6 +103,16 @@ impl EventTranslator {
                     self.message_id(*request_id),
                 ),
             ))],
+            BackendEvent::ReasoningSummaryDelta {
+                request_id,
+                content,
+                ..
+            } => vec![self.update(acp::SessionUpdate::AgentThoughtChunk(
+                acp::ContentChunk::new(
+                    acp::ContentBlock::Text(acp::TextContent::new(content)),
+                    self.message_id(*request_id),
+                ),
+            ))],
             BackendEvent::ToolCallUpdated { tool_call, .. } => vec![self.update(
                 acp::SessionUpdate::ToolCallUpdate(crate::v2::types::tool_call_update(
                     tool_call,

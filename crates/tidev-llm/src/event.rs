@@ -14,6 +14,10 @@ pub enum LlmEvent {
     ReasoningDelta {
         content: String,
     },
+    ReasoningSummaryDelta {
+        content: String,
+        summary_index: Option<u32>,
+    },
     ToolCallUpdated {
         tool_call: ToolCall,
     },

@@ -69,6 +69,7 @@ pub(super) fn is_reasoning_collapsed(
 /// `decorate_card_lines` shifts them by the visual prefix width.
 pub(super) fn render_reasoning_lines(
     ctx: &RenderContext,
+    message_id: &Uuid,
     reasoning: &str,
     content_width: usize,
     is_streaming: bool,
@@ -119,6 +120,52 @@ pub(super) fn render_reasoning_lines(
     }
 
     let body_style = Style::default().fg(dimmed_color);
+    let display = ctx.reasoning_displays.get(message_id);
+    let mut segments: Vec<&str> = Vec::new();
+    if let Some(display) = display {
+        segments.extend(
+            display
+                .summaries
+                .iter()
+                .map(|summary| summary.content.as_str())
+                .filter(|content| !content.trim().is_empty()),
+        );
+        if !display.ordinary.trim().is_empty() {
+            segments.push(display.ordinary.as_str());
+        }
+    }
+    if segments.is_empty() {
+        segments.push(reasoning);
+    }
+
+    for (index, segment) in segments.into_iter().enumerate() {
+        if index > 0 {
+            lines.push(HyperlinkLine::new(Line::from("")));
+        }
+        render_reasoning_segment(
+            ctx,
+            segment,
+            content_width,
+            label_style,
+            body_style,
+            &mut lines,
+        );
+    }
+
+    lines
+}
+
+/// Render one semantically complete reasoning segment. Summary segments are
+/// passed here independently so their display boundaries do not depend on
+/// Markdown syntax or on the bytes stored in `Message.reasoning`.
+fn render_reasoning_segment(
+    ctx: &RenderContext,
+    reasoning: &str,
+    content_width: usize,
+    label_style: Style,
+    body_style: Style,
+    lines: &mut Vec<HyperlinkLine>,
+) {
     let effective = content_width.saturating_sub(2).max(1); // 2 for ┃ prefix
     let rendered = markdown::render_markdown_text_with_width_and_cwd(
         reasoning,
@@ -126,7 +173,6 @@ pub(super) fn render_reasoning_lines(
         Some(ctx.workspace_root),
     );
 
-    // Skip leading blank lines
     let mut rendered_lines = markdown::markdown_to_hyperlink_lines(&rendered).into_iter();
     let mut first_line = rendered_lines.next();
     while let Some(ref line) = first_line {
@@ -142,43 +188,41 @@ pub(super) fn render_reasoning_lines(
         }
     }
 
-    // First content line
     if let Some(line) = first_line {
-        let mut spans = vec![Span::styled("┃ ", label_style)];
-        for mut span in line.line.spans {
-            if let Some(fg) = span.style.fg {
-                span.style = span
-                    .style
-                    .fg(crate::theme::mix_colors(fg, palette.background, 0.4));
-            } else {
-                span.style = span.style.patch(body_style);
-            }
-            spans.push(span);
-        }
-        lines.push(HyperlinkLine {
-            line: Line::from(spans),
-            hyperlinks: line.hyperlinks,
-        });
+        lines.push(style_reasoning_line(
+            line,
+            label_style,
+            body_style,
+            ctx.palette.background,
+        ));
     }
-
-    // Subsequent lines
     for line in rendered_lines {
-        let mut spans = vec![Span::styled("┃ ", label_style)];
-        for mut span in line.line.spans {
-            if let Some(fg) = span.style.fg {
-                span.style = span
-                    .style
-                    .fg(crate::theme::mix_colors(fg, palette.background, 0.4));
-            } else {
-                span.style = span.style.patch(body_style);
-            }
-            spans.push(span);
-        }
-        lines.push(HyperlinkLine {
-            line: Line::from(spans),
-            hyperlinks: line.hyperlinks,
-        });
+        lines.push(style_reasoning_line(
+            line,
+            label_style,
+            body_style,
+            ctx.palette.background,
+        ));
     }
+}
 
-    lines
+fn style_reasoning_line(
+    line: HyperlinkLine,
+    label_style: Style,
+    body_style: Style,
+    background: ratatui::style::Color,
+) -> HyperlinkLine {
+    let mut spans = vec![Span::styled("┃ ", label_style)];
+    for mut span in line.line.spans {
+        if let Some(fg) = span.style.fg {
+            span.style = span.style.fg(crate::theme::mix_colors(fg, background, 0.4));
+        } else {
+            span.style = span.style.patch(body_style);
+        }
+        spans.push(span);
+    }
+    HyperlinkLine {
+        line: Line::from(spans),
+        hyperlinks: line.hyperlinks,
+    }
 }

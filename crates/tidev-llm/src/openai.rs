@@ -198,7 +198,17 @@ pub(crate) async fn stream_openai(
                                 let cleaned = strip_think_tags(text);
                                 if !cleaned.is_empty() {
                                     reasoning_text.push_str(&cleaned);
-                                    let _ = tx.send(LlmEvent::ReasoningDelta { content: cleaned });
+                                    if detail.detail_type == "reasoning.summary" {
+                                        let _ = tx.send(LlmEvent::ReasoningSummaryDelta {
+                                            content: cleaned,
+                                            summary_index: detail
+                                                .index
+                                                .and_then(|index| u32::try_from(index).ok()),
+                                        });
+                                    } else {
+                                        let _ =
+                                            tx.send(LlmEvent::ReasoningDelta { content: cleaned });
+                                    }
                                 }
                             }
                         }

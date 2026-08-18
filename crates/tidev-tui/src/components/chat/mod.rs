@@ -620,6 +620,7 @@ impl MessageList {
         match event {
             BackendEvent::Delta { .. }
             | BackendEvent::ReasoningDelta { .. }
+            | BackendEvent::ReasoningSummaryDelta { .. }
             | BackendEvent::ToolCallUpdated { .. }
             | BackendEvent::Finished { .. }
             | BackendEvent::Failed { .. }
@@ -702,6 +703,7 @@ impl MessageList {
                     self.streaming_buffer
                         .push_reasoning_delta(content, &mut chat_context.messages);
                     if let Some(msg_id) = self.streaming_buffer.current_message_id {
+                        chat_context.append_reasoning_delta(msg_id, content);
                         if let Some(msg) = chat_context.messages.iter_mut().find(|m| m.id == msg_id)
                             && msg.reasoning_started_at.is_none()
                         {
@@ -712,17 +714,20 @@ impl MessageList {
                 } else if let Some(msg) =
                     chat_context.messages.iter_mut().rev().find(|m| m.streaming)
                 {
+                    let message_id = msg.id;
                     msg.reasoning.push_str(content);
                     if msg.reasoning_started_at.is_none() {
                         msg.reasoning_started_at = Some(Utc::now());
                     }
-                    self.layout_index.mark_dirty(msg.id);
+                    chat_context.append_reasoning_delta(message_id, content);
+                    self.layout_index.mark_dirty(message_id);
                 } else if is_active_session && !self.cancelled {
                     self.streaming_buffer
                         .recover_or_begin_streaming(&mut chat_context.messages);
                     self.streaming_buffer
                         .push_reasoning_delta(content, &mut chat_context.messages);
                     if let Some(msg_id) = self.streaming_buffer.current_message_id {
+                        chat_context.append_reasoning_delta(msg_id, content);
                         if let Some(msg) = chat_context.messages.iter_mut().find(|m| m.id == msg_id)
                             && msg.reasoning_started_at.is_none()
                         {
@@ -730,6 +735,65 @@ impl MessageList {
                         }
                         self.layout_index.mark_dirty(msg_id);
                     }
+                }
+                self.dirty = true;
+            }
+            BackendEvent::ReasoningSummaryDelta {
+                content,
+                summary_index,
+                ..
+            } => {
+                let is_active_session = self.active_session_id == Some(session_id);
+                if is_active_session && self.streaming_buffer.is_streaming {
+                    self.streaming_buffer
+                        .push_reasoning_delta(content, &mut chat_context.messages);
+                    if let Some(msg_id) = self.streaming_buffer.current_message_id {
+                        chat_context.append_reasoning_summary_delta(
+                            msg_id,
+                            *summary_index,
+                            content,
+                        );
+                        if let Some(msg) = chat_context.messages.iter_mut().find(|m| m.id == msg_id)
+                            && msg.reasoning_started_at.is_none()
+                        {
+                            msg.reasoning_started_at = Some(Utc::now());
+                        }
+                        self.layout_index.mark_dirty(msg_id);
+                    }
+                } else if let Some(msg) =
+                    chat_context.messages.iter_mut().rev().find(|m| m.streaming)
+                {
+                    let message_id = msg.id;
+                    msg.reasoning.push_str(content);
+                    if msg.reasoning_started_at.is_none() {
+                        msg.reasoning_started_at = Some(Utc::now());
+                    }
+                    chat_context.append_reasoning_summary_delta(
+                        message_id,
+                        *summary_index,
+                        content,
+                    );
+                    self.layout_index.mark_dirty(message_id);
+                } else if is_active_session && !self.cancelled {
+                    let message_id = self
+                        .streaming_buffer
+                        .recover_or_begin_streaming(&mut chat_context.messages);
+                    self.streaming_buffer
+                        .push_reasoning_delta(content, &mut chat_context.messages);
+                    chat_context.append_reasoning_summary_delta(
+                        message_id,
+                        *summary_index,
+                        content,
+                    );
+                    if let Some(msg) = chat_context
+                        .messages
+                        .iter_mut()
+                        .find(|m| m.id == message_id)
+                        && msg.reasoning_started_at.is_none()
+                    {
+                        msg.reasoning_started_at = Some(Utc::now());
+                    }
+                    self.layout_index.mark_dirty(message_id);
                 }
                 self.dirty = true;
             }
@@ -1628,6 +1692,7 @@ fn infer_subagent_status(event: &BackendEvent) -> Option<String> {
     match event {
         BackendEvent::Delta { .. } => Some("Writing output".to_string()),
         BackendEvent::ReasoningDelta { .. } => Some("Thinking".to_string()),
+        BackendEvent::ReasoningSummaryDelta { .. } => Some("Thinking".to_string()),
         BackendEvent::ToolCallUpdated { tool_call, .. } => {
             let name = canonical_tool_name(&tool_call.name).unwrap_or(&tool_call.name);
             Some(format!("Tool: {name}"))

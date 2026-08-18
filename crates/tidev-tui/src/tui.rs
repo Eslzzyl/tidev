@@ -204,6 +204,7 @@ impl Tui {
             let mut be_count = 0;
             let mut cd_delta: Option<Coalesced> = None;
             let mut cd_reasoning: Option<Coalesced> = None;
+            let mut cd_summary: Option<Coalesced> = None;
 
             'be: while let Some(ref mut rx) = event_rx {
                 let event = match rx.try_recv() {
@@ -215,7 +216,7 @@ impl Tui {
                 if be_count > MAX_BACKEND_EVENTS_PER_BATCH {
                     // Overflow: flush coalesced, process directly, then
                     // leave remaining events for the next iteration.
-                    flush_delta(&mut cd_delta, &mut cd_reasoning, app);
+                    flush_delta(&mut cd_delta, &mut cd_reasoning, &mut cd_summary, app);
                     app.handle_backend_event(event);
                     break 'be;
                 }
@@ -249,14 +250,32 @@ impl Tui {
                             app,
                         );
                     }
+                    BackendEvent::ReasoningSummaryDelta {
+                        session_id,
+                        request_id,
+                        content,
+                        summary_index,
+                    } => {
+                        let boundary = coalesce_summary_or_flush(
+                            &mut cd_summary,
+                            session_id,
+                            request_id,
+                            content,
+                            summary_index,
+                            app,
+                        );
+                        if boundary {
+                            break 'be;
+                        }
+                    }
                     _ => {
                         // Non-delta: flush before processing to preserve ordering.
-                        flush_delta(&mut cd_delta, &mut cd_reasoning, app);
+                        flush_delta(&mut cd_delta, &mut cd_reasoning, &mut cd_summary, app);
                         app.handle_backend_event(event);
                     }
                 }
             }
-            flush_delta(&mut cd_delta, &mut cd_reasoning, app);
+            flush_delta(&mut cd_delta, &mut cd_reasoning, &mut cd_summary, app);
 
             // 2c. Tool permission requests.
             if let Some(ref mut rx) = request_rx {
@@ -374,6 +393,7 @@ struct Coalesced {
     session_id: Uuid,
     request_id: u64,
     content: String,
+    summary_index: Option<u32>,
 }
 
 /// Coalesce `content` into `slot`, or flush the previous delta first.
@@ -402,16 +422,58 @@ fn coalesce_or_flush(
         session_id,
         request_id,
         content,
+        summary_index: None,
     });
 }
 
+/// Coalesce summary deltas for one provider summary unit. Returns `true` when
+/// a new unit boundary was observed, allowing the event loop to render the
+/// completed unit before draining more summary content.
+fn coalesce_summary_or_flush(
+    slot: &mut Option<Coalesced>,
+    session_id: Uuid,
+    request_id: u64,
+    content: String,
+    summary_index: Option<u32>,
+    app: &mut App,
+) -> bool {
+    if let Some(cd) = slot
+        && cd.session_id == session_id
+        && cd.request_id == request_id
+        && cd.summary_index == summary_index
+    {
+        cd.content.push_str(&content);
+        return false;
+    }
+
+    let boundary = slot.is_some();
+    if let Some(cd) = slot.take() {
+        emit_summary(cd, app);
+    }
+    *slot = Some(Coalesced {
+        session_id,
+        request_id,
+        content,
+        summary_index,
+    });
+    boundary
+}
+
 /// Flush both coalesced slots.
-fn flush_delta(delta: &mut Option<Coalesced>, reasoning: &mut Option<Coalesced>, app: &mut App) {
+fn flush_delta(
+    delta: &mut Option<Coalesced>,
+    reasoning: &mut Option<Coalesced>,
+    summary: &mut Option<Coalesced>,
+    app: &mut App,
+) {
     if let Some(cd) = delta.take() {
         emit_delta(cd, false, app);
     }
     if let Some(cd) = reasoning.take() {
         emit_delta(cd, true, app);
+    }
+    if let Some(cd) = summary.take() {
+        emit_summary(cd, app);
     }
 }
 
@@ -433,4 +495,13 @@ fn emit_delta(cd: Coalesced, is_reasoning: bool, app: &mut App) {
             content,
         });
     }
+}
+
+fn emit_summary(cd: Coalesced, app: &mut App) {
+    app.handle_backend_event(BackendEvent::ReasoningSummaryDelta {
+        session_id: cd.session_id,
+        request_id: cd.request_id,
+        content: cd.content,
+        summary_index: cd.summary_index,
+    });
 }

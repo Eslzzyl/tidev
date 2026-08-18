@@ -1417,10 +1417,16 @@ fn wrap_tool_title(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chat_context::ReasoningDisplay;
     use ratatui::style::Color;
     use std::collections::HashSet;
     use std::path::Path;
     use tidev_llm::message::{Message, ToolCall, ToolExecutionResult};
+    use uuid::Uuid;
+
+    static EMPTY_REASONING_DISPLAYS: std::sync::LazyLock<
+        std::collections::HashMap<Uuid, ReasoningDisplay>,
+    > = std::sync::LazyLock::new(std::collections::HashMap::new);
 
     fn test_palette() -> ThemePalette {
         ThemePalette {
@@ -1472,6 +1478,7 @@ mod tests {
             default_collapse_thinking: false,
             default_collapse_diffs: false,
             message_app_data: None,
+            reasoning_displays: &EMPTY_REASONING_DISPLAYS,
         };
         // Normal read output (no instruction files)
         let normal_output = "\
@@ -1642,6 +1649,7 @@ mod tests {
             default_collapse_thinking: false,
             default_collapse_diffs: true,
             message_app_data: None,
+            reasoning_displays: &EMPTY_REASONING_DISPLAYS,
         };
 
         let (lines, _regions) =
@@ -1692,6 +1700,7 @@ mod tests {
             default_collapse_thinking: false,
             default_collapse_diffs: false,
             message_app_data: None,
+            reasoning_displays: &EMPTY_REASONING_DISPLAYS,
         };
 
         let (lines, _regions) =
@@ -1742,6 +1751,7 @@ mod tests {
             default_collapse_thinking: false,
             default_collapse_diffs: true,
             message_app_data: None,
+            reasoning_displays: &EMPTY_REASONING_DISPLAYS,
         };
 
         let (lines, _) =

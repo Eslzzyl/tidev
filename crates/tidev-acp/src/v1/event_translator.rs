@@ -115,6 +115,22 @@ impl EventTranslator {
                 )]
             }
 
+            BackendEvent::ReasoningSummaryDelta {
+                session_id: _,
+                request_id,
+                content,
+                ..
+            } => {
+                let message_id = self.message_id_for(*request_id);
+                let chunk =
+                    acp::ContentChunk::new(acp::ContentBlock::Text(acp::TextContent::new(content)))
+                        .message_id(message_id);
+                vec![acp::SessionNotification::new(
+                    self.session_id.clone(),
+                    acp::SessionUpdate::AgentThoughtChunk(chunk),
+                )]
+            }
+
             BackendEvent::ToolCallUpdated {
                 session_id: _,
                 request_id: _,

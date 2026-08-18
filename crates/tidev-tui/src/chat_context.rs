@@ -8,6 +8,20 @@ use uuid::Uuid;
 use tidev_core::{MessageAppData, SessionMessage};
 use tidev_llm::message::Message;
 
+/// Provider-semantic reasoning display data kept separate from the raw
+/// reasoning string that is replayed to the next LLM request.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct ReasoningDisplay {
+    pub ordinary: String,
+    pub summaries: Vec<ReasoningSummary>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ReasoningSummary {
+    pub summary_index: Option<u32>,
+    pub content: String,
+}
+
 /// A lightweight replacement for the old `Conversation` type.
 /// Holds the message list and session metadata needed by rendering code.
 #[derive(Clone, Debug, Default)]
@@ -16,6 +30,9 @@ pub struct ChatContext {
     pub title: String,
     pub messages: Vec<Message>,
     pub message_app_data: HashMap<Uuid, MessageAppData>,
+    /// UI-only reasoning classification. The raw `Message.reasoning` remains
+    /// the single value used to construct subsequent provider requests.
+    pub(crate) reasoning_display: HashMap<Uuid, ReasoningDisplay>,
     /// When set, only messages up to (not including) this one are visible
     /// (undo revert point).
     pub revert_message_id: Option<Uuid>,
@@ -42,6 +59,7 @@ impl ChatContext {
             title,
             messages,
             message_app_data,
+            reasoning_display: HashMap::new(),
             revert_message_id: None,
             parent_session_id,
             model_display_name,
@@ -70,6 +88,7 @@ impl ChatContext {
             title,
             messages,
             message_app_data,
+            reasoning_display: HashMap::new(),
             revert_message_id: None,
             parent_session_id,
             model_display_name,
@@ -94,6 +113,33 @@ impl ChatContext {
     /// Return application-owned fields for a message.
     pub fn app_data(&self, message_id: Uuid) -> Option<&MessageAppData> {
         self.message_app_data.get(&message_id)
+    }
+
+    pub(crate) fn append_reasoning_delta(&mut self, message_id: Uuid, content: &str) {
+        self.reasoning_display
+            .entry(message_id)
+            .or_default()
+            .ordinary
+            .push_str(content);
+    }
+
+    pub(crate) fn append_reasoning_summary_delta(
+        &mut self,
+        message_id: Uuid,
+        summary_index: Option<u32>,
+        content: &str,
+    ) {
+        let display = self.reasoning_display.entry(message_id).or_default();
+        if let Some(last) = display.summaries.last_mut()
+            && last.summary_index == summary_index
+        {
+            last.content.push_str(content);
+        } else {
+            display.summaries.push(ReasoningSummary {
+                summary_index,
+                content: content.to_string(),
+            });
+        }
     }
 
     /// Return the current messages paired with their application data.

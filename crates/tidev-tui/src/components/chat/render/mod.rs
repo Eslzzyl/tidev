@@ -18,7 +18,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::Instant;
 
-use crate::chat_context::ChatContext;
+use crate::chat_context::{ChatContext, ReasoningDisplay};
 use crate::hyperlink::{HyperlinkLine, HyperlinkRange, mark_buffer_hyperlinks};
 use crate::theme::ThemePalette;
 use ratatui::layout::Rect;
@@ -63,6 +63,7 @@ pub(crate) struct RenderContext<'a> {
     /// membership in `expanded_tool_results` marks a card the user toggled.
     pub default_collapse_diffs: bool,
     pub message_app_data: Option<&'a HashMap<Uuid, tidev_core::MessageAppData>>,
+    pub reasoning_displays: &'a HashMap<Uuid, ReasoningDisplay>,
 }
 
 // ---------------------------------------------------------------------------
@@ -138,6 +139,7 @@ pub(crate) fn render_messages(
         default_collapse_thinking,
         default_collapse_diffs,
         message_app_data: Some(&chat_context.message_app_data),
+        reasoning_displays: &chat_context.reasoning_display,
     };
 
     let output = messages_text(
@@ -219,6 +221,9 @@ mod tests {
     use tidev_llm::message::{Message, MessageRole};
     use tidev_llm::reasoning::ThinkingLevelType;
 
+    static EMPTY_REASONING_DISPLAYS: std::sync::LazyLock<HashMap<Uuid, ReasoningDisplay>> =
+        std::sync::LazyLock::new(HashMap::new);
+
     fn user_msg(content: &str, id: u128) -> Message {
         let mut msg = Message::new(MessageRole::User, content);
         msg.id = Uuid::from_u128(id);
@@ -279,6 +284,7 @@ mod tests {
             default_collapse_thinking: false,
             default_collapse_diffs: false,
             message_app_data: None,
+            reasoning_displays: &EMPTY_REASONING_DISPLAYS,
         }
     }
 
@@ -422,6 +428,69 @@ mod tests {
             }
         }
         assert!(found, "expected a hyperlink in the user card");
+    }
+
+    #[test]
+    fn reasoning_summary_segments_render_as_separate_blocks() {
+        let palette = test_palette();
+        let expanded = HashSet::new();
+        let subagents = Vec::new();
+        let collapsed = HashSet::new();
+        let displays = HashMap::from([(
+            Uuid::from_u128(1),
+            ReasoningDisplay {
+                ordinary: String::new(),
+                summaries: vec![
+                    crate::chat_context::ReasoningSummary {
+                        summary_index: Some(0),
+                        content: "**Planning**".into(),
+                    },
+                    crate::chat_context::ReasoningSummary {
+                        summary_index: Some(1),
+                        content: "**Implementation**".into(),
+                    },
+                ],
+            },
+        )]);
+        let mut ctx = test_render_ctx(&palette, &expanded, &subagents, &collapsed);
+        ctx.reasoning_displays = &displays;
+
+        let message = assistant_msg("**Planning****Implementation**", "", 1);
+        let chat_ctx = ChatContext::new(
+            Uuid::from_u128(2),
+            "test".into(),
+            vec![message],
+            None,
+            "test-model".into(),
+            "test-provider".into(),
+        );
+        let geom = CardGeom::new(80);
+        let mut index = MessageLayoutIndex::new();
+        let mut cache = lru::LruCache::new(std::num::NonZeroUsize::new(64).unwrap());
+        update_layout_index(&mut index, &mut cache, &chat_ctx.messages, &geom, &ctx);
+        let output = messages_text(
+            &chat_ctx, &mut index, &mut cache, &ctx, geom, 0, 100, false, &None,
+        );
+
+        let rendered: Vec<String> = output
+            .hyperlink_lines
+            .iter()
+            .map(|line| {
+                line.line
+                    .spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect()
+            })
+            .collect();
+        assert!(rendered.iter().any(|line| line.contains("Planning")));
+        assert!(rendered.iter().any(|line| line.contains("Implementation")));
+        assert_ne!(
+            rendered.iter().position(|line| line.contains("Planning")),
+            rendered
+                .iter()
+                .position(|line| line.contains("Implementation"))
+        );
     }
 
     #[test]

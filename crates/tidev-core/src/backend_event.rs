@@ -22,6 +22,12 @@ pub enum BackendEvent {
         request_id: u64,
         content: String,
     },
+    ReasoningSummaryDelta {
+        session_id: Uuid,
+        request_id: u64,
+        content: String,
+        summary_index: Option<u32>,
+    },
     ToolCallUpdated {
         session_id: Uuid,
         request_id: u64,
@@ -149,6 +155,7 @@ impl BackendEvent {
         match self {
             Self::Delta { session_id, .. }
             | Self::ReasoningDelta { session_id, .. }
+            | Self::ReasoningSummaryDelta { session_id, .. }
             | Self::ToolCallUpdated { session_id, .. }
             | Self::Finished { session_id, .. }
             | Self::Failed { session_id, .. }
@@ -174,6 +181,7 @@ impl BackendEvent {
         match self {
             Self::Delta { request_id, .. }
             | Self::ReasoningDelta { request_id, .. }
+            | Self::ReasoningSummaryDelta { request_id, .. }
             | Self::ToolCallUpdated { request_id, .. }
             | Self::Finished { request_id, .. }
             | Self::Failed { request_id, .. }
@@ -214,6 +222,16 @@ pub fn agent_event_to_backend_event(event: AgentEvent, session_id: Uuid) -> Back
             session_id,
             request_id,
             content,
+        },
+        AgentEvent::ReasoningSummaryDelta {
+            request_id,
+            content,
+            summary_index,
+        } => BackendEvent::ReasoningSummaryDelta {
+            session_id,
+            request_id,
+            content,
+            summary_index,
         },
         AgentEvent::ToolCallUpdated {
             request_id,

@@ -229,12 +229,15 @@ pub(crate) async fn stream_responses(
                     sequence_number: _,
                     item_id: _,
                     output_index: _,
-                    summary_index: _,
+                    summary_index,
                 } => {
                     let cleaned = strip_think_tags(&summary_delta);
                     if !cleaned.is_empty() {
                         reasoning_text.push_str(&cleaned);
-                        let _ = tx.send(LlmEvent::ReasoningDelta { content: cleaned });
+                        let _ = tx.send(LlmEvent::ReasoningSummaryDelta {
+                            content: cleaned,
+                            summary_index: Some(summary_index),
+                        });
                     }
                 }
                 ResponseStreamEvent::ReasoningSummaryTextDone {

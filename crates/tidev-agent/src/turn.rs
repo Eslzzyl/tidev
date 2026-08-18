@@ -86,6 +86,12 @@ pub async fn stream_turn(
                         }
                         turn.reasoning.push_str(&content);
                     }
+                    AgentEvent::ReasoningSummaryDelta { content, .. } => {
+                        if turn.reasoning_started_at.is_none() {
+                            turn.reasoning_started_at = Some(Utc::now());
+                        }
+                        turn.reasoning.push_str(&content);
+                    }
                     AgentEvent::ToolCallUpdated { tool_call, .. } => {
                         turn.upsert_tool_call(tool_call);
                         if turn.reasoning_started_at.is_some()
