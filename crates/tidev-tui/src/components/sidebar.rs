@@ -14,6 +14,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph, Wrap};
 use tidev_core::FileDiff;
 use tidev_tools::types::TodoItem;
+use tidev_utils::path::display_path_with_tilde;
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::ContextUsage;
@@ -365,14 +366,7 @@ impl Sidebar {
         );
 
         // ── Footer: workspace path ──
-        let display_path = workspace_root.to_string_lossy().to_string();
-        let display_path = display_path.replace(
-            &dirs::home_dir()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string(),
-            "~",
-        );
+        let display_path = display_path_with_tilde(workspace_root);
         let display_path = shorten(&display_path, sidebar_content_width);
         let footer_lines: Vec<Line<'static>> = vec![
             Line::from(""),

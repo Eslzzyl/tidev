@@ -14,7 +14,7 @@ impl App {
         let service = self.runtime.git();
         let tx = self.git_result_tx.clone();
         tokio::spawn(async move {
-            let result = service.status().await.map_err(|error| error.to_string());
+            let result = service.status().await;
             let _ = tx.send(GitTaskResult::Status { request_id, result });
         });
         request_id
@@ -25,10 +25,7 @@ impl App {
         let service = self.runtime.git();
         let tx = self.git_result_tx.clone();
         tokio::spawn(async move {
-            let result = service
-                .history(head.as_deref(), skip, 50)
-                .await
-                .map_err(|error| error.to_string());
+            let result = service.history(head.as_deref(), skip, 50).await;
             let _ = tx.send(GitTaskResult::History { request_id, result });
         });
         request_id
@@ -39,7 +36,7 @@ impl App {
         let service = self.runtime.git();
         let tx = self.git_result_tx.clone();
         tokio::spawn(async move {
-            let result = service.diff(scope).await.map_err(|error| error.to_string());
+            let result = service.diff(scope).await;
             let _ = tx.send(GitTaskResult::Diff { request_id, result });
         });
         request_id

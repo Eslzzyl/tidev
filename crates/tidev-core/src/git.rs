@@ -3,6 +3,8 @@
 //! This module deliberately operates on the user's repository. It is separate
 //! from `tidev-snapshot`, whose Git repository is an internal undo/redo store.
 
+use std::fmt;
+use std::io;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
@@ -18,6 +20,47 @@ const MAX_DIFF_BYTES: usize = 10 * 1024 * 1024;
 pub struct GitService {
     workspace_root: PathBuf,
 }
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum GitError {
+    NotRepository { path: PathBuf },
+    WorkspaceMissing { path: PathBuf },
+    GitUnavailable,
+    CommandFailed { command: String, message: String },
+    InvalidOutput(String),
+}
+
+impl fmt::Display for GitError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotRepository { path } => {
+                write!(
+                    formatter,
+                    "No Git repository found in {}",
+                    tidev_utils::path::display_path_with_tilde(path)
+                )
+            }
+            Self::WorkspaceMissing { path } => {
+                write!(
+                    formatter,
+                    "Workspace directory does not exist: {}",
+                    tidev_utils::path::display_path_with_tilde(path)
+                )
+            }
+            Self::GitUnavailable => formatter.write_str("Git executable was not found"),
+            Self::CommandFailed { command, message } => {
+                write!(formatter, "git {command} failed: {message}")
+            }
+            Self::InvalidOutput(message) => {
+                write!(formatter, "Git returned invalid output: {message}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for GitError {}
+
+pub type GitResult<T> = std::result::Result<T, GitError>;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GitRepoInfo {
@@ -140,14 +183,16 @@ impl GitService {
         &self.workspace_root
     }
 
-    pub async fn repo_info(&self) -> Result<GitRepoInfo> {
+    pub async fn repo_info(&self) -> GitResult<GitRepoInfo> {
         let root = self
             .git_text(&["rev-parse", "--show-toplevel"])
             .await?
             .trim()
             .to_string();
         if root.is_empty() {
-            bail!("Git repository root is empty");
+            return Err(GitError::InvalidOutput(
+                "repository root is empty".to_string(),
+            ));
         }
 
         let head = self
@@ -193,7 +238,7 @@ impl GitService {
         })
     }
 
-    pub async fn status(&self) -> Result<GitStatusSnapshot> {
+    pub async fn status(&self) -> GitResult<GitStatusSnapshot> {
         let repo = self.repo_info().await?;
         let output = self
             .git_output(&[
@@ -204,7 +249,8 @@ impl GitService {
                 "-z",
             ])
             .await?;
-        let files = parse_status(&output.stdout)?;
+        let files = parse_status(&output.stdout)
+            .map_err(|error| GitError::InvalidOutput(error.to_string()))?;
         let mut counts = GitStatusCounts::default();
         for file in &files {
             counts.staged += usize::from(file.staged);
@@ -226,7 +272,7 @@ impl GitService {
         head: Option<&str>,
         skip: usize,
         limit: usize,
-    ) -> Result<GitHistoryPage> {
+    ) -> GitResult<GitHistoryPage> {
         let repo = self.repo_info().await?;
         let head = head.map(str::to_string).or(repo.head);
         let Some(head) = head else {
@@ -251,7 +297,8 @@ impl GitService {
             "--",
         ];
         let output = self.git_output(&args).await?;
-        let mut commits = parse_history(&output.stdout)?;
+        let mut commits = parse_history(&output.stdout)
+            .map_err(|error| GitError::InvalidOutput(error.to_string()))?;
         let has_more = commits.len() > limit;
         commits.truncate(limit);
 
@@ -262,7 +309,7 @@ impl GitService {
         })
     }
 
-    pub async fn diff(&self, scope: GitDiffScope) -> Result<GitDiffSnapshot> {
+    pub async fn diff(&self, scope: GitDiffScope) -> GitResult<GitDiffSnapshot> {
         let repo = self.repo_info().await?;
         let mut patch = match &scope {
             GitDiffScope::Worktree => {
@@ -319,7 +366,9 @@ impl GitService {
                     ".",
                 ])
                 .await?;
-            for path in parse_nul_paths(&untracked.stdout)? {
+            for path in parse_nul_paths(&untracked.stdout)
+                .map_err(|error| GitError::InvalidOutput(error.to_string()))?
+            {
                 let output = self
                     .git_output_allow_exit_1(&[
                         "diff",
@@ -340,7 +389,8 @@ impl GitService {
             }
         }
 
-        let files = parse_diff_files(&patch)?;
+        let files =
+            parse_diff_files(&patch).map_err(|error| GitError::InvalidOutput(error.to_string()))?;
         Ok(GitDiffSnapshot {
             scope,
             files,
@@ -349,7 +399,7 @@ impl GitService {
         })
     }
 
-    async fn diff_command(&self, range: &[&str]) -> Result<Vec<u8>> {
+    async fn diff_command(&self, range: &[&str]) -> GitResult<Vec<u8>> {
         Ok(self
             .git_output(&[
                 "diff",
@@ -365,9 +415,9 @@ impl GitService {
             .stdout)
     }
 
-    async fn git_text(&self, args: &[&str]) -> Result<String> {
+    async fn git_text(&self, args: &[&str]) -> GitResult<String> {
         let output = self.git_output(args).await?;
-        String::from_utf8(output.stdout).context("Git returned non-UTF-8 output")
+        String::from_utf8(output.stdout).map_err(|error| GitError::InvalidOutput(error.to_string()))
     }
 
     async fn git_optional_text(&self, args: &[&str]) -> Option<String> {
@@ -387,7 +437,12 @@ impl GitService {
             .map(|value| value.trim().to_string())
     }
 
-    async fn git_output(&self, args: &[&str]) -> Result<std::process::Output> {
+    async fn git_output(&self, args: &[&str]) -> GitResult<std::process::Output> {
+        if !self.workspace_root.is_dir() {
+            return Err(GitError::WorkspaceMissing {
+                path: self.workspace_root.clone(),
+            });
+        }
         let output = Command::new("git")
             .current_dir(&self.workspace_root)
             .env("GIT_OPTIONAL_LOCKS", "0")
@@ -395,15 +450,28 @@ impl GitService {
             .args(args)
             .output()
             .await
-            .with_context(|| format!("failed to run git in {}", self.workspace_root.display()))?;
+            .map_err(|error| map_git_io_error(error, &self.workspace_root))?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            bail!("git {} failed: {}", args.join(" "), stderr);
+            if args == ["rev-parse", "--show-toplevel"] && output.status.code() == Some(128) {
+                return Err(GitError::NotRepository {
+                    path: self.workspace_root.clone(),
+                });
+            }
+            return Err(GitError::CommandFailed {
+                command: args.join(" "),
+                message: stderr,
+            });
         }
         Ok(output)
     }
 
-    async fn git_output_allow_exit_1(&self, args: &[&str]) -> Result<std::process::Output> {
+    async fn git_output_allow_exit_1(&self, args: &[&str]) -> GitResult<std::process::Output> {
+        if !self.workspace_root.is_dir() {
+            return Err(GitError::WorkspaceMissing {
+                path: self.workspace_root.clone(),
+            });
+        }
         let output = Command::new("git")
             .current_dir(&self.workspace_root)
             .env("GIT_OPTIONAL_LOCKS", "0")
@@ -411,12 +479,32 @@ impl GitService {
             .args(args)
             .output()
             .await
-            .with_context(|| format!("failed to run git in {}", self.workspace_root.display()))?;
+            .map_err(|error| map_git_io_error(error, &self.workspace_root))?;
         if !output.status.success() && output.status.code() != Some(1) {
             let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            bail!("git {} failed: {}", args.join(" "), stderr);
+            return Err(GitError::CommandFailed {
+                command: args.join(" "),
+                message: stderr,
+            });
         }
         Ok(output)
+    }
+}
+
+fn map_git_io_error(error: io::Error, workspace_root: &Path) -> GitError {
+    if error.kind() == io::ErrorKind::NotFound {
+        if !workspace_root.is_dir() {
+            GitError::WorkspaceMissing {
+                path: workspace_root.to_path_buf(),
+            }
+        } else {
+            GitError::GitUnavailable
+        }
+    } else {
+        GitError::CommandFailed {
+            command: "<spawn>".to_string(),
+            message: error.to_string(),
+        }
     }
 }
 
@@ -689,6 +777,48 @@ mod tests {
                 .expect("query staged diff");
             assert_eq!(staged_diff.files.len(), 1);
             assert_eq!(staged_diff.files[0].path, "tracked.txt");
+        });
+    }
+
+    #[test]
+    fn reports_when_workspace_is_not_a_repository() {
+        let workspace = TestRepository::new();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("build Tokio runtime");
+
+        runtime.block_on(async {
+            let error = GitService::new(workspace.path.clone())
+                .status()
+                .await
+                .expect_err("a plain directory is not a Git repository");
+            assert_eq!(
+                error,
+                GitError::NotRepository {
+                    path: workspace.path.clone(),
+                }
+            );
+        });
+    }
+
+    #[test]
+    fn reports_when_workspace_is_missing() {
+        let workspace = std::env::temp_dir().join(format!(
+            "tidev-git-missing-{}",
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("build Tokio runtime");
+
+        runtime.block_on(async {
+            let error = GitService::new(workspace.clone())
+                .status()
+                .await
+                .expect_err("a missing directory cannot be queried");
+            assert_eq!(error, GitError::WorkspaceMissing { path: workspace });
         });
     }
 

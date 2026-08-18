@@ -26,8 +26,8 @@ pub use approval::{
 };
 pub use backend_event::{BackendEvent, agent_event_to_backend_event};
 pub use git::{
-    GitChangeKind, GitCommitSummary, GitDiffFile, GitDiffScope, GitDiffSnapshot, GitFileStatus,
-    GitHistoryPage, GitRepoInfo, GitService, GitStatusCounts, GitStatusSnapshot,
+    GitChangeKind, GitCommitSummary, GitDiffFile, GitDiffScope, GitDiffSnapshot, GitError,
+    GitFileStatus, GitHistoryPage, GitRepoInfo, GitService, GitStatusCounts, GitStatusSnapshot,
 };
 pub use message_buf::CoreMessageBuffer;
 pub use mode::Mode;

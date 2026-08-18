@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use uuid::Uuid;
 
-use tidev_core::{GitDiffScope, GitDiffSnapshot, GitHistoryPage, GitStatusSnapshot};
+use tidev_core::{GitDiffScope, GitDiffSnapshot, GitError, GitHistoryPage, GitStatusSnapshot};
 use tidev_llm::message::MessageAttachment;
 
 /// Panel action identifiers (launcher target).
@@ -86,15 +86,15 @@ pub(crate) enum GitAction {
     },
     StatusReady {
         request_id: u64,
-        result: Result<GitStatusSnapshot, String>,
+        result: Result<GitStatusSnapshot, GitError>,
     },
     HistoryReady {
         request_id: u64,
-        result: Result<GitHistoryPage, String>,
+        result: Result<GitHistoryPage, GitError>,
     },
     DiffReady {
         request_id: u64,
-        result: Result<GitDiffSnapshot, String>,
+        result: Result<GitDiffSnapshot, GitError>,
     },
 }
 

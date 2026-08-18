@@ -10,6 +10,7 @@ use ratatui::layout::{Alignment, Constraint, Layout, Margin, Rect};
 use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph};
+use tidev_utils::path::display_path_with_tilde;
 use unicode_width::UnicodeWidthStr;
 
 impl App {
@@ -729,11 +730,7 @@ impl App {
         }
 
         // Workspace path on the very last row
-        let workspace_path = self.runtime.workspace_root().display().to_string();
-        let display_path = workspace_path.replace(
-            &dirs::home_dir().unwrap_or_default().display().to_string(),
-            "~",
-        );
+        let display_path = display_path_with_tilde(self.runtime.workspace_root());
         let workspace_area = Rect::new(
             area.x + 1,
             area.bottom() - 1,

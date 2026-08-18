@@ -29,6 +29,22 @@ pub fn canonicalize_display(path: &Path) -> PathBuf {
     dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
+/// Format a path for user-facing messages, replacing the home directory with
+/// `~` when the path is inside it.
+pub fn display_path_with_tilde(path: &Path) -> String {
+    let path = canonicalize_display(path);
+    let Some(home) = dirs::home_dir().map(|path| canonicalize_display(&path)) else {
+        return path.display().to_string().replace('\\', "/");
+    };
+
+    let display = match path.strip_prefix(&home) {
+        Ok(relative) if relative.as_os_str().is_empty() => "~".to_string(),
+        Ok(relative) => format!("~/{}", relative.display()),
+        Err(_) => path.display().to_string(),
+    };
+    display.replace('\\', "/")
+}
+
 /// Canonicalize a path for **boundary comparison**, resolving all symlinks.
 ///
 /// Unlike [`canonicalize_display`] which falls back to the raw path on failure,
@@ -476,6 +492,16 @@ mod tests {
         fs::create_dir(&ws).unwrap();
         let result = display_workspace_relative(&ws, &ws.join("new_file.rs"));
         assert_eq!(result, "new_file.rs");
+    }
+
+    #[test]
+    fn test_display_path_with_tilde() {
+        let home = dirs::home_dir().expect("home directory should be available");
+        assert_eq!(display_path_with_tilde(&home), "~");
+        assert_eq!(
+            display_path_with_tilde(&home.join("tidev-test-path")),
+            "~/tidev-test-path"
+        );
     }
 
     #[cfg(unix)]

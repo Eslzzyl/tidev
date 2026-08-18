@@ -20,7 +20,7 @@ use tidev_config::ThemeCatalog;
 use tidev_core::Mode as SessionMode;
 use tidev_core::{ApprovedTool, ToolCallWithViolations};
 use tidev_core::{BackendEvent, TuiResponse};
-use tidev_core::{GitDiffSnapshot, GitHistoryPage, GitStatusSnapshot};
+use tidev_core::{GitDiffSnapshot, GitError, GitHistoryPage, GitStatusSnapshot};
 use tidev_llm::message::{COMPACTION_MESSAGE_LABEL, Message, MessageRole};
 use tidev_llm::reasoning::ThinkingLevelType;
 use tidev_tools::types::TodoItem;
@@ -63,15 +63,15 @@ pub(crate) enum AppScreen {
 pub(crate) enum GitTaskResult {
     Status {
         request_id: u64,
-        result: Result<GitStatusSnapshot, String>,
+        result: Result<GitStatusSnapshot, GitError>,
     },
     History {
         request_id: u64,
-        result: Result<GitHistoryPage, String>,
+        result: Result<GitHistoryPage, GitError>,
     },
     Diff {
         request_id: u64,
-        result: Result<GitDiffSnapshot, String>,
+        result: Result<GitDiffSnapshot, GitError>,
     },
 }
 

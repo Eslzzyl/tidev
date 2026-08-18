@@ -2,11 +2,11 @@
 
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, MouseEvent, MouseEventKind};
-use ratatui::layout::{Constraint, Layout, Margin, Position, Rect};
+use ratatui::layout::{Alignment, Constraint, Layout, Margin, Position, Rect};
 use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
-use tidev_core::{GitChangeKind, GitDiffScope, GitHistoryPage, GitStatusSnapshot};
+use tidev_core::{GitChangeKind, GitDiffScope, GitError, GitHistoryPage, GitStatusSnapshot};
 
 use crate::action::{Action, GitAction, GitQueryKind, GitTab, OverlayAction, OverlayKind};
 use crate::component::Component;
@@ -31,7 +31,7 @@ pub(crate) struct GitPanel {
     status_selected: usize,
     diff_scroll: u16,
     loading: Option<(u64, GitQueryKind)>,
-    error: Option<String>,
+    error: Option<GitError>,
 }
 
 impl GitPanel {
@@ -153,7 +153,11 @@ impl GitPanel {
     fn draw_status(&self, frame: &mut Frame, left: Rect, right: Rect, ctx: &DrawContext) {
         let palette = ctx.palette;
         let Some(status) = &self.status else {
-            self.draw_message(frame, right, "Loading workspace status...", palette.muted);
+            if let Some(error) = &self.error {
+                self.draw_error_state(frame, left, right, error, palette);
+            } else {
+                self.draw_message(frame, right, "Loading workspace status...", palette.muted);
+            }
             return;
         };
 
@@ -246,12 +250,16 @@ impl GitPanel {
             return;
         };
         let Some(diff) = &self.diff else {
-            self.draw_message(
-                frame,
-                right_chunks[1],
-                "Loading worktree diff...",
-                palette.muted,
-            );
+            if let Some(error) = &self.error {
+                self.draw_centered_error(frame, right_chunks[1], error, palette);
+            } else {
+                self.draw_message(
+                    frame,
+                    right_chunks[1],
+                    "Loading worktree diff...",
+                    palette.muted,
+                );
+            }
             return;
         };
         if !matches!(&self.diff_scope, Some(GitDiffScope::Worktree)) {
@@ -287,6 +295,12 @@ impl GitPanel {
 
     fn draw_history(&self, frame: &mut Frame, left: Rect, right: Rect, ctx: &DrawContext) {
         let palette = ctx.palette;
+        if self.history.is_empty()
+            && let Some(error) = &self.error
+        {
+            self.draw_error_state(frame, left, right, error, palette);
+            return;
+        }
         let mut left_lines = Vec::new();
         for (index, commit) in self.history.iter().enumerate() {
             let selected = index == self.history_selected;
@@ -316,14 +330,26 @@ impl GitPanel {
         }
         if left_lines.is_empty() {
             left_lines.push(Line::from(Span::styled(
-                "No commits",
-                Style::default().fg(palette.muted),
+                if self.error.is_some() {
+                    "Git unavailable"
+                } else {
+                    "No commits"
+                },
+                Style::default().fg(if self.error.is_some() {
+                    palette.error
+                } else {
+                    palette.muted
+                }),
             )));
         }
         frame.render_widget(Paragraph::new(left_lines), left);
 
         let Some(commit) = self.history.get(self.history_selected) else {
-            self.draw_message(frame, right, "Select a commit", palette.muted);
+            if let Some(error) = &self.error {
+                self.draw_centered_error(frame, right, error, palette);
+            } else {
+                self.draw_message(frame, right, "Select a commit", palette.muted);
+            }
             return;
         };
 
@@ -364,12 +390,16 @@ impl GitPanel {
         self.render_lines(frame, right_chunks[0], summary, palette);
 
         let Some(diff) = &self.diff else {
-            self.draw_message(
-                frame,
-                right_chunks[1],
-                "Loading commit diff...",
-                palette.muted,
-            );
+            if let Some(error) = &self.error {
+                self.draw_centered_error(frame, right_chunks[1], error, palette);
+            } else {
+                self.draw_message(
+                    frame,
+                    right_chunks[1],
+                    "Loading commit diff...",
+                    palette.muted,
+                );
+            }
             return;
         };
         if !matches!(&self.diff_scope, Some(GitDiffScope::Commit(id)) if id == &commit.id) {
@@ -452,6 +482,61 @@ impl GitPanel {
             ))),
             area,
         );
+    }
+
+    fn draw_error_state(
+        &self,
+        frame: &mut Frame,
+        left: Rect,
+        right: Rect,
+        error: &GitError,
+        palette: crate::theme::ThemePalette,
+    ) {
+        let area = Rect {
+            x: left.x,
+            y: left.y,
+            width: left.width.saturating_add(right.width),
+            height: left.height.min(right.height),
+        };
+        self.draw_centered_error(frame, area, error, palette);
+    }
+
+    fn draw_centered_error(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        error: &GitError,
+        palette: crate::theme::ThemePalette,
+    ) {
+        let title = match error {
+            GitError::NotRepository { .. } => "No Git repository",
+            GitError::WorkspaceMissing { .. } => "Workspace unavailable",
+            GitError::GitUnavailable => "Git unavailable",
+            GitError::CommandFailed { .. } | GitError::InvalidOutput(_) => "Git query failed",
+        };
+        let color = Self::error_color(error, palette);
+        let lines = vec![
+            Line::from(Span::styled(
+                title,
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            )),
+            Line::from(Span::styled(error.to_string(), Style::default().fg(color))),
+        ];
+        frame.render_widget(
+            Paragraph::new(lines)
+                .alignment(Alignment::Center)
+                .wrap(ratatui::widgets::Wrap { trim: true }),
+            area,
+        );
+    }
+
+    fn error_color(error: &GitError, palette: crate::theme::ThemePalette) -> ratatui::style::Color {
+        match error {
+            GitError::NotRepository { .. } | GitError::WorkspaceMissing { .. } => palette.warning,
+            GitError::GitUnavailable
+            | GitError::CommandFailed { .. }
+            | GitError::InvalidOutput(_) => palette.error,
+        }
     }
 }
 
@@ -576,7 +661,11 @@ impl Component for GitPanel {
                 self.error = None;
             }
             GitAction::SwitchTab(tab) => {
+                let unavailable = self.status.is_none() && self.error.is_some();
                 self.tab = *tab;
+                if unavailable {
+                    return Vec::new();
+                }
                 self.error = None;
                 match tab {
                     GitTab::Status if self.status.is_none() => {
@@ -638,7 +727,17 @@ impl Component for GitPanel {
                             })];
                         }
                     }
-                    Err(error) => self.error = Some(error.clone()),
+                    Err(error) => {
+                        self.status = None;
+                        self.history.clear();
+                        self.history_head = None;
+                        self.history_has_more = false;
+                        self.history_skip = 0;
+                        self.history_selected = 0;
+                        self.diff = None;
+                        self.diff_scope = None;
+                        self.error = Some(error.clone());
+                    }
                 }
             }
             GitAction::HistoryReady { request_id, result } => {
@@ -653,7 +752,11 @@ impl Component for GitPanel {
                             return self.selected_commit_diff_action().into_iter().collect();
                         }
                     }
-                    Err(error) => self.error = Some(error.clone()),
+                    Err(error) => {
+                        self.diff = None;
+                        self.diff_scope = None;
+                        self.error = Some(error.clone());
+                    }
                 }
             }
             GitAction::DiffReady { request_id, result } => {
@@ -663,7 +766,10 @@ impl Component for GitPanel {
                 self.loading = None;
                 match result {
                     Ok(diff) => self.diff = Some(diff.clone()),
-                    Err(error) => self.error = Some(error.clone()),
+                    Err(error) => {
+                        self.diff = None;
+                        self.error = Some(error.clone());
+                    }
                 }
             }
         }
@@ -717,11 +823,10 @@ impl Component for GitPanel {
         } else {
             "1/2 tabs  ·  ↑/↓ select  ·  PgUp/PgDown scroll  ·  r refresh  ·  Esc close".to_string()
         };
-        let footer_color = if self.error.is_some() {
-            palette.error
-        } else {
-            palette.muted
-        };
+        let footer_color = self
+            .error
+            .as_ref()
+            .map_or(palette.muted, |error| Self::error_color(error, palette));
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 footer,
@@ -765,4 +870,81 @@ fn move_index(index: usize, len: usize, delta: isize) -> usize {
         return 0;
     }
     (index as isize + delta).rem_euclid(len as isize) as usize
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use ratatui::style::Color;
+    use tidev_core::Mode as SessionMode;
+
+    fn test_palette() -> crate::theme::ThemePalette {
+        crate::theme::ThemePalette {
+            is_dark: true,
+            background: Color::Rgb(0, 0, 0),
+            panel: Color::Rgb(10, 10, 10),
+            panel_alt: Color::Rgb(20, 20, 20),
+            panel_light: Color::Rgb(30, 30, 30),
+            text: Color::Rgb(255, 255, 255),
+            muted: Color::Rgb(128, 128, 128),
+            border: Color::Rgb(64, 64, 64),
+            accent: Color::Rgb(0, 200, 200),
+            accent_soft: Color::Rgb(100, 150, 150),
+            success: Color::Rgb(0, 200, 0),
+            warning: Color::Rgb(200, 200, 0),
+            error: Color::Rgb(200, 0, 0),
+            diff_add: Color::Rgb(0, 200, 0),
+            diff_delete: Color::Rgb(200, 0, 0),
+            diff_add_bg: Color::Rgb(0, 80, 0),
+            diff_delete_bg: Color::Rgb(80, 0, 0),
+            selection_bg: Color::Rgb(0, 200, 200),
+            selection_fg: Color::Rgb(255, 255, 255),
+            mode_build: Color::Rgb(0, 200, 200),
+            mode_plan: Color::Rgb(100, 150, 150),
+        }
+    }
+
+    #[test]
+    fn renders_repository_error_in_panel_body() {
+        let workspace = std::path::PathBuf::from("/tmp/tidev-not-a-repository");
+        let mut panel = GitPanel::new();
+        panel.error = Some(GitError::NotRepository {
+            path: workspace.clone(),
+        });
+
+        let mut terminal = Terminal::new(TestBackend::new(140, 45)).expect("create test terminal");
+        terminal
+            .draw(|frame| {
+                let context = DrawContext {
+                    palette: test_palette(),
+                    focused: true,
+                    mode: SessionMode::Build,
+                    pending_mode: None,
+                    model_display: None,
+                    provider_display: None,
+                    thinking_level: None,
+                    subagent_disabled: false,
+                    collapse_thinking: false,
+                    collapse_diffs: false,
+                    workspace_root: &workspace,
+                };
+                panel.draw(frame, frame.area(), &context);
+            })
+            .expect("render Git panel");
+
+        let buffer = terminal.backend().buffer();
+        let rendered = (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(rendered.contains("No Git repository"));
+        assert!(!rendered.contains("Loading workspace status"));
+    }
 }
