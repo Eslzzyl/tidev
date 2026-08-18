@@ -7,6 +7,7 @@ use crate::component::Component;
 use crate::components::overlays::agents::AgentsPanel;
 use crate::components::overlays::connect::ConnectDialog;
 use crate::components::overlays::fork::ForkConfirmDialog;
+use crate::components::overlays::git::GitPanel;
 use crate::components::overlays::image::ImageViewer;
 use crate::components::overlays::mcp::McpServerPanel;
 
@@ -25,6 +26,7 @@ use crate::utils::strip_system_reminder_tags;
 
 impl App {
     pub(crate) fn open_overlay(&mut self, kind: OverlayKind) {
+        let is_git_panel = matches!(&kind, OverlayKind::GitPanel);
         let kind_for_update = kind.clone();
         let component: Option<Box<dyn Component>> = match kind {
             OverlayKind::ThemePanel => {
@@ -171,6 +173,7 @@ impl App {
             }
             OverlayKind::ConnectDialog => Some(Box::new(ConnectDialog::new())),
             OverlayKind::PanelLauncher => Some(Box::new(PanelLauncher::new())),
+            OverlayKind::GitPanel => Some(Box::new(GitPanel::new())),
             // Permission/security dialogs are triggered by handle_tui_request,
             // not by user keystrokes. These branches exist as fallback placeholders.
             OverlayKind::QuestionDialog
@@ -193,6 +196,11 @@ impl App {
                     runtime: &mut self.runtime,
                 };
                 let _ = top.update(&Action::Overlay(OverlayAction::Open(kind_for_update)), &ctx);
+            }
+            if is_git_panel {
+                self.process_action(crate::action::Action::Git(
+                    crate::action::GitAction::Refresh,
+                ));
             }
         }
     }

@@ -682,6 +682,7 @@ impl App {
             KeyCode::F(8) => Some(Action::Overlay(OverlayAction::Open(
                 OverlayKind::SessionPanel,
             ))),
+            KeyCode::F(9) => Some(Action::Overlay(OverlayAction::Open(OverlayKind::GitPanel))),
             KeyCode::Char('p') if key.modifiers == KeyModifiers::CONTROL => Some(Action::Overlay(
                 OverlayAction::Open(OverlayKind::PanelLauncher),
             )),

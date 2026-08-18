@@ -61,6 +61,10 @@ static PANEL_ENTRIES: &[PanelEntry] = &[
         description: "Search web / providers",
         action: PanelAction::Search,
     },
+    PanelEntry {
+        description: "View Git history, status, and diffs",
+        action: PanelAction::Git,
+    },
 ];
 
 // ---------------------------------------------------------------------------
@@ -209,6 +213,7 @@ impl Component for PanelLauncher {
                         PanelAction::Skills => OverlayKind::SkillsPanel,
                         PanelAction::Message => OverlayKind::MessagePanel,
                         PanelAction::Search => OverlayKind::SearchPanel,
+                        PanelAction::Git => OverlayKind::GitPanel,
                     };
                     vec![Action::Overlay(OverlayAction::Open(kind))]
                 } else {

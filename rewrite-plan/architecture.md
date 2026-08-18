@@ -59,11 +59,12 @@ mode reminder 处理。应用数据不会进入 LLM 协议消息。
     tidev-core -> tidev-agent, tidev-tools, tidev-llm, tidev-config,
                    tidev-storage, tidev-snapshot, tidev-instructions,
                    tidev-logging, tidev-search, tidev-utils
-      CoreContext、Runtime、SessionManager、BackendEvent
+      CoreContext、Runtime、SessionManager、BackendEvent、只读 GitService
       审批媒介、Mode、SessionMessage、快照、指令注入、undo
       MCP 产品集成和 tidev 工具适配器
 
     tidev-tui -> tidev-core, tidev-llm, tidev-tools, tidev-config, tidev-utils
+      Git 面板通过 core GitService 查询工作区状态、历史和 diff
     tidev-acp -> tidev-core, tidev-llm, tidev-config, tidev-utils
 
 tidev-agent 的 tidev 内部依赖只有 tidev-llm。rmcp 是 agent 的外部依赖，

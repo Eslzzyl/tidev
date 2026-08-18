@@ -48,6 +48,7 @@ pub(crate) enum CommandAction {
     CollapseThinking,
     /// Copy the most recent completed assistant message.
     CopyLastAssistant,
+    Git,
 }
 
 // ---------------------------------------------------------------------------
@@ -198,6 +199,12 @@ pub(crate) static COMMANDS: &[CommandSpec] = &[
         aliases: &[],
         description: "Copy the last completed assistant message",
         action: CommandAction::CopyLastAssistant,
+    },
+    CommandSpec {
+        name: "git",
+        aliases: &[],
+        description: "Open the Git workspace panel",
+        action: CommandAction::Git,
     },
 ];
 
@@ -520,6 +527,13 @@ pub(crate) fn execute_command(
                 vec![Action::Notice("Usage: /copy".to_string())]
             }
         }
+        CommandAction::Git => {
+            if args.is_empty() {
+                vec![Action::Overlay(OverlayAction::Open(OverlayKind::GitPanel))]
+            } else {
+                vec![Action::Notice("Usage: /git".to_string())]
+            }
+        }
     }
 }
 
@@ -639,6 +653,30 @@ mod tests {
             execute_command(CommandAction::CopyLastAssistant, &["extra".into()], &catalog)
                 .as_slice(),
             [Action::Notice(message)] if message == "Usage: /copy"
+        ));
+    }
+
+    #[test]
+    fn test_git_command_opens_panel_without_arguments() {
+        let reg = CommandRegistry::new();
+        assert_eq!(
+            reg.command("git").map(|spec| spec.action),
+            Some(CommandAction::Git)
+        );
+
+        let catalog = test_catalog();
+        assert!(matches!(
+            execute_command(CommandAction::Git, &[], &catalog).as_slice(),
+            [Action::Overlay(OverlayAction::Open(OverlayKind::GitPanel))]
+        ));
+    }
+
+    #[test]
+    fn test_git_command_rejects_arguments() {
+        let catalog = test_catalog();
+        assert!(matches!(
+            execute_command(CommandAction::Git, &["status".into()], &catalog).as_slice(),
+            [Action::Notice(message)] if message == "Usage: /git"
         ));
     }
 

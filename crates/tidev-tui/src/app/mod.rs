@@ -7,6 +7,7 @@ mod actions;
 mod backend_events;
 mod drawing;
 mod events;
+mod git;
 mod overlays;
 mod tools;
 
@@ -19,6 +20,7 @@ use tidev_config::ThemeCatalog;
 use tidev_core::Mode as SessionMode;
 use tidev_core::{ApprovedTool, ToolCallWithViolations};
 use tidev_core::{BackendEvent, TuiResponse};
+use tidev_core::{GitDiffSnapshot, GitHistoryPage, GitStatusSnapshot};
 use tidev_llm::message::{COMPACTION_MESSAGE_LABEL, Message, MessageRole};
 use tidev_llm::reasoning::ThinkingLevelType;
 use tidev_tools::types::TodoItem;
@@ -57,6 +59,22 @@ pub(crate) enum AppScreen {
     Chat,
 }
 
+/// Results of read-only Git queries started by the TUI.
+pub(crate) enum GitTaskResult {
+    Status {
+        request_id: u64,
+        result: Result<GitStatusSnapshot, String>,
+    },
+    History {
+        request_id: u64,
+        result: Result<GitHistoryPage, String>,
+    },
+    Diff {
+        request_id: u64,
+        result: Result<GitDiffSnapshot, String>,
+    },
+}
+
 /// Max queued prompt cards visible in the frozen area above the composer.
 const MAX_VISIBLE_QUEUED_PROMPTS: usize = 4;
 /// Max wrapped lines per queued prompt card.
@@ -90,6 +108,12 @@ pub struct App {
     pub(crate) request_rx: Option<tokio::sync::mpsc::UnboundedReceiver<tidev_core::TuiRequest>>,
     /// Receiver for backend events (streaming deltas, tool results, etc.).
     pub(crate) event_rx: Option<tokio::sync::mpsc::UnboundedReceiver<BackendEvent>>,
+    /// Receiver for TUI-only Git query results.
+    pub(crate) git_result_rx: Option<tokio::sync::mpsc::UnboundedReceiver<GitTaskResult>>,
+    /// Sender used by spawned Git query tasks.
+    pub(crate) git_result_tx: tokio::sync::mpsc::UnboundedSender<GitTaskResult>,
+    /// Monotonic ID used to discard stale Git query results.
+    pub(crate) next_git_request_id: u64,
 
     /// Chat message list component.
     pub(crate) message_list: Option<MessageList>,
@@ -217,6 +241,7 @@ impl App {
         request_rx: tokio::sync::mpsc::UnboundedReceiver<tidev_core::TuiRequest>,
         event_rx: tokio::sync::mpsc::UnboundedReceiver<BackendEvent>,
     ) -> Self {
+        let (git_result_tx, git_result_rx) = tokio::sync::mpsc::unbounded_channel();
         let theme_catalog =
             ThemeCatalog::load(runtime.config_dir()).expect("bundled theme presets must parse");
         let theme_str = runtime.config().theme.clone();
@@ -247,6 +272,9 @@ impl App {
             desktop_notifications: NotificationManager::new(&notif_config),
             request_rx: Some(request_rx),
             event_rx: Some(event_rx),
+            git_result_rx: Some(git_result_rx),
+            git_result_tx,
+            next_git_request_id: 0,
             pending_approvals: HashMap::new(),
             active_approval_session: None,
             boundary_permissions: HashMap::new(),

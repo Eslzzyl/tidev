@@ -7,6 +7,7 @@ use std::path::PathBuf;
 
 use uuid::Uuid;
 
+use tidev_core::{GitDiffScope, GitDiffSnapshot, GitHistoryPage, GitStatusSnapshot};
 use tidev_llm::message::MessageAttachment;
 
 /// Panel action identifiers (launcher target).
@@ -21,6 +22,7 @@ pub(crate) enum PanelAction {
     Settings,
     Skills,
     Theme,
+    Git,
 }
 
 // ---------------------------------------------------------------------------
@@ -64,6 +66,49 @@ pub(crate) enum ChatAction {
     ExpandAllThinking,
     /// Collapse every thinking block in the current session (one-shot).
     CollapseAllThinking,
+}
+
+/// Git panel tabs and backend query actions.
+#[derive(Debug)]
+pub(crate) enum GitAction {
+    Refresh,
+    SwitchTab(GitTab),
+    LoadHistory {
+        head: Option<String>,
+        skip: usize,
+    },
+    LoadDiff {
+        scope: GitDiffScope,
+    },
+    Loading {
+        request_id: u64,
+        query: GitQueryKind,
+    },
+    StatusReady {
+        request_id: u64,
+        result: Result<GitStatusSnapshot, String>,
+    },
+    HistoryReady {
+        request_id: u64,
+        result: Result<GitHistoryPage, String>,
+    },
+    DiffReady {
+        request_id: u64,
+        result: Result<GitDiffSnapshot, String>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum GitTab {
+    Status,
+    History,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum GitQueryKind {
+    Status,
+    History,
+    Diff,
 }
 
 /// Overlay (panel/dialog) management.
@@ -217,6 +262,7 @@ pub(crate) enum OverlayKind {
     SearchPanel,
     MessagePanel,
     McpServerPanel,
+    GitPanel,
 }
 
 // ---------------------------------------------------------------------------
@@ -238,6 +284,7 @@ pub(crate) enum Action {
     Settings(SettingsAction),
     Connect(ConnectAction),
     Mcp(McpAction),
+    Git(GitAction),
     /// Copy the most recent completed assistant message to the clipboard.
     CopyLastAssistant,
 

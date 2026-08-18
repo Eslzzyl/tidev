@@ -101,6 +101,8 @@ pub struct Runtime {
     active_loop_cancels: Arc<std::sync::Mutex<HashMap<Uuid, CancellationToken>>>,
     /// Snapshot service for undo/redo (optional).
     snapshot: Option<tidev_snapshot::SnapshotService>,
+    /// Read-only Git service for the user's workspace repository.
+    git: crate::git::GitService,
 
     /// Per-session message buffers, keyed by session ID.
     buffers: Arc<Mutex<HashMap<Uuid, Arc<RwLock<CoreMessageBuffer>>>>>,
@@ -320,6 +322,11 @@ impl Runtime {
     /// Get the workspace root.
     pub fn workspace_root(&self) -> &PathBuf {
         &self.workspace_root
+    }
+
+    /// Get a cloneable read-only Git service for the workspace repository.
+    pub fn git(&self) -> crate::git::GitService {
+        self.git.clone()
     }
 
     /// Get the config directory.
@@ -1751,6 +1758,7 @@ impl RuntimeBuilder {
             active_model,
             active_loop_cancels: Arc::new(std::sync::Mutex::new(HashMap::new())),
             snapshot,
+            git: crate::git::GitService::new(workspace_root.clone()),
             buffers: Arc::new(Mutex::new(HashMap::new())),
             context_managers: Arc::new(Mutex::new(HashMap::new())),
             event_tx,

@@ -78,6 +78,7 @@ impl Tui {
         // Take ownership of receivers so the borrow checker is happy.
         let mut request_rx = app.request_rx.take();
         let mut event_rx = app.event_rx.take();
+        let mut git_result_rx = app.git_result_rx.take();
 
         // ── Dedicated crossterm reader thread ─────────────────────────
         //
@@ -187,6 +188,17 @@ impl Tui {
                         processed = true;
                     }
                 }
+                result = async {
+                    match git_result_rx.as_mut() {
+                        Some(rx) => rx.recv().await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    if let Some(result) = result {
+                        app.handle_git_task_result(result);
+                        processed = true;
+                    }
+                }
                 _ = tokio::time::sleep(FRAME_BUDGET) => {}
             }
 
@@ -281,6 +293,12 @@ impl Tui {
             if let Some(ref mut rx) = request_rx {
                 while let Ok(request) = rx.try_recv() {
                     app.handle_tui_request(request);
+                }
+            }
+
+            if let Some(ref mut rx) = git_result_rx {
+                while let Ok(result) = rx.try_recv() {
+                    app.handle_git_task_result(result);
                 }
             }
 

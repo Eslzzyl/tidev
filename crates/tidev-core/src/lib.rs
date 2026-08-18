@@ -5,6 +5,7 @@ pub mod agent_type;
 pub mod approval;
 pub mod attachment;
 pub mod backend_event;
+pub mod git;
 pub mod mcp;
 pub mod message_buf;
 pub mod mode;
@@ -24,6 +25,10 @@ pub use approval::{
     TuiResponse,
 };
 pub use backend_event::{BackendEvent, agent_event_to_backend_event};
+pub use git::{
+    GitChangeKind, GitCommitSummary, GitDiffFile, GitDiffScope, GitDiffSnapshot, GitFileStatus,
+    GitHistoryPage, GitRepoInfo, GitService, GitStatusCounts, GitStatusSnapshot,
+};
 pub use message_buf::CoreMessageBuffer;
 pub use mode::Mode;
 pub use registry::ToolRegistry;

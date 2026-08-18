@@ -7,9 +7,9 @@ use tidev_core::Mode as SessionMode;
 use tidev_llm::message::{Message, MessageRole, ToolExecutionResult};
 
 use crate::action::{
-    Action, BoundaryDecision, ChatAction, ConnectAction, McpAction, OverlayAction, OverlayKind,
-    SearchAction, SensitiveFileDecision, SessionAction, SettingKey, SettingValue, SettingsAction,
-    ThemeAction,
+    Action, BoundaryDecision, ChatAction, ConnectAction, GitAction, GitQueryKind, McpAction,
+    OverlayAction, OverlayKind, SearchAction, SensitiveFileDecision, SessionAction, SettingKey,
+    SettingValue, SettingsAction, ThemeAction,
 };
 use crate::component::Component;
 
@@ -267,6 +267,53 @@ impl App {
                 Action::Mcp(action) => {
                     self.handle_mcp_action(action, &mut queue);
                 }
+                Action::Git(action) => match action {
+                    GitAction::Refresh => {
+                        let request_id = self.spawn_git_status();
+                        let loading = Self::git_loading_action(request_id, GitQueryKind::Status);
+                        let ctx = UpdateContext {
+                            runtime: &mut self.runtime,
+                        };
+                        queue.extend(self.overlays.update_all(&loading, &ctx));
+                    }
+                    GitAction::LoadHistory { head, skip } => {
+                        let request = Action::Git(GitAction::LoadHistory {
+                            head: head.clone(),
+                            skip,
+                        });
+                        let ctx = UpdateContext {
+                            runtime: &mut self.runtime,
+                        };
+                        queue.extend(self.overlays.update_all(&request, &ctx));
+                        let request_id = self.spawn_git_history(head, skip);
+                        let loading = Self::git_loading_action(request_id, GitQueryKind::History);
+                        let ctx = UpdateContext {
+                            runtime: &mut self.runtime,
+                        };
+                        queue.extend(self.overlays.update_all(&loading, &ctx));
+                    }
+                    GitAction::LoadDiff { scope } => {
+                        let request = Action::Git(GitAction::LoadDiff {
+                            scope: scope.clone(),
+                        });
+                        let ctx = UpdateContext {
+                            runtime: &mut self.runtime,
+                        };
+                        queue.extend(self.overlays.update_all(&request, &ctx));
+                        let request_id = self.spawn_git_diff(scope);
+                        let loading = Self::git_loading_action(request_id, GitQueryKind::Diff);
+                        let ctx = UpdateContext {
+                            runtime: &mut self.runtime,
+                        };
+                        queue.extend(self.overlays.update_all(&loading, &ctx));
+                    }
+                    action => {
+                        let ctx = UpdateContext {
+                            runtime: &mut self.runtime,
+                        };
+                        queue.extend(self.overlays.update_all(&Action::Git(action), &ctx));
+                    }
+                },
                 Action::Session(SessionAction::Select(session_id)) => {
                     // Ignore if already on this session
                     if self.current_session_id == Some(session_id) {

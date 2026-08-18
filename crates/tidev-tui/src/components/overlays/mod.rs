@@ -1,6 +1,7 @@
 pub(crate) mod agents;
 pub(crate) mod connect;
 pub(crate) mod fork;
+pub(crate) mod git;
 pub(crate) mod image;
 pub(crate) mod mcp;
 pub(crate) mod message;
