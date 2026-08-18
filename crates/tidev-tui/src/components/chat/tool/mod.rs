@@ -887,6 +887,12 @@ fn render_diff_summary_lines(
 
     // Structured per-file changes (apply_patch): exact paths and operations.
     if canonical_name == "apply_patch" && !message.metadata.file_changes.is_empty() {
+        lines.extend(build_apply_patch_summary_header(
+            message.metadata.file_changes.len(),
+            palette,
+            content_width,
+        ));
+        first = false;
         for change in &message.metadata.file_changes {
             let label = match change.operation.as_str() {
                 "A" => "Write",
@@ -985,6 +991,29 @@ fn push_diff_summary_line(
         content_width,
     ));
     *is_first = false;
+}
+
+/// Build the collapsed apply_patch header. The tool identity is shown once
+/// here; individual rows below only describe the file operation.
+fn build_apply_patch_summary_header(
+    file_count: usize,
+    palette: ThemePalette,
+    content_width: usize,
+) -> Vec<Line<'static>> {
+    wrap_tool_title(
+        Line::from(vec![
+            Span::styled("Apply patch ", Style::default().fg(palette.accent_soft)),
+            Span::styled(
+                format!("· {}", pluralize(file_count, "file", "files")),
+                Style::default()
+                    .fg(palette.text)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("  ▶", Style::default().fg(palette.muted)),
+        ]),
+        content_width,
+        "  ",
+    )
 }
 
 /// Build a single wrapped summary line for one file:
@@ -1678,5 +1707,54 @@ mod tests {
             rendered.contains("- a") && rendered.contains("+ b"),
             "full diff should still render when expanded"
         );
+    }
+
+    #[test]
+    fn collapsed_apply_patch_summary_keeps_tool_identity() {
+        let tool_call = ToolCall {
+            id: "call_1".into(),
+            name: "apply_patch".into(),
+            arguments:
+                r#"{"patch_text":"*** Begin Patch\n*** Update File: src/main.rs\n@@\n-a\n+b\n"}"#
+                    .into(),
+            thought_signature: None,
+        };
+        let mut result = ToolExecutionResult::new("Success. Updated the following files:");
+        result.metadata.file_changes = vec![tidev_llm::message::FileChangeInfo {
+            path: "src/main.rs".into(),
+            diff: Some("--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1 +1 @@\n-a\n+b\n".into()),
+            operation: "M".into(),
+        }];
+        let result_msg = Message::tool_result("call_1", "apply_patch", result);
+
+        let palette = test_palette();
+        let empty_set = HashSet::new();
+        let ctx = RenderContext {
+            palette,
+            spinner: ".",
+            workspace_root: Path::new("/test"),
+            expanded_tool_results: &empty_set,
+            hovered_card: None,
+            model_display_name: "test",
+            running_subagents: &[],
+            hovered_inline_subagent: None,
+            thinking_collapsed_overrides: &empty_set,
+            default_collapse_thinking: false,
+            default_collapse_diffs: true,
+            message_app_data: None,
+        };
+
+        let (lines, _) =
+            render_tool_call_with_result(&tool_call, Some(&result_msg), 80, false, &ctx, false);
+        let rendered: String = lines
+            .iter()
+            .flat_map(|line| line.line.spans.iter().map(|span| span.content.as_ref()))
+            .collect();
+
+        assert!(rendered.contains("Apply patch"));
+        assert!(rendered.contains("1 file"));
+        assert!(rendered.contains("Edit"));
+        assert!(rendered.contains("src/main.rs"));
+        assert!(rendered.contains("▶"));
     }
 }

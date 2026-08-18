@@ -1103,6 +1103,49 @@ impl MessageList {
             }
         }
 
+        // Tool card bounds are relative to the currently rendered content,
+        // while the layout index stores absolute message lines. Prefer the
+        // visible card bounds here so a collapsed diff remains clickable after
+        // its line count changes.
+        let local_line = self
+            .content_area
+            .map(|area| y.saturating_sub(area.y) as usize + self.render_scroll)
+            .unwrap_or(y as usize + self.render_scroll);
+        if let Some((tool_message_id, _, _)) = self
+            .card_bounds
+            .iter()
+            .find(|&&(_, start, end)| local_line >= start && local_line < end)
+            .copied()
+            && let Some(session_id) = self.active_session_id
+            && let Some(ctx) = self.chat_contexts.get(&session_id)
+        {
+            let block_id = self
+                .layout_index
+                .blocks
+                .iter()
+                .find(|block| {
+                    let end = block.message_start_idx + block.message_count;
+                    ctx.visible_messages()[block.message_start_idx..end]
+                        .iter()
+                        .any(|message| message.id == tool_message_id)
+                })
+                .map(|block| block.message_id);
+            if let Some(block_id) = block_id {
+                if self.expanded_tool_results.contains(&block_id) {
+                    self.expanded_tool_results.remove(&block_id);
+                } else {
+                    self.expanded_tool_results.insert(block_id);
+                }
+                self.layout_index.mark_dirty(block_id);
+                // A manual fold/unfold is an interaction with the current
+                // viewport. Do not let the next redraw re-apply follow-tail
+                // and move the user away from the card they clicked.
+                self.follow_tail = false;
+                self.dirty = true;
+                return Some(Action::Noop);
+            }
+        }
+
         let scroll = self.scroll_offset;
         let y_u = y as usize;
         let absolute_line = scroll + y_u;
@@ -1151,6 +1194,7 @@ impl MessageList {
                     self.expanded_tool_results.insert(block.message_id);
                 }
                 self.layout_index.mark_dirty(block.message_id);
+                self.follow_tail = false;
                 self.dirty = true;
             }
         }
