@@ -640,7 +640,7 @@ where
         let marker = if let Some(last_index) = self.list_indices.last_mut() {
             match last_index {
                 None => Some(vec![Span::styled(
-                    " ".repeat(width - 1) + "- ",
+                    " ".repeat(width - 1) + "• ",
                     self.styles.unordered_list_marker,
                 )]),
                 Some(index) => {
@@ -1013,7 +1013,7 @@ mod tests {
     fn renders_list_item() {
         let text = render_markdown_text("- item\n");
         let rendered = lines_to_strings(&text);
-        assert_eq!(rendered, vec!["- item".to_string()]);
+        assert_eq!(rendered, vec!["• item".to_string()]);
     }
 
     #[test]
