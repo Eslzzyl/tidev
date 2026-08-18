@@ -588,6 +588,18 @@ mod tests {
         assert!(props.contains_key("content"));
     }
 
+    #[test]
+    fn test_skill_args_allow_empty_arguments() {
+        let schema = SkillArgs::schema();
+        assert!(schema.get("required").is_none());
+
+        let args: SkillArgs = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(args.name, None);
+        assert_eq!(args.path, None);
+        assert_eq!(args.offset, None);
+        assert_eq!(args.limit, None);
+    }
+
     // ── MCP type tests ────────────────────────────────────────────────
 
     #[test]

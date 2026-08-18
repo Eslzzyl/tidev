@@ -28,15 +28,17 @@ fn skill_from_str(content: &'static str, dir_name: &str) -> SkillInfo {
     // Normalize CRLF to LF to handle Windows line endings (git may convert
     // to CRLF on checkout).  This mirrors what parse_skill_content does.
     let content = content.replace("\r\n", "\n");
-    let (name, description, _body) = crate::skills::parse_frontmatter(&content)
+    let (name, description, body) = crate::skills::parse_frontmatter(&content)
         .expect("bundled SKILL.md must have valid YAML frontmatter");
+    let body = body.trim().to_string();
 
     SkillInfo {
         name,
         description,
         directory: PathBuf::from(format!("__builtin__/{}", dir_name)),
         location: PathBuf::from(format!("__builtin__/{}/SKILL.md", dir_name)),
-        content,
+        document: content,
+        content: body,
         companion_files: Vec::new(),
     }
 }
@@ -63,8 +65,12 @@ mod tests {
             );
             assert!(!skill.content.is_empty(), "content must not be empty");
             assert!(
-                skill.content.starts_with("---\n"),
-                "content should start with frontmatter"
+                skill.document.starts_with("---\n"),
+                "document should start with frontmatter"
+            );
+            assert!(
+                !skill.content.starts_with("---\n"),
+                "content should contain only the document body"
             );
         }
     }

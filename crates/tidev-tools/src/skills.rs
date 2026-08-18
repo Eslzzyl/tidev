@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, bail};
 use ignore::WalkBuilder;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use std::time::Duration;
 use std::{
     collections::HashSet,
@@ -32,14 +32,15 @@ pub const SKILL_TOOL_DESCRIPTION: &str = "Load a reusable skill or read a file i
      directory) to read a companion file such as a doc or script. Paths are confined to the \
      skill's own directory.";
 
-static CATALOG: OnceLock<Arc<SkillCatalogInner>> = OnceLock::new();
-
 #[derive(Clone, Debug)]
 pub struct SkillInfo {
     pub name: String,
     pub description: String,
     pub directory: PathBuf,
     pub location: PathBuf,
+    /// The complete normalized SKILL.md document, including frontmatter.
+    pub document: String,
+    /// The body of SKILL.md after frontmatter.
     pub content: String,
     pub companion_files: Vec<PathBuf>,
 }
@@ -184,26 +185,22 @@ impl SkillCatalog {
             SKILL_ROOTS,
             worktree.map(|p| p.display().to_string())
         );
-        let inner = CATALOG
-            .get_or_init(|| {
-                let start = std::time::Instant::now();
-                log::info!("SkillCatalog::discover: initializing catalog (first call)");
-                let inner = discover_inner(
-                    workspace_root,
-                    config_dir,
-                    dirs::home_dir().as_deref(),
-                    skill_sources,
-                    worktree,
-                );
-                log::info!(
-                    "SkillCatalog::discover: catalog initialized with {} skills in {:?}",
-                    inner.skills.len(),
-                    start.elapsed()
-                );
-                Arc::new(inner)
-            })
-            .clone();
-        Self { inner }
+        let start = std::time::Instant::now();
+        let inner = discover_inner(
+            workspace_root,
+            config_dir,
+            dirs::home_dir().as_deref(),
+            skill_sources,
+            worktree,
+        );
+        log::info!(
+            "SkillCatalog::discover: catalog initialized with {} skills in {:?}",
+            inner.skills.len(),
+            start.elapsed()
+        );
+        Self {
+            inner: Arc::new(inner),
+        }
     }
 
     pub fn all(&self) -> &[SkillInfo] {
@@ -286,10 +283,22 @@ impl SkillCatalog {
         let skill = self
             .get(name)
             .with_context(|| format!("unknown skill '{name}'"))?;
+        let normalized_path = normalize_skill_relative_path(relative_path)?;
+
+        if normalized_path == Path::new(SKILL_FILE_NAME) {
+            let mut document = skill.document.clone();
+            crate::builtin::utils::truncate_in_place(&mut document, max_output_bytes);
+            return Ok(document);
+        }
+
         let resolved = resolve_skill_relative_path(&skill.directory, relative_path)?;
 
         if resolved.is_dir() {
             return list_skill_directory(relative_path, &resolved);
+        }
+
+        if normalized_path.as_os_str().is_empty() {
+            return list_virtual_skill_directory(skill);
         }
 
         if !resolved.is_file() {
@@ -343,11 +352,7 @@ impl SkillCatalog {
     }
 }
 
-/// Resolve a skill-relative path against the skill directory, rejecting any
-/// path that escapes it: absolute paths, `.`/`..` segments are checked at the
-/// component level, and the canonicalized result must remain inside the
-/// canonicalized skill directory (which also blocks symlink escapes).
-fn resolve_skill_relative_path(skill_dir: &Path, relative_path: &str) -> Result<PathBuf> {
+fn normalize_skill_relative_path(relative_path: &str) -> Result<PathBuf> {
     let path = Path::new(relative_path);
     if path.as_os_str().is_empty() {
         bail!("path must not be empty");
@@ -356,6 +361,7 @@ fn resolve_skill_relative_path(skill_dir: &Path, relative_path: &str) -> Result<
         bail!("path must be relative to the skill directory");
     }
 
+    let mut normalized = PathBuf::new();
     for component in path.components() {
         match component {
             Component::CurDir => {}
@@ -365,9 +371,19 @@ fn resolve_skill_relative_path(skill_dir: &Path, relative_path: &str) -> Result<
             Component::RootDir | Component::Prefix(_) => {
                 bail!("path must be relative to the skill directory")
             }
-            Component::Normal(_) => {}
+            Component::Normal(value) => normalized.push(value),
         }
     }
+
+    Ok(normalized)
+}
+
+/// Resolve a skill-relative path against the skill directory, rejecting any
+/// path that escapes it: absolute paths, `.`/`..` segments are checked at the
+/// component level, and the canonicalized result must remain inside the
+/// canonicalized skill directory (which also blocks symlink escapes).
+fn resolve_skill_relative_path(skill_dir: &Path, relative_path: &str) -> Result<PathBuf> {
+    let path = normalize_skill_relative_path(relative_path)?;
 
     let resolved = skill_dir.join(path);
     let canonical_dir = canonicalize_for_comparison(skill_dir);
@@ -376,6 +392,19 @@ fn resolve_skill_relative_path(skill_dir: &Path, relative_path: &str) -> Result<
         bail!("path '{relative_path}' escapes the skill directory");
     }
     Ok(resolved)
+}
+
+fn list_virtual_skill_directory(skill: &SkillInfo) -> Result<String> {
+    let mut entries = vec![SKILL_FILE_NAME.to_string()];
+    entries.extend(
+        skill
+            .companion_files
+            .iter()
+            .map(|path| path.display().to_string().replace('\\', "/")),
+    );
+    entries.sort();
+    entries.dedup();
+    Ok(format!("./\n{}", entries.join("\n")))
 }
 
 /// Render a directory listing inside a skill, mirroring the generic read
@@ -596,6 +625,7 @@ fn parse_skill_content(
             e
         );
     })?;
+    let body = body.trim().to_string();
 
     if !is_valid_skill_name(&name) {
         log::debug!(
@@ -644,7 +674,8 @@ fn parse_skill_content(
         description,
         directory: directory.unwrap_or_else(|| location.clone()),
         location,
-        content: body.trim().to_string(),
+        document: normalized_content,
+        content: body,
         companion_files,
     })
 }
@@ -896,6 +927,9 @@ mod tests {
             description: format!("test skill {name}"),
             directory: dir.to_path_buf(),
             location: dir.join(SKILL_FILE_NAME),
+            document: format!(
+                "---\nname: {name}\ndescription: test skill {name}\n---\n\nBody of {name}."
+            ),
             content: format!("Body of {name}."),
             companion_files: Vec::new(),
         }
@@ -969,6 +1003,31 @@ mod tests {
     }
 
     #[test]
+    fn read_skill_file_reads_the_main_document_for_virtual_skills() {
+        let skill = crate::bundled_skills::load()
+            .into_iter()
+            .find(|skill| skill.name == "git-workflow")
+            .unwrap();
+        let catalog = catalog_from_skills(vec![skill]);
+
+        let document = catalog
+            .read_skill_file("git-workflow", "SKILL.md", 1024 * 1024)
+            .unwrap();
+        assert!(document.starts_with("---\n"));
+        assert!(document.contains("# Git Workflow"));
+
+        let rendered = catalog.render_skill("git-workflow").unwrap();
+        assert!(rendered.starts_with("# Skill: git-workflow\n\nLocation: "));
+        assert!(rendered.contains("# Git Workflow"));
+        assert!(!rendered.contains("---\nname: git-workflow"));
+
+        let listing = catalog
+            .read_skill_file("git-workflow", ".", 1024 * 1024)
+            .unwrap();
+        assert_eq!(listing, "./\nSKILL.md");
+    }
+
+    #[test]
     fn read_skill_file_lists_skill_directories() {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("demo");
@@ -1026,5 +1085,32 @@ mod tests {
 
         let err = catalog.read_skill_file("demo", "link.txt", 1024);
         assert!(err.is_err(), "symlink escape must be rejected");
+    }
+
+    #[test]
+    fn discover_creates_a_catalog_for_each_workspace() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace_one = tmp.path().join("workspace-one");
+        let workspace_two = tmp.path().join("workspace-two");
+        let config_one = tmp.path().join("config-one");
+        let config_two = tmp.path().join("config-two");
+        fs::create_dir_all(&workspace_one).unwrap();
+        fs::create_dir_all(&workspace_two).unwrap();
+        fs::create_dir_all(&config_one).unwrap();
+        fs::create_dir_all(&config_two).unwrap();
+        write_skill(
+            &workspace_one.join(".agents").join("skills"),
+            "workspace-one-skill",
+        );
+        write_skill(
+            &workspace_two.join(".agents").join("skills"),
+            "workspace-two-skill",
+        );
+
+        let catalog_one = SkillCatalog::discover(&workspace_one, &config_one, &[], None);
+        let catalog_two = SkillCatalog::discover(&workspace_two, &config_two, &[], None);
+
+        assert!(catalog_one.get("workspace-one-skill").is_some());
+        assert!(catalog_two.get("workspace-two-skill").is_some());
     }
 }

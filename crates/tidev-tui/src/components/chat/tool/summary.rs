@@ -103,7 +103,7 @@ pub(super) fn render_tool_call_summary_line_inner(
         }
         "skill" => {
             let name = string_field("name");
-            let path = string_field("path");
+            let path = normalize_skill_path(string_field("path"));
             match (name, path) {
                 (Some(name), Some(path)) => (
                     "Read skill",
@@ -321,31 +321,53 @@ pub(super) fn compute_tool_result_suffix(
                 }
             }
         }
-        "skill" => {
-            if tool_output_is_error(output) {
-                " → error".to_string()
-            } else if output.starts_with("Available skills") {
-                // List mode: report the catalog total when the page header
-                // carries it ("showing A-B of N").
-                let total = output
-                    .split("of ")
-                    .nth(1)
-                    .and_then(|s| s.split([')', ':']).next())
-                    .and_then(|s| s.trim().parse::<usize>().ok());
-                match total {
-                    Some(n) => format!(" → {n} available"),
-                    None => " → listed".to_string(),
-                }
-            } else {
-                let content_lines: Vec<_> = output
-                    .lines()
-                    .skip_while(|l| l.starts_with('#') || l.starts_with("**"))
-                    .filter(|l| !l.is_empty())
-                    .collect();
-                format!(" → {} lines", content_lines.len())
-            }
-        }
+        "skill" => skill_result_suffix(output),
         _ => String::new(),
+    }
+}
+
+fn normalize_skill_path(path: Option<String>) -> Option<String> {
+    path.filter(|path| !path.is_empty())
+}
+
+fn skill_result_suffix(output: &str) -> String {
+    if tool_output_is_error(output) {
+        if output.contains("unknown skill '") {
+            " → skill not found".to_string()
+        } else if output.contains("file not found") {
+            " → file not found".to_string()
+        } else if output.contains("escapes the skill directory")
+            || output.contains("path must be relative to the skill directory")
+        {
+            " → blocked by policy".to_string()
+        } else if output.contains("a path requires a skill name")
+            || output.contains("path must not be empty")
+        {
+            " → invalid request".to_string()
+        } else if output.contains("Cannot read binary file") {
+            " → binary file".to_string()
+        } else {
+            " → error".to_string()
+        }
+    } else if output.starts_with("Available skills") {
+        // List mode: report the catalog total when the page header
+        // carries it ("showing A-B of N").
+        let total = output
+            .split("of ")
+            .nth(1)
+            .and_then(|s| s.split([')', ':']).next())
+            .and_then(|s| s.trim().parse::<usize>().ok());
+        match total {
+            Some(n) => format!(" → {n} available"),
+            None => " → listed".to_string(),
+        }
+    } else {
+        let content_lines: Vec<_> = output
+            .lines()
+            .skip_while(|l| l.starts_with('#') || l.starts_with("**"))
+            .filter(|l| !l.is_empty())
+            .collect();
+        format!(" → {} lines", content_lines.len())
     }
 }
 
@@ -454,6 +476,51 @@ mod tests {
         assert_eq!(
             compute_tool_result_suffix("read", "Path '/tmp/file' was denied.", &[]),
             " → blocked by policy"
+        );
+    }
+
+    #[test]
+    fn skill_result_suffix_distinguishes_failure_states() {
+        assert_eq!(
+            compute_tool_result_suffix("skill", "Error: unknown skill 'missing'", &[]),
+            " → skill not found"
+        );
+        assert_eq!(
+            compute_tool_result_suffix(
+                "skill",
+                "Error: failed to read docs/missing.md in skill 'demo': file not found",
+                &[],
+            ),
+            " → file not found"
+        );
+        assert_eq!(
+            compute_tool_result_suffix(
+                "skill",
+                "Error: path '../secret' escapes the skill directory",
+                &[],
+            ),
+            " → blocked by policy"
+        );
+        assert_eq!(
+            compute_tool_result_suffix(
+                "skill",
+                "Error: skill: a path requires a skill name to read from",
+                &[],
+            ),
+            " → invalid request"
+        );
+        assert_eq!(
+            compute_tool_result_suffix("skill", "Error: unexpected failure", &[]),
+            " → error"
+        );
+    }
+
+    #[test]
+    fn empty_skill_path_is_not_rendered_as_a_child_path() {
+        assert_eq!(normalize_skill_path(Some(String::new())), None);
+        assert_eq!(
+            normalize_skill_path(Some("docs/guide.md".to_string())),
+            Some("docs/guide.md".to_string())
         );
     }
 }

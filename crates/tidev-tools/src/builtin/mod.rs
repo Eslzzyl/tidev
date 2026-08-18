@@ -125,6 +125,10 @@ where
     }
 }
 
+fn normalize_skill_path(path: Option<String>) -> Option<String> {
+    path.filter(|path| !path.is_empty())
+}
+
 fn panic_msg(panic: Box<dyn Any + Send>) -> String {
     if let Some(s) = panic.downcast_ref::<String>() {
         s.clone()
@@ -280,6 +284,10 @@ pub async fn execute_tool_call(
                 offset,
                 limit,
             } = args;
+            // Some tool adapters encode an omitted optional string as an
+            // empty string. Treat that representation the same as an absent
+            // path so `skill` can load a named skill without a document path.
+            let path = normalize_skill_path(path);
             safe_spawn_blocking_str(move || match (name.as_deref(), path.as_deref()) {
                 (None, None) => skills.list_skills(
                     offset.unwrap_or(1).max(1) as usize,
@@ -323,3 +331,24 @@ pub async fn execute_tool_call(
 /// Kill any remaining tracked child processes. Called during program exit
 /// to prevent orphaned shell subprocesses.
 pub use exec::{kill_all_children, kill_process_group};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_skill_path_is_treated_as_absent() {
+        let args = SkillArgs {
+            name: Some("git-workflow".to_string()),
+            path: Some(String::new()),
+            offset: None,
+            limit: None,
+        };
+        let SkillArgs { path, .. } = args;
+        assert_eq!(normalize_skill_path(path), None);
+        assert_eq!(
+            normalize_skill_path(Some("docs/guide.md".to_string())),
+            Some("docs/guide.md".to_string())
+        );
+    }
+}
