@@ -7,6 +7,8 @@ use ratatui::widgets::Paragraph;
 
 use crate::theme::ThemePalette;
 
+type ClipboardImage = (String, String, Vec<u8>, u64);
+
 /// Return the suffix of `text` that fits in `max_width` terminal columns.
 /// The returned slice always starts at a UTF-8 character boundary.
 pub(crate) fn tail_fitting_width(text: &str, max_width: u16) -> &str {
@@ -116,27 +118,150 @@ pub(crate) fn paste_from_clipboard() -> Option<String> {
 ///
 /// This consumes the clipboard — call it only after `paste_from_clipboard()`
 /// returns `None` (i.e. clipboard does not contain text).
-pub(crate) fn paste_image_from_clipboard() -> Option<(String, String, Vec<u8>, u64)> {
-    let mut clipboard = arboard::Clipboard::new().ok()?;
-    let img = clipboard.get_image().ok()?;
+/// Returns `Ok(None)` when no image is available and `Err` when an image
+/// backend failed, including the WSL PowerShell fallback.
+pub(crate) fn paste_image_from_clipboard() -> Result<Option<ClipboardImage>, String> {
+    let native_image = match arboard::Clipboard::new() {
+        Ok(mut clipboard) => match clipboard.get_image() {
+            Ok(image) => Some(image),
+            Err(error) => {
+                log::debug!("native image clipboard read failed: {error}");
+                None
+            }
+        },
+        Err(error) => {
+            log::debug!("native clipboard unavailable: {error}");
+            None
+        }
+    };
 
-    // Encode RGBA bytes as PNG.
-    let rgba =
-        image::RgbaImage::from_raw(img.width as u32, img.height as u32, img.bytes.into_owned())?;
+    if let Some(image) = native_image {
+        return encode_clipboard_image(image).map(Some);
+    }
+
+    #[cfg(target_os = "linux")]
+    if is_probably_wsl() {
+        return paste_wsl_image();
+    }
+
+    Ok(None)
+}
+
+fn encode_clipboard_image(img: arboard::ImageData<'_>) -> Result<ClipboardImage, String> {
+    let width = img.width;
+    let height = img.height;
+    let rgba = image::RgbaImage::from_raw(width as u32, height as u32, img.bytes.into_owned())
+        .ok_or_else(|| format!("invalid clipboard image dimensions: {width}x{height}"))?;
+    let png_bytes = encode_rgba_png(&rgba)?;
+    let file_size = png_bytes.len() as u64;
+
+    Ok((
+        format!("clipboard_{width}x{height}.png"),
+        "image/png".to_string(),
+        png_bytes,
+        file_size,
+    ))
+}
+
+fn encode_rgba_png(rgba: &image::RgbaImage) -> Result<Vec<u8>, String> {
     let mut png_bytes = Vec::new();
     rgba.write_to(
         &mut std::io::Cursor::new(&mut png_bytes),
         image::ImageFormat::Png,
     )
-    .ok()?;
+    .map_err(|error| format!("failed to encode clipboard image as PNG: {error}"))?;
+    Ok(png_bytes)
+}
 
-    let file_size = png_bytes.len() as u64;
-    Some((
-        format!("clipboard_{}x{}.png", img.width, img.height),
-        "image/png".to_string(),
-        png_bytes,
-        file_size,
+#[cfg(target_os = "linux")]
+fn is_probably_wsl() -> bool {
+    std::env::var_os("WSL_INTEROP").is_some()
+        || std::env::var_os("WSL_DISTRO_NAME").is_some()
+        || std::fs::read_to_string("/proc/version")
+            .map(|version| {
+                let version = version.to_ascii_lowercase();
+                version.contains("microsoft") || version.contains("wsl")
+            })
+            .unwrap_or(false)
+}
+
+#[cfg(target_os = "linux")]
+fn paste_wsl_image() -> Result<Option<ClipboardImage>, String> {
+    let script = r#"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $img = Get-Clipboard -Format Image; if ($null -eq $img) { exit 1 }; $path = [System.IO.Path]::ChangeExtension([System.IO.Path]::GetTempFileName(), 'png'); $img.Save($path, [System.Drawing.Imaging.ImageFormat]::Png); Write-Output $path"#;
+    let mut last_error = None;
+
+    for command in ["powershell.exe", "pwsh", "powershell"] {
+        let output = match std::process::Command::new(command)
+            .args(["-NoProfile", "-NonInteractive", "-Command", script])
+            .output()
+        {
+            Ok(output) => output,
+            Err(error) => {
+                last_error = Some(format!("{command} is not executable: {error}"));
+                continue;
+            }
+        };
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            last_error = Some(if stderr.is_empty() {
+                format!("{command} exited with status {}", output.status)
+            } else {
+                format!("{command} failed: {stderr}")
+            });
+            continue;
+        }
+
+        let windows_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let Some(wsl_path) = windows_path_to_wsl(&windows_path) else {
+            last_error = Some(format!("{command} returned an invalid image path"));
+            continue;
+        };
+
+        let result = image::open(&wsl_path)
+            .map_err(|error| format!("failed to read {}: {error}", wsl_path.display()))
+            .and_then(|image| {
+                let rgba = image.to_rgba8();
+                let (width, height) = rgba.dimensions();
+                let png_bytes = encode_rgba_png(&rgba)?;
+                let file_size = png_bytes.len() as u64;
+                Ok((
+                    format!("clipboard_{width}x{height}.png"),
+                    "image/png".to_string(),
+                    png_bytes,
+                    file_size,
+                ))
+            });
+        let _ = std::fs::remove_file(&wsl_path);
+
+        return result
+            .map(Some)
+            .map_err(|error| format!("WSL clipboard image fallback failed: {error}"));
+    }
+
+    Err(format!(
+        "WSL clipboard image fallback failed: {}",
+        last_error.unwrap_or_else(|| "no PowerShell executable found".to_string())
     ))
+}
+
+#[cfg(target_os = "linux")]
+fn windows_path_to_wsl(input: &str) -> Option<std::path::PathBuf> {
+    let drive = input.chars().next()?.to_ascii_lowercase();
+    if !drive.is_ascii_lowercase() || input.get(1..2) != Some(":") {
+        return None;
+    }
+
+    let mut path = std::path::PathBuf::from(format!("/mnt/{drive}"));
+    for component in input
+        .get(2..)?
+        .trim_start_matches(['\\', '/'])
+        .split(['\\', '/'])
+        .filter(|component| !component.is_empty())
+    {
+        path.push(component);
+    }
+    Some(path)
 }
 
 /// Expand tab characters to spaces.
@@ -441,5 +566,15 @@ mod cursor_tests {
         let (lines, position) = wrapped_input_tail("abcdefghi", area);
         assert_eq!(lines, vec!["efgh", "i"]);
         assert_eq!(position, Position::new(4, 3));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn windows_path_is_converted_to_wsl_path() {
+        assert_eq!(
+            windows_path_to_wsl(r"C:\Users\test\clipboard.png"),
+            Some(std::path::PathBuf::from("/mnt/c/Users/test/clipboard.png"))
+        );
+        assert_eq!(windows_path_to_wsl("not-a-windows-path"), None);
     }
 }

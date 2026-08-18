@@ -704,33 +704,35 @@ impl Composer {
             self.ensure_input_cursor_visible();
             self.dirty = true;
             None
-        } else if let Some((filename, _mime, data, file_size)) =
-            crate::utils::paste_image_from_clipboard()
-        {
-            if self.model_supports_images {
-                let placeholder = format!("[Image: {}]", filename);
-                let insert_pos = self.cursor;
-                self.insert_str(&placeholder);
-                let end_pos = self.cursor;
-                self.register_span(
-                    insert_pos,
-                    end_pos,
-                    placeholder,
-                    InlineSpanKind::Image,
-                    Some(data),
-                    Some(filename),
-                );
-                self.ensure_input_cursor_visible();
-                self.dirty = true;
-                log::info!("Pasted image: {} bytes", file_size);
-                None
-            } else {
-                Some(Action::Notice(
-                    "This model does not support image attachments".to_string(),
-                ))
-            }
         } else {
-            None
+            match crate::utils::paste_image_from_clipboard() {
+                Ok(Some((filename, _mime, data, file_size))) => {
+                    if self.model_supports_images {
+                        let placeholder = format!("[Image: {}]", filename);
+                        let insert_pos = self.cursor;
+                        self.insert_str(&placeholder);
+                        let end_pos = self.cursor;
+                        self.register_span(
+                            insert_pos,
+                            end_pos,
+                            placeholder,
+                            InlineSpanKind::Image,
+                            Some(data),
+                            Some(filename),
+                        );
+                        self.ensure_input_cursor_visible();
+                        self.dirty = true;
+                        log::info!("Pasted image: {} bytes", file_size);
+                        None
+                    } else {
+                        Some(Action::Notice(
+                            "This model does not support image attachments".to_string(),
+                        ))
+                    }
+                }
+                Ok(None) => None,
+                Err(error) => Some(Action::Notice(error)),
+            }
         }
     }
 
@@ -1387,30 +1389,32 @@ impl Component for Composer {
                 return None;
             }
             // 2. Try image paste (detect regardless of model support).
-            if let Some((filename, _mime, data, file_size)) =
-                crate::utils::paste_image_from_clipboard()
-            {
-                if self.model_supports_images {
-                    let placeholder = format!("[Image: {}]", filename);
-                    let insert_pos = self.cursor;
-                    self.insert_str(&placeholder);
-                    let end_pos = self.cursor;
-                    self.register_span(
-                        insert_pos,
-                        end_pos,
-                        placeholder.clone(),
-                        InlineSpanKind::Image,
-                        Some(data),
-                        Some(filename),
-                    );
-                    self.dirty = true;
-                    self.ensure_input_cursor_visible();
-                    log::info!("Pasted image: {} bytes", file_size);
-                } else {
-                    return Some(Action::Notice(
-                        "This model does not support image attachments".to_string(),
-                    ));
+            match crate::utils::paste_image_from_clipboard() {
+                Ok(Some((filename, _mime, data, file_size))) => {
+                    if self.model_supports_images {
+                        let placeholder = format!("[Image: {}]", filename);
+                        let insert_pos = self.cursor;
+                        self.insert_str(&placeholder);
+                        let end_pos = self.cursor;
+                        self.register_span(
+                            insert_pos,
+                            end_pos,
+                            placeholder.clone(),
+                            InlineSpanKind::Image,
+                            Some(data),
+                            Some(filename),
+                        );
+                        self.dirty = true;
+                        self.ensure_input_cursor_visible();
+                        log::info!("Pasted image: {} bytes", file_size);
+                    } else {
+                        return Some(Action::Notice(
+                            "This model does not support image attachments".to_string(),
+                        ));
+                    }
                 }
+                Ok(None) => {}
+                Err(error) => return Some(Action::Notice(error)),
             }
             return None;
         }
