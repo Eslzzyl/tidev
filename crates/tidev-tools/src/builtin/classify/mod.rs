@@ -24,6 +24,7 @@ mod rust;
 mod systemctl;
 mod tar;
 mod terraform;
+mod zstd;
 
 use apt::classify_apt;
 use brew::classify_brew;
@@ -47,6 +48,7 @@ use std::sync::OnceLock;
 use systemctl::classify_systemctl;
 use tar::classify_tar;
 use terraform::classify_terraform;
+use zstd::classify_zstd;
 
 // ---------------------------------------------------------------------------
 // Safety
@@ -510,9 +512,10 @@ fn classify_command(cmd: &str, args: &[&str]) -> Safety {
 
         // ── Archives ─────────────────────────────────────────────────
         "tar" => classify_tar(args),
+        "zstd" => classify_zstd(args),
         "unzip" | "zip" | "gzip" | "gunzip" | "bzip2" | "bunzip2" | "xz" | "unxz" | "zcat"
-        | "zstd" | "unzstd" | "7z" | "7za" | "7zr" | "rar" | "unrar" | "ar" | "deb"
-        | "arj" | "cabextract" => Safety::WriteOperation,
+        | "unzstd" | "7z" | "7za" | "7zr" | "rar" | "unrar" | "ar" | "deb" | "arj"
+        | "cabextract" => Safety::WriteOperation,
 
         // ── Media / conversion (write files) ─────────────────────────
         "ffmpeg" | "avconv" => Safety::Unknown,
@@ -1842,6 +1845,17 @@ mod tests {
         assert_eq!(
             cl.classify("echo hello > file.txt 2>/dev/null"),
             Safety::WriteOperation
+        );
+    }
+
+    #[test]
+    fn zstd_stdout_pipeline_is_read_only() {
+        let cl = c();
+        assert_eq!(
+            cl.classify(
+                "sqlite3-readonly sessions.sqlite3 \"SELECT reasoning FROM messages\" | zstd -d -c 2>/dev/null"
+            ),
+            Safety::ReadOnly
         );
     }
 
