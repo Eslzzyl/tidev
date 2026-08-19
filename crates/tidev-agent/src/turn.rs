@@ -42,15 +42,19 @@ pub async fn stream_turn(
     model.system_prompt = Some(system_prompt.to_string());
     let messages = messages.to_vec();
     let tools = tools.to_vec();
-    let thinking_level = thinking_level.clone();
+    let thinking_level_owned = thinking_level.clone();
 
-    let handle = tokio::spawn(async move {
-        llm.stream_chat(model, messages, tools, tx, thinking_level)
-            .await;
-    });
+    let handle = {
+        let thinking_level = thinking_level_owned.clone();
+        tokio::spawn(async move {
+            llm.stream_chat(model, messages, tools, tx, thinking_level)
+                .await;
+        })
+    };
 
     let mut turn = AssistantTurn {
         created_at: Some(Utc::now()),
+        thinking_level: Some(thinking_level_owned),
         ..Default::default()
     };
 

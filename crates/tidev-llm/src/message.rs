@@ -297,6 +297,9 @@ pub struct AssistantTurn {
     /// Raw OpenAI Responses output items returned by the provider.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub responses_output_items: Vec<serde_json::Value>,
+    /// Thinking / reasoning level used for this turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_level: Option<crate::reasoning::ThinkingLevelType>,
 }
 
 impl AssistantTurn {

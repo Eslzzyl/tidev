@@ -113,9 +113,12 @@ impl App {
                 Action::Overlay(OverlayAction::Close(kind)) => {
                     let is_model_panel = kind == OverlayKind::ModelPanel;
                     self.close_overlay(kind, &mut queue);
-                    if is_model_panel && let Some(ref mut composer) = self.composer {
-                        let model = self.runtime.active_model();
-                        composer.set_model_supports_images(model.supports_images);
+                    if is_model_panel {
+                        self.thinking_level = self.runtime.active_model().thinking_level.clone();
+                        if let Some(ref mut composer) = self.composer {
+                            let model = self.runtime.active_model();
+                            composer.set_model_supports_images(model.supports_images);
+                        }
                     }
                 }
                 Action::Settings(SettingsAction::Change { key, value }) => {
@@ -892,7 +895,8 @@ impl App {
 
                             // Spawn submission to avoid blocking the UI.
                             let mode = self.mode;
-                            let thinking_level = self.thinking_level.clone();
+                            let thinking_level = self.runtime.active_model().thinking_level.clone();
+                            self.thinking_level = thinking_level.clone();
                             let rt = self.runtime.clone();
                             let text_for_title = text.clone();
                             self.set_notice("Sending...");

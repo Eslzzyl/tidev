@@ -455,6 +455,7 @@ mod tests {
             reasoning_started_at: Some(now),
             reasoning_completed_at: Some(now),
             responses_output_items: vec![serde_json::json!({"type": "payload"})],
+            thinking_level: None,
         }
     }
 

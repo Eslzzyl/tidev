@@ -50,13 +50,17 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
         let system_prompt = config.system_prompt.clone();
 
         // ─── 6. Stream LLM turn ──────────────────────────────────────────
+        // Per-turn thinking level: prefer the last user message's level so
+        // that “high” sent with a message is both used for the request and
+        // shown in the footer. Falls back to the session's default.
+        let thinking_level = messages
+            .iter()
+            .rev()
+            .find(|m| m.role == MessageRole::User)
+            .and_then(|m| m.thinking_level.clone())
+            .unwrap_or_else(|| config.thinking_level.clone());
         let turn = match ctx
-            .stream_turn(
-                &messages,
-                &system_prompt,
-                &config.thinking_level,
-                request_id,
-            )
+            .stream_turn(&messages, &system_prompt, &thinking_level, request_id)
             .await
         {
             Ok(turn) => turn,
@@ -167,6 +171,7 @@ fn build_assistant_message(turn: &AssistantTurn) -> Message {
         created_at,
         false,
     );
+    msg.thinking_level = turn.thinking_level.clone();
     msg.completed_at = Some(completed_at);
     msg.reasoning = turn.reasoning.clone();
     msg.tool_calls = turn.tool_calls.clone();
