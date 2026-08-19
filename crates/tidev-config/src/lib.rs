@@ -370,6 +370,8 @@ pub struct UiConfig {
     /// loop is busy. See [`SendWhileBusy`].
     #[serde(default)]
     pub send_while_busy: SendWhileBusy,
+    #[serde(default = "default_right_sidebar_visible")]
+    pub right_sidebar_visible: bool,
 }
 
 fn default_scroll_speed() -> f32 {
@@ -377,6 +379,9 @@ fn default_scroll_speed() -> f32 {
 }
 fn default_tab_width() -> usize {
     4
+}
+fn default_right_sidebar_visible() -> bool {
+    true
 }
 
 impl Default for UiConfig {
@@ -391,6 +396,7 @@ impl Default for UiConfig {
             collapse_thinking: false,
             collapse_diffs: false,
             send_while_busy: SendWhileBusy::Queue,
+            right_sidebar_visible: default_right_sidebar_visible(),
         }
     }
 }

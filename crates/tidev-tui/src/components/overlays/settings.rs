@@ -140,6 +140,12 @@ impl SettingsPanel {
                         },
                         key: SettingKey::SendWhileBusy,
                     },
+                    SettingItem {
+                        name: String::from("Right sidebar"),
+                        description: String::from("Show the right-hand info sidebar"),
+                        setting_type: SettingType::Toggle(config.ui.right_sidebar_visible),
+                        key: SettingKey::RightSidebarVisible,
+                    },
                 ],
             },
             SettingCategory {

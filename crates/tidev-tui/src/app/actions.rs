@@ -92,6 +92,10 @@ fn apply_setting_change(
             }
             _ => false,
         },
+        (SettingKey::RightSidebarVisible, SettingValue::Bool(value)) => {
+            config.ui.right_sidebar_visible = value;
+            true
+        }
         _ => false,
     }
 }
@@ -106,6 +110,18 @@ impl App {
                 }
                 Action::CopyLastAssistant => {
                     self.copy_last_assistant_message();
+                }
+                Action::ToggleRightSidebar(visible) => {
+                    let target = visible.unwrap_or(!self.runtime.config().ui.right_sidebar_visible);
+                    let key = SettingKey::RightSidebarVisible;
+                    let value = SettingValue::Bool(target);
+                    // Reuse Settings handling for persistence and overlay sync.
+                    // Push Notice first so Settings is popped and persisted before the notice is shown.
+                    queue.push(Action::Notice(format!(
+                        "Right sidebar {}",
+                        if target { "shown" } else { "hidden" }
+                    )));
+                    queue.push(Action::Settings(SettingsAction::Change { key, value }));
                 }
                 Action::Overlay(OverlayAction::Open(kind)) => {
                     self.open_overlay(kind);

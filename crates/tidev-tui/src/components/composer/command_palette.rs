@@ -49,6 +49,8 @@ pub(crate) enum CommandAction {
     /// Copy the most recent completed assistant message.
     CopyLastAssistant,
     Git,
+    /// Toggle the right-hand sidebar.
+    ToggleRightSidebar,
 }
 
 // ---------------------------------------------------------------------------
@@ -205,6 +207,12 @@ pub(crate) static COMMANDS: &[CommandSpec] = &[
         aliases: &[],
         description: "Open the Git workspace panel",
         action: CommandAction::Git,
+    },
+    CommandSpec {
+        name: "right-sidebar",
+        aliases: &[],
+        description: "Toggle the right-hand sidebar",
+        action: CommandAction::ToggleRightSidebar,
     },
 ];
 
@@ -532,6 +540,29 @@ pub(crate) fn execute_command(
                 vec![Action::Overlay(OverlayAction::Open(OverlayKind::GitPanel))]
             } else {
                 vec![Action::Notice("Usage: /git".to_string())]
+            }
+        }
+        CommandAction::ToggleRightSidebar => {
+            if args.is_empty() || args.len() == 1 && args[0] == "toggle" {
+                vec![Action::ToggleRightSidebar(None)]
+            } else if args.len() == 1 {
+                match args[0].as_str() {
+                    "on" | "show" | "open" | "true" | "1" | "enable" | "enabled" => {
+                        vec![Action::ToggleRightSidebar(Some(true))]
+                    }
+                    "off" | "hide" | "close" | "false" | "0" | "disable" | "disabled" => {
+                        vec![Action::ToggleRightSidebar(Some(false))]
+                    }
+                    _ => {
+                        vec![Action::Notice(
+                            "Usage: /right-sidebar [on|off|toggle]".to_string(),
+                        )]
+                    }
+                }
+            } else {
+                vec![Action::Notice(
+                    "Usage: /right-sidebar [on|off|toggle]".to_string(),
+                )]
             }
         }
     }

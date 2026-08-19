@@ -152,6 +152,7 @@ pub(crate) enum SettingKey {
     CollapseThinking,
     CollapseDiffs,
     SendWhileBusy,
+    RightSidebarVisible,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -287,6 +288,8 @@ pub(crate) enum Action {
     Git(GitAction),
     /// Copy the most recent completed assistant message to the clipboard.
     CopyLastAssistant,
+    /// Toggle the right-hand sidebar. `None` means flip current value.
+    ToggleRightSidebar(Option<bool>),
 
     // ── Tool approval pipeline ──
     /// Result from a WorkspaceBoundaryDialog.

@@ -291,14 +291,19 @@ impl App {
         }
 
         // Determine sidebar visibility and split the layout.
-        // Use the same threshold as the old TUI.
+        // Controlled solely by the persisted flag with a minimal width guard
+        // to avoid a broken layout on very narrow terminals.
         const SIDEBAR_GAP: u16 = 2;
+        const MIN_MAIN_WIDTH: u16 = 20;
         let sidebar_width = self.runtime.config().ui.sidebar_width;
-        let sidebar_visible =
-            area.width >= sidebar_width.saturating_add(70).saturating_add(SIDEBAR_GAP);
+        let flag_visible = self.runtime.config().ui.right_sidebar_visible;
+        let min_width_for_sidebar = sidebar_width
+            .saturating_add(SIDEBAR_GAP)
+            .saturating_add(MIN_MAIN_WIDTH);
+        let sidebar_visible = flag_visible && area.width >= min_width_for_sidebar;
         let (main_area, sidebar_area) = if sidebar_visible {
             let split = ratatui::layout::Layout::horizontal([
-                ratatui::layout::Constraint::Min(20),
+                ratatui::layout::Constraint::Min(MIN_MAIN_WIDTH),
                 ratatui::layout::Constraint::Length(SIDEBAR_GAP),
                 ratatui::layout::Constraint::Length(sidebar_width),
             ])
