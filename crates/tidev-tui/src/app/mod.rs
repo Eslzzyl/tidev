@@ -151,6 +151,10 @@ pub struct App {
     /// Tracks instruction sources already shown as "Loaded instructions from" messages
     /// in the current session.  Pure in-memory dedup — never written to the DB.
     shown_instruction_sources: Vec<String>,
+    /// Instruction sources reported while tool results are still streaming.
+    /// They are rendered only after StreamEnd so the notification cannot split
+    /// an assistant message from its tool-result block.
+    pending_instruction_sources: HashMap<Uuid, Vec<String>>,
 
     // ── Tool approval pipeline (per-session) ──
     /// Per-session pending tool approval states.
@@ -305,6 +309,7 @@ impl App {
             terminal_area: Rect::new(0, 0, 0, 0),
             todos: Vec::new(),
             shown_instruction_sources: Vec::new(),
+            pending_instruction_sources: HashMap::new(),
             image_picker: {
                 log::info!("[img] from_query_stdio START");
                 let r = Picker::from_query_stdio();
@@ -385,9 +390,9 @@ impl App {
     /// instruction sources.  Deduplicates against sources already shown in
     /// this session (tracked by `shown_instruction_sources`).
     ///
-    /// **Does not persist.** The caller is responsible for persisting via
-    /// `Runtime::append_message` when cross-session replay is needed.
-    fn show_instruction_sources(&mut self, sources: &[String]) {
+    /// **Does not persist.** The backend persists the replay message; this
+    /// method only updates the live chat context.
+    fn show_instruction_sources(&mut self, sources: &[String], after_turn: bool) {
         let new_sources: Vec<&String> = sources
             .iter()
             .filter(|s| !self.shown_instruction_sources.contains(s))
@@ -418,8 +423,10 @@ impl App {
             )
         };
 
-        // Push as a System message into the current session's chat context
-        // for immediate display.
+        // Keep the notification adjacent to the user message that caused the
+        // initial instruction load.  If the turn already has assistant/tool
+        // messages (the deferred tool-discovery path), append after that
+        // complete block instead of splitting it.
         if let Some(sid) = self.current_session_id
             && let Some(ref mut chat) = self.message_list
         {
@@ -427,7 +434,19 @@ impl App {
                 && ctx.session_id == sid
             {
                 let system_msg = Message::new(MessageRole::System, &content);
-                ctx.push(system_msg);
+                let insert_at = if after_turn {
+                    ctx.messages.len()
+                } else {
+                    ctx.messages
+                        .iter()
+                        .rposition(|message| message.role == MessageRole::User)
+                        .map(|user_idx| user_idx + 1)
+                        .unwrap_or(ctx.messages.len())
+                };
+                let message_id = system_msg.id;
+                ctx.messages.insert(insert_at, system_msg);
+                ctx.message_app_data
+                    .insert(message_id, tidev_core::MessageAppData::default());
             }
             // Force a layout rebuild so the new message is rendered on
             // the next frame, even if no other dirty-triggering event
@@ -438,6 +457,19 @@ impl App {
         // Mark as shown in memory only — the backend owns `session_instruction_sources`.
         let owned: Vec<String> = new_sources.into_iter().cloned().collect();
         self.shown_instruction_sources.extend(owned);
+    }
+
+    /// Render instruction notifications deferred while tool results were in
+    /// flight.  StreamEnd is emitted after the final tool result has been
+    /// routed to MessageList, so appending here preserves the assistant/tool
+    /// block as well as the persisted message order on session reload.
+    pub(crate) fn flush_pending_instruction_sources(&mut self, session_id: Uuid) {
+        let Some(sources) = self.pending_instruction_sources.remove(&session_id) else {
+            return;
+        };
+        if Some(session_id) == self.current_session_id && !sources.is_empty() {
+            self.show_instruction_sources(&sources, true);
+        }
     }
 
     /// Accessor for `spinner_start` so tui.rs can compute spinner frame.

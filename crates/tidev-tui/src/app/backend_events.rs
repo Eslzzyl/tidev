@@ -70,7 +70,32 @@ impl App {
             } => {
                 log::info!("Instructions loaded: {sources:?}");
                 if Some(session_id) == self.current_session_id && !sources.is_empty() {
-                    self.show_instruction_sources(&sources);
+                    // Tool-discovered instruction sources are reported before
+                    // their tool results are appended to the chat context.  A
+                    // notification inserted at this point would split the
+                    // assistant/tool render block, and a subsequent session
+                    // reload would rebuild it in a different position.  Keep
+                    // it pending until StreamEnd; root/session instructions
+                    // (which arrive before streaming starts) can be shown now.
+                    let tool_results_in_flight = self
+                        .message_list
+                        .as_ref()
+                        .and_then(|chat| chat.active_chat_context())
+                        .is_some_and(|ctx| {
+                            ctx.messages.iter().rev().any(|message| {
+                                message.streaming
+                                    && message.role == tidev_llm::message::MessageRole::Assistant
+                                    && !message.tool_calls.is_empty()
+                            })
+                        });
+                    if tool_results_in_flight {
+                        self.pending_instruction_sources
+                            .entry(session_id)
+                            .or_default()
+                            .extend(sources);
+                    } else {
+                        self.show_instruction_sources(&sources, false);
+                    }
                 }
             }
             BackendEvent::Retrying {
@@ -288,10 +313,13 @@ impl App {
             BackendEvent::StreamEnd { session_id, .. }
                 if self.pending_compacts.remove(&session_id) && !self.has_active_request() =>
             {
+                self.flush_pending_instruction_sources(session_id);
                 // If a compact was queued and no request is active, run it now.
                 self.execute_compact();
             }
-            BackendEvent::StreamEnd { .. } => {}
+            BackendEvent::StreamEnd { session_id, .. } => {
+                self.flush_pending_instruction_sources(session_id);
+            }
             _ => {
                 // Events already forwarded to MessageList above:
                 //   Delta, ReasoningDelta, ToolCallUpdated, Finished, ToolCompleted,
