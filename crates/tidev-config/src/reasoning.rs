@@ -4,7 +4,8 @@
 
 pub use tidev_llm::reasoning::{
     ClaudeEffortLevel, DeepSeekV4ThinkingLevel, GlmThinkingLevel, Gpt5ThinkingLevel,
-    MiniMaxThinkingLevel, Qwen35ThinkingLevel, ThinkingLevel, ThinkingLevelType,
+    MiniMaxThinkingLevel, MuseSparkThinkingLevel, Qwen35ThinkingLevel, ThinkingLevel,
+    ThinkingLevelType,
 };
 
 /// Model name pattern matching rules.
@@ -25,6 +26,8 @@ impl ThinkingMatcher {
             ThinkingLevelType::Gpt5(Gpt5ThinkingLevel::Medium)
         } else if model_lower.contains("minimax") && model_lower.contains("m3") {
             ThinkingLevelType::MiniMax(MiniMaxThinkingLevel::High)
+        } else if model_lower.contains("muse") || model_lower.contains("spark") {
+            ThinkingLevelType::MuseSpark(MuseSparkThinkingLevel::Medium)
         } else if model_lower.contains("claude") {
             ThinkingLevelType::Claude(ClaudeEffortLevel::High)
         } else {
@@ -88,6 +91,14 @@ impl ThinkingMatcher {
                 ThinkingLevelType::Claude(ClaudeEffortLevel::Low),
                 ThinkingLevelType::Claude(ClaudeEffortLevel::Medium),
                 ThinkingLevelType::Claude(ClaudeEffortLevel::High),
+            ]
+        } else if id.contains("muse") || id.contains("spark") {
+            vec![
+                ThinkingLevelType::MuseSpark(MuseSparkThinkingLevel::Minimal),
+                ThinkingLevelType::MuseSpark(MuseSparkThinkingLevel::Low),
+                ThinkingLevelType::MuseSpark(MuseSparkThinkingLevel::Medium),
+                ThinkingLevelType::MuseSpark(MuseSparkThinkingLevel::High),
+                ThinkingLevelType::MuseSpark(MuseSparkThinkingLevel::XHigh),
             ]
         } else {
             vec![]

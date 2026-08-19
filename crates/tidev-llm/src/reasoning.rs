@@ -399,6 +399,70 @@ impl ClaudeEffortLevel {
     }
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MuseSparkThinkingLevel {
+    Minimal,
+    Low,
+    #[default]
+    Medium,
+    High,
+    XHigh,
+}
+
+impl MuseSparkThinkingLevel {
+    pub fn extra_body(&self) -> serde_json::Value {
+        match self {
+            Self::Minimal => serde_json::json!({
+                "reasoning_effort": "minimal"
+            }),
+            Self::Low => serde_json::json!({
+                "reasoning_effort": "low"
+            }),
+            Self::Medium => serde_json::json!({
+                "reasoning_effort": "medium"
+            }),
+            Self::High => serde_json::json!({
+                "reasoning_effort": "high"
+            }),
+            Self::XHigh => serde_json::json!({
+                "reasoning_effort": "xhigh"
+            }),
+        }
+    }
+
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::Minimal => "Minimal",
+            Self::Low => "Low",
+            Self::Medium => "Medium",
+            Self::High => "High",
+            Self::XHigh => "XHigh",
+        }
+    }
+
+    pub fn next(&self) -> Self {
+        match self {
+            Self::Minimal => Self::Low,
+            Self::Low => Self::Medium,
+            Self::Medium => Self::High,
+            Self::High => Self::XHigh,
+            Self::XHigh => Self::Minimal,
+        }
+    }
+
+    pub fn from_display_name(name: &str) -> Self {
+        match name.to_lowercase().as_str() {
+            "minimal" => Self::Minimal,
+            "low" => Self::Low,
+            "medium" => Self::Medium,
+            "high" => Self::High,
+            "xhigh" | "x_high" | "x-high" => Self::XHigh,
+            _ => Self::Medium,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Unified thinking level type
 // ---------------------------------------------------------------------------
@@ -415,6 +479,7 @@ pub enum ThinkingLevelType {
     Gpt5(Gpt5ThinkingLevel),
     MiniMax(MiniMaxThinkingLevel),
     Claude(ClaudeEffortLevel),
+    MuseSpark(MuseSparkThinkingLevel),
 }
 
 impl ThinkingLevelType {
@@ -427,6 +492,7 @@ impl ThinkingLevelType {
             Self::Gpt5(level) => level.display_name(),
             Self::MiniMax(level) => level.display_name(),
             Self::Claude(level) => level.display_name(),
+            Self::MuseSpark(level) => level.display_name(),
         }
     }
 
@@ -439,6 +505,7 @@ impl ThinkingLevelType {
             Self::Gpt5(level) => Self::Gpt5(level.next()),
             Self::MiniMax(level) => Self::MiniMax(level.next()),
             Self::Claude(level) => Self::Claude(level.next()),
+            Self::MuseSpark(level) => Self::MuseSpark(level.next()),
         }
     }
 
@@ -451,6 +518,7 @@ impl ThinkingLevelType {
             Self::Gpt5(level) => Some(level.extra_body()),
             Self::MiniMax(level) => Some(level.extra_body()),
             Self::Claude(level) => Some(level.extra_body()),
+            Self::MuseSpark(level) => Some(level.extra_body()),
         }
     }
 
@@ -481,6 +549,11 @@ impl ThinkingLevelType {
             Self::Gpt5(Gpt5ThinkingLevel::High) => Some("high"),
             Self::Gpt5(Gpt5ThinkingLevel::XHigh) => Some("xhigh"),
             Self::Gpt5(Gpt5ThinkingLevel::Max) => Some("max"),
+            Self::MuseSpark(MuseSparkThinkingLevel::Minimal) => Some("minimal"),
+            Self::MuseSpark(MuseSparkThinkingLevel::Low) => Some("low"),
+            Self::MuseSpark(MuseSparkThinkingLevel::Medium) => Some("medium"),
+            Self::MuseSpark(MuseSparkThinkingLevel::High) => Some("high"),
+            Self::MuseSpark(MuseSparkThinkingLevel::XHigh) => Some("xhigh"),
         }
     }
 
@@ -576,6 +649,9 @@ impl ThinkingLevelType {
             ["gpt5", level] => Self::Gpt5(Gpt5ThinkingLevel::from_display_name(level)),
             ["minimax", level] => Self::MiniMax(MiniMaxThinkingLevel::from_display_name(level)),
             ["claude", level] => Self::Claude(ClaudeEffortLevel::from_display_name(level)),
+            ["muse_spark" | "muse" | "spark", level] => {
+                Self::MuseSpark(MuseSparkThinkingLevel::from_display_name(level))
+            }
             _ => Self::None,
         }
     }
@@ -595,6 +671,9 @@ impl fmt::Display for ThinkingLevelType {
                 write!(f, "minimax:{}", level.display_name().to_lowercase())
             }
             Self::Claude(level) => write!(f, "claude:{}", level.display_name().to_lowercase()),
+            Self::MuseSpark(level) => {
+                write!(f, "muse_spark:{}", level.display_name().to_lowercase())
+            }
         }
     }
 }
