@@ -1195,18 +1195,35 @@ impl MessageList {
                 })
                 .map(|block| block.message_id);
             if let Some(block_id) = block_id {
-                if self.expanded_tool_results.contains(&block_id) {
-                    self.expanded_tool_results.remove(&block_id);
-                } else {
-                    self.expanded_tool_results.insert(block_id);
+                // Only tool-containing blocks are foldable. User/System/Shell/
+                // Error messages must remain selectable via mouse drag, so a
+                // hit on their card_bounds must not consume the click.
+                let is_foldable = self
+                    .layout_index
+                    .blocks
+                    .iter()
+                    .find(|b| b.message_id == block_id)
+                    .is_some_and(|block| {
+                        let msgs = ctx.visible_messages();
+                        let end = block.message_start_idx + block.message_count;
+                        msgs[block.message_start_idx..end]
+                            .iter()
+                            .any(|m| m.role == tidev_llm::message::MessageRole::Tool)
+                    });
+                if is_foldable {
+                    if self.expanded_tool_results.contains(&block_id) {
+                        self.expanded_tool_results.remove(&block_id);
+                    } else {
+                        self.expanded_tool_results.insert(block_id);
+                    }
+                    self.layout_index.mark_dirty(block_id);
+                    // A manual fold/unfold is an interaction with the current
+                    // viewport. Do not let the next redraw re-apply follow-tail
+                    // and move the user away from the card they clicked.
+                    self.follow_tail = false;
+                    self.dirty = true;
+                    return Some(Action::Noop);
                 }
-                self.layout_index.mark_dirty(block_id);
-                // A manual fold/unfold is an interaction with the current
-                // viewport. Do not let the next redraw re-apply follow-tail
-                // and move the user away from the card they clicked.
-                self.follow_tail = false;
-                self.dirty = true;
-                return Some(Action::Noop);
             }
         }
 
@@ -1244,22 +1261,36 @@ impl MessageList {
             return Some(Action::Noop);
         }
 
-        // Use the layout index to find which block was clicked.
+        // Fallback: layout-index hit test. Historically this toggled every
+        // block, which made User messages appear "clickable" and, after the
+        // card_bounds fast-path was added, masked the selection bug. Only
+        // tool-containing blocks are foldable, so restrict the toggle.
         let block_idx = self
             .layout_index
             .blocks
             .partition_point(|b| b.start_line + b.line_count <= absolute_line);
         if block_idx < self.layout_index.blocks.len() {
             let block = &self.layout_index.blocks[block_idx];
-            if block.message_count > 0 {
-                if self.expanded_tool_results.contains(&block.message_id) {
-                    self.expanded_tool_results.remove(&block.message_id);
-                } else {
-                    self.expanded_tool_results.insert(block.message_id);
+            if block.message_count > 0
+                && let Some(session_id) = self.active_session_id
+                && let Some(ctx) = self.chat_contexts.get(&session_id)
+            {
+                let msgs = ctx.visible_messages();
+                let end = block.message_start_idx + block.message_count;
+                let is_foldable = msgs[block.message_start_idx..end]
+                    .iter()
+                    .any(|m| m.role == tidev_llm::message::MessageRole::Tool);
+                if is_foldable {
+                    if self.expanded_tool_results.contains(&block.message_id) {
+                        self.expanded_tool_results.remove(&block.message_id);
+                    } else {
+                        self.expanded_tool_results.insert(block.message_id);
+                    }
+                    self.layout_index.mark_dirty(block.message_id);
+                    self.follow_tail = false;
+                    self.dirty = true;
+                    return Some(Action::Noop);
                 }
-                self.layout_index.mark_dirty(block.message_id);
-                self.follow_tail = false;
-                self.dirty = true;
             }
         }
 
