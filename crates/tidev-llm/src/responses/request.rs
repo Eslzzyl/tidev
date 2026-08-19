@@ -67,7 +67,9 @@ pub(super) fn build_responses_request(
                 // available. This preserves reasoning items and encrypted content
                 // that cannot be reconstructed from the display text alone.
                 if !message.metadata.responses_output_items.is_empty() {
-                    input_items.extend(message.metadata.responses_output_items.iter().cloned());
+                    input_items.extend(canonicalize_output_items(
+                        &message.metadata.responses_output_items,
+                    ));
                     continue;
                 }
 
@@ -187,6 +189,33 @@ pub(super) fn build_responses_request(
         // second time into the top-level request.
         extra_body: model.extra_body.clone(),
     })
+}
+
+/// Keep one final representation for each provider output item ID.
+///
+/// New responses use the authoritative `response.completed` output list, but
+/// this also makes sessions written by older tidev versions recoverable when
+/// they contain both an `output_item.done` snapshot and the final item.
+fn canonicalize_output_items(items: &[serde_json::Value]) -> Vec<serde_json::Value> {
+    let mut canonical = Vec::with_capacity(items.len());
+    for item in items {
+        let Some(id) = item.get("id").and_then(serde_json::Value::as_str) else {
+            canonical.push(item.clone());
+            continue;
+        };
+
+        if let Some(index) = canonical
+            .iter()
+            .position(|existing| existing.get("id").and_then(serde_json::Value::as_str) == Some(id))
+        {
+            // Preserve the original output position while replacing a partial
+            // snapshot with the later, complete representation.
+            canonical[index] = item.clone();
+        } else {
+            canonical.push(item.clone());
+        }
+    }
+    canonical
 }
 
 // ToolCallBuilder for Responses API
@@ -713,6 +742,63 @@ mod tests {
                 },
                 {
                     "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "visible text"}]
+                }
+            ])
+        );
+    }
+
+    #[test]
+    fn responses_assistant_replays_duplicate_output_ids_once() {
+        let model = LlmProviderConfig {
+            provider_id: "test".to_string(),
+            base_url: "https://api.openai.com/v1".to_string(),
+            api_type: ApiType::OpenAiResponses,
+            model_id: "gpt-5".to_string(),
+            request_model_id: Some("gpt-5".to_string()),
+            max_output_tokens: 4096,
+            temperature: None,
+            supports_images: false,
+            supports_parallel_tool_calls: true,
+            context_window: 128000,
+            system_prompt: None,
+            api_key: None,
+            extra_body: None,
+            thinking_level: crate::reasoning::ThinkingLevelType::None,
+        };
+        let mut assistant = Message::new(MessageRole::Assistant, "visible text");
+        assistant.metadata.responses_output_items = vec![
+            serde_json::json!({
+                "type": "reasoning",
+                "id": "rs_1",
+                "encrypted_content": "partial"
+            }),
+            serde_json::json!({
+                "type": "message",
+                "id": "msg_1",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "visible text"}]
+            }),
+            serde_json::json!({
+                "type": "reasoning",
+                "id": "rs_1",
+                "encrypted_content": "complete"
+            }),
+        ];
+
+        let request = build_responses_request(&model, vec![assistant], false, &[], None).unwrap();
+        assert_eq!(
+            request.input,
+            serde_json::json!([
+                {
+                    "type": "reasoning",
+                    "id": "rs_1",
+                    "encrypted_content": "complete"
+                },
+                {
+                    "type": "message",
+                    "id": "msg_1",
                     "role": "assistant",
                     "content": [{"type": "output_text", "text": "visible text"}]
                 }

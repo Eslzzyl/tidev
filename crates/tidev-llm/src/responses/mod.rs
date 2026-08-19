@@ -20,7 +20,7 @@ use log::{debug as log_debug, error as log_error};
 use self::error::{classify_responses_stream_error, response_error_details};
 use self::event::ResponseStreamEvent;
 use self::request::{ToolCallBuilder, build_responses_request};
-use self::types::ResponsesCompleteResponse;
+use self::types::{ResponseStreamResponse, ResponsesCompleteResponse};
 
 mod error;
 mod event;
@@ -406,13 +406,14 @@ pub(crate) async fn stream_responses(
                     response,
                     sequence_number: _,
                 } => {
-                    for item in response.output.iter() {
-                        if let Ok(raw_item) = serde_json::to_value(item)
-                            && !responses_output_items.contains(&raw_item)
-                        {
-                            responses_output_items.push(raw_item);
-                        }
-                    }
+                    // The output_item.done events are useful for streaming
+                    // tool-call handling, but response.completed carries the
+                    // authoritative final output array. Do not append both
+                    // representations: a completed item can have the same
+                    // id as its output_item.done snapshot while containing a
+                    // more complete payload (for example encrypted reasoning
+                    // content).
+                    responses_output_items = response_output_items(&response);
                     if let Some(usage) = response.usage {
                         let cached_tokens = usage
                             .input_tokens_details
@@ -578,6 +579,16 @@ pub(crate) async fn stream_responses(
         message: "Responses stream closed before response.completed".to_string(),
     }
     .into())
+}
+
+/// Serialize the final output list from `response.completed` for stateless
+/// replay on the next Responses API turn.
+fn response_output_items(response: &ResponseStreamResponse) -> Vec<serde_json::Value> {
+    response
+        .output
+        .iter()
+        .filter_map(|item| serde_json::to_value(item).ok())
+        .collect()
 }
 
 #[allow(clippy::too_many_arguments)]
