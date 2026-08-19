@@ -123,3 +123,31 @@ context_window = 256000
 max_output_tokens = 32768
 supports_streaming = true
 supports_images = true
+
+[providers.opencode-go.models.muse-spark-1-2-contributor]
+api_type = "openai_responses"
+base_url = "https://opencode.ai/zen/go/v1"
+request_model_id = "muse-spark-1.2-contributor"
+display_name = "Muse Spark 1.2 Contributor"
+context_window = 1048576
+max_output_tokens = 131072
+supports_streaming = true
+supports_images = true
+
+[providers.opencode-go.models.qwen-3-8-max]
+api_type = "anthropic"
+base_url = "https://opencode.ai/zen/go/v1/messages"
+request_model_id = "qwen3.8-max"
+display_name = "Qwen3.8 Max"
+context_window = 1000000
+max_output_tokens = 131072
+supports_streaming = true
+supports_images = true
+
+[providers.opencode-go.models.glm-5-3]
+request_model_id = "glm-5.3"
+display_name = "GLM-5.3"
+context_window = 1048576
+max_output_tokens = 131072
+supports_streaming = true
+supports_images = false
