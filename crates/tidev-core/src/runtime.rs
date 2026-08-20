@@ -1722,6 +1722,7 @@ pub struct RuntimeBuilder {
     workspace_root: Option<PathBuf>,
     config_dir: Option<PathBuf>,
     data_dir: Option<PathBuf>,
+    console_logging: Option<bool>,
 }
 
 impl RuntimeBuilder {
@@ -1730,6 +1731,7 @@ impl RuntimeBuilder {
             workspace_root: None,
             config_dir: None,
             data_dir: None,
+            console_logging: None,
         }
     }
 
@@ -1748,6 +1750,12 @@ impl RuntimeBuilder {
     /// Override the data directory (defaults to ~/.local/share/tidev).
     pub fn data_dir(mut self, path: impl Into<PathBuf>) -> Self {
         self.data_dir = Some(path.into());
+        self
+    }
+
+    /// Override whether log records are also written to stderr for this run.
+    pub fn console_logging(mut self, enabled: bool) -> Self {
+        self.console_logging = Some(enabled);
         self
     }
 
@@ -1784,7 +1792,10 @@ impl RuntimeBuilder {
 
         // 2. Config + auth (with project-level overlay).
         let workspace_root = self.workspace_root.clone().unwrap_or_default();
-        let config = AppConfig::load_with_overlay(&paths, &workspace_root)?;
+        let mut config = AppConfig::load_with_overlay(&paths, &workspace_root)?;
+        if let Some(enabled) = self.console_logging {
+            config.logging.console = enabled;
+        }
         let auth = AuthStore::load_or_create(&paths)?;
 
         // ── Startup initialisation ─────────────────────────────────
@@ -2261,8 +2272,7 @@ mod tests {
     #[tokio::test]
     async fn create_session_with_workspace_persists_requested_root() {
         let rt = make_test_runtime().await;
-        let other_dir =
-            std::env::temp_dir().join(format!("tidev-other-ws-{}", Uuid::new_v4()));
+        let other_dir = std::env::temp_dir().join(format!("tidev-other-ws-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&other_dir).expect("temp dir should be created");
 
         let sid = rt

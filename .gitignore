@@ -3,3 +3,4 @@
 task.md
 .DS_Store
 /doc/
+/crates/tidev-web/web-dist

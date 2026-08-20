@@ -45,6 +45,21 @@ enum Command {
     /// Start as an ACP agent over stdio
     Acp,
 
+    /// Start the Web frontend and API server
+    Web {
+        /// Bind address (defaults to 127.0.0.1)
+        #[arg(long, default_value = "127.0.0.1")]
+        host: String,
+
+        /// Listen port (defaults to 26502)
+        #[arg(long, default_value_t = 26502)]
+        port: u16,
+
+        /// Workspace root (defaults to the current directory)
+        #[arg(long)]
+        workspace: Option<PathBuf>,
+    },
+
     /// Export session(s) to an uncompressed SQLite database
     Export {
         /// Session UUID(s) to export (repeat for multiple)
@@ -208,6 +223,18 @@ async fn main() -> Result<()> {
             stdin,
         }) => headless::run(workspace, instruction, instruction_file, stdin).await,
         Some(Command::Acp) => tidev_acp::run_acp_agent().await,
+        Some(Command::Web {
+            host,
+            port,
+            workspace,
+        }) => {
+            tidev_web::run(tidev_web::WebOptions {
+                host,
+                port,
+                workspace,
+            })
+            .await
+        }
 
         // ── Export ──────────────────────────────────────────────
         Some(Command::Export {
