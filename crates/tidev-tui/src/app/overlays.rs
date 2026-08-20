@@ -38,7 +38,7 @@ impl App {
             }
             OverlayKind::AgentsPanel => Some(Box::new(AgentsPanel::new())),
             OverlayKind::SkillsPanel => {
-                let catalog = &self.runtime.skills;
+                let catalog = self.runtime.skills();
                 let skills: Vec<SkillItem> = catalog
                     .all()
                     .iter()
@@ -55,7 +55,7 @@ impl App {
                 Some(Box::new(SettingsPanel::new(&config)))
             }
             OverlayKind::McpServerPanel => {
-                let mcp = self.runtime.tool_registry.mcp_manager();
+                let mcp = self.runtime.tool_registry().mcp_manager();
                 Some(Box::new(McpServerPanel::new(mcp)))
             }
             OverlayKind::SearchPanel => {

@@ -19,9 +19,9 @@
 //! ```
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex as StdMutex, OnceLock, RwLock as StdRwLock};
+use std::sync::{Arc, Mutex as StdMutex, RwLock as StdRwLock};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -50,6 +50,7 @@ use crate::message_buf::CoreMessageBuffer;
 use crate::registry::ToolRegistry;
 use crate::session::SessionManager;
 use crate::tool_def::to_llm_tool_def;
+use crate::workspace::Workspace;
 
 // ---------------------------------------------------------------------------
 // TodoPersistence impl — bridges tidev-tools to tidev-storage.
@@ -91,19 +92,18 @@ pub struct Runtime {
     pub session_manager: SessionManager,
     /// LLM client.
     pub llm: tidev_llm::LlmClient,
-    /// Tool registry.
-    pub tool_registry: Arc<ToolRegistry>,
-    /// Skills catalog.
-    pub skills: tidev_tools::SkillCatalog,
     /// Resolved model (for loop construction). Behind RwLock so the TUI can
     /// update it when the user switches providers.
     active_model: Arc<StdRwLock<tidev_config::auth::ActiveModel>>,
     /// Per-session cancellation tokens for active agent loops.
     active_loop_cancels: Arc<std::sync::Mutex<HashMap<Uuid, CancellationToken>>>,
-    /// Snapshot service for undo/redo (optional).
-    snapshot: Option<tidev_snapshot::SnapshotService>,
-    /// Read-only Git service for the user's workspace repository.
-    git: crate::git::GitService,
+
+    /// Default workspace (the directory the runtime was started in).
+    default_workspace: Arc<Workspace>,
+    /// Cache of additional workspaces, keyed by canonical path.
+    workspaces: Arc<std::sync::Mutex<HashMap<PathBuf, Arc<Workspace>>>>,
+    /// Todo persistence bridge shared across workspaces.
+    todo: Arc<dyn tidev_tools::TodoPersistence + Send + Sync + 'static>,
 
     /// Per-session message buffers, keyed by session ID.
     buffers: Arc<Mutex<HashMap<Uuid, Arc<RwLock<CoreMessageBuffer>>>>>,
@@ -161,13 +161,6 @@ pub struct Runtime {
 
     /// Cancellation token for background cleanup tasks.
     cleanup_cancel: CancellationToken,
-
-    /// Workspace root.
-    workspace_root: PathBuf,
-
-    /// File search index for @mention autocomplete.
-    /// Lazily initialised on first access.
-    file_search_index: OnceLock<Arc<FileSearchIndex>>,
 }
 
 /// RAII guard that removes a session from `busy_sessions` and
@@ -356,14 +349,14 @@ impl Runtime {
         cm
     }
 
-    /// Get the tool registry.
+    /// Get the default workspace's tool registry.
     pub fn tool_registry(&self) -> &ToolRegistry {
-        &self.tool_registry
+        self.default_workspace.tool_registry()
     }
 
-    /// Get the MCP manager (delegates to tool registry).
+    /// Get the default workspace's MCP manager.
     pub fn mcp_manager(&self) -> &McpManager {
-        self.tool_registry.mcp_manager()
+        self.default_workspace.mcp_manager()
     }
 
     /// Get the LLM client.
@@ -378,12 +371,62 @@ impl Runtime {
 
     /// Get the workspace root.
     pub fn workspace_root(&self) -> &PathBuf {
-        &self.workspace_root
+        self.default_workspace.root()
     }
 
-    /// Get a cloneable read-only Git service for the workspace repository.
+    /// Get a cloneable read-only Git service for the default workspace repository.
     pub fn git(&self) -> crate::git::GitService {
-        self.git.clone()
+        self.default_workspace.git()
+    }
+
+    /// Get the default workspace's skills catalog.
+    pub fn skills(&self) -> &tidev_tools::SkillCatalog {
+        self.default_workspace.skills()
+    }
+
+    /// Get or create a workspace for the given directory.
+    pub async fn workspace_for(&self, path: impl AsRef<Path>) -> Result<Arc<Workspace>> {
+        use tidev_utils::path::canonicalize_display;
+
+        let path = canonicalize_display(path.as_ref());
+        {
+            let map = self.workspaces.lock().unwrap();
+            if let Some(ws) = map.get(&path) {
+                return Ok(Arc::clone(ws));
+            }
+        }
+
+        let paths = self.paths.clone();
+        let auth = self.auth.read().unwrap().clone();
+        let active_model = self.active_model.read().unwrap().clone();
+        let todo = self.todo.clone();
+        let max_output_bytes = active_model.max_output_tokens * 2;
+        let path_key = path.clone();
+
+        let workspace = tokio::task::spawn_blocking(move || {
+            let config = AppConfig::load_with_overlay(&paths, &path_key)?;
+            Workspace::new(path_key, &paths, &config, &auth, max_output_bytes, todo)
+        })
+        .await
+        .context("workspace initialisation panicked")??;
+
+        let workspace = Arc::new(workspace);
+        let mut map = self.workspaces.lock().unwrap();
+        if let Some(existing) = map.get(&path) {
+            return Ok(Arc::clone(existing));
+        }
+
+        if !workspace.config().mcp.is_empty() {
+            let mcp = workspace.mcp_manager().clone();
+            tokio::spawn(async move {
+                if let Err(error) = mcp.refresh_all().await {
+                    log::warn!("failed to refresh MCP servers for workspace: {error}");
+                }
+            });
+        }
+
+        map.insert(path, Arc::clone(&workspace));
+        Ok(workspace)
     }
 
     /// Get the config directory.
@@ -488,13 +531,7 @@ impl Runtime {
     /// workspace root.  Background indexing and file-system watching
     /// are managed by the index itself.
     pub fn file_search_index(&self) -> Arc<FileSearchIndex> {
-        self.file_search_index
-            .get_or_init(|| {
-                let index = Arc::new(FileSearchIndex::new());
-                index.ensure_background_indexing(&self.workspace_root);
-                index
-            })
-            .clone()
+        self.default_workspace.file_search_index()
     }
 
     /// Save a thinking level preference for an agent type to config.
@@ -517,13 +554,27 @@ impl Runtime {
         Ok(())
     }
 
-    /// Create a new session with current workspace and active model settings.
+    /// Create a new session in the default workspace.
     pub fn create_default_session(&self, title: &str) -> Result<Uuid> {
+        self.create_session_in_workspace(&self.default_workspace, title)
+    }
+
+    /// Create a new session in the requested workspace directory.
+    pub async fn create_session_with_workspace(
+        &self,
+        title: &str,
+        workspace: impl AsRef<Path>,
+    ) -> Result<Uuid> {
+        let workspace = self.workspace_for(workspace).await?;
+        self.create_session_in_workspace(&workspace, title)
+    }
+
+    fn create_session_in_workspace(&self, workspace: &Workspace, title: &str) -> Result<Uuid> {
         let session_id = Uuid::new_v4();
-        let model = self.active_model.read().unwrap();
+        let model = self.active_model.read().unwrap().clone();
         self.session_manager.create_session(
             session_id,
-            &self.workspace_root.to_string_lossy(),
+            &workspace.root().to_string_lossy(),
             &model.provider_id,
             &model.provider_display_name,
             &model.model_id,
@@ -1026,28 +1077,40 @@ impl Runtime {
         let event_bus = self.event_bus(session_id).await;
 
         // Compose or load the system prompt (mode-agnostic — see inject_mode_reminder).
-        let (system_prompt, session_start_hash) = {
+        let (system_prompt, session_start_hash, workspace) = {
             let session = self.session_manager.load_session(session_id)?;
             let ssh = session.as_ref().and_then(|s| s.snapshot_start_hash.clone());
-            match session {
-                Some(s) if !s.system_prompt.is_empty() => (s.system_prompt, ssh),
+            let workspace_path = session
+                .as_ref()
+                .map(|s| s.workspace_root.clone())
+                .unwrap_or_default();
+            let workspace = if workspace_path.is_empty() {
+                Arc::clone(&self.default_workspace)
+            } else {
+                self.workspace_for(&workspace_path).await?
+            };
+            let sp = match session {
+                Some(s) if !s.system_prompt.is_empty() => s.system_prompt,
                 _ => {
                     let sp = crate::agent_ctx::compose_system_prompt(
                         crate::agent_type::AgentType::General,
-                        &self.workspace_root,
-                        &self.skills,
+                        workspace.root(),
+                        workspace.skills(),
                     );
                     // Persist system prompt to the session record.
                     self.session_manager.update_system_prompt(session_id, &sp)?;
-                    (sp, ssh)
+                    sp
                 }
-            }
+            };
+            (sp, ssh, workspace)
         };
 
         let active_model = self.active_model.read().unwrap().clone();
         let llm_config = crate::agent_ctx::to_llm_provider_config(&active_model);
 
-        let filtered_tools = self.tool_registry.definitions_for_model(&active_model);
+        let filtered_tools = workspace
+            .tool_registry()
+            .definitions_for_model(&active_model);
         // The buffer is shared with the spawned task (for persisting queued
         // prompts after a turn) and moved into the CoreContext.
         let buffer = self.message_buffer(session_id).await;
@@ -1056,7 +1119,7 @@ impl Runtime {
         let ctx = crate::agent_ctx::CoreContext::new(
             self.llm.clone(),
             self.session_manager.clone(),
-            self.tool_registry.clone(),
+            workspace.tool_registry_arc(),
             context_manager,
             buffer,
             event_bus,
@@ -1067,9 +1130,9 @@ impl Runtime {
             llm_config,
             cancel.clone(),
             filtered_tools,
-            self.workspace_root.clone(),
+            workspace.root().to_path_buf(),
             active_model.clone(),
-            self.snapshot.clone(),
+            workspace.snapshot().cloned(),
             self.config.clone(),
             self.auth.clone(),
             session_start_hash,
@@ -1383,7 +1446,7 @@ impl Runtime {
         };
         let active_model = self.active_model.read().unwrap().clone();
         let tools: Vec<tidev_llm::ToolDefinition> = self
-            .tool_registry
+            .tool_registry()
             .definitions_for_model(&active_model)
             .iter()
             .map(to_llm_tool_def)
@@ -1470,19 +1533,30 @@ impl Runtime {
         messages: &[crate::SessionMessage],
         target_id: Uuid,
     ) -> Result<()> {
+        // Resolve the workspace this session belongs to.
+        let session = self
+            .session_manager
+            .load_session(session_id)?
+            .context("session not found")?;
+        let workspace = if session.workspace_root.is_empty() {
+            Arc::clone(&self.default_workspace)
+        } else {
+            self.workspace_for(&session.workspace_root).await?
+        };
+        let snapshot = workspace.snapshot().cloned();
+
         // 1. Reuse existing redo_snapshot if one exists (maintains undo chain),
         //    otherwise capture current workspace as the redo point.
         let redo_hash: Option<Vec<u8>> = match self.session_manager.load_revert_state(session_id)? {
             Some((_, Some(existing))) => {
                 // Restore workspace to the pre-undo state first.
                 let s = String::from_utf8_lossy(&existing).to_string();
-                if let Some(ref snap) = self.snapshot {
+                if let Some(ref snap) = snapshot {
                     snap.restore(&s).await?;
                 }
                 Some(existing)
             }
-            _ => self
-                .snapshot
+            _ => snapshot
                 .as_ref()
                 .and_then(|s| s.track().ok())
                 .flatten()
@@ -1492,7 +1566,7 @@ impl Runtime {
         // 2. Collect patches after target, then revert to roll files back.
         let patches = crate::undo::collect_patches_after_message(messages, target_id);
         if !patches.is_empty()
-            && let Some(ref snap) = self.snapshot
+            && let Some(ref snap) = snapshot
         {
             snap.revert(&patches).await?;
         }
@@ -1575,8 +1649,17 @@ impl Runtime {
 
     /// Full unrevert: restore the pre-undo workspace snapshot and clear state.
     async fn unrevert(&self, session_id: Uuid, redo_snapshot: &[u8]) -> Result<()> {
+        let session = self
+            .session_manager
+            .load_session(session_id)?
+            .context("session not found")?;
+        let workspace = if session.workspace_root.is_empty() {
+            Arc::clone(&self.default_workspace)
+        } else {
+            self.workspace_for(&session.workspace_root).await?
+        };
         let hash_str = String::from_utf8_lossy(redo_snapshot);
-        if let Some(ref snap) = self.snapshot {
+        if let Some(snap) = workspace.snapshot() {
             snap.restore(&hash_str).await?;
         }
 
@@ -1761,45 +1844,32 @@ impl RuntimeBuilder {
         )?;
         log::info!("startup: LLM client ready in {:?}", _t_llm.elapsed());
 
-        // 8. Skills catalog.
-        let _t_skills = Instant::now();
-        let skills = tidev_tools::SkillCatalog::discover(
-            &workspace_root,
-            &paths.config_dir,
-            &config.skills,
-            None,
-        );
-        log::info!("startup: skills catalog ready in {:?}", _t_skills.elapsed());
+        // 8. Todo persistence bridge.
+        let todo: Arc<dyn tidev_tools::TodoPersistence + Send + Sync + 'static> =
+            Arc::new(TodoStore {
+                store: store.clone(),
+            });
 
-        // 9. Todo persistence bridge.
-        let todo = Arc::new(TodoStore {
-            store: store.clone(),
-        });
-
-        // 9b. MCP manager.
-        let _t_mcp = Instant::now();
-        let mcp_manager = McpManager::new(workspace_root.clone(), config.mcp.servers.clone());
-        log::info!("startup: MCP manager ready in {:?}", _t_mcp.elapsed());
-
-        // 10. Tool registry.
-        let _t_tools = Instant::now();
+        // 9. Default workspace (skills, MCP, tool registry, snapshot, git).
+        let _t_workspace = Instant::now();
         let max_output_bytes = active_model.max_output_tokens * 2; // heuristic: 2x output tokens ≈ bytes
-        let tool_registry = Arc::new(ToolRegistry::new(
-            workspace_root.clone(),
-            paths.config_dir.clone(),
-            skills.clone(),
-            todo,
-            config.websearch.clone(),
-            auth.clone(),
+        let default_workspace = Arc::new(Workspace::new(
+            workspace_root,
+            &paths,
+            &config,
+            &auth,
             max_output_bytes,
-            mcp_manager,
-        ));
-        log::info!("startup: tool registry ready in {:?}", _t_tools.elapsed());
+            todo.clone(),
+        )?);
+        log::info!(
+            "startup: default workspace ready in {:?}",
+            _t_workspace.elapsed()
+        );
 
-        // 10b. Best-effort MCP server refresh (don't block startup on failures).
+        // 9b. Best-effort MCP server refresh for the default workspace.
         let _t_mcp_refresh = Instant::now();
         if !config.mcp.is_empty() {
-            if let Err(e) = tool_registry.mcp_manager().refresh_all().await {
+            if let Err(e) = default_workspace.mcp_manager().refresh_all().await {
                 log::warn!("MCP server refresh (best-effort): {e:#}");
             }
             log::info!(
@@ -1807,20 +1877,6 @@ impl RuntimeBuilder {
                 _t_mcp_refresh.elapsed()
             );
         }
-
-        // 11. Snapshot service.
-        let _t_snap = Instant::now();
-        let snapshot_config = Arc::new(config.snapshot.clone());
-        let snapshot = if snapshot_config.enabled {
-            Some(tidev_snapshot::SnapshotService::new(
-                &workspace_root,
-                &paths,
-                snapshot_config,
-            )?)
-        } else {
-            None
-        };
-        log::info!("startup: snapshot service ready in {:?}", _t_snap.elapsed());
 
         // Load saved thinking level preference from database (if any).
         if let Ok(Some(level_str)) =
@@ -1858,7 +1914,7 @@ impl RuntimeBuilder {
         }
 
         // 13b. Start background snapshot GC (hourly, with initial 60s delay).
-        if let Some(ref svc) = snapshot {
+        if let Some(svc) = default_workspace.snapshot() {
             let cancel = cleanup_cancel.clone();
             let svc = svc.clone();
             tokio::spawn(async move {
@@ -1909,18 +1965,21 @@ impl RuntimeBuilder {
 
         log::info!("startup: runtime ready in {:?}", _start.elapsed());
 
+        let default_workspace_root = default_workspace.root().to_path_buf();
+        let mut workspaces = HashMap::new();
+        workspaces.insert(default_workspace_root, Arc::clone(&default_workspace));
+
         Ok(Runtime {
             config: Arc::new(StdRwLock::new(config)),
             auth: Arc::new(StdRwLock::new(auth)),
             paths,
             session_manager,
             llm,
-            tool_registry,
-            skills,
             active_model,
             active_loop_cancels: Arc::new(std::sync::Mutex::new(HashMap::new())),
-            snapshot,
-            git: crate::git::GitService::new(workspace_root.clone()),
+            default_workspace,
+            workspaces: Arc::new(std::sync::Mutex::new(workspaces)),
+            todo,
             buffers: Arc::new(Mutex::new(HashMap::new())),
             context_managers: Arc::new(Mutex::new(HashMap::new())),
             event_tx,
@@ -1937,8 +1996,6 @@ impl RuntimeBuilder {
             session_start_lock: Arc::new(std::sync::Mutex::new(())),
             prompt_submission_lock: Arc::new(Mutex::new(())),
             cleanup_cancel,
-            workspace_root,
-            file_search_index: OnceLock::new(),
         })
     }
 }
@@ -2199,5 +2256,28 @@ mod tests {
         assert!(error.to_string().contains("different content"));
 
         rt.cancel_session(sid).await;
+    }
+
+    #[tokio::test]
+    async fn create_session_with_workspace_persists_requested_root() {
+        let rt = make_test_runtime().await;
+        let other_dir =
+            std::env::temp_dir().join(format!("tidev-other-ws-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&other_dir).expect("temp dir should be created");
+
+        let sid = rt
+            .create_session_with_workspace("other workspace session", &other_dir)
+            .await
+            .expect("session should be created");
+
+        let session = rt
+            .session_manager
+            .load_session(sid)
+            .expect("session should load")
+            .expect("session should exist");
+        let expected = tidev_utils::path::canonicalize_display(&other_dir)
+            .to_string_lossy()
+            .to_string();
+        assert_eq!(session.workspace_root, expected);
     }
 }

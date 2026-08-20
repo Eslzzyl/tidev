@@ -19,6 +19,7 @@ pub mod system_info;
 mod tool_adapter;
 mod tool_def;
 pub mod undo;
+pub mod workspace;
 
 pub use agent_ctx::CoreContext;
 pub use approval::{

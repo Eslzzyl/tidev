@@ -1,6 +1,5 @@
 //! ACP v2 request handlers for tidev.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use agent_client_protocol::schema::v2 as acp;
@@ -108,12 +107,17 @@ pub(crate) fn build_agent(
                   cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>| {
                 let state = state.clone();
                 async move {
-                    ensure_workspace(&state.runtime, &request.cwd)?;
-                    merge_mcp_servers(&state.runtime, &request.mcp_servers).await;
+                    let workspace = state
+                        .runtime
+                        .workspace_for(&request.cwd.0)
+                        .await
+                        .map_err(internal_error)?;
+                    merge_mcp_servers(workspace.mcp_manager(), &request.mcp_servers).await;
                     let title = format!("ACP session - {}", request.cwd.0.display());
                     let session_id = state
                         .runtime
-                        .create_default_session(&title)
+                        .create_session_with_workspace(&title, &request.cwd.0)
+                        .await
                         .map_err(internal_error)?;
                     activate(&state, session_id).await;
                     let response = acp::NewSessionResponse::new(session_id.to_string())
@@ -140,7 +144,12 @@ pub(crate) fn build_agent(
                 async move {
                     let session_id = parse_session_id(&request.session_id)?;
                     load_and_activate(&state, session_id, &request.cwd).await?;
-                    merge_mcp_servers(&state.runtime, &request.mcp_servers).await;
+                    let workspace = state
+                        .runtime
+                        .workspace_for(&request.cwd.0)
+                        .await
+                        .map_err(internal_error)?;
+                    merge_mcp_servers(workspace.mcp_manager(), &request.mcp_servers).await;
                     if matches!(request.replay_from, Some(acp::ReplayFrom::Start(_))) {
                         replay_messages(&state, session_id, &cx).await;
                     }
@@ -567,20 +576,6 @@ async fn apply_config_option(
     Ok(())
 }
 
-fn ensure_workspace(
-    runtime: &Runtime,
-    cwd: &acp::AbsolutePath,
-) -> Result<(), agent_client_protocol::Error> {
-    let requested = PathBuf::from(&cwd.0);
-    if requested != *runtime.workspace_root() {
-        return Err(invalid_error(format!(
-            "ACP v2 only supports the runtime workspace: {}",
-            runtime.workspace_root().display()
-        )));
-    }
-    Ok(())
-}
-
 fn extract_prompt(
     blocks: &[acp::ContentBlock],
 ) -> Result<(String, Vec<MessageAttachment>), agent_client_protocol::Error> {
@@ -614,7 +609,7 @@ fn extract_prompt(
     Ok((text.join("\n"), attachments))
 }
 
-async fn merge_mcp_servers(runtime: &Runtime, servers: &[acp::McpServer]) {
+async fn merge_mcp_servers(mcp_manager: &tidev_core::mcp::McpManager, servers: &[acp::McpServer]) {
     for server in servers {
         let converted = match server {
             acp::McpServer::Http(server) => Some((
@@ -644,10 +639,7 @@ async fn merge_mcp_servers(runtime: &Runtime, servers: &[acp::McpServer]) {
             _ => None,
         };
         if let Some((name, config)) = converted
-            && let Err(error) = runtime
-                .mcp_manager()
-                .upsert_server(name.clone(), config)
-                .await
+            && let Err(error) = mcp_manager.upsert_server(name.clone(), config).await
         {
             log::warn!("ACP v2 failed to add MCP server '{name}': {error}");
         }
