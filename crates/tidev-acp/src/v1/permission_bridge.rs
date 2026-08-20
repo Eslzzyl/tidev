@@ -1,30 +1,31 @@
-//! Permission bridge: translates tidev [`TuiRequest`]s into ACP
+//! Permission bridge: translates tidev [`FrontendRequest`]s into ACP
 //! [`session/request_permission`](acp::RequestPermissionRequest) requests.
 //!
-//! Runs as a background task that consumes `TuiRequest`s from the channel,
+//! Runs as a background task that consumes `FrontendRequest`s from the channel,
 //! sends permission requests to the ACP client, waits for the user's
-//! response, and sends back [`TuiResponse`]s.
+//! response, and sends back [`FrontendResponse`]s.
 
 use agent_client_protocol::schema::v1 as acp;
-use tidev_core::{ApprovedTool, TuiRequest, TuiRequestKind, TuiResponse};
+use tidev_core::{ApprovedTool, FrontendRequest, FrontendRequestKind, FrontendResponse, Runtime};
 use tidev_llm::message::ToolExecutionResult;
 
 use crate::v1::types::tool_kind;
 
 /// Spawn the permission bridge task.
 ///
-/// This task consumes [`TuiRequest`]s from the given channel, converts each
+/// This task consumes [`FrontendRequest`]s from the given channel, converts each
 /// to an ACP [`session/request_permission`] request, sends it to the client
 /// via the given connection, waits for the response, and sends back a
-/// [`TuiResponse`] through the original oneshot channel.
+/// [`FrontendResponse`] through Runtime's approval broker.
 pub fn spawn(
-    mut request_rx: tokio::sync::mpsc::UnboundedReceiver<TuiRequest>,
+    runtime: Runtime,
+    mut request_rx: tokio::sync::mpsc::UnboundedReceiver<FrontendRequest>,
     cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         while let Some(request) = request_rx.recv().await {
             match request.kind {
-                TuiRequestKind::ToolApproval(tools_with_violations) => {
+                FrontendRequestKind::ToolApproval(tools_with_violations) => {
                     let acp_session_id = acp::SessionId::new(request.session_id.to_string());
                     let mut approved_tools = Vec::new();
 
@@ -116,9 +117,8 @@ pub fn spawn(
                     }
 
                     // Send the combined response back.
-                    let _ = request
-                        .response_tx
-                        .send(TuiResponse::ToolApproval(approved_tools));
+                    let response = FrontendResponse::ToolApproval(approved_tools);
+                    let _ = runtime.respond_to_request(request.request_id, response);
                 }
             }
         }

@@ -920,7 +920,7 @@ impl App {
                                 chat.follow_tail = true;
                             }
                             tokio::spawn(async move {
-                                if let Err(e) = rt
+                                if let Err(error) = rt
                                     .submit_prompt_with_attachments(
                                         sid,
                                         mode,
@@ -930,7 +930,7 @@ impl App {
                                     )
                                     .await
                                 {
-                                    log::error!("submit_prompt failed: {e}");
+                                    log::error!("submit_prompt failed: {error}");
                                 }
                             });
 

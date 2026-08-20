@@ -5,6 +5,7 @@ pub mod agent_type;
 pub mod approval;
 pub mod attachment;
 pub mod backend_event;
+mod event_hub;
 pub mod git;
 pub mod mcp;
 pub mod message_buf;
@@ -21,10 +22,11 @@ pub mod undo;
 
 pub use agent_ctx::CoreContext;
 pub use approval::{
-    ApprovedTool, PendingToolApproval, ToolCallWithViolations, TuiRequest, TuiRequestKind,
-    TuiResponse,
+    ApprovalBroker, ApprovalError, ApprovedTool, FrontendRequest, FrontendRequestKind,
+    FrontendResponse, ToolCallWithViolations,
 };
 pub use backend_event::{BackendEvent, agent_event_to_backend_event};
+pub use event_hub::{EventCursor, EventEnvelope, EventReplay, EventSubscription};
 pub use git::{
     GitChangeKind, GitCommitSummary, GitDiffFile, GitDiffScope, GitDiffSnapshot, GitError,
     GitFileStatus, GitHistoryPage, GitRepoInfo, GitService, GitStatusCounts, GitStatusSnapshot,
@@ -32,7 +34,7 @@ pub use git::{
 pub use message_buf::CoreMessageBuffer;
 pub use mode::Mode;
 pub use registry::ToolRegistry;
-pub use runtime::Runtime;
+pub use runtime::{PromptSubmission, PromptSubmissionReceipt, Runtime};
 pub use session::SessionManager;
 pub use session_message::SessionMessage;
 pub use tidev_agent::{CompactionResult, ContextManager};

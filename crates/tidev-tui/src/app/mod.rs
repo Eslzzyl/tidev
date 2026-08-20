@@ -17,9 +17,9 @@ use std::time::Instant;
 use crate::theme::{ThemePalette, resolve_palette};
 use ratatui::layout::{Position, Rect};
 use tidev_config::ThemeCatalog;
+use tidev_core::BackendEvent;
 use tidev_core::Mode as SessionMode;
 use tidev_core::{ApprovedTool, ToolCallWithViolations};
-use tidev_core::{BackendEvent, TuiResponse};
 use tidev_core::{GitDiffSnapshot, GitError, GitHistoryPage, GitStatusSnapshot};
 use tidev_llm::message::{COMPACTION_MESSAGE_LABEL, Message, MessageRole};
 use tidev_llm::reasoning::ThinkingLevelType;
@@ -47,7 +47,7 @@ pub(crate) struct ContextUsage {
 
 /// Per-session pending tool approval state.
 struct PendingApproval {
-    response_tx: tokio::sync::mpsc::UnboundedSender<TuiResponse>,
+    request_id: Uuid,
     tools: Vec<ToolCallWithViolations>,
     tool_index: usize,
     approved_tools: Vec<ApprovedTool>,
@@ -105,7 +105,8 @@ pub struct App {
     /// Desktop/terminal notifications (OSC 9 / BEL).
     desktop_notifications: NotificationManager,
     /// Receiver for tool permission requests from the agent loop.
-    pub(crate) request_rx: Option<tokio::sync::mpsc::UnboundedReceiver<tidev_core::TuiRequest>>,
+    pub(crate) request_rx:
+        Option<tokio::sync::mpsc::UnboundedReceiver<tidev_core::FrontendRequest>>,
     /// Receiver for backend events (streaming deltas, tool results, etc.).
     pub(crate) event_rx: Option<tokio::sync::mpsc::UnboundedReceiver<BackendEvent>>,
     /// Receiver for TUI-only Git query results.
@@ -242,7 +243,7 @@ pub(crate) struct PendingInput {
 impl App {
     pub fn new(
         runtime: tidev_core::Runtime,
-        request_rx: tokio::sync::mpsc::UnboundedReceiver<tidev_core::TuiRequest>,
+        request_rx: tokio::sync::mpsc::UnboundedReceiver<tidev_core::FrontendRequest>,
         event_rx: tokio::sync::mpsc::UnboundedReceiver<BackendEvent>,
     ) -> Self {
         let (git_result_tx, git_result_rx) = tokio::sync::mpsc::unbounded_channel();

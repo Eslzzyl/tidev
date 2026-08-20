@@ -3,18 +3,19 @@
 use std::sync::Arc;
 
 use agent_client_protocol::schema::v2 as acp;
-use tidev_core::{ApprovedTool, TuiRequest, TuiRequestKind, TuiResponse};
+use tidev_core::{ApprovedTool, FrontendRequest, FrontendRequestKind, FrontendResponse, Runtime};
 use tidev_llm::message::ToolExecutionResult;
 use tokio::sync::RwLock;
 
 pub(crate) fn spawn(
-    mut request_rx: tokio::sync::mpsc::UnboundedReceiver<TuiRequest>,
+    runtime: Runtime,
+    mut request_rx: tokio::sync::mpsc::UnboundedReceiver<FrontendRequest>,
     cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>,
     supports_elicitation: Arc<RwLock<bool>>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         while let Some(request) = request_rx.recv().await {
-            let TuiRequestKind::ToolApproval(ref tools) = request.kind;
+            let FrontendRequestKind::ToolApproval(ref tools) = request.kind;
             let session_id = acp::SessionId::new(request.session_id.to_string());
             let mut approved = Vec::new();
 
@@ -94,9 +95,8 @@ pub(crate) fn spawn(
                     });
                 }
             }
-            let _ = request
-                .response_tx
-                .send(TuiResponse::ToolApproval(approved));
+            let response = FrontendResponse::ToolApproval(approved);
+            let _ = runtime.respond_to_request(request.request_id, response);
         }
     })
 }
@@ -123,7 +123,7 @@ fn permission_reason(item: &tidev_core::ToolCallWithViolations) -> String {
 }
 
 async fn handle_question(
-    _request: &TuiRequest,
+    _request: &FrontendRequest,
     item: &tidev_core::ToolCallWithViolations,
     session_id: &acp::SessionId,
     cx: &agent_client_protocol::ConnectionTo<agent_client_protocol::Client>,

@@ -3,7 +3,6 @@ use super::*;
 use std::collections::HashMap;
 use std::path::Path;
 
-use tidev_core::TuiResponse;
 use tidev_llm::message::ToolExecutionResult;
 use tidev_tools::types::QuestionArgs;
 use uuid::Uuid;
@@ -16,18 +15,18 @@ use crate::components::overlays::workspace::WorkspaceBoundaryDialog;
 impl App {
     /// Handle a pending tool approval request from the agent loop.
     /// Stores the request per-session.
-    pub(crate) fn handle_tui_request(&mut self, request: tidev_core::TuiRequest) {
+    pub(crate) fn handle_frontend_request(&mut self, request: tidev_core::FrontendRequest) {
         let session_id = request.session_id;
         match request.kind {
-            tidev_core::TuiRequestKind::ToolApproval(tools_with_violations) => {
+            tidev_core::FrontendRequestKind::ToolApproval(tools_with_violations) => {
                 log::info!(
-                    "handle_tui_request: session {session_id}, {} tool(s) pending approval",
+                    "handle_frontend_request: session {session_id}, {} tool(s) pending approval",
                     tools_with_violations.len()
                 );
                 self.pending_approvals.insert(
                     session_id,
                     PendingApproval {
-                        response_tx: request.response_tx,
+                        request_id: request.request_id,
                         tools: tools_with_violations,
                         tool_index: 0,
                         approved_tools: Vec::new(),
@@ -233,7 +232,10 @@ impl App {
             tools.len()
         );
 
-        let _ = approval.response_tx.send(TuiResponse::ToolApproval(tools));
+        let response = tidev_core::FrontendResponse::ToolApproval(tools);
+        let _ = self
+            .runtime
+            .respond_to_request(approval.request_id, response);
 
         // Clear active approval if this was the active session.
         if self.active_approval_session == Some(session_id) {

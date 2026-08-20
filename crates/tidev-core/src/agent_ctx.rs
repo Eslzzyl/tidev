@@ -12,7 +12,6 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use chrono::Utc;
 use serde_json::Value;
-use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -38,7 +37,7 @@ use tidev_snapshot::SnapshotService;
 use tidev_storage::MessageAppData;
 
 use crate::approval::{
-    ApprovedTool, ToolCallWithViolations, TuiRequest, TuiRequestKind, TuiResponse,
+    ApprovalBroker, ApprovedTool, FrontendRequestKind, FrontendResponse, ToolCallWithViolations,
 };
 use crate::message_buf::CoreMessageBuffer;
 use crate::mode::Mode;
@@ -283,8 +282,8 @@ pub struct CoreContext {
     buffer: Arc<RwLock<CoreMessageBuffer>>,
     /// Ordered event bus for this session.
     event_bus: CoreEventBus,
-    /// Channel for sending UI requests (tool approval etc.).
-    request_tx: UnboundedSender<TuiRequest>,
+    /// Frontend-neutral approval broker.
+    approval_broker: ApprovalBroker,
     /// This loop's session ID.
     session_id: Uuid,
     /// Current session mode.
@@ -441,7 +440,7 @@ impl CoreContext {
         context_manager: Arc<Mutex<ContextManager>>,
         buffer: Arc<RwLock<CoreMessageBuffer>>,
         event_bus: CoreEventBus,
-        request_tx: UnboundedSender<TuiRequest>,
+        approval_broker: ApprovalBroker,
         session_id: Uuid,
         mode: Mode,
         system_prompt: String,
@@ -463,7 +462,7 @@ impl CoreContext {
             context_manager,
             buffer,
             event_bus,
-            request_tx,
+            approval_broker,
             session_id,
             mode,
             system_prompt,
@@ -867,21 +866,17 @@ impl CoreContext {
             return Ok(approved);
         }
 
-        let (response_tx, mut response_rx) = tokio::sync::mpsc::unbounded_channel();
-        self.request_tx
-            .send(TuiRequest {
-                session_id: self.session_id,
-                kind: TuiRequestKind::ToolApproval(pending),
-                response_tx,
-            })
-            .map_err(|_| anyhow::anyhow!("UI request channel closed — UI may have exited"))?;
-
-        let user_approved = tokio::select! {
-            _ = self.cancel.cancelled() => Vec::new(),
-            result = response_rx.recv() => match result {
-                Some(TuiResponse::ToolApproval(tools)) => tools,
-                None => Vec::new(),
-            },
+        let user_approved = match self
+            .approval_broker
+            .request(
+                self.session_id,
+                FrontendRequestKind::ToolApproval(pending),
+                &self.cancel,
+            )
+            .await
+        {
+            Ok(FrontendResponse::ToolApproval(tools)) => tools,
+            Err(_) => Vec::new(),
         };
         approved.extend(user_approved);
         Ok(approved)
@@ -1507,8 +1502,9 @@ async fn execute_task_tool(
         Arc::new(Mutex::new(ContextManager::new())),
         child_buffer.clone(),
         spawner.event_bus.for_session(child_session_id),
-        // Subagents auto-approve (parent handles UI permissions).
-        tokio::sync::mpsc::unbounded_channel().0,
+        // Subagents inherit the parent's tool permissions. No frontend
+        // approval channel is installed for a child context.
+        ApprovalBroker::new(tokio::sync::mpsc::unbounded_channel().0),
         child_session_id,
         spawner.mode,
         agent_def.system_prompt.clone(),

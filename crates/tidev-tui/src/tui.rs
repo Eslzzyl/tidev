@@ -184,7 +184,7 @@ impl Tui {
                     }
                 } => {
                     if let Some(request) = result {
-                        app.handle_tui_request(request);
+                        app.handle_frontend_request(request);
                         processed = true;
                     }
                 }
@@ -292,7 +292,7 @@ impl Tui {
             // 2c. Tool permission requests.
             if let Some(ref mut rx) = request_rx {
                 while let Ok(request) = rx.try_recv() {
-                    app.handle_tui_request(request);
+                    app.handle_frontend_request(request);
                 }
             }
 

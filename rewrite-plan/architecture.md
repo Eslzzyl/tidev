@@ -142,7 +142,7 @@ agent。MCP 的 client 和通用 registry 在 agent，core 只负责配置映射
     CoreContext::execute_tools
       ├── ToolPermission / mode 检查
       ├── 工作区边界和敏感文件检查
-      ├── TuiRequest -> TuiResponse
+      ├── FrontendRequest -> FrontendResponse
       ├── 拒绝调用合成 ToolExecutionResult
       └── 已批准调用进入工具执行调度
 

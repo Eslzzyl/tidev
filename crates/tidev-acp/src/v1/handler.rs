@@ -604,11 +604,11 @@ pub async fn run_acp_agent() -> Result<()> {
                             *state.session_named.write().await = true;
                         }
 
-                        if let Err(e) = state
+                        let submit_result = state
                             .runtime
                             .submit_prompt(session_id, content, mode)
-                            .await
-                        {
+                            .await;
+                        if let Err(e) = submit_result {
                             log::error!("ACP: failed to submit prompt: {e}");
                             // Submit failed — respond immediately with error.
                             let response =
@@ -845,7 +845,11 @@ pub async fn run_acp_agent() -> Result<()> {
 
             // Spawn the permission bridge task.
             let _permission_handle = {
-                crate::v1::permission_bridge::spawn(request_rx, cx.clone())
+                crate::v1::permission_bridge::spawn(
+                    state.runtime.clone(),
+                    request_rx,
+                    cx.clone(),
+                )
             };
 
             // Wait until the connection closes.

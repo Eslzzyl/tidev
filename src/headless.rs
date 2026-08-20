@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use tidev_core::{Mode, Runtime, TuiRequestKind, TuiResponse};
+use tidev_core::{FrontendRequestKind, FrontendResponse, Mode, Runtime};
 
 pub async fn run(
     workspace: Option<PathBuf>,
@@ -17,6 +17,7 @@ pub async fn run(
 
     let runtime = Runtime::builder().workspace_root(workspace).build().await?;
     let mut request_rx = runtime.request_rx().await;
+    let approval_runtime = runtime.clone();
     let session_id = runtime.create_default_session("Headless session")?;
 
     runtime
@@ -25,7 +26,7 @@ pub async fn run(
 
     let approval_task = tokio::spawn(async move {
         while let Some(request) = request_rx.recv().await {
-            let TuiRequestKind::ToolApproval(tool_calls) = request.kind;
+            let FrontendRequestKind::ToolApproval(tool_calls) = request.kind;
             let decisions = tool_calls
                 .into_iter()
                 .map(|pending| tidev_core::ApprovedTool {
@@ -39,9 +40,11 @@ pub async fn run(
                     user_reason: Some("headless mode has no interactive approval prompt".into()),
                 })
                 .collect();
-            if request
-                .response_tx
-                .send(TuiResponse::ToolApproval(decisions))
+            if approval_runtime
+                .respond_to_request(
+                    request.request_id,
+                    FrontendResponse::ToolApproval(decisions),
+                )
                 .is_err()
             {
                 break;

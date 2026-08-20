@@ -48,7 +48,7 @@ fn available_commands(mode: SessionMode) -> acp::AvailableCommandsUpdate {
 pub(crate) fn build_agent(
     runtime: Runtime,
     event_rx_slot: ReceiverSlot<tidev_core::BackendEvent>,
-    request_rx_slot: ReceiverSlot<tidev_core::TuiRequest>,
+    request_rx_slot: ReceiverSlot<tidev_core::FrontendRequest>,
 ) -> impl ConnectTo<agent_client_protocol::Client> {
     let state = Arc::new(State {
         runtime,
@@ -110,9 +110,10 @@ pub(crate) fn build_agent(
                 async move {
                     ensure_workspace(&state.runtime, &request.cwd)?;
                     merge_mcp_servers(&state.runtime, &request.mcp_servers).await;
+                    let title = format!("ACP session - {}", request.cwd.0.display());
                     let session_id = state
                         .runtime
-                        .create_default_session(&format!("ACP session - {}", request.cwd.0.display()))
+                        .create_default_session(&title)
                         .map_err(internal_error)?;
                     activate(&state, session_id).await;
                     let response = acp::NewSessionResponse::new(session_id.to_string())
@@ -328,6 +329,7 @@ pub(crate) fn build_agent(
                     .ok_or_else(|| internal_error("v2 request receiver already taken"))?;
                 let events = tokio::spawn(run_event_loop(state.clone(), event_rx, cx.clone()));
                 let permission = crate::v2::permission_bridge::spawn(
+                    state.runtime.clone(),
                     request_rx,
                     cx.clone(),
                     state.client_supports_elicitation.clone(),

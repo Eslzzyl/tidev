@@ -42,8 +42,9 @@ use tidev_tools::types::TodoItem;
 
 use tidev_agent::{AgentContext, ContextManager};
 
-use crate::approval::TuiRequest;
+use crate::approval::{ApprovalBroker, FrontendRequest, FrontendResponse};
 use crate::backend_event::{BackendEvent, CoreEventBus};
+use crate::event_hub::EventHub;
 use crate::mcp::McpManager;
 use crate::message_buf::CoreMessageBuffer;
 use crate::registry::ToolRegistry;
@@ -109,21 +110,19 @@ pub struct Runtime {
     /// Per-session context managers, keyed by session ID.
     context_managers: Arc<Mutex<HashMap<Uuid, Arc<Mutex<ContextManager>>>>>,
 
-    /// Event channel (sender → UI). Messages are fanned out to every
-    /// registered subscriber (see [`Runtime::event_rx`]).
+    /// Event channel (sender → frontend hub).
     event_tx: UnboundedSender<BackendEvent>,
     /// Ordered event buses keyed by session. Agent and backend events for a
     /// session must enter the frontend channel through the same FIFO queue.
     event_buses: Arc<Mutex<HashMap<Uuid, CoreEventBus>>>,
-    /// Registered event subscribers. Each call to [`Runtime::event_rx`]
-    /// adds one; dead senders are pruned by the fan-out task.
-    event_subscribers: Arc<Mutex<Vec<UnboundedSender<BackendEvent>>>>,
-    /// Request channel (sender → UI). Messages are fanned out to every
-    /// registered subscriber (see [`Runtime::request_rx`]).
-    request_tx: UnboundedSender<TuiRequest>,
+    /// Ordered, replayable frontend event distribution.
+    event_hub: EventHub,
+    /// Frontend-neutral approval broker. Requests are fanned out to every
+    /// registered subscriber while responses are routed by request ID.
+    approval_broker: ApprovalBroker,
     /// Registered request subscribers. Each call to [`Runtime::request_rx`]
     /// adds one; dead senders are pruned by the fan-out task.
-    request_subscribers: Arc<Mutex<Vec<UnboundedSender<TuiRequest>>>>,
+    request_subscribers: Arc<Mutex<Vec<UnboundedSender<FrontendRequest>>>>,
 
     /// Currently running agent loop handles, keyed by session ID.
     run_loop_handles: Arc<std::sync::Mutex<HashMap<Uuid, tokio::task::JoinHandle<()>>>>,
@@ -154,6 +153,11 @@ pub struct Runtime {
     /// to prevent a TOCTOU race where two tasks both see is_session_busy=false
     /// and both call start_agent_loop for the same session.
     session_start_lock: Arc<std::sync::Mutex<()>>,
+
+    /// Serializes prompt submission through the shared Runtime. This makes a
+    /// client retry with the same message ID idempotent and gives concurrent
+    /// frontends one authoritative insertion order.
+    prompt_submission_lock: Arc<Mutex<()>>,
 
     /// Cancellation token for background cleanup tasks.
     cleanup_cancel: CancellationToken,
@@ -206,11 +210,45 @@ enum DeliveryMode {
 /// current turn exits.
 #[derive(Clone, Debug)]
 struct PendingPrompt {
+    message_id: Uuid,
     delivery: DeliveryMode,
     mode: Mode,
     content: String,
     attachments: Vec<MessageAttachment>,
     thinking_level: Option<ThinkingLevelType>,
+}
+
+/// A frontend-neutral user prompt submission.
+///
+/// Clients generate `message_id` once and reuse it when retrying a command.
+/// Runtime uses it as the durable idempotency key for the user message.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct PromptSubmission {
+    pub message_id: Uuid,
+    pub content: String,
+    pub mode: Mode,
+    pub attachments: Vec<MessageAttachment>,
+    pub thinking_level: Option<ThinkingLevelType>,
+}
+
+impl PromptSubmission {
+    pub fn new(content: String, mode: Mode) -> Self {
+        Self {
+            message_id: Uuid::new_v4(),
+            content,
+            mode,
+            attachments: Vec::new(),
+            thinking_level: None,
+        }
+    }
+}
+
+/// Receipt returned for a prompt submission.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PromptSubmissionReceipt {
+    pub message_id: Uuid,
+    /// True when a retry matched a prompt already accepted by Runtime.
+    pub duplicate: bool,
 }
 
 impl Runtime {
@@ -223,16 +261,32 @@ impl Runtime {
     // Accessors
     // -----------------------------------------------------------------------
 
-    /// Subscribe to backend events.
+    /// Subscribe to backend events using the legacy event-only receiver.
     ///
-    /// Every call registers a new subscriber and returns its receiver;
-    /// events are broadcast to all subscribers concurrently. The receiver
-    /// yields events until it is dropped. Frontends (TUI, ACP, web server,
-    /// ...) can subscribe any number of times.
+    /// New frontends should prefer [`Runtime::subscribe_events`] so they can
+    /// resume from an event cursor after reconnecting.
     pub async fn event_rx(&self) -> UnboundedReceiver<BackendEvent> {
+        let subscription = self.subscribe_events(None).await;
+        let mut events = subscription.into_receiver();
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        self.event_subscribers.lock().await.push(tx);
+        tokio::spawn(async move {
+            while let Some(envelope) = events.recv().await {
+                if tx.send(envelope.event).is_err() {
+                    break;
+                }
+            }
+        });
         rx
+    }
+
+    /// Subscribe to ordered frontend events. The returned replay result and
+    /// live receiver are captured atomically, so a reconnecting client can
+    /// process replay before draining live events without a gap.
+    pub async fn subscribe_events(
+        &self,
+        after: Option<crate::EventCursor>,
+    ) -> crate::EventSubscription {
+        self.event_hub.subscribe(after).await
     }
 
     /// Get (or create) the ordered event bus for a session.
@@ -248,20 +302,23 @@ impl Runtime {
     ///
     /// Every call registers a new subscriber and returns its receiver;
     /// requests are broadcast to all subscribers concurrently. Each
-    /// [`TuiRequest`] carries its own response channel, so any subscriber
-    /// can answer — the first response wins.
-    pub async fn request_rx(&self) -> UnboundedReceiver<TuiRequest> {
+    /// Subscribers answer through [`Runtime::respond_to_request`]. The core
+    /// broker guarantees that the first response wins.
+    pub async fn request_rx(&self) -> UnboundedReceiver<FrontendRequest> {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         self.request_subscribers.lock().await.push(tx);
         rx
     }
 
-    /// Deprecated — use [`request_rx`] instead.
-    #[doc(hidden)]
-    pub async fn perm_rx(
+    /// Answer a frontend request, routing the response to the waiting agent
+    /// loop. Multiple frontends may observe a request, but only the first
+    /// response is accepted.
+    pub fn respond_to_request(
         &self,
-    ) -> Option<tokio::sync::mpsc::UnboundedReceiver<crate::PendingToolApproval>> {
-        None
+        request_id: Uuid,
+        response: FrontendResponse,
+    ) -> Result<(), crate::ApprovalError> {
+        self.approval_broker.respond(request_id, response)
     }
 
     /// Get (or create) the message buffer for a session.
@@ -509,8 +566,9 @@ impl Runtime {
 
     /// Submit a user prompt for a session.
     pub async fn submit_prompt(&self, session_id: Uuid, content: String, mode: Mode) -> Result<()> {
-        self.submit_prompt_with_attachments(session_id, mode, content, Vec::new(), None)
+        self.submit_prompt_submission(session_id, PromptSubmission::new(content, mode))
             .await
+            .map(|_| ())
     }
 
     /// Submit a user prompt with file/directory/image attachments.
@@ -538,6 +596,43 @@ impl Runtime {
         attachments: Vec<MessageAttachment>,
         thinking_level: Option<ThinkingLevelType>,
     ) -> Result<()> {
+        let mut submission = PromptSubmission::new(content, mode);
+        submission.attachments = attachments;
+        submission.thinking_level = thinking_level;
+        self.submit_prompt_submission(session_id, submission)
+            .await
+            .map(|_| ())
+    }
+
+    /// Submit a prompt with a caller-provided message ID.
+    ///
+    /// The ID is an idempotency key: repeating an already accepted submission
+    /// returns a duplicate receipt without changing the buffer, persistence,
+    /// queue, or future LLM request bytes.
+    pub async fn submit_prompt_submission(
+        &self,
+        session_id: Uuid,
+        submission: PromptSubmission,
+    ) -> Result<PromptSubmissionReceipt> {
+        let _submission_guard = self.prompt_submission_lock.lock().await;
+        if self
+            .find_existing_prompt_submission(session_id, &submission)
+            .await?
+        {
+            return Ok(PromptSubmissionReceipt {
+                message_id: submission.message_id,
+                duplicate: true,
+            });
+        }
+
+        let PromptSubmission {
+            message_id,
+            content,
+            mode,
+            attachments,
+            thinking_level,
+        } = submission;
+
         // Decide delivery before mutating anything. start_agent_loop
         // re-checks busy under a mutex for atomicity.
         let delivery = if self.is_session_busy(session_id) {
@@ -587,6 +682,7 @@ impl Runtime {
         //    system-reminder suffix so the model keeps advancing the task
         //    while adjusting direction.
         let mut user_msg = Message::new(MessageRole::User, content);
+        user_msg.id = message_id;
         user_msg.attachments = attachments;
         user_msg.thinking_level = thinking_level;
         if delivery == Some(DeliveryMode::Steer) {
@@ -620,13 +716,19 @@ impl Runtime {
                 );
                 self.push_pending_prompt(
                     session_id,
-                    DeliveryMode::Steer,
-                    mode,
-                    String::new(),
-                    Vec::new(),
-                    None,
+                    PendingPrompt {
+                        message_id,
+                        delivery: DeliveryMode::Steer,
+                        mode,
+                        content: String::new(),
+                        attachments: Vec::new(),
+                        thinking_level: None,
+                    },
                 );
-                Ok(())
+                Ok(PromptSubmissionReceipt {
+                    message_id,
+                    duplicate: false,
+                })
             }
             // 4b. Queueing: hold the content in the pending queue. The host
             //     persists it after the current turn exits and starts the
@@ -645,13 +747,19 @@ impl Runtime {
                 );
                 self.push_pending_prompt(
                     session_id,
-                    DeliveryMode::Queue,
-                    mode,
-                    q_content,
-                    q_attachments,
-                    q_thinking,
+                    PendingPrompt {
+                        message_id,
+                        delivery: DeliveryMode::Queue,
+                        mode,
+                        content: q_content,
+                        attachments: q_attachments,
+                        thinking_level: q_thinking,
+                    },
                 );
-                Ok(())
+                Ok(PromptSubmissionReceipt {
+                    message_id,
+                    duplicate: false,
+                })
             }
             // 4c. Idle: persist and spawn the loop.
             None => {
@@ -666,9 +774,68 @@ impl Runtime {
                         queued: false,
                     },
                 );
-                self.start_agent_loop(session_id, mode).await
+                self.start_agent_loop(session_id, mode).await?;
+                Ok(PromptSubmissionReceipt {
+                    message_id,
+                    duplicate: false,
+                })
             }
         }
+    }
+
+    /// Check whether Runtime has already accepted a prompt submission with the
+    /// caller-provided message ID. A reused ID with different content is a
+    /// protocol error rather than a second user message.
+    async fn find_existing_prompt_submission(
+        &self,
+        session_id: Uuid,
+        submission: &PromptSubmission,
+    ) -> Result<bool> {
+        let buffer = self.message_buffer(session_id).await;
+        {
+            let buffer = buffer.read().await;
+            if let Some(message) = buffer
+                .load()
+                .iter()
+                .find(|message| message.id == submission.message_id)
+            {
+                let mode_matches = buffer
+                    .app_data(message.id)
+                    .and_then(|data| data.mode.as_deref())
+                    == Some(submission.mode.as_str());
+                if prompt_message_matches_submission(message, submission) && mode_matches {
+                    return Ok(true);
+                }
+                anyhow::bail!(
+                    "message ID {} was already accepted with different content",
+                    submission.message_id
+                );
+            }
+        }
+
+        let queued = self
+            .pending_prompts
+            .lock()
+            .expect("pending prompt mutex poisoned");
+        if let Some(prompt) = queued.get(&session_id).and_then(|prompts| {
+            prompts
+                .iter()
+                .find(|prompt| prompt.message_id == submission.message_id)
+        }) {
+            if prompt.delivery == DeliveryMode::Queue
+                && prompt.mode == submission.mode
+                && prompt.content == submission.content
+                && prompt.attachments == submission.attachments
+                && prompt.thinking_level == submission.thinking_level
+            {
+                return Ok(true);
+            }
+            anyhow::bail!(
+                "message ID {} was already accepted with different content",
+                submission.message_id
+            );
+        }
+        Ok(false)
     }
 
     /// Persist a user message to the in-memory buffer and the store,
@@ -695,26 +862,10 @@ impl Runtime {
     /// Steering entries set the session's steering signal so the running
     /// loop keeps going (their content is already persisted); queueing
     /// entries are drained by the host after the loop exits.
-    fn push_pending_prompt(
-        &self,
-        session_id: Uuid,
-        delivery: DeliveryMode,
-        mode: Mode,
-        content: String,
-        attachments: Vec<MessageAttachment>,
-        thinking_level: Option<ThinkingLevelType>,
-    ) {
+    fn push_pending_prompt(&self, session_id: Uuid, prompt: PendingPrompt) {
+        let delivery = prompt.delivery;
         let mut queue = self.pending_prompts.lock().unwrap();
-        queue
-            .entry(session_id)
-            .or_default()
-            .push_back(PendingPrompt {
-                delivery,
-                mode,
-                content,
-                attachments,
-                thinking_level,
-            });
+        queue.entry(session_id).or_default().push_back(prompt);
         if delivery == DeliveryMode::Steer
             && let Some(signal) = self.steer_signals.lock().unwrap().get(&session_id)
         {
@@ -909,7 +1060,7 @@ impl Runtime {
             context_manager,
             buffer,
             event_bus,
-            self.request_tx.clone(),
+            self.approval_broker.clone(),
             session_id,
             mode,
             system_prompt.clone(),
@@ -1015,6 +1166,7 @@ impl Runtime {
                 let mut failed = false;
                 for prompt in queued {
                     let mut msg = Message::new(MessageRole::User, prompt.content);
+                    msg.id = prompt.message_id;
                     msg.attachments = prompt.attachments;
                     msg.thinking_level = prompt.thinking_level;
                     let app_data = MessageAppData {
@@ -1466,6 +1618,18 @@ impl Runtime {
     }
 }
 
+fn prompt_message_matches_submission(message: &Message, submission: &PromptSubmission) -> bool {
+    let steering_content = format!(
+        "{}\n\n{}",
+        submission.content,
+        crate::prompts::steer_reminder()
+    );
+    message.role == MessageRole::User
+        && (message.content == submission.content || message.content == steering_content)
+        && message.attachments == submission.attachments
+        && message.thinking_level == submission.thinking_level
+}
+
 // ---------------------------------------------------------------------------
 // RuntimeBuilder
 // ---------------------------------------------------------------------------
@@ -1718,22 +1882,20 @@ impl RuntimeBuilder {
         //     server, ...) can consume the same stream concurrently and
         //     subscribe/unsubscribe at any time.
         let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<BackendEvent>();
-        let event_subscribers: Arc<Mutex<Vec<UnboundedSender<BackendEvent>>>> =
-            Arc::new(Mutex::new(Vec::new()));
+        let event_hub = EventHub::new();
         {
-            let subscribers = event_subscribers.clone();
+            let event_hub = event_hub.clone();
             tokio::spawn(async move {
                 while let Some(event) = event_rx.recv().await {
-                    let mut subs = subscribers.lock().await;
-                    // Send to every subscriber; drop senders whose receiver
-                    // was closed (frontend exited).
-                    subs.retain(|tx| tx.send(event.clone()).is_ok());
+                    event_hub.publish(event).await;
                 }
             });
         }
 
-        let (request_tx, mut request_rx) = tokio::sync::mpsc::unbounded_channel::<TuiRequest>();
-        let request_subscribers: Arc<Mutex<Vec<UnboundedSender<TuiRequest>>>> =
+        let (request_tx, mut request_rx) =
+            tokio::sync::mpsc::unbounded_channel::<FrontendRequest>();
+        let approval_broker = ApprovalBroker::new(request_tx);
+        let request_subscribers: Arc<Mutex<Vec<UnboundedSender<FrontendRequest>>>> =
             Arc::new(Mutex::new(Vec::new()));
         {
             let subscribers = request_subscribers.clone();
@@ -1763,8 +1925,8 @@ impl RuntimeBuilder {
             context_managers: Arc::new(Mutex::new(HashMap::new())),
             event_tx,
             event_buses: Arc::new(Mutex::new(HashMap::new())),
-            event_subscribers,
-            request_tx,
+            event_hub,
+            approval_broker,
             request_subscribers,
             run_loop_handles: Arc::new(std::sync::Mutex::new(HashMap::new())),
             busy_sessions: Arc::new(std::sync::Mutex::new(HashSet::new())),
@@ -1773,6 +1935,7 @@ impl RuntimeBuilder {
             session_idle_notifies: Arc::new(StdMutex::new(HashMap::new())),
             session_outcomes: Arc::new(StdMutex::new(HashMap::new())),
             session_start_lock: Arc::new(std::sync::Mutex::new(())),
+            prompt_submission_lock: Arc::new(Mutex::new(())),
             cleanup_cancel,
             workspace_root,
             file_search_index: OnceLock::new(),
@@ -1956,6 +2119,84 @@ mod tests {
         let pending = pending.expect("steer entry should be registered");
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].delivery, DeliveryMode::Steer);
+
+        rt.cancel_session(sid).await;
+    }
+
+    #[tokio::test]
+    async fn prompt_submission_is_idempotent_while_queued() {
+        let rt = make_test_runtime().await;
+        let sid = rt.create_default_session("idempotent queue").unwrap();
+        rt.busy_sessions.lock().unwrap().insert(sid);
+        rt.config.write().unwrap().ui.send_while_busy = SendWhileBusy::Queue;
+
+        let submission = PromptSubmission {
+            message_id: Uuid::new_v4(),
+            content: "keep this exact prompt".into(),
+            mode: Mode::Build,
+            attachments: Vec::new(),
+            thinking_level: None,
+        };
+        let first = rt
+            .submit_prompt_submission(sid, submission.clone())
+            .await
+            .expect("first submit should succeed");
+        let retry = rt
+            .submit_prompt_submission(sid, submission.clone())
+            .await
+            .expect("retry should succeed");
+
+        assert!(!first.duplicate);
+        assert!(retry.duplicate);
+        assert_eq!(first.message_id, submission.message_id);
+        let pending = rt
+            .pending_prompts
+            .lock()
+            .unwrap()
+            .get(&sid)
+            .cloned()
+            .unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].message_id, submission.message_id);
+
+        rt.cancel_session(sid).await;
+    }
+
+    #[tokio::test]
+    async fn prompt_submission_rejects_conflicting_message_id() {
+        let rt = make_test_runtime().await;
+        let sid = rt.create_default_session("idempotent conflict").unwrap();
+        rt.busy_sessions.lock().unwrap().insert(sid);
+        rt.config.write().unwrap().ui.send_while_busy = SendWhileBusy::Queue;
+
+        let message_id = Uuid::new_v4();
+        rt.submit_prompt_submission(
+            sid,
+            PromptSubmission {
+                message_id,
+                content: "first content".into(),
+                mode: Mode::Build,
+                attachments: Vec::new(),
+                thinking_level: None,
+            },
+        )
+        .await
+        .expect("first submit should succeed");
+
+        let error = rt
+            .submit_prompt_submission(
+                sid,
+                PromptSubmission {
+                    message_id,
+                    content: "different content".into(),
+                    mode: Mode::Build,
+                    attachments: Vec::new(),
+                    thinking_level: None,
+                },
+            )
+            .await
+            .expect_err("conflicting reuse must fail");
+        assert!(error.to_string().contains("different content"));
 
         rt.cancel_session(sid).await;
     }
