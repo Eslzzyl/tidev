@@ -8,7 +8,7 @@ import type {
   Session,
   TerminalShell,
   TodoItem,
-} from "./types";
+} from "../types";
 
 const AUTH_TOKEN_KEY = "web_auth_token";
 
@@ -121,6 +121,38 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ approved_tools: approvedTools }),
     }),
+  revert: (sessionId: string, messageId: string) =>
+    request<{ accepted: boolean }>(`/api/sessions/${sessionId}/revert`, {
+      method: "POST",
+      body: JSON.stringify({ message_id: messageId }),
+    }),
+  redo: (sessionId: string) =>
+    request<{ accepted: boolean }>(`/api/sessions/${sessionId}/redo`, {
+      method: "POST",
+    }),
+  fork: (sessionId: string, messageId: string, title?: string) =>
+    request<Session>(`/api/sessions/${sessionId}/fork`, {
+      method: "POST",
+      body: JSON.stringify({ message_id: messageId, title }),
+    }),
+  compact: (sessionId: string) =>
+    request<{ accepted: boolean }>(`/api/sessions/${sessionId}/compact`, {
+      method: "POST",
+    }),
+  shell: (sessionId: string, command: string) =>
+    request<{ accepted: boolean }>(`/api/sessions/${sessionId}/shell`, {
+      method: "POST",
+      body: JSON.stringify({ command }),
+    }),
+  searchFiles: (query: string) =>
+    request<{
+      files: Array<{
+        path: string;
+        display: string;
+        kind: string;
+        matched_indices: number[];
+      }>;
+    }>(`/api/files/search?query=${encodeURIComponent(query)}`),
 };
 
 export function openBackendEvents(

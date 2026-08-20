@@ -1383,6 +1383,106 @@ impl Runtime {
         Ok(())
     }
 
+    /// Revert to a specific user message.
+    ///
+    /// Cancels any running loop for the session and restores workspace,
+    /// snapshot and context state to `target_id`. The caller should ensure
+    /// `target_id` is a user message; this method will error otherwise.
+    pub async fn revert(&self, session_id: Uuid, target_id: Uuid) -> Result<()> {
+        self.cancel_session(session_id).await;
+        let buf = self.message_buffer(session_id).await;
+        let messages = buf.read().await.session_messages();
+        drop(buf);
+        let target_pos = messages
+            .iter()
+            .position(|m| m.id == target_id)
+            .ok_or_else(|| anyhow::anyhow!("target message {target_id} not found"))?;
+        if messages[target_pos].role != MessageRole::User {
+            anyhow::bail!("can only revert to user messages");
+        }
+        self.revert_to_message(session_id, &messages, target_id)
+            .await?;
+        log::info!("revert completed for session {session_id} to {target_id}");
+        Ok(())
+    }
+
+    /// Fork a session from a specific user message.
+    ///
+    /// Creates a new session that shares the same workspace and model as
+    /// `source_session_id` and copies all messages up to and including
+    /// `target_message_id`. Tool call IDs are remapped so assistant/tool
+    /// pairing remains valid in the fork.
+    pub fn fork_session(
+        &self,
+        source_session_id: Uuid,
+        target_message_id: Uuid,
+        title: Option<String>,
+    ) -> Result<Uuid> {
+        let source = self
+            .session_manager
+            .load_session(source_session_id)?
+            .ok_or_else(|| anyhow::anyhow!("source session {source_session_id} not found"))?;
+        let messages = self.session_manager.load_messages(source_session_id)?;
+        let target_idx = messages
+            .iter()
+            .position(|m| m.id == target_message_id)
+            .ok_or_else(|| anyhow::anyhow!("target message {target_message_id} not found"))?;
+        if messages[target_idx].role != MessageRole::User {
+            anyhow::bail!("can only fork from user messages");
+        }
+        let new_session_id = Uuid::new_v4();
+        let fork_title = title.unwrap_or_else(|| format!("Fork of {}", source.title));
+        self.session_manager.create_session(
+            new_session_id,
+            &source.workspace_root,
+            &source.provider_id,
+            &source.provider_display_name,
+            &source.model_id,
+            &source.model_display_name,
+            &fork_title,
+            None,
+            None,
+        )?;
+        if !source.system_prompt.is_empty() {
+            // Best-effort: copy system prompt so the fork shares the same prefix.
+            let _ = self.session_manager.store().update_session(
+                new_session_id,
+                None,
+                None,
+                None,
+                None,
+                Some(&source.system_prompt),
+                None,
+                None,
+                None,
+                None,
+            );
+        }
+        let mut id_map = HashMap::new();
+        for original in messages.iter().take(target_idx + 1) {
+            let mut new_message = original.clone();
+            let new_id = Uuid::new_v4();
+            id_map.insert(original.id, new_id);
+            new_message.id = new_id;
+            if let Some(tool_call_id) = new_message.tool_call_id.clone()
+                && let Ok(old_id) = Uuid::parse_str(&tool_call_id)
+                && let Some(&new_tool_call_id) = id_map.get(&old_id)
+            {
+                new_message.tool_call_id = Some(new_tool_call_id.to_string());
+            }
+            self.session_manager
+                .append_message(new_session_id, &new_message)?;
+        }
+        log::info!(
+            "fork completed {} -> {} at {} ({} messages)",
+            source_session_id,
+            new_session_id,
+            target_message_id,
+            target_idx + 1
+        );
+        Ok(new_session_id)
+    }
+
     /// Redo — move forward past the last undo, or restore pre-undo state.
     pub async fn redo(&self, session_id: Uuid) -> Result<()> {
         let Some((current_id, redo_snapshot)) =

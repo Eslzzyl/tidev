@@ -39,6 +39,15 @@ import type {
   TodoItem,
   ToolCall,
 } from "./types";
+import { buildRounds } from "./utils/round";
+import type { Round, ShellBlock, SystemMessageBlock } from "./utils/round";
+import { formatTime as formatChatTime, getDuration, stripSystemReminderTags } from "./utils/format";
+import { parseSlashCommand } from "./commands";
+import { FileMentionPopover } from "./components/FileMentionPopover";
+import { FilesView } from "./components/views/FilesView";
+import { GitView } from "./components/views/GitView";
+import { StatsView } from "./components/views/StatsView";
+import { TerminalView } from "./components/views/TerminalView";
 
 const features: { id: Feature; label: string; icon: typeof MessageSquare }[] = [
   { id: "chat", label: "Chat", icon: MessageSquare },
@@ -55,23 +64,6 @@ function eventPayload(envelope: EventEnvelope): [string, Record<string, unknown>
 
 function asString(value: unknown): string {
   return typeof value === "string" ? value : "";
-}
-
-function roleLabel(role: Message["role"]): string {
-  switch (role) {
-    case "user":
-      return "You";
-    case "assistant":
-      return "Assistant";
-    case "tool":
-      return "Tool";
-    case "system":
-      return "System";
-    case "shell":
-      return "Shell";
-    case "error":
-      return "Error";
-  }
 }
 
 function makeRejectedTool(tool: ToolCall): ApprovedTool {
@@ -128,6 +120,8 @@ export default function App() {
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [fileMention, setFileMention] = useState<{ query: string; atPos: number } | null>(null);
+  const [fileMentionIndex, setFileMentionIndex] = useState(0);
   const selectedSessionRef = useRef<string | null>(null);
   const composerTextareaRef = useRef<HTMLTextAreaElement>(null);
   const composingRef = useRef(false);
@@ -181,6 +175,47 @@ export default function App() {
     if (compositionEndTimerRef.current) clearTimeout(compositionEndTimerRef.current);
   });
 
+  const findAtFragment = useCallback((text: string, cursor: number): { atPos: number; query: string } | null => {
+    const safeCursor = Math.min(cursor, text.length);
+    const prefix = text.slice(0, safeCursor);
+    const atIndex = prefix.lastIndexOf("@");
+    if (atIndex === -1) return null;
+    if (atIndex > 0) {
+      const prev = prefix[atIndex - 1];
+      if (prev && !/\s/.test(prev) && !["(", "[", "{", '"', "/", "\\"].includes(prev)) return null;
+    }
+    const query = prefix.slice(atIndex + 1);
+    if (query.length > 0 && /\s/.test(query)) return null;
+    return { atPos: atIndex, query };
+  }, []);
+
+  const updateFileMention = useCallback((text: string, cursor: number) => {
+    const fragment = findAtFragment(text, cursor);
+    if (fragment) {
+      setFileMention(fragment);
+      setFileMentionIndex(0);
+    } else {
+      setFileMention(null);
+    }
+  }, [findAtFragment]);
+
+  const handleFileSelect = useCallback((path: string) => {
+    if (!fileMention) return;
+    const before = draft.slice(0, fileMention.atPos);
+    const after = draft.slice(fileMention.atPos + 1 + fileMention.query.length);
+    const inserted = `${before}@${path} ${after}`;
+    setDraft(inserted);
+    setFileMention(null);
+    requestAnimationFrame(() => {
+      const ta = composerTextareaRef.current;
+      if (!ta) return;
+      const newPos = before.length + 1 + path.length + 1;
+      ta.focus();
+      ta.setSelectionRange(newPos, newPos);
+      updateFileMention(inserted, newPos);
+    });
+  }, [draft, fileMention, updateFileMention]);
+
   const loadMessages = useCallback(async (sessionId: string) => {
     try {
       const response = await api.messages(sessionId);
@@ -208,6 +243,7 @@ export default function App() {
       setStreams({});
       setTodos([]);
       setError(null);
+      setFileMention(null);
       void loadMessages(sessionId);
       void loadTodos(sessionId);
     },
@@ -382,6 +418,7 @@ export default function App() {
     setMessages([]);
     setStreams({});
     setDraft("");
+    setFileMention(null);
     setError(null);
   };
 
@@ -438,10 +475,132 @@ export default function App() {
     }
   };
 
+  const handleRevert = useCallback(async (messageId: string) => {
+    const sessionId = selectedSessionRef.current;
+    if (!sessionId) return;
+    try {
+      await api.revert(sessionId, messageId);
+      await loadMessages(sessionId);
+      await loadTodos(sessionId);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to revert");
+    }
+  }, [loadMessages, loadTodos]);
+
+  const handleRedo = useCallback(async () => {
+    const sessionId = selectedSessionRef.current;
+    if (!sessionId) return;
+    try {
+      await api.redo(sessionId);
+      await loadMessages(sessionId);
+      await loadTodos(sessionId);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to redo");
+    }
+  }, [loadMessages, loadTodos]);
+
+  const handleFork = useCallback(async (messageId: string) => {
+    const sessionId = selectedSessionRef.current;
+    if (!sessionId) return;
+    try {
+      const forked = await api.fork(sessionId, messageId);
+      setSessions((current) => [forked, ...current]);
+      selectSession(forked.session_id);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to fork");
+    }
+  }, [selectSession]);
+
+  const handleCompact = useCallback(async () => {
+    const sessionId = selectedSessionRef.current;
+    if (!sessionId) return;
+    try {
+      await api.compact(sessionId);
+      setError(null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to compact");
+    }
+  }, []);
+
+  const handleShell = useCallback(async (command: string) => {
+    const sessionId = selectedSessionRef.current;
+    if (!sessionId || !command.trim()) return;
+    try {
+      await api.shell(sessionId, command);
+      // Shell output will appear via subsequent message reload triggered by
+      // the shell task appending messages; poll briefly.
+      setTimeout(() => void loadMessages(sessionId), 400);
+      setTimeout(() => void loadMessages(sessionId), 1200);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to run shell command");
+    }
+  }, [loadMessages]);
+
+  const handleSlashCommand = useCallback(async (raw: string): Promise<boolean> => {
+    const parsed = parseSlashCommand(raw);
+    if (!parsed) return false;
+    const { command, args } = parsed;
+    if (command === "undo") {
+      const lastUser = [...messages].reverse().find((r) => r.message.role === "user");
+      if (lastUser) await handleRevert(lastUser.message.id);
+      else setError("No user message to undo");
+      return true;
+    }
+    if (command === "redo") {
+      await handleRedo();
+      return true;
+    }
+    if (command === "compact") {
+      await handleCompact();
+      return true;
+    }
+    if (command === "fork") {
+      const target = [...messages].reverse().find((r) => r.message.role === "user");
+      if (target) await handleFork(target.message.id);
+      else setError("No message to fork from");
+      return true;
+    }
+    if (command === "shell") {
+      if (!args) {
+        setError("Usage: /shell <command> or !<command>");
+        return true;
+      }
+      await handleShell(args);
+      return true;
+    }
+    if (command === "rename" && args) {
+      const sid = selectedSessionRef.current;
+      if (sid) {
+        try {
+          const updated = await api.updateSession(sid, args);
+          setSessions((current) => current.map((item) => (item.session_id === sid ? updated : item)));
+        } catch (reason) {
+          setError(reason instanceof Error ? reason.message : "Failed to rename");
+        }
+      }
+      return true;
+    }
+    if (command === "new") {
+      createSession();
+      return true;
+    }
+    return false;
+  }, [messages, handleRevert, handleRedo, handleFork, handleCompact, handleShell]);
+
   const submit = async () => {
-    const content = draft.trim();
+    const raw = draft;
+    const content = raw.trim();
     const sessionId = selectedSessionRef.current;
     if (!content || !sessionId || sending) return;
+    setFileMention(null);
+    // Intercept slash / bang commands before sending as a prompt.
+    if (content.startsWith("/") || content.startsWith("!")) {
+      const handled = await handleSlashCommand(content);
+      if (handled) {
+        setDraft("");
+        return;
+      }
+    }
     const messageId = crypto.randomUUID();
     setSending(true);
     setDraft("");
@@ -692,6 +851,12 @@ export default function App() {
                     <h1>{selectedSession?.title ?? "New conversation"}</h1>
                   </div>
                   <div className="panel-actions">
+                    <button className="ghost-button" onClick={() => void handleRedo()} title="Redo">
+                      Redo
+                    </button>
+                    <button className="ghost-button" onClick={() => void handleCompact()} title="Compact context">
+                      Compact
+                    </button>
                     <span className="model-label">
                       <Sparkles size={15} />
                       {selectedSession?.model_display_name ?? "Runtime model"}
@@ -699,7 +864,12 @@ export default function App() {
                   </div>
                 </div>
                 <div className="message-stage">
-                  <VirtualMessageList messages={messages} streams={visibleStreams} />
+                  <VirtualMessageList
+                    messages={messages}
+                    streams={visibleStreams}
+                    onRevert={(id) => void handleRevert(id)}
+                    onFork={(id) => void handleFork(id)}
+                  />
                   {pendingRequests.map((request) => (
                     <ApprovalCard
                       key={request.request_id}
@@ -847,11 +1017,33 @@ export default function App() {
                         : "Ctrl+Enter to send"}
                     </span>
                   </div>
-                  <div className="composer">
+                  <div className="composer" style={{ position: "relative" }}>
+                    {fileMention ? (
+                      <FileMentionPopover
+                        query={fileMention.query}
+                        selectedIndex={fileMentionIndex}
+                        onSelectedIndexChange={setFileMentionIndex}
+                        onSelect={handleFileSelect}
+                        onClose={() => setFileMention(null)}
+                      />
+                    ) : null}
                     <textarea
                       ref={composerTextareaRef}
                       value={draft}
-                      onChange={(event) => setDraft(event.target.value)}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        const cursor = event.target.selectionStart ?? value.length;
+                        setDraft(value);
+                        updateFileMention(value, cursor);
+                      }}
+                      onSelect={(event) => {
+                        const ta = event.target as HTMLTextAreaElement;
+                        updateFileMention(ta.value, ta.selectionStart ?? ta.value.length);
+                      }}
+                      onClick={(event) => {
+                        const ta = event.target as HTMLTextAreaElement;
+                        updateFileMention(ta.value, ta.selectionStart ?? ta.value.length);
+                      }}
                       onCompositionStart={() => {
                         composingRef.current = true;
                         compositionJustCommittedRef.current = false;
@@ -868,6 +1060,23 @@ export default function App() {
                         }, 0);
                       }}
                       onKeyDown={(event) => {
+                        if (fileMention) {
+                          if (event.key === "Escape") {
+                            event.preventDefault();
+                            setFileMention(null);
+                            return;
+                          }
+                          if (event.key === "Enter" || event.key === "Tab") {
+                            // Let FileMentionPopover handle selection via its document listener
+                            // but prevent the composer from submitting.
+                            event.preventDefault();
+                            return;
+                          }
+                          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                            event.preventDefault();
+                            return;
+                          }
+                        }
                         if (event.key === "Tab") {
                           event.preventDefault();
                           setMode((current) => (current === "plan" ? "build" : "plan"));
@@ -924,6 +1133,14 @@ export default function App() {
               </section>
             </>
           )
+        ) : feature === "files" ? (
+          <FilesView />
+        ) : feature === "terminal" ? (
+          <TerminalView />
+        ) : feature === "git" ? (
+          <GitView />
+        ) : feature === "stats" ? (
+          <StatsView />
         ) : (
           <DeferredFeature feature={feature} />
         )}
@@ -1179,22 +1396,44 @@ function WelcomePage({
 function VirtualMessageList({
   messages,
   streams,
+  onRevert,
+  onFork,
 }: {
   messages: MessageRecord[];
   streams: StreamMessage[];
+  onRevert?: (messageId: string) => void;
+  onFork?: (messageId: string) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const rows = useMemo(
-    () => [
-      ...messages.map((record) => ({ type: "message" as const, key: record.message.id, record })),
-      ...streams.map((stream) => ({ type: "stream" as const, key: stream.key, stream })),
-    ],
-    [messages, streams],
-  );
+  const rounds = useMemo(() => buildRounds(messages), [messages]);
+  type RoundRow = { type: "round"; key: string; round: Round };
+  type SystemRow = { type: "system"; key: string; block: SystemMessageBlock };
+  type ShellRow = { type: "shell"; key: string; block: ShellBlock };
+  type StreamRow = { type: "stream"; key: string; stream: StreamMessage };
+  type Row = RoundRow | SystemRow | ShellRow | StreamRow;
+  const rows = useMemo<Row[]>(() => {
+    const base: Row[] = rounds.map((item) => {
+      if ((item as ShellBlock).kind === "shell") {
+        const b = item as ShellBlock;
+        return { type: "shell", key: b.id, block: b } as ShellRow;
+      }
+      if ((item as SystemMessageBlock).kind === "system") {
+        const b = item as SystemMessageBlock;
+        return { type: "system", key: b.id, block: b } as SystemRow;
+      }
+      const r = item as Round;
+      return { type: "round", key: r.id, round: r } as RoundRow;
+    });
+    for (const s of streams) {
+      base.push({ type: "stream", key: s.key, stream: s } as StreamRow);
+    }
+    return base;
+  }, [rounds, streams]);
+
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => 130,
+    estimateSize: () => 160,
     overscan: 8,
     getItemKey: (index) => rows[index]?.key ?? index,
   });
@@ -1227,8 +1466,12 @@ function VirtualMessageList({
               ref={virtualizer.measureElement}
               style={{ transform: `translateY(${item.start}px)` }}
             >
-              {row.type === "message" ? (
-                <MessageBubble record={row.record} />
+              {row.type === "round" ? (
+                <RoundView round={row.round} onRevert={onRevert} onFork={onFork} />
+              ) : row.type === "shell" ? (
+                <ShellBlockView block={row.block} />
+              ) : row.type === "system" ? (
+                <SystemBlockView block={row.block} />
               ) : (
                 <StreamBubble stream={row.stream} />
               )}
@@ -1240,39 +1483,180 @@ function VirtualMessageList({
   );
 }
 
-function MessageBubble({ record }: { record: MessageRecord }) {
-  const { message } = record;
-  const isUser = message.role === "user";
+function RoundView({
+  round,
+  onRevert,
+  onFork,
+}: {
+  round: Round;
+  onRevert?: (messageId: string) => void;
+  onFork?: (messageId: string) => void;
+}) {
+  const userTime = round.userMessage.created_at ? formatChatTime(round.userMessage.created_at) : "";
+  const duration = round.completedAt
+    ? getDuration(round.userMessage.created_at ?? "", round.completedAt)
+    : null;
+  const footerParts: string[] = [];
+  if (round.modelName) footerParts.push(round.modelName);
+  if (duration) footerParts.push(duration);
+  if (round.completedAt) footerParts.push(formatChatTime(round.completedAt));
+  else if (round.status === "streaming" && userTime) footerParts.push(userTime);
+
+  const hasAssistant = round.segments.length > 0 || round.status !== "user_only";
   return (
-    <article className={isUser ? "message-card user" : "message-card assistant"}>
+    <div className="round-group">
+      <article className="message-card user">
+        <div className="message-layout">
+          <span className="avatar user-avatar">U</span>
+          <div className="message-column">
+            <div className="message-meta">
+              <span>You</span>
+              {userTime ? <time>{userTime}</time> : null}
+              <span className="message-actions-inline">
+                {onRevert ? (
+                  <button
+                    className="inline-action"
+                    onClick={() => onRevert(round.userMessage.id)}
+                    title="Revert to this message (undo later messages)"
+                  >
+                    Undo
+                  </button>
+                ) : null}
+                {onFork ? (
+                  <button
+                    className="inline-action"
+                    onClick={() => onFork(round.userMessage.id)}
+                    title="Fork conversation from this message"
+                  >
+                    Fork
+                  </button>
+                ) : null}
+              </span>
+            </div>
+            <div className="message-content">
+              <p className="plain-content">{stripSystemReminderTags(round.userMessage.content)}</p>
+            </div>
+          </div>
+        </div>
+      </article>
+      {hasAssistant ? (
+        <article className="message-card assistant">
+          <div className="message-layout">
+            <span className="avatar">A</span>
+            <div className="message-column">
+              <div className="message-meta">
+                <span>Assistant</span>
+                {round.status === "streaming" ? (
+                  <span className="streaming-label">streaming</span>
+                ) : null}
+              </div>
+              <div className="message-content">
+                {round.segments.map((seg, idx) => {
+                  if (seg.type === "reasoning" && seg.content) {
+                    return (
+                      <details key={idx} className="reasoning" open={round.status === "streaming"}>
+                        <summary>Reasoning</summary>
+                        <div>{seg.content}</div>
+                      </details>
+                    );
+                  }
+                  if (seg.type === "text" && seg.content) {
+                    return (
+                      <ReactMarkdown key={idx} remarkPlugins={[remarkGfm]}>
+                        {stripSystemReminderTags(seg.content)}
+                      </ReactMarkdown>
+                    );
+                  }
+                  if (seg.type === "tool_call") {
+                    const entry = round.toolCallMap[seg.toolCallId];
+                    if (!entry) return null;
+                    return <ToolCallEntryView key={idx} entry={entry} />;
+                  }
+                  return null;
+                })}
+                {round.status === "streaming" && round.segments.length === 0 ? (
+                  <span className="cursor-block" />
+                ) : null}
+                {round.status === "complete" && footerParts.length ? (
+                  <div className="round-footer">{footerParts.join(" · ")}</div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </article>
+      ) : null}
+    </div>
+  );
+}
+
+function SystemBlockView({ block }: { block: SystemMessageBlock }) {
+  return (
+    <article className="message-card system">
       <div className="message-layout">
-        <span className={isUser ? "avatar user-avatar" : "avatar"}>{isUser ? "U" : "A"}</span>
+        <span className="avatar">S</span>
         <div className="message-column">
           <div className="message-meta">
-            <span>{roleLabel(message.role)}</span>
-            {message.created_at ? <time>{formatTime(message.created_at)}</time> : null}
+            <span>System</span>
+            {block.message.created_at ? <time>{formatChatTime(block.message.created_at)}</time> : null}
           </div>
           <div className="message-content">
-            {message.reasoning ? (
-              <details className="reasoning">
-                <summary>Reasoning</summary>
-                <div>{message.reasoning}</div>
-              </details>
-            ) : null}
-            {message.content ? (
-              isUser ? (
-                <p className="plain-content">{message.content}</p>
-              ) : (
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
-              )
-            ) : (
-              <span className="muted">No text content</span>
-            )}
-            {message.tool_calls?.length ? <ToolCallList calls={message.tool_calls} /> : null}
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{block.message.content}</ReactMarkdown>
           </div>
         </div>
       </div>
     </article>
+  );
+}
+
+function ShellBlockView({ block }: { block: ShellBlock }) {
+  const exit = block.exitCode;
+  return (
+    <article className="message-card shell">
+      <div className="message-layout">
+        <span className="avatar">S</span>
+        <div className="message-column">
+          <div className="message-meta">
+            <span>Shell</span>
+            {exit !== null && exit !== undefined ? (
+              <span className={exit === 0 ? "shell-exit ok" : "shell-exit fail"}>exit {exit}</span>
+            ) : null}
+          </div>
+          <div className="message-content">
+            <pre className="shell-command">{block.command.content}</pre>
+            <pre className="shell-output">{block.output.content}</pre>
+          </div>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function ToolCallEntryView({ entry }: { entry: import("./utils/round").ToolCallEntry }) {
+  const summary = (() => {
+    try {
+      const args = JSON.parse(entry.arguments);
+      if (entry.name === "read" || entry.name === "write" || entry.name === "edit") {
+        return args.file_path || args.path || "";
+      }
+      if (entry.name === "bash") return args.command || "";
+      if (entry.name === "grep") return args.pattern ? `"${args.pattern}"` : "";
+      if (entry.name === "glob") return args.pattern || "";
+      return entry.arguments.slice(0, 80);
+    } catch {
+      return entry.arguments.slice(0, 80);
+    }
+  })();
+  return (
+    <div className="tool-entry">
+      <div className="tool-entry-header">
+        <strong>{entry.name}</strong>
+        <code className="tool-args">{summary}</code>
+        {!entry.resultComplete ? <span className="tool-running">running…</span> : null}
+      </div>
+      {entry.result ? (
+        <pre className="tool-result">{entry.result.output.slice(0, 2000)}</pre>
+      ) : null}
+    </div>
   );
 }
 
@@ -1417,12 +1801,6 @@ function shortPath(value: string): string {
   if (!value) return "";
   const parts = value.split(/[\\/]/).filter(Boolean);
   return parts.length > 2 ? `…/${parts.slice(-2).join("/")}` : value;
-}
-
-function formatTime(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(date);
 }
 
 function formatThinkingLevel(value: string): string {

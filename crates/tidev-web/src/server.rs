@@ -10,6 +10,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::api::AppState;
 use crate::frontend::{Frontend, FrontendConfig};
+use crate::terminal::TerminalManager;
 
 /// Options for starting the tidev Web server.
 #[derive(Clone, Debug)]
@@ -49,10 +50,14 @@ pub async fn run(options: WebOptions) -> Result<()> {
         return Ok(());
     }
 
+    let terminal_manager = std::sync::Arc::new(TerminalManager::new());
+    let (terminal_tx, _) = tokio::sync::broadcast::channel(1024);
     let state = AppState {
         runtime: runtime.clone(),
         frontend_mode,
         cancel: cancel.clone(),
+        terminal_manager,
+        terminal_tx,
     };
     let api = crate::api::router().layer(middleware::from_fn_with_state(
         Arc::new(state.clone()),

@@ -7,5 +7,7 @@
 mod api;
 mod frontend;
 mod server;
+mod terminal;
+mod terminal_api;
 
 pub use server::{WebOptions, run};
