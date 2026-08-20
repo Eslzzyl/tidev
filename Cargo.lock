@@ -4849,15 +4849,20 @@ dependencies = [
  "async-stream",
  "axum",
  "axum-reverse-proxy",
+ "futures-core",
  "log",
  "mime_guess",
  "rust-embed",
  "serde",
  "serde_json",
+ "tidev-config",
  "tidev-core",
+ "tidev-llm",
  "tokio",
  "tokio-util",
  "tower-http",
+ "url",
+ "uuid",
 ]
 
 [[package]]

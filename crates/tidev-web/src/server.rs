@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
-use axum::Router;
+use axum::{Router, middleware};
 use tokio::net::TcpListener;
 use tokio::signal;
 use tokio_util::sync::CancellationToken;
@@ -54,8 +54,12 @@ pub async fn run(options: WebOptions) -> Result<()> {
         frontend_mode,
         cancel: cancel.clone(),
     };
+    let api = crate::api::router().layer(middleware::from_fn_with_state(
+        Arc::new(state.clone()),
+        crate::api::auth_middleware,
+    ));
     let app = Router::new()
-        .nest("/api", crate::api::router())
+        .nest("/api", api)
         .merge(frontend.router())
         .layer(tower_http::compression::CompressionLayer::new())
         .with_state(Arc::new(state));
