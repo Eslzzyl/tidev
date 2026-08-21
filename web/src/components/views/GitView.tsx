@@ -777,7 +777,7 @@ function ChangesPanel({
         <button
           onClick={onCommit}
           disabled={!commitMsg.trim() || committing}
-          className="mt-2 flex items-center gap-1.5 rounded bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-neutral-800 disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
+          className="git-commit-button mt-2 flex items-center gap-1.5 rounded bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-neutral-800 disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
         >
           {committing ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />

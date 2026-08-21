@@ -80,12 +80,12 @@ export default function SettingsPanel({ open, onClose }: { open: boolean; onClos
     document.documentElement.style.setProperty("--ui-mono-font", settings.monoFontFamily);
   }, [settings]);
 
-  if (!open) return null;
-
   const update = useCallback(
     (patch: Partial<Settings>) => setSettings((current) => ({ ...current, ...patch })),
     [],
   );
+
+  if (!open) return null;
 
   return (
     <div

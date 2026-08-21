@@ -274,6 +274,51 @@ button {
   flex: 1;
   display: flex;
 }
+.workspace > :only-child {
+  width: 100%;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.stats-granularity-button.is-active {
+  color: var(--accent-contrast);
+  background: var(--text);
+}
+.stats-control-group {
+  display: flex;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.stats-range-button {
+  padding: 6px 10px;
+  border: 0;
+  color: var(--muted);
+  background: var(--panel-strong);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition:
+    color 140ms ease,
+    background 140ms ease;
+}
+.stats-range-button:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+.stats-range-button.is-active {
+  color: var(--accent-contrast);
+  background: var(--text);
+}
+.git-commit-button {
+  color: var(--accent-contrast);
+  background: var(--text);
+}
+.git-commit-button:disabled {
+  color: var(--muted);
+  background: var(--line);
+  opacity: 1;
+  cursor: not-allowed;
+}
 .session-sidebar {
   width: 262px;
   display: flex;

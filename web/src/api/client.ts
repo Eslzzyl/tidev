@@ -43,6 +43,7 @@ import type {
   GitFileDiffResponse,
   StatsSummary,
   StatsTimeSeries,
+  StatsOverview,
   ModelUsageEntry,
   ProviderUsageEntry,
   SessionUsageEntry,
@@ -456,7 +457,30 @@ export const api = {
 
   // ── Stats ──────────────────────────────────────────────────────────
 
-  getStatsSummary: () => fetchJson<StatsSummary>(`${API_BASE}/stats/summary`),
+  getStatsOverview: (params?: {
+    granularity?: string;
+    start?: string;
+    end?: string;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.granularity) searchParams.set("granularity", params.granularity);
+    if (params?.start) searchParams.set("start", params.start);
+    if (params?.end) searchParams.set("end", params.end);
+    if (params?.limit !== undefined) searchParams.set("limit", String(params.limit));
+    if (params?.offset !== undefined) searchParams.set("offset", String(params.offset));
+    const qs = searchParams.toString();
+    return fetchJson<StatsOverview>(`${API_BASE}/stats/overview${qs ? `?${qs}` : ""}`);
+  },
+
+  getStatsSummary: (params?: { start?: string; end?: string }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.start) searchParams.set("start", params.start);
+    if (params?.end) searchParams.set("end", params.end);
+    const qs = searchParams.toString();
+    return fetchJson<StatsSummary>(`${API_BASE}/stats/summary${qs ? `?${qs}` : ""}`);
+  },
 
   getStatsTimeSeries: (params?: { granularity?: string; start?: string; end?: string }) => {
     const searchParams = new URLSearchParams();
@@ -487,10 +511,17 @@ export const api = {
     );
   },
 
-  getStatsSessions: (params?: { limit?: number; offset?: number }) => {
+  getStatsSessions: (params?: {
+    limit?: number;
+    offset?: number;
+    start?: string;
+    end?: string;
+  }) => {
     const searchParams = new URLSearchParams();
     if (params?.limit !== undefined) searchParams.set("limit", String(params.limit));
     if (params?.offset !== undefined) searchParams.set("offset", String(params.offset));
+    if (params?.start) searchParams.set("start", params.start);
+    if (params?.end) searchParams.set("end", params.end);
     const qs = searchParams.toString();
     return fetchJson<{ entries: SessionUsageEntry[]; total: number }>(
       `${API_BASE}/stats/sessions${qs ? `?${qs}` : ""}`,
@@ -516,9 +547,7 @@ export const api = {
  * Resolves once the new server is confirmed running.
  * Throws after `timeout` ms.
  */
-export async function waitForServerRestart(
-  timeout = 60_000,
-): Promise<void> {
+export async function waitForServerRestart(timeout = 60_000): Promise<void> {
   console.log("[restart] Starting waitForServerRestart");
 
   // 1. Read the current boot_id before restart

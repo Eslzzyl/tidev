@@ -41,12 +41,20 @@ export const queryKeys = {
   gitDiffFile: (path: string, staged?: boolean) => ["git", "file-diff", path, staged] as const,
 
   // Stats
-  statsSummary: ["stats", "summary"] as const,
-  statsTimeSeries: (granularity?: string) => ["stats", "timeseries", granularity] as const,
-  statsModels: ["stats", "models"] as const,
-  statsProviders: ["stats", "providers"] as const,
-  statsSessions: (limit?: number, offset?: number) =>
-    ["stats", "sessions", limit, offset] as const,
+  statsOverview: (
+    granularity?: string,
+    start?: string,
+    end?: string,
+    limit?: number,
+    offset?: number,
+  ) => ["stats", "overview", granularity, start, end, limit, offset] as const,
+  statsSummary: (start?: string, end?: string) => ["stats", "summary", start, end] as const,
+  statsTimeSeries: (granularity?: string, start?: string, end?: string) =>
+    ["stats", "timeseries", granularity, start, end] as const,
+  statsModels: (start?: string, end?: string) => ["stats", "models", start, end] as const,
+  statsProviders: (start?: string, end?: string) => ["stats", "providers", start, end] as const,
+  statsSessions: (limit?: number, offset?: number, start?: string, end?: string) =>
+    ["stats", "sessions", limit, offset, start, end] as const,
 
   // Filesystem
   fsList: (path?: string) => ["fs", "list", path ?? ""] as const,
@@ -117,8 +125,7 @@ export function useDeleteSession() {
 export function useRenameSession() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, title }: { id: string; title: string }) =>
-      api.renameSession(id, title),
+    mutationFn: ({ id, title }: { id: string; title: string }) => api.renameSession(id, title),
     onSuccess: (_data, { id }) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
       queryClient.invalidateQueries({ queryKey: queryKeys.session(id) });
@@ -147,13 +154,8 @@ export function useForkSession() {
 export function useRevertToMessage() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({
-      sessionId,
-      messageId,
-    }: {
-      sessionId: string;
-      messageId: string;
-    }) => api.revertToMessage(sessionId, messageId),
+    mutationFn: ({ sessionId, messageId }: { sessionId: string; messageId: string }) =>
+      api.revertToMessage(sessionId, messageId),
     onSuccess: (_data, { sessionId }) => {
       queryClient.invalidateQueries({
         queryKey: queryKeys.sessionMessages(sessionId),
@@ -182,13 +184,8 @@ export function useCompactSession() {
 
 export function useAbortRequest() {
   return useMutation({
-    mutationFn: ({
-      sessionId,
-      requestId,
-    }: {
-      sessionId: string;
-      requestId: number;
-    }) => api.abortRequest(sessionId, { request_id: requestId }),
+    mutationFn: ({ sessionId, requestId }: { sessionId: string; requestId: number }) =>
+      api.abortRequest(sessionId, { request_id: requestId }),
   });
 }
 
@@ -212,13 +209,8 @@ export function useSendMessage() {
 
 export function useSendShellCommand() {
   return useMutation({
-    mutationFn: ({
-      sessionId,
-      command,
-    }: {
-      sessionId: string;
-      command: string;
-    }) => api.sendShellCommand(sessionId, command),
+    mutationFn: ({ sessionId, command }: { sessionId: string; command: string }) =>
+      api.sendShellCommand(sessionId, command),
   });
 }
 
@@ -370,13 +362,8 @@ export function useProviders() {
 export function useConnectProvider() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({
-      id,
-      data,
-    }: {
-      id: string;
-      data: Parameters<typeof api.connectProvider>[1];
-    }) => api.connectProvider(id, data),
+    mutationFn: ({ id, data }: { id: string; data: Parameters<typeof api.connectProvider>[1] }) =>
+      api.connectProvider(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.providers });
     },
@@ -540,48 +527,63 @@ export function useGitBranchDelete() {
 
 // ── Stats ──────────────────────────────────────────────────────────────────
 
-export function useStatsSummary() {
+type StatsQueryParams = { start?: string; end?: string };
+
+export function useStatsOverview(
+  granularity?: string,
+  params?: StatsQueryParams,
+  limit?: number,
+  offset?: number,
+) {
   return useQuery({
-    queryKey: queryKeys.statsSummary,
-    queryFn: api.getStatsSummary,
+    queryKey: queryKeys.statsOverview(granularity, params?.start, params?.end, limit, offset),
+    queryFn: () => api.getStatsOverview({ granularity, ...params, limit, offset }),
     staleTime: 60_000,
   });
 }
 
-export function useStatsTimeSeries(granularity?: string) {
+export function useStatsSummary(params?: StatsQueryParams) {
   return useQuery({
-    queryKey: queryKeys.statsTimeSeries(granularity),
-    queryFn: () => api.getStatsTimeSeries({ granularity }),
+    queryKey: queryKeys.statsSummary(params?.start, params?.end),
+    queryFn: () => api.getStatsSummary(params),
     staleTime: 60_000,
   });
 }
 
-export function useStatsModels() {
+export function useStatsTimeSeries(granularity?: string, params?: StatsQueryParams) {
   return useQuery({
-    queryKey: queryKeys.statsModels,
+    queryKey: queryKeys.statsTimeSeries(granularity, params?.start, params?.end),
+    queryFn: () => api.getStatsTimeSeries({ granularity, ...params }),
+    staleTime: 60_000,
+  });
+}
+
+export function useStatsModels(params?: StatsQueryParams) {
+  return useQuery({
+    queryKey: queryKeys.statsModels(params?.start, params?.end),
     queryFn: async () => {
-      const { entries } = await api.getStatsModels();
+      const { entries } = await api.getStatsModels(params);
       return entries;
     },
     staleTime: 60_000,
   });
 }
 
-export function useStatsProviders() {
+export function useStatsProviders(params?: StatsQueryParams) {
   return useQuery({
-    queryKey: queryKeys.statsProviders,
+    queryKey: queryKeys.statsProviders(params?.start, params?.end),
     queryFn: async () => {
-      const { entries } = await api.getStatsProviders();
+      const { entries } = await api.getStatsProviders(params);
       return entries;
     },
     staleTime: 60_000,
   });
 }
 
-export function useStatsSessions(limit?: number, offset?: number) {
+export function useStatsSessions(limit?: number, offset?: number, params?: StatsQueryParams) {
   return useQuery({
-    queryKey: queryKeys.statsSessions(limit, offset),
-    queryFn: () => api.getStatsSessions({ limit, offset }),
+    queryKey: queryKeys.statsSessions(limit, offset, params?.start, params?.end),
+    queryFn: () => api.getStatsSessions({ limit, offset, ...params }),
     staleTime: 60_000,
   });
 }
@@ -670,13 +672,8 @@ export function useCloseTerminal() {
 export function useRenameTerminal() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({
-      sessionId,
-      label,
-    }: {
-      sessionId: string;
-      label: string;
-    }) => api.renameTerminal(sessionId, label),
+    mutationFn: ({ sessionId, label }: { sessionId: string; label: string }) =>
+      api.renameTerminal(sessionId, label),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.terminalList });
     },

@@ -375,6 +375,29 @@ pub struct SessionTokenStats {
     pub output_tokens: u32,
 }
 
+/// Token usage recorded for one completed assistant response.
+///
+/// This deliberately contains metadata only. Message content is not loaded by
+/// the statistics endpoints, which keeps the read path small and avoids
+/// exposing conversation payloads to the web layer.
+#[derive(Debug, Clone)]
+pub struct UsageRecord {
+    pub session_id: String,
+    pub title: String,
+    pub provider_id: String,
+    pub provider_display_name: String,
+    pub model_id: String,
+    pub model_display_name: String,
+    pub session_created_at: String,
+    pub session_updated_at: String,
+    pub created_at: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_write_tokens: u64,
+    pub total_tokens: u64,
+}
+
 #[derive(Debug, Clone)]
 pub struct FileReadRecord {
     pub file_path: String,
@@ -1402,6 +1425,42 @@ impl SessionStore {
                 },
             )
             .map_err(Into::into)
+        })
+    }
+
+    /// Load token usage records without loading message content or metadata.
+    pub fn load_usage_records(&self) -> Result<Vec<UsageRecord>> {
+        self.read(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT m.session_id, s.title, s.provider_id, s.provider_display_name, \
+                 s.model_id, s.model_display_name, s.created_at, s.updated_at, m.created_at, \
+                 COALESCE(m.input_tokens, 0), COALESCE(m.output_tokens, 0), \
+                 COALESCE(m.cache_read_tokens, 0), COALESCE(m.cache_write_tokens, 0), \
+                 COALESCE(m.total_tokens, COALESCE(m.input_tokens, 0) + COALESCE(m.output_tokens, 0)) \
+                 FROM messages m INNER JOIN sessions s ON s.id = m.session_id \
+                 WHERE m.role = 'assistant' \
+                   AND (m.total_tokens IS NOT NULL OR m.input_tokens IS NOT NULL OR m.output_tokens IS NOT NULL) \
+                 ORDER BY m.created_at ASC, m.rowid ASC",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok(UsageRecord {
+                    session_id: row.get(0)?,
+                    title: row.get(1)?,
+                    provider_id: row.get(2)?,
+                    provider_display_name: row.get(3)?,
+                    model_id: row.get(4)?,
+                    model_display_name: row.get(5)?,
+                    session_created_at: row.get(6)?,
+                    session_updated_at: row.get(7)?,
+                    created_at: row.get(8)?,
+                    input_tokens: row.get::<_, i64>(9)?.max(0) as u64,
+                    output_tokens: row.get::<_, i64>(10)?.max(0) as u64,
+                    cache_read_tokens: row.get::<_, i64>(11)?.max(0) as u64,
+                    cache_write_tokens: row.get::<_, i64>(12)?.max(0) as u64,
+                    total_tokens: row.get::<_, i64>(13)?.max(0) as u64,
+                })
+            })?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
         })
     }
 

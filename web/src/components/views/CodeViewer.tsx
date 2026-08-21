@@ -155,7 +155,7 @@ export function CodeViewer() {
 
   if (openFiles.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center text-xs text-neutral-400">
+      <div className="file-viewer-empty flex h-full items-center justify-center text-xs text-neutral-400">
         Select a file to view
       </div>
     );

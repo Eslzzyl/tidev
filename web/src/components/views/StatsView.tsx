@@ -27,13 +27,7 @@ import {
   MousePointerClick,
 } from "lucide-react";
 import { queryClient } from "../../lib/queryClient";
-import {
-  useStatsSummary,
-  useStatsTimeSeries,
-  useStatsModels,
-  useStatsProviders,
-  useStatsSessions,
-} from "../../hooks/useQueries";
+import { useStatsOverview } from "../../hooks/useQueries";
 import type { ProviderUsageEntry } from "../../types/api";
 
 // ── Color palettes ───────────────────────────────────────────────────────
@@ -103,6 +97,14 @@ function formatDate(d: string | null): string {
 }
 
 type Granularity = "hour" | "day" | "week" | "month";
+type StatsRange = "24h" | "7d" | "30d" | "all";
+
+const RANGE_OPTIONS: { value: StatsRange; label: string; durationMs?: number }[] = [
+  { value: "24h", label: "24h", durationMs: 24 * 60 * 60 * 1000 },
+  { value: "7d", label: "7d", durationMs: 7 * 24 * 60 * 60 * 1000 },
+  { value: "30d", label: "30d", durationMs: 30 * 24 * 60 * 60 * 1000 },
+  { value: "all", label: "All" },
+];
 
 // ── Custom Tooltip ───────────────────────────────────────────────────────
 
@@ -200,6 +202,7 @@ function ChartContainer({
 export function StatsView() {
   // UI state
   const [granularity, setGranularity] = useState<Granularity>("hour");
+  const [range, setRange] = useState<StatsRange>("24h");
   const [isDark, setIsDark] = useState(false);
 
   // Detect dark mode
@@ -215,24 +218,33 @@ export function StatsView() {
   }, []);
 
   const colors = useMemo(() => (isDark ? DARK_COLORS : LIGHT_COLORS), [isDark]);
+  const statsParams = useMemo(() => {
+    const option = RANGE_OPTIONS.find((candidate) => candidate.value === range);
+    if (!option?.durationMs) return undefined;
+    const end = new Date();
+    return {
+      start: new Date(end.getTime() - option.durationMs).toISOString(),
+      end: end.toISOString(),
+    };
+  }, [range]);
 
   // Queries
-  const summaryQ = useStatsSummary();
-  const timeSeriesQ = useStatsTimeSeries(granularity);
-  const modelsQ = useStatsModels();
-  const providersQ = useStatsProviders();
-  const sessionsQ = useStatsSessions(10);
+  const overviewQ = useStatsOverview(granularity, statsParams, 10);
 
-  const initialLoading = summaryQ.isLoading || timeSeriesQ.isLoading || modelsQ.isLoading || providersQ.isLoading || sessionsQ.isLoading;
-  const error = summaryQ.error || timeSeriesQ.error || modelsQ.error || providersQ.error || sessionsQ.error;
-  const errorMessage = error ? (error instanceof Error ? error.message : "Failed to load stats") : null;
+  const initialLoading = overviewQ.isLoading;
+  const error = overviewQ.error;
+  const errorMessage = error
+    ? error instanceof Error
+      ? error.message
+      : "Failed to load stats"
+    : null;
 
-  const summary = summaryQ.data;
-  const timeSeries = timeSeriesQ.data;
-  const models = modelsQ.data ?? [];
-  const providers = providersQ.data ?? [];
-  const sessions = sessionsQ.data?.entries ?? [];
-  const sessionTotal = sessionsQ.data?.total ?? 0;
+  const summary = overviewQ.data?.summary;
+  const timeSeries = overviewQ.data?.timeseries;
+  const models = overviewQ.data?.models.entries ?? [];
+  const providers = overviewQ.data?.providers.entries ?? [];
+  const sessions = overviewQ.data?.sessions.entries ?? [];
+  const sessionTotal = overviewQ.data?.sessions.total ?? 0;
 
   // ── Derived data ─────────────────────────────────────────────────────
 
@@ -240,7 +252,7 @@ export function StatsView() {
     if (!timeSeries) return [];
     return timeSeries.entries.map((e) => ({
       bucket: e.time_bucket,
-      Input: e.input_tokens,
+      "Fresh Input": Math.max(0, e.input_tokens - e.cache_read_tokens),
       Output: e.output_tokens,
       "Cache Read": e.cache_read_tokens,
       cacheHitRate: e.input_tokens > 0 ? (e.cache_read_tokens / e.input_tokens) * 100 : 0,
@@ -294,23 +306,35 @@ export function StatsView() {
     <div className="h-full overflow-y-auto">
       <div className="mx-auto max-w-7xl space-y-6 p-4 pb-12 sm:p-6">
         {/* ── Header ──────────────────────────────────────────────────── */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <BarChart3 className="h-5 w-5 text-neutral-700 dark:text-neutral-300" />
             <h1 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">
               Statistics
             </h1>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {/* Date range selector */}
+            <div className="stats-control-group" aria-label="Statistics range">
+              {RANGE_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  onClick={() => setRange(option.value)}
+                  className={`stats-range-button ${range === option.value ? "is-active" : ""}`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
             {/* Granularity selector */}
-            <div className="flex overflow-hidden rounded-lg border border-neutral-200 dark:border-neutral-700">
+            <div className="stats-control-group" aria-label="Statistics granularity">
               {(["hour", "day", "week", "month"] as Granularity[]).map((g) => (
                 <button
                   key={g}
                   onClick={() => setGranularity(g)}
-                  className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                  className={`stats-granularity-button px-3 py-1.5 text-xs font-medium transition-colors ${
                     granularity === g
-                      ? "bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900"
+                      ? "is-active bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900"
                       : "bg-white text-neutral-600 hover:bg-neutral-50 dark:bg-neutral-950 dark:text-neutral-400 dark:hover:bg-neutral-900"
                   }`}
                 >
@@ -367,86 +391,90 @@ export function StatsView() {
           <h2 className="mb-4 text-sm font-semibold text-neutral-700 dark:text-neutral-300">
             Token Usage
           </h2>
-          <ChartContainer className="h-[300px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={totalTokenData}>
-                <defs>
-                  <linearGradient id="gradInput" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={CHART_COLORS[2]} stopOpacity={0.3} />
-                    <stop offset="95%" stopColor={CHART_COLORS[2]} stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="gradOutput" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={CHART_COLORS[1]} stopOpacity={0.3} />
-                    <stop offset="95%" stopColor={CHART_COLORS[1]} stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="gradCache" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={CHART_COLORS[0]} stopOpacity={0.3} />
-                    <stop offset="95%" stopColor={CHART_COLORS[0]} stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#333" : "#e5e7eb"} />
-                <XAxis
-                  dataKey="bucket"
-                  tickFormatter={(v) => formatTokenBucket(granularity, v)}
-                  tick={{ fontSize: 11, fill: isDark ? "#888" : "#6b7280" }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <YAxis
-                  yAxisId="left"
-                  tickFormatter={formatNumber}
-                  tick={{ fontSize: 11, fill: isDark ? "#888" : "#6b7280" }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <YAxis
-                  yAxisId="right"
-                  orientation="right"
-                  domain={[0, 100]}
-                  tickFormatter={(v) => `${v}%`}
-                  tick={{ fontSize: 11, fill: isDark ? "#888" : "#6b7280" }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <Tooltip content={<ChartTooltip granularity={granularity} />} />
-                <Legend wrapperStyle={{ fontSize: 12 }} iconType="circle" />
-                <Area
-                  yAxisId="left"
-                  type="monotone"
-                  dataKey="Input"
-                  stroke={CHART_COLORS[2]}
-                  fill="url(#gradInput)"
-                  strokeWidth={2}
-                />
-                <Area
-                  yAxisId="left"
-                  type="monotone"
-                  dataKey="Output"
-                  stroke={CHART_COLORS[1]}
-                  fill="url(#gradOutput)"
-                  strokeWidth={2}
-                />
-                <Area
-                  yAxisId="left"
-                  type="monotone"
-                  dataKey="Cache Read"
-                  stroke={CHART_COLORS[0]}
-                  fill="url(#gradCache)"
-                  strokeWidth={1.5}
-                />
-                <Line
-                  yAxisId="right"
-                  type="monotone"
-                  dataKey="cacheHitRate"
-                  stroke={CHART_COLORS[3]}
-                  strokeWidth={2}
-                  strokeDasharray="4 3"
-                  dot={false}
-                  name="Cache Hit Rate"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </ChartContainer>
+          {totalTokenData.length === 0 ? (
+            <ChartEmptyState text="No token usage data yet" />
+          ) : (
+            <ChartContainer className="h-[300px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={totalTokenData}>
+                  <defs>
+                    <linearGradient id="gradInput" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={CHART_COLORS[2]} stopOpacity={0.3} />
+                      <stop offset="95%" stopColor={CHART_COLORS[2]} stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="gradOutput" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={CHART_COLORS[1]} stopOpacity={0.3} />
+                      <stop offset="95%" stopColor={CHART_COLORS[1]} stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="gradCache" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={CHART_COLORS[0]} stopOpacity={0.3} />
+                      <stop offset="95%" stopColor={CHART_COLORS[0]} stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#333" : "#e5e7eb"} />
+                  <XAxis
+                    dataKey="bucket"
+                    tickFormatter={(v) => formatTokenBucket(granularity, v)}
+                    tick={{ fontSize: 11, fill: isDark ? "#888" : "#6b7280" }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    yAxisId="left"
+                    tickFormatter={formatNumber}
+                    tick={{ fontSize: 11, fill: isDark ? "#888" : "#6b7280" }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    yAxisId="right"
+                    orientation="right"
+                    domain={[0, 100]}
+                    tickFormatter={(v) => `${v}%`}
+                    tick={{ fontSize: 11, fill: isDark ? "#888" : "#6b7280" }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <Tooltip content={<ChartTooltip granularity={granularity} />} />
+                  <Legend wrapperStyle={{ fontSize: 12 }} iconType="circle" />
+                  <Area
+                    yAxisId="left"
+                    type="monotone"
+                    dataKey="Fresh Input"
+                    stroke={CHART_COLORS[2]}
+                    fill="url(#gradInput)"
+                    strokeWidth={2}
+                  />
+                  <Area
+                    yAxisId="left"
+                    type="monotone"
+                    dataKey="Output"
+                    stroke={CHART_COLORS[1]}
+                    fill="url(#gradOutput)"
+                    strokeWidth={2}
+                  />
+                  <Area
+                    yAxisId="left"
+                    type="monotone"
+                    dataKey="Cache Read"
+                    stroke={CHART_COLORS[0]}
+                    fill="url(#gradCache)"
+                    strokeWidth={1.5}
+                  />
+                  <Line
+                    yAxisId="right"
+                    type="monotone"
+                    dataKey="cacheHitRate"
+                    stroke={CHART_COLORS[3]}
+                    strokeWidth={2}
+                    strokeDasharray="4 3"
+                    dot={false}
+                    name="Cache Hit Rate"
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </ChartContainer>
+          )}
         </div>
 
         {/* ── Request Count Chart (Bar) ───────────────────────────────── */}
@@ -454,32 +482,36 @@ export function StatsView() {
           <h2 className="mb-4 text-sm font-semibold text-neutral-700 dark:text-neutral-300">
             Requests Over Time
           </h2>
-          <ChartContainer className="h-[200px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={timeSeries?.entries || []}>
-                <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#333" : "#e5e7eb"} />
-                <XAxis
-                  dataKey="time_bucket"
-                  tickFormatter={(v) => formatTokenBucket(granularity, v)}
-                  tick={{ fontSize: 11, fill: isDark ? "#888" : "#6b7280" }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <YAxis
-                  tick={{ fontSize: 11, fill: isDark ? "#888" : "#6b7280" }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <Tooltip content={<ChartTooltip granularity={granularity} />} />
-                <Bar
-                  dataKey="request_count"
-                  fill={CHART_COLORS[0]}
-                  radius={[4, 4, 0, 0]}
-                  maxBarSize={40}
-                />
-              </BarChart>
-            </ResponsiveContainer>
-          </ChartContainer>
+          {!timeSeries?.entries.length ? (
+            <ChartEmptyState text="No request data yet" />
+          ) : (
+            <ChartContainer className="h-[200px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={timeSeries.entries}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#333" : "#e5e7eb"} />
+                  <XAxis
+                    dataKey="time_bucket"
+                    tickFormatter={(v) => formatTokenBucket(granularity, v)}
+                    tick={{ fontSize: 11, fill: isDark ? "#888" : "#6b7280" }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    tick={{ fontSize: 11, fill: isDark ? "#888" : "#6b7280" }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <Tooltip content={<ChartTooltip granularity={granularity} />} />
+                  <Bar
+                    dataKey="request_count"
+                    fill={CHART_COLORS[0]}
+                    radius={[4, 4, 0, 0]}
+                    maxBarSize={40}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </ChartContainer>
+          )}
         </div>
 
         {/* ── Model Breakdown + Provider Breakdown ──────────────────── */}
@@ -551,7 +583,6 @@ export function StatsView() {
                       shortName: p.provider_display_name || p.provider_id,
                     }))}
                     layout="vertical"
-                    stackOffset="sign"
                   >
                     <CartesianGrid
                       strokeDasharray="3 3"
@@ -725,6 +756,14 @@ function SummaryCard({
       </div>
       <div className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">{value}</div>
       {subtitle && <div className="mt-0.5 text-xs text-neutral-400">{subtitle}</div>}
+    </div>
+  );
+}
+
+function ChartEmptyState({ text }: { text: string }) {
+  return (
+    <div className="flex h-[200px] items-center justify-center rounded-lg border border-dashed border-neutral-200 text-sm text-neutral-400 dark:border-neutral-800">
+      {text}
     </div>
   );
 }

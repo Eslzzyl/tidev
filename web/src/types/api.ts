@@ -401,6 +401,14 @@ export interface StatsTimeSeries {
   summary: StatsSummary;
 }
 
+export interface StatsOverview {
+  summary: StatsSummary;
+  timeseries: StatsTimeSeries;
+  models: { entries: ModelUsageEntry[] };
+  providers: { entries: ProviderUsageEntry[] };
+  sessions: { entries: SessionUsageEntry[]; total: number };
+}
+
 export interface ModelUsageEntry {
   provider_id: string;
   provider_display_name: string;

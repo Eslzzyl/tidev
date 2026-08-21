@@ -14,6 +14,7 @@ axum-reverse-proxy = { version = "1.4", default-features = false }
 async-stream = "0.3"
 base64 = "0.22"
 bytes = "1"
+chrono = { version = "0.4", features = ["serde"] }
 futures-core = "0.3"
 futures-util = "0.3"
 log = "0.4"
