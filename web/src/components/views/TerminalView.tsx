@@ -1,15 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Terminal } from "@xterm/xterm";
-import { FitAddon } from "@xterm/addon-fit";
+import jetBrainsMonoRegularUrl from "@fontsource/jetbrains-mono/files/jetbrains-mono-latin-400-normal.woff2?url";
 import { Edit3, Plus, X, XCircle, XSquare } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Restty, parseGhosttyTheme } from "restty";
 import { useTerminalStore } from "../../stores/useTerminalStore";
-import { useUIStore, getEffectiveTheme } from "../../stores/useUIStore";
-import { ContextMenu } from "../ui/ContextMenu";
-import type { ContextMenuItem } from "../ui/ContextMenu";
-import { RenameDialog } from "../ui/RenameDialog";
-import { ConfirmDialog } from "../ui/ConfirmDialog";
+import { getEffectiveTheme, useUIStore } from "../../stores/useUIStore";
 import type { TerminalConnection } from "../../terminal/connection";
-import "@xterm/xterm/css/xterm.css";
+import { createResttyTransport } from "../../terminal/resttyTransport";
+import { ConfirmDialog } from "../ui/ConfirmDialog";
+import type { ContextMenuItem } from "../ui/ContextMenu";
+import { ContextMenu } from "../ui/ContextMenu";
+import { RenameDialog } from "../ui/RenameDialog";
+
+const TERMINAL_FONT_SIZE = 17;
 
 /** Dark terminal theme */
 const DARK_THEME = {
@@ -58,6 +60,38 @@ const LIGHT_THEME = {
   brightCyan: "#06b6d4",
   brightWhite: "#f5f5f5",
 };
+
+const ANSI_PALETTE_KEYS = [
+  "black",
+  "red",
+  "green",
+  "yellow",
+  "blue",
+  "magenta",
+  "cyan",
+  "white",
+  "brightBlack",
+  "brightRed",
+  "brightGreen",
+  "brightYellow",
+  "brightBlue",
+  "brightMagenta",
+  "brightCyan",
+  "brightWhite",
+] as const;
+
+function createResttyTheme(theme: typeof DARK_THEME) {
+  const lines = [
+    `background = ${theme.background}`,
+    `foreground = ${theme.foreground}`,
+    `cursor-color = ${theme.cursor}`,
+    `cursor-text = ${theme.background}`,
+    `selection-background = ${theme.selectionBackground}`,
+    ...ANSI_PALETTE_KEYS.map((key, index) => `palette = ${index}=${theme[key]}`),
+  ];
+
+  return parseGhosttyTheme(lines.join("\n"));
+}
 
 export function TerminalView() {
   const tabs = useTerminalStore((s) => s.tabs);
@@ -176,7 +210,9 @@ export function TerminalView() {
         <button
           onClick={() => createTab()}
           className={`mr-1 rounded p-1 transition-colors ${
-            isDark ? "text-neutral-400 hover:bg-neutral-800 hover:text-white" : "text-neutral-500 hover:bg-neutral-200 hover:text-black"
+            isDark
+              ? "text-neutral-400 hover:bg-neutral-800 hover:text-white"
+              : "text-neutral-500 hover:bg-neutral-200 hover:text-black"
           }`}
         >
           <Plus size={14} />
@@ -186,10 +222,7 @@ export function TerminalView() {
       {/* Terminal viewport */}
       <div className="flex-1 overflow-hidden">
         {tabs.map((tab) => (
-          <div
-            key={tab.id}
-            className={tab.id === activeTabId ? "block h-full flex-1" : "hidden"}
-          >
+          <div key={tab.id} className={tab.id === activeTabId ? "block h-full flex-1" : "hidden"}>
             {activeTab && <TerminalViewport tab={tab} isDark={isDark} />}
           </div>
         ))}
@@ -240,9 +273,7 @@ export function TerminalView() {
           confirmText="Close Others"
           danger
           onConfirm={() => {
-            const others = tabs
-              .filter((t) => t.id !== confirmClose.excludeId)
-              .map((t) => t.id);
+            const others = tabs.filter((t) => t.id !== confirmClose.excludeId).map((t) => t.id);
             if (others.length > 0) closeTabs(others);
             setConfirmClose(null);
           }}
@@ -257,145 +288,83 @@ interface TerminalViewportProps {
   tab: {
     id: string;
     connection: TerminalConnection | null;
-    lifecycle: string;
   };
   isDark: boolean;
 }
 
 function TerminalViewport({ tab, isDark }: TerminalViewportProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
-  const xtermRef = useRef<Terminal | null>(null);
-  const fitAddonRef = useRef<FitAddon | null>(null);
-  const connRef = useRef<TerminalConnection | null>(null);
-  /** Guards against duplicate HTTP start in StrictMode double-mount. */
+  const resttyRef = useRef<Restty | null>(null);
+  /** Guards against duplicate HTTP starts during StrictMode mount replay. */
   const httpStartedRef = useRef(false);
 
   const startSession = useTerminalStore((s) => s.startSession);
 
-  // Initialize xterm.js and start the terminal session
+  // Create the server-side PTY before mounting its restty transport.
   useEffect(() => {
-    if (!terminalRef.current) return;
-    if (xtermRef.current) return;
-
-    // ★ Optimization: kick off HTTP POST immediately with default 80×24,
-    // so PTY creation runs in parallel with xterm initialization.
-    // The actual size will be sent via WebSocket resize once xterm is ready.
     if (!tab.connection && !httpStartedRef.current) {
       httpStartedRef.current = true;
       startSession(tab.id, 80, 24);
     }
+  }, [startSession, tab.connection, tab.id]);
 
-    const term = new Terminal({
-      cursorBlink: true,
-      cursorStyle: "block",
-      fontSize: 13,
-      fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
-      theme: isDark ? DARK_THEME : LIGHT_THEME,
-      allowProposedApi: true,
-      cols: 80,
-      rows: 24,
+  // Mount one native restty surface for this tab and let it own sizing,
+  // keyboard input, IME handling, selection, and terminal rendering.
+  useEffect(() => {
+    if (!terminalRef.current || !tab.connection || resttyRef.current) return;
+
+    const theme = isDark ? DARK_THEME : LIGHT_THEME;
+    const restty = new Restty({
+      root: terminalRef.current,
+      terminal: {
+        renderer: "auto",
+        fontSize: TERMINAL_FONT_SIZE,
+        fontSizeMode: "em",
+        fonts: [jetBrainsMonoRegularUrl],
+        theme: createResttyTheme(theme),
+        autoResize: true,
+        showResizeOverlay: false,
+        maxScrollbackBytes: 10 * 1024 * 1024,
+      },
+      surface: {
+        paneStyles: {
+          enabled: true,
+          paneBackground: theme.background,
+          splitBackground: theme.background,
+          dividerColor: "transparent",
+        },
+        defaultContextMenu: false,
+        shortcuts: false,
+      },
+      services: {
+        ptyTransport: createResttyTransport(tab.connection),
+      },
     });
 
-    const fitAddon = new FitAddon();
-    term.loadAddon(fitAddon);
-    fitAddonRef.current = fitAddon;
-
-    term.open(terminalRef.current);
-    xtermRef.current = term;
-
-    // Handle user input: forward to terminal connection
-    term.onData((data: string) => {
-      const conn = connRef.current;
-      if (conn) {
-        conn.sendMessage("stdin", data);
-      }
-    });
-
-    // Fit terminal and send resize if connection is ready.
-    // This is called on first paint (rAF) and on every resize.
-    const fitAndInit = () => {
-      try {
-        fitAddon.fit();
-        const cols = term.cols;
-        const rows = term.rows;
-        if (cols <= 0 || rows <= 0) return;
-
-        // Send current actual size to the PTY
-        const conn = connRef.current;
-        if (conn) {
-          conn.sendMessage("resize", rows, cols);
-        }
-        // If connection not ready yet, resize will be sent by
-        // the connection-watcher effect when it arrives.
-      } catch {
-        // Fit errors are non-fatal
-      }
-    };
-
-    // ★ Optimization: use rAF (~16ms) instead of setTimeout(50ms)
-    const rafId = requestAnimationFrame(() => {
-      fitAndInit();
-    });
-
-    // Observe container for future resize
-    const resizeObserver = new ResizeObserver(() => {
-      fitAndInit();
-    });
-    resizeObserver.observe(terminalRef.current);
+    resttyRef.current = restty;
+    restty.connectPty();
+    restty.setFontSize(TERMINAL_FONT_SIZE);
+    restty.updateSize(true);
 
     return () => {
-      cancelAnimationFrame(rafId);
-      resizeObserver.disconnect();
-      // Remove message handlers from connection
-      const conn = connRef.current;
-      if (conn) {
-        conn.offMessage(liveHandler);
-      }
-      connRef.current = null;
-      term.dispose();
-      xtermRef.current = null;
-      fitAddonRef.current = null;
+      restty.destroy();
+      resttyRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Live handler: forward stdout directly to xterm
-  const liveHandler = (msg: { type: string; content: unknown[] }) => {
-    const term = xtermRef.current;
-    if (!term) return;
-
-    if (msg.type === "stdout") {
-      const text = msg.content[0] as string;
-      term.write(text);
-    } else if (msg.type === "disconnect") {
-      term.write("\r\n\x1b[31m[Process exited]\x1b[0m\r\n");
-    }
-  };
-
-  // Watch for connection changes on the tab
-  useEffect(() => {
-    const conn = tab.connection;
-    if (!conn || conn === connRef.current) return;
-
-    connRef.current = conn;
-
-    // If xterm is already ready, register live handler and send
-    // the actual terminal size (may correct default 80×24 used in
-    // the parallel HTTP start).
-    if (xtermRef.current) {
-      const term = xtermRef.current;
-      const cols = term.cols;
-      const rows = term.rows;
-      if (cols > 0 && rows > 0) {
-        conn.sendMessage("resize", rows, cols);
-      }
-
-      // Switch to live handler
-      conn.onMessage(liveHandler);
-    } else {
-      // Not ready yet — buffer will be handled during init
-    }
   }, [tab.connection]);
+
+  useEffect(() => {
+    const restty = resttyRef.current;
+    if (!restty) return;
+
+    const theme = isDark ? DARK_THEME : LIGHT_THEME;
+    const resttyTheme = createResttyTheme(theme);
+    restty.forEachPane((pane) => pane.applyTheme(resttyTheme));
+    restty.setPaneStyleOptions({
+      paneBackground: theme.background,
+      splitBackground: theme.background,
+      dividerColor: "transparent",
+    });
+  }, [isDark]);
 
   return (
     <div

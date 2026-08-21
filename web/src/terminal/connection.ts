@@ -1,55 +1,47 @@
-/**
- * Terminal WebSocket connection with built-in reconnection and message queue.
- *
- * Protocol: JSON arrays over WebSocket text frames.
- *   Client → Server: ["stdin", "<text>"], ["resize", <rows>, <cols>]
- *   Server → Client: ["setup"], ["stdout", "<text>"], ["disconnect", "<reason>"]
- */
+import type { PtyResizeMeta } from "restty";
 
+/** Lifecycle state of a terminal WebSocket. */
 export type ConnectionStatus = "disconnected" | "connecting" | "connected";
 
-export interface TerminalMessage {
-  type: string;
-  content: unknown[];
-}
-
-type MessageHandler = (msg: TerminalMessage) => void;
+type DataHandler = (data: string) => void;
 type StatusHandler = (status: ConnectionStatus) => void;
 
+/**
+ * A reconnecting WebSocket connection for one server-side PTY session.
+ *
+ * The wire format follows restty's native WebSocket PTY transport. The
+ * renderer-specific behavior lives in resttyTransport.ts.
+ */
 export class TerminalConnection {
   private _ws: WebSocket | null = null;
-  private _name: string;
+  private readonly _sessionId: string;
   private _status: ConnectionStatus = "disconnected";
-  private _messageHandlers: Set<MessageHandler> = new Set();
-  private _statusHandlers: Set<StatusHandler> = new Set();
-  private _pendingMessages: string[] = [];
+  private readonly _dataHandlers = new Set<DataHandler>();
+  private readonly _statusHandlers = new Set<StatusHandler>();
   private _reconnectAttempt = 0;
-  private _reconnectLimit = 7;
+  private readonly _reconnectLimit = 7;
   private _reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+  private _decoder = new TextDecoder();
   private _disposed = false;
 
-  constructor(name: string) {
-    this._name = name;
+  constructor(sessionId: string) {
+    this._sessionId = sessionId;
   }
 
-  get name(): string {
-    return this._name;
+  get sessionId(): string {
+    return this._sessionId;
   }
 
   get status(): ConnectionStatus {
     return this._status;
   }
 
-  get disposed(): boolean {
-    return this._disposed;
+  onData(handler: DataHandler): void {
+    this._dataHandlers.add(handler);
   }
 
-  onMessage(handler: MessageHandler): void {
-    this._messageHandlers.add(handler);
-  }
-
-  offMessage(handler: MessageHandler): void {
-    this._messageHandlers.delete(handler);
+  offData(handler: DataHandler): void {
+    this._dataHandlers.delete(handler);
   }
 
   onStatusChange(handler: StatusHandler): void {
@@ -62,130 +54,144 @@ export class TerminalConnection {
 
   connect(): void {
     if (this._disposed) return;
-    // Guard: don't re-connect if already connecting or connected
-    if (this._ws && (this._ws.readyState === WebSocket.OPEN || this._ws.readyState === WebSocket.CONNECTING)) {
+    if (
+      this._ws &&
+      (this._ws.readyState === WebSocket.OPEN || this._ws.readyState === WebSocket.CONNECTING)
+    ) {
       return;
     }
+
     this._cancelReconnect();
     this._updateStatus("connecting");
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const params = new URLSearchParams({ session_id: this._sessionId });
     const token = localStorage.getItem("web_auth_token");
-    const tokenParam = token ? `?token=${encodeURIComponent(token)}` : "";
-    const url = `${protocol}//${window.location.host}/api/terminal/ws${tokenParam}`;
+    if (token) params.set("token", token);
+    const url = `${protocol}//${window.location.host}/api/terminal/ws?${params.toString()}`;
 
     try {
       const ws = new WebSocket(url);
+      ws.binaryType = "arraybuffer";
       this._ws = ws;
+      this._decoder = new TextDecoder();
 
       ws.onopen = () => {
-        // Send bind message
-        this._sendRaw(JSON.stringify(["bind", this._name]));
+        if (this._ws !== ws) return;
+        this._reconnectAttempt = 0;
+        this._updateStatus("connected");
       };
 
       ws.onmessage = (event: MessageEvent) => {
-        try {
-          const data = JSON.parse(event.data) as unknown[];
-          if (!Array.isArray(data) || data.length === 0) return;
+        if (this._ws !== ws) return;
 
-          const msgType = String(data[0]);
-          const content = data.slice(1);
+        if (event.data instanceof ArrayBuffer) {
+          this._emitData(this._decoder.decode(new Uint8Array(event.data), { stream: true }));
+          return;
+        }
 
-          // Handle protocol-level messages
-          if (msgType === "setup") {
-            this._updateStatus("connected");
-            this._flushQueue();
-            return;
-          }
+        if (event.data instanceof Blob) {
+          void event.data.arrayBuffer().then((data) => {
+            if (this._ws !== ws) return;
+            this._emitData(this._decoder.decode(new Uint8Array(data), { stream: true }));
+          });
+          return;
+        }
 
-          if (msgType === "disconnect") {
-            this._updateStatus("disconnected");
-            this._cleanup();
-            return;
-          }
-
-          // Forward to handlers
-          this._emitMessage({ type: msgType, content });
-        } catch {
-          // Invalid JSON — ignore
+        if (typeof event.data === "string") {
+          this._handleTextMessage(event.data);
         }
       };
 
       ws.onclose = (event: CloseEvent) => {
-        // Normal close (1000) or going away (1001) — no reconnect
+        if (this._ws !== ws) return;
+        const tail = this._decoder.decode();
+        if (tail) this._emitData(tail);
+
+        this._ws = null;
         if (event.code === 1000 || event.code === 1001) {
           this._updateStatus("disconnected");
-          this._cleanup();
           return;
         }
-        // Unexpected close — attempt reconnect
         this._scheduleReconnect();
       };
 
       ws.onerror = () => {
-        // onclose will follow, which triggers reconnect
+        // The close event owns reconnect handling.
       };
     } catch {
-      // WebSocket constructor failed — attempt reconnect
       this._scheduleReconnect();
     }
   }
 
-  sendMessage(type: string, ...content: unknown[]): void {
-    const msg = JSON.stringify([type, ...content]);
-
-    if (this._status === "connected" && this._ws) {
-      this._sendRaw(msg);
-    } else {
-      // Queue for later delivery
-      this._pendingMessages.push(msg);
-    }
+  sendInput(data: string): boolean {
+    return this._send({ type: "input", data });
   }
 
+  resize(cols: number, rows: number, meta?: PtyResizeMeta): boolean {
+    return this._send({ type: "resize", cols, rows, ...meta });
+  }
+
+  /** Close the current socket while keeping this connection reusable. */
   disconnect(): void {
-    this._disposed = true;
     this._cancelReconnect();
-    this._cleanup();
+    this._cleanupSocket();
     this._updateStatus("disconnected");
   }
 
-  private _sendRaw(msg: string): void {
-    if (this._ws && this._ws.readyState === WebSocket.OPEN) {
-      this._ws.send(msg);
-    }
+  /** Permanently release the connection and all reconnect state. */
+  dispose(): void {
+    this._disposed = true;
+    this.disconnect();
+    this._dataHandlers.clear();
+    this._statusHandlers.clear();
   }
 
-  private _flushQueue(): void {
-    const pending = this._pendingMessages;
-    this._pendingMessages = [];
-    for (const msg of pending) {
-      this._sendRaw(msg);
+  private _handleTextMessage(data: string): void {
+    try {
+      const message = JSON.parse(data) as { type?: unknown };
+      if (message && message.type === "exit") {
+        this._cleanupSocket();
+        this._updateStatus("disconnected");
+        return;
+      }
+    } catch {
+      // Plain text is terminal output.
     }
+
+    this._emitData(data);
   }
 
-  private _cleanup(): void {
-    if (this._ws) {
-      this._ws.onopen = null;
-      this._ws.onmessage = null;
-      this._ws.onclose = null;
-      this._ws.onerror = null;
-      this._ws.close();
-      this._ws = null;
-    }
+  private _send(message: object): boolean {
+    if (!this._ws || this._ws.readyState !== WebSocket.OPEN) return false;
+    this._ws.send(JSON.stringify(message));
+    return true;
+  }
+
+  private _cleanupSocket(): void {
+    if (!this._ws) return;
+    const ws = this._ws;
+    this._ws = null;
+    ws.onopen = null;
+    ws.onmessage = null;
+    ws.onclose = null;
+    ws.onerror = null;
+    ws.close();
   }
 
   private _scheduleReconnect(): void {
-    if (this._disposed) return;
+    if (this._disposed) {
+      this._updateStatus("disconnected");
+      return;
+    }
     if (this._reconnectAttempt >= this._reconnectLimit) {
       this._updateStatus("disconnected");
       return;
     }
 
-    // Exponential backoff with random jitter
     const delay = Math.floor(Math.random() * (1 << this._reconnectAttempt) * 1000);
     this._reconnectAttempt++;
-
-    this._cleanup();
+    this._cleanupSocket();
     this._updateStatus("connecting");
 
     this._reconnectTimeout = setTimeout(() => {
@@ -195,24 +201,19 @@ export class TerminalConnection {
   }
 
   private _cancelReconnect(): void {
-    if (this._reconnectTimeout !== null) {
-      clearTimeout(this._reconnectTimeout);
-      this._reconnectTimeout = null;
-    }
+    if (this._reconnectTimeout === null) return;
+    clearTimeout(this._reconnectTimeout);
+    this._reconnectTimeout = null;
   }
 
   private _updateStatus(status: ConnectionStatus): void {
-    if (this._status !== status) {
-      this._status = status;
-      for (const handler of this._statusHandlers) {
-        handler(status);
-      }
-    }
+    if (this._status === status) return;
+    this._status = status;
+    for (const handler of this._statusHandlers) handler(status);
   }
 
-  private _emitMessage(msg: TerminalMessage): void {
-    for (const handler of this._messageHandlers) {
-      handler(msg);
-    }
+  private _emitData(data: string): void {
+    if (!data) return;
+    for (const handler of this._dataHandlers) handler(data);
   }
 }

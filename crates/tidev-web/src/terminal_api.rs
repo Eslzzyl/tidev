@@ -2,41 +2,32 @@
 //! Terminal API routes for web terminal.
 //!
 //! - `POST /api/terminal/start`     — Start a new terminal session (with optional cols/rows/shell)
-//! - `POST /api/terminal/input`     — Send raw input to a terminal session
-//! - `POST /api/terminal/resize`    — Resize the PTY (cols × rows)
-//! - `GET  /api/terminal/events`    — SSE stream for terminal output
 //! - `GET  /api/terminal/shells`    — List available shells on the server
-//! - `GET  /api/terminal/ws`        — WebSocket endpoint for terminal I/O
+//! - `GET  /api/terminal/ws?session_id=...` — WebSocket endpoint for terminal I/O
 //! - `DELETE /api/terminal/{id}`    — Close a terminal session
 //!
 //! ## WebSocket Protocol
 //!
-//! Messages are JSON arrays: `[type, ...args]`
+//! The protocol follows restty's native WebSocket PTY transport.
 //!
 //! **Client → Server:**
-//! - `["bind", "<session_id>"]`  — Bind to an existing session
-//! - `["stdin", "<text>"]`       — Send input to the PTY
-//! - `["resize", <rows>, <cols>]` — Resize the PTY
+//! - `{"type":"input","data":"<text>"}` — Send input to the PTY
+//! - `{"type":"resize","cols":<cols>,"rows":<rows>}` — Resize the PTY
 //!
 //! **Server → Client:**
-//! - `["setup"]`                 — Session ready (sent after successful bind)
-//! - `["stdout", "<text>"]`      — PTY output
-//! - `["disconnect", "<reason>"]` — Session closed
+//! - Raw UTF-8 text or binary frames — PTY output
+//! - `{"type":"exit"}` — PTY process exited
 
 use std::collections::HashSet;
-use std::convert::Infallible;
 use std::sync::Arc;
 
 use axum::{
     Json, Router,
     extract::{
         Path, Query, State,
-        ws::{Message, Utf8Bytes, WebSocket, WebSocketUpgrade},
+        ws::{Message, WebSocket, WebSocketUpgrade},
     },
-    response::{
-        IntoResponse,
-        sse::{Event, Sse},
-    },
+    response::IntoResponse,
     routing::{delete, get, post},
 };
 use serde::{Deserialize, Serialize};
@@ -47,10 +38,7 @@ use crate::api::{ApiError, AppState};
 pub fn terminal_routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/terminal/start", post(start_terminal))
-        .route("/terminal/input", post(terminal_input))
-        .route("/terminal/resize", post(terminal_resize))
         .route("/terminal/rename", post(rename_terminal))
-        .route("/terminal/events", get(terminal_events))
         .route("/terminal/shells", get(list_shells))
         .route("/terminal/list", get(list_sessions))
         .route("/terminal/ws", get(terminal_ws_handler))
@@ -87,29 +75,11 @@ struct StartRequest {
 }
 
 #[derive(Deserialize)]
-struct InputRequest {
-    session_id: String,
-    data: String,
-}
-
-#[derive(Deserialize)]
-struct ResizeRequest {
-    session_id: String,
-    cols: u16,
-    rows: u16,
-}
-
-#[derive(Deserialize)]
-struct EventsQuery {
-    session_id: String,
-    /// Optional auth token (for SSE which can't set custom headers)
-    token: Option<String>,
-}
-
-#[derive(Deserialize)]
 struct WsQuery {
     /// Optional auth token (for WebSocket which can't set custom headers)
     token: Option<String>,
+    /// Existing terminal session to attach to.
+    session_id: String,
 }
 
 #[derive(Serialize)]
@@ -123,9 +93,17 @@ struct SessionEntry {
     label: String,
 }
 
-/// Parse a JSON array message from the WebSocket.
-/// Returns the message type as a string and the remaining arguments.
-fn parse_ws_msg(msg: &Message) -> Result<(String, Vec<serde_json::Value>), String> {
+#[derive(Deserialize)]
+#[serde(tag = "type")]
+enum PtyClientMessage {
+    #[serde(rename = "input")]
+    Input { data: String },
+    #[serde(rename = "resize")]
+    Resize { cols: u16, rows: u16 },
+}
+
+/// Parse a restty PTY message from a WebSocket text or UTF-8 binary frame.
+fn parse_pty_message(msg: &Message) -> Result<PtyClientMessage, String> {
     let text = match msg {
         Message::Text(t) => t.to_string(),
         Message::Binary(d) => String::from_utf8(d.to_vec())
@@ -133,24 +111,7 @@ fn parse_ws_msg(msg: &Message) -> Result<(String, Vec<serde_json::Value>), Strin
         _ => return Err("unexpected message type".to_string()),
     };
 
-    let arr: Vec<serde_json::Value> =
-        serde_json::from_str(&text).map_err(|e| format!("invalid JSON array: {e}"))?;
-
-    if arr.is_empty() {
-        return Err("empty message array".to_string());
-    }
-
-    let msg_type = arr[0]
-        .as_str()
-        .ok_or_else(|| "first element must be a string type".to_string())?;
-
-    Ok((msg_type.to_string(), arr[1..].to_vec()))
-}
-
-/// Build a JSON array WebSocket message.
-fn json_msg(args: impl IntoIterator<Item = impl Into<serde_json::Value>>) -> Utf8Bytes {
-    let arr: Vec<serde_json::Value> = args.into_iter().map(Into::into).collect();
-    serde_json::to_string(&arr).unwrap_or_default().into()
+    serde_json::from_str(&text).map_err(|e| format!("invalid PTY message: {e}"))
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────
@@ -458,127 +419,13 @@ fn detect_shells() -> Vec<ShellEntry> {
     shells
 }
 
-async fn terminal_input(
-    State(state): State<Arc<AppState>>,
-    Json(req): Json<InputRequest>,
-) -> Result<(), ApiError> {
-    let session_id = Uuid::parse_str(&req.session_id)
-        .map_err(|e| ApiError::bad_request(format!("Invalid session_id: {e}")))?;
-
-    state
-        .terminal_manager
-        .write_input(session_id, req.data.as_bytes())
-        .await
-        .map_err(ApiError::internal)?;
-
-    Ok(())
-}
-
-async fn terminal_resize(
-    State(state): State<Arc<AppState>>,
-    Json(req): Json<ResizeRequest>,
-) -> Result<(), ApiError> {
-    let session_id = Uuid::parse_str(&req.session_id)
-        .map_err(|e| ApiError::bad_request(format!("Invalid session_id: {e}")))?;
-
-    state
-        .terminal_manager
-        .resize(session_id, req.cols, req.rows)
-        .await
-        .map_err(ApiError::internal)?;
-
-    Ok(())
-}
-
-/// SSE endpoint for terminal output.
-/// Public endpoint (bypasses auth middleware) because EventSource
-/// cannot set custom headers. Auth is handled inline via query param.
-/// Respects `cancel_token` for graceful shutdown.
-async fn terminal_events(
-    State(state): State<Arc<AppState>>,
-    Query(query): Query<EventsQuery>,
-) -> Result<Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>>, ApiError> {
-    // Validate auth token if configured
-    if let Some(configured) = crate::api::configured_auth_token(&state) {
-        let provided = query.token.as_deref().unwrap_or("");
-        if provided != configured {
-            return Err(ApiError::unauthorized("Invalid or missing auth token"));
-        }
-    }
-
-    let session_id = Uuid::parse_str(&query.session_id)
-        .map_err(|e| ApiError::bad_request(format!("Invalid session_id: {e}")))?;
-
-    let cancel_token = state.cancel.clone();
-    let mut rx = state.terminal_tx.subscribe();
-
-    // Flush any buffered output that was produced before this subscriber
-    // connected (e.g. the initial shell prompt).
-    let buf = state.terminal_manager.get_buffer(session_id).await;
-    let initial: Vec<Result<Event, Infallible>> = if buf.is_empty() {
-        Vec::new()
-    } else {
-        let text = String::from_utf8_lossy(&buf).to_string();
-        vec![Ok(Event::default().event("terminal.output").data(text))]
-    };
-
-    let stream = async_stream::stream! {
-        for evt in initial {
-            yield evt;
-        }
-
-        loop {
-            tokio::select! {
-                // Check for shutdown signal
-                _ = cancel_token.cancelled() => {
-                    log::debug!("terminal SSE closing due to shutdown for session {}", session_id);
-                    break;
-                }
-                result = rx.recv() => {
-                    let output = match result {
-                        Ok(o) => o,
-                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                            log::warn!("terminal SSE lagged by {} for session {}", n, session_id);
-                            continue;
-                        }
-                    };
-
-                    if output.session_id != session_id {
-                        continue;
-                    }
-
-                    if output.closed {
-                        yield Ok(Event::default().event("terminal.close").data(""));
-                        break;
-                    } else {
-                        let text = String::from_utf8_lossy(&output.data).to_string();
-                        yield Ok(Event::default().event("terminal.output").data(text));
-                    }
-                }
-            }
-        }
-
-        log::debug!("terminal SSE stream ended for session {}", session_id);
-    };
-
-    Ok(Sse::new(stream))
-}
-
 /// WebSocket endpoint for terminal I/O.
 ///
 /// Public endpoint (bypasses auth middleware) because the browser WebSocket API
 /// cannot set custom headers. Auth is handled inline via query param.
 ///
-/// Protocol: JSON arrays over text frames.
-///   Client → Server:
-///     ["bind", "<session_id>"]
-///     ["stdin", "<text>"]
-///     ["resize", <rows>, <cols>]
-///   Server → Client:
-///     ["setup"]
-///     ["stdout", "<text>"]
-///     ["disconnect", "<reason>"]
+/// The session is selected by the `session_id` query parameter and the payload
+/// format follows restty's native WebSocket PTY transport.
 async fn terminal_ws_handler(
     ws: WebSocketUpgrade,
     State(state): State<Arc<AppState>>,
@@ -592,90 +439,25 @@ async fn terminal_ws_handler(
         }
     }
 
-    Ok(ws.on_upgrade(move |socket| handle_terminal_ws(socket, state)))
+    let session_id = Uuid::parse_str(&query.session_id)
+        .map_err(|e| ApiError::bad_request(format!("Invalid session_id: {e}")))?;
+    if !state.terminal_manager.has_session(session_id).await {
+        return Err(ApiError::not_found("Terminal session not found"));
+    }
+
+    Ok(ws.on_upgrade(move |socket| handle_terminal_ws(socket, state, session_id)))
 }
 
-async fn handle_terminal_ws(mut ws: WebSocket, state: Arc<AppState>) {
+async fn handle_terminal_ws(mut ws: WebSocket, state: Arc<AppState>, session_id: Uuid) {
     let cancel_token = state.cancel.clone();
     let terminal_manager = state.terminal_manager.clone();
     let terminal_tx = state.terminal_tx.clone();
 
-    // Wait for the bind message to get the session_id.
-    let session_id = loop {
-        let msg = match tokio::time::timeout(std::time::Duration::from_secs(10), ws.recv()).await {
-            Ok(Some(Ok(msg))) => msg,
-            Ok(Some(Err(e))) => {
-                log::warn!("terminal WS recv error before bind: {e}");
-                return;
-            }
-            Ok(None) | Err(_) => {
-                let _ = ws
-                    .send(Message::Text(json_msg(["disconnect", "bind timeout"])))
-                    .await;
-                return;
-            }
-        };
-
-        let (msg_type, args) = match parse_ws_msg(&msg) {
-            Ok(v) => v,
-            Err(e) => {
-                let _ = ws.send(Message::Text(json_msg(["disconnect", &e]))).await;
-                continue;
-            }
-        };
-
-        if msg_type != "bind" {
-            let _ = ws
-                .send(Message::Text(json_msg(["disconnect", "expected bind"])))
-                .await;
-            continue;
-        }
-
-        let session_id_str = match args.first().and_then(|v| v.as_str()) {
-            Some(s) => s,
-            None => {
-                let _ = ws
-                    .send(Message::Text(json_msg([
-                        "disconnect",
-                        "bind missing session_id",
-                    ])))
-                    .await;
-                continue;
-            }
-        };
-
-        let sid = match Uuid::parse_str(session_id_str) {
-            Ok(id) => id,
-            Err(e) => {
-                let _ = ws
-                    .send(Message::Text(json_msg([
-                        "disconnect",
-                        &format!("invalid session_id: {e}"),
-                    ])))
-                    .await;
-                continue;
-            }
-        };
-
-        if !terminal_manager.has_session(sid).await {
-            let _ = ws
-                .send(Message::Text(json_msg(["disconnect", "session not found"])))
-                .await;
-            continue;
-        }
-
-        // Send setup signal — session is ready
-        let _ = ws.send(Message::Text(json_msg(["setup"]))).await;
-        break sid;
-    };
-
     // Flush any buffered output that was produced before this subscriber
-    // connected (e.g. the initial shell prompt), matching the SSE handler.
+    // connected (e.g. the initial shell prompt).
     let buf = terminal_manager.get_buffer(session_id).await;
-    if !buf.is_empty()
-        && let Ok(text) = String::from_utf8(buf)
-    {
-        let _ = ws.send(Message::Text(json_msg(["stdout", &text]))).await;
+    if !buf.is_empty() {
+        let _ = ws.send(Message::Binary(buf.into())).await;
     }
 
     // Subscribe to terminal output
@@ -708,16 +490,16 @@ async fn handle_terminal_ws(mut ws: WebSocket, state: Arc<AppState>) {
 
                     if output.closed {
                         let _ = output_tx_clone
-                            .send(Message::Text(json_msg(["disconnect", "session closed"])))
+                            .send(Message::Text(
+                                serde_json::json!({"type": "exit"}).to_string().into(),
+                            ))
                             .await;
                         break;
                     }
 
-                    if let Ok(text) = String::from_utf8(output.data) {
-                        let _ = output_tx_clone
-                            .send(Message::Text(json_msg(["stdout", &text])))
-                            .await;
-                    }
+                    let _ = output_tx_clone
+                        .send(Message::Binary(output.data.into()))
+                        .await;
                 }
             }
         }
@@ -730,44 +512,23 @@ async fn handle_terminal_ws(mut ws: WebSocket, state: Arc<AppState>) {
         tokio::select! {
             ws_msg = ws.recv() => {
                 match ws_msg {
-                    Some(Ok(Message::Text(data))) => {
-                        // Parse JSON array
-                        let (msg_type, args) = match parse_ws_msg_raw(&data) {
-                            Ok(v) => v,
-                            Err(_) => continue,
-                        };
-
-                        match msg_type.as_str() {
-                            "stdin" => {
-                                if let Some(text) = args.first().and_then(|v| v.as_str()) {
-                                    let _ = terminal_manager
-                                        .write_input(session_id, text.as_bytes())
-                                        .await;
-                                }
+                    Some(Ok(Message::Close(_))) => break,
+                    Some(Ok(msg)) => {
+                        match parse_pty_message(&msg) {
+                            Ok(PtyClientMessage::Input { data }) => {
+                                let _ = terminal_manager
+                                    .write_input(session_id, data.as_bytes())
+                                    .await;
                             }
-                            "resize"
-                                if args.len() >= 2 => {
-                                    let rows = args[0].as_u64().unwrap_or(24) as u16;
-                                    let cols = args[1].as_u64().unwrap_or(80) as u16;
-                                    let _ = terminal_manager
-                                        .resize(session_id, cols, rows)
-                                        .await;
-                                }
-                            _ => {
-                                // Unknown message type — ignore
+                            Ok(PtyClientMessage::Resize { cols, rows }) => {
+                                let _ = terminal_manager.resize(session_id, cols, rows).await;
+                            }
+                            Err(_) => {
+                                // Ignore malformed or unsupported PTY messages.
                             }
                         }
                     }
-                    Some(Ok(Message::Binary(data))) => {
-                        // Treat binary as stdin
-                        let _ = terminal_manager
-                            .write_input(session_id, &data)
-                            .await;
-                    }
-                    Some(Ok(Message::Close(_))) => break,
-                    Some(Err(_)) => break,
-                    None => break,
-                    _ => {}
+                    Some(Err(_)) | None => break,
                 }
             }
             out_msg = output_rx.recv() => {
@@ -791,23 +552,6 @@ async fn handle_terminal_ws(mut ws: WebSocket, state: Arc<AppState>) {
     output_task.abort();
 }
 
-/// Parse a JSON array from a text WebSocket message (string slice).
-/// Returns (message_type, args).
-fn parse_ws_msg_raw(text: &str) -> Result<(String, Vec<serde_json::Value>), String> {
-    let arr: Vec<serde_json::Value> =
-        serde_json::from_str(text).map_err(|e| format!("invalid JSON array: {e}"))?;
-
-    if arr.is_empty() {
-        return Err("empty message array".to_string());
-    }
-
-    let msg_type = arr[0]
-        .as_str()
-        .ok_or_else(|| "first element must be a string type".to_string())?;
-
-    Ok((msg_type.to_string(), arr[1..].to_vec()))
-}
-
 async fn close_terminal(
     State(state): State<Arc<AppState>>,
     Path(session_id): Path<String>,
@@ -816,4 +560,39 @@ async fn close_terminal(
         state.terminal_manager.close_session(id).await;
     }
     axum::http::StatusCode::OK
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_input_message() {
+        let message = Message::Text(r#"{"type":"input","data":"pwd\r"}"#.into());
+
+        assert!(matches!(
+            parse_pty_message(&message),
+            Ok(PtyClientMessage::Input { data }) if data == "pwd\r"
+        ));
+    }
+
+    #[test]
+    fn parses_resize_message() {
+        let message = Message::Text(r#"{"type":"resize","cols":120,"rows":40}"#.into());
+
+        assert!(matches!(
+            parse_pty_message(&message),
+            Ok(PtyClientMessage::Resize {
+                cols: 120,
+                rows: 40
+            })
+        ));
+    }
+
+    #[test]
+    fn rejects_legacy_array_message() {
+        let message = Message::Text(r#"["stdin","pwd"]"#.into());
+
+        assert!(parse_pty_message(&message).is_err());
+    }
 }

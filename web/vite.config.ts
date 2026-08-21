@@ -11,6 +11,8 @@ export default defineConfig({
     VitePWA({
       registerType: "autoUpdate",
       workbox: {
+        // restty embeds its terminal WASM runtime in the application chunk.
+        maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
         globPatterns: ["**/*.{js,css,svg,png,woff2,ico}"],
         runtimeCaching: [
           {

@@ -57,7 +57,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
       queryClient.invalidateQueries({ queryKey: ["terminal", "list"] });
       const sessionId = result.session_id;
 
-      // Create connection with the server-assigned session ID
+      // Restty owns the PTY transport connection once its viewport mounts.
       const conn = new TerminalConnection(sessionId);
       conn.onStatusChange((status) => {
         if (status === "connected") {
@@ -67,25 +67,16 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
         }
       });
 
-      // Start connecting
-      conn.connect();
-
       set((state) => ({
         tabs: state.tabs.map((t) =>
-          t.id === tabId
-            ? { ...t, sessionId, connection: conn, lifecycle: "connecting" }
-            : t,
+          t.id === tabId ? { ...t, sessionId, connection: conn, lifecycle: "connecting" } : t,
         ),
       }));
 
       return sessionId;
     } catch {
       set((state) => ({
-        tabs: state.tabs.map((t) =>
-          t.id === tabId
-            ? { ...t, lifecycle: "exited" }
-            : t,
-        ),
+        tabs: state.tabs.map((t) => (t.id === tabId ? { ...t, lifecycle: "exited" } : t)),
       }));
       return null;
     }
@@ -94,7 +85,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
   closeTab: async (id) => {
     const tab = get().tabs.find((t) => t.id === id);
     if (tab?.connection) {
-      tab.connection.disconnect();
+      tab.connection.dispose();
     }
     if (tab?.sessionId) {
       try {
@@ -124,16 +115,14 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     const toClose = tabs.filter((t) => ids.includes(t.id));
     const idSet = new Set(ids);
 
-    // Disconnect all connections synchronously
+    // Release all connections synchronously
     for (const tab of toClose) {
-      tab.connection?.disconnect();
+      tab.connection?.dispose();
     }
 
     // Close all sessions on server
     await Promise.allSettled(
-      toClose.map((tab) =>
-        tab.sessionId ? api.closeTerminal(tab.sessionId) : Promise.resolve(),
-      ),
+      toClose.map((tab) => (tab.sessionId ? api.closeTerminal(tab.sessionId) : Promise.resolve())),
     );
     queryClient.invalidateQueries({ queryKey: ["terminal", "list"] });
 
@@ -141,8 +130,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
       const remaining = state.tabs.filter((t) => !idSet.has(t.id));
       return {
         tabs: remaining,
-        activeTabId:
-          remaining.length > 0 ? remaining[remaining.length - 1].id : null,
+        activeTabId: remaining.length > 0 ? remaining[remaining.length - 1].id : null,
       };
     });
   },
@@ -154,11 +142,14 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     // Persist rename to server
     const tab = get().tabs.find((t) => t.id === id);
     if (tab?.sessionId) {
-      api.renameTerminal(tab.sessionId, label).then(() => {
-        queryClient.invalidateQueries({ queryKey: ["terminal", "list"] });
-      }).catch(() => {
-        // Ignore rename errors — local state is already updated
-      });
+      api
+        .renameTerminal(tab.sessionId, label)
+        .then(() => {
+          queryClient.invalidateQueries({ queryKey: ["terminal", "list"] });
+        })
+        .catch(() => {
+          // Ignore rename errors — local state is already updated
+        });
     }
   },
 
@@ -166,9 +157,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
 
   setLifecycle: (tabId, lifecycle) => {
     set((state) => ({
-      tabs: state.tabs.map((t) =>
-        t.id === tabId ? { ...t, lifecycle } : t,
-      ),
+      tabs: state.tabs.map((t) => (t.id === tabId ? { ...t, lifecycle } : t)),
     }));
   },
 
@@ -193,7 +182,6 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
             get().setLifecycle(id, "exited");
           }
         });
-        conn.connect();
         newTabs.push({
           id,
           sessionId: entry.session_id,

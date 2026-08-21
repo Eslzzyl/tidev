@@ -347,20 +347,6 @@ export const api = {
       default_shell: string;
     }>(`${API_BASE}/terminal/shells`),
 
-  terminalInput: (sessionId: string, data: string) =>
-    fetchWithAuth(`${API_BASE}/terminal/input`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: sessionId, data }),
-    }),
-
-  terminalResize: (sessionId: string, cols: number, rows: number) =>
-    fetchWithAuth(`${API_BASE}/terminal/resize`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: sessionId, cols, rows }),
-    }),
-
   closeTerminal: (sessionId: string) =>
     fetchWithAuth(`${API_BASE}/terminal/${sessionId}`, { method: "DELETE" }),
 
