@@ -58,6 +58,14 @@ max_output_tokens = 262144
 supports_streaming = true
 supports_images = false
 
+[providers.opencode-go.models.deepseek-v4-flash-vision-exp]
+request_model_id = "deepseek-v4-flash-vision-exp"
+display_name = "DeepSeek V4 Flash Vision Exp"
+context_window = 1048576
+max_output_tokens = 262144
+supports_streaming = true
+supports_images = true
+
 [providers.opencode-go.models.mimo-v2-5-pro]
 request_model_id = "mimo-v2.5-pro"
 display_name = "MiMo-V2.5-Pro"
