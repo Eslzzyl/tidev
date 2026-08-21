@@ -56,6 +56,12 @@ export default defineConfig({
   ],
   server: {
     port: 5173,
+    // The Rust HTTP adapter proxies the Vite assets, but must not proxy the
+    // persistent HMR WebSocket. Point the browser at Vite directly so a
+    // reconnect cannot retain a proxy-side socket pair.
+    ws: {
+      clientPort: 5173,
+    },
     proxy: {
       "/api": {
         target: "http://127.0.0.1:26502",
