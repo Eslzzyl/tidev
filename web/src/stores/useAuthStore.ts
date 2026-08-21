@@ -71,12 +71,12 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         return;
       }
 
-      // Auth is required — trust the stored token without re-verifying.
-      // If the token is invalid the next API call will return 401 and
-      // handleUnauthorized will redirect to the login overlay.
+      const valid = token ? await get().verifyToken(token) : false;
+      if (!valid) clearStoredToken();
       set({
         isAuthRequired: true,
-        isAuthenticated: !!token,
+        token: valid ? token : null,
+        isAuthenticated: valid,
         isLoading: false,
         error: null,
       });
@@ -165,6 +165,18 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 
   clearError: () => set({ error: null }),
 }));
+
+export function getAuthToken(): string | null {
+  return loadToken();
+}
+
+export function setAuthToken(token: string): void {
+  if (token) {
+    useAuthStore.getState().setToken(token);
+  } else {
+    useAuthStore.getState().clearToken();
+  }
+}
 
 function loadToken(): string | null {
   try {

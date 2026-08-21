@@ -100,7 +100,9 @@ export function TerminalSection() {
           {loading ? (
             <span className="text-sm text-neutral-500">Loading shells...</span>
           ) : error ? (
-            <span className="text-sm text-red-500">{error?.message ?? "Failed to load shells"}</span>
+            <span className="text-sm text-red-500">
+              {error?.message ?? "Failed to load shells"}
+            </span>
           ) : (
             <select
               value={selectValue}

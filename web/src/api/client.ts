@@ -1,14 +1,13 @@
 import type {
   Session,
   SessionDetail,
-  Message,
-  ModelInfo,
+  MessageRecord,
+  Model,
+  ApprovedTool,
   ToolInfo,
-  TodoItem,
   CreateSessionRequest,
   CreateSessionResponse,
   SendMessageRequest,
-  SendMessageResponse,
   ShellCommandResponse,
   AbortRequest,
   WorkspaceInfo,
@@ -48,17 +47,9 @@ import type {
   ProviderUsageEntry,
   SessionUsageEntry,
 } from "../types/api";
-import { useAuthStore } from "../stores/useAuthStore";
+import { getAuthToken, useAuthStore } from "../stores/useAuthStore";
 
 const API_BASE = "/api";
-
-function getAuthToken(): string | null {
-  try {
-    return localStorage.getItem("web_auth_token");
-  } catch {
-    return null;
-  }
-}
 
 function getAuthHeaders(): Record<string, string> {
   const token = getAuthToken();
@@ -119,37 +110,51 @@ export const api = {
   getWorkspace: () => fetchJson<WorkspaceInfo>(`${API_BASE}/workspace`),
 
   // Sessions
-  listSessions: () => fetchJson<{ sessions: Session[] }>(`${API_BASE}/sessions`),
+  listSessions: (limit = 100) =>
+    fetchJson<Session[]>(`${API_BASE}/sessions?limit=${encodeURIComponent(limit)}`),
 
-  createSession: (data: CreateSessionRequest) =>
+  createSession: (data: CreateSessionRequest | string) =>
     fetchJson<CreateSessionResponse>(`${API_BASE}/sessions`, {
       method: "POST",
-      body: JSON.stringify(data),
+      body: JSON.stringify(typeof data === "string" ? { title: data } : data),
     }),
 
   getSession: (id: string) => fetchJson<SessionDetail>(`${API_BASE}/sessions/${id}`),
 
   deleteSession: (id: string) =>
-    fetchWithAuth(`${API_BASE}/sessions/${id}`, { method: "DELETE" }).then((r) => {
-      if (!r.ok) throw new Error(`Failed to delete session: ${r.status}`);
-    }),
+    fetchJson<{ accepted: boolean }>(`${API_BASE}/sessions/${id}`, { method: "DELETE" }),
 
   // Messages
   listMessages: (sessionId: string) =>
-    fetchJson<{ messages: Message[]; todos: TodoItem[] }>(
-      `${API_BASE}/sessions/${sessionId}/messages`,
-    ),
+    fetchJson<{ messages: MessageRecord[] }>(`${API_BASE}/sessions/${sessionId}/messages`),
+
+  sendPrompt: (
+    sessionId: string,
+    content: string,
+    mode: "build" | "plan",
+    messageId: string,
+    thinkingLevel?: string,
+  ) =>
+    fetchJson<import("../types/api").PromptResponse>(`${API_BASE}/sessions/${sessionId}/prompts`, {
+      method: "POST",
+      body: JSON.stringify({
+        content,
+        mode,
+        message_id: messageId,
+        thinking_level: thinkingLevel,
+      }),
+    }),
 
   sendMessage: (sessionId: string, data: SendMessageRequest) =>
-    fetchJson<SendMessageResponse>(`${API_BASE}/sessions/${sessionId}/messages`, {
+    fetchJson<import("../types/api").PromptResponse>(`${API_BASE}/sessions/${sessionId}/prompts`, {
       method: "POST",
       body: JSON.stringify(data),
     }),
 
   abortRequest: (sessionId: string, data: AbortRequest) =>
-    fetchJson<{ success: boolean }>(`${API_BASE}/sessions/${sessionId}/abort`, {
+    fetchJson<{ accepted: boolean }>(`${API_BASE}/sessions/${sessionId}/cancel`, {
       method: "POST",
-      body: JSON.stringify(data),
+      body: JSON.stringify(data.request_id ? data : undefined),
     }),
 
   sendShellCommand: (sessionId: string, command: string) =>
@@ -159,7 +164,7 @@ export const api = {
     }),
 
   // Models
-  listModels: () => fetchJson<{ models: ModelInfo[] }>(`${API_BASE}/models`),
+  listModels: () => fetchJson<Model[]>(`${API_BASE}/models`),
 
   // Tools
   listTools: () => fetchJson<{ tools: ToolInfo[] }>(`${API_BASE}/tools`),
@@ -169,7 +174,7 @@ export const api = {
 
   // Files (@-mention search)
   searchFiles: (query: string) =>
-    fetchJson<{ suggestions: FileSuggestion[] }>(
+    fetchJson<{ files: FileSuggestion[] }>(
       `${API_BASE}/files/search?q=${encodeURIComponent(query)}`,
     ),
 
@@ -179,42 +184,58 @@ export const api = {
 
   // Revert / Undo
   revertToMessage: (sessionId: string, messageId: string) =>
-    fetchJson<{
-      success: boolean;
-      reverted_to_message_id: string;
-      hidden_message_count: number;
-    }>(`${API_BASE}/sessions/${sessionId}/revert`, {
+    fetchJson<{ accepted: boolean }>(`${API_BASE}/sessions/${sessionId}/revert`, {
       method: "POST",
       body: JSON.stringify({ message_id: messageId }),
     }),
 
   // Fork session from a message
   forkSession: (sessionId: string, messageId: string, title?: string) =>
-    fetchJson<{
-      session_id: string;
-      message_count: number;
-    }>(`${API_BASE}/sessions/${sessionId}/fork`, {
+    fetchJson<Session>(`${API_BASE}/sessions/${sessionId}/fork`, {
       method: "POST",
       body: JSON.stringify({ message_id: messageId, title }),
     }),
 
   // Redo
   redoSession: (sessionId: string) =>
-    fetchJson<{ success: boolean; message: string }>(`${API_BASE}/sessions/${sessionId}/redo`, {
+    fetchJson<{ accepted: boolean }>(`${API_BASE}/sessions/${sessionId}/redo`, {
       method: "POST",
     }),
 
   // Compact session context
   compactSession: (sessionId: string) =>
-    fetchJson<{ request_id: number }>(`${API_BASE}/sessions/${sessionId}/compact`, {
+    fetchJson<{ accepted: boolean }>(`${API_BASE}/sessions/${sessionId}/compact`, {
       method: "POST",
     }),
 
   // Rename session
   renameSession: (sessionId: string, title: string) =>
-    fetchJson<{ success: boolean; title: string }>(`${API_BASE}/sessions/${sessionId}/rename`, {
-      method: "POST",
+    fetchJson<Session>(`${API_BASE}/sessions/${sessionId}`, {
+      method: "PATCH",
       body: JSON.stringify({ title }),
+    }),
+
+  // Chat controls
+  selectModel: (providerId: string, modelId: string) =>
+    fetchJson<Model>(`${API_BASE}/models/select`, {
+      method: "POST",
+      body: JSON.stringify({ provider_id: providerId, model_id: modelId }),
+    }),
+
+  setThinkingLevel: (providerId: string, modelId: string, thinkingLevel: string) =>
+    fetchJson<{ accepted: boolean }>(`${API_BASE}/models/thinking-level`, {
+      method: "POST",
+      body: JSON.stringify({
+        provider_id: providerId,
+        model_id: modelId,
+        thinking_level: thinkingLevel,
+      }),
+    }),
+
+  respondToRequest: (requestId: string, approvedTools: ApprovedTool[]) =>
+    fetchJson<{ accepted: boolean }>(`${API_BASE}/requests/${requestId}/respond`, {
+      method: "POST",
+      body: JSON.stringify({ approved_tools: approvedTools }),
     }),
 
   // Init prompt

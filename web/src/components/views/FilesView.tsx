@@ -98,7 +98,7 @@ export function FilesView() {
           queryKey: ["files", "search", searchQuery],
           queryFn: () => api.searchFiles(searchQuery),
         });
-        const mapped = result.suggestions
+        const mapped = result.files
           .filter((s) => s.kind === "file")
           .slice(0, 20)
           .map((s) => ({ path: s.path, display: s.display }));

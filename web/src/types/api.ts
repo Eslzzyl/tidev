@@ -9,6 +9,11 @@ export interface Session {
   title: string;
   created_at: string;
   updated_at: string;
+  status: string;
+  ended_at: string | null;
+  context_summary: string | null;
+  context_retained_from: number;
+  busy: boolean;
 }
 
 export interface SessionDetail extends Session {
@@ -27,7 +32,7 @@ export interface FileDiff {
 
 export interface TodoItem {
   content: string;
-  status: "pending" | "in_progress" | "completed";
+  status: string;
 }
 
 export interface TodosResponse {
@@ -46,6 +51,7 @@ export interface ToolCall {
   id: string;
   name: string;
   arguments: string;
+  thought_signature?: string | null;
 }
 
 export interface Message {
@@ -53,13 +59,14 @@ export interface Message {
   role: "user" | "assistant" | "system" | "tool" | "error" | "shell";
   content: string;
   created_at: string;
-  completed_at?: string;
+  completed_at?: string | null;
   /** Local-only flag set during SSE streaming; not persisted by the API. */
   streaming?: boolean;
   file_diffs?: FileDiff[];
   todos?: TodoItem[];
   token_usage?: TokenUsage;
   tokens_per_second?: number;
+  model_id?: string | null;
   reasoning?: string;
   tool_call_id?: string;
   tool_name?: string;
@@ -67,6 +74,65 @@ export interface Message {
   diff?: string;
   filepath?: string;
   rtk_rewritten?: boolean;
+}
+
+export interface MessageRecord {
+  message: Message;
+  app_data: {
+    mode?: string | null;
+    child_session_id?: string | null;
+    snapshot_hash?: string | null;
+    patch_files?: string | null;
+    file_diffs?: string | null;
+  };
+}
+
+export interface EventEnvelope {
+  cursor: number;
+  session_id: string;
+  event: Record<string, unknown>;
+}
+
+export interface ToolCallWithViolations {
+  tool_call: ToolCall;
+  workspace_boundary_violation?: string | null;
+  sensitive_file_violation?: string | null;
+}
+
+export interface ApprovedTool {
+  tool_call: ToolCall;
+  rejection: {
+    output: string;
+    attachments: unknown[];
+    metadata: Record<string, unknown>;
+  } | null;
+  child_session_id: string | null;
+  allow_outside: boolean;
+  sensitive_file_approved: boolean;
+  user_reason: string | null;
+}
+
+export interface FrontendRequest {
+  request_id: string;
+  session_id: string;
+  kind: {
+    ToolApproval?: ToolCallWithViolations[];
+  };
+}
+
+export interface Model {
+  provider_id: string;
+  provider_display_name: string;
+  model_id: string;
+  model_display_name: string;
+  connected: boolean;
+  active: boolean;
+  thinking_levels: string[];
+  thinking_level: string;
+}
+
+export interface AuthStatus {
+  auth_required: boolean;
 }
 
 export interface ModelInfo {
@@ -89,10 +155,8 @@ export interface ToolInfo {
 }
 
 export interface CreateSessionRequest {
-  workspace_root: string;
   title?: string;
-  provider_id?: string;
-  model_id?: string;
+  workspace_root?: string;
 }
 
 export interface SetDefaultModelRequest {
@@ -149,19 +213,13 @@ export interface SetModelThinkingLevelRequest {
   thinking_level: string;
 }
 
-export interface SetDefaultModelRequest {
-  provider_id: string;
-  model_id: string;
-  thinking_level?: string;
-}
-
 export interface WorkspaceInfo {
   workspace_root: string;
   workspace_display: string;
 }
 
 export interface CreateSessionResponse {
-  session_id: string;
+  session: Session;
 }
 
 export interface SendMessageRequest {
@@ -174,6 +232,11 @@ export interface SendMessageRequest {
 
 export interface SendMessageResponse {
   request_id: number;
+}
+
+export interface PromptResponse {
+  message_id: string;
+  duplicate: boolean;
 }
 
 export interface ShellCommandRequest {

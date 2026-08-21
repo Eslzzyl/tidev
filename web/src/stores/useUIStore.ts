@@ -1,8 +1,5 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
-import type { MainTab } from "../lib/router";
-
-export type { MainTab } from "../lib/router";
 export type Theme = "light" | "dark" | "system";
 
 export interface SettingsState {
@@ -27,7 +24,6 @@ export interface UIState {
   connectionStatus: "connected" | "disconnected" | "connecting";
   leftSidebarWidth: number;
   rightSidebarWidth: number;
-  activeTab: MainTab;
   settings: SettingsState;
 }
 
@@ -51,12 +47,6 @@ export interface UIActions {
   setLoading: (isLoading: boolean) => void;
   setStreaming: (isStreaming: boolean) => void;
   setConnectionStatus: (status: UIState["connectionStatus"]) => void;
-  setActiveTab: (tab: MainTab) => void;
-  navigateToChat: () => void;
-  navigateToFiles: () => void;
-  navigateToTerminal: () => void;
-  navigateToGit: () => void;
-  navigateToStats: () => void;
   updateSettings: (partial: Partial<SettingsState>) => void;
 }
 
@@ -65,29 +55,63 @@ const DEFAULT_RIGHT_SIDEBAR_WIDTH = 280;
 const MIN_SIDEBAR_WIDTH = 180;
 const MAX_SIDEBAR_WIDTH = 500;
 
+const defaultSettings: SettingsState = {
+  fontFamily: "Inter, system-ui, sans-serif",
+  monoFontFamily: "JetBrains Mono, Fira Code, monospace",
+  fontSize: 14,
+  diffLayout: "side-by-side",
+  enterToSend: true,
+  terminalShell: "",
+};
+
+function loadLegacyPreferences(): { theme?: Theme; settings: Partial<SettingsState> } {
+  if (typeof localStorage === "undefined") return { settings: {} };
+
+  try {
+    const raw = JSON.parse(localStorage.getItem("tidev-ui-settings") ?? "null") as
+      | (Partial<SettingsState> & { theme?: Theme })
+      | null;
+    if (!raw) return { settings: {} };
+
+    const { theme, ...settings } = raw;
+    return { theme, settings };
+  } catch {
+    return { settings: {} };
+  }
+}
+
+const legacyPreferences = loadLegacyPreferences();
+
 const initialState: UIState = {
   sidebarOpen: true,
   rightSidebarOpen: true,
   settingsPanelOpen: false,
   mobileMenuOpen: false,
   mobileRightSidebarOpen: false,
-  theme: "system",
+  theme: legacyPreferences.theme ?? "system",
   inputValue: "",
   isLoading: false,
   isStreaming: false,
   connectionStatus: "disconnected",
   leftSidebarWidth: DEFAULT_LEFT_SIDEBAR_WIDTH,
   rightSidebarWidth: DEFAULT_RIGHT_SIDEBAR_WIDTH,
-  activeTab: "chat",
-  settings: {
-    fontFamily: "Inter, system-ui, sans-serif",
-    monoFontFamily: "JetBrains Mono, Fira Code, monospace",
-    fontSize: 14,
-    diffLayout: "side-by-side",
-    enterToSend: true,
-    terminalShell: "",
-  },
+  settings: { ...defaultSettings, ...legacyPreferences.settings },
 };
+
+function applyVisualSettings(theme: Theme, settings: SettingsState): void {
+  if (typeof document === "undefined") return;
+
+  const root = document.documentElement;
+  const effectiveTheme = getEffectiveTheme(theme);
+  if (theme === "system") delete root.dataset.theme;
+  else root.dataset.theme = theme;
+  root.classList.toggle("dark", effectiveTheme === "dark");
+  root.style.setProperty("--ui-font-family", settings.fontFamily);
+  root.style.setProperty("--ui-mono-font", settings.monoFontFamily);
+  root.style.setProperty("--ui-font-size", `${settings.fontSize}px`);
+}
+
+applyVisualSettings(initialState.theme, initialState.settings);
 
 function clampSidebarWidth(width: number): number {
   return Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, width));
@@ -116,7 +140,11 @@ export const useUIStore = create<UIState & UIActions>()(
         set((s) => ({ mobileRightSidebarOpen: !s.mobileRightSidebarOpen })),
       closeMobileRightSidebar: () => set({ mobileRightSidebarOpen: false }),
 
-      setTheme: (theme) => set({ theme }),
+      setTheme: (theme) =>
+        set((state) => {
+          applyVisualSettings(theme, state.settings);
+          return { theme };
+        }),
 
       setLeftSidebarWidth: (width) => set({ leftSidebarWidth: clampSidebarWidth(width) }),
 
@@ -127,16 +155,12 @@ export const useUIStore = create<UIState & UIActions>()(
       setStreaming: (isStreaming) => set({ isStreaming }),
       setConnectionStatus: (status) => set({ connectionStatus: status }),
 
-      setActiveTab: (tab) => set({ activeTab: tab }),
-
-      navigateToChat: () => set({ activeTab: "chat" }),
-      navigateToFiles: () => set({ activeTab: "files" }),
-      navigateToTerminal: () => set({ activeTab: "terminal" }),
-      navigateToGit: () => set({ activeTab: "git" }),
-      navigateToStats: () => set({ activeTab: "stats" }),
-
       updateSettings: (partial) =>
-        set((s) => ({ settings: { ...s.settings, ...partial } })),
+        set((state) => {
+          const settings = { ...state.settings, ...partial };
+          applyVisualSettings(state.theme, settings);
+          return { settings };
+        }),
     }),
     {
       name: "tidev-ui",
@@ -147,9 +171,11 @@ export const useUIStore = create<UIState & UIActions>()(
         leftSidebarWidth: state.leftSidebarWidth,
         rightSidebarWidth: state.rightSidebarWidth,
         rightSidebarOpen: state.rightSidebarOpen,
-        activeTab: state.activeTab,
         settings: state.settings,
       }),
+      onRehydrateStorage: () => (state) => {
+        if (state) applyVisualSettings(state.theme, state.settings);
+      },
     },
   ),
 );

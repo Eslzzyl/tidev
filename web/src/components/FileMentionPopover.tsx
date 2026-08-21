@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api } from "../api";
+import { api } from "../api/client";
 
 interface FileSuggestion {
   path: string;
@@ -16,7 +16,13 @@ interface Props {
   onSelectedIndexChange: (index: number) => void;
 }
 
-export function FileMentionPopover({ query, onSelect, onClose, selectedIndex, onSelectedIndexChange }: Props) {
+export function FileMentionPopover({
+  query,
+  onSelect,
+  onClose,
+  selectedIndex,
+  onSelectedIndexChange,
+}: Props) {
   const [suggestions, setSuggestions] = useState<FileSuggestion[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -86,7 +92,9 @@ export function FileMentionPopover({ query, onSelect, onClose, selectedIndex, on
           onMouseEnter={() => onSelectedIndexChange(idx)}
           onClick={() => onSelect(item.path)}
         >
-          <span className="file-mention-path">{highlightMatches(item.display || item.path, item.matched_indices)}</span>
+          <span className="file-mention-path">
+            {highlightMatches(item.display || item.path, item.matched_indices)}
+          </span>
           <small className="file-mention-kind">{item.kind}</small>
         </button>
       ))}

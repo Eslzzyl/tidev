@@ -1,4 +1,4 @@
-import type { Message, MessageRecord } from "../types";
+import type { Message, MessageRecord } from "../types/api";
 
 export interface ToolCallEntry {
   id: string;
@@ -76,9 +76,7 @@ function parseExitCode(content: string): number | null {
  * Adapted from last-full web/src/utils/round.ts to work with the
  * new tidev-core message shape (MessageRecord wraps Message + app_data).
  */
-export function buildRounds(
-  records: MessageRecord[],
-): (Round | SystemMessageBlock | ShellBlock)[] {
+export function buildRounds(records: MessageRecord[]): (Round | SystemMessageBlock | ShellBlock)[] {
   const rounds: (Round | SystemMessageBlock | ShellBlock)[] = [];
   let currentRound: Round | null = null;
   let pendingShellCmd: Message | null = null;

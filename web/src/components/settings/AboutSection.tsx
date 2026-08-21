@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { api, waitForServerRestart } from "../../api/client";
 import { useUIStore } from "../../stores/useUIStore";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 
@@ -40,7 +41,6 @@ export function AboutSection() {
     setShowConfirm(false);
     setRestarting(true);
     try {
-      const { api, waitForServerRestart } = await import("../../api/client");
       await api.restartServer();
       await waitForServerRestart();
       window.location.reload();

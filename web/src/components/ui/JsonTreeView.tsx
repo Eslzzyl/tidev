@@ -87,7 +87,7 @@ function TreeNode({ keyName, value, depth, maxDepth }: TreeNodeProps) {
         </button>
         {isExpanded && !empty && (
           <div className="ml-4 border-l border-neutral-200 pl-3 dark:border-neutral-700">
-            {entries.map(([k, v], i) => (
+            {entries.map(([k, v], _i) => (
               <TreeNode
                 key={k}
                 keyName={type === "object" ? k : null}
@@ -147,7 +147,7 @@ export function JsonTreeView({ data, initialExpanded = false, maxDepth = 3 }: Js
         <div className="mt-1 font-mono text-xs leading-5">
           <span className="text-neutral-500">{bracket[0]}</span>
           <div className="ml-3 border-l border-neutral-200 pl-2 dark:border-neutral-700">
-            {entries.map(([k, v], i) => (
+            {entries.map(([k, v], _i) => (
               <TreeNode
                 key={k}
                 keyName={type === "object" ? k : null}
