@@ -6,6 +6,7 @@ import { formatDate, shortPath } from "../../utils/chat";
 
 export interface SessionSidebarProps {
   loading: boolean;
+  mobileOpen?: boolean;
   sessions: Session[];
   selectedSessionId: string | null;
   search: string;
@@ -23,6 +24,7 @@ export interface SessionSidebarProps {
 
 export function SessionSidebar({
   loading,
+  mobileOpen = false,
   sessions,
   selectedSessionId,
   search,
@@ -44,7 +46,7 @@ export function SessionSidebar({
   );
 
   return (
-    <aside className="session-sidebar">
+    <aside className={mobileOpen ? "session-sidebar mobile-open" : "session-sidebar"}>
       <div className="sidebar-heading">
         <div>
           <span className="eyebrow">{t("Workspace")}</span>

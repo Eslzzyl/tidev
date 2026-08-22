@@ -1,4 +1,5 @@
-import { Sparkles } from "lucide-react";
+import { Menu, Sparkles } from "lucide-react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type {
@@ -110,20 +111,39 @@ export function ChatPanel({
   onFileMentionClose,
 }: ChatPanelProps) {
   const { t } = useTranslation();
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const pendingRequests = requests.filter((request) => request.session_id === selectedSessionId);
+
+  const handleSelectSession = (sessionId: string) => {
+    setMobileSidebarOpen(false);
+    onSelectSession(sessionId);
+  };
+
+  const handleCreateSession = () => {
+    setMobileSidebarOpen(false);
+    onCreateSession();
+  };
 
   return (
     <>
+      <button
+        className={
+          mobileSidebarOpen ? "mobile-sidebar-backdrop visible" : "mobile-sidebar-backdrop"
+        }
+        onClick={() => setMobileSidebarOpen(false)}
+        aria-label={t("Close conversations")}
+      />
       <SessionSidebar
         loading={loading}
+        mobileOpen={mobileSidebarOpen}
         sessions={sessions}
         selectedSessionId={selectedSessionId}
         search={sessionSearch}
         renamingSessionId={renamingSessionId}
         renameValue={renameValue}
         onSearchChange={onSessionSearchChange}
-        onCreate={onCreateSession}
-        onSelect={onSelectSession}
+        onCreate={handleCreateSession}
+        onSelect={handleSelectSession}
         onStartRename={onStartRename}
         onRenameChange={onRenameChange}
         onRename={onRename}
@@ -132,9 +152,19 @@ export function ChatPanel({
       />
       <section className="chat-panel">
         <div className="panel-header">
-          <div>
-            <span className="eyebrow">{t("Conversation")}</span>
-            <h1>{selectedSession?.title ?? t("New conversation")}</h1>
+          <div className="panel-heading">
+            <button
+              className="mobile-sidebar-button"
+              onClick={() => setMobileSidebarOpen(true)}
+              aria-label={t("Open conversations")}
+              title={t("Open conversations")}
+            >
+              <Menu size={16} />
+            </button>
+            <div>
+              <span className="eyebrow">{t("Conversation")}</span>
+              <h1>{selectedSession?.title ?? t("New conversation")}</h1>
+            </div>
           </div>
           <div className="panel-actions">
             <button className="ghost-button" onClick={onRedo} title={t("Redo")}>
@@ -150,7 +180,13 @@ export function ChatPanel({
           </div>
         </div>
         <div className="message-stage">
-          <MessageList messages={messages} streams={streams} onRevert={onRevert} onFork={onFork} />
+          <MessageList
+            messages={messages}
+            streams={streams}
+            workspaceRoot={selectedSession?.workspace_root}
+            onRevert={onRevert}
+            onFork={onFork}
+          />
           {pendingRequests.map((request) => (
             <ApprovalCard
               key={request.request_id}

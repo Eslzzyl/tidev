@@ -187,6 +187,16 @@ export function useChatRuntime() {
         return;
       }
       if (kind === "TurnStarting") {
+        const requestId = Number(payload.request_id);
+        if (Number.isFinite(requestId)) {
+          const key = `${sessionId}:${requestId}`;
+          setStreams((current) => {
+            if (!current[key]) return current;
+            const next = { ...current };
+            delete next[key];
+            return next;
+          });
+        }
         setSessions((current) =>
           current.map((item) => (item.session_id === sessionId ? { ...item, busy: true } : item)),
         );
@@ -241,13 +251,38 @@ export function useChatRuntime() {
         );
         return;
       }
-      if (kind === "Finished" || kind === "StreamEnd") {
+      if (kind === "Finished") {
         const requestId = Number(payload.request_id);
         const key = `${sessionId}:${requestId}`;
         setStreams((current) => {
+          if (current[key] && current[key].status !== "streaming") return current;
           const next = { ...current };
           delete next[key];
           return next;
+        });
+        setSessions((current) =>
+          current.map((item) => (item.session_id === sessionId ? { ...item, busy: false } : item)),
+        );
+        if (selectedSessionRef.current === sessionId) {
+          void loadMessages(sessionId);
+          void loadTodos(sessionId);
+        }
+        return;
+      }
+      if (kind === "StreamEnd") {
+        const requestId = Number(payload.request_id);
+        const key = `${sessionId}:${requestId}`;
+        setStreams((current) => {
+          const stream = current[key];
+          if (!stream || stream.status !== "streaming") return current;
+          return {
+            ...current,
+            [key]: {
+              ...stream,
+              status: "interrupted",
+              error: i18n.t("The turn was interrupted."),
+            },
+          };
         });
         setSessions((current) =>
           current.map((item) => (item.session_id === sessionId ? { ...item, busy: false } : item)),

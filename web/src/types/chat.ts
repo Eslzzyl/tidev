@@ -6,6 +6,6 @@ export interface StreamMessage {
   content: string;
   reasoning: string;
   toolCalls: import("./api").ToolCall[];
-  status: "streaming" | "failed";
+  status: "streaming" | "failed" | "interrupted";
   error?: string;
 }
