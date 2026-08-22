@@ -153,11 +153,12 @@ export function getSuggestions(query: string): CommandSuggestion[] {
   return candidates;
 }
 
-export function commandFragment(input: string): string | null {
-  const trimmed = input.trimStart();
+export function commandFragment(input: string, cursor = input.length): string | null {
+  const safeCursor = Math.max(0, Math.min(cursor, input.length));
+  const trimmed = input.slice(0, safeCursor).trimStart();
   if (!trimmed.startsWith("/")) return null;
   const body = trimmed.slice(1);
-  if (body.includes(" ")) return null;
+  if (/\s/.test(body)) return null;
   return body;
 }
 

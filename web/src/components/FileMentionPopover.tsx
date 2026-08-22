@@ -1,13 +1,22 @@
 import { useEffect, useState } from "react";
+import {
+  Database,
+  File as FileIcon,
+  FileArchive,
+  FileBraces,
+  FileCode,
+  FileImage,
+  FileMusic,
+  FileSpreadsheet,
+  FileText,
+  FileVideoCamera,
+  Folder,
+  type LucideIcon,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { api } from "../api/client";
 
-interface FileSuggestion {
-  path: string;
-  display: string;
-  kind: string;
-  matched_indices: number[];
-}
+import { api } from "../api/client";
+import type { FileSuggestion } from "../types/api";
 
 interface Props {
   query: string;
@@ -97,11 +106,125 @@ export function FileMentionPopover({
           <span className="file-mention-path">
             {highlightMatches(item.display || item.path, item.matched_indices)}
           </span>
-          <small className="file-mention-kind">{item.kind}</small>
+          <FileMentionIcon suggestion={item} />
         </button>
       ))}
     </div>
   );
+}
+
+interface FileIconInfo {
+  icon: LucideIcon;
+  label: string;
+  tone: string;
+}
+
+const CODE_EXTENSIONS = new Set([
+  "c",
+  "cc",
+  "cpp",
+  "cs",
+  "css",
+  "go",
+  "h",
+  "hpp",
+  "html",
+  "java",
+  "js",
+  "jsx",
+  "kt",
+  "less",
+  "mjs",
+  "php",
+  "py",
+  "rb",
+  "rs",
+  "scss",
+  "sh",
+  "sql",
+  "swift",
+  "ts",
+  "tsx",
+  "vue",
+  "xml",
+  "zig",
+]);
+
+const CONFIG_EXTENSIONS = new Set(["env", "ini", "properties", "toml", "yaml", "yml"]);
+const IMAGE_EXTENSIONS = new Set([
+  "avif",
+  "bmp",
+  "gif",
+  "ico",
+  "jpeg",
+  "jpg",
+  "png",
+  "svg",
+  "webp",
+]);
+const ARCHIVE_EXTENSIONS = new Set(["7z", "bz2", "gz", "rar", "tar", "xz", "zip"]);
+const AUDIO_EXTENSIONS = new Set(["flac", "m4a", "mp3", "ogg", "wav"]);
+const VIDEO_EXTENSIONS = new Set(["avi", "mkv", "mov", "mp4", "webm"]);
+const SPREADSHEET_EXTENSIONS = new Set(["csv", "ods", "xls", "xlsx"]);
+const DATA_EXTENSIONS = new Set(["db", "graphql", "sqlite"]);
+const TEXT_EXTENSIONS = new Set(["log", "md", "mdx", "rst", "tex", "txt"]);
+
+function FileMentionIcon({ suggestion }: { suggestion: FileSuggestion }) {
+  const { icon: Icon, label, tone } = getFileIcon(suggestion);
+
+  return (
+    <span className={`file-mention-kind ${tone}`} role="img" aria-label={label} title={label}>
+      <Icon size={14} strokeWidth={1.8} aria-hidden="true" />
+    </span>
+  );
+}
+
+function getFileIcon(suggestion: FileSuggestion): FileIconInfo {
+  if (suggestion.kind === "directory") {
+    return { icon: Folder, label: "Directory", tone: "directory" };
+  }
+  if (suggestion.kind === "image") {
+    return { icon: FileImage, label: "Image", tone: "image" };
+  }
+
+  const fileName = suggestion.path.split(/[\\/]/).pop()?.toLowerCase() ?? "";
+  const extension = fileName.includes(".") ? (fileName.split(".").pop() ?? "") : "";
+
+  if (fileName === "dockerfile" || fileName.startsWith("dockerfile.")) {
+    return { icon: FileCode, label: "Code file", tone: "code" };
+  }
+  if (CODE_EXTENSIONS.has(extension)) {
+    return { icon: FileCode, label: "Code file", tone: "code" };
+  }
+  if (extension === "json" || extension === "jsonc") {
+    return { icon: FileBraces, label: "JSON file", tone: "config" };
+  }
+  if (CONFIG_EXTENSIONS.has(extension)) {
+    return { icon: FileBraces, label: "Configuration file", tone: "config" };
+  }
+  if (DATA_EXTENSIONS.has(extension)) {
+    return { icon: Database, label: "Data file", tone: "data" };
+  }
+  if (IMAGE_EXTENSIONS.has(extension)) {
+    return { icon: FileImage, label: "Image", tone: "image" };
+  }
+  if (ARCHIVE_EXTENSIONS.has(extension)) {
+    return { icon: FileArchive, label: "Archive", tone: "archive" };
+  }
+  if (AUDIO_EXTENSIONS.has(extension)) {
+    return { icon: FileMusic, label: "Audio file", tone: "audio" };
+  }
+  if (VIDEO_EXTENSIONS.has(extension)) {
+    return { icon: FileVideoCamera, label: "Video file", tone: "video" };
+  }
+  if (SPREADSHEET_EXTENSIONS.has(extension)) {
+    return { icon: FileSpreadsheet, label: "Spreadsheet", tone: "spreadsheet" };
+  }
+  if (TEXT_EXTENSIONS.has(extension)) {
+    return { icon: FileText, label: "Text file", tone: "text" };
+  }
+
+  return { icon: FileIcon, label: "File", tone: "file" };
 }
 
 function highlightMatches(display: string, indices: number[]): React.ReactNode {

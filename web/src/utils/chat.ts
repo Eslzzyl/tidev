@@ -12,7 +12,19 @@ export function shortPath(value: string): string {
   return parts.length > 2 ? `…/${parts.slice(-2).join("/")}` : value;
 }
 
-export function formatThinkingLevel(value: string): string {
+const THINKING_LEVEL_LABELS_ZH: Record<string, string> = {
+  off: "关",
+  minimal: "最低",
+  low: "低",
+  medium: "中",
+  high: "高",
+  xhigh: "极高",
+  max: "最高",
+};
+
+export function formatThinkingLevel(value: string, locale = i18n.language): string {
   const [, level = value] = value.split(":", 2);
+  const normalized = level.trim().toLowerCase();
+  if (locale.startsWith("zh")) return THINKING_LEVEL_LABELS_ZH[normalized] ?? level;
   return level.charAt(0).toUpperCase() + level.slice(1);
 }

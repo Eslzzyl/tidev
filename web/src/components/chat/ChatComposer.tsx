@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, CircleStop, ListTodo, LoaderCircle, Send } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { commandFragment, getSuggestions } from "../../commands";
 import type { Model, TodoItem } from "../../types/api";
+import { CommandPopover } from "../CommandPopover";
 import { FileMentionPopover } from "../FileMentionPopover";
-import { formatThinkingLevel } from "../../utils/chat";
+import { ModelPicker } from "../ModelPicker";
 
 export interface ChatComposerProps {
   draft: string;
@@ -58,9 +60,11 @@ export function ChatComposer({
   onFileMentionClose,
 }: ChatComposerProps) {
   const { t } = useTranslation();
-  const [modelPickerOpen, setModelPickerOpen] = useState(false);
-  const [thinkingPickerOpen, setThinkingPickerOpen] = useState(false);
   const [todoPickerOpen, setTodoPickerOpen] = useState(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(true);
+  const [commandIndex, setCommandIndex] = useState(0);
+  const [cursorPosition, setCursorPosition] = useState(() => draft.length);
+  const composerWrapRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const composingRef = useRef(false);
   const compositionJustCommittedRef = useRef(false);
@@ -82,14 +86,80 @@ export function ChatComposer({
     [],
   );
 
-  const closeOtherMenus = (menu: "model" | "thinking" | "todo") => {
-    setModelPickerOpen(menu === "model" ? (current) => !current : false);
-    setThinkingPickerOpen(menu === "thinking" ? (current) => !current : false);
-    setTodoPickerOpen(menu === "todo" ? (current) => !current : false);
+  const commandQuery = commandFragment(draft, cursorPosition);
+  const commandSuggestions = useMemo(
+    () => (commandQuery === null ? [] : getSuggestions(commandQuery)),
+    [commandQuery],
+  );
+  const commandPaletteVisible = commandPaletteOpen && commandSuggestions.length > 0 && !fileMention;
+
+  useEffect(() => {
+    setCommandIndex(0);
+  }, [commandQuery]);
+
+  useEffect(() => {
+    if (cursorPosition <= draft.length) return;
+    setCursorPosition(draft.length);
+  }, [cursorPosition, draft.length]);
+
+  useEffect(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+
+      const composerWrap = composerWrapRef.current;
+      if (!composerWrap?.contains(target)) {
+        setTodoPickerOpen(false);
+        setCommandPaletteOpen(false);
+        onFileMentionClose();
+        return;
+      }
+
+      if (!(target instanceof Element) || !target.closest(".composer-menu")) {
+        setTodoPickerOpen(false);
+      }
+      if (
+        !(target instanceof Element) ||
+        (!target.closest(".command-popover") && !target.closest("textarea"))
+      ) {
+        setCommandPaletteOpen(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [onFileMentionClose]);
+
+  const closeOtherMenus = () => {
+    setTodoPickerOpen((current) => !current);
+    setCommandPaletteOpen(false);
+    onFileMentionClose();
+  };
+
+  const selectCommand = (suggestion: (typeof commandSuggestions)[number]) => {
+    if (commandQuery === null) return;
+
+    const prefix = draft.slice(0, cursorPosition);
+    const commandStart = prefix.length - prefix.trimStart().length;
+    const commandEnd = commandStart + commandQuery.length + 1;
+    const replacement = `/${suggestion.spec.name} `;
+    const nextDraft = `${draft.slice(0, commandStart)}${replacement}${draft.slice(commandEnd)}`;
+    const nextCursor = commandStart + replacement.length;
+
+    setCursorPosition(nextCursor);
+    setCommandPaletteOpen(false);
+    onDraftChange(nextDraft);
+    onFileMentionChange(nextDraft, nextCursor);
+    requestAnimationFrame(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      textarea.focus();
+      textarea.setSelectionRange(nextCursor, nextCursor);
+    });
   };
 
   return (
-    <div className="composer-wrap">
+    <div ref={composerWrapRef} className="composer-wrap">
       <div className="composer-toolbar">
         <button
           className={mode === "plan" ? "composer-control plan" : "composer-control build"}
@@ -97,67 +167,20 @@ export function ChatComposer({
         >
           {mode === "plan" ? t("Plan") : t("Build")}
         </button>
+        <ModelPicker
+          models={models}
+          activeModel={activeModel}
+          thinkingLevel={thinkingLevel}
+          onSelectModel={onSelectModel}
+          onSelectThinkingLevel={onSelectThinkingLevel}
+          onOpen={() => {
+            setTodoPickerOpen(false);
+            setCommandPaletteOpen(false);
+            onFileMentionClose();
+          }}
+        />
         <div className="composer-menu">
-          <button className="composer-control neutral" onClick={() => closeOtherMenus("model")}>
-            <span>
-              {activeModel
-                ? `${activeModel.provider_display_name}/${activeModel.model_display_name}`
-                : t("Select model")}
-            </span>
-            <ChevronDown size={13} />
-          </button>
-          {modelPickerOpen ? (
-            <div className="composer-popover model-popover">
-              {models.map((model) => (
-                <button
-                  key={`${model.provider_id}:${model.model_id}`}
-                  className={model.active ? "composer-option selected" : "composer-option"}
-                  disabled={!model.connected}
-                  onClick={() => {
-                    onSelectModel(model);
-                    setModelPickerOpen(false);
-                  }}
-                >
-                  <span>
-                    {model.provider_display_name}/{model.model_display_name}
-                  </span>
-                  <small>{model.connected ? t("Connected") : t("Not connected")}</small>
-                </button>
-              ))}
-            </div>
-          ) : null}
-        </div>
-        {activeModel?.thinking_levels.length ? (
-          <div className="composer-menu">
-            <button
-              className="composer-control thinking"
-              onClick={() => closeOtherMenus("thinking")}
-            >
-              <span>{formatThinkingLevel(thinkingLevel ?? activeModel.thinking_level)}</span>
-              <ChevronDown size={13} />
-            </button>
-            {thinkingPickerOpen ? (
-              <div className="composer-popover thinking-popover">
-                {activeModel.thinking_levels.map((level) => (
-                  <button
-                    key={level}
-                    className={
-                      thinkingLevel === level ? "composer-option selected" : "composer-option"
-                    }
-                    onClick={() => {
-                      onSelectThinkingLevel(level);
-                      setThinkingPickerOpen(false);
-                    }}
-                  >
-                    {formatThinkingLevel(level)}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-        <div className="composer-menu">
-          <button className="composer-control neutral" onClick={() => closeOtherMenus("todo")}>
+          <button className="composer-control neutral" onClick={closeOtherMenus}>
             <ListTodo size={13} />
             <span>
               {t("To-Do")}
@@ -201,10 +224,20 @@ export function ChatComposer({
                 const textarea = textareaRef.current;
                 if (!textarea) return;
                 textarea.focus();
-                if (cursor !== undefined) textarea.setSelectionRange(cursor, cursor);
+                if (cursor !== undefined) {
+                  setCursorPosition(cursor);
+                  textarea.setSelectionRange(cursor, cursor);
+                }
               });
             }}
             onClose={onFileMentionClose}
+          />
+        ) : commandPaletteVisible ? (
+          <CommandPopover
+            suggestions={commandSuggestions}
+            selectedIndex={commandIndex}
+            onSelectedIndexChange={setCommandIndex}
+            onSelect={selectCommand}
           />
         ) : null}
         <textarea
@@ -213,16 +246,24 @@ export function ChatComposer({
           onChange={(event) => {
             const value = event.target.value;
             const cursor = event.target.selectionStart ?? value.length;
+            setCursorPosition(cursor);
+            setCommandPaletteOpen(true);
             onDraftChange(value);
             onFileMentionChange(value, cursor);
           }}
           onSelect={(event) => {
             const textarea = event.target as HTMLTextAreaElement;
-            onFileMentionChange(textarea.value, textarea.selectionStart ?? textarea.value.length);
+            const cursor = textarea.selectionStart ?? textarea.value.length;
+            setCursorPosition(cursor);
+            setCommandPaletteOpen(true);
+            onFileMentionChange(textarea.value, cursor);
           }}
           onClick={(event) => {
             const textarea = event.target as HTMLTextAreaElement;
-            onFileMentionChange(textarea.value, textarea.selectionStart ?? textarea.value.length);
+            const cursor = textarea.selectionStart ?? textarea.value.length;
+            setCursorPosition(cursor);
+            setCommandPaletteOpen(true);
+            onFileMentionChange(textarea.value, cursor);
           }}
           onCompositionStart={() => {
             composingRef.current = true;
@@ -238,6 +279,27 @@ export function ChatComposer({
             }, 0);
           }}
           onKeyDown={(event) => {
+            if (commandPaletteVisible) {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                setCommandPaletteOpen(false);
+                return;
+              }
+              if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                event.preventDefault();
+                setCommandIndex((current) => {
+                  const delta = event.key === "ArrowDown" ? 1 : -1;
+                  return (current + delta + commandSuggestions.length) % commandSuggestions.length;
+                });
+                return;
+              }
+              if (event.key === "Enter" || event.key === "Tab") {
+                event.preventDefault();
+                const selected = commandSuggestions[commandIndex];
+                if (selected) selectCommand(selected);
+                return;
+              }
+            }
             if (fileMention) {
               if (event.key === "Escape") {
                 event.preventDefault();
@@ -271,7 +333,7 @@ export function ChatComposer({
             }
           }}
           placeholder={t("Ask tidev to inspect, plan, or change your workspace…")}
-          rows={3}
+          rows={2}
         />
         <button
           className={isBusy ? "send-button stop" : "send-button"}

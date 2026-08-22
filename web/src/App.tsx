@@ -147,12 +147,18 @@ export default function App() {
                 models={models}
                 activeModel={activeModel}
                 thinkingLevel={thinkingLevel}
+                fileMention={fileMention}
+                fileMentionIndex={fileMentionIndex}
                 onChangeDraft={setDraft}
                 onModeChange={setMode}
                 onSelectSession={selectSession}
                 onSelectModel={(model) => void chooseModel(model)}
                 onSelectThinkingLevel={(level) => void chooseThinkingLevel(level)}
                 onSubmit={() => void submitWelcome()}
+                onFileMentionChange={updateFileMention}
+                onFileMentionIndexChange={setFileMentionIndex}
+                onFileSelect={handleFileSelect}
+                onFileMentionClose={() => setFileMention(null)}
               />
             ) : (
               <>
