@@ -4647,6 +4647,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
+ "serde_json",
  "tidev-acp",
  "tidev-config",
  "tidev-core",

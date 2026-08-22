@@ -342,7 +342,7 @@ impl SessionStore {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionRecord {
     pub session_id: Uuid,
     pub parent_session_id: Option<Uuid>,
@@ -366,6 +366,39 @@ pub struct SessionRecord {
 pub struct WorkspaceSessionCount {
     pub workspace_root: String,
     pub session_count: i64,
+}
+
+/// A tool output retained separately from the protocol message content.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ToolOutputRecord {
+    pub message_id: Uuid,
+    pub session_id: Uuid,
+    pub tool_name: String,
+    pub output: String,
+    pub created_at: String,
+}
+
+/// A message together with application-owned fields needed for inspection.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct StoredMessageView {
+    pub sequence: usize,
+    pub message: Message,
+    pub app_data: MessageAppData,
+    pub tool_output: Option<ToolOutputRecord>,
+}
+
+/// Complete read-only inspection data for one session.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SessionInspection {
+    pub session: SessionRecord,
+    pub messages: Vec<StoredMessageView>,
+}
+
+#[derive(Serialize)]
+struct JsonlMessageRecord<'a> {
+    session_id: Uuid,
+    sequence: usize,
+    message: &'a Message,
 }
 
 /// Token statistics for a session.
@@ -493,6 +526,32 @@ impl SessionStore {
             messages,
             revert_message_id: None,
         }))
+    }
+
+    /// Load a session and all read-only data needed to inspect its history.
+    pub fn load_session_inspection(&self, session_id: Uuid) -> Result<Option<SessionInspection>> {
+        let Some(session) = self.load_session(session_id)? else {
+            return Ok(None);
+        };
+
+        let messages = self.load_messages(session_id)?;
+        let app_data = self.load_message_app_data(session_id)?;
+        let tool_outputs = self.load_tool_outputs(session_id)?;
+        let messages = messages
+            .into_iter()
+            .enumerate()
+            .map(|(sequence, message)| {
+                let message_id = message.id;
+                StoredMessageView {
+                    sequence,
+                    message,
+                    app_data: app_data.get(&message_id).cloned().unwrap_or_default(),
+                    tool_output: tool_outputs.get(&message_id).cloned(),
+                }
+            })
+            .collect();
+
+        Ok(Some(SessionInspection { session, messages }))
     }
 
     /// List all sessions ordered by creation time (newest first).
@@ -817,6 +876,48 @@ impl SessionStore {
         Ok(file_path)
     }
 
+    /// Export one or more sessions to a single JSONL message stream.
+    ///
+    /// Each line contains the session ID, a stable per-session sequence, and
+    /// the protocol message. This format is intended for CLI inspection and
+    /// scripting; the existing TUI export keeps its legacy one-message shape.
+    pub fn export_to_jsonl(&self, session_ids: &[Uuid], output_path: &Path) -> Result<usize> {
+        for session_id in session_ids {
+            if self.load_session(*session_id)?.is_none() {
+                anyhow::bail!("session not found: {session_id}");
+            }
+        }
+
+        if let Some(parent) = output_path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            fs::create_dir_all(parent).with_context(|| {
+                format!("failed to create export directory {}", parent.display())
+            })?;
+        }
+
+        let mut file = fs::File::create(output_path)
+            .with_context(|| format!("failed to create JSONL export {}", output_path.display()))?;
+        let mut message_count = 0;
+
+        for session_id in session_ids {
+            let messages = self.load_messages(*session_id)?;
+            for (sequence, message) in messages.iter().enumerate() {
+                let record = JsonlMessageRecord {
+                    session_id: *session_id,
+                    sequence,
+                    message,
+                };
+                serde_json::to_writer(&mut file, &record)?;
+                file.write_all(b"\n")?;
+                message_count += 1;
+            }
+        }
+
+        file.flush()?;
+        Ok(message_count)
+    }
+
     /// Count sessions in a workspace.
     pub fn get_current_workspace_sessions_count(&self, workspace_root: &Path) -> Result<i64> {
         self.read(|conn| {
@@ -832,6 +933,38 @@ impl SessionStore {
     /// Alias for load_session (compatibility).
     pub fn load_session_record(&self, session_id: Uuid) -> Result<Option<SessionRecord>> {
         self.load_session(session_id)
+    }
+
+    /// Load all retained tool outputs for a session.
+    pub fn load_tool_outputs(&self, session_id: Uuid) -> Result<HashMap<Uuid, ToolOutputRecord>> {
+        self.read(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT message_id, session_id, tool_name, output, created_at \
+                 FROM tool_outputs WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC",
+            )?;
+            let rows = stmt.query_map(params![session_id.to_string()], |row| {
+                let message_id = Uuid::parse_str(&row.get::<_, String>(0)?).unwrap_or_default();
+                let stored_session_id =
+                    Uuid::parse_str(&row.get::<_, String>(1)?).unwrap_or(session_id);
+                let output = match row.get::<_, Vec<u8>>(3) {
+                    Ok(blob) => decompress_text(&blob),
+                    Err(_) => row.get::<_, String>(3)?,
+                };
+                Ok(ToolOutputRecord {
+                    message_id,
+                    session_id: stored_session_id,
+                    tool_name: row.get(2)?,
+                    output,
+                    created_at: row.get(4)?,
+                })
+            })?;
+            let mut tool_outputs = HashMap::new();
+            for row in rows {
+                let record = row?;
+                tool_outputs.insert(record.message_id, record);
+            }
+            Ok(tool_outputs)
+        })
     }
 
     /// Load tool output content for a message from tool_outputs table.
@@ -1256,12 +1389,14 @@ impl SessionStore {
                     .get::<_, Vec<u8>>(2)
                     .ok()
                     .filter(|bytes| !bytes.is_empty())
-                    .map(|bytes| decompress_text(&bytes));
+                    .map(|bytes| decompress_text(&bytes))
+                    .filter(|value| !value.is_empty());
                 let file_diffs = row
                     .get::<_, Vec<u8>>(3)
                     .ok()
                     .filter(|bytes| !bytes.is_empty())
-                    .map(|bytes| decompress_text(&bytes));
+                    .map(|bytes| decompress_text(&bytes))
+                    .filter(|value| !value.is_empty());
                 let mode = row
                     .get::<_, Option<String>>(4)?
                     .and_then(|raw| serde_json::from_str::<String>(&raw).ok().or(Some(raw)));
@@ -2584,6 +2719,77 @@ mod tests {
         assert!(serialized.get("patch_files").is_none());
         assert!(serialized.get("file_diffs").is_none());
         assert!(serialized.get("mode").is_none());
+    }
+
+    #[test]
+    fn session_inspection_includes_application_data_and_tool_output() {
+        let (store, _tmp) = test_store();
+        let sid = create_test_session(&store, "/workspace", "inspection test");
+        let message = Message::tool_result(
+            "call-1",
+            "shell",
+            tidev_llm::message::ToolExecutionResult::new("stored preview"),
+        );
+        let child_id = Uuid::new_v4();
+        let mut app_data = HashMap::new();
+        app_data.insert(
+            message.id,
+            MessageAppData {
+                mode: Some("plan".into()),
+                child_session_id: Some(child_id),
+                ..Default::default()
+            },
+        );
+        store
+            .append_messages_with_app_data(sid, std::slice::from_ref(&message), &app_data)
+            .unwrap();
+        store
+            .save_tool_output(sid, message.id, "shell", "complete tool output")
+            .unwrap();
+
+        let inspection = store
+            .load_session_inspection(sid)
+            .unwrap()
+            .expect("session should exist");
+        assert_eq!(inspection.session.session_id, sid);
+        assert_eq!(inspection.messages.len(), 1);
+        assert_eq!(inspection.messages[0].sequence, 0);
+        assert_eq!(inspection.messages[0].app_data, app_data[&message.id]);
+        assert_eq!(
+            inspection.messages[0]
+                .tool_output
+                .as_ref()
+                .map(|output| output.output.as_str()),
+            Some("complete tool output")
+        );
+    }
+
+    #[test]
+    fn jsonl_export_contains_session_id_and_message_sequence() {
+        let (store, _tmp) = test_store();
+        let sid = create_test_session(&store, "/workspace", "jsonl test");
+        let messages = vec![
+            Message::new(MessageRole::User, "first"),
+            Message::new(MessageRole::Assistant, "second"),
+        ];
+        store.append_messages(sid, &messages).unwrap();
+
+        let export_tmp = TempDir::new().unwrap();
+        let export_path = export_tmp.path().join("messages.jsonl");
+        let count = store.export_to_jsonl(&[sid], &export_path).unwrap();
+        assert_eq!(count, 2);
+
+        let lines = std::fs::read_to_string(export_path)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0]["session_id"], sid.to_string());
+        assert_eq!(lines[0]["sequence"], 0);
+        assert_eq!(lines[0]["message"]["content"], "first");
+        assert_eq!(lines[1]["sequence"], 1);
+        assert_eq!(lines[1]["message"]["content"], "second");
     }
 
     #[test]

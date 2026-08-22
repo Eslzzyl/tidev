@@ -2,9 +2,11 @@
 //!
 //! Each public function corresponds to a subcommand in [`crate::Command`].
 
+use super::SessionOutputFormat;
 use anyhow::{Context, Result};
 use chrono::Duration;
 use std::path::PathBuf;
+use tidev_storage::{SessionInspection, StoredMessageView};
 use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
@@ -237,6 +239,233 @@ pub fn tmp_clean(min_age_minutes: u64, dry_run: bool) -> Result<()> {
 // ---------------------------------------------------------------------------
 // tidev session
 // ---------------------------------------------------------------------------
+
+/// List sessions without starting the TUI.
+pub fn session_list(
+    query: Option<String>,
+    limit: u64,
+    offset: u64,
+    format: SessionOutputFormat,
+) -> Result<()> {
+    let limit = i64::try_from(limit).context("session list limit is too large")?;
+    let offset = i64::try_from(offset).context("session list offset is too large")?;
+    let (_paths, store) = open_store()?;
+
+    let sessions = if let Some(query) = query {
+        let search_limit = limit
+            .checked_add(offset)
+            .context("session list range is too large")?;
+        store
+            .search_sessions(&query, search_limit)?
+            .into_iter()
+            .skip(offset as usize)
+            .collect()
+    } else {
+        store.list_sessions_unfiltered(limit, offset)?
+    };
+
+    match format {
+        SessionOutputFormat::Text => print_session_list(&sessions),
+        SessionOutputFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(&sessions)?);
+        }
+    }
+    Ok(())
+}
+
+/// Show a complete session or one message without starting the TUI.
+pub fn session_show(
+    session_id: &str,
+    message_id: Option<&str>,
+    format: SessionOutputFormat,
+) -> Result<()> {
+    let session_id = parse_session_id(session_id)?;
+    let message_id = message_id
+        .map(parse_message_id)
+        .transpose()
+        .context("invalid message UUID")?;
+    let (_paths, store) = open_store()?;
+    let mut inspection = store
+        .load_session_inspection(session_id)?
+        .with_context(|| format!("session not found: {session_id}"))?;
+
+    if let Some(message_id) = message_id {
+        inspection
+            .messages
+            .retain(|message| message.message.id == message_id);
+        if inspection.messages.is_empty() {
+            anyhow::bail!("message {message_id} not found in session {session_id}");
+        }
+    }
+
+    match format {
+        SessionOutputFormat::Text => print_session_inspection_text(&inspection)?,
+        SessionOutputFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(&inspection)?);
+        }
+    }
+    Ok(())
+}
+
+fn parse_session_id(value: &str) -> Result<Uuid> {
+    Uuid::parse_str(value).with_context(|| format!("invalid session UUID: {value}"))
+}
+
+fn parse_message_id(value: &str) -> Result<Uuid> {
+    Uuid::parse_str(value).with_context(|| format!("invalid message UUID: {value}"))
+}
+
+fn print_session_list(sessions: &[tidev_storage::SessionRecord]) {
+    if sessions.is_empty() {
+        println!("No sessions found.");
+        return;
+    }
+
+    println!("ID  UPDATED  STATUS  PARENT  TITLE");
+    for session in sessions {
+        let parent = session
+            .parent_session_id
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| "-".to_string());
+        let title = session
+            .title
+            .replace('\n', "\\n")
+            .replace('\r', "\\r")
+            .replace('\t', "\\t");
+        println!(
+            "{}  {}  {}  {}  {}",
+            session.session_id,
+            session.updated_at.to_rfc3339(),
+            session.status,
+            parent,
+            title
+        );
+    }
+}
+
+fn print_session_inspection_text(inspection: &SessionInspection) -> Result<()> {
+    let session = &inspection.session;
+    println!("Session: {}", session.session_id);
+    println!("Title: {}", session.title);
+    println!("Status: {}", session.status);
+    println!("Workspace: {}", session.workspace_root);
+    println!(
+        "Provider: {} ({})",
+        session.provider_id, session.provider_display_name
+    );
+    println!(
+        "Model: {} ({})",
+        session.model_id, session.model_display_name
+    );
+    println!("Created: {}", session.created_at.to_rfc3339());
+    println!("Updated: {}", session.updated_at.to_rfc3339());
+    if let Some(parent_session_id) = session.parent_session_id {
+        println!("Parent session: {parent_session_id}");
+    }
+    if !session.system_prompt.is_empty() {
+        println!("\nSystem prompt:\n{}", session.system_prompt);
+    }
+    if let Some(summary) = &session.context_summary {
+        println!("\nContext summary:\n{summary}");
+        println!("Context retained from: {}", session.context_retained_from);
+    }
+    println!("\nMessages: {}", inspection.messages.len());
+
+    for message in &inspection.messages {
+        print_message_text(message)?;
+    }
+    Ok(())
+}
+
+fn print_message_text(message: &StoredMessageView) -> Result<()> {
+    let protocol = &message.message;
+    println!(
+        "\n--- Message {}: {} ---",
+        message.sequence,
+        protocol.role.label()
+    );
+    println!("ID: {}", protocol.id);
+    println!("Created: {}", protocol.created_at.to_rfc3339());
+    if let Some(completed_at) = protocol.completed_at {
+        println!("Completed: {}", completed_at.to_rfc3339());
+    }
+    println!("Streaming: {}", protocol.streaming);
+    println!("\nContent:\n{}", protocol.content);
+
+    if !protocol.reasoning.is_empty() {
+        println!("\nReasoning:\n{}", protocol.reasoning);
+    }
+    if !protocol.tool_calls.is_empty() {
+        println!(
+            "\nTool calls:\n{}",
+            serde_json::to_string_pretty(&protocol.tool_calls)?
+        );
+    }
+    if !protocol.attachments.is_empty() {
+        println!(
+            "\nAttachments:\n{}",
+            serde_json::to_string_pretty(&protocol.attachments)?
+        );
+    }
+    if protocol.tool_call_id.is_some() || protocol.tool_name.is_some() {
+        println!(
+            "\nTool result metadata:\n{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "tool_call_id": protocol.tool_call_id,
+                "tool_name": protocol.tool_name,
+            }))?
+        );
+    }
+    if protocol.input_tokens.is_some()
+        || protocol.output_tokens.is_some()
+        || protocol.total_tokens.is_some()
+        || protocol.cache_read_tokens.is_some()
+        || protocol.cache_write_tokens.is_some()
+        || protocol.model_id.is_some()
+        || protocol.tokens_per_second.is_some()
+        || protocol.thinking_level.is_some()
+    {
+        println!(
+            "\nUsage and model metadata:\n{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "input_tokens": protocol.input_tokens,
+                "output_tokens": protocol.output_tokens,
+                "total_tokens": protocol.total_tokens,
+                "cache_read_tokens": protocol.cache_read_tokens,
+                "cache_write_tokens": protocol.cache_write_tokens,
+                "model_id": protocol.model_id,
+                "tokens_per_second": protocol.tokens_per_second,
+                "thinking_level": protocol.thinking_level,
+            }))?
+        );
+    }
+    if protocol.reasoning_started_at.is_some() || protocol.reasoning_completed_at.is_some() {
+        println!(
+            "\nReasoning timing:\n{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "reasoning_started_at": protocol.reasoning_started_at,
+                "reasoning_completed_at": protocol.reasoning_completed_at,
+            }))?
+        );
+    }
+
+    println!(
+        "\nProtocol metadata:\n{}",
+        serde_json::to_string_pretty(&protocol.metadata)?
+    );
+    println!(
+        "\nApplication data:\n{}",
+        serde_json::to_string_pretty(&message.app_data)?
+    );
+    if let Some(tool_output) = &message.tool_output {
+        println!(
+            "\nRetained full tool output ({}):\n{}",
+            tool_output.tool_name, tool_output.output
+        );
+        println!("Tool output created: {}", tool_output.created_at);
+    }
+    Ok(())
+}
 
 /// Delete sessions older than the specified number of days.
 pub fn session_prune(older_than_days: u64) -> Result<()> {

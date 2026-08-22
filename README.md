@@ -55,6 +55,34 @@ AI coding agent built in pure Rust. tidev reimplements the interaction model of 
 
 ---
 
+## CLI Session Inspection
+
+Session history can be inspected directly from the CLI without starting the TUI or creating an intermediate export:
+
+~~~bash
+# List root and child sessions
+tidev session list
+
+# Search sessions by title or UUID
+tidev session list --query "keyword"
+
+# Show a complete session
+tidev session show <SESSION_UUID>
+
+# Show one message from a session
+tidev session show <SESSION_UUID> --message-id <MESSAGE_UUID>
+
+# Get the complete inspection record as JSON
+tidev session show <SESSION_UUID> --format json
+~~~
+
+Session export uses one command with an explicit format. SQLite remains the default and importable format:
+
+~~~bash
+tidev export --session <SESSION_UUID> --output ./tidev-export.db
+tidev export --format jsonl --session <SESSION_UUID> --output ./tidev-export.jsonl
+~~~
+
 ## Performance
 
 Test results on macOS 27:

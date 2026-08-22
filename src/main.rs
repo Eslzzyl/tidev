@@ -6,6 +6,18 @@ use uuid::Uuid;
 mod cli;
 mod headless;
 
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+enum ExportFormat {
+    Sqlite,
+    Jsonl,
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+enum SessionOutputFormat {
+    Text,
+    Json,
+}
+
 #[derive(Parser, Debug)]
 #[command(
     name = "tidev",
@@ -60,7 +72,7 @@ enum Command {
         workspace: Option<PathBuf>,
     },
 
-    /// Export session(s) to an uncompressed SQLite database
+    /// Export session(s) to SQLite or JSONL
     Export {
         /// Session UUID(s) to export (repeat for multiple)
         #[arg(short, long)]
@@ -70,9 +82,13 @@ enum Command {
         #[arg(short, long)]
         all: bool,
 
-        /// Output database file path
-        #[arg(short, long, default_value = "./tidev-export.db")]
-        output: PathBuf,
+        /// Export format
+        #[arg(short, long, value_enum, default_value_t = ExportFormat::Sqlite)]
+        format: ExportFormat,
+
+        /// Output file path (defaults to a format-specific file)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
     },
 
     /// Import sessions from an uncompressed SQLite export file
@@ -202,6 +218,33 @@ enum TmpCommand {
 
 #[derive(clap::Subcommand, Debug)]
 enum SessionCommand {
+    /// List sessions, including child sessions
+    List {
+        /// Search session titles or UUIDs
+        #[arg(short, long)]
+        query: Option<String>,
+        /// Maximum number of sessions to display
+        #[arg(short, long, default_value_t = 50)]
+        limit: u64,
+        /// Number of sessions to skip
+        #[arg(long, default_value_t = 0)]
+        offset: u64,
+        /// Output format
+        #[arg(long, value_enum, default_value_t = SessionOutputFormat::Text)]
+        format: SessionOutputFormat,
+    },
+    /// Show a complete session or one message without starting the TUI
+    #[command(alias = "view")]
+    Show {
+        /// Session UUID
+        session_id: String,
+        /// Show only this message in the session
+        #[arg(long)]
+        message_id: Option<String>,
+        /// Output format
+        #[arg(long, value_enum, default_value_t = SessionOutputFormat::Text)]
+        format: SessionOutputFormat,
+    },
     /// Delete sessions not updated for more than N days
     Prune {
         /// Number of days
@@ -240,8 +283,9 @@ async fn main() -> Result<()> {
         Some(Command::Export {
             session,
             all,
+            format,
             output,
-        }) => run_export(session, all, output),
+        }) => run_export(session, all, format, output),
 
         // ── Import ──────────────────────────────────────────────
         Some(Command::Import {
@@ -288,6 +332,17 @@ async fn main() -> Result<()> {
 
         // ── Session ─────────────────────────────────────────────
         Some(Command::Session(cmd)) => match cmd {
+            SessionCommand::List {
+                query,
+                limit,
+                offset,
+                format,
+            } => cli::session_list(query, limit, offset, format),
+            SessionCommand::Show {
+                session_id,
+                message_id,
+                format,
+            } => cli::session_show(&session_id, message_id.as_deref(), format),
             SessionCommand::Prune { older_than_days } => cli::session_prune(older_than_days),
         },
     }
@@ -295,8 +350,13 @@ async fn main() -> Result<()> {
 
 // ── Export handler (kept from the original) ──────────────────────────
 
-/// Export one or more sessions to a portable SQLite file.
-fn run_export(session: Vec<String>, all: bool, output: PathBuf) -> Result<()> {
+/// Export one or more sessions in the requested format.
+fn run_export(
+    session: Vec<String>,
+    all: bool,
+    format: ExportFormat,
+    output: Option<PathBuf>,
+) -> Result<()> {
     if session.is_empty() && !all {
         anyhow::bail!("Specify at least one --session <UUID> or --all to export all sessions");
     }
@@ -323,11 +383,29 @@ fn run_export(session: Vec<String>, all: bool, output: PathBuf) -> Result<()> {
         anyhow::bail!("No sessions to export");
     }
 
-    store.export_to_sqlite(&session_ids, &output)?;
-    eprintln!(
-        "Exported {} session(s) to {}",
-        session_ids.len(),
-        output.display()
-    );
+    let output = output.unwrap_or_else(|| match format {
+        ExportFormat::Sqlite => PathBuf::from("./tidev-export.db"),
+        ExportFormat::Jsonl => PathBuf::from("./tidev-export.jsonl"),
+    });
+
+    match format {
+        ExportFormat::Sqlite => {
+            store.export_to_sqlite(&session_ids, &output)?;
+            eprintln!(
+                "Exported {} session(s) to {}",
+                session_ids.len(),
+                output.display()
+            );
+        }
+        ExportFormat::Jsonl => {
+            let message_count = store.export_to_jsonl(&session_ids, &output)?;
+            eprintln!(
+                "Exported {} session(s) and {} message(s) to {}",
+                session_ids.len(),
+                message_count,
+                output.display()
+            );
+        }
+    }
     Ok(())
 }
