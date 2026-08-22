@@ -19,8 +19,8 @@ api_type = "openai_chat_completions"
 
 | Key | Required | Description |
 |-----|----------|-------------|
-| `display_name` | Yes | Human-readable name shown in the UI |
-| `base_url` | Yes | Base URL of the API endpoint |
+| `display_name` | Yes for new providers | Human-readable name shown in the UI. When overriding a bundled provider, omitted values inherit from the preset |
+| `base_url` | Yes for new providers | Base URL of the API endpoint. When overriding a bundled provider, omitted values inherit from the preset |
 | `api_type` | No | Default API protocol for all models under this provider (see below). Can be overridden per-model |
 
 ### api_type values
@@ -295,6 +295,10 @@ base_url = "https://my-mirror.example.com"
 
 Model entries in the user config are merged with bundled ones. If a user model
 has the same key as a bundled model, the user model replaces it entirely.
+Provider-level `display_name`, `base_url`, and `api_type` values follow the same
+override rule: values present in the user config replace the bundled values,
+while omitted values are inherited. This also applies to project-level
+`.tidev/config.toml` overlays.
 
 ## Connecting to custom providers
 

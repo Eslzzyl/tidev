@@ -14,9 +14,9 @@ pub mod types;
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use include_dir::{Dir, include_dir};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 pub use crate::auth::AuthStore;
 use crate::auth::{ActiveModel, ModelSummary};
@@ -411,7 +411,9 @@ impl Default for UiConfig {
 /// project-level overlay (`.tidev/config.toml` in the workspace root).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AppConfig {
+    #[serde(default = "default_provider")]
     pub default_provider: String,
+    #[serde(default = "default_model")]
     pub default_model: String,
     #[serde(default = "default_theme")]
     pub theme: String,
@@ -419,7 +421,11 @@ pub struct AppConfig {
     pub ui: UiConfig,
     #[serde(default)]
     pub logging: LogConfig,
-    #[serde(default)]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_provider_configs",
+        serialize_with = "serialize_provider_configs"
+    )]
     pub providers: BTreeMap<String, ProviderConfig>,
     #[serde(default)]
     pub instructions: Vec<String>,
@@ -445,17 +451,100 @@ pub struct AppConfig {
     pub subagent: SubagentConfig,
     #[serde(skip)]
     pub bundled_providers: BTreeMap<String, ProviderConfig>,
+    /// Effective provider catalog after applying user overrides.
+    #[serde(skip)]
+    effective_providers: BTreeMap<String, ProviderConfig>,
 }
 
 fn default_theme() -> String {
     "dark".to_string()
 }
 
+fn default_provider() -> String {
+    "openai".to_string()
+}
+
+fn default_model() -> String {
+    "gpt-4o-mini".to_string()
+}
+
+/// A partial provider definition used when reading user configuration.
+///
+/// `ProviderConfig` represents a fully resolved provider and therefore has
+/// required metadata fields. User configuration, however, may only specify a
+/// model under a bundled provider. This intermediate type preserves that
+/// partial form until the bundled catalog is available for merging.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+struct ProviderConfigOverride {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    display_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    base_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    api_type: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    models: BTreeMap<String, crate::provider::ModelConfig>,
+}
+
+impl ProviderConfigOverride {
+    fn into_partial_provider(self) -> ProviderConfig {
+        ProviderConfig {
+            display_name: self.display_name.unwrap_or_default(),
+            base_url: self.base_url.unwrap_or_default(),
+            api_type: self.api_type,
+            models: self.models,
+        }
+    }
+
+    fn from_provider(provider: &ProviderConfig) -> Self {
+        Self {
+            display_name: (!provider.display_name.is_empty())
+                .then(|| provider.display_name.clone()),
+            base_url: (!provider.base_url.is_empty()).then(|| provider.base_url.clone()),
+            api_type: provider.api_type.clone(),
+            models: provider.models.clone(),
+        }
+    }
+}
+
+fn deserialize_provider_configs<'de, D>(
+    deserializer: D,
+) -> std::result::Result<BTreeMap<String, ProviderConfig>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let overrides = BTreeMap::<String, ProviderConfigOverride>::deserialize(deserializer)?;
+    Ok(overrides
+        .into_iter()
+        .map(|(provider_id, provider)| (provider_id, provider.into_partial_provider()))
+        .collect())
+}
+
+fn serialize_provider_configs<S>(
+    providers: &BTreeMap<String, ProviderConfig>,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    let overrides = providers
+        .iter()
+        .map(|(provider_id, provider)| {
+            (
+                provider_id.clone(),
+                ProviderConfigOverride::from_provider(provider),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    overrides.serialize(serializer)
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
+        let bundled_providers = bundled_provider_catalog().unwrap_or_default();
         Self {
-            default_provider: "openai".to_string(),
-            default_model: "gpt-4o-mini".to_string(),
+            default_provider: default_provider(),
+            default_model: default_model(),
             theme: "dark".to_string(),
             ui: UiConfig::default(),
             logging: LogConfig::default(),
@@ -471,7 +560,8 @@ impl Default for AppConfig {
             mcp: McpConfig::default(),
             snapshot: SnapshotConfig::default(),
             subagent: SubagentConfig::default(),
-            bundled_providers: bundled_provider_catalog().unwrap_or_default(),
+            effective_providers: bundled_providers.clone(),
+            bundled_providers,
         }
     }
 }
@@ -483,6 +573,7 @@ impl AppConfig {
     pub fn load(paths: &ConfigPaths) -> Result<Self> {
         let mut config = Self::load_global(paths)?;
         config.bundled_providers = bundled_provider_catalog()?;
+        config.rebuild_effective_providers()?;
         Ok(config)
     }
 
@@ -520,6 +611,7 @@ impl AppConfig {
         }
 
         config.bundled_providers = bundled_provider_catalog()?;
+        config.rebuild_effective_providers()?;
         Ok(config)
     }
 
@@ -538,6 +630,19 @@ impl AppConfig {
         }
         if has("default_model") {
             self.default_model = overlay.default_model;
+        }
+
+        // Providers and models use overlay semantics: provider fields replace
+        // only fields explicitly present in the overlay, while model entries
+        // with the same key replace the previous model entirely.
+        if has("providers") {
+            for (provider_id, provider) in &overlay.providers {
+                let existing = self
+                    .providers
+                    .entry(provider_id.clone())
+                    .or_insert_with(empty_provider_config);
+                apply_provider_override(existing, provider);
+            }
         }
 
         // Lists: append
@@ -575,6 +680,21 @@ impl AppConfig {
         }
     }
 
+    /// Rebuild the effective provider catalog from bundled presets and user
+    /// provider overrides.
+    fn rebuild_effective_providers(&mut self) -> Result<()> {
+        let mut effective = self.bundled_providers.clone();
+
+        for (provider_id, user_provider) in &self.providers {
+            let merged =
+                merge_provider_config(effective.get(provider_id), user_provider, provider_id)?;
+            effective.insert(provider_id.clone(), merged);
+        }
+
+        self.effective_providers = effective;
+        Ok(())
+    }
+
     // ── Saving ───────────────────────────────────────────────────────
 
     /// Save the config to the default config file.
@@ -589,8 +709,9 @@ impl AppConfig {
     // ── Provider helpers ─────────────────────────────────────────────
 
     pub fn provider(&self, provider_id: &str) -> Option<&ProviderConfig> {
-        self.providers
+        self.effective_providers
             .get(provider_id)
+            .or_else(|| self.providers.get(provider_id))
             .or_else(|| self.bundled_providers.get(provider_id))
     }
 
@@ -615,12 +736,9 @@ impl AppConfig {
 
     pub fn provider_ids(&self) -> Vec<String> {
         let mut ids: BTreeSet<String> = BTreeSet::new();
-        for id in self.providers.keys() {
-            ids.insert(id.clone());
-        }
-        for id in self.bundled_providers.keys() {
-            ids.insert(id.clone());
-        }
+        ids.extend(self.effective_providers.keys().cloned());
+        ids.extend(self.providers.keys().cloned());
+        ids.extend(self.bundled_providers.keys().cloned());
         ids.into_iter().collect()
     }
 
@@ -863,6 +981,73 @@ impl AppConfig {
     }
 }
 
+fn empty_provider_config() -> ProviderConfig {
+    ProviderConfig {
+        display_name: String::new(),
+        base_url: String::new(),
+        api_type: None,
+        models: BTreeMap::new(),
+    }
+}
+
+/// Apply one partial provider definition over another partial definition.
+fn apply_provider_override(base: &mut ProviderConfig, override_config: &ProviderConfig) {
+    if !override_config.display_name.is_empty() {
+        base.display_name.clone_from(&override_config.display_name);
+    }
+    if !override_config.base_url.is_empty() {
+        base.base_url.clone_from(&override_config.base_url);
+    }
+    if override_config.api_type.is_some() {
+        base.api_type.clone_from(&override_config.api_type);
+    }
+    base.models.extend(override_config.models.clone());
+}
+
+/// Resolve a user provider override against an optional bundled provider.
+fn merge_provider_config(
+    bundled: Option<&ProviderConfig>,
+    user: &ProviderConfig,
+    provider_id: &str,
+) -> Result<ProviderConfig> {
+    let display_name = if user.display_name.is_empty() {
+        bundled
+            .map(|provider| provider.display_name.clone())
+            .unwrap_or_default()
+    } else {
+        user.display_name.clone()
+    };
+    if display_name.trim().is_empty() {
+        bail!("provider '{provider_id}' requires 'display_name'");
+    }
+
+    let base_url = if user.base_url.is_empty() {
+        bundled
+            .map(|provider| provider.base_url.clone())
+            .unwrap_or_default()
+    } else {
+        user.base_url.clone()
+    };
+    if base_url.trim().is_empty() {
+        bail!("provider '{provider_id}' requires 'base_url'");
+    }
+
+    let mut models = bundled
+        .map(|provider| provider.models.clone())
+        .unwrap_or_default();
+    models.extend(user.models.clone());
+
+    Ok(ProviderConfig {
+        display_name,
+        base_url,
+        api_type: user
+            .api_type
+            .clone()
+            .or_else(|| bundled.and_then(|provider| provider.api_type.clone())),
+        models,
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Bundled provider catalog
 // ---------------------------------------------------------------------------
@@ -985,6 +1170,166 @@ mod tests {
         let auth = AuthStore::default();
         let result = config.resolve_model_by_ids(&auth, "nonexistent", "model");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn user_models_extend_bundled_provider() {
+        let mut config: AppConfig = toml::from_str(
+            r#"
+default_provider = "deepseek"
+default_model = "custom-model"
+
+[providers.deepseek.models.custom-model]
+request_model_id = "deepseek-v4-custom"
+display_name = "DeepSeek Custom"
+context_window = 1048576
+max_output_tokens = 262144
+"#,
+        )
+        .expect("partial provider override should parse");
+        config.bundled_providers = bundled_provider_catalog().expect("bundled catalog");
+        config
+            .rebuild_effective_providers()
+            .expect("provider override should resolve");
+
+        let provider = config.provider("deepseek").expect("provider should exist");
+        assert!(provider.models.contains_key("custom-model"));
+        assert!(provider.models.contains_key("deepseek-v4-pro"));
+        assert_eq!(
+            provider.models["custom-model"].request_model_id.as_deref(),
+            Some("deepseek-v4-custom")
+        );
+    }
+
+    #[test]
+    fn user_model_replaces_bundled_model_with_same_key() {
+        let mut config: AppConfig = toml::from_str(
+            r#"
+[providers.deepseek.models.deepseek-v4-pro]
+request_model_id = "deepseek-v4-pro-custom"
+display_name = "Custom DeepSeek V4 Pro"
+context_window = 500000
+max_output_tokens = 100000
+"#,
+        )
+        .expect("partial provider override should parse");
+        config.bundled_providers = bundled_provider_catalog().expect("bundled catalog");
+        config
+            .rebuild_effective_providers()
+            .expect("provider override should resolve");
+
+        let provider = config.provider("deepseek").expect("provider should exist");
+        let model = provider
+            .models
+            .get("deepseek-v4-pro")
+            .expect("overridden model should exist");
+        assert_eq!(model.display_name, "Custom DeepSeek V4 Pro");
+        assert_eq!(model.context_window, 500000);
+        assert_eq!(
+            model.request_model_id.as_deref(),
+            Some("deepseek-v4-pro-custom")
+        );
+        assert!(provider.models.contains_key("deepseek-v4-flash"));
+    }
+
+    #[test]
+    fn provider_fields_override_bundled_provider_without_removing_models() {
+        let mut config: AppConfig = toml::from_str(
+            r#"
+[providers.deepseek]
+display_name = "DeepSeek Mirror"
+base_url = "https://mirror.example.com/v1"
+"#,
+        )
+        .expect("provider override should parse");
+        config.bundled_providers = bundled_provider_catalog().expect("bundled catalog");
+        config
+            .rebuild_effective_providers()
+            .expect("provider override should resolve");
+
+        let provider = config.provider("deepseek").expect("provider should exist");
+        assert_eq!(provider.display_name, "DeepSeek Mirror");
+        assert_eq!(provider.base_url, "https://mirror.example.com/v1");
+        assert!(provider.models.contains_key("deepseek-v4-pro"));
+    }
+
+    #[test]
+    fn serializing_partial_provider_override_does_not_expand_bundled_models() {
+        let config: AppConfig = toml::from_str(
+            r#"
+[providers.deepseek.models.custom-model]
+request_model_id = "deepseek-v4-custom"
+display_name = "DeepSeek Custom"
+context_window = 1048576
+max_output_tokens = 262144
+"#,
+        )
+        .expect("partial provider override should parse");
+        let serialized = toml::to_string(&config).expect("config should serialize");
+        assert!(serialized.contains("custom-model"));
+        assert!(!serialized.contains("deepseek-v4-pro"));
+
+        let reparsed: AppConfig = toml::from_str(&serialized).expect("config should round-trip");
+        assert!(
+            reparsed
+                .providers
+                .get("deepseek")
+                .expect("provider should exist")
+                .models
+                .contains_key("custom-model")
+        );
+    }
+
+    #[test]
+    fn project_provider_overrides_merge_with_global_provider_overrides() {
+        let mut config: AppConfig = toml::from_str(
+            r#"
+[providers.deepseek.models.global-model]
+request_model_id = "deepseek-global"
+display_name = "Global Model"
+context_window = 100000
+max_output_tokens = 10000
+"#,
+        )
+        .expect("global provider override should parse");
+        let overlay_toml = r#"
+[providers.deepseek.models.project-model]
+request_model_id = "deepseek-project"
+display_name = "Project Model"
+context_window = 200000
+max_output_tokens = 20000
+"#;
+        let overlay: AppConfig =
+            toml::from_str(overlay_toml).expect("project provider override should parse");
+        config.merge(overlay, overlay_toml);
+        config.bundled_providers = bundled_provider_catalog().expect("bundled catalog");
+        config
+            .rebuild_effective_providers()
+            .expect("provider override should resolve");
+
+        let provider = config.provider("deepseek").expect("provider should exist");
+        assert!(provider.models.contains_key("global-model"));
+        assert!(provider.models.contains_key("project-model"));
+        assert!(provider.models.contains_key("deepseek-v4-pro"));
+    }
+
+    #[test]
+    fn new_provider_still_requires_provider_metadata() {
+        let mut config: AppConfig = toml::from_str(
+            r#"
+[providers.custom.models.model]
+request_model_id = "model"
+display_name = "Model"
+context_window = 100000
+max_output_tokens = 10000
+"#,
+        )
+        .expect("provider model should parse before resolution");
+        config.bundled_providers = bundled_provider_catalog().expect("bundled catalog");
+        let error = config
+            .rebuild_effective_providers()
+            .expect_err("new providers must define metadata");
+        assert!(error.to_string().contains("display_name"));
     }
 
     #[test]
