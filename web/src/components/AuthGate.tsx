@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { useAuthStore } from "../stores/useAuthStore";
 
 export function AuthGate() {
+  const { t } = useTranslation();
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const { verifyToken, setToken, error, clearError, isAuthRequired, isAuthenticated } =
@@ -24,7 +26,7 @@ export function AuthGate() {
       setToken(password.trim());
     } else {
       useAuthStore.setState({
-        error: "Invalid access token. Please try again.",
+        error: t("Invalid access token. Please try again."),
       });
     }
     setSubmitting(false);
@@ -55,7 +57,7 @@ export function AuthGate() {
           </div>
           <h1 className="text-2xl font-bold text-neutral-900 dark:text-neutral-100">tidev</h1>
           <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
-            Enter your access token to continue
+            {t("Enter your access token to continue")}
           </p>
         </div>
 
@@ -67,7 +69,7 @@ export function AuthGate() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Access token"
+              placeholder={t("Access token")}
               autoComplete="current-password"
               className="w-full rounded-lg border border-neutral-300 bg-white px-4 py-2.5 text-base text-neutral-900 placeholder-neutral-400 outline-none transition-colors focus:border-neutral-500 focus:ring-1 focus:ring-neutral-500 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder-neutral-500 dark:focus:border-neutral-500"
               disabled={submitting}
@@ -81,7 +83,7 @@ export function AuthGate() {
             disabled={!password.trim() || submitting}
             className="w-full rounded-lg bg-neutral-900 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
           >
-            {submitting ? "Verifying..." : "Unlock"}
+            {submitting ? t("Verifying...") : t("Unlock")}
           </button>
         </form>
       </div>

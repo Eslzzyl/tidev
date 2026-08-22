@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { X, File, Folder } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 interface CreateItemDialogProps {
   /** Parent directory path where the item will be created */
@@ -13,6 +14,7 @@ interface CreateItemDialogProps {
 }
 
 export function CreateItemDialog({ parentPath, type, onSubmit, onClose }: CreateItemDialogProps) {
+  const { t } = useTranslation();
   const [name, setName] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -52,7 +54,7 @@ export function CreateItemDialog({ parentPath, type, onSubmit, onClose }: Create
               <Folder className="h-4 w-4 text-yellow-500" />
             )}
             <span className="text-sm font-medium text-neutral-800 dark:text-neutral-200">
-              New {type}
+              {type === "file" ? t("New File") : t("New Directory")}
             </span>
           </div>
           <button
@@ -64,7 +66,7 @@ export function CreateItemDialog({ parentPath, type, onSubmit, onClose }: Create
         </div>
 
         <div className="mb-2 text-[11px] text-neutral-500">
-          in <span className="font-mono">{parentPath || "/"}</span>
+          {t("in")} <span className="font-mono">{parentPath || "/"}</span>
         </div>
 
         <form onSubmit={handleSubmit}>
@@ -73,7 +75,7 @@ export function CreateItemDialog({ parentPath, type, onSubmit, onClose }: Create
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder={type === "file" ? "filename.ext" : "directory-name"}
+            placeholder={type === "file" ? t("filename.ext") : t("directory-name")}
             className="w-full rounded border border-neutral-300 bg-white px-2 py-1.5 text-base outline-none focus:border-blue-400 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100 dark:focus:border-blue-500"
           />
           <div className="mt-3 flex justify-end gap-2">
@@ -82,14 +84,14 @@ export function CreateItemDialog({ parentPath, type, onSubmit, onClose }: Create
               onClick={onClose}
               className="rounded px-3 py-1 text-xs text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
             >
-              Cancel
+              {t("Cancel")}
             </button>
             <button
               type="submit"
               disabled={!name.trim()}
               className="rounded bg-blue-600 px-3 py-1 text-xs text-white hover:bg-blue-700 disabled:opacity-40"
             >
-              Create
+              {t("Create")}
             </button>
           </div>
         </form>

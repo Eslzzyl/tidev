@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
+import { i18n, resolveLocale, type LocalePreference } from "../i18n";
 export type Theme = "light" | "dark" | "system";
 
 export interface SettingsState {
@@ -22,6 +23,7 @@ export interface UIState {
   isLoading: boolean;
   isStreaming: boolean;
   connectionStatus: "connected" | "disconnected" | "connecting";
+  locale: LocalePreference;
   leftSidebarWidth: number;
   rightSidebarWidth: number;
   settings: SettingsState;
@@ -41,6 +43,7 @@ export interface UIActions {
   toggleMobileRightSidebar: () => void;
   closeMobileRightSidebar: () => void;
   setTheme: (theme: Theme) => void;
+  setLocale: (locale: LocalePreference) => void;
   setLeftSidebarWidth: (width: number) => void;
   setRightSidebarWidth: (width: number) => void;
   setInputValue: (value: string) => void;
@@ -89,6 +92,7 @@ const initialState: UIState = {
   mobileMenuOpen: false,
   mobileRightSidebarOpen: false,
   theme: legacyPreferences.theme ?? "system",
+  locale: "system",
   inputValue: "",
   isLoading: false,
   isStreaming: false,
@@ -146,6 +150,11 @@ export const useUIStore = create<UIState & UIActions>()(
           return { theme };
         }),
 
+      setLocale: (locale) => {
+        void i18n.changeLanguage(resolveLocale(locale));
+        set({ locale });
+      },
+
       setLeftSidebarWidth: (width) => set({ leftSidebarWidth: clampSidebarWidth(width) }),
 
       setRightSidebarWidth: (width) => set({ rightSidebarWidth: clampSidebarWidth(width) }),
@@ -168,6 +177,7 @@ export const useUIStore = create<UIState & UIActions>()(
       // Only persist user preferences — not transient UI state like loading/streaming
       partialize: (state) => ({
         theme: state.theme,
+        locale: state.locale,
         leftSidebarWidth: state.leftSidebarWidth,
         rightSidebarWidth: state.rightSidebarWidth,
         rightSidebarOpen: state.rightSidebarOpen,

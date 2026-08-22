@@ -8,6 +8,7 @@ import { GoToLineDialog } from "../ui/GoToLineDialog";
 import { FileTabs } from "./FileTabs";
 import { ImagePreview } from "./ImagePreview";
 import { MarkdownPreview } from "./MarkdownPreview";
+import { useTranslation } from "react-i18next";
 
 const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "svg", "webp", "ico", "bmp"]);
 const MARKDOWN_EXTS = new Set(["md", "markdown", "mdx"]);
@@ -37,6 +38,7 @@ function tryParseJson(content: string): unknown {
 }
 
 export function CodeViewer() {
+  const { t } = useTranslation();
   const openFiles = useFileStore((s) => s.openFiles);
   const activeFilePath = useFileStore((s) => s.activeFilePath);
   const isSaving = useFileStore((s) => s.isSaving);
@@ -156,7 +158,7 @@ export function CodeViewer() {
   if (openFiles.length === 0) {
     return (
       <div className="file-viewer-empty flex h-full items-center justify-center text-xs text-neutral-400">
-        Select a file to view
+        {t("Select a file to view")}
       </div>
     );
   }
@@ -181,7 +183,7 @@ export function CodeViewer() {
             </span>
             {activeFile.isDirty && (
               <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-400">
-                Modified
+                {t("Modified")}
               </span>
             )}
             {activeFile.language && renderMode === "code" && (
@@ -191,17 +193,17 @@ export function CodeViewer() {
             )}
             {renderMode === "image" && (
               <span className="shrink-0 rounded bg-purple-100 px-1.5 py-0.5 text-[10px] font-medium uppercase text-purple-600 dark:bg-purple-900/40 dark:text-purple-400">
-                Image
+                {t("Image")}
               </span>
             )}
             {renderMode === "markdown" && (
               <span className="shrink-0 rounded bg-green-100 px-1.5 py-0.5 text-[10px] font-medium uppercase text-green-600 dark:bg-green-900/40 dark:text-green-400">
-                Preview
+                {t("Preview")}
               </span>
             )}
             {renderMode === "json" && (
               <span className="shrink-0 rounded bg-cyan-100 px-1.5 py-0.5 text-[10px] font-medium uppercase text-cyan-600 dark:bg-cyan-900/40 dark:text-cyan-400">
-                Tree
+                {t("Tree")}
               </span>
             )}
           </div>
@@ -209,7 +211,7 @@ export function CodeViewer() {
             {isSaving && (
               <span className="flex items-center gap-1 text-[10px] text-neutral-400">
                 <Loader2 className="h-3 w-3 animate-spin" />
-                Saving...
+                {t("Saving...")}
               </span>
             )}
 
@@ -222,8 +224,8 @@ export function CodeViewer() {
                     ? "bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400"
                     : "text-neutral-400 hover:bg-neutral-200 hover:text-neutral-600 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
                 }`}
-                aria-label={isEditing ? "Preview mode" : "Edit mode"}
-                title={isEditing ? "Switch to preview" : "Switch to edit source"}
+                aria-label={isEditing ? t("Preview mode") : t("Edit mode")}
+                title={isEditing ? t("Switch to preview") : t("Switch to edit source")}
               >
                 {isEditing ? <Eye className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}
               </button>
@@ -238,8 +240,8 @@ export function CodeViewer() {
                     ? "bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400"
                     : "text-neutral-400 hover:bg-neutral-200 hover:text-neutral-600 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
                 }`}
-                aria-label={isEditing ? "View mode" : "Edit mode"}
-                title={isEditing ? "Switch to view mode" : "Switch to edit mode"}
+                aria-label={isEditing ? t("View mode") : t("Edit mode")}
+                title={isEditing ? t("Switch to view mode") : t("Switch to edit mode")}
               >
                 {isEditing ? <Eye className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}
               </button>
@@ -250,8 +252,8 @@ export function CodeViewer() {
               <button
                 onClick={handleSaveClick}
                 className="rounded p-1 text-green-600 hover:bg-green-100 dark:text-green-400 dark:hover:bg-green-900/30"
-                aria-label="Save file"
-                title="Save (Ctrl+S)"
+                aria-label={t("Save file")}
+                title={t("Save (Ctrl+S)")}
               >
                 <Save className="h-3.5 w-3.5" />
               </button>
@@ -262,7 +264,7 @@ export function CodeViewer() {
               <button
                 onClick={handleCopy}
                 className="rounded p-1 text-neutral-400 hover:bg-neutral-200 hover:text-neutral-600 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
-                aria-label="Copy file content"
+                aria-label={t("Copy file content")}
               >
                 {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
               </button>
@@ -270,7 +272,7 @@ export function CodeViewer() {
             <button
               onClick={() => activeFilePath && closeFile(activeFilePath)}
               className="rounded p-1 text-neutral-400 hover:bg-neutral-200 hover:text-neutral-600 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
-              aria-label="Close file"
+              aria-label={t("Close file")}
             >
               <X className="h-3.5 w-3.5" />
             </button>

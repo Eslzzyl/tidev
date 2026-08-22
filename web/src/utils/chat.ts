@@ -1,7 +1,9 @@
+import i18n from "../i18n";
+
 export function formatDate(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(date);
+  return new Intl.DateTimeFormat(i18n.language, { month: "short", day: "numeric" }).format(date);
 }
 
 export function shortPath(value: string): string {

@@ -48,6 +48,7 @@ import type {
   SessionUsageEntry,
 } from "../types/api";
 import { getAuthToken, useAuthStore } from "../stores/useAuthStore";
+import i18n from "../i18n";
 
 const API_BASE = "/api";
 
@@ -84,11 +85,11 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
     if (response.status === 401) {
       // Token is invalid or expired — trigger auth re-entry
       useAuthStore.getState().handleUnauthorized();
-      throw new Error("Unauthorized: invalid or missing auth token");
+      throw new Error(i18n.t("Unauthorized: invalid or missing auth token"));
     }
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: "Unknown error" }));
+      const error = await response.json().catch(() => ({ error: i18n.t("Unknown error") }));
       throw new Error(error.error || `HTTP ${response.status}`);
     }
 
@@ -97,7 +98,7 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
     // Handle network errors (e.g., cannot connect to backend)
     if (error instanceof TypeError && error.message.includes("fetch")) {
       throw new Error(
-        "Cannot connect to the server. Please check your network connection and try again.",
+        i18n.t("Cannot connect to the server. Please check your network connection and try again."),
         { cause: error },
       );
     }
@@ -294,14 +295,16 @@ export const api = {
       method: "POST",
       body: JSON.stringify(data),
     }).then((r) => {
-      if (!r.ok) throw new Error(`Failed to connect provider: ${r.status}`);
+      if (!r.ok)
+        throw new Error(i18n.t("Failed to connect provider: {{status}}", { status: r.status }));
     }),
 
   disconnectProvider: (id: string) =>
     fetchWithAuth(`${API_BASE}/providers/${encodeURIComponent(id)}/connect`, {
       method: "DELETE",
     }).then((r) => {
-      if (!r.ok) throw new Error(`Failed to disconnect provider: ${r.status}`);
+      if (!r.ok)
+        throw new Error(i18n.t("Failed to disconnect provider: {{status}}", { status: r.status }));
     }),
 
   createProvider: (data: CreateProviderRequest) =>
@@ -309,14 +312,16 @@ export const api = {
       method: "POST",
       body: JSON.stringify(data),
     }).then((r) => {
-      if (!r.ok) throw new Error(`Failed to create provider: ${r.status}`);
+      if (!r.ok)
+        throw new Error(i18n.t("Failed to create provider: {{status}}", { status: r.status }));
     }),
 
   deleteProvider: (id: string) =>
     fetchWithAuth(`${API_BASE}/providers/${encodeURIComponent(id)}`, {
       method: "DELETE",
     }).then((r) => {
-      if (!r.ok) throw new Error(`Failed to delete provider: ${r.status}`);
+      if (!r.ok)
+        throw new Error(i18n.t("Failed to delete provider: {{status}}", { status: r.status }));
     }),
 
   // Filesystem
@@ -620,5 +625,5 @@ export async function waitForServerRestart(timeout = 60_000): Promise<void> {
   }
 
   console.log("[restart] Timed out waiting for server restart");
-  throw new Error("Server did not come back within timeout");
+  throw new Error(i18n.t("Server did not come back within timeout"));
 }

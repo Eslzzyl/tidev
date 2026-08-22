@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { Clock3, ChevronDown, LoaderCircle, Send } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import type { Model, Session } from "../../types/api";
 import { formatDate, formatThinkingLevel } from "../../utils/chat";
@@ -41,6 +42,7 @@ export function WelcomePage({
   onSelectThinkingLevel,
   onSubmit,
 }: WelcomePageProps) {
+  const { t } = useTranslation();
   const compositionRef = useRef(false);
   const [modelOpen, setModelOpen] = useState(false);
   const [thinkingOpen, setThinkingOpen] = useState(false);
@@ -50,7 +52,7 @@ export function WelcomePage({
       <div className="welcome-heading">
         <div className="welcome-logo">t</div>
         <h1>tidev</h1>
-        <p>Your intelligent coding assistant</p>
+        <p>{t("Your intelligent coding assistant")}</p>
       </div>
       <div className="welcome-composer">
         <textarea
@@ -76,7 +78,7 @@ export function WelcomePage({
           }}
           autoFocus
           disabled={loading || sending}
-          placeholder="What would you like to work on?"
+          placeholder={t("What would you like to work on?")}
           rows={3}
         />
         <div className="welcome-composer-footer">
@@ -85,7 +87,7 @@ export function WelcomePage({
               className={mode === "plan" ? "composer-control plan" : "composer-control build"}
               onClick={() => onModeChange(mode === "plan" ? "build" : "plan")}
             >
-              {mode === "plan" ? "Plan" : "Build"}
+              {mode === "plan" ? t("Plan") : t("Build")}
             </button>
             <div className="composer-menu">
               <button
@@ -98,7 +100,7 @@ export function WelcomePage({
                 <span>
                   {activeModel
                     ? `${activeModel.provider_display_name}/${activeModel.model_display_name}`
-                    : "Select model"}
+                    : t("Select model")}
                 </span>
                 <ChevronDown size={13} />
               </button>
@@ -117,7 +119,7 @@ export function WelcomePage({
                       <span>
                         {model.provider_display_name}/{model.model_display_name}
                       </span>
-                      <small>{model.connected ? "Connected" : "Not connected"}</small>
+                      <small>{model.connected ? t("Connected") : t("Not connected")}</small>
                     </button>
                   ))}
                 </div>
@@ -160,7 +162,7 @@ export function WelcomePage({
             className="send-button"
             disabled={!draft.trim() || loading || sending}
             onClick={onSubmit}
-            title="Start conversation"
+            title={t("Start conversation")}
           >
             {sending ? <LoaderCircle className="spin" size={17} /> : <Send size={17} />}
           </button>
@@ -171,7 +173,7 @@ export function WelcomePage({
         <div className="recent-sessions">
           <div className="recent-heading">
             <Clock3 size={16} />
-            <span>Recent Sessions</span>
+            <span>{t("Recent Sessions")}</span>
           </div>
           <div className="recent-session-grid">
             {sessions.slice(0, 5).map((session) => (
@@ -180,7 +182,7 @@ export function WelcomePage({
                 key={session.session_id}
                 onClick={() => onSelectSession(session.session_id)}
               >
-                <span>{session.title || "Untitled conversation"}</span>
+                <span>{session.title || t("Untitled conversation")}</span>
                 <time>{formatDate(session.updated_at)}</time>
               </button>
             ))}

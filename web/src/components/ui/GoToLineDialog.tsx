@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 
 interface GoToLineDialogProps {
   totalLines: number;
@@ -8,6 +9,7 @@ interface GoToLineDialogProps {
 }
 
 export function GoToLineDialog({ totalLines, currentLine, onGo, onClose }: GoToLineDialogProps) {
+  const { t } = useTranslation();
   const [lineStr, setLineStr] = useState(String(currentLine));
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -43,7 +45,7 @@ export function GoToLineDialog({ totalLines, currentLine, onGo, onClose }: GoToL
       <div className="w-56 rounded-lg border border-neutral-200 bg-white p-3 shadow-xl dark:border-neutral-700 dark:bg-neutral-900">
         <form onSubmit={handleSubmit}>
           <div className="mb-2 text-xs font-medium text-neutral-700 dark:text-neutral-300">
-            Go to line
+            {t("Go to line")}
           </div>
           <div className="flex items-center gap-1">
             <input
@@ -64,13 +66,13 @@ export function GoToLineDialog({ totalLines, currentLine, onGo, onClose }: GoToL
               onClick={onClose}
               className="rounded px-2 py-0.5 text-[11px] text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
             >
-              Cancel
+              {t("Cancel")}
             </button>
             <button
               type="submit"
               className="rounded bg-blue-600 px-2 py-0.5 text-[11px] text-white hover:bg-blue-700"
             >
-              Go
+              {t("Go")}
             </button>
           </div>
         </form>

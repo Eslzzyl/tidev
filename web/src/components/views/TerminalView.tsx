@@ -10,6 +10,7 @@ import { ConfirmDialog } from "../ui/ConfirmDialog";
 import type { ContextMenuItem } from "../ui/ContextMenu";
 import { ContextMenu } from "../ui/ContextMenu";
 import { RenameDialog } from "../ui/RenameDialog";
+import { useTranslation } from "react-i18next";
 
 const TERMINAL_FONT_SIZE = 17;
 
@@ -94,6 +95,7 @@ function createResttyTheme(theme: typeof DARK_THEME) {
 }
 
 export function TerminalView() {
+  const { t } = useTranslation();
   const tabs = useTerminalStore((s) => s.tabs);
   const activeTabId = useTerminalStore((s) => s.activeTabId);
   const createTab = useTerminalStore((s) => s.createTab);
@@ -199,6 +201,7 @@ export function TerminalView() {
               <X
                 size={12}
                 className="cursor-pointer opacity-50 hover:opacity-100"
+                aria-label={t("Close terminal")}
                 onClick={(e) => {
                   e.stopPropagation();
                   closeTab(tab.id);
@@ -214,6 +217,8 @@ export function TerminalView() {
               ? "text-neutral-400 hover:bg-neutral-800 hover:text-white"
               : "text-neutral-500 hover:bg-neutral-200 hover:text-black"
           }`}
+          aria-label={t("New terminal tab")}
+          title={t("New terminal tab")}
         >
           <Plus size={14} />
         </button>
@@ -253,9 +258,9 @@ export function TerminalView() {
       {/* Confirm close all */}
       {confirmClose?.type === "all" && (
         <ConfirmDialog
-          title="Close All Terminals"
-          message="Are you sure you want to close all terminal tabs?"
-          confirmText="Close All"
+          title={t("Close All Terminals")}
+          message={t("Are you sure you want to close all terminal tabs?")}
+          confirmText={t("Close All")}
           danger
           onConfirm={() => {
             closeTabs(tabs.map((t) => t.id));
@@ -268,9 +273,9 @@ export function TerminalView() {
       {/* Confirm close others */}
       {confirmClose?.type === "others" && confirmClose.excludeId && (
         <ConfirmDialog
-          title="Close Other Terminals"
-          message="Are you sure you want to close all other terminal tabs?"
-          confirmText="Close Others"
+          title={t("Close Other Terminals")}
+          message={t("Are you sure you want to close all other terminal tabs?")}
+          confirmText={t("Close Others")}
           danger
           onConfirm={() => {
             const others = tabs.filter((t) => t.id !== confirmClose.excludeId).map((t) => t.id);

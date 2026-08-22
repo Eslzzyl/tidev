@@ -1,10 +1,12 @@
 import { useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 
 export interface ContextMenuItem {
   type?: "item" | "separator";
   label?: string;
   icon?: React.ReactNode;
   shortcut?: string;
+  translated?: boolean;
   disabled?: boolean;
   danger?: boolean;
   onClick?: () => void;
@@ -18,6 +20,7 @@ interface ContextMenuProps {
 }
 
 export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
+  const { t } = useTranslation();
   const menuRef = useRef<HTMLDivElement>(null);
 
   // Close on click outside or Escape
@@ -77,7 +80,9 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
             } ${item.disabled ? "cursor-not-allowed opacity-40" : "cursor-pointer"}`}
           >
             {item.icon && <span className="h-3.5 w-3.5 shrink-0">{item.icon}</span>}
-            <span className="flex-1">{item.label}</span>
+            <span className="flex-1">
+              {item.label ? (item.translated === false ? item.label : t(item.label)) : null}
+            </span>
             {item.shortcut && <span className="text-[10px] text-neutral-400">{item.shortcut}</span>}
           </button>
         ),

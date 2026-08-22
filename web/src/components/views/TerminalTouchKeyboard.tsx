@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTerminalStore } from "../../stores/useTerminalStore";
+import { useTranslation } from "react-i18next";
 
 interface TerminalTouchKeyboardProps {
   tabId: string;
@@ -32,6 +33,7 @@ const KEY_ROWS: KeyDef[][] = [
 ];
 
 export function TerminalTouchKeyboard({ tabId, sendInput, isDark }: TerminalTouchKeyboardProps) {
+  const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
   const [systemKbHeight, setSystemKbHeight] = useState(0);
   const ctrlLatch = useTerminalStore((s) => s.ctrlLatch);
@@ -121,7 +123,9 @@ export function TerminalTouchKeyboard({ tabId, sendInput, isDark }: TerminalTouc
                       : "bg-neutral-100 text-neutral-700 hover:bg-neutral-200 active:bg-neutral-300"
                 }`}
               >
-                {key.label}
+                {key.label === "Tab" || key.label === "Esc" || key.label === "Ctrl"
+                  ? t(key.label)
+                  : key.label}
               </button>
             );
           })}

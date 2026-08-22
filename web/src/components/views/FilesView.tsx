@@ -7,6 +7,7 @@ import { useGitFileStore } from "../../stores/useGitFileStore";
 import { api } from "../../api/client";
 import { queryClient } from "../../lib/queryClient";
 import { CreateItemDialog } from "../ui/CreateItemDialog";
+import { useTranslation } from "react-i18next";
 
 const SEARCH_CACHE_SIZE = 50;
 const MIN_FILETREE_WIDTH = 180;
@@ -27,6 +28,7 @@ function loadFileTreeWidth(): number {
 }
 
 export function FilesView() {
+  const { t } = useTranslation();
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<{ path: string; display: string }[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -192,8 +194,8 @@ export function FilesView() {
             width: COLLAPSED_STRIP_WIDTH,
             minWidth: COLLAPSED_STRIP_WIDTH,
           }}
-          aria-label="Open file browser"
-          title="Open file browser"
+          aria-label={t("Open file browser")}
+          title={t("Open file browser")}
         >
           <PanelLeft className="h-4 w-4 text-neutral-400" />
         </button>
@@ -212,14 +214,16 @@ export function FilesView() {
       >
         {/* Header with collapse button */}
         <div className="flex items-center justify-between border-b border-neutral-200 px-2 py-1.5 dark:border-neutral-800">
-          <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">Files</span>
+          <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
+            {t("Files")}
+          </span>
           <div className="flex items-center gap-1">
             {/* New file button */}
             <button
               onClick={() => setCreateType("file")}
               className="rounded p-1 text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
-              aria-label="New file"
-              title="New file"
+              aria-label={t("New file")}
+              title={t("New file")}
             >
               <File className="h-3.5 w-3.5" />
             </button>
@@ -227,8 +231,8 @@ export function FilesView() {
             <button
               onClick={() => setCreateType("directory")}
               className="rounded p-1 text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
-              aria-label="New directory"
-              title="New directory"
+              aria-label={t("New directory")}
+              title={t("New directory")}
             >
               <Folder className="h-3.5 w-3.5" />
             </button>
@@ -236,8 +240,8 @@ export function FilesView() {
             <button
               onClick={handleRefresh}
               className="rounded p-1 text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
-              aria-label="Refresh file tree"
-              title="Refresh"
+              aria-label={t("Refresh file tree")}
+              title={t("Refresh")}
             >
               <RotateCw className="h-3.5 w-3.5" />
             </button>
@@ -245,8 +249,8 @@ export function FilesView() {
             <button
               onClick={toggleFileTree}
               className="ml-1 rounded p-1 text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
-              aria-label="Close file browser"
-              title="Close"
+              aria-label={t("Close file browser")}
+              title={t("Close")}
             >
               <ChevronLeft className="h-3.5 w-3.5" />
             </button>
@@ -259,7 +263,7 @@ export function FilesView() {
             <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-neutral-400" />
             <input
               type="text"
-              placeholder="Search files..."
+              placeholder={t("Search files...")}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full rounded border border-neutral-200 bg-white py-1 pl-7 pr-2 text-base outline-none focus:border-neutral-400 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:focus:border-neutral-500"
@@ -282,7 +286,7 @@ export function FilesView() {
           {searchQuery.trim() ? (
             <div className="p-2">
               {isSearching ? (
-                <p className="py-4 text-center text-xs text-neutral-400">Searching...</p>
+                <p className="py-4 text-center text-xs text-neutral-400">{t("Searching...")}</p>
               ) : searchResults.length > 0 ? (
                 <div className="space-y-0.5">
                   {searchResults.map((r) => (
@@ -290,7 +294,7 @@ export function FilesView() {
                   ))}
                 </div>
               ) : (
-                <p className="py-4 text-center text-xs text-neutral-400">No results</p>
+                <p className="py-4 text-center text-xs text-neutral-400">{t("No results")}</p>
               )}
             </div>
           ) : (
@@ -304,7 +308,7 @@ export function FilesView() {
         <button
           onClick={toggleFileTree}
           className="fixed inset-0 z-40 bg-black/50"
-          aria-label="Close file browser"
+          aria-label={t("Close file browser")}
         />
       )}
 
@@ -317,7 +321,7 @@ export function FilesView() {
             isResizing ? "bg-neutral-400 dark:bg-neutral-600" : ""
           }`}
           role="separator"
-          aria-label="Resize file browser"
+          aria-label={t("Resize file browser")}
         />
       )}
 

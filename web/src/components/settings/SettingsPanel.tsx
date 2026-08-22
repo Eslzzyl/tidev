@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { X, Palette, Type, Keyboard, Terminal as TerminalIcon, Lock, Info } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useUIStore } from "../../stores/useUIStore";
 import { useClickOutside } from "../../hooks/useClickOutside";
 import { AppearanceSection } from "./AppearanceSection";
@@ -39,6 +40,7 @@ const categories: Category[] = [
 ];
 
 export function SettingsPanel() {
+  const { t } = useTranslation();
   const settingsPanelOpen = useUIStore((s) => s.settingsPanelOpen);
   const closeSettingsPanel = useUIStore((s) => s.closeSettingsPanel);
   const [activeCategory, setActiveCategory] = useState<CategoryId>("appearance");
@@ -100,12 +102,12 @@ export function SettingsPanel() {
         {/* Header */}
         <div className="flex shrink-0 items-center justify-between border-b border-neutral-200 px-5 py-3 dark:border-neutral-800">
           <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
-            Settings
+            {t("Settings")}
           </h2>
           <button
             onClick={closeSettingsPanel}
             className="rounded p-1 text-neutral-500 transition-colors duration-150 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
-            aria-label="Close settings"
+            aria-label={t("Close settings")}
           >
             <X className="h-5 w-5" />
           </button>
@@ -137,7 +139,7 @@ export function SettingsPanel() {
                 }`}
               >
                 {cat.icon}
-                <span>{cat.label}</span>
+                <span>{t(cat.label)}</span>
               </button>
             ))}
           </nav>
@@ -159,7 +161,7 @@ export function SettingsPanel() {
         {/* Footer */}
         <div className="flex shrink-0 items-center justify-between border-t border-neutral-200 px-5 py-3 dark:border-neutral-800">
           <p className="text-xs text-neutral-500 dark:text-neutral-400">
-            Settings are saved automatically
+            {t("Settings are saved automatically")}
           </p>
         </div>
       </div>

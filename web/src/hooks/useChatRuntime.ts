@@ -18,6 +18,7 @@ import type {
 import type { StreamMessage } from "../types/chat";
 import { parseSlashCommand } from "../commands";
 import { asString, eventPayload } from "../utils/events";
+import i18n from "../i18n";
 
 export function useChatRuntime() {
   const authChecking = useAuthStore((state) => state.isLoading);
@@ -106,7 +107,7 @@ export function useChatRuntime() {
         setMessages(response.messages);
       }
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Failed to load messages");
+      setError(reason instanceof Error ? reason.message : i18n.t("Failed to load messages"));
     }
   }, []);
 
@@ -115,7 +116,7 @@ export function useChatRuntime() {
       const response = await api.getTodos(sessionId);
       if (selectedSessionRef.current === sessionId) setTodos(response.todos);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Failed to load to-do list");
+      setError(reason instanceof Error ? reason.message : i18n.t("Failed to load to-do list"));
     }
   }, []);
 
@@ -143,7 +144,7 @@ export function useChatRuntime() {
         setSessions(items);
       })
       .catch((reason) =>
-        setError(reason instanceof Error ? reason.message : "Failed to load sessions"),
+        setError(reason instanceof Error ? reason.message : i18n.t("Failed to load sessions")),
       )
       .finally(() => setLoading(false));
     return () => {
@@ -159,7 +160,7 @@ export function useChatRuntime() {
         (current) => current ?? available.find((model) => model.active)?.thinking_level,
       );
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Failed to load models");
+      setError(reason instanceof Error ? reason.message : i18n.t("Failed to load models"));
     }
   }, []);
 
@@ -308,20 +309,27 @@ export function useChatRuntime() {
         current.map((item) => (item.session_id === sessionId ? updated : item)),
       );
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Failed to rename session");
+      setError(reason instanceof Error ? reason.message : i18n.t("Failed to rename session"));
     } finally {
       setRenamingSessionId(null);
     }
   };
 
   const deleteSession = async (session: Session) => {
-    if (!window.confirm(`Delete conversation “${session.title || "Untitled"}”?`)) return;
+    if (
+      !window.confirm(
+        i18n.t("Delete conversation “{{title}}”?", {
+          title: session.title || i18n.t("Untitled conversation"),
+        }),
+      )
+    )
+      return;
     try {
       await api.deleteSession(session.session_id);
       setSessions((current) => current.filter((item) => item.session_id !== session.session_id));
       if (selectedSessionRef.current === session.session_id) createSession();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Failed to delete session");
+      setError(reason instanceof Error ? reason.message : i18n.t("Failed to delete session"));
     }
   };
 
@@ -343,7 +351,7 @@ export function useChatRuntime() {
         thinkingLevel,
       );
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Failed to start conversation");
+      setError(reason instanceof Error ? reason.message : i18n.t("Failed to start conversation"));
     } finally {
       setWelcomeSending(false);
     }
@@ -358,7 +366,7 @@ export function useChatRuntime() {
         await loadMessages(sessionId);
         await loadTodos(sessionId);
       } catch (reason) {
-        setError(reason instanceof Error ? reason.message : "Failed to revert");
+        setError(reason instanceof Error ? reason.message : i18n.t("Failed to revert"));
       }
     },
     [loadMessages, loadTodos],
@@ -372,7 +380,7 @@ export function useChatRuntime() {
       await loadMessages(sessionId);
       await loadTodos(sessionId);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Failed to redo");
+      setError(reason instanceof Error ? reason.message : i18n.t("Failed to redo"));
     }
   }, [loadMessages, loadTodos]);
 
@@ -385,7 +393,7 @@ export function useChatRuntime() {
         setSessions((current) => [forked, ...current]);
         selectSession(forked.session_id);
       } catch (reason) {
-        setError(reason instanceof Error ? reason.message : "Failed to fork");
+        setError(reason instanceof Error ? reason.message : i18n.t("Failed to fork"));
       }
     },
     [selectSession],
@@ -398,7 +406,7 @@ export function useChatRuntime() {
       await api.compactSession(sessionId);
       setError(null);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Failed to compact");
+      setError(reason instanceof Error ? reason.message : i18n.t("Failed to compact"));
     }
   }, []);
 
@@ -413,7 +421,7 @@ export function useChatRuntime() {
         setTimeout(() => void loadMessages(sessionId), 400);
         setTimeout(() => void loadMessages(sessionId), 1200);
       } catch (reason) {
-        setError(reason instanceof Error ? reason.message : "Failed to run shell command");
+        setError(reason instanceof Error ? reason.message : i18n.t("Failed to run shell command"));
       }
     },
     [loadMessages],
@@ -427,7 +435,7 @@ export function useChatRuntime() {
       if (command === "undo") {
         const lastUser = [...messages].reverse().find((r) => r.message.role === "user");
         if (lastUser) await handleRevert(lastUser.message.id);
-        else setError("No user message to undo");
+        else setError(i18n.t("No user message to undo"));
         return true;
       }
       if (command === "redo") {
@@ -441,12 +449,12 @@ export function useChatRuntime() {
       if (command === "fork") {
         const target = [...messages].reverse().find((r) => r.message.role === "user");
         if (target) await handleFork(target.message.id);
-        else setError("No message to fork from");
+        else setError(i18n.t("No message to fork from"));
         return true;
       }
       if (command === "shell") {
         if (!args) {
-          setError("Usage: /shell <command> or !<command>");
+          setError(i18n.t("Usage: /shell <command> or !<command>"));
           return true;
         }
         await handleShell(args);
@@ -461,7 +469,7 @@ export function useChatRuntime() {
               current.map((item) => (item.session_id === sid ? updated : item)),
             );
           } catch (reason) {
-            setError(reason instanceof Error ? reason.message : "Failed to rename");
+            setError(reason instanceof Error ? reason.message : i18n.t("Failed to rename"));
           }
         }
         return true;
@@ -495,7 +503,7 @@ export function useChatRuntime() {
     try {
       await api.sendPrompt(sessionId, content, mode, messageId, thinkingLevel);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Failed to send prompt");
+      setError(reason instanceof Error ? reason.message : i18n.t("Failed to send prompt"));
       setDraft(content);
     } finally {
       setSending(false);
@@ -517,7 +525,7 @@ export function useChatRuntime() {
       );
       setThinkingLevel(selected.thinking_level);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Failed to select model");
+      setError(reason instanceof Error ? reason.message : i18n.t("Failed to select model"));
     }
   };
 
@@ -530,7 +538,7 @@ export function useChatRuntime() {
         current.map((item) => (item.active ? { ...item, thinking_level: level } : item)),
       );
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Failed to set thinking level");
+      setError(reason instanceof Error ? reason.message : i18n.t("Failed to set thinking level"));
     }
   };
 
@@ -539,7 +547,7 @@ export function useChatRuntime() {
       await api.respondToRequest(requestId, tools);
       setRequests((current) => current.filter((item) => item.request_id !== requestId));
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Failed to respond");
+      setError(reason instanceof Error ? reason.message : i18n.t("Failed to respond"));
     }
   }, []);
 
@@ -548,7 +556,7 @@ export function useChatRuntime() {
     try {
       await api.abortRequest(sessionId, { request_id: 0 });
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Failed to cancel");
+      setError(reason instanceof Error ? reason.message : i18n.t("Failed to cancel"));
     } finally {
       setCanceling(false);
     }

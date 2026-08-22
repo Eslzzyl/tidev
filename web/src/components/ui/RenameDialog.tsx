@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 
 interface RenameDialogProps {
   currentName: string;
@@ -7,6 +8,7 @@ interface RenameDialogProps {
 }
 
 export function RenameDialog({ currentName, onSubmit, onClose }: RenameDialogProps) {
+  const { t } = useTranslation();
   const [name, setName] = useState(currentName);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -48,7 +50,7 @@ export function RenameDialog({ currentName, onSubmit, onClose }: RenameDialogPro
     >
       <div className="w-72 rounded-lg border border-neutral-200 bg-white p-4 shadow-xl dark:border-neutral-700 dark:bg-neutral-900">
         <div className="mb-3 text-sm font-medium text-neutral-800 dark:text-neutral-200">
-          Rename
+          {t("Rename")}
         </div>
 
         <form onSubmit={handleSubmit}>
@@ -65,7 +67,7 @@ export function RenameDialog({ currentName, onSubmit, onClose }: RenameDialogPro
               onClick={onClose}
               className="rounded px-3 py-1 text-xs text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
             >
-              Cancel
+              {t("Cancel")}
             </button>
             <button
               type="submit"

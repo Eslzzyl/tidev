@@ -1,12 +1,14 @@
 import { useState, useEffect } from "react";
 import { Loader2, AlertCircle } from "lucide-react";
 import { api } from "../../api/client";
+import { useTranslation } from "react-i18next";
 
 interface ImagePreviewProps {
   path: string;
 }
 
 export function ImagePreview({ path }: ImagePreviewProps) {
+  const { t } = useTranslation();
   const [src, setSrc] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -28,7 +30,7 @@ export function ImagePreview({ path }: ImagePreviewProps) {
       })
       .catch((err) => {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Failed to load image");
+          setError(err instanceof Error ? err.message : t("Failed to load image"));
           setLoading(false);
         }
       });

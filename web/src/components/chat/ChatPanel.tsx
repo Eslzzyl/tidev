@@ -1,4 +1,5 @@
 import { Sparkles } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import type {
   ApprovedTool,
@@ -108,6 +109,7 @@ export function ChatPanel({
   onFileSelect,
   onFileMentionClose,
 }: ChatPanelProps) {
+  const { t } = useTranslation();
   const pendingRequests = requests.filter((request) => request.session_id === selectedSessionId);
 
   return (
@@ -131,14 +133,14 @@ export function ChatPanel({
       <section className="chat-panel">
         <div className="panel-header">
           <div>
-            <span className="eyebrow">Conversation</span>
-            <h1>{selectedSession?.title ?? "New conversation"}</h1>
+            <span className="eyebrow">{t("Conversation")}</span>
+            <h1>{selectedSession?.title ?? t("New conversation")}</h1>
           </div>
           <div className="panel-actions">
-            <button className="ghost-button" onClick={onRedo} title="Redo">
+            <button className="ghost-button" onClick={onRedo} title={t("Redo")}>
               Redo
             </button>
-            <button className="ghost-button" onClick={onCompact} title="Compact context">
+            <button className="ghost-button" onClick={onCompact} title={t("Compact context")}>
               Compact
             </button>
             <span className="model-label">

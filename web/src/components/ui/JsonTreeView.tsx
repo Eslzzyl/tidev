@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ChevronRight, ChevronDown } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 interface JsonTreeViewProps {
   data: unknown;
@@ -49,6 +50,7 @@ interface TreeNodeProps {
 }
 
 function TreeNode({ keyName, value, depth, maxDepth }: TreeNodeProps) {
+  const { t } = useTranslation();
   const [isExpanded, setIsExpanded] = useState(depth < maxDepth);
   const type = getType(value);
   const isCollapsible = (type === "array" || type === "object") && depth < 10;
@@ -82,7 +84,7 @@ function TreeNode({ keyName, value, depth, maxDepth }: TreeNodeProps) {
           <span className="text-neutral-500">
             {isExpanded
               ? ""
-              : `${bracket[0]} ${entries.length} ${type === "object" ? "keys" : "items"} ${bracket[1]}`}
+              : `${bracket[0]} ${entries.length} ${type === "object" ? t("keys") : t("items")} ${bracket[1]}`}
           </span>
         </button>
         {isExpanded && !empty && (
@@ -115,6 +117,7 @@ function TreeNode({ keyName, value, depth, maxDepth }: TreeNodeProps) {
 }
 
 export function JsonTreeView({ data, initialExpanded = false, maxDepth = 3 }: JsonTreeViewProps) {
+  const { t } = useTranslation();
   const [isExpanded, setIsExpanded] = useState(initialExpanded);
 
   if (!data || typeof data !== "object") {
@@ -140,8 +143,8 @@ export function JsonTreeView({ data, initialExpanded = false, maxDepth = 3 }: Js
         className="inline-flex items-center gap-1 rounded px-1 py-0.5 text-xs font-medium text-neutral-600 hover:bg-neutral-200/50 dark:text-neutral-400 dark:hover:bg-neutral-800"
       >
         {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-        {type === "object" ? "JSON" : "Array"} ({entries.length}{" "}
-        {type === "object" ? "keys" : "items"})
+        {type === "object" ? t("JSON") : t("Array")} ({entries.length}{" "}
+        {type === "object" ? t("keys") : t("items")})
       </button>
       {isExpanded && (
         <div className="mt-1 font-mono text-xs leading-5">

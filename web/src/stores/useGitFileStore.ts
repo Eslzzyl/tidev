@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { api } from "../api/client";
 import { queryClient } from "../lib/queryClient";
+import i18n from "../i18n";
 
 export interface GitFileStatus {
   status: string;
@@ -117,7 +118,7 @@ export const useGitFileStore = create<GitFileStore>((set) => ({
     } catch (err) {
       set({
         loading: false,
-        error: err instanceof Error ? err.message : "Failed to get git status",
+        error: err instanceof Error ? err.message : i18n.t("Failed to get git status"),
       });
     }
   },

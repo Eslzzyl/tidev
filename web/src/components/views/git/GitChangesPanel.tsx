@@ -1,6 +1,7 @@
 import { Check, ChevronRight, FileEdit, FilePlus, FileText, FileX, Loader2 } from "lucide-react";
 import type { GitFileDiffResponse, GitStatusResponse } from "../../../types/api";
 import { DiffRenderer } from "../../renderers/DiffRenderer";
+import { useTranslation } from "react-i18next";
 
 export function ChangesPanel({
   status,
@@ -23,6 +24,7 @@ export function ChangesPanel({
   expandedChangeFiles: Set<string>;
   onToggleChangeDiff: (path: string, staged: boolean, status: string) => void;
 }) {
+  const { t } = useTranslation();
   const staged = status?.files.filter((f) => f.staged) || [];
   const unstaged = status?.files.filter((f) => !f.staged) || [];
 
@@ -44,15 +46,15 @@ export function ChangesPanel({
   const statusLabel = (s: string) => {
     switch (s) {
       case "M":
-        return "Modified";
+        return t("Modified");
       case "A":
-        return "Added";
+        return t("Added");
       case "D":
-        return "Deleted";
+        return t("Deleted");
       case "R":
-        return "Renamed";
+        return t("Renamed");
       case "?":
-        return "Untracked";
+        return t("Untracked");
       default:
         return s;
     }
@@ -65,7 +67,7 @@ export function ChangesPanel({
         <textarea
           value={commitMsg}
           onChange={(e) => onCommitMsgChange(e.target.value)}
-          placeholder="Commit message"
+          placeholder={t("Commit message")}
           rows={2}
           className="w-full rounded border border-neutral-300 bg-white px-3 py-2 text-base text-neutral-900 placeholder-neutral-400 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder-neutral-500"
           onKeyDown={(e) => {
@@ -85,7 +87,8 @@ export function ChangesPanel({
           ) : (
             <Check className="h-3.5 w-3.5" />
           )}
-          Commit {staged.length > 0 ? `(${staged.length} file(s))` : ""}
+          {t("Commit")}
+          {staged.length > 0 ? ` ${t("({{count}} files)", { count: staged.length })}` : ""}
         </button>
       </div>
 
@@ -93,7 +96,7 @@ export function ChangesPanel({
       {staged.length > 0 && (
         <div className="mb-4">
           <h3 className="mb-1 text-xs font-medium uppercase text-neutral-500">
-            Staged ({staged.length})
+            {t("Staged ({{count}})", { count: staged.length })}
           </h3>
           <div className="space-y-0.5">
             {staged.map((f, i) => (
@@ -114,7 +117,7 @@ export function ChangesPanel({
       {unstaged.length > 0 && (
         <div className="mb-4">
           <h3 className="mb-1 text-xs font-medium uppercase text-neutral-500">
-            Changes ({unstaged.length})
+            {t("Changes ({{count}})", { count: unstaged.length })}
           </h3>
           <div className="space-y-0.5">
             {unstaged.map((f, i) => (
@@ -133,7 +136,9 @@ export function ChangesPanel({
         </div>
       )}
       {(!status || status.files.length === 0) && (
-        <div className="py-8 text-center text-sm text-neutral-500">No changes in working tree</div>
+        <div className="py-8 text-center text-sm text-neutral-500">
+          {t("No changes in working tree")}
+        </div>
       )}
     </div>
   );
@@ -156,6 +161,7 @@ export function ChangeFileRow({
   isExpanded: boolean;
   onToggle: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div>
       <button
@@ -186,14 +192,14 @@ export function ChangeFileRow({
           <div className="ml-4 border-l-2 border-neutral-200 pl-2 dark:border-neutral-700">
             {file.status === "?" ? (
               <p className="py-2 text-xs text-neutral-400">
-                New file — no previous version to diff against
+                {t("New file — no previous version to diff against")}
               </p>
             ) : diff ? (
               diff.diff ? (
                 <DiffRenderer diff={diff.diff} filepath={file.path} />
               ) : (
                 <p className="py-2 text-xs text-neutral-400">
-                  No diff content (binary or empty file)
+                  {t("No diff content (binary or empty file)")}
                 </p>
               )
             ) : null}

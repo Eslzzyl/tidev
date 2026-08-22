@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, CircleStop, ListTodo, LoaderCircle, Send } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import type { Model, TodoItem } from "../../types/api";
 import { FileMentionPopover } from "../FileMentionPopover";
@@ -56,6 +57,7 @@ export function ChatComposer({
   onFileSelect,
   onFileMentionClose,
 }: ChatComposerProps) {
+  const { t } = useTranslation();
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [thinkingPickerOpen, setThinkingPickerOpen] = useState(false);
   const [todoPickerOpen, setTodoPickerOpen] = useState(false);
@@ -93,14 +95,14 @@ export function ChatComposer({
           className={mode === "plan" ? "composer-control plan" : "composer-control build"}
           onClick={() => onModeChange(mode === "plan" ? "build" : "plan")}
         >
-          {mode === "plan" ? "Plan" : "Build"}
+          {mode === "plan" ? t("Plan") : t("Build")}
         </button>
         <div className="composer-menu">
           <button className="composer-control neutral" onClick={() => closeOtherMenus("model")}>
             <span>
               {activeModel
                 ? `${activeModel.provider_display_name}/${activeModel.model_display_name}`
-                : "Select model"}
+                : t("Select model")}
             </span>
             <ChevronDown size={13} />
           </button>
@@ -119,7 +121,7 @@ export function ChatComposer({
                   <span>
                     {model.provider_display_name}/{model.model_display_name}
                   </span>
-                  <small>{model.connected ? "Connected" : "Not connected"}</small>
+                  <small>{model.connected ? t("Connected") : t("Not connected")}</small>
                 </button>
               ))}
             </div>
@@ -157,7 +159,10 @@ export function ChatComposer({
         <div className="composer-menu">
           <button className="composer-control neutral" onClick={() => closeOtherMenus("todo")}>
             <ListTodo size={13} />
-            <span>To-Do{todos.length ? ` (${todos.length})` : ""}</span>
+            <span>
+              {t("To-Do")}
+              {todos.length ? ` (${todos.length})` : ""}
+            </span>
             <ChevronDown size={13} />
           </button>
           {todoPickerOpen ? (
@@ -174,14 +179,14 @@ export function ChatComposer({
                   </div>
                 ))
               ) : (
-                <div className="todo-empty">No to-do items in this conversation.</div>
+                <div className="todo-empty">{t("No to-do items in this conversation.")}</div>
               )}
             </div>
           ) : null}
         </div>
         <div className="composer-spacer" />
         <span className="composer-hint">
-          {enterToSend ? "Enter to send · Shift+Enter for newline" : "Ctrl+Enter to send"}
+          {enterToSend ? t("Enter to send · Shift+Enter for newline") : t("Ctrl+Enter to send")}
         </span>
       </div>
       <div className="composer" style={{ position: "relative" }}>
@@ -265,14 +270,14 @@ export function ChatComposer({
               onSubmit();
             }
           }}
-          placeholder="Ask tidev to inspect, plan, or change your workspace…"
+          placeholder={t("Ask tidev to inspect, plan, or change your workspace…")}
           rows={3}
         />
         <button
           className={isBusy ? "send-button stop" : "send-button"}
           disabled={sending || canceling || !selectedSessionId || (!isBusy && !draft.trim())}
           onClick={() => (isBusy ? onCancel() : onSubmit())}
-          title={isBusy ? "Stop current turn" : "Send prompt"}
+          title={isBusy ? t("Stop current turn") : t("Send prompt")}
         >
           {sending || canceling ? (
             <LoaderCircle className="spin" size={17} />

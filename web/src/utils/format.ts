@@ -1,3 +1,5 @@
+import i18n from "../i18n";
+
 /**
  * Format a date string for display in the session list.
  */
@@ -8,13 +10,13 @@ export function formatSessionDate(dateStr: string): string {
   const days = Math.floor(diff / (1000 * 60 * 60 * 24));
 
   if (days === 0) {
-    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return date.toLocaleTimeString(i18n.language, { hour: "2-digit", minute: "2-digit" });
   } else if (days === 1) {
-    return "Yesterday";
+    return i18n.t("Yesterday");
   } else if (days < 7) {
-    return date.toLocaleDateString([], { weekday: "short" });
+    return date.toLocaleDateString(i18n.language, { weekday: "short" });
   } else {
-    return date.toLocaleDateString([], { month: "short", day: "numeric" });
+    return date.toLocaleDateString(i18n.language, { month: "short", day: "numeric" });
   }
 }
 
@@ -23,7 +25,7 @@ export function formatSessionDate(dateStr: string): string {
  */
 export function formatTime(isoStr: string): string {
   const d = new Date(isoStr);
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleTimeString(i18n.language, { hour: "2-digit", minute: "2-digit" });
 }
 
 /**
@@ -66,7 +68,7 @@ export function getDuration(createdAt: string, completedAt: string): string | nu
  * Format a number with commas.
  */
 export function formatNumber(n: number): string {
-  return n.toLocaleString();
+  return n.toLocaleString(i18n.language);
 }
 
 /**

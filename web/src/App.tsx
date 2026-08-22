@@ -1,5 +1,6 @@
 import { lazy, Suspense, useState } from "react";
 import { BarChart3, FolderTree, GitBranch, MessageSquare, Settings, Terminal } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import { AuthGate } from "./components/AuthGate";
 import { ChatPanel } from "./components/chat/ChatPanel";
@@ -30,6 +31,7 @@ const features: { id: Feature; label: string; icon: typeof MessageSquare }[] = [
 ];
 
 export default function App() {
+  const { t } = useTranslation();
   const [feature, setFeature] = useState<Feature>("chat");
   const {
     authChecking,
@@ -96,7 +98,7 @@ export default function App() {
           <span className="brand-glyph">t</span>
           <span>tidev</span>
         </div>
-        <nav className="feature-nav" aria-label="Primary">
+        <nav className="feature-nav" aria-label={t("Primary navigation")}>
           {features.map(({ id, label, icon: Icon }) => (
             <button
               className={feature === id ? "feature-link active" : "feature-link"}
@@ -104,26 +106,26 @@ export default function App() {
               onClick={() => setFeature(id)}
             >
               <Icon size={16} strokeWidth={1.8} />
-              {label}
+              {t(label)}
             </button>
           ))}
         </nav>
         <div className="header-title">
           {feature === "chat"
-            ? (selectedSession?.title ?? "Chat")
-            : features.find((item) => item.id === feature)?.label}
+            ? (selectedSession?.title ?? t("Chat"))
+            : t(features.find((item) => item.id === feature)?.label ?? "Chat")}
           {feature === "chat" && activeModel ? (
             <span>· {activeModel.model_display_name}</span>
           ) : null}
         </div>
         <div className="topbar-meta">
           <span className="connection-dot" />
-          <span>Local runtime</span>
+          <span>{t("Local runtime")}</span>
           <button
             className="settings-button"
             onClick={openSettingsPanel}
-            aria-label="Settings"
-            title="Settings"
+            aria-label={t("Settings")}
+            title={t("Settings")}
           >
             <Settings size={16} />
           </button>
@@ -225,22 +227,24 @@ export default function App() {
 }
 
 function AuthLoading() {
+  const { t } = useTranslation();
   return (
     <main className="auth-page">
       <div className="auth-card">
         <div className="welcome-logo">t</div>
         <h1>tidev</h1>
-        <p>Connecting to the local runtime…</p>
+        <p>{t("Connecting to the local runtime…")}</p>
       </div>
     </main>
   );
 }
 
 function FeatureLoading() {
+  const { t } = useTranslation();
   return (
     <div className="feature-loading" role="status" aria-live="polite">
       <span className="feature-loading-spinner" aria-hidden="true" />
-      <span className="sr-only">Loading feature</span>
+      <span className="sr-only">{t("Loading feature")}</span>
     </div>
   );
 }

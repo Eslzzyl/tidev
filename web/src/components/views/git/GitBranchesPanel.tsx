@@ -1,5 +1,6 @@
 import { GitBranch, Loader2, Plus, Trash2 } from "lucide-react";
 import type { GitBranchResponse } from "../../../types/api";
+import { useTranslation } from "react-i18next";
 
 export function BranchesPanel({
   branches,
@@ -20,10 +21,11 @@ export function BranchesPanel({
   showSubmodules: boolean;
   onToggleSubmodules: () => void;
 }) {
+  const { t } = useTranslation();
   if (!branches) {
     return (
       <div className="flex h-full items-center justify-center p-6">
-        <p className="text-sm text-neutral-500">Not a git repository</p>
+        <p className="text-sm text-neutral-500">{t("Not a git repository")}</p>
       </div>
     );
   }
@@ -43,7 +45,7 @@ export function BranchesPanel({
             type="text"
             value={newBranchName}
             onChange={(e) => onNewBranchNameChange(e.target.value)}
-            placeholder="New branch name"
+            placeholder={t("New branch name")}
             className="flex-1 rounded border border-neutral-300 bg-white px-3 py-1.5 text-base text-neutral-900 placeholder-neutral-400 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder-neutral-500"
             onKeyDown={(e) => {
               if (e.key === "Enter" && newBranchName.trim() && !creatingBranch) onCreateBranch();
@@ -59,7 +61,7 @@ export function BranchesPanel({
             ) : (
               <Plus className="h-3.5 w-3.5" />
             )}
-            Create
+            {t("Create")}
           </button>
         </div>
       </div>
@@ -78,7 +80,7 @@ export function BranchesPanel({
             }`}
           />
         </button>
-        <span className="text-xs text-neutral-500">Show submodule branches</span>
+        <span className="text-xs text-neutral-500">{t("Show submodule branches")}</span>
       </div>
 
       {/* Branch list */}
@@ -92,13 +94,13 @@ export function BranchesPanel({
             <span className="flex-1 font-medium text-neutral-900 dark:text-neutral-100">
               {branch.name}
             </span>
-            {branch.current && <span className="text-xs text-neutral-400">current</span>}
+            {branch.current && <span className="text-xs text-neutral-400">{t("current")}</span>}
             {branch.remote && <span className="text-xs text-neutral-400">{branch.remote}</span>}
             {!branch.current && (
               <button
                 onClick={() => onDeleteBranch(branch.name)}
                 className="rounded p-1 text-neutral-400 hover:bg-neutral-200 hover:text-red-600 dark:hover:bg-neutral-700 dark:hover:text-red-400"
-                title="Delete branch"
+                title={t("Delete branch")}
               >
                 <Trash2 className="h-3 w-3" />
               </button>

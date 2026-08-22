@@ -18,6 +18,7 @@ import { ContextMenu, type ContextMenuItem } from "../ui/ContextMenu";
 import { CreateItemDialog } from "../ui/CreateItemDialog";
 import { RenameDialog } from "../ui/RenameDialog";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
+import { useTranslation } from "react-i18next";
 
 const fileIcons: Record<string, React.ReactNode> = {
   rs: <Code className="h-4 w-4 text-orange-500" />,
@@ -83,6 +84,7 @@ type DialogState =
   | null;
 
 export function FileTree() {
+  const { t } = useTranslation();
   const rootChildren = useFileStore((s) => s.rootChildren);
   const rootLoaded = useFileStore((s) => s.rootLoaded);
   const rootLoading = useFileStore((s) => s.rootLoading);
@@ -227,14 +229,16 @@ export function FileTree() {
       <div className="px-3 py-4 text-center">
         <p className="text-xs text-red-500">{error}</p>
         <button onClick={loadRoot} className="mt-2 text-xs text-blue-500 hover:underline">
-          Retry
+          {t("Retry")}
         </button>
       </div>
     );
   }
 
   if (rootChildren.length === 0) {
-    return <div className="px-3 py-8 text-center text-xs text-neutral-400">No files found</div>;
+    return (
+      <div className="px-3 py-8 text-center text-xs text-neutral-400">{t("No files found")}</div>
+    );
   }
 
   return (
@@ -307,11 +311,11 @@ export function FileTree() {
       {/* Delete confirm dialog */}
       {dialog?.type === "delete" && (
         <ConfirmDialog
-          title="Delete"
-          message={`Are you sure you want to delete "${dialog.nodeName}"?${
-            dialog.isDir ? " The directory must be empty." : ""
+          title={t("Delete")}
+          message={`${t('Are you sure you want to delete "{{name}}"?', { name: dialog.nodeName })}${
+            dialog.isDir ? ` ${t("The directory must be empty.")}` : ""
           }`}
-          confirmLabel="Delete"
+          confirmLabel={t("Delete")}
           danger
           onConfirm={handleDeleteConfirm}
           onCancel={() => setDialog(null)}
@@ -351,6 +355,7 @@ function TreeNodeItem({
   onDragLeave,
   onDrop,
 }: TreeNodeItemProps) {
+  const { t } = useTranslation();
   const isSelected = selectedPath === node.path;
   const gitDisplay = gitDisplayMap[node.path];
   const isDragOver = dragOverPath === node.path;
@@ -464,7 +469,7 @@ function TreeNodeItem({
                 className="py-1 text-xs text-neutral-400"
                 style={{ paddingLeft: `${24 + (depth + 1) * 16}px` }}
               >
-                {node.loading ? "Loading..." : "Empty"}
+                {node.loading ? t("Loading...") : t("Empty")}
               </div>
             )}
           </div>

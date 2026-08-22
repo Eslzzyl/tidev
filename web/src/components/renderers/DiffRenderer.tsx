@@ -9,6 +9,7 @@ import {
 } from "react";
 import { ChevronDown, ChevronRight, Expand, Minus } from "lucide-react";
 import type { HLJSApi } from "highlight.js";
+import { useTranslation } from "react-i18next";
 
 interface Props {
   diff: string;
@@ -504,6 +505,7 @@ export function CollapsibleDiffFile({
   defaultExpanded = true,
   hideCollapseToggle = false,
 }: Props & { defaultExpanded?: boolean; hideCollapseToggle?: boolean }) {
+  const { t } = useTranslation();
   const { allExpanded } = useDiffCollapseContext();
   const [localExpanded, setLocalExpanded] = useState(defaultExpanded);
 
@@ -531,7 +533,9 @@ export function CollapsibleDiffFile({
           <ChevronRight className="h-3.5 w-3.5 text-neutral-400" />
         )}
         <span className="flex-1 truncate">{filepath}</span>
-        <span className="text-[10px] text-neutral-400">{totalLines} lines</span>
+        <span className="text-[10px] text-neutral-400">
+          {t("{{count}} lines", { count: totalLines })}
+        </span>
       </button>
 
       {/* Diff content */}
@@ -560,6 +564,7 @@ export function useDiffCollapseContext() {
  * Provider that manages "expand/collapse all" for multiple diff files.
  */
 export function DiffCollapseProvider({ children }: { children: React.ReactNode }) {
+  const { t } = useTranslation();
   const [allExpanded, setAllExpanded] = useState<boolean | null>(null);
 
   const toggleAll = useCallback(() => {
@@ -571,7 +576,7 @@ export function DiffCollapseProvider({ children }: { children: React.ReactNode }
       <div>
         <div className="mb-2 flex items-center justify-between">
           <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
-            File Changes
+            {t("File Changes")}
           </span>
           <button
             onClick={toggleAll}
@@ -579,11 +584,11 @@ export function DiffCollapseProvider({ children }: { children: React.ReactNode }
           >
             {allExpanded === false ? (
               <>
-                <Expand className="h-3 w-3" /> Expand all
+                <Expand className="h-3 w-3" /> {t("Expand all")}
               </>
             ) : (
               <>
-                <Minus className="h-3 w-3" /> Collapse all
+                <Minus className="h-3 w-3" /> {t("Collapse all")}
               </>
             )}
           </button>

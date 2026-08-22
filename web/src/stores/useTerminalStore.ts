@@ -4,6 +4,7 @@ import { api } from "../api/client";
 import { queryClient } from "../lib/queryClient";
 import { useUIStore } from "./useUIStore";
 import { TerminalConnection } from "../terminal/connection";
+import i18n from "../i18n";
 
 export interface TerminalTab {
   id: string;
@@ -37,7 +38,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
 
   createTab: () => {
     const id = uuidv4();
-    const label = "Terminal";
+    const label = i18n.t("Terminal");
 
     set((state) => ({
       tabs: [...state.tabs, { id, sessionId: null, label, connection: null, lifecycle: "idle" }],
@@ -52,7 +53,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
       const { settings } = useUIStore.getState();
       const shell = settings.terminalShell || undefined;
       const tab = get().tabs.find((t) => t.id === tabId);
-      const label = tab?.label ?? "Terminal";
+      const label = tab?.label ?? i18n.t("Terminal");
       const result = await api.startTerminal(cols, rows, shell, label);
       queryClient.invalidateQueries({ queryKey: ["terminal", "list"] });
       const sessionId = result.session_id;
@@ -185,7 +186,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
         newTabs.push({
           id,
           sessionId: entry.session_id,
-          label: entry.label || "Terminal",
+          label: entry.label || i18n.t("Terminal"),
           connection: conn,
           lifecycle: "connecting" as const,
         });

@@ -32,12 +32,14 @@ import type { GraphRow } from "../../lib/gitGraph";
 import { ChangesPanel } from "./git/GitChangesPanel";
 import { GraphHistoryPanel, CommitDetailPanel } from "./git/GitHistoryPanels";
 import { BranchesPanel } from "./git/GitBranchesPanel";
+import { useTranslation } from "react-i18next";
 
 type GitTab = "changes" | "history" | "branches";
 
 const MIN_PANEL_PCT = 20; // minimum panel width in %
 
 export function GitView() {
+  const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<GitTab>("changes");
   const [status, setStatus] = useState<GitStatusResponse | null>(null);
   const [branches, setBranches] = useState<GitBranchResponse | null>(null);
@@ -150,7 +152,7 @@ export function GitView() {
       setGraphData(result);
       setGraphCount(fetchCount);
     } catch (err) {
-      setGraphErrorMessage(err instanceof Error ? err.message : "Failed to load graph data");
+      setGraphErrorMessage(err instanceof Error ? err.message : t("Failed to load graph data"));
     } finally {
       setGraphLoading(false);
     }
@@ -178,7 +180,7 @@ export function GitView() {
       // Refresh graph data
       await loadGraphData(50);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load git data");
+      setError(err instanceof Error ? err.message : t("Failed to load git data"));
     } finally {
       setLoading(false);
     }
@@ -200,7 +202,7 @@ export function GitView() {
       setSelectedCommit(detail);
       setDetailOpen(true);
     } catch (err) {
-      setDetailError(err instanceof Error ? err.message : "Failed to load commit details");
+      setDetailError(err instanceof Error ? err.message : t("Failed to load commit details"));
     } finally {
       setLoadingDetail(false);
     }
@@ -232,7 +234,7 @@ export function GitView() {
         }
         setExpandedFiles((prev) => new Set(prev).add(filePath));
       } catch (err) {
-        setDetailError(err instanceof Error ? err.message : "Failed to load file diff");
+        setDetailError(err instanceof Error ? err.message : t("Failed to load file diff"));
       } finally {
         setLoadingFileDiff(null);
       }
@@ -255,7 +257,7 @@ export function GitView() {
       setFileDiffs((prev) => ({ ...prev, ...diffMap }));
       setExpandedFiles(new Set([...expandedFiles, ...diffs.map((d) => d.path)]));
     } catch (err) {
-      setDetailError(err instanceof Error ? err.message : "Failed to load all diffs");
+      setDetailError(err instanceof Error ? err.message : t("Failed to load all diffs"));
     } finally {
       setLoadingAllDiffs(false);
     }
@@ -309,7 +311,11 @@ export function GitView() {
         setChangeDiffs((prev) => ({ ...prev, [filePath]: result }));
         setExpandedChangeFiles((prev) => new Set(prev).add(filePath));
       } catch (err) {
-        setCommitResult(`Error loading diff: ${err instanceof Error ? err.message : "Unknown"}`);
+        setCommitResult(
+          t("Error loading diff: {{message}}", {
+            message: err instanceof Error ? err.message : t("Unknown error"),
+          }),
+        );
       } finally {
         setLoadingChangeDiff(null);
       }
@@ -336,7 +342,11 @@ export function GitView() {
       setCommitMsg("");
       await refreshStatus();
     } catch (err) {
-      setCommitResult(`Error: ${err instanceof Error ? err.message : "Commit failed"}`);
+      setCommitResult(
+        t("Error: {{message}}", {
+          message: err instanceof Error ? err.message : t("Commit failed"),
+        }),
+      );
     } finally {
       setCommitting(false);
     }
@@ -349,7 +359,11 @@ export function GitView() {
       setCommitResult(result.message);
       await refreshStatus();
     } catch (err) {
-      setCommitResult(`Push error: ${err instanceof Error ? err.message : "Push failed"}`);
+      setCommitResult(
+        t("Push error: {{message}}", {
+          message: err instanceof Error ? err.message : t("Push failed"),
+        }),
+      );
     } finally {
       setPushPullLoading(false);
     }
@@ -362,7 +376,11 @@ export function GitView() {
       setCommitResult(result.message);
       await refreshStatus();
     } catch (err) {
-      setCommitResult(`Pull error: ${err instanceof Error ? err.message : "Pull failed"}`);
+      setCommitResult(
+        t("Pull error: {{message}}", {
+          message: err instanceof Error ? err.message : t("Pull failed"),
+        }),
+      );
     } finally {
       setPushPullLoading(false);
     }
@@ -375,7 +393,11 @@ export function GitView() {
       setCommitResult(result.message);
       await refreshStatus();
     } catch (err) {
-      setCommitResult(`Error: ${err instanceof Error ? err.message : "Stash failed"}`);
+      setCommitResult(
+        t("Error: {{message}}", {
+          message: err instanceof Error ? err.message : t("Stash failed"),
+        }),
+      );
     } finally {
       setStashLoading(false);
     }
@@ -393,7 +415,11 @@ export function GitView() {
       setNewBranchName("");
       await refreshStatus();
     } catch (err) {
-      setCommitResult(`Error: ${err instanceof Error ? err.message : "Failed to create branch"}`);
+      setCommitResult(
+        t("Error: {{message}}", {
+          message: err instanceof Error ? err.message : t("Failed to create branch"),
+        }),
+      );
     } finally {
       setCreatingBranch(false);
     }
@@ -405,7 +431,11 @@ export function GitView() {
       setCommitResult(result.message);
       await refreshStatus();
     } catch (err) {
-      setCommitResult(`Error: ${err instanceof Error ? err.message : "Failed to delete branch"}`);
+      setCommitResult(
+        t("Error: {{message}}", {
+          message: err instanceof Error ? err.message : t("Failed to delete branch"),
+        }),
+      );
     }
   };
 
@@ -422,17 +452,17 @@ export function GitView() {
   const tabs: { id: GitTab; label: string; icon: React.ReactNode }[] = [
     {
       id: "changes",
-      label: "Changes",
+      label: t("Changes"),
       icon: <FileEdit className="h-4 w-4" />,
     },
     {
       id: "history",
-      label: "History",
+      label: t("History"),
       icon: <GitCommitHorizontal className="h-4 w-4" />,
     },
     {
       id: "branches",
-      label: "Branches",
+      label: t("Branches"),
       icon: <GitBranch className="h-4 w-4" />,
     },
   ];
@@ -447,7 +477,7 @@ export function GitView() {
             onClick={refreshStatus}
             className="mt-3 rounded bg-neutral-200 px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-300 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"
           >
-            Retry
+            {t("Retry")}
           </button>
         </div>
       </div>
@@ -476,7 +506,7 @@ export function GitView() {
             onClick={handlePull}
             disabled={pushPullLoading}
             className="rounded p-1.5 text-neutral-500 hover:bg-neutral-200 dark:hover:bg-neutral-700"
-            title="Pull"
+            title={t("Pull")}
           >
             {pushPullLoading ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -488,7 +518,7 @@ export function GitView() {
             onClick={handlePush}
             disabled={pushPullLoading}
             className="rounded p-1.5 text-neutral-500 hover:bg-neutral-200 dark:hover:bg-neutral-700"
-            title="Push"
+            title={t("Push")}
           >
             <ArrowUpFromLine className="h-3.5 w-3.5" />
           </button>
@@ -496,7 +526,7 @@ export function GitView() {
             onClick={handleStash}
             disabled={stashLoading}
             className="rounded p-1.5 text-neutral-500 hover:bg-neutral-200 dark:hover:bg-neutral-700"
-            title="Stash"
+            title={t("Stash")}
           >
             {stashLoading ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -508,7 +538,7 @@ export function GitView() {
             onClick={refreshStatus}
             disabled={loading}
             className="rounded p-1.5 text-neutral-500 hover:bg-neutral-200 dark:hover:bg-neutral-700"
-            title="Refresh"
+            title={t("Refresh")}
           >
             <RotateCcw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
           </button>
@@ -537,16 +567,16 @@ export function GitView() {
       {commitResult && (
         <div
           className={`px-4 py-1.5 text-xs ${
-            commitResult.startsWith("Error") ||
-            commitResult.startsWith("Push error") ||
-            commitResult.startsWith("Pull error")
+            commitResult.startsWith(t("Error")) ||
+            commitResult.startsWith(t("Push error")) ||
+            commitResult.startsWith(t("Pull error"))
               ? "bg-red-50 text-red-700 dark:bg-red-950/30 dark:text-red-400"
               : "bg-green-50 text-green-700 dark:bg-green-950/30 dark:text-green-400"
           }`}
         >
           {commitResult}
           <button onClick={() => setCommitResult(null)} className="ml-2 underline">
-            Dismiss
+            {t("Dismiss")}
           </button>
         </div>
       )}
@@ -591,7 +621,7 @@ export function GitView() {
                 isResizingSplit ? "bg-neutral-400 dark:bg-neutral-600" : ""
               }`}
               role="separator"
-              aria-label="Resize panels"
+              aria-label={t("Resize panels")}
             />
 
             {/* Right: Commit detail */}
@@ -615,7 +645,7 @@ export function GitView() {
                 </div>
               ) : (
                 <div className="flex h-full items-center justify-center text-sm text-neutral-400">
-                  Select a commit to view details
+                  {t("Select a commit to view details")}
                 </div>
               )}
             </div>
@@ -645,7 +675,7 @@ export function GitView() {
             className={`fixed inset-0 z-40 bg-black/30 transition-opacity duration-300 md:hidden ${
               animateOut ? "opacity-0" : ""
             }`}
-            aria-label="Close detail"
+            aria-label={t("Close detail")}
           />
           {/* Full-screen overlay */}
           <div
@@ -662,7 +692,7 @@ export function GitView() {
                 <ChevronDown className="h-5 w-5" />
               </button>
               <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
-                Commit Detail
+                {t("Commit Detail")}
               </span>
             </div>
             {/* Scrollable content */}

@@ -5,6 +5,7 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
 import { Check, Copy, Download, Maximize2, Minimize2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 // Dynamically import mermaid to avoid issues
 let mermaidInstance: {
@@ -47,6 +48,7 @@ function CustomLink(props: React.ComponentPropsWithoutRef<"a">) {
  * Custom image component with click-to-expand.
  */
 function CustomImage(props: React.ComponentPropsWithoutRef<"img">) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
 
   if (!props.src) return null;
@@ -56,7 +58,7 @@ function CustomImage(props: React.ComponentPropsWithoutRef<"img">) {
       <button
         onClick={() => setExpanded(!expanded)}
         className="group relative block"
-        title={expanded ? "Collapse" : "Expand image"}
+        title={expanded ? t("Collapse") : t("Expand image")}
       >
         <img
           {...props}
@@ -77,6 +79,7 @@ function CustomImage(props: React.ComponentPropsWithoutRef<"img">) {
  * Enhanced code block with language label, copy, and download buttons.
  */
 function CodeBlock({ language, children }: { language: string; children: string }) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
 
   const handleCopy = useCallback(() => {
@@ -107,14 +110,14 @@ function CodeBlock({ language, children }: { language: string; children: string 
           <button
             onClick={handleCopy}
             className="rounded p-1 text-neutral-400 hover:bg-neutral-200 hover:text-neutral-600 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
-            title="Copy code"
+            title={t("Copy code")}
           >
             {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
           </button>
           <button
             onClick={handleDownload}
             className="rounded p-1 text-neutral-400 hover:bg-neutral-200 hover:text-neutral-600 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
-            title="Download code"
+            title={t("Download code")}
           >
             <Download className="h-3.5 w-3.5" />
           </button>
@@ -133,6 +136,7 @@ function CodeBlock({ language, children }: { language: string; children: string 
  * Mermaid diagram component using the mermaid library.
  */
 function Mermaid({ chart }: { chart: string }) {
+  const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const [svg, setSvg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -152,7 +156,7 @@ function Mermaid({ chart }: { chart: string }) {
         }
       } catch (e) {
         if (mounted) {
-          setError(e instanceof Error ? e.message : "Failed to render diagram");
+          setError(e instanceof Error ? e.message : t("Failed to render diagram"));
           setSvg(null);
         }
       }
@@ -168,14 +172,14 @@ function Mermaid({ chart }: { chart: string }) {
     return (
       <div className="my-3 rounded border border-red-200 bg-red-50 p-3 dark:border-red-800 dark:bg-red-950">
         <p className="mb-1 text-xs font-medium text-red-600 dark:text-red-400">
-          Diagram rendering failed
+          {t("Diagram rendering failed")}
         </p>
         <pre className="text-xs text-red-500 dark:text-red-300">{chart}</pre>
         <button
           onClick={() => setKey((k) => k + 1)}
           className="mt-2 text-xs text-blue-500 hover:underline"
         >
-          Retry
+          {t("Retry")}
         </button>
       </div>
     );

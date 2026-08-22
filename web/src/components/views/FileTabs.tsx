@@ -1,5 +1,6 @@
 import { X, FileIcon } from "lucide-react";
 import type { OpenFile } from "../../stores/useFileStore";
+import { useTranslation } from "react-i18next";
 
 interface FileTabsProps {
   files: OpenFile[];
@@ -9,6 +10,7 @@ interface FileTabsProps {
 }
 
 export function FileTabs({ files, activePath, onSelect, onClose }: FileTabsProps) {
+  const { t } = useTranslation();
   if (files.length === 0) return null;
 
   return (
@@ -35,7 +37,7 @@ export function FileTabs({ files, activePath, onSelect, onClose }: FileTabsProps
               onClick={(e) => onClose(file.path, e)}
               className="ml-0.5 cursor-pointer rounded p-0.5 text-neutral-400 opacity-0 hover:bg-neutral-200 hover:text-neutral-600 group-hover:opacity-100 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
               role="button"
-              aria-label={`Close ${file.path}`}
+              aria-label={t("Close {{path}}", { path: file.path })}
             >
               {" "}
               <X className="h-3 w-3" />

@@ -3,6 +3,7 @@ import type { DirectoryEntry } from "../types/api";
 import { api } from "../api/client";
 import { queryClient } from "../lib/queryClient";
 import { toast } from "./useToastStore";
+import i18n from "../i18n";
 
 export interface TreeNode {
   name: string;
@@ -106,7 +107,7 @@ export const useFileStore = create<FileStore>((set, get) => ({
     } catch (err) {
       set({
         rootLoading: false,
-        error: err instanceof Error ? err.message : "Failed to load files",
+        error: err instanceof Error ? err.message : i18n.t("Failed to load files"),
       });
     }
   },
@@ -176,7 +177,9 @@ export const useFileStore = create<FileStore>((set, get) => ({
       // Add an error entry as a tab so the user can see the error
       const errorFile: OpenFile = {
         path,
-        content: `Error loading file: ${err instanceof Error ? err.message : "Unknown error"}`,
+        content: i18n.t("Error loading file: {{message}}", {
+          message: err instanceof Error ? err.message : i18n.t("Unknown error"),
+        }),
         language: null,
         isDirty: false,
         originalContent: "",
@@ -252,11 +255,15 @@ export const useFileStore = create<FileStore>((set, get) => ({
     try {
       await api.createItem(path, type);
       queryClient.invalidateQueries({ queryKey: ["fs", "list"] });
-      toast.success(type === "file" ? `File created: ${path}` : `Directory created: ${path}`);
+      toast.success(
+        type === "file"
+          ? i18n.t("File created: {{path}}", { path })
+          : i18n.t("Directory created: {{path}}", { path }),
+      );
       get().refreshTree();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Unknown error";
-      toast.error(`Failed to create: ${msg}`);
+      const msg = err instanceof Error ? err.message : i18n.t("Unknown error");
+      toast.error(i18n.t("Failed to create: {{message}}", { message: msg }));
       throw err;
     }
   },
@@ -265,7 +272,7 @@ export const useFileStore = create<FileStore>((set, get) => ({
     try {
       await api.renameItem(path, newPath);
       queryClient.invalidateQueries({ queryKey: ["fs", "list"] });
-      toast.success(`Renamed to: ${newPath}`);
+      toast.success(i18n.t("Renamed to: {{path}}", { path: newPath }));
 
       // Update open files if the renamed file was open
       const state = get();
@@ -280,8 +287,8 @@ export const useFileStore = create<FileStore>((set, get) => ({
 
       get().refreshTree();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Unknown error";
-      toast.error(`Failed to rename: ${msg}`);
+      const msg = err instanceof Error ? err.message : i18n.t("Unknown error");
+      toast.error(i18n.t("Failed to rename: {{message}}", { message: msg }));
       throw err;
     }
   },
@@ -290,7 +297,7 @@ export const useFileStore = create<FileStore>((set, get) => ({
     try {
       await api.removeItem(path);
       queryClient.invalidateQueries({ queryKey: ["fs", "list"] });
-      toast.success(`Deleted: ${path}`);
+      toast.success(i18n.t("Deleted: {{path}}", { path }));
 
       // Close tab if the deleted file was open
       const state = get();
@@ -300,8 +307,8 @@ export const useFileStore = create<FileStore>((set, get) => ({
 
       get().refreshTree();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Unknown error";
-      toast.error(`Failed to delete: ${msg}`);
+      const msg = err instanceof Error ? err.message : i18n.t("Unknown error");
+      toast.error(i18n.t("Failed to delete: {{message}}", { message: msg }));
       throw err;
     }
   },
@@ -318,7 +325,7 @@ export const useFileStore = create<FileStore>((set, get) => ({
         rootPath: result.directory,
       });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Unknown error";
+      const msg = err instanceof Error ? err.message : i18n.t("Unknown error");
       set({ error: msg });
     }
   },

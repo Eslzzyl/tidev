@@ -1,4 +1,5 @@
 import { AlertTriangle, Loader2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 interface ConfirmDialogProps {
   isOpen?: boolean;
@@ -25,10 +26,11 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
+  const { t } = useTranslation();
   if (!isOpen) return null;
 
-  const confirmBtnLabel = confirmText || confirmLabel || "Confirm";
-  const cancelBtnLabel = cancelText || "Cancel";
+  const confirmBtnLabel = confirmText || confirmLabel || t("Confirm");
+  const cancelBtnLabel = cancelText || t("Cancel");
 
   return (
     <div

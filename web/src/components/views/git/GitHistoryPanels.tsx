@@ -18,6 +18,8 @@ import { ContextMenu, type ContextMenuItem } from "../../ui/ContextMenu";
 import { formatGitDate } from "../../../utils/format";
 import { GitGraphSVG, getGraphWidth, GRAPH_ROW_HEIGHT } from "../GitGraph";
 import type { GraphRow } from "../../../lib/gitGraph";
+import { useTranslation } from "react-i18next";
+import i18n from "../../../i18n";
 
 export function buildCommitContextMenuItems(row: GraphRow): ContextMenuItem[] {
   const copy = (text: string) => {
@@ -45,7 +47,8 @@ export function buildCommitContextMenuItems(row: GraphRow): ContextMenuItem[] {
     items.push({ type: "separator" });
     for (const tag of tags) {
       items.push({
-        label: `Copy Tag (${tag})`,
+        label: i18n.t("Copy Tag ({{tag}})", { tag }),
+        translated: false,
         icon: <Tag className="h-3.5 w-3.5" />,
         onClick: () => copy(tag),
       });
@@ -91,6 +94,7 @@ export function GraphHistoryPanel({
   onRetry: () => void;
   onLoadMore: () => void;
 }) {
+  const { t } = useTranslation();
   const sentinelRef = useRef<HTMLDivElement>(null);
 
   // Context menu state
@@ -176,7 +180,7 @@ export function GraphHistoryPanel({
             onClick={onRetry}
             className="mt-3 rounded bg-neutral-200 px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-300 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"
           >
-            Retry
+            {t("Retry")}
           </button>
         </div>
       </div>
@@ -186,7 +190,7 @@ export function GraphHistoryPanel({
   if (rows.length === 0) {
     return (
       <div className="flex h-full items-center justify-center p-6">
-        <p className="text-sm text-neutral-500">No commits yet</p>
+        <p className="text-sm text-neutral-500">{t("No commits yet")}</p>
       </div>
     );
   }
@@ -256,7 +260,7 @@ export function GraphHistoryPanel({
       {graphLoading && (
         <div className="flex items-center justify-center py-4">
           <Loader2 className="h-4 w-4 animate-spin text-neutral-400" />
-          <span className="ml-2 text-xs text-neutral-500">Loading graph...</span>
+          <span className="ml-2 text-xs text-neutral-500">{t("Loading graph...")}</span>
         </div>
       )}
 
@@ -298,6 +302,7 @@ export function CommitDetailPanel({
   onLoadFileDiff: (path: string) => void;
   onLoadAllDiffs: () => void;
 }) {
+  const { t } = useTranslation();
   const statusIcon = (s: string) => {
     switch (s) {
       case "A":
@@ -346,7 +351,9 @@ export function CommitDetailPanel({
         <div className="mt-1 flex items-center gap-2 text-xs">
           <span className="text-green-600">+{commit.total_additions}</span>
           <span className="text-red-600">-{commit.total_deletions}</span>
-          <span className="text-neutral-400">{commit.files.length} file(s)</span>
+          <span className="text-neutral-400">
+            {t("{{count}} files", { count: commit.files.length })}
+          </span>
         </div>
       </div>
 
@@ -357,7 +364,7 @@ export function CommitDetailPanel({
       <div>
         <div className="mb-2 flex items-center justify-between">
           <h3 className="text-xs font-medium uppercase text-neutral-500">
-            Changed Files ({commit.files.length})
+            {t("Changed Files ({{count}})", { count: commit.files.length })}
           </h3>
           <button
             onClick={onLoadAllDiffs}
@@ -369,7 +376,7 @@ export function CommitDetailPanel({
             ) : (
               <ChevronDown className="h-3 w-3" />
             )}
-            Show all diffs
+            {t("Show all diffs")}
           </button>
         </div>
         <div className="space-y-1">
@@ -411,7 +418,7 @@ export function CommitDetailPanel({
                         <DiffRenderer diff={fileDiffs[file.path].diff} filepath={file.path} />
                       ) : (
                         <p className="py-2 text-xs text-neutral-400">
-                          No diff content (binary or empty file)
+                          {t("No diff content (binary or empty file)")}
                         </p>
                       )}
                     </div>

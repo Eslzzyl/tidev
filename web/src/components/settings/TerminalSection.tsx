@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useUIStore } from "../../stores/useUIStore";
 import {
   useTerminalShells,
@@ -9,6 +10,7 @@ import {
 type Mode = "default" | "selected" | "custom";
 
 export function TerminalSection() {
+  const { t } = useTranslation();
   const terminalShell = useUIStore((s) => s.settings.terminalShell);
   const updateSettings = useUIStore((s) => s.updateSettings);
 
@@ -83,25 +85,29 @@ export function TerminalSection() {
     localMode === "default" ? "__default__" : localMode === "custom" ? "__custom__" : terminalShell;
 
   const defaultShellLabel = shellsData
-    ? `System default (${shellsData.default_shell})`
-    : "System default";
+    ? t("System default ({{shell}})", { shell: shellsData.default_shell })
+    : t("System default");
 
   return (
     <section>
-      <h2 className="mb-1 text-sm font-medium text-neutral-900 dark:text-neutral-100">Terminal</h2>
+      <h2 className="mb-1 text-sm font-medium text-neutral-900 dark:text-neutral-100">
+        {t("Terminal")}
+      </h2>
       <p className="mb-4 text-sm text-neutral-500 dark:text-neutral-400">
-        Choose which shell to use in the terminal
+        {t("Choose which shell to use in the terminal")}
       </p>
 
       <div className="flex flex-col gap-3 rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
         <label className="flex flex-col gap-2">
-          <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100">Shell</span>
+          <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
+            {t("Shell")}
+          </span>
 
           {loading ? (
-            <span className="text-sm text-neutral-500">Loading shells...</span>
+            <span className="text-sm text-neutral-500">{t("Loading shells...")}</span>
           ) : error ? (
             <span className="text-sm text-red-500">
-              {error?.message ?? "Failed to load shells"}
+              {error?.message ?? t("Failed to load shells")}
             </span>
           ) : (
             <select
@@ -115,7 +121,7 @@ export function TerminalSection() {
                   {s.name} ({s.path})
                 </option>
               ))}
-              <option value="__custom__">Custom...</option>
+              <option value="__custom__">{t("Custom...")}</option>
             </select>
           )}
         </label>
@@ -124,7 +130,7 @@ export function TerminalSection() {
         {localMode === "custom" && (
           <div>
             <label className="mb-1 block text-xs text-neutral-500 dark:text-neutral-400">
-              Shell path or command
+              {t("Shell path or command")}
             </label>
             <input
               type="text"
@@ -139,9 +145,10 @@ export function TerminalSection() {
         {/* Hint text */}
         <p className="text-xs text-neutral-400 dark:text-neutral-500">
           {localMode === "default" &&
-            "Uses the server's $SHELL environment variable (or /bin/bash as fallback)."}
-          {localMode === "selected" && `New terminal tabs will use ${terminalShell}.`}
-          {localMode === "custom" && "Enter the full path to your preferred shell executable."}
+            t("Uses the server's $SHELL environment variable (or /bin/bash as fallback).")}
+          {localMode === "selected" &&
+            t("New terminal tabs will use {{shell}}.", { shell: terminalShell })}
+          {localMode === "custom" && t("Enter the full path to your preferred shell executable.")}
         </p>
       </div>
     </section>

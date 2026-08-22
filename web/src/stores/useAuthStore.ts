@@ -6,6 +6,7 @@
  * - SSE connections pass token via `?token=` query parameter.
  */
 import { create } from "zustand";
+import i18n from "../i18n";
 
 const AUTH_TOKEN_KEY = "web_auth_token";
 const API_BASE = "/api";
@@ -120,7 +121,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       set({
         token: null,
         isAuthenticated: false,
-        error: "Session expired. Please re-enter your access token.",
+        error: i18n.t("Session expired. Please re-enter your access token."),
       });
     }
   },
@@ -143,8 +144,8 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       });
 
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: "Unknown error" }));
-        set({ error: err.error || "Failed to configure token" });
+        const err = await res.json().catch(() => ({ error: i18n.t("Unknown error") }));
+        set({ error: err.error || i18n.t("Failed to configure token") });
         return false;
       }
 
@@ -158,7 +159,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       }
       return true;
     } catch (err) {
-      set({ error: err instanceof Error ? err.message : "Network error" });
+      set({ error: err instanceof Error ? err.message : i18n.t("Network error") });
       return false;
     }
   },

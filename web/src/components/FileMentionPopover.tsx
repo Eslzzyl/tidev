@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../api/client";
 
 interface FileSuggestion {
@@ -23,6 +24,7 @@ export function FileMentionPopover({
   selectedIndex,
   onSelectedIndexChange,
 }: Props) {
+  const { t } = useTranslation();
   const [suggestions, setSuggestions] = useState<FileSuggestion[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -67,7 +69,7 @@ export function FileMentionPopover({
   if (loading && suggestions.length === 0) {
     return (
       <div className="composer-popover file-mention-popover">
-        <div className="file-mention-loading">Searching…</div>
+        <div className="file-mention-loading">{t("Searching…")}</div>
       </div>
     );
   }
@@ -75,9 +77,9 @@ export function FileMentionPopover({
   if (suggestions.length === 0) {
     return (
       <div className="composer-popover file-mention-popover">
-        <div className="file-mention-empty">No files found</div>
+        <div className="file-mention-empty">{t("No files found")}</div>
         <button className="composer-option" onClick={onClose}>
-          Close
+          {t("Close")}
         </button>
       </div>
     );

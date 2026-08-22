@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Check, Sparkles, X } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import type { ApprovedTool, FrontendRequest, MessageRecord, ToolCall } from "../../types/api";
 import type { StreamMessage } from "../../types/chat";
@@ -22,6 +23,7 @@ export interface MessageListProps {
 }
 
 export function MessageList({ messages, streams, onRevert, onFork }: MessageListProps) {
+  const { t } = useTranslation();
   const scrollRef = useRef<HTMLDivElement>(null);
   const rounds = useMemo(() => buildRounds(messages), [messages]);
   type Row =
@@ -60,10 +62,11 @@ export function MessageList({ messages, streams, onRevert, onFork }: MessageList
         <div className="welcome-icon">
           <Sparkles size={21} />
         </div>
-        <h2>What are we building?</h2>
+        <h2>{t("What are we building?")}</h2>
         <p>
-          Start a conversation with the local tidev runtime. Your messages and streamed responses
-          are persisted in SQLite.
+          {t(
+            "Start a conversation with the local tidev runtime. Your messages and streamed responses are persisted in SQLite.",
+          )}
         </p>
       </div>
     );
@@ -108,6 +111,7 @@ function RoundView({
   onRevert?: (messageId: string) => void;
   onFork?: (messageId: string) => void;
 }) {
+  const { t } = useTranslation();
   const userTime = round.userMessage.created_at ? formatTime(round.userMessage.created_at) : "";
   const duration = round.completedAt
     ? getDuration(round.userMessage.created_at ?? "", round.completedAt)
@@ -126,25 +130,25 @@ function RoundView({
           <span className="avatar user-avatar">U</span>
           <div className="message-column">
             <div className="message-meta">
-              <span>You</span>
+              <span>{t("You")}</span>
               {userTime ? <time>{userTime}</time> : null}
               <span className="message-actions-inline">
                 {onRevert ? (
                   <button
                     className="inline-action"
                     onClick={() => onRevert(round.userMessage.id)}
-                    title="Revert to this message (undo later messages)"
+                    title={t("Revert to this message (undo later messages)")}
                   >
-                    Undo
+                    {t("Undo")}
                   </button>
                 ) : null}
                 {onFork ? (
                   <button
                     className="inline-action"
                     onClick={() => onFork(round.userMessage.id)}
-                    title="Fork conversation from this message"
+                    title={t("Fork conversation from this message")}
                   >
-                    Fork
+                    {t("Fork")}
                   </button>
                 ) : null}
               </span>
@@ -161,9 +165,9 @@ function RoundView({
             <span className="avatar">A</span>
             <div className="message-column">
               <div className="message-meta">
-                <span>Assistant</span>
+                <span>{t("Assistant")}</span>
                 {round.status === "streaming" ? (
-                  <span className="streaming-label">streaming</span>
+                  <span className="streaming-label">{t("streaming")}</span>
                 ) : null}
               </div>
               <div className="message-content">
@@ -175,7 +179,7 @@ function RoundView({
                         className="reasoning"
                         open={round.status === "streaming"}
                       >
-                        <summary>Reasoning</summary>
+                        <summary>{t("Reasoning")}</summary>
                         <div>{segment.content}</div>
                       </details>
                     );
@@ -210,13 +214,14 @@ function RoundView({
 }
 
 function SystemBlockView({ block }: { block: SystemMessageBlock }) {
+  const { t } = useTranslation();
   return (
     <article className="message-card system">
       <div className="message-layout">
         <span className="avatar">S</span>
         <div className="message-column">
           <div className="message-meta">
-            <span>System</span>
+            <span>{t("System")}</span>
             {block.message.created_at ? <time>{formatTime(block.message.created_at)}</time> : null}
           </div>
           <div className="message-content">
@@ -229,6 +234,7 @@ function SystemBlockView({ block }: { block: SystemMessageBlock }) {
 }
 
 function ShellBlockView({ block }: { block: ShellBlock }) {
+  const { t } = useTranslation();
   const exit = block.exitCode;
   return (
     <article className="message-card shell">
@@ -236,9 +242,11 @@ function ShellBlockView({ block }: { block: ShellBlock }) {
         <span className="avatar">S</span>
         <div className="message-column">
           <div className="message-meta">
-            <span>Shell</span>
+            <span>{t("Shell")}</span>
             {exit !== null && exit !== undefined ? (
-              <span className={exit === 0 ? "shell-exit ok" : "shell-exit fail"}>exit {exit}</span>
+              <span className={exit === 0 ? "shell-exit ok" : "shell-exit fail"}>
+                {t("exit {{code}}", { code: exit })}
+              </span>
             ) : null}
           </div>
           <div className="message-content">
@@ -252,6 +260,7 @@ function ShellBlockView({ block }: { block: ShellBlock }) {
 }
 
 function ToolCallEntryView({ entry }: { entry: import("../../utils/round").ToolCallEntry }) {
+  const { t } = useTranslation();
   const summary = (() => {
     try {
       const args = JSON.parse(entry.arguments);
@@ -271,7 +280,7 @@ function ToolCallEntryView({ entry }: { entry: import("../../utils/round").ToolC
       <div className="tool-entry-header">
         <strong>{entry.name}</strong>
         <code className="tool-args">{summary}</code>
-        {!entry.resultComplete ? <span className="tool-running">running…</span> : null}
+        {!entry.resultComplete ? <span className="tool-running">{t("running…")}</span> : null}
       </div>
       {entry.result ? (
         <pre className="tool-result">{entry.result.output.slice(0, 2000)}</pre>
@@ -281,19 +290,20 @@ function ToolCallEntryView({ entry }: { entry: import("../../utils/round").ToolC
 }
 
 function StreamBubble({ stream }: { stream: StreamMessage }) {
+  const { t } = useTranslation();
   return (
     <article className="message-card assistant streaming-card">
       <div className="message-layout">
         <span className="avatar">A</span>
         <div className="message-column">
           <div className="message-meta">
-            <span>Assistant</span>
-            <span className="streaming-label">streaming</span>
+            <span>{t("Assistant")}</span>
+            <span className="streaming-label">{t("streaming")}</span>
           </div>
           <div className="message-content">
             {stream.reasoning ? (
               <details className="reasoning" open>
-                <summary>Reasoning</summary>
+                <summary>{t("Reasoning")}</summary>
                 <div>{stream.reasoning}</div>
               </details>
             ) : null}
@@ -304,7 +314,7 @@ function StreamBubble({ stream }: { stream: StreamMessage }) {
             )}
             {stream.toolCalls.length ? <ToolCallList calls={stream.toolCalls} /> : null}
             {stream.status === "failed" ? (
-              <div className="stream-error">{stream.error ?? "The turn failed."}</div>
+              <div className="stream-error">{stream.error ?? t("The turn failed.")}</div>
             ) : null}
           </div>
         </div>
@@ -359,18 +369,21 @@ export function ApprovalCard({
   request: FrontendRequest;
   onRespond: (tools: ApprovedTool[]) => void;
 }) {
+  const { t } = useTranslation();
   const tools = request.kind.ToolApproval ?? [];
   return (
     <div className="approval-card">
       <div className="approval-heading">
         <span>
-          <Sparkles size={16} /> Approval required
+          <Sparkles size={16} /> {t("Approval required")}
         </span>
         <span className="approval-session">{request.session_id.slice(0, 8)}</span>
       </div>
       <p>
-        tidev is waiting for permission to run{" "}
-        {tools.length === 1 ? "a tool" : `${tools.length} tools`}.
+        {t("tidev is waiting for permission to run {{countLabel}}.", {
+          countLabel:
+            tools.length === 1 ? t("a tool") : t("{{count}} tools", { count: tools.length }),
+        })}
       </p>
       <div className="approval-tools">
         {tools.map((item) => (
@@ -386,14 +399,14 @@ export function ApprovalCard({
           onClick={() => onRespond(tools.map((item) => makeRejectedTool(item.tool_call)))}
         >
           <X size={15} />
-          Reject
+          {t("Reject")}
         </button>
         <button
           className="primary-button"
           onClick={() => onRespond(tools.map((item) => makeApprovedTool(item.tool_call)))}
         >
           <Check size={15} />
-          Allow
+          {t("Allow")}
         </button>
       </div>
     </div>

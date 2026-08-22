@@ -29,6 +29,8 @@ import {
 import { queryClient } from "../../lib/queryClient";
 import { useStatsOverview } from "../../hooks/useQueries";
 import type { ProviderUsageEntry } from "../../types/api";
+import { useTranslation } from "react-i18next";
+import i18n from "../../i18n";
 
 // ── Color palettes ───────────────────────────────────────────────────────
 
@@ -62,20 +64,20 @@ function formatNumber(n: number): string {
   if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`;
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return n.toLocaleString();
+  return n.toLocaleString(i18n.language);
 }
 
 function formatTokenBucket(granularity: string, bucket: string): string {
   const d = new Date(bucket);
   switch (granularity) {
     case "hour":
-      return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      return d.toLocaleTimeString(i18n.language, { hour: "2-digit", minute: "2-digit" });
     case "day":
-      return d.toLocaleDateString([], { month: "short", day: "numeric" });
+      return d.toLocaleDateString(i18n.language, { month: "short", day: "numeric" });
     case "week":
       return `W${getWeekNumber(d)}`;
     case "month":
-      return d.toLocaleDateString([], { month: "short", year: "2-digit" });
+      return d.toLocaleDateString(i18n.language, { month: "short", year: "2-digit" });
     default:
       return bucket;
   }
@@ -89,7 +91,7 @@ function getWeekNumber(d: Date): number {
 
 function formatDate(d: string | null): string {
   if (!d) return "—";
-  return new Date(d).toLocaleDateString([], {
+  return new Date(d).toLocaleDateString(i18n.language, {
     year: "numeric",
     month: "short",
     day: "numeric",
@@ -119,6 +121,7 @@ function ChartTooltip({
   label?: string;
   granularity: string;
 }) {
+  const { t } = useTranslation();
   if (!active || !payload?.length) return null;
   return (
     <div className="rounded-lg border border-neutral-200 bg-white p-3 shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
@@ -133,7 +136,7 @@ function ChartTooltip({
           />
           <span className="text-neutral-700 dark:text-neutral-300">{p.name}:</span>
           <span className="font-medium text-neutral-900 dark:text-neutral-100">
-            {p.name === "Cache Hit Rate" ? `${p.value.toFixed(1)}%` : formatNumber(p.value)}
+            {p.name === t("Cache Hit Rate") ? `${p.value.toFixed(1)}%` : formatNumber(p.value)}
           </span>
         </p>
       ))}
@@ -200,6 +203,7 @@ function ChartContainer({
 // ── Main Component ───────────────────────────────────────────────────────
 
 export function StatsView() {
+  const { t } = useTranslation();
   // UI state
   const [granularity, setGranularity] = useState<Granularity>("hour");
   const [range, setRange] = useState<StatsRange>("24h");
@@ -236,7 +240,7 @@ export function StatsView() {
   const errorMessage = error
     ? error instanceof Error
       ? error.message
-      : "Failed to load stats"
+      : t("Failed to load stats")
     : null;
 
   const summary = overviewQ.data?.summary;
@@ -277,7 +281,7 @@ export function StatsView() {
       <div className="flex h-full items-center justify-center">
         <div className="flex flex-col items-center gap-3">
           <Loader2 className="h-6 w-6 animate-spin text-neutral-400" />
-          <p className="text-sm text-neutral-500">Loading statistics…</p>
+          <p className="text-sm text-neutral-500">{t("Loading statistics…")}</p>
         </div>
       </div>
     );
@@ -293,7 +297,7 @@ export function StatsView() {
             onClick={() => queryClient.invalidateQueries({ queryKey: ["stats"] })}
             className="rounded-lg bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-200 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"
           >
-            Retry
+            {t("Retry")}
           </button>
         </div>
       </div>
@@ -310,24 +314,24 @@ export function StatsView() {
           <div className="flex items-center gap-2">
             <BarChart3 className="h-5 w-5 text-neutral-700 dark:text-neutral-300" />
             <h1 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">
-              Statistics
+              {t("Statistics")}
             </h1>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
             {/* Date range selector */}
-            <div className="stats-control-group" aria-label="Statistics range">
+            <div className="stats-control-group" aria-label={t("Statistics range")}>
               {RANGE_OPTIONS.map((option) => (
                 <button
                   key={option.value}
                   onClick={() => setRange(option.value)}
                   className={`stats-range-button ${range === option.value ? "is-active" : ""}`}
                 >
-                  {option.label}
+                  {option.value === "all" ? t("All") : option.label}
                 </button>
               ))}
             </div>
             {/* Granularity selector */}
-            <div className="stats-control-group" aria-label="Statistics granularity">
+            <div className="stats-control-group" aria-label={t("Statistics granularity")}>
               {(["hour", "day", "week", "month"] as Granularity[]).map((g) => (
                 <button
                   key={g}
@@ -338,7 +342,7 @@ export function StatsView() {
                       : "bg-white text-neutral-600 hover:bg-neutral-50 dark:bg-neutral-950 dark:text-neutral-400 dark:hover:bg-neutral-900"
                   }`}
                 >
-                  {g.charAt(0).toUpperCase() + g.slice(1)}
+                  {t(g.charAt(0).toUpperCase() + g.slice(1))}
                 </button>
               ))}
             </div>
@@ -346,7 +350,7 @@ export function StatsView() {
             <button
               onClick={() => queryClient.invalidateQueries({ queryKey: ["stats"] })}
               className="rounded-lg p-1.5 text-neutral-500 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
-              title="Refresh"
+              title={t("Refresh")}
             >
               <RefreshCw className="h-4 w-4" />
             </button>
@@ -358,29 +362,35 @@ export function StatsView() {
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
             <SummaryCard
               icon={<Database className="h-4 w-4" />}
-              label="Total Tokens"
+              label={t("Total Tokens")}
               value={formatNumber(summary.total_tokens)}
-              subtitle={`${formatNumber(summary.total_input_tokens)} in / ${formatNumber(summary.total_output_tokens)} out`}
+              subtitle={t("{{input}} in / {{output}} out", {
+                input: formatNumber(summary.total_input_tokens),
+                output: formatNumber(summary.total_output_tokens),
+              })}
             />
             <SummaryCard
               icon={<MousePointerClick className="h-4 w-4" />}
-              label="Total Requests"
+              label={t("Total Requests")}
               value={summary.total_requests.toLocaleString()}
             />
             <SummaryCard
               icon={<Hash className="h-4 w-4" />}
-              label="Total Sessions"
+              label={t("Total Sessions")}
               value={formatNumber(summary.total_sessions)}
             />
             <SummaryCard
               icon={<Zap className="h-4 w-4" />}
-              label="Cache Hit Rate"
+              label={t("Cache Hit Rate")}
               value={`${summary.cache_hit_rate.toFixed(1)}%`}
-              subtitle={`${formatNumber(summary.total_cache_read_tokens)} read / ${formatNumber(summary.total_cache_write_tokens)} write`}
+              subtitle={t("{{read}} read / {{write}} write", {
+                read: formatNumber(summary.total_cache_read_tokens),
+                write: formatNumber(summary.total_cache_write_tokens),
+              })}
             />
             <SummaryCard
               icon={<MessagesSquare className="h-4 w-4" />}
-              label="First Usage"
+              label={t("First Usage")}
               value={formatDate(summary.first_usage_date)}
             />
           </div>
@@ -389,10 +399,10 @@ export function StatsView() {
         {/* ── Token Usage ──────────────────────────────────────────────── */}
         <div className="rounded-xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-950">
           <h2 className="mb-4 text-sm font-semibold text-neutral-700 dark:text-neutral-300">
-            Token Usage
+            {t("Token Usage")}
           </h2>
           {totalTokenData.length === 0 ? (
-            <ChartEmptyState text="No token usage data yet" />
+            <ChartEmptyState text={t("No token usage data yet")} />
           ) : (
             <ChartContainer className="h-[300px]">
               <ResponsiveContainer width="100%" height="100%">
@@ -441,6 +451,7 @@ export function StatsView() {
                     yAxisId="left"
                     type="monotone"
                     dataKey="Fresh Input"
+                    name={t("Fresh Input")}
                     stroke={CHART_COLORS[2]}
                     fill="url(#gradInput)"
                     strokeWidth={2}
@@ -449,6 +460,7 @@ export function StatsView() {
                     yAxisId="left"
                     type="monotone"
                     dataKey="Output"
+                    name={t("Output")}
                     stroke={CHART_COLORS[1]}
                     fill="url(#gradOutput)"
                     strokeWidth={2}
@@ -457,6 +469,7 @@ export function StatsView() {
                     yAxisId="left"
                     type="monotone"
                     dataKey="Cache Read"
+                    name={t("Cache Read")}
                     stroke={CHART_COLORS[0]}
                     fill="url(#gradCache)"
                     strokeWidth={1.5}
@@ -469,7 +482,7 @@ export function StatsView() {
                     strokeWidth={2}
                     strokeDasharray="4 3"
                     dot={false}
-                    name="Cache Hit Rate"
+                    name={t("Cache Hit Rate")}
                   />
                 </AreaChart>
               </ResponsiveContainer>
@@ -480,10 +493,10 @@ export function StatsView() {
         {/* ── Request Count Chart (Bar) ───────────────────────────────── */}
         <div className="rounded-xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-950">
           <h2 className="mb-4 text-sm font-semibold text-neutral-700 dark:text-neutral-300">
-            Requests Over Time
+            {t("Requests Over Time")}
           </h2>
           {!timeSeries?.entries.length ? (
-            <ChartEmptyState text="No request data yet" />
+            <ChartEmptyState text={t("No request data yet")} />
           ) : (
             <ChartContainer className="h-[200px]">
               <ResponsiveContainer width="100%" height="100%">
@@ -504,6 +517,7 @@ export function StatsView() {
                   <Tooltip content={<ChartTooltip granularity={granularity} />} />
                   <Bar
                     dataKey="request_count"
+                    name={t("Requests")}
                     fill={CHART_COLORS[0]}
                     radius={[4, 4, 0, 0]}
                     maxBarSize={40}
@@ -519,10 +533,12 @@ export function StatsView() {
           {/* Model Pie Chart */}
           <div className="rounded-xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-950">
             <h2 className="mb-2 text-sm font-semibold text-neutral-700 dark:text-neutral-300">
-              Model Distribution (by tokens)
+              {t("Model Distribution (by tokens)")}
             </h2>
             {modelPieData.length === 0 ? (
-              <p className="py-8 text-center text-sm text-neutral-400">No model usage data yet</p>
+              <p className="py-8 text-center text-sm text-neutral-400">
+                {t("No model usage data yet")}
+              </p>
             ) : (
               <ChartContainer className="h-[280px]">
                 <ResponsiveContainer width="100%" height="100%">
@@ -553,7 +569,10 @@ export function StatsView() {
                             </p>
                             <p className="text-xs text-neutral-500">{d.provider}</p>
                             <p className="mt-1 text-xs text-neutral-700 dark:text-neutral-300">
-                              {formatNumber(d.value)} tokens ({pct}%)
+                              {t("{{value}} tokens ({{percent}}%)", {
+                                value: formatNumber(d.value),
+                                percent: pct,
+                              })}
                             </p>
                           </div>
                         );
@@ -569,10 +588,12 @@ export function StatsView() {
           {/* Provider Breakdown */}
           <div className="rounded-xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-950">
             <h2 className="mb-4 text-sm font-semibold text-neutral-700 dark:text-neutral-300">
-              Provider Usage
+              {t("Provider Usage")}
             </h2>
             {providers.length === 0 ? (
-              <p className="py-8 text-center text-sm text-neutral-400">No provider data yet</p>
+              <p className="py-8 text-center text-sm text-neutral-400">
+                {t("No provider data yet")}
+              </p>
             ) : (
               <ChartContainer className="h-[280px]">
                 <ResponsiveContainer width="100%" height="100%">
@@ -616,20 +637,25 @@ export function StatsView() {
                               {d.provider_display_name || d.provider_id}
                             </p>
                             <p className="mt-1 text-xs text-neutral-700 dark:text-neutral-300">
-                              Total: {formatNumber(d.total_tokens)}
+                              {t("Total: {{value}}", { value: formatNumber(d.total_tokens) })}
                             </p>
                             <p className="text-xs text-blue-800 dark:text-blue-300">
-                              Output: {formatNumber(d.output_tokens)}
+                              {t("Output: {{value}}", { value: formatNumber(d.output_tokens) })}
                             </p>
                             <p className="text-xs text-blue-600">
-                              Fresh Input:{" "}
-                              {formatNumber(Math.max(0, d.input_tokens - d.cache_read_tokens))}
+                              {t("Fresh Input: {{value}}", {
+                                value: formatNumber(
+                                  Math.max(0, d.input_tokens - d.cache_read_tokens),
+                                ),
+                              })}
                             </p>
                             <p className="text-xs text-blue-500">
-                              Cache Read: {formatNumber(d.cache_read_tokens)}
+                              {t("Cache Read: {{value}}", {
+                                value: formatNumber(d.cache_read_tokens),
+                              })}
                             </p>
                             <p className="mt-1 text-xs text-neutral-500">
-                              Requests: {formatNumber(d.request_count)}
+                              {t("Requests: {{value}}", { value: formatNumber(d.request_count) })}
                             </p>
                           </div>
                         );
@@ -639,21 +665,21 @@ export function StatsView() {
                     <Bar
                       stackId="a"
                       dataKey="output_tokens"
-                      name="Output"
+                      name={t("Output")}
                       fill="#1d4ed8"
                       radius={[0, 0, 0, 0]}
                     />
                     <Bar
                       stackId="a"
                       dataKey="freshInput"
-                      name="Fresh Input"
+                      name={t("Fresh Input")}
                       fill="#3b82f6"
                       radius={[0, 0, 0, 0]}
                     />
                     <Bar
                       stackId="a"
                       dataKey="cache_read_tokens"
-                      name="Cache Read"
+                      name={t("Cache Read")}
                       fill="#93c5fd"
                       radius={[0, 4, 4, 0]}
                     />
@@ -668,29 +694,31 @@ export function StatsView() {
         <div className="rounded-xl border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-950">
           <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-3 dark:border-neutral-800">
             <h2 className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">
-              Top Sessions by Token Usage
+              {t("Top Sessions by Token Usage")}
             </h2>
-            <span className="text-xs text-neutral-400">{sessionTotal} total</span>
+            <span className="text-xs text-neutral-400">
+              {t("{{count}} total", { count: sessionTotal })}
+            </span>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead>
                 <tr className="border-b border-neutral-100 dark:border-neutral-800">
-                  <th className="px-4 py-2 font-medium text-neutral-500">Session</th>
-                  <th className="px-4 py-2 font-medium text-neutral-500">Model</th>
-                  <th className="px-4 py-2 font-medium text-neutral-500">Messages</th>
-                  <th className="px-4 py-2 font-medium text-neutral-500">Total Tokens</th>
-                  <th className="px-4 py-2 font-medium text-neutral-500">Input</th>
-                  <th className="px-4 py-2 font-medium text-neutral-500">Output</th>
-                  <th className="px-4 py-2 font-medium text-neutral-500">Cache Hit Rate</th>
-                  <th className="px-4 py-2 font-medium text-neutral-500">Last Active</th>
+                  <th className="px-4 py-2 font-medium text-neutral-500">{t("Session")}</th>
+                  <th className="px-4 py-2 font-medium text-neutral-500">{t("Model")}</th>
+                  <th className="px-4 py-2 font-medium text-neutral-500">{t("Messages")}</th>
+                  <th className="px-4 py-2 font-medium text-neutral-500">{t("Total Tokens")}</th>
+                  <th className="px-4 py-2 font-medium text-neutral-500">{t("Input")}</th>
+                  <th className="px-4 py-2 font-medium text-neutral-500">{t("Output")}</th>
+                  <th className="px-4 py-2 font-medium text-neutral-500">{t("Cache Hit Rate")}</th>
+                  <th className="px-4 py-2 font-medium text-neutral-500">{t("Last Active")}</th>
                 </tr>
               </thead>
               <tbody>
                 {sessions.length === 0 ? (
                   <tr>
                     <td colSpan={8} className="px-4 py-8 text-center text-neutral-400">
-                      No session data yet
+                      {t("No session data yet")}
                     </td>
                   </tr>
                 ) : (
@@ -700,7 +728,7 @@ export function StatsView() {
                       className="border-b border-neutral-50 hover:bg-neutral-50 dark:border-neutral-800/50 dark:hover:bg-neutral-900/50"
                     >
                       <td className="max-w-[200px] truncate px-4 py-2.5 font-medium text-neutral-900 dark:text-neutral-100">
-                        {s.title || "Untitled"}
+                        {s.title || t("Untitled")}
                       </td>
                       <td className="px-4 py-2.5 text-neutral-600 dark:text-neutral-400">
                         {s.model_display_name || s.model_id}
@@ -722,7 +750,7 @@ export function StatsView() {
                           ? `${((s.cache_read_tokens / s.input_tokens) * 100).toFixed(1)}%`
                           : "0%"}
                       </td>
-                      <td className="px-4 py-2.5 text-neutral-500">{s.updated_at.split("T")[0]}</td>
+                      <td className="px-4 py-2.5 text-neutral-500">{formatDate(s.updated_at)}</td>
                     </tr>
                   ))
                 )}

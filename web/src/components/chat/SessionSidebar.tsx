@@ -1,4 +1,5 @@
 import { Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import type { Session } from "../../types/api";
 import { formatDate, shortPath } from "../../utils/chat";
@@ -36,6 +37,7 @@ export function SessionSidebar({
   onCancelRename,
   onDelete,
 }: SessionSidebarProps) {
+  const { t } = useTranslation();
   const normalizedSearch = search.trim().toLowerCase();
   const visibleSessions = sessions.filter((session) =>
     session.title.toLowerCase().includes(normalizedSearch),
@@ -45,10 +47,10 @@ export function SessionSidebar({
     <aside className="session-sidebar">
       <div className="sidebar-heading">
         <div>
-          <span className="eyebrow">Workspace</span>
-          <strong>Conversations</strong>
+          <span className="eyebrow">{t("Workspace")}</span>
+          <strong>{t("Conversations")}</strong>
         </div>
-        <button className="icon-button" onClick={onCreate} title="New conversation">
+        <button className="icon-button" onClick={onCreate} title={t("New conversation")}>
           <Plus size={17} />
         </button>
       </div>
@@ -57,14 +59,14 @@ export function SessionSidebar({
         <input
           value={search}
           onChange={(event) => onSearchChange(event.target.value)}
-          placeholder="Search sessions…"
-          aria-label="Search sessions"
+          placeholder={t("Search sessions…")}
+          aria-label={t("Search sessions")}
         />
       </div>
       <div className="session-list">
-        {loading ? <div className="empty-state">Loading sessions…</div> : null}
+        {loading ? <div className="empty-state">{t("Loading sessions…")}</div> : null}
         {!loading && sessions.length === 0 ? (
-          <div className="empty-state">No conversations yet.</div>
+          <div className="empty-state">{t("No conversations yet.")}</div>
         ) : null}
         {visibleSessions.map((session) => (
           <div
@@ -91,7 +93,7 @@ export function SessionSidebar({
                 onClick={() => onSelect(session.session_id)}
                 onDoubleClick={() => onStartRename(session)}
               >
-                <span className="session-title">{session.title || "Untitled conversation"}</span>
+                <span className="session-title">{session.title || t("Untitled conversation")}</span>
                 <span className="session-meta">
                   {session.busy ? <span className="busy-indicator" /> : null}
                   {session.model_display_name} · {formatDate(session.updated_at)}
@@ -102,15 +104,15 @@ export function SessionSidebar({
               <span className="session-actions">
                 <button
                   onClick={() => onStartRename(session)}
-                  title="Rename conversation"
-                  aria-label="Rename conversation"
+                  title={t("Rename conversation")}
+                  aria-label={t("Rename conversation")}
                 >
                   <Pencil size={13} />
                 </button>
                 <button
                   onClick={() => onDelete(session)}
-                  title="Delete conversation"
-                  aria-label="Delete conversation"
+                  title={t("Delete conversation")}
+                  aria-label={t("Delete conversation")}
                 >
                   <Trash2 size={13} />
                 </button>
@@ -120,7 +122,7 @@ export function SessionSidebar({
         ))}
       </div>
       <div className="sidebar-footer">
-        <span>{sessions.length} conversations</span>
+        <span>{t("{{count}} conversations", { count: sessions.length })}</span>
         <span className="workspace-path" title={sessions[0]?.workspace_root}>
           {shortPath(sessions[0]?.workspace_root ?? "")}
         </span>
