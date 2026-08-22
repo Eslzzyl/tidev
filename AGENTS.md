@@ -1,8 +1,9 @@
 # tidev 项目指导
 
-tidev 是一个用纯 Rust 编写的 AI coding agent（TUI + ACP）。工作区是 Cargo
-workspace，由 `crates/` 下的 13 个 crate 组成。当前架构边界与设计约束见
-`rewrite-plan/architecture.md`，架构决策记录见 `rewrite-plan/decisions/`。
+tidev 是一个用纯 Rust 编写的 AI coding agent（TUI + ACP + Web）。工作区是 Cargo
+workspace，由 `crates/` 下的 14 个 crate 组成；`web/` 下是独立的 Web 前端项目。
+当前架构边界与设计约束见 `rewrite-plan/architecture.md`，架构决策记录见
+`rewrite-plan/decisions/`，Web 前端约定见 `web/AGENTS.md`。
 
 ## 铁律
 
@@ -28,7 +29,7 @@ workspace，由 `crates/` 下的 13 个 crate 组成。当前架构边界与设�
 
 ## 项目结构
 
-`crates/` 下 13 个 crate，依赖方向自底向上：
+`crates/` 下 14 个 crate，依赖方向自底向上：
 
 - `tidev-llm`：协议类型、provider 实现、LlmEvent；只依赖外部库。
 - `tidev-agent`：通用 agent 循环（AgentContext、run_agent_loop）、消息缓冲与上下文管理、工具契约与注册、MCP；内部只依赖 tidev-llm。
@@ -36,7 +37,12 @@ workspace，由 `crates/` 下的 13 个 crate 组成。当前架构边界与设�
 - `tidev-core`：tidev 宿主，Runtime、SessionManager、审批、快照、指令注入、子代理、undo。
 - `tidev-tui`：终端界面，通过 `tidev-core::Runtime` 交互。
 - `tidev-acp`：ACP 接入。
+- `tidev-web`：Web 接入，axum HTTP 服务（默认端口 26502），提供 `/api` REST、
+  `/api/events` SSE 与终端 WebSocket，托管 `web/dist` 构建产物；依赖 tidev-core。
 - `tidev-config` / `tidev-storage` / `tidev-search` / `tidev-snapshot` / `tidev-instructions` / `tidev-logging` / `tidev-utils`：配置、持久化、搜索、快照、指令、日志与通用工具。
+
+`web/` 是 Web 前端（Vite + React + TypeScript，pnpm 管理，非 Cargo 成员），发布时
+构建产物嵌入 `tidev-web` 二进制；详见 `web/AGENTS.md`。
 
 ## 常用命令
 
@@ -57,3 +63,4 @@ workspace，由 `crates/` 下的 13 个 crate 组成。当前架构边界与设�
 - `rewrite-plan/decisions/`：架构决策记录（ADR）。
 - `rewrite-plan/todo.md`：待补充的功能清单。
 - `docs/dev/tidev/`：具体模块设计文档。
+- `web/AGENTS.md`：Web 前端的项目指导。
