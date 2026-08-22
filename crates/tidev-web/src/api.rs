@@ -1354,13 +1354,22 @@ struct GitGraphCommit {
 }
 
 #[derive(Serialize)]
-struct GitShowFilesResponse {
-    files: Vec<String>,
+struct GitShowResponse {
+    sha: String,
+    author: String,
+    date: String,
+    message: String,
+    files: Vec<GitCommitFileInfo>,
+    total_additions: usize,
+    total_deletions: usize,
 }
 
 #[derive(Serialize)]
-struct GitDiffResponse {
-    diff: String,
+struct GitCommitFileInfo {
+    path: String,
+    status: String,
+    additions: usize,
+    deletions: usize,
 }
 
 #[derive(Serialize)]
@@ -1578,33 +1587,88 @@ async fn git_graph(
 async fn git_show_files(
     State(state): State<Arc<AppState>>,
     Path(sha): Path<String>,
-) -> Result<Json<GitShowFilesResponse>, ApiError> {
+) -> Result<Json<GitShowResponse>, ApiError> {
     let cwd = git_workspace(&state);
-    let output = run_git(&["show", "--name-only", "--pretty=format:", &sha], &cwd)
-        .map_err(|e| ApiError::not_found(e))?;
-    let files = output
+    let metadata = run_git(
+        &["show", "-s", "--format=%H%x1f%an%x1f%aI%x1f%s", &sha],
+        &cwd,
+    )
+    .map_err(ApiError::not_found)?;
+    let fields: Vec<&str> = metadata.trim_end().splitn(4, '\x1f').collect();
+    if fields.len() != 4 {
+        return Err(ApiError::not_found("Invalid git show response"));
+    }
+
+    let output = run_git(
+        &["show", "--format=", "--numstat", "--find-renames", &sha],
+        &cwd,
+    )
+    .map_err(ApiError::not_found)?;
+    let files: Vec<GitCommitFileInfo> = output
         .lines()
-        .filter(|l| !l.trim().is_empty())
-        .map(|s| s.to_string())
+        .filter_map(|line| {
+            let parts: Vec<&str> = line.splitn(3, '\t').collect();
+            if parts.len() != 3 {
+                return None;
+            }
+            let additions = parts[0].parse().unwrap_or(0);
+            let deletions = parts[1].parse().unwrap_or(0);
+            let status = match (additions, deletions) {
+                (0, deletions) if deletions > 0 => "D",
+                (additions, 0) if additions > 0 => "A",
+                _ => "M",
+            };
+            Some(GitCommitFileInfo {
+                path: parts[2].to_string(),
+                status: status.to_string(),
+                additions,
+                deletions,
+            })
+        })
         .collect();
-    Ok(Json(GitShowFilesResponse { files }))
+    let total_additions = files.iter().map(|file| file.additions).sum();
+    let total_deletions = files.iter().map(|file| file.deletions).sum();
+
+    Ok(Json(GitShowResponse {
+        sha: fields[0].to_string(),
+        author: fields[1].to_string(),
+        date: fields[2].to_string(),
+        message: fields[3].trim_end().to_string(),
+        files,
+        total_additions,
+        total_deletions,
+    }))
 }
 
 async fn git_show_diff(
     State(state): State<Arc<AppState>>,
     Path(sha): Path<String>,
     Query(params): Query<std::collections::HashMap<String, String>>,
-) -> Result<Json<GitDiffResponse>, ApiError> {
+) -> Result<Json<Vec<GitFileDiffResponse>>, ApiError> {
     let cwd = git_workspace(&state);
-    let args = vec!["show", "--pretty=format:", &sha, "--"];
-    let path = params.get("path").cloned();
-    let output = if let Some(p) = path.as_deref() {
-        run_git(&["show", "--pretty=format:", &sha, "--", p], &cwd)
-    } else {
-        run_git(&args, &cwd)
+    if let Some(path) = params.get("path") {
+        let output = run_git(&["show", "--pretty=format:", &sha, "--", path], &cwd)
+            .map_err(ApiError::not_found)?;
+        return Ok(Json(vec![GitFileDiffResponse {
+            path: path.clone(),
+            diff: output,
+        }]));
     }
-    .map_err(|e| ApiError::not_found(e))?;
-    Ok(Json(GitDiffResponse { diff: output }))
+
+    let commit = git_show_files(State(state.clone()), Path(sha.clone()))
+        .await
+        .map_err(|error| ApiError::not_found(error.message))?
+        .0;
+    let mut diffs = Vec::with_capacity(commit.files.len());
+    for file in commit.files {
+        let output = run_git(&["show", "--pretty=format:", &sha, "--", &file.path], &cwd)
+            .map_err(ApiError::not_found)?;
+        diffs.push(GitFileDiffResponse {
+            path: file.path,
+            diff: output,
+        });
+    }
+    Ok(Json(diffs))
 }
 
 async fn git_diff_file(

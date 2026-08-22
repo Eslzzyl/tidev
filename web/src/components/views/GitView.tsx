@@ -76,6 +76,8 @@ export function GitView() {
   // Mobile detail sheet
   const [detailOpen, setDetailOpen] = useState(false);
   const [animateOut, setAnimateOut] = useState(false);
+  const desktopDetailScrollRef = useRef<HTMLDivElement>(null);
+  const mobileDetailScrollRef = useRef<HTMLDivElement>(null);
 
   // Submodule toggle
   const [showSubmodules, setShowSubmodules] = useState(false);
@@ -255,13 +257,25 @@ export function GitView() {
         diffMap[d.path] = d;
       }
       setFileDiffs((prev) => ({ ...prev, ...diffMap }));
-      setExpandedFiles(new Set([...expandedFiles, ...diffs.map((d) => d.path)]));
+      setExpandedFiles((prev) => new Set([...prev, ...diffs.map((d) => d.path)]));
     } catch (err) {
       setDetailError(err instanceof Error ? err.message : t("Failed to load all diffs"));
     } finally {
       setLoadingAllDiffs(false);
     }
   }, [selectedCommit, expandedFiles]);
+
+  const toggleAllDiffs = useCallback(async () => {
+    if (!selectedCommit) return;
+    const allDiffsExpanded =
+      selectedCommit.files.length > 0 &&
+      selectedCommit.files.every((file) => expandedFiles.has(file.path));
+    if (allDiffsExpanded) {
+      setExpandedFiles(new Set());
+      return;
+    }
+    await loadAllDiffs();
+  }, [selectedCommit, expandedFiles, loadAllDiffs]);
 
   const closeDetail = useCallback(() => {
     setDetailOpen(false);
@@ -505,7 +519,7 @@ export function GitView() {
           <button
             onClick={handlePull}
             disabled={pushPullLoading}
-            className="rounded p-1.5 text-neutral-500 hover:bg-neutral-200 dark:hover:bg-neutral-700"
+            className="git-icon-button rounded p-1.5 text-neutral-500 hover:bg-neutral-200 dark:hover:bg-neutral-700"
             title={t("Pull")}
           >
             {pushPullLoading ? (
@@ -517,7 +531,7 @@ export function GitView() {
           <button
             onClick={handlePush}
             disabled={pushPullLoading}
-            className="rounded p-1.5 text-neutral-500 hover:bg-neutral-200 dark:hover:bg-neutral-700"
+            className="git-icon-button rounded p-1.5 text-neutral-500 hover:bg-neutral-200 dark:hover:bg-neutral-700"
             title={t("Push")}
           >
             <ArrowUpFromLine className="h-3.5 w-3.5" />
@@ -525,7 +539,7 @@ export function GitView() {
           <button
             onClick={handleStash}
             disabled={stashLoading}
-            className="rounded p-1.5 text-neutral-500 hover:bg-neutral-200 dark:hover:bg-neutral-700"
+            className="git-icon-button rounded p-1.5 text-neutral-500 hover:bg-neutral-200 dark:hover:bg-neutral-700"
             title={t("Stash")}
           >
             {stashLoading ? (
@@ -537,7 +551,7 @@ export function GitView() {
           <button
             onClick={refreshStatus}
             disabled={loading}
-            className="rounded p-1.5 text-neutral-500 hover:bg-neutral-200 dark:hover:bg-neutral-700"
+            className="git-icon-button rounded p-1.5 text-neutral-500 hover:bg-neutral-200 dark:hover:bg-neutral-700"
             title={t("Refresh")}
           >
             <RotateCcw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
@@ -626,8 +640,12 @@ export function GitView() {
 
             {/* Right: Commit detail */}
             <div
+              ref={desktopDetailScrollRef}
               className="hidden overflow-y-auto md:block"
-              style={{ flex: `${(1 - splitRatio) * 100}%` }}
+              style={{
+                flex: `${(1 - splitRatio) * 100}%`,
+                overscrollBehaviorX: "none",
+              }}
             >
               {selectedCommit ? (
                 <div className="p-4">
@@ -640,7 +658,8 @@ export function GitView() {
                     detailError={detailError}
                     expandedFiles={expandedFiles}
                     onLoadFileDiff={loadFileDiff}
-                    onLoadAllDiffs={loadAllDiffs}
+                    onToggleAllDiffs={toggleAllDiffs}
+                    scrollRef={desktopDetailScrollRef}
                   />
                 </div>
               ) : (
@@ -696,7 +715,11 @@ export function GitView() {
               </span>
             </div>
             {/* Scrollable content */}
-            <div className="flex-1 overflow-y-auto overscroll-contain">
+            <div
+              ref={mobileDetailScrollRef}
+              className="flex-1 overflow-y-auto overscroll-contain"
+              style={{ overscrollBehaviorX: "none" }}
+            >
               <div className="p-4">
                 <CommitDetailPanel
                   commit={selectedCommit}
@@ -707,7 +730,8 @@ export function GitView() {
                   detailError={detailError}
                   expandedFiles={expandedFiles}
                   onLoadFileDiff={loadFileDiff}
-                  onLoadAllDiffs={loadAllDiffs}
+                  onToggleAllDiffs={toggleAllDiffs}
+                  scrollRef={mobileDetailScrollRef}
                 />
               </div>
             </div>

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useLayoutEffect, useRef, useState } from "react";
 import { BarChart3, FolderTree, GitBranch, MessageSquare, Settings, Terminal } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -33,6 +33,35 @@ const features: { id: Feature; label: string; icon: typeof MessageSquare }[] = [
 export default function App() {
   const { t } = useTranslation();
   const [feature, setFeature] = useState<Feature>("chat");
+  const featureNavRef = useRef<HTMLElement>(null);
+  const featureButtonRefs = useRef<Partial<Record<Feature, HTMLButtonElement | null>>>({});
+  const [featureIndicator, setFeatureIndicator] = useState({
+    left: 0,
+    width: 0,
+    visible: false,
+  });
+
+  useLayoutEffect(() => {
+    const updateIndicator = () => {
+      const nav = featureNavRef.current;
+      const button = featureButtonRefs.current[feature];
+      if (!nav || !button) return;
+
+      const navRect = nav.getBoundingClientRect();
+      const buttonRect = button.getBoundingClientRect();
+      setFeatureIndicator({
+        left: buttonRect.left - navRect.left,
+        width: buttonRect.width,
+        visible: true,
+      });
+    };
+
+    updateIndicator();
+    const observer = new ResizeObserver(updateIndicator);
+    if (featureNavRef.current) observer.observe(featureNavRef.current);
+    return () => observer.disconnect();
+  }, [feature]);
+
   const {
     authChecking,
     authRequired,
@@ -98,38 +127,38 @@ export default function App() {
           <span className="brand-glyph">t</span>
           <span>tidev</span>
         </div>
-        <nav className="feature-nav" aria-label={t("Primary navigation")}>
+        <nav ref={featureNavRef} className="feature-nav" aria-label={t("Primary navigation")}>
           {features.map(({ id, label, icon: Icon }) => (
             <button
               className={feature === id ? "feature-link active" : "feature-link"}
               key={id}
+              ref={(button) => {
+                featureButtonRefs.current[id] = button;
+              }}
               onClick={() => setFeature(id)}
             >
               <Icon size={16} strokeWidth={1.8} />
               {t(label)}
             </button>
           ))}
+          <span
+            className="feature-nav-indicator"
+            aria-hidden="true"
+            style={{
+              width: `${featureIndicator.width}px`,
+              transform: `translateX(${featureIndicator.left}px)`,
+              opacity: featureIndicator.visible ? 1 : 0,
+            }}
+          />
         </nav>
-        <div className="header-title">
-          {feature === "chat"
-            ? (selectedSession?.title ?? t("Chat"))
-            : t(features.find((item) => item.id === feature)?.label ?? "Chat")}
-          {feature === "chat" && activeModel ? (
-            <span>· {activeModel.model_display_name}</span>
-          ) : null}
-        </div>
-        <div className="topbar-meta">
-          <span className="connection-dot" />
-          <span>{t("Local runtime")}</span>
-          <button
-            className="settings-button"
-            onClick={openSettingsPanel}
-            aria-label={t("Settings")}
-            title={t("Settings")}
-          >
-            <Settings size={16} />
-          </button>
-        </div>
+        <button
+          className="settings-button"
+          onClick={openSettingsPanel}
+          aria-label={t("Settings")}
+          title={t("Settings")}
+        >
+          <Settings size={16} />
+        </button>
       </header>
 
       <main className="workspace">

@@ -192,13 +192,37 @@ button {
   font-weight: 700;
 }
 .feature-nav {
+  position: relative;
   display: flex;
   align-items: stretch;
   align-self: stretch;
   align-self: auto;
   gap: 1px;
 }
+.feature-nav-indicator {
+  position: absolute;
+  inset-block: 0;
+  z-index: 0;
+  border-radius: 6px;
+  background: #f5f5f5;
+  pointer-events: none;
+  transition:
+    opacity 120ms ease,
+    transform 200ms ease,
+    width 200ms ease;
+}
+:root[data-theme="dark"] .feature-nav-indicator,
+:root.dark .feature-nav-indicator {
+  background: #262626;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .feature-nav-indicator {
+    background: #262626;
+  }
+}
 .feature-link {
+  position: relative;
+  z-index: 1;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -219,37 +243,19 @@ button {
 }
 .feature-link.active {
   color: var(--text);
-  background: var(--selected);
-  box-shadow: inset 0 0 0 1px var(--line);
+  background: transparent;
+  box-shadow: none;
+  font-weight: 500;
 }
-.header-title {
-  min-width: 0;
-  flex: 1;
-  overflow: hidden;
-  color: var(--muted);
-  font-size: 12px;
-  text-align: center;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.header-title span {
-  color: var(--muted);
-  font-size: 11px;
-}
-.topbar-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-left: auto;
-  color: var(--muted);
-  font-size: 12px;
+.feature-link.active:hover {
+  background: transparent;
 }
 .settings-button {
   display: grid;
   place-items: center;
   width: 28px;
   height: 28px;
-  margin-left: 8px;
+  margin-left: auto;
   border: 0;
   border-radius: 6px;
   color: var(--muted);
@@ -260,14 +266,6 @@ button {
   color: var(--text);
   background: var(--hover);
 }
-.connection-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent);
-}
-
 .workspace {
   min-height: 0;
   flex: 1;
@@ -329,15 +327,33 @@ button {
   color: var(--accent-contrast);
   background: var(--text);
 }
-.git-commit-button {
+.git-primary-button {
   color: var(--accent-contrast);
   background: var(--text);
 }
-.git-commit-button:disabled {
+.git-primary-button:disabled {
   color: var(--muted);
   background: var(--line);
   opacity: 1;
   cursor: not-allowed;
+}
+.git-icon-button:disabled {
+  color: var(--muted);
+  background: transparent;
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.git-icon-button:disabled:hover {
+  background: transparent;
+}
+.git-inline-button:disabled {
+  color: var(--muted);
+  background: transparent;
+  opacity: 1;
+  cursor: not-allowed;
+}
+.git-inline-button:disabled:hover {
+  background: transparent;
 }
 .session-sidebar {
   width: 262px;
@@ -491,6 +507,16 @@ button {
   color: var(--text);
   background: var(--panel-strong);
   font-size: 12px;
+}
+.rename-submit-button {
+  color: #ffffff;
+}
+.rename-submit-button:disabled {
+  color: #404040;
+}
+:root[data-theme="dark"] .rename-submit-button:disabled,
+:root.dark .rename-submit-button:disabled {
+  color: #e5e5e5;
 }
 .session-title {
   overflow: hidden;
@@ -1962,9 +1988,6 @@ button {
   .feature-link svg {
     width: 18px;
     height: 18px;
-  }
-  .topbar-meta {
-    display: none;
   }
   .session-sidebar {
     width: 205px;

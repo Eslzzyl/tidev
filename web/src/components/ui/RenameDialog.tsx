@@ -72,9 +72,9 @@ export function RenameDialog({ currentName, onSubmit, onClose }: RenameDialogPro
             <button
               type="submit"
               disabled={!name.trim() || name.trim() === currentName}
-              className="rounded bg-blue-600 px-3 py-1 text-xs text-white hover:bg-blue-700 disabled:opacity-40"
+              className="rename-submit-button rounded bg-blue-600 px-3 py-1 text-xs hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-neutral-300 disabled:text-neutral-700 dark:disabled:bg-neutral-700 dark:disabled:text-neutral-200"
             >
-              Rename
+              {t("Rename")}
             </button>
           </div>
         </form>

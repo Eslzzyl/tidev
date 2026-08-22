@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import {
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   Copy,
   FileEdit,
   FilePlus,
@@ -13,7 +14,7 @@ import {
   User,
 } from "lucide-react";
 import type { GitFileDiffResponse, GitShowResponse } from "../../../types/api";
-import { DiffRenderer } from "../../renderers/DiffRenderer";
+import { DiffRenderer, DiffScrollProvider } from "../../renderers/DiffRenderer";
 import { ContextMenu, type ContextMenuItem } from "../../ui/ContextMenu";
 import { formatGitDate } from "../../../utils/format";
 import { GitGraphSVG, getGraphWidth, GRAPH_ROW_HEIGHT } from "../GitGraph";
@@ -290,7 +291,8 @@ export function CommitDetailPanel({
   detailError,
   expandedFiles,
   onLoadFileDiff,
-  onLoadAllDiffs,
+  onToggleAllDiffs,
+  scrollRef,
 }: {
   commit: GitShowResponse;
   fileDiffs: Record<string, GitFileDiffResponse>;
@@ -300,9 +302,13 @@ export function CommitDetailPanel({
   detailError: string | null;
   expandedFiles: Set<string>;
   onLoadFileDiff: (path: string) => void;
-  onLoadAllDiffs: () => void;
+  onToggleAllDiffs: () => void;
+  scrollRef: RefObject<HTMLDivElement | null>;
 }) {
   const { t } = useTranslation();
+  const contentRef = useRef<HTMLDivElement>(null);
+  const allDiffsExpanded =
+    commit.files.length > 0 && commit.files.every((file) => expandedFiles.has(file.path));
   const statusIcon = (s: string) => {
     switch (s) {
       case "A":
@@ -333,103 +339,109 @@ export function CommitDetailPanel({
   }
 
   return (
-    <div className="space-y-4">
-      {/* Commit header */}
-      <div>
-        <div className="flex items-center gap-2">
-          <GitCommitHorizontal className="h-4 w-4 text-neutral-400" />
-          <span className="font-mono text-xs text-neutral-500">{commit.sha.substring(0, 7)}</span>
+    <DiffScrollProvider scrollRef={scrollRef} contentRef={contentRef}>
+      <div ref={contentRef} className="space-y-4">
+        {/* Commit header */}
+        <div>
+          <div className="flex items-center gap-2">
+            <GitCommitHorizontal className="h-4 w-4 text-neutral-400" />
+            <span className="font-mono text-xs text-neutral-500">{commit.sha.substring(0, 7)}</span>
+          </div>
+          <p className="mt-1 text-sm font-medium text-neutral-900 dark:text-neutral-100">
+            {commit.message}
+          </p>
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-neutral-500">
+            <span>{commit.author}</span>
+            <span>·</span>
+            <span>{new Date(commit.date).toLocaleString()}</span>
+          </div>
+          <div className="mt-1 flex items-center gap-2 text-xs">
+            <span className="text-green-600">+{commit.total_additions}</span>
+            <span className="text-red-600">-{commit.total_deletions}</span>
+            <span className="text-neutral-400">
+              {t("{{count}} files", { count: commit.files.length })}
+            </span>
+          </div>
         </div>
-        <p className="mt-1 text-sm font-medium text-neutral-900 dark:text-neutral-100">
-          {commit.message}
-        </p>
-        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-neutral-500">
-          <span>{commit.author}</span>
-          <span>·</span>
-          <span>{new Date(commit.date).toLocaleString()}</span>
-        </div>
-        <div className="mt-1 flex items-center gap-2 text-xs">
-          <span className="text-green-600">+{commit.total_additions}</span>
-          <span className="text-red-600">-{commit.total_deletions}</span>
-          <span className="text-neutral-400">
-            {t("{{count}} files", { count: commit.files.length })}
-          </span>
-        </div>
-      </div>
 
-      {/* Divider */}
-      <div className="border-t border-neutral-200 dark:border-neutral-800" />
+        {/* Divider */}
+        <div className="border-t border-neutral-200 dark:border-neutral-800" />
 
-      {/* File list */}
-      <div>
-        <div className="mb-2 flex items-center justify-between">
-          <h3 className="text-xs font-medium uppercase text-neutral-500">
-            {t("Changed Files ({{count}})", { count: commit.files.length })}
-          </h3>
-          <button
-            onClick={onLoadAllDiffs}
-            disabled={loadingAllDiffs}
-            className="flex items-center gap-1 rounded px-2 py-1 text-[10px] text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800 disabled:opacity-50"
-          >
-            {loadingAllDiffs ? (
-              <Loader2 className="h-3 w-3 animate-spin" />
-            ) : (
-              <ChevronDown className="h-3 w-3" />
-            )}
-            {t("Show all diffs")}
-          </button>
-        </div>
-        <div className="space-y-1">
-          {commit.files.map((file) => (
-            <div key={file.path}>
-              <button
-                onClick={() => onLoadFileDiff(file.path)}
-                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800"
-              >
-                {statusIcon(file.status)}
-                <span className="flex-1 truncate text-left text-neutral-700 dark:text-neutral-300">
-                  {file.path}
-                </span>
-                <span className="flex-shrink-0 text-[10px] text-green-600">+{file.additions}</span>
-                <span className="flex-shrink-0 text-[10px] text-red-600">-{file.deletions}</span>
-                {loadingFileDiff === file.path && (
-                  <Loader2 className="h-3 w-3 animate-spin text-neutral-400" />
-                )}
-                <ChevronRight
-                  className={`h-3 w-3 text-neutral-400 transition-transform ${
-                    expandedFiles.has(file.path) ? "rotate-90" : ""
-                  }`}
-                />
-              </button>
-
-              {/* Inline diff for this file — smooth height transition */}
-              <div
-                className="motion-safe:transition-all motion-safe:duration-300 motion-safe:ease-smooth grid"
-                style={{
-                  gridTemplateRows:
-                    expandedFiles.has(file.path) && fileDiffs[file.path] ? "1fr" : "0fr",
-                  opacity: expandedFiles.has(file.path) && fileDiffs[file.path] ? 1 : 0,
-                }}
-              >
-                <div className="min-h-0 overflow-hidden">
-                  {fileDiffs[file.path] && (
-                    <div className="ml-4 border-l-2 border-neutral-200 pl-2 dark:border-neutral-700">
-                      {fileDiffs[file.path].diff ? (
-                        <DiffRenderer diff={fileDiffs[file.path].diff} filepath={file.path} />
-                      ) : (
-                        <p className="py-2 text-xs text-neutral-400">
-                          {t("No diff content (binary or empty file)")}
-                        </p>
-                      )}
-                    </div>
+        {/* File list */}
+        <div>
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="text-xs font-medium uppercase text-neutral-500">
+              {t("Changed Files ({{count}})", { count: commit.files.length })}
+            </h3>
+            <button
+              onClick={onToggleAllDiffs}
+              disabled={loadingAllDiffs}
+              className="git-inline-button flex items-center gap-1 rounded px-2 py-1 text-[10px] text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+            >
+              {loadingAllDiffs ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : allDiffsExpanded ? (
+                <ChevronUp className="h-3 w-3" />
+              ) : (
+                <ChevronDown className="h-3 w-3" />
+              )}
+              {t(allDiffsExpanded ? "Hide all diffs" : "Show all diffs")}
+            </button>
+          </div>
+          <div className="space-y-1">
+            {commit.files.map((file) => (
+              <div key={file.path}>
+                <button
+                  onClick={() => onLoadFileDiff(file.path)}
+                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                >
+                  {statusIcon(file.status)}
+                  <span className="flex-1 truncate text-left text-neutral-700 dark:text-neutral-300">
+                    {file.path}
+                  </span>
+                  <span className="flex-shrink-0 text-[10px] text-green-600">
+                    +{file.additions}
+                  </span>
+                  <span className="flex-shrink-0 text-[10px] text-red-600">-{file.deletions}</span>
+                  {loadingFileDiff === file.path && (
+                    <Loader2 className="h-3 w-3 animate-spin text-neutral-400" />
                   )}
+                  <ChevronRight
+                    className={`h-3 w-3 text-neutral-400 transition-transform ${
+                      expandedFiles.has(file.path) ? "rotate-90" : ""
+                    }`}
+                  />
+                </button>
+
+                {/* Inline diff for this file — smooth height transition */}
+                <div
+                  className="motion-safe:transition-all motion-safe:duration-300 motion-safe:ease-smooth grid"
+                  style={{
+                    gridTemplateRows:
+                      expandedFiles.has(file.path) && fileDiffs[file.path] ? "1fr" : "0fr",
+                    opacity: expandedFiles.has(file.path) && fileDiffs[file.path] ? 1 : 0,
+                  }}
+                >
+                  <div className="min-h-0 overflow-hidden">
+                    {fileDiffs[file.path] && (
+                      <div className="ml-4 border-l-2 border-neutral-200 pl-2 dark:border-neutral-700">
+                        {fileDiffs[file.path].diff ? (
+                          <DiffRenderer diff={fileDiffs[file.path].diff} filepath={file.path} />
+                        ) : (
+                          <p className="py-2 text-xs text-neutral-400">
+                            {t("No diff content (binary or empty file)")}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       </div>
-    </div>
+    </DiffScrollProvider>
   );
 }
 

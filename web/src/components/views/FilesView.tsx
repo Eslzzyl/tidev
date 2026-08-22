@@ -185,7 +185,7 @@ export function FilesView() {
 
   return (
     <div className="flex h-full">
-      {/* Collapsed strip (mobile-only, always visible when collapsed) */}
+      {/* Collapsed strip, always visible when the file tree is closed */}
       {!fileTreeOpen && (
         <button
           onClick={toggleFileTree}
@@ -205,7 +205,7 @@ export function FilesView() {
       <div
         ref={panelRef}
         className={`flex flex-col border-r border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-950 ${
-          fileTreeOpen ? "flex" : "hidden md:flex"
+          fileTreeOpen ? "flex" : "hidden"
         } ${
           // On mobile, when open, overlay the panel
           fileTreeOpen && isMobile ? "fixed inset-y-0 left-0 z-50 shadow-xl" : "relative"

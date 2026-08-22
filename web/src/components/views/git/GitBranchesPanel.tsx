@@ -54,7 +54,7 @@ export function BranchesPanel({
           <button
             onClick={onCreateBranch}
             disabled={!newBranchName.trim() || creatingBranch}
-            className="flex items-center gap-1 rounded bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-neutral-800 disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
+            className="git-primary-button flex items-center gap-1 rounded px-3 py-1.5 text-xs font-medium transition-colors hover:bg-neutral-800 dark:hover:bg-neutral-200"
           >
             {creatingBranch ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -70,6 +70,8 @@ export function BranchesPanel({
       <div className="mb-3 flex items-center gap-2">
         <button
           onClick={onToggleSubmodules}
+          aria-label={t("Show submodule branches")}
+          aria-pressed={showSubmodules}
           className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${
             showSubmodules ? "bg-neutral-500" : "bg-neutral-300 dark:bg-neutral-600"
           }`}
