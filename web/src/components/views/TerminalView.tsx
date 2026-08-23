@@ -173,8 +173,6 @@ export function TerminalView() {
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const activeTab = tabs.find((t) => t.id === activeTabId);
-
   return (
     <div className={`flex h-full flex-col ${isDark ? "bg-black" : "bg-white"}`}>
       {/* Tab bar */}
@@ -228,7 +226,7 @@ export function TerminalView() {
       <div className="flex-1 overflow-hidden">
         {tabs.map((tab) => (
           <div key={tab.id} className={tab.id === activeTabId ? "block h-full flex-1" : "hidden"}>
-            {activeTab && <TerminalViewport tab={tab} isDark={isDark} />}
+            <TerminalViewport tab={tab} isDark={isDark} isActive={tab.id === activeTabId} />
           </div>
         ))}
       </div>
@@ -295,9 +293,10 @@ interface TerminalViewportProps {
     connection: TerminalConnection | null;
   };
   isDark: boolean;
+  isActive: boolean;
 }
 
-function TerminalViewport({ tab, isDark }: TerminalViewportProps) {
+function TerminalViewport({ tab, isDark, isActive }: TerminalViewportProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
   const resttyRef = useRef<Restty | null>(null);
   /** Guards against duplicate HTTP starts during StrictMode mount replay. */
@@ -347,6 +346,7 @@ function TerminalViewport({ tab, isDark }: TerminalViewportProps) {
     });
 
     resttyRef.current = restty;
+    restty.setPaused(!isActive);
     restty.connectPty();
     restty.setFontSize(TERMINAL_FONT_SIZE);
     restty.updateSize(true);
@@ -356,6 +356,14 @@ function TerminalViewport({ tab, isDark }: TerminalViewportProps) {
       resttyRef.current = null;
     };
   }, [tab.connection]);
+
+  useEffect(() => {
+    const restty = resttyRef.current;
+    if (!restty) return;
+
+    restty.setPaused(!isActive);
+    if (isActive) restty.updateSize(true);
+  }, [isActive]);
 
   useEffect(() => {
     const restty = resttyRef.current;

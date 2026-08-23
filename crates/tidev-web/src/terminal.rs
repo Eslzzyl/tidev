@@ -6,6 +6,7 @@ use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use bytes::Bytes;
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use tokio::sync::broadcast;
 use uuid::Uuid;
@@ -22,7 +23,7 @@ struct TerminalSession {
     reader_task: tokio::task::JoinHandle<()>,
     /// Child process handle — used for kill() + wait() in close_session().
     child: Option<Box<dyn portable_pty::Child + Send + Sync>>,
-    buffer: Arc<Mutex<Vec<u8>>>,
+    buffer: Arc<Mutex<std::collections::VecDeque<u8>>>,
     /// User-visible tab label (persisted in memory for page-refresh).
     label: String,
 }
@@ -30,7 +31,7 @@ struct TerminalSession {
 #[derive(Clone, Debug)]
 pub struct TerminalOutput {
     pub session_id: Uuid,
-    pub data: Vec<u8>,
+    pub data: Bytes,
     pub closed: bool,
 }
 
@@ -95,7 +96,7 @@ impl TerminalManager {
             .take_writer()
             .map_err(|e| format!("Failed to take PTY writer: {e}"))?;
 
-        let buffer = Arc::new(Mutex::new(Vec::new()));
+        let buffer = Arc::new(Mutex::new(std::collections::VecDeque::new()));
         let buffer_clone = buffer.clone();
         let tx_clone = tx.clone();
         let sid = id;
@@ -107,7 +108,7 @@ impl TerminalManager {
                     Ok(0) => {
                         let _ = tx_clone.send(TerminalOutput {
                             session_id: sid,
-                            data: Vec::new(),
+                            data: Bytes::new(),
                             closed: true,
                         });
                         break;
@@ -115,16 +116,16 @@ impl TerminalManager {
                     Ok(n) => {
                         let data = &buf[..n];
                         let mut guard = buffer_clone.lock().unwrap();
-                        guard.extend_from_slice(data);
+                        guard.extend(data.iter().copied());
                         // Trim buffer to max size
                         if guard.len() > MAX_BUFFER_SIZE {
                             let excess = guard.len() - MAX_BUFFER_SIZE;
-                            guard.drain(..excess);
+                            let _ = guard.drain(..excess);
                         }
                         if tx_clone.receiver_count() > 0 {
                             let _ = tx_clone.send(TerminalOutput {
                                 session_id: sid,
-                                data: data.to_vec(),
+                                data: Bytes::copy_from_slice(data),
                                 closed: false,
                             });
                         }
@@ -134,7 +135,7 @@ impl TerminalManager {
                         log::error!("[terminal {}] read error: {e}", sid);
                         let _ = tx_clone.send(TerminalOutput {
                             session_id: sid,
-                            data: Vec::new(),
+                            data: Bytes::new(),
                             closed: true,
                         });
                         break;
@@ -160,7 +161,7 @@ impl TerminalManager {
         let sessions = self.sessions.lock().await;
         if let Some(s) = sessions.get(&session_id) {
             let guard = s.buffer.lock().unwrap();
-            guard.clone()
+            guard.iter().copied().collect()
         } else {
             Vec::new()
         }

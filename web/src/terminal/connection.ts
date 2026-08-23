@@ -6,6 +6,9 @@ export type ConnectionStatus = "disconnected" | "connecting" | "connected";
 type DataHandler = (data: string) => void;
 type StatusHandler = (status: ConnectionStatus) => void;
 
+/** Marks a binary WebSocket frame as raw terminal input. */
+const RAW_INPUT_PREFIX = 0;
+
 /**
  * A reconnecting WebSocket connection for one server-side PTY session.
  *
@@ -22,6 +25,7 @@ export class TerminalConnection {
   private readonly _reconnectLimit = 7;
   private _reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
   private _decoder = new TextDecoder();
+  private readonly _encoder = new TextEncoder();
   private _disposed = false;
 
   constructor(sessionId: string) {
@@ -125,7 +129,13 @@ export class TerminalConnection {
   }
 
   sendInput(data: string): boolean {
-    return this._send({ type: "input", data });
+    if (!this._ws || this._ws.readyState !== WebSocket.OPEN) return false;
+    const encoded = this._encoder.encode(data);
+    const frame = new Uint8Array(encoded.length + 1);
+    frame[0] = RAW_INPUT_PREFIX;
+    frame.set(encoded, 1);
+    this._ws.send(frame);
+    return true;
   }
 
   resize(cols: number, rows: number, meta?: PtyResizeMeta): boolean {

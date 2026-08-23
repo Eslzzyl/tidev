@@ -11,7 +11,8 @@
 //! The protocol follows restty's native WebSocket PTY transport.
 //!
 //! **Client → Server:**
-//! - `{"type":"input","data":"<text>"}` — Send input to the PTY
+//! - Binary `[0x00][UTF-8 input]` — Fast-path input to the PTY
+//! - `{"type":"input","data":"<text>"}` — Legacy text input to the PTY
 //! - `{"type":"resize","cols":<cols>,"rows":<rows>}` — Resize the PTY
 //!
 //! **Server → Client:**
@@ -95,23 +96,47 @@ struct SessionEntry {
 
 #[derive(Deserialize)]
 #[serde(tag = "type")]
-enum PtyClientMessage {
+enum PtyClientJsonMessage {
     #[serde(rename = "input")]
     Input { data: String },
     #[serde(rename = "resize")]
     Resize { cols: u16, rows: u16 },
 }
 
-/// Parse a restty PTY message from a WebSocket text or UTF-8 binary frame.
-fn parse_pty_message(msg: &Message) -> Result<PtyClientMessage, String> {
-    let text = match msg {
-        Message::Text(t) => t.to_string(),
-        Message::Binary(d) => String::from_utf8(d.to_vec())
-            .map_err(|_| "invalid UTF-8 in binary message".to_string())?,
-        _ => return Err("unexpected message type".to_string()),
-    };
+enum PtyClientMessage {
+    InputText(String),
+    InputBytes(bytes::Bytes),
+    Resize { cols: u16, rows: u16 },
+}
 
-    serde_json::from_str(&text).map_err(|e| format!("invalid PTY message: {e}"))
+const RAW_INPUT_PREFIX: u8 = 0;
+
+/// Parse a PTY message from a text frame or a prefixed binary input frame.
+fn parse_pty_message(msg: Message) -> Result<PtyClientMessage, String> {
+    match msg {
+        // Prefixed binary frames avoid JSON serialization and parsing for
+        // every keypress and paste operation. Unprefixed binary JSON remains
+        // supported for compatibility with the previous protocol.
+        Message::Binary(data) if data.first() == Some(&RAW_INPUT_PREFIX) => {
+            Ok(PtyClientMessage::InputBytes(data.slice(1..)))
+        }
+        Message::Binary(data) => {
+            let text = String::from_utf8(data.to_vec())
+                .map_err(|_| "invalid UTF-8 in binary message".to_string())?;
+            parse_json_pty_message(&text)
+        }
+        Message::Text(text) => parse_json_pty_message(&text),
+        _ => Err("unexpected message type".to_string()),
+    }
+}
+
+fn parse_json_pty_message(text: &str) -> Result<PtyClientMessage, String> {
+    let message: PtyClientJsonMessage =
+        serde_json::from_str(text).map_err(|e| format!("invalid PTY message: {e}"))?;
+    Ok(match message {
+        PtyClientJsonMessage::Input { data } => PtyClientMessage::InputText(data),
+        PtyClientJsonMessage::Resize { cols, rows } => PtyClientMessage::Resize { cols, rows },
+    })
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────
@@ -463,48 +488,6 @@ async fn handle_terminal_ws(mut ws: WebSocket, state: Arc<AppState>, session_id:
     // Subscribe to terminal output
     let mut rx = terminal_tx.subscribe();
 
-    // Channel for sending messages to the WebSocket from the spawned task.
-    let (output_tx, mut output_rx) = tokio::sync::mpsc::channel::<Message>(256);
-
-    // Spawn a task to forward terminal output to the mpsc channel.
-    let cancel_clone = cancel_token.clone();
-    let output_tx_clone = output_tx.clone();
-    let sid = session_id;
-    let output_task = tokio::spawn(async move {
-        loop {
-            tokio::select! {
-                _ = cancel_clone.cancelled() => break,
-                result = rx.recv() => {
-                    let output = match result {
-                        Ok(o) => o,
-                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                            log::warn!("terminal WS output lagged by {n} for session {sid}");
-                            continue;
-                        }
-                    };
-
-                    if output.session_id != sid {
-                        continue;
-                    }
-
-                    if output.closed {
-                        let _ = output_tx_clone
-                            .send(Message::Text(
-                                serde_json::json!({"type": "exit"}).to_string().into(),
-                            ))
-                            .await;
-                        break;
-                    }
-
-                    let _ = output_tx_clone
-                        .send(Message::Binary(output.data.into()))
-                        .await;
-                }
-            }
-        }
-    });
-
     // Main I/O loop
     let mut ping_interval = tokio::time::interval(std::time::Duration::from_secs(30));
 
@@ -514,11 +497,14 @@ async fn handle_terminal_ws(mut ws: WebSocket, state: Arc<AppState>, session_id:
                 match ws_msg {
                     Some(Ok(Message::Close(_))) => break,
                     Some(Ok(msg)) => {
-                        match parse_pty_message(&msg) {
-                            Ok(PtyClientMessage::Input { data }) => {
+                        match parse_pty_message(msg) {
+                            Ok(PtyClientMessage::InputText(data)) => {
                                 let _ = terminal_manager
                                     .write_input(session_id, data.as_bytes())
                                     .await;
+                            }
+                            Ok(PtyClientMessage::InputBytes(data)) => {
+                                let _ = terminal_manager.write_input(session_id, &data).await;
                             }
                             Ok(PtyClientMessage::Resize { cols, rows }) => {
                                 let _ = terminal_manager.resize(session_id, cols, rows).await;
@@ -531,14 +517,30 @@ async fn handle_terminal_ws(mut ws: WebSocket, state: Arc<AppState>, session_id:
                     Some(Err(_)) | None => break,
                 }
             }
-            out_msg = output_rx.recv() => {
-                match out_msg {
-                    Some(msg) => {
-                        if ws.send(msg).await.is_err() {
-                            break;
-                        }
+            result = rx.recv() => {
+                let output = match result {
+                    Ok(o) => o,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        log::warn!("terminal WS output lagged by {n} for session {session_id}");
+                        continue;
                     }
-                    None => break,
+                };
+
+                if output.session_id != session_id {
+                    continue;
+                }
+
+                if output.closed {
+                    let exit = serde_json::json!({"type": "exit"}).to_string().into();
+                    if ws.send(Message::Text(exit)).await.is_err() {
+                        break;
+                    }
+                    break;
+                }
+
+                if ws.send(Message::Binary(output.data)).await.is_err() {
+                    break;
                 }
             }
             _ = ping_interval.tick() => {
@@ -548,8 +550,6 @@ async fn handle_terminal_ws(mut ws: WebSocket, state: Arc<AppState>, session_id:
             }
         }
     }
-
-    output_task.abort();
 }
 
 async fn close_terminal(
@@ -571,8 +571,8 @@ mod tests {
         let message = Message::Text(r#"{"type":"input","data":"pwd\r"}"#.into());
 
         assert!(matches!(
-            parse_pty_message(&message),
-            Ok(PtyClientMessage::Input { data }) if data == "pwd\r"
+            parse_pty_message(message),
+            Ok(PtyClientMessage::InputText(data)) if data == "pwd\r"
         ));
     }
 
@@ -581,7 +581,7 @@ mod tests {
         let message = Message::Text(r#"{"type":"resize","cols":120,"rows":40}"#.into());
 
         assert!(matches!(
-            parse_pty_message(&message),
+            parse_pty_message(message),
             Ok(PtyClientMessage::Resize {
                 cols: 120,
                 rows: 40
@@ -593,6 +593,16 @@ mod tests {
     fn rejects_legacy_array_message() {
         let message = Message::Text(r#"["stdin","pwd"]"#.into());
 
-        assert!(parse_pty_message(&message).is_err());
+        assert!(parse_pty_message(message).is_err());
+    }
+
+    #[test]
+    fn parses_binary_input_message_without_json() {
+        let message = Message::Binary(bytes::Bytes::from_static(b"\0pwd\r"));
+
+        assert!(matches!(
+            parse_pty_message(message),
+            Ok(PtyClientMessage::InputBytes(data)) if data.as_ref() == b"pwd\r"
+        ));
     }
 }
