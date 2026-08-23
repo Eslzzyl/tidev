@@ -56,7 +56,7 @@ pub async fn run(options: WebOptions) -> Result<()> {
         runtime: runtime.clone(),
         frontend_mode,
         cancel: cancel.clone(),
-        terminal_manager,
+        terminal_manager: terminal_manager.clone(),
         terminal_tx,
     };
     let api = crate::api::router().layer(middleware::from_fn_with_state(
@@ -73,13 +73,15 @@ pub async fn run(options: WebOptions) -> Result<()> {
     let listener = TcpListener::bind(addr).await?;
     log::info!("tidev web listening on http://{addr}");
 
-    axum::serve(listener, app)
+    let serve_result = axum::serve(listener, app)
         .with_graceful_shutdown(cancel.cancelled_owned())
-        .await?;
+        .await;
 
+    terminal_manager.shutdown().await;
     frontend.shutdown().await;
     runtime.shutdown().await;
     let _ = signal_task.await;
+    serve_result?;
     Ok(())
 }
 

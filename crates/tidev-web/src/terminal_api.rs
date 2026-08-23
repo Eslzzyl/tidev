@@ -159,7 +159,18 @@ async fn start_terminal(
     //   2. Config override (server-side persisted)
     //   3. $SHELL environment variable
     //   4. /bin/bash (hardcoded fallback in start_session)
-    let shell = req.shell;
+    let configured_shell = {
+        let config = state.runtime.config();
+        #[cfg(windows)]
+        {
+            config.shell.windows_shell
+        }
+        #[cfg(not(windows))]
+        {
+            config.shell.unix_shell
+        }
+    };
+    let shell = req.shell.or(configured_shell);
 
     let label = req.label.unwrap_or_else(|| "Terminal".to_string());
 
@@ -493,6 +504,7 @@ async fn handle_terminal_ws(mut ws: WebSocket, state: Arc<AppState>, session_id:
 
     loop {
         tokio::select! {
+            _ = cancel_token.cancelled() => break,
             ws_msg = ws.recv() => {
                 match ws_msg {
                     Some(Ok(Message::Close(_))) => break,
