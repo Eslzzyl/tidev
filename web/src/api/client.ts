@@ -8,7 +8,6 @@ import type {
   CreateSessionRequest,
   CreateSessionResponse,
   SendMessageRequest,
-  ShellCommandResponse,
   AbortRequest,
   WorkspaceInfo,
   FileSuggestion,
@@ -156,12 +155,6 @@ export const api = {
     fetchJson<{ accepted: boolean }>(`${API_BASE}/sessions/${sessionId}/cancel`, {
       method: "POST",
       body: JSON.stringify(data.request_id ? data : undefined),
-    }),
-
-  sendShellCommand: (sessionId: string, command: string) =>
-    fetchJson<ShellCommandResponse>(`${API_BASE}/sessions/${sessionId}/shell`, {
-      method: "POST",
-      body: JSON.stringify({ command }),
     }),
 
   // Models

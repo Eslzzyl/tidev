@@ -148,6 +148,10 @@ pub struct ToolMetadata {
     pub prior_retained_from: Option<usize>,
     #[serde(default)]
     pub file_changes: Vec<FileChangeInfo>,
+    #[serde(default)]
+    pub exit_code: Option<i32>,
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
     /// Raw OpenAI Responses output items needed to replay reasoning and other
     /// provider-specific items on the next turn.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -209,7 +213,6 @@ pub enum MessageRole {
     Assistant,
     Tool,
     Error,
-    Shell,
 }
 
 impl MessageRole {
@@ -220,7 +223,6 @@ impl MessageRole {
             Self::Assistant => "assistant",
             Self::Tool => "tool",
             Self::Error => "error",
-            Self::Shell => "shell",
         }
     }
 
@@ -237,7 +239,6 @@ impl MessageRole {
             "assistant" => Self::Assistant,
             "tool" => Self::Tool,
             "error" => Self::Error,
-            "shell" => Self::Shell,
             _ => Self::User,
         }
     }
@@ -772,7 +773,6 @@ mod tests {
         );
         assert_eq!(MessageRole::from_db_value("tool"), MessageRole::Tool);
         assert_eq!(MessageRole::from_db_value("error"), MessageRole::Error);
-        assert_eq!(MessageRole::from_db_value("shell"), MessageRole::Shell);
     }
 
     #[test]
@@ -789,7 +789,6 @@ mod tests {
             MessageRole::Assistant,
             MessageRole::Tool,
             MessageRole::Error,
-            MessageRole::Shell,
         ] {
             let db = role.db_value();
             let back = MessageRole::from_db_value(db);

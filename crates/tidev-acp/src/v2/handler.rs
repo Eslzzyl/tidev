@@ -452,17 +452,15 @@ async fn replay_messages(
                     .raw_output(serde_json::Value::String(message.content.clone()));
                     acp::SessionUpdate::ToolCallUpdate(update)
                 }
-                MessageRole::System | MessageRole::Error | MessageRole::Shell => {
-                    acp::SessionUpdate::AgentMessage(
-                        acp::AgentMessage::new(message.id.to_string()).content(vec![
-                            acp::ContentBlock::Text(acp::TextContent::new(format!(
-                                "[{}]\n{}",
-                                message.role.label(),
-                                message.content
-                            ))),
-                        ]),
-                    )
-                }
+                MessageRole::System | MessageRole::Error => acp::SessionUpdate::AgentMessage(
+                    acp::AgentMessage::new(message.id.to_string()).content(vec![
+                        acp::ContentBlock::Text(acp::TextContent::new(format!(
+                            "[{}]\n{}",
+                            message.role.label(),
+                            message.content
+                        ))),
+                    ]),
+                ),
             };
             let _ = cx.send_notification(acp::UpdateSessionNotification::new(
                 session_id.to_string(),

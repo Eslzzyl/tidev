@@ -14,11 +14,163 @@ import type {
   Session,
   TodoItem,
   ToolCall,
+  ToolExecutionResult,
 } from "../types/api";
 import type { StreamMessage } from "../types/chat";
 import { parseSlashCommand } from "../commands";
 import { asString, eventPayload } from "../utils/events";
+import { toolCallEntry, toolResultStatus, type ToolCallEntry } from "../utils/round";
 import i18n from "../i18n";
+
+function createStream(key: string, requestId: number): StreamMessage {
+  return {
+    key,
+    requestId,
+    segments: [],
+    toolCallMap: {},
+    status: "streaming",
+    providerFinished: false,
+    reasoningStartedAt: null,
+    reasoningCompletedAt: null,
+  };
+}
+
+function cloneStream(stream: StreamMessage): StreamMessage {
+  return {
+    ...stream,
+    segments: stream.segments.map((segment) => ({ ...segment })),
+    toolCallMap: { ...stream.toolCallMap },
+  };
+}
+
+function appendSegment(stream: StreamMessage, type: "text" | "reasoning", content: string) {
+  if (!content) return;
+  const last = stream.segments[stream.segments.length - 1];
+  if (last?.type === type) {
+    last.content += content;
+  } else {
+    stream.segments.push({ type, content });
+  }
+}
+
+function reconcileSegment(stream: StreamMessage, type: "text" | "reasoning", content: string) {
+  if (!content) return;
+  const index = stream.segments.findLastIndex((segment) => segment.type === type);
+  const existing = index >= 0 ? stream.segments[index] : undefined;
+  if (!existing || existing.type !== type) {
+    stream.segments.push({ type, content });
+    return;
+  }
+  if (existing.content === content || existing.content.endsWith(content)) return;
+  if (content.startsWith(existing.content)) {
+    existing.content = content;
+  } else if (!existing.content.includes(content)) {
+    stream.segments.push({ type, content });
+  }
+}
+
+function ensureToolCall(stream: StreamMessage, toolCall: ToolCall): ToolCallEntry {
+  const existing = stream.toolCallMap[toolCall.id];
+  if (existing) {
+    const updated = { ...existing, name: toolCall.name, arguments: toolCall.arguments };
+    stream.toolCallMap[toolCall.id] = updated;
+    return updated;
+  }
+
+  const entry = toolCallEntry(toolCall);
+  stream.toolCallMap[toolCall.id] = entry;
+  stream.segments.push({ type: "tool_call", toolCallId: toolCall.id });
+  return entry;
+}
+
+function emptyToolMetadata() {
+  return {
+    filepath: null,
+    diff: null,
+    truncated: null,
+    exists: null,
+    prior_summary: null,
+    prior_retained_from: null,
+    file_changes: [],
+    exit_code: null,
+    duration_ms: null,
+  };
+}
+
+function updateShellResult(
+  entry: ToolCallEntry,
+  content: string,
+  finished: boolean,
+  exitCode: number | null,
+): void {
+  const result: ToolExecutionResult = {
+    output: content,
+    attachments: entry.result?.attachments ?? [],
+    metadata: {
+      ...(entry.result?.metadata ?? emptyToolMetadata()),
+      exit_code: exitCode ?? entry.result?.metadata.exit_code ?? null,
+    },
+  };
+  entry.result = result;
+  entry.status = finished ? toolResultStatus(result) : "running";
+}
+
+function toolCallFromPayload(value: unknown): ToolCall | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as Partial<ToolCall>;
+  if (
+    typeof candidate.id !== "string" ||
+    typeof candidate.name !== "string" ||
+    typeof candidate.arguments !== "string"
+  ) {
+    return null;
+  }
+  return {
+    id: candidate.id,
+    name: candidate.name,
+    arguments: candidate.arguments,
+    thought_signature: candidate.thought_signature ?? null,
+  };
+}
+
+function toolResultFromPayload(value: unknown): ToolExecutionResult | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as Partial<ToolExecutionResult>;
+  if (
+    typeof candidate.output !== "string" ||
+    !Array.isArray(candidate.attachments) ||
+    !candidate.metadata ||
+    typeof candidate.metadata !== "object"
+  ) {
+    return null;
+  }
+  return candidate as ToolExecutionResult;
+}
+
+function updateSubagentEntry(
+  stream: StreamMessage,
+  toolCallId: string,
+  childSessionId: string,
+  statusText: string,
+  currentToolCall: ToolCall | null,
+  contentDelta: string,
+  reasoningDelta: string,
+): void {
+  const entry = stream.toolCallMap[toolCallId];
+  if (!entry) return;
+  const updated: ToolCallEntry = {
+    ...entry,
+    status: entry.status === "completed" || entry.status === "failed" ? entry.status : "running",
+    childSessionId,
+    subagentStatus: statusText || entry.subagentStatus,
+    subagentContentDelta: `${entry.subagentContentDelta ?? ""}${contentDelta}`,
+    subagentReasoningDelta: `${entry.subagentReasoningDelta ?? ""}${reasoningDelta}`,
+  };
+  if (currentToolCall) {
+    updated.name = currentToolCall.name;
+  }
+  stream.toolCallMap[toolCallId] = updated;
+}
 
 export function useChatRuntime() {
   const authChecking = useAuthStore((state) => state.isLoading);
@@ -191,10 +343,16 @@ export function useChatRuntime() {
         if (Number.isFinite(requestId)) {
           const key = `${sessionId}:${requestId}`;
           setStreams((current) => {
-            if (!current[key]) return current;
-            const next = { ...current };
-            delete next[key];
-            return next;
+            const stream = current[key] ?? createStream(key, requestId);
+            return {
+              ...current,
+              [key]: {
+                ...stream,
+                status: "streaming",
+                providerFinished: false,
+                error: undefined,
+              },
+            };
           });
         }
         setSessions((current) =>
@@ -212,40 +370,129 @@ export function useChatRuntime() {
         if (!Number.isFinite(requestId)) return;
         const key = `${sessionId}:${requestId}`;
         setStreams((current) => {
-          const previous = current[key] ?? {
-            key,
-            requestId,
-            content: "",
-            reasoning: "",
-            toolCalls: [],
-            status: "streaming" as const,
-          };
-          const next = { ...previous };
-          if (kind === "Delta") next.content += asString(payload.content);
-          if (kind === "ReasoningDelta" || kind === "ReasoningSummaryDelta")
-            next.reasoning += asString(payload.content);
+          const next = cloneStream(current[key] ?? createStream(key, requestId));
+          next.status = "streaming";
           if (kind === "ToolCallUpdated") {
-            const toolCall = payload.tool_call as ToolCall;
-            next.toolCalls = [
-              ...next.toolCalls.filter((item) => item.id !== toolCall.id),
-              toolCall,
-            ];
+            const toolCall = toolCallFromPayload(payload.tool_call);
+            if (!toolCall) return current;
+            const entry = ensureToolCall(next, toolCall);
+            if (
+              entry.status !== "running" &&
+              entry.status !== "completed" &&
+              entry.status !== "failed"
+            ) {
+              entry.status = "pending";
+            }
+          } else if (kind === "Delta") {
+            appendSegment(next, "text", asString(payload.content));
+          } else {
+            const content = asString(payload.content);
+            appendSegment(next, "reasoning", content);
+            if (content) next.reasoningStartedAt ??= new Date().toISOString();
           }
+          return { ...current, [key]: next };
+        });
+        return;
+      }
+      if (kind === "ToolStarting") {
+        const requestId = Number(payload.request_id);
+        const toolCall = toolCallFromPayload(payload.tool_call);
+        if (!Number.isFinite(requestId) || !toolCall) return;
+        const key = `${sessionId}:${requestId}`;
+        setStreams((current) => {
+          const next = cloneStream(current[key] ?? createStream(key, requestId));
+          const entry = ensureToolCall(next, toolCall);
+          if (entry.status !== "completed" && entry.status !== "failed") {
+            entry.status = "running";
+          }
+          return { ...current, [key]: next };
+        });
+        return;
+      }
+      if (kind === "ToolCompleted" || kind === "SubagentCompleted") {
+        const requestId = Number(payload.request_id);
+        const toolCall = toolCallFromPayload(payload.tool_call);
+        const result = toolResultFromPayload(payload.result);
+        if (!Number.isFinite(requestId) || !toolCall || !result) return;
+        const key = `${sessionId}:${requestId}`;
+        const childSessionId = asString(payload.child_session_id);
+        setStreams((current) => {
+          const next = cloneStream(current[key] ?? createStream(key, requestId));
+          const entry = ensureToolCall(next, toolCall);
+          entry.result = result;
+          entry.status = toolResultStatus(result);
+          if (childSessionId) entry.childSessionId = childSessionId;
+          return { ...current, [key]: next };
+        });
+        return;
+      }
+      if (kind === "SubagentStatus") {
+        const requestId = Number(payload.request_id);
+        const toolCallId = asString(payload.tool_call_id);
+        const childSessionId = asString(payload.child_session_id);
+        if (!Number.isFinite(requestId) || !toolCallId || !childSessionId) return;
+        const currentToolCall = toolCallFromPayload(payload.current_tool_call);
+        const key = `${sessionId}:${requestId}`;
+        setStreams((current) => {
+          const next = cloneStream(current[key] ?? createStream(key, requestId));
+          if (!next.toolCallMap[toolCallId]) {
+            ensureToolCall(
+              next,
+              currentToolCall ?? {
+                id: toolCallId,
+                name: "task",
+                arguments: "{}",
+                thought_signature: null,
+              },
+            );
+          }
+          updateSubagentEntry(
+            next,
+            toolCallId,
+            childSessionId,
+            asString(payload.status_text),
+            currentToolCall,
+            asString(payload.content_delta),
+            asString(payload.reasoning_delta),
+          );
+          return { ...current, [key]: next };
+        });
+        return;
+      }
+      if (kind === "ShellOutput") {
+        const toolCallId = asString(payload.tool_call_id);
+        if (!toolCallId) return;
+        const finished = payload.finished === true;
+        const exitCode = typeof payload.exit_code === "number" ? payload.exit_code : null;
+        const content = asString(payload.content);
+        setStreams((current) => {
+          const keys = Object.keys(current).filter(
+            (key) => key.startsWith(`${sessionId}:`) && current[key]?.toolCallMap[toolCallId],
+          );
+          const key = keys[keys.length - 1];
+          if (!key) return current;
+          const stream = current[key];
+          if (!stream) return current;
+          const next = cloneStream(stream);
+          const entry = next.toolCallMap[toolCallId];
+          if (!entry) return current;
+          const updated = { ...entry };
+          updateShellResult(updated, content, finished, exitCode);
+          next.toolCallMap[toolCallId] = updated;
           return { ...current, [key]: next };
         });
         return;
       }
       if (kind === "Failed") {
         const requestId = Number(payload.request_id);
+        if (!Number.isFinite(requestId)) return;
         const key = `${sessionId}:${requestId}`;
-        setStreams((current) => ({
-          ...current,
-          [key]: {
-            ...(current[key] ?? { key, requestId, content: "", reasoning: "", toolCalls: [] }),
-            status: "failed",
-            error: asString(payload.error),
-          },
-        }));
+        setStreams((current) => {
+          const next = cloneStream(current[key] ?? createStream(key, requestId));
+          next.status = "failed";
+          next.error = asString(payload.error);
+          return { ...current, [key]: next };
+        });
         setSessions((current) =>
           current.map((item) => (item.session_id === sessionId ? { ...item, busy: false } : item)),
         );
@@ -253,33 +500,55 @@ export function useChatRuntime() {
       }
       if (kind === "Finished") {
         const requestId = Number(payload.request_id);
+        if (!Number.isFinite(requestId)) return;
         const key = `${sessionId}:${requestId}`;
         setStreams((current) => {
-          if (current[key] && current[key].status !== "streaming") return current;
-          const next = { ...current };
-          delete next[key];
-          return next;
+          const next = cloneStream(current[key] ?? createStream(key, requestId));
+          const turn = (payload.turn ?? {}) as Record<string, unknown>;
+          const turnCompletedAt = asString(turn.completed_at) || null;
+          reconcileSegment(next, "text", asString(turn.content));
+          reconcileSegment(next, "reasoning", asString(turn.reasoning));
+          next.providerFinished = true;
+          next.status = "streaming";
+          next.reasoningStartedAt = asString(turn.reasoning_started_at) || next.reasoningStartedAt;
+          next.reasoningCompletedAt =
+            asString(turn.reasoning_completed_at) ||
+            next.reasoningCompletedAt ||
+            (next.reasoningStartedAt ? turnCompletedAt : null);
+          if (Array.isArray(turn.tool_calls)) {
+            for (const value of turn.tool_calls) {
+              const toolCall = toolCallFromPayload(value);
+              if (toolCall) ensureToolCall(next, toolCall);
+            }
+          }
+          return { ...current, [key]: next };
         });
-        setSessions((current) =>
-          current.map((item) => (item.session_id === sessionId ? { ...item, busy: false } : item)),
-        );
-        if (selectedSessionRef.current === sessionId) {
-          void loadMessages(sessionId);
-          void loadTodos(sessionId);
-        }
         return;
       }
       if (kind === "StreamEnd") {
         const requestId = Number(payload.request_id);
+        if (!Number.isFinite(requestId)) return;
         const key = `${sessionId}:${requestId}`;
         setStreams((current) => {
           const stream = current[key];
-          if (!stream || stream.status !== "streaming") return current;
+          if (!stream) return current;
+          if (stream.providerFinished && stream.status !== "failed") {
+            const next = { ...current };
+            delete next[key];
+            return next;
+          }
+          if (stream.status !== "streaming") return current;
           return {
             ...current,
             [key]: {
               ...stream,
               status: "interrupted",
+              reasoningStartedAt:
+                asString(payload.reasoning_started_at) || stream.reasoningStartedAt,
+              reasoningCompletedAt:
+                asString(payload.reasoning_completed_at) ||
+                stream.reasoningCompletedAt ||
+                (stream.reasoningStartedAt ? new Date().toISOString() : null),
               error: i18n.t("The turn was interrupted."),
             },
           };
@@ -445,23 +714,6 @@ export function useChatRuntime() {
     }
   }, []);
 
-  const handleShell = useCallback(
-    async (command: string) => {
-      const sessionId = selectedSessionRef.current;
-      if (!sessionId || !command.trim()) return;
-      try {
-        await api.sendShellCommand(sessionId, command);
-        // Shell output will appear via subsequent message reload triggered by
-        // the shell task appending messages; poll briefly.
-        setTimeout(() => void loadMessages(sessionId), 400);
-        setTimeout(() => void loadMessages(sessionId), 1200);
-      } catch (reason) {
-        setError(reason instanceof Error ? reason.message : i18n.t("Failed to run shell command"));
-      }
-    },
-    [loadMessages],
-  );
-
   const handleSlashCommand = useCallback(
     async (raw: string): Promise<boolean> => {
       const parsed = parseSlashCommand(raw);
@@ -487,14 +739,6 @@ export function useChatRuntime() {
         else setError(i18n.t("No message to fork from"));
         return true;
       }
-      if (command === "shell") {
-        if (!args) {
-          setError(i18n.t("Usage: /shell <command> or !<command>"));
-          return true;
-        }
-        await handleShell(args);
-        return true;
-      }
       if (command === "rename" && args) {
         const sid = selectedSessionRef.current;
         if (sid) {
@@ -515,7 +759,7 @@ export function useChatRuntime() {
       }
       return false;
     },
-    [messages, handleRevert, handleRedo, handleFork, handleCompact, handleShell],
+    [messages, handleRevert, handleRedo, handleFork, handleCompact],
   );
 
   const submit = async () => {
@@ -524,8 +768,8 @@ export function useChatRuntime() {
     const sessionId = selectedSessionRef.current;
     if (!content || !sessionId || sending) return;
     setFileMention(null);
-    // Intercept slash / bang commands before sending as a prompt.
-    if (content.startsWith("/") || content.startsWith("!")) {
+    // Intercept slash commands before sending as a prompt.
+    if (content.startsWith("/")) {
       const handled = await handleSlashCommand(content);
       if (handled) {
         setDraft("");

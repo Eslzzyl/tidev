@@ -129,7 +129,7 @@ fn compute_and_cache_block(
             line_count += 1; // trailing empty line
             (count, line_count, 0)
         }
-        MessageRole::User | MessageRole::System | MessageRole::Error | MessageRole::Shell => {
+        MessageRole::User | MessageRole::System | MessageRole::Error => {
             let cards = render_single_card(ctx, message, content_width, is_round_end);
             let mut line_count = 0;
             for (_, card_lines) in &cards {
@@ -256,7 +256,7 @@ fn render_block_from_cache(
 
     let role = messages[block.message_start_idx].role.clone();
 
-    // Render Cards entry (assistant/user/shell card)
+    // Render Cards entry (assistant/user card)
     if let Some(entry) = cache.peek(&cards_key) {
         if let MessageRenderCacheValue::Cards(cards) = &entry.value {
             for (bg, card_lines) in cards {
@@ -271,7 +271,7 @@ fn render_block_from_cache(
                     }
                     track_selectable_region(selectable_regions, card_lines, start_line);
                     let show_hover = ctx.hovered_card == Some(block.message_id)
-                        && matches!(role, MessageRole::User | MessageRole::Shell);
+                        && matches!(role, MessageRole::User);
                     let adjusted_bg = if show_hover {
                         ctx.palette.hover_bg(*bg)
                     } else {
@@ -300,8 +300,8 @@ fn render_block_from_cache(
             if !card_lines.is_empty() {
                 let start_line = current_line_offset + lines.len();
                 track_selectable_region(selectable_regions, card_lines, start_line);
-                let show_hover = ctx.hovered_card == Some(block.message_id)
-                    && matches!(role, MessageRole::User | MessageRole::Shell);
+                let show_hover =
+                    ctx.hovered_card == Some(block.message_id) && matches!(role, MessageRole::User);
                 let adjusted_bg = if show_hover {
                     ctx.palette.hover_bg(*bg)
                 } else {
@@ -625,7 +625,7 @@ pub(super) fn update_layout_index(
                 line_count += 1; // trailing empty line
                 (count, line_count, cache_entries)
             }
-            MessageRole::User | MessageRole::System | MessageRole::Error | MessageRole::Shell => {
+            MessageRole::User | MessageRole::System | MessageRole::Error => {
                 let cards = render_single_card(ctx, message, content_width, is_round_end);
                 let mut line_count = 0;
                 for (_, card_lines) in &cards {

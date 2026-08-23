@@ -1,7 +1,7 @@
 #![allow(clippy::all)]
 //! Terminal API routes for web terminal.
 //!
-//! - `POST /api/terminal/start`     — Start a new terminal session (with optional cols/rows/shell)
+//! - `POST /api/terminal/start`     — Start a new terminal session (with optional cols, rows, or shell)
 //! - `GET  /api/terminal/shells`    — List available shells on the server
 //! - `GET  /api/terminal/ws?session_id=...` — WebSocket endpoint for terminal I/O
 //! - `DELETE /api/terminal/{id}`    — Close a terminal session

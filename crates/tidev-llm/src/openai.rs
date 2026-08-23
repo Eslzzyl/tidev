@@ -465,7 +465,6 @@ fn build_openai_request(
                 }
             }
             MessageRole::Error => {}
-            MessageRole::Shell => {}
         }
     }
 

@@ -8,7 +8,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::builtin::utils::parse_arguments;
 use crate::types::{QuestionArgs, SkillArgs, ToolDefinition, ToolPermission};
-use tidev_llm::message::{ToolCall, ToolExecutionResult};
+use tidev_llm::message::{ToolCall, ToolExecutionResult, ToolMetadata};
 use tidev_utils::tool_name::canonical_tool_name;
 
 use crate::skills::SkillCatalog;
@@ -232,11 +232,18 @@ pub async fn execute_tool_call(
                     &tool_call_id,
                 )
                 .await
-                .map(|r| r.output)
+                .map(|r| ToolExecutionResult {
+                    output: r.output,
+                    attachments: Vec::new(),
+                    metadata: ToolMetadata {
+                        exit_code: r.exit_code,
+                        ..ToolMetadata::default()
+                    },
+                })
             })
             .await
             {
-                Ok(Ok(output)) => ToolExecutionResult::new(output),
+                Ok(Ok(output)) => output,
                 Ok(Err(e)) => ToolExecutionResult::new(format!("Error: {e:#}")),
                 Err(join_err) => {
                     ToolExecutionResult::new(format!("Error: tool panicked: {join_err}"))

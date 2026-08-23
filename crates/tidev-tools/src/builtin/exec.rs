@@ -105,6 +105,7 @@ pub fn kill_all_children() {
 #[derive(Debug)]
 pub struct ShellExecutionResult {
     pub output: String,
+    pub exit_code: Option<i32>,
 }
 
 pub fn definitions() -> Vec<ToolDefinition> {
@@ -251,6 +252,7 @@ async fn run_shell_streaming(
             output: "[exit 1]\nError: Command blocked in Plan mode — this command appears \
                      to modify files."
                 .to_string(),
+            exit_code: Some(1),
         });
     }
 
@@ -357,6 +359,7 @@ async fn run_shell_streaming(
                 truncate_in_place(&mut output_buf, max_output_bytes);
                 return Ok(ShellExecutionResult {
                     output: format!("[exit -1] (cancelled)\n{}", output_buf),
+                    exit_code: Some(-1),
                 });
             }
 
@@ -382,6 +385,7 @@ async fn run_shell_streaming(
                         timeout_ms / 1000,
                         output_buf
                     ),
+                    exit_code: Some(-1),
                 });
             }
 
@@ -462,6 +466,7 @@ async fn run_shell_streaming(
 
     Ok(ShellExecutionResult {
         output: format!("[exit {status_code}]\n{}", combined),
+        exit_code,
     })
 }
 #[allow(clippy::too_many_arguments)]
@@ -505,6 +510,7 @@ fn run_shell_inner(
             output: "[exit 1]\nError: Command blocked in Plan mode — this command appears \
                      to modify files."
                 .to_string(),
+            exit_code: Some(1),
         });
     }
 
@@ -642,6 +648,7 @@ fn run_shell_inner(
             truncate_in_place(&mut output_buf, max_output_bytes);
             return Ok(ShellExecutionResult {
                 output: format!("[exit -1] (cancelled)\n{}", output_buf),
+                exit_code: Some(-1),
             });
         }
 
@@ -667,6 +674,7 @@ fn run_shell_inner(
                     timeout_ms / 1000,
                     output_buf
                 ),
+                exit_code: Some(-1),
             });
         }
 
@@ -736,6 +744,7 @@ fn run_shell_inner(
 
     Ok(ShellExecutionResult {
         output: format!("[exit {status_code}]\n{}", combined),
+        exit_code,
     })
 }
 

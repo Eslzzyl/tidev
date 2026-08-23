@@ -54,26 +54,76 @@ export interface ToolCall {
   thought_signature?: string | null;
 }
 
+export type MessageAttachment =
+  | {
+      type: "file_reference";
+      path: string;
+      content: string;
+      tool_output: string | null;
+      truncated: boolean;
+    }
+  | {
+      type: "directory_reference";
+      path: string;
+      tree: string;
+    }
+  | {
+      type: "image";
+      filename: string;
+      mime: string;
+      data: number[];
+      file_size: number;
+    };
+
+export interface FileChangeInfo {
+  path: string;
+  diff: string | null;
+  operation: string;
+}
+
+export interface ToolMetadata {
+  filepath: string | null;
+  diff: string | null;
+  truncated: boolean | null;
+  exists: boolean | null;
+  prior_summary: string | null;
+  prior_retained_from: number | null;
+  file_changes: FileChangeInfo[];
+  exit_code: number | null;
+  duration_ms: number | null;
+  responses_output_items?: unknown[];
+  preserve_full_output?: boolean;
+}
+
+export interface ToolExecutionResult {
+  output: string;
+  attachments: MessageAttachment[];
+  metadata: ToolMetadata;
+}
+
 export interface Message {
   id: string;
-  role: "user" | "assistant" | "system" | "tool" | "error" | "shell";
+  role: "user" | "assistant" | "system" | "tool" | "error";
   content: string;
+  attachments: MessageAttachment[];
+  reasoning: string;
+  tool_calls: ToolCall[];
+  tool_call_id: string | null;
+  tool_name: string | null;
+  metadata: ToolMetadata;
   created_at: string;
-  completed_at?: string | null;
-  /** Local-only flag set during SSE streaming; not persisted by the API. */
-  streaming?: boolean;
-  file_diffs?: FileDiff[];
-  todos?: TodoItem[];
-  token_usage?: TokenUsage;
-  tokens_per_second?: number;
-  model_id?: string | null;
-  reasoning?: string;
-  tool_call_id?: string;
-  tool_name?: string;
-  tool_calls?: ToolCall[];
-  diff?: string;
-  filepath?: string;
-  rtk_rewritten?: boolean;
+  completed_at: string | null;
+  streaming: boolean;
+  reasoning_started_at: string | null;
+  reasoning_completed_at: string | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  total_tokens: number | null;
+  cache_read_tokens: number | null;
+  cache_write_tokens: number | null;
+  model_id: string | null;
+  tokens_per_second: number | null;
+  thinking_level: string | null;
 }
 
 export interface MessageRecord {
@@ -237,14 +287,6 @@ export interface SendMessageResponse {
 export interface PromptResponse {
   message_id: string;
   duplicate: boolean;
-}
-
-export interface ShellCommandRequest {
-  command: string;
-}
-
-export interface ShellCommandResponse {
-  request_id: number;
 }
 
 export interface AbortRequest {

@@ -7,6 +7,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex as StdMutex, RwLock as StdRwLock};
+use std::time::Instant;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -413,7 +414,8 @@ impl ToolCallExecutor for CoreToolExecutor {
             .get(&tool_call.id)
             .copied()
             .unwrap_or((false, false));
-        Ok(self
+        let started_at = Instant::now();
+        let mut result = self
             .registry
             .execute_via_agent(
                 &tool_call,
@@ -426,7 +428,12 @@ impl ToolCallExecutor for CoreToolExecutor {
                 Some(self.event_tx.clone()),
                 !is_read_only(&tool_call.name),
             )
-            .await)
+            .await;
+        if tidev_utils::tool_name::canonical_tool_name(&tool_call.name) == Some("shell") {
+            let duration_ms = started_at.elapsed().as_millis().max(1);
+            result.metadata.duration_ms = Some(u64::try_from(duration_ms).unwrap_or(u64::MAX));
+        }
+        Ok(result)
     }
 }
 

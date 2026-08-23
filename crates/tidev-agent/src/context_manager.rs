@@ -252,7 +252,7 @@ impl ContextManager {
                 continue;
             }
             match msg.role {
-                MessageRole::System | MessageRole::Error | MessageRole::Shell => continue,
+                MessageRole::System | MessageRole::Error => continue,
                 MessageRole::User => {
                     Self::drain_pending_tool_calls(&mut out, &mut pending_tool_calls);
                     out.push(msg.clone());
@@ -403,7 +403,7 @@ impl ContextManager {
     ///
     /// - Skips messages before `retained_from` (they are covered by the summary).
     /// - Prepends the existing summary (if any) as a User message.
-    /// - Filters out System, Error, and Shell messages.
+    /// - Filters out System and Error messages.
     /// - Validates and sanitizes assistant tool_call arguments.
     /// - Tracks tool_call / tool_result pairing, injecting synthetic failures
     ///   for orphaned tool_calls.
@@ -493,11 +493,10 @@ mod tests {
     }
 
     #[test]
-    fn build_request_messages_skips_system_error_shell() {
+    fn build_request_messages_skips_system_and_error() {
         let msgs = vec![
             Message::new(MessageRole::System, "system prompt"),
             Message::new(MessageRole::Error, "error msg"),
-            Message::new(MessageRole::Shell, "shell output"),
             user_msg("hello"),
         ];
         let buf = MessageBuffer::new(msgs);

@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
-import { ChevronDown, Loader2, MessageSquare, Search, Sparkles, Wrench } from "lucide-react";
+import { MessageSquare, Search, Sparkles, Wrench } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import { api } from "../../api/client";
 import type { MessageRecord } from "../../types/api";
 import type { ToolCallEntry } from "../../utils/round";
+import { ActivityRipple } from "./ActivityRipple";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 
 function parseTaskArgs(entry: ToolCallEntry): {
@@ -30,6 +32,20 @@ function agentIcon(agent: string) {
   return Wrench;
 }
 
+function agentLabel(agent: string, t: (key: string) => string) {
+  return agent || t("Subagent");
+}
+
+function statusLabel(
+  status: string | undefined,
+  t: (key: string, options?: Record<string, unknown>) => string,
+) {
+  if (!status) return "";
+  const match = status.match(/^Started (Explorer|Librarian|Oracle|Fixer) subagent$/i);
+  if (!match) return status;
+  return t("Started {{agent}} subagent", { agent: match[1] });
+}
+
 function ChildMessages({ records }: { records: MessageRecord[] }) {
   return (
     <div className="subagent-messages">
@@ -49,12 +65,14 @@ function ChildMessages({ records }: { records: MessageRecord[] }) {
 }
 
 export function SubagentCard({ entry }: { entry: ToolCallEntry }) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const [records, setRecords] = useState<MessageRecord[] | null>(null);
   const [loading, setLoading] = useState(false);
   const { agent, description, prompt } = parseTaskArgs(entry);
   const Icon = agentIcon(agent);
-  const running = !entry.resultComplete && entry.argumentsComplete;
+  const running = entry.status === "pending" || entry.status === "running";
+  const displayedStatus = statusLabel(entry.subagentStatus, t);
 
   useEffect(() => {
     if (!expanded || !entry.childSessionId || records || loading) return;
@@ -68,43 +86,46 @@ export function SubagentCard({ entry }: { entry: ToolCallEntry }) {
 
   return (
     <div className="tool-renderer subagent-renderer">
-      <button className="tool-renderer-header" onClick={() => setExpanded((value) => !value)}>
-        <Icon size={14} />
-        <span className="tool-renderer-title">
-          <strong>{agent}</strong>
-          <span>{description || "Delegated task"}</span>
-        </span>
-        {running ? <Loader2 className="spin" size={14} /> : null}
-        <ChevronDown
-          className={expanded ? "thinking-chevron expanded" : "thinking-chevron"}
-          size={14}
-        />
+      <button
+        className="tool-renderer-header"
+        onClick={() => setExpanded((value) => !value)}
+        aria-expanded={expanded}
+      >
+        <ActivityRipple active={running} row label={t("Subagent is running")}>
+          <Icon size={14} />
+          <span className="tool-renderer-title">
+            <strong>{agentLabel(agent, t)}</strong>
+            <span>{displayedStatus || description || t("Delegated task")}</span>
+          </span>
+        </ActivityRipple>
       </button>
-      {expanded ? (
+      <div className={`tool-renderer-body-shell${expanded ? " expanded" : ""}`}>
         <div className="tool-renderer-body">
           {prompt ? (
             <div className="subagent-prompt">
-              <span>Task prompt</span>
+              <span>{t("Task prompt")}</span>
               <p>{prompt}</p>
             </div>
           ) : null}
           {entry.childSessionId ? (
             <div className="subagent-session-label">
               <MessageSquare size={13} />
-              <span>Sub-session</span>
+              <span>{t("Sub-session")}</span>
             </div>
           ) : null}
-          {loading ? (
-            <div className="tool-loading">
-              <Loader2 className="spin" size={14} /> Loading sub-session...
-            </div>
+          {entry.subagentReasoningDelta ? (
+            <div className="subagent-live-reasoning">{entry.subagentReasoningDelta}</div>
           ) : null}
+          {entry.subagentContentDelta ? (
+            <MarkdownRenderer content={entry.subagentContentDelta} />
+          ) : null}
+          {loading ? <div className="tool-loading">{t("Loading sub-session…")}</div> : null}
           {records ? <ChildMessages records={records} /> : null}
           {!records && entry.result?.output ? (
             <MarkdownRenderer content={entry.result.output} />
           ) : null}
         </div>
-      ) : null}
+      </div>
     </div>
   );
 }

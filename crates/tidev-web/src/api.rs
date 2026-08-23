@@ -128,11 +128,6 @@ struct ForkRequest {
     title: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct ShellRequest {
-    command: String,
-}
-
 #[derive(Debug, Serialize)]
 struct SessionDto {
     session_id: Uuid,
@@ -329,7 +324,6 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/sessions/{session_id}/redo", post(redo))
         .route("/sessions/{session_id}/fork", post(fork_session))
         .route("/sessions/{session_id}/compact", post(compact))
-        .route("/sessions/{session_id}/shell", post(execute_shell))
         .route("/files/search", get(search_files))
         .route("/fs/list", get(fs_list))
         .route("/fs/read", get(fs_read))
@@ -814,87 +808,6 @@ async fn compact(
 ) -> Result<Json<AcceptedResponse>, ApiError> {
     state.runtime.compact_session(session_id, None).await?;
     Ok(Json(AcceptedResponse { accepted: true }))
-}
-
-async fn execute_shell(
-    State(state): State<Arc<AppState>>,
-    Path(session_id): Path<Uuid>,
-    Json(request): Json<ShellRequest>,
-) -> Result<Json<AcceptedResponse>, ApiError> {
-    let command = request.command.trim().to_owned();
-    if command.is_empty() {
-        return Err(ApiError::bad_request("command cannot be empty"));
-    }
-    if state
-        .runtime
-        .session_manager()
-        .load_session(session_id)?
-        .is_none()
-    {
-        return Err(ApiError::not_found("session not found"));
-    }
-    let runtime = state.runtime.clone();
-    tokio::spawn(async move {
-        let user_msg = Message::new(
-            tidev_llm::message::MessageRole::Shell,
-            format!("$ {command}"),
-        );
-        if let Err(error) = runtime.append_message(session_id, user_msg).await {
-            log::warn!("failed to append shell command message: {error:#}");
-            return;
-        }
-        let (output, exit_code) = run_shell_command(&command).await;
-        let mut content = output;
-        if let Some(code) = exit_code {
-            if code != 0 && !content.is_empty() {
-                content.push('\n');
-            }
-            if code != 0 {
-                content.push_str(&format!("Exit code: {code}"));
-            } else if content.is_empty() {
-                content = format!("Exit code: {code}");
-            }
-        }
-        let output_msg = Message::new(tidev_llm::message::MessageRole::Shell, content);
-        if let Err(error) = runtime.append_message(session_id, output_msg).await {
-            log::warn!("failed to append shell output message: {error:#}");
-        }
-    });
-    Ok(Json(AcceptedResponse { accepted: true }))
-}
-
-async fn run_shell_command(command: &str) -> (String, Option<i32>) {
-    #[cfg(windows)]
-    let (shell, arg) = ("cmd", "/C");
-    #[cfg(not(windows))]
-    let (shell, arg) = ("sh", "-c");
-    let result = tokio::process::Command::new(shell)
-        .arg(arg)
-        .arg(command)
-        .output()
-        .await;
-    match result {
-        Ok(output) => {
-            let mut combined = String::new();
-            if !output.stdout.is_empty() {
-                combined.push_str(&String::from_utf8_lossy(&output.stdout));
-                combined = combined.trim_end().to_owned();
-            }
-            if !output.stderr.is_empty() {
-                let stderr = String::from_utf8_lossy(&output.stderr)
-                    .trim_end()
-                    .to_owned();
-                if !stderr.is_empty() {
-                    if !combined.is_empty() {
-                        combined.push('\n');
-                    }
-                    combined.push_str(&stderr);
-                }
-            }
-            (combined, output.status.code())
-        }
-        Err(error) => (format!("Failed to execute shell: {error}"), None),
-    }
 }
 
 async fn search_files(

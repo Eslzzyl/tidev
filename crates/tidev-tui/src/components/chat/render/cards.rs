@@ -189,8 +189,8 @@ fn render_assistant_body_lines(
     lines
 }
 
-/// Render a user or shell message card with ┃ prefix and mode-colored accent.
-fn render_user_shell_card(
+/// Render a user message card with ┃ prefix and mode-colored accent.
+fn render_user_card(
     ctx: &RenderContext,
     message: &Message,
     content_width: usize,
@@ -475,9 +475,7 @@ pub(super) fn render_single_card(
     is_round_end: bool,
 ) -> Vec<(Color, Vec<HyperlinkLine>)> {
     match message.role {
-        MessageRole::User | MessageRole::Shell => {
-            render_user_shell_card(ctx, message, content_width)
-        }
+        MessageRole::User => render_user_card(ctx, message, content_width),
         MessageRole::Error => render_error_card(ctx, message, content_width),
         MessageRole::System => render_system_card(ctx, message, content_width, is_round_end),
         MessageRole::Tool => render_tool_card(ctx, message, content_width),

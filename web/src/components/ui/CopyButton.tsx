@@ -23,7 +23,7 @@ export function CopyButton({ content }: CopyButtonProps) {
   return (
     <button
       onClick={handleCopy}
-      className="ml-2 rounded p-1 text-neutral-400 transition-colors hover:bg-neutral-200 hover:text-neutral-600 dark:text-neutral-500 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
+      className="ml-2 rounded p-1 text-neutral-400 transition-colors hover:text-neutral-600 dark:text-neutral-500 dark:hover:text-neutral-300"
       title={t("Copy to clipboard")}
     >
       {copied ? <Check className="h-4 w-4" /> : <Clipboard className="h-4 w-4" />}

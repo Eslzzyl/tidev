@@ -604,8 +604,8 @@ fn build_gemini_request(
                     });
                 }
             }
-            MessageRole::Error | MessageRole::Shell => {
-                // Skip error and shell messages
+            MessageRole::Error => {
+                // Skip error messages
             }
         }
     }

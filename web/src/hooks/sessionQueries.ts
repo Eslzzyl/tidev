@@ -140,10 +140,3 @@ export function useSendMessage() {
     },
   });
 }
-
-export function useSendShellCommand() {
-  return useMutation({
-    mutationFn: ({ sessionId, command }: { sessionId: string; command: string }) =>
-      api.sendShellCommand(sessionId, command),
-  });
-}

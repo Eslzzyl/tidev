@@ -10,8 +10,7 @@ export type CommandAction =
   | "skills"
   | "connect"
   | "compact"
-  | "fork"
-  | "shell";
+  | "fork";
 
 export interface CommandSpec {
   name: string;
@@ -98,13 +97,6 @@ export const COMMANDS: CommandSpec[] = [
     usage: "/fork",
     action: "fork",
   },
-  {
-    name: "shell",
-    aliases: ["bash", "!"],
-    description: "Run a shell command",
-    usage: "/shell <command>  or  !<command>",
-    action: "shell",
-  },
 ];
 
 function score(spec: CommandSpec, query: string): number | null {
@@ -163,18 +155,11 @@ export function commandFragment(input: string, cursor = input.length): string | 
 }
 
 export function isSlashCommand(input: string): boolean {
-  return commandFragment(input) !== null || isShellBang(input);
-}
-
-export function isShellBang(input: string): boolean {
-  return input.trimStart().startsWith("!");
+  return commandFragment(input) !== null;
 }
 
 export function parseSlashCommand(input: string): { command: string; args: string } | null {
   const trimmed = input.trim();
-  if (trimmed.startsWith("!")) {
-    return { command: "shell", args: trimmed.slice(1).trim() };
-  }
   if (!trimmed.startsWith("/")) return null;
   const withoutSlash = trimmed.slice(1);
   const spaceIdx = withoutSlash.indexOf(" ");

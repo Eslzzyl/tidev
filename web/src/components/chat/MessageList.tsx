@@ -6,8 +6,7 @@ import { useTranslation } from "react-i18next";
 import type { ApprovedTool, FrontendRequest, MessageRecord, ToolCall } from "../../types/api";
 import type { StreamMessage } from "../../types/chat";
 import { CopyButton } from "../ui/CopyButton";
-import { ShellBlock } from "../renderers/ShellBlock";
-import { SystemMessageBlock } from "../renderers/SystemMessageBlock";
+import { InstructionMessage, SystemMessageBlock } from "../renderers/SystemMessageBlock";
 import { ThinkingBlock } from "../renderers/ThinkingBlock";
 import { ToolCallRow } from "../renderers/ToolCallRow";
 import { MarkdownRenderer } from "../renderers/MarkdownRenderer";
@@ -16,8 +15,9 @@ import {
   getRoundPreviewIndex,
   isRoundCollapsible,
   type Round,
-  type ShellBlock as ShellBlockData,
+  type RoundSegment,
   type SystemMessageBlock as SystemMessageBlockData,
+  type ToolCallEntry,
 } from "../../utils/round";
 import { formatTime, getDuration, stripSystemReminderTags } from "../../utils/format";
 
@@ -44,15 +44,10 @@ export function MessageList({
   type Row =
     | { type: "round"; key: string; round: Round }
     | { type: "system"; key: string; block: SystemMessageBlockData }
-    | { type: "shell"; key: string; block: ShellBlockData }
     | { type: "stream"; key: string; stream: StreamMessage };
 
   const rows = useMemo<Row[]>(() => {
     const base: Row[] = rounds.map((item) => {
-      if ((item as ShellBlockData).kind === "shell") {
-        const block = item as ShellBlockData;
-        return { type: "shell", key: block.id, block };
-      }
       if ((item as SystemMessageBlockData).kind === "system") {
         const block = item as SystemMessageBlockData;
         return { type: "system", key: block.id, block };
@@ -123,8 +118,6 @@ export function MessageList({
                   onRevert={onRevert}
                   onFork={onFork}
                 />
-              ) : row.type === "shell" ? (
-                <ShellBlock block={row.block} />
               ) : row.type === "system" ? (
                 <SystemMessageBlock message={row.block.message} />
               ) : (
@@ -241,6 +234,11 @@ function RoundView({
           </div>
         </div>
       </article>
+      {round.leadingInstructions.map((message) => (
+        <div className="round-instruction" key={message.id}>
+          <InstructionMessage message={message} />
+        </div>
+      ))}
       {hasAssistant ? (
         <article className="chat-message assistant-message">
           <div className="assistant-message-inner">
@@ -266,32 +264,16 @@ function RoundView({
               className="assistant-message-content message-content"
               id={`assistant-content-${round.id}`}
             >
-              {round.segments.map((segment, index) => {
-                if (!showAllSegments && index !== previewIndex) return null;
-                if (segment.type === "reasoning" && segment.content) {
-                  return (
-                    <ThinkingBlock
-                      key={index}
-                      content={segment.content}
-                      defaultExpanded={round.status === "streaming"}
-                    />
-                  );
-                }
-                if (segment.type === "text" && segment.content) {
-                  return (
-                    <MarkdownRenderer
-                      key={index}
-                      content={stripSystemReminderTags(segment.content)}
-                    />
-                  );
-                }
-                if (segment.type === "tool_call") {
-                  const entry = round.toolCallMap[segment.toolCallId];
-                  if (!entry) return null;
-                  return <ToolCallRow key={index} entry={entry} workspaceRoot={workspaceRoot} />;
-                }
-                return null;
-              })}
+              <AssistantSegments
+                segments={round.segments}
+                toolCallMap={round.toolCallMap}
+                workspaceRoot={workspaceRoot}
+                showAllSegments={showAllSegments}
+                previewIndex={previewIndex}
+                active={round.status === "streaming"}
+                reasoningStartedAt={round.reasoningStartedAt}
+                reasoningCompletedAt={round.reasoningCompletedAt ?? round.completedAt}
+              />
               {round.status === "streaming" && round.segments.length === 0 ? (
                 <span className="cursor-block" />
               ) : null}
@@ -319,8 +301,10 @@ function StreamBubble({
 }) {
   const { t } = useTranslation();
   const isStreaming = stream.status === "streaming";
-  const isCollapsible =
-    !isStreaming && (Boolean(stream.reasoning.trim()) || stream.toolCalls.length > 0);
+  const previewIndex = stream.segments.findLastIndex(
+    (segment) => segment.type === "text" && segment.content.trim(),
+  );
+  const isCollapsible = !isStreaming && stream.segments.length > 1;
   const showAllSegments = isStreaming || expanded;
   const statusLabel = isStreaming
     ? t("streaming")
@@ -355,17 +339,17 @@ function StreamBubble({
           </div>
         )}
         <div className="assistant-message-content message-content" id={contentId}>
-          {showAllSegments && stream.reasoning ? (
-            <ThinkingBlock content={stream.reasoning} defaultExpanded />
-          ) : null}
-          {stream.content ? (
-            <MarkdownRenderer content={stream.content} />
-          ) : isStreaming ? (
-            <span className="cursor-block" />
-          ) : null}
-          {showAllSegments && stream.toolCalls.length ? (
-            <ToolCallList calls={stream.toolCalls} workspaceRoot={workspaceRoot} />
-          ) : null}
+          <AssistantSegments
+            segments={stream.segments}
+            toolCallMap={stream.toolCallMap}
+            workspaceRoot={workspaceRoot}
+            showAllSegments={showAllSegments}
+            previewIndex={previewIndex >= 0 ? previewIndex : null}
+            active={isStreaming}
+            reasoningStartedAt={stream.reasoningStartedAt}
+            reasoningCompletedAt={stream.reasoningCompletedAt}
+          />
+          {isStreaming && stream.segments.length === 0 ? <span className="cursor-block" /> : null}
           {!isStreaming ? (
             <div className="stream-error">{stream.error ?? t("Response failed")}</div>
           ) : null}
@@ -375,22 +359,65 @@ function StreamBubble({
   );
 }
 
-function ToolCallList({ calls, workspaceRoot }: { calls: ToolCall[]; workspaceRoot: string }) {
+function AssistantSegments({
+  segments,
+  toolCallMap,
+  workspaceRoot,
+  showAllSegments,
+  previewIndex,
+  active,
+  reasoningStartedAt,
+  reasoningCompletedAt,
+}: {
+  segments: RoundSegment[];
+  toolCallMap: Record<string, ToolCallEntry>;
+  workspaceRoot: string;
+  showAllSegments: boolean;
+  previewIndex: number | null;
+  active: boolean;
+  reasoningStartedAt?: string | null;
+  reasoningCompletedAt?: string | null;
+}) {
   return (
     <div className="tool-list">
-      {calls.map((call) => (
-        <ToolCallRow
-          key={call.id}
-          workspaceRoot={workspaceRoot}
-          entry={{
-            id: call.id,
-            name: call.name,
-            arguments: call.arguments,
-            argumentsComplete: true,
-            resultComplete: false,
-          }}
-        />
-      ))}
+      {segments.map((segment, index) => {
+        if (segment.type === "instruction") {
+          return (
+            <InstructionMessage
+              key={`instruction-${segment.message.id}`}
+              message={segment.message}
+            />
+          );
+        }
+        if (!showAllSegments && index !== previewIndex) return null;
+        if (segment.type === "reasoning" && segment.content) {
+          return (
+            <ThinkingBlock
+              key={`thinking-${index}`}
+              content={segment.content}
+              active={active}
+              startedAt={segment.startedAt ?? reasoningStartedAt ?? undefined}
+              completedAt={segment.completedAt ?? reasoningCompletedAt ?? undefined}
+            />
+          );
+        }
+        if (segment.type === "text" && segment.content) {
+          return (
+            <MarkdownRenderer
+              key={`text-${index}`}
+              content={stripSystemReminderTags(segment.content)}
+            />
+          );
+        }
+        if (segment.type === "tool_call") {
+          const entry = toolCallMap[segment.toolCallId];
+          if (!entry) return null;
+          return (
+            <ToolCallRow key={segment.toolCallId} entry={entry} workspaceRoot={workspaceRoot} />
+          );
+        }
+        return null;
+      })}
     </div>
   );
 }

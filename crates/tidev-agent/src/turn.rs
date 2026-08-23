@@ -1,7 +1,7 @@
 //! Generic streaming turn execution for agent hosts.
 
 use anyhow::Result;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use tokio_util::sync::CancellationToken;
 
 use tidev_llm::message::{AssistantTurn, Message, ToolCall};
@@ -138,8 +138,15 @@ pub async fn stream_turn(
         }
     }
 
-    turn.completed_at = Some(Utc::now());
+    finalize_turn_timing(&mut turn, Utc::now());
     Ok(turn)
+}
+
+fn finalize_turn_timing(turn: &mut AssistantTurn, completed_at: DateTime<Utc>) {
+    turn.completed_at = Some(completed_at);
+    if turn.reasoning_started_at.is_some() && turn.reasoning_completed_at.is_none() {
+        turn.reasoning_completed_at = Some(completed_at);
+    }
 }
 
 /// Restore the assistant tool-call order after concurrent execution.
@@ -166,4 +173,41 @@ pub fn order_tool_results(
 
     ordered.extend(pending.into_iter().flatten());
     ordered
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn finalizing_a_reasoning_only_turn_freezes_reasoning_time() {
+        let started_at = Utc::now() - chrono::Duration::seconds(2);
+        let completed_at = Utc::now();
+        let mut turn = AssistantTurn {
+            reasoning_started_at: Some(started_at),
+            ..Default::default()
+        };
+
+        finalize_turn_timing(&mut turn, completed_at);
+
+        assert_eq!(turn.completed_at, Some(completed_at));
+        assert_eq!(turn.reasoning_completed_at, Some(completed_at));
+    }
+
+    #[test]
+    fn finalizing_preserves_an_existing_reasoning_end_time() {
+        let started_at = Utc::now() - chrono::Duration::seconds(2);
+        let reasoning_completed_at = Utc::now() - chrono::Duration::seconds(1);
+        let completed_at = Utc::now();
+        let mut turn = AssistantTurn {
+            reasoning_started_at: Some(started_at),
+            reasoning_completed_at: Some(reasoning_completed_at),
+            ..Default::default()
+        };
+
+        finalize_turn_timing(&mut turn, completed_at);
+
+        assert_eq!(turn.completed_at, Some(completed_at));
+        assert_eq!(turn.reasoning_completed_at, Some(reasoning_completed_at));
+    }
 }

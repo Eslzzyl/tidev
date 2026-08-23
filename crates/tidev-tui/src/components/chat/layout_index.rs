@@ -16,7 +16,7 @@ use uuid::Uuid;
 /// A block in the message layout index representing a renderable unit.
 ///
 /// Each block contains either:
-/// - A single User/System/Error/Shell message
+/// - A single User/System/Error message
 /// - An Assistant message with its associated Tool results
 #[derive(Clone, Debug)]
 pub(crate) struct MessageBlock {

@@ -149,7 +149,6 @@ pub(super) fn build_responses_request(
                 }));
             }
             MessageRole::Error => {}
-            MessageRole::Shell => {}
         }
     }
 

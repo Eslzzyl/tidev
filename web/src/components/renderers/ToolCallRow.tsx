@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState, type ComponentType } from "react";
+import type { TFunction } from "i18next";
 import {
-  ChevronDown,
   Clock,
   FileDiff,
   FileEdit,
@@ -8,30 +8,48 @@ import {
   Files,
   LayoutTemplate,
   ListTodo,
-  Loader2,
   Search,
   Sparkles,
   Terminal,
   Wrench,
+  X,
 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
+import type { MessageAttachment } from "../../types/api";
 import type { ToolCallEntry } from "../../utils/round";
+import { JsonTreeView } from "../ui/JsonTreeView";
+import { ActivityRipple } from "./ActivityRipple";
 import { CodeLinesRenderer } from "./CodeLinesRenderer";
 import { DiffRenderer } from "./DiffRenderer";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { SubagentCard } from "./SubagentCard";
 import { TodoRenderer } from "./TodoRenderer";
-import { JsonTreeView } from "../ui/JsonTreeView";
 
 interface Props {
   entry: ToolCallEntry;
   workspaceRoot?: string;
-  defaultExpanded?: boolean;
 }
 
 const READ_ONLY_TOOLS = new Set(["read", "grep", "glob", "skill"]);
 const WRITE_TOOLS = new Set(["write", "edit", "apply_patch"]);
 const WEB_TOOLS = new Set(["websearch", "webfetch"]);
+const TOOL_LABELS: Record<string, string> = {
+  read: "Read file",
+  grep: "Search text",
+  glob: "Find files",
+  write: "Write file",
+  edit: "Edit file",
+  apply_patch: "Edit file",
+  skill: "Load skill",
+  bash: "Run command",
+  shell: "Run command",
+  task: "Subagent",
+  todowrite: "Update to-do",
+  websearch: "Web search",
+  webfetch: "Fetch web page",
+  question: "Ask",
+};
 
 function isBash(name: string) {
   return name === "bash" || name === "shell";
@@ -94,6 +112,22 @@ function toolTone(name: string) {
   return "default";
 }
 
+function toolLabel(entry: ToolCallEntry, t: TFunction) {
+  if (entry.name === "grep" || entry.name === "glob") return "";
+  if (entry.name === "skill") {
+    const args = parseArguments(entry);
+    const hasName = Boolean(stringArgument(args, "name"));
+    return t(
+      hasName && stringArgument(args, "path")
+        ? "Read skill file"
+        : hasName
+          ? "Load skill"
+          : "List skills",
+    );
+  }
+  return t(TOOL_LABELS[entry.name] ?? "Tool call");
+}
+
 function parseArguments(entry: ToolCallEntry): Record<string, unknown> | null {
   try {
     const value = JSON.parse(entry.arguments) as unknown;
@@ -108,41 +142,68 @@ function stringArgument(args: Record<string, unknown> | null, key: string) {
   return typeof value === "string" ? value : "";
 }
 
-function summarizeArguments(entry: ToolCallEntry, workspaceRoot: string) {
+function summarizeArguments(entry: ToolCallEntry, workspaceRoot: string, t: TFunction) {
   const args = parseArguments(entry);
-  if (!args) return entry.arguments || "...";
+  if (!args) return entry.arguments || "…";
   switch (entry.name) {
     case "read":
     case "write":
     case "edit":
       return relativePath(
-        stringArgument(args, "file_path") || stringArgument(args, "path") || "(unknown)",
+        stringArgument(args, "file_path") || stringArgument(args, "path") || t("Unknown"),
         workspaceRoot,
       );
     case "apply_patch":
-      return relativePath(stringArgument(args, "path") || "(unknown)", workspaceRoot);
+      return (
+        patchFileChanges(stringArgument(args, "patch_text"), workspaceRoot)
+          .map((change) => change.path)
+          .join(t("File change separator")) || t("Patch files")
+      );
     case "grep": {
       const pattern = stringArgument(args, "pattern");
       const path = relativePath(stringArgument(args, "path") || ".", workspaceRoot);
-      return pattern ? `"${pattern}" in ${path}` : path;
+      return pattern
+        ? t('Search in {{path}} for "{{pattern}}"', { path, pattern })
+        : t("Search in {{path}}", { path });
     }
-    case "glob":
-      return `${stringArgument(args, "pattern") || "*"} in ${relativePath(stringArgument(args, "path") || ".", workspaceRoot)}`;
+    case "glob": {
+      const pattern = stringArgument(args, "pattern") || "*";
+      const path = relativePath(stringArgument(args, "path") || ".", workspaceRoot);
+      return t("Find files in {{path}} matching {{pattern}}", { path, pattern });
+    }
     case "bash":
     case "shell":
-      return stringArgument(args, "command") || "(no command)";
+      return stringArgument(args, "command") || t("No command");
     case "skill":
-      return stringArgument(args, "name") || "(unknown)";
+      if (!stringArgument(args, "name")) return "";
+      return stringArgument(args, "path")
+        ? `${stringArgument(args, "name")}/${stringArgument(args, "path")}`
+        : stringArgument(args, "name");
     case "task":
-      return stringArgument(args, "description") || "(no description)";
+      return stringArgument(args, "description") || t("No description");
     case "todowrite": {
       const todos = args.todos;
-      return Array.isArray(todos) ? `${todos.length} item(s)` : "(todos)";
+      return Array.isArray(todos) ? t("{{count}} to-dos", { count: todos.length }) : t("No to-dos");
     }
     case "websearch":
-      return stringArgument(args, "query") || "(no query)";
+      return stringArgument(args, "query") || t("No query");
     case "webfetch":
-      return stringArgument(args, "url") || "(no url)";
+      return stringArgument(args, "url") || t("No URL");
+    case "question": {
+      const questions = args?.questions;
+      if (!Array.isArray(questions)) return t("Unknown");
+      const prompts = questions
+        .map((item) => {
+          if (typeof item === "string") return item;
+          if (item && typeof item === "object") {
+            const question = (item as Record<string, unknown>).question;
+            return typeof question === "string" ? question : "";
+          }
+          return "";
+        })
+        .filter(Boolean);
+      return prompts.join(t("File change separator")) || t("Unknown");
+    }
     default:
       return entry.arguments.length > 80 ? `${entry.arguments.slice(0, 80)}...` : entry.arguments;
   }
@@ -173,44 +234,364 @@ function parseJson(output: string): unknown | null {
   }
 }
 
-function resultSummary(entry: ToolCallEntry) {
-  if (!entry.result) return "";
-  if (entry.result.isError) return " · failed";
-  const firstLine = entry.result.output.split("\n")[0]?.trim() || "empty";
-  if (entry.name === "grep" || entry.name === "glob") {
-    if (/no files found/i.test(firstLine)) return " · no match";
-    const count = firstLine.match(/Found (\d+)/i)?.[1];
-    return count ? ` · ${count} match${count === "1" ? "" : "es"}` : ` · ${firstLine}`;
-  }
-  return ` · ${firstLine.length > 70 ? `${firstLine.slice(0, 70)}...` : firstLine}`;
+function statusSuffix(entry: ToolCallEntry, t: TFunction) {
+  if (entry.status === "failed") return t(", failed");
+  if (entry.status === "pending") return t(", waiting");
+  if (entry.status === "running") return t(", running");
+  return t(", completed");
 }
 
-export const ToolCallRow = memo(function ToolCallRow({
-  entry,
-  workspaceRoot = "",
-  defaultExpanded = false,
-}: Props) {
-  const [expanded, setExpanded] = useState(defaultExpanded);
+function parseRange(value: string): [number, number] | null {
+  const match = value.trim().match(/^(\d+)\s*-\s*(\d+)$/);
+  return match ? [Number(match[1]), Number(match[2])] : null;
+}
+
+function readMetadata(output: string): {
+  lineRange: [number, number];
+  requestedRange: [number, number] | null;
+  total: number;
+  truncatedBy: string | null;
+} | null {
+  let lineRange: [number, number] | null = null;
+  let requestedRange: [number, number] | null = null;
+  let total: number | null = null;
+  let truncatedBy: string | null = null;
+
+  for (const line of output.split("\n")) {
+    const lineValue = line.match(/^<line_range>(.*?)<\/line_range>$/)?.[1];
+    const requestedValue = line.match(/^<requested_range>(.*?)<\/requested_range>$/)?.[1];
+    const totalValue = line.match(/^<file_total>(.*?)<\/file_total>$/)?.[1];
+    const truncatedValue = line.match(/^<truncated_by>(.*?)<\/truncated_by>$/)?.[1];
+    if (lineValue) lineRange = parseRange(lineValue);
+    if (requestedValue) requestedRange = parseRange(requestedValue);
+    if (totalValue && /^\d+$/.test(totalValue.trim())) total = Number(totalValue.trim());
+    if (truncatedValue && (truncatedValue === "size" || truncatedValue === "lines")) {
+      truncatedBy = truncatedValue;
+    }
+  }
+
+  return lineRange && total !== null ? { lineRange, requestedRange, total, truncatedBy } : null;
+}
+
+function isErrorOutput(output: string) {
+  return /^(Error:|User cancelled the request)/.test(output.trim());
+}
+
+function formatFileSize(bytes: number) {
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${unit === 0 ? value : value.toFixed(1)} ${units[unit]}`;
+}
+
+function attachmentSummary(
+  attachments: MessageAttachment[],
+  output: string,
+  t: TFunction,
+): string | null {
+  const image = attachments.find(
+    (attachment): attachment is Extract<MessageAttachment, { type: "image" }> =>
+      attachment.type === "image",
+  );
+  if (image) {
+    const type = image.mime.replace(/^image\//, "");
+    return t("{{type}}, {{size}}", { type, size: formatFileSize(image.file_size) });
+  }
+
+  if (attachments.some((attachment) => attachment.type === "directory_reference")) {
+    let files = 0;
+    let directories = 0;
+    for (const line of output.split("\n").slice(1)) {
+      const value = line.trim();
+      if (!value) continue;
+      if (value.endsWith("/")) directories += 1;
+      else files += 1;
+    }
+    if (files === 0 && directories === 0) return t("Empty");
+    if (directories === 0) return t("{{count}} files", { count: files });
+    if (files === 0) return t("{{count}} directories", { count: directories });
+    return t("{{files}} files, {{directories}} directories", { files, directories });
+  }
+
+  return null;
+}
+
+function readResultSummary(entry: ToolCallEntry, t: TFunction) {
+  const output = entry.result?.output ?? "";
+  const lower = output.toLowerCase();
+  if (lower.includes("file not found")) {
+    return lower.includes("did you mean")
+      ? t("File not found with suggestions")
+      : t("File not found");
+  }
+  if (lower.includes("escapes the workspace root") || lower.includes(" was denied")) {
+    return t("Blocked by policy");
+  }
+  if (isErrorOutput(output)) return t("Tool error");
+
+  const attachment = attachmentSummary(entry.result?.attachments ?? [], output, t);
+  if (attachment) return attachment;
+
+  const metadata = readMetadata(output);
+  const sizeTruncated = output.includes("Output capped at 50 KB");
+  const outputTruncated =
+    sizeTruncated ||
+    metadata?.truncatedBy === "size" ||
+    metadata?.truncatedBy === "lines" ||
+    entry.result?.metadata.truncated === true;
+  const legacyRange = output.match(/Showing lines (\d+)-(\d+)(?: of (\d+))?/i);
+  if (metadata) {
+    const [start, end] = metadata.lineRange;
+    const isFullFile = start === 1 && end === metadata.total;
+    const requestedRange =
+      metadata.requestedRange &&
+      end - start + 1 !== metadata.requestedRange[1] - metadata.requestedRange[0] + 1
+        ? metadata.requestedRange
+        : null;
+    let summary = isFullFile
+      ? t("Read all {{count}} lines", { count: metadata.total })
+      : requestedRange
+        ? t(
+            "Read lines {{start}}-{{end}} of {{total}} (requested {{requestedStart}}-{{requestedEnd}})",
+            {
+              start,
+              end,
+              total: metadata.total,
+              requestedStart: requestedRange[0],
+              requestedEnd: requestedRange[1],
+            },
+          )
+        : t("Read lines {{start}}-{{end}} of {{total}}", {
+            start,
+            end,
+            total: metadata.total,
+          });
+    const requestSatisfied = metadata.requestedRange && end >= metadata.requestedRange[1];
+    if (!isFullFile && outputTruncated && !requestSatisfied) {
+      summary = readDetailSummary(summary, t("truncated by 50 KB"), t);
+    } else if (metadata.truncatedBy === "lines") {
+      summary = readDetailSummary(summary, t("truncated by 2000 lines"), t);
+    }
+    return summary;
+  }
+
+  if (legacyRange) {
+    const [, start, end, total] = legacyRange;
+    const summary = total
+      ? t("Read lines {{start}}-{{end}} of {{total}}", {
+          start,
+          end,
+          total,
+        })
+      : t("Read lines {{start}}-{{end}}", { start, end });
+    return outputTruncated ? readDetailSummary(summary, t("truncated"), t) : summary;
+  }
+
+  const lines = output ? output.split("\n").length : 0;
+  if (lines === 0) return t("Empty");
+  return outputTruncated
+    ? t("{{count}} lines (truncated)", { count: lines })
+    : t("{{count}} lines", { count: lines });
+}
+
+function readDetailSummary(summary: string, detail: string, t: TFunction) {
+  return t("Result detail", { summary, detail });
+}
+
+function skillResultSummary(entry: ToolCallEntry, t: TFunction) {
+  const output = entry.result?.output ?? "";
+  const lower = output.toLowerCase();
+  if (lower.includes("unknown skill '")) return t("Skill not found");
+  if (lower.includes("file not found")) return t("File not found");
+  if (
+    lower.includes("escapes the skill directory") ||
+    lower.includes("path must be relative to the skill directory")
+  ) {
+    return t("Blocked by policy");
+  }
+  if (lower.includes("a path requires a skill name") || lower.includes("path must not be empty")) {
+    return t("Invalid request");
+  }
+  if (lower.includes("cannot read binary file")) return t("Binary file");
+  if (output.startsWith("Available skills")) {
+    const total = output.match(/of\s+(\d+)/i)?.[1];
+    return total ? t("{{count}} skills", { count: total }) : t("Skills listed");
+  }
+  const lines = output
+    .split("\n")
+    .filter((line) => line.trim() && !line.startsWith("#") && !line.startsWith("**"));
+  return t("{{count}} lines", { count: lines.length });
+}
+
+function diffLineCounts(
+  diff: string | null | undefined,
+): { additions: number; deletions: number } | null {
+  if (!diff) return null;
+  const lines = diff.split("\n");
+  const looksLikeDiff = lines.some(
+    (line) =>
+      line.startsWith("diff --git ") ||
+      line.startsWith("--- ") ||
+      line.startsWith("+++ ") ||
+      line.startsWith("@@"),
+  );
+  if (!looksLikeDiff) return null;
+  let additions = 0;
+  let deletions = 0;
+  for (const line of lines) {
+    if (line.startsWith("+") && !line.startsWith("+++")) additions += 1;
+    if (line.startsWith("-") && !line.startsWith("---")) deletions += 1;
+  }
+  return { additions, deletions };
+}
+
+function textLineCount(value: string) {
+  const normalized = value.replace(/\n$/, "");
+  return normalized ? normalized.split("\n").length : 0;
+}
+
+function diffCountLabel(counts: { additions: number; deletions: number } | null) {
+  if (!counts || (counts.additions === 0 && counts.deletions === 0)) return "";
+  const parts: string[] = [];
+  if (counts.additions > 0) parts.push(`+${counts.additions}`);
+  if (counts.deletions > 0) parts.push(`-${counts.deletions}`);
+  return parts.join(" ");
+}
+
+interface InlineFileChange {
+  path: string;
+  counts: { additions: number; deletions: number } | null;
+}
+
+function patchFileChanges(patchText: string, workspaceRoot: string): InlineFileChange[] {
+  const changes: InlineFileChange[] = [];
+  let current: InlineFileChange | null = null;
+  for (const line of patchText.split("\n")) {
+    const header = line.match(/^\*\*\* (Add|Update|Delete) File:\s*(.+)$/);
+    if (header) {
+      current = {
+        path: relativePath(header[2].trim(), workspaceRoot),
+        counts: { additions: 0, deletions: 0 },
+      };
+      changes.push(current);
+      continue;
+    }
+    if (!current) continue;
+    if (line.startsWith("+") && !line.startsWith("+++")) current.counts!.additions += 1;
+    if (line.startsWith("-") && !line.startsWith("---")) current.counts!.deletions += 1;
+  }
+  return changes.map((change) => ({
+    ...change,
+    counts:
+      change.counts && change.counts.additions + change.counts.deletions > 0 ? change.counts : null,
+  }));
+}
+
+function inlineFileChanges(
+  entry: ToolCallEntry,
+  workspaceRoot: string,
+  unknownPath: string,
+): InlineFileChange[] {
+  const args = parseArguments(entry);
+  const metadata = entry.result?.metadata;
+  if (metadata?.file_changes.length) {
+    return metadata.file_changes.map((change) => ({
+      path: relativePath(change.path, workspaceRoot),
+      counts: diffLineCounts(change.diff),
+    }));
+  }
+  if (metadata?.diff) {
+    return [
+      {
+        path: relativePath(
+          metadata.filepath || stringArgument(args, "file_path") || unknownPath,
+          workspaceRoot,
+        ),
+        counts: diffLineCounts(metadata.diff),
+      },
+    ];
+  }
+  if (entry.result) return [];
+  if (entry.name === "apply_patch") {
+    return patchFileChanges(stringArgument(args, "patch_text"), workspaceRoot);
+  }
+  if (entry.name === "write") {
+    const path = stringArgument(args, "file_path") || stringArgument(args, "path");
+    return path
+      ? [
+          {
+            path: relativePath(path, workspaceRoot),
+            counts: { additions: textLineCount(stringArgument(args, "content")), deletions: 0 },
+          },
+        ]
+      : [];
+  }
+  if (entry.name === "edit") {
+    const path = stringArgument(args, "file_path") || stringArgument(args, "path");
+    return path
+      ? [
+          {
+            path: relativePath(path, workspaceRoot),
+            counts: {
+              additions: textLineCount(
+                stringArgument(args, "new_text") || stringArgument(args, "new_string"),
+              ),
+              deletions: textLineCount(
+                stringArgument(args, "old_text") || stringArgument(args, "old_string"),
+              ),
+            },
+          },
+        ]
+      : [];
+  }
+  return [];
+}
+
+function fileChangeSummary(entry: ToolCallEntry, workspaceRoot: string, t: TFunction) {
+  return inlineFileChanges(entry, workspaceRoot, t("Unknown"))
+    .map((change) => {
+      const counts = diffCountLabel(change.counts);
+      return counts ? `${change.path} ${counts}` : change.path;
+    })
+    .join(t("File change separator"));
+}
+
+function resultSummary(entry: ToolCallEntry, workspaceRoot: string, t: TFunction) {
+  const resultSuffix = (summary: string) => t("Result suffix", { summary });
+  if (entry.name === "grep" || entry.name === "glob") {
+    if (entry.status !== "completed" || !entry.result) return statusSuffix(entry, t);
+    const firstLine = entry.result.output.split("\n")[0]?.trim() || "";
+    if (/no files found/i.test(firstLine)) return resultSuffix(t("No results"));
+    const count = firstLine.match(/Found (\d+)/i)?.[1];
+    return count ? resultSuffix(t("Found {{count}} items", { count })) : statusSuffix(entry, t);
+  }
+  if (entry.name === "read" && entry.result) return resultSuffix(readResultSummary(entry, t));
+  if (entry.name === "skill" && entry.result) return resultSuffix(skillResultSummary(entry, t));
+  if (entry.status !== "completed" || !entry.result) return statusSuffix(entry, t);
+  if (isWriteTool(entry.name)) {
+    const changes = fileChangeSummary(entry, workspaceRoot, t);
+    return changes ? resultSuffix(changes) : statusSuffix(entry, t);
+  }
+  return statusSuffix(entry, t);
+}
+
+export const ToolCallRow = memo(function ToolCallRow({ entry, workspaceRoot = "" }: Props) {
+  const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
-  const autoExpanded = useRef(false);
   const startTime = useRef<number | null>(null);
 
   const output = entry.result?.output?.trim() || "";
-  const running = !entry.resultComplete && entry.argumentsComplete;
-  const hasUsefulOutput = Boolean(output && output !== "Done");
-  const hasDiff = Boolean(entry.result?.diff);
+  const active = entry.status === "pending" || entry.status === "running";
+  const running = entry.status === "running";
+  const metadata = entry.result?.metadata;
+  const fileChanges = metadata?.file_changes.filter((change) => Boolean(change.diff)) ?? [];
+  const hasDiff = Boolean(metadata?.diff) || fileChanges.length > 0;
   const Icon = toolIcon(entry.name);
-
-  useEffect(() => {
-    if (autoExpanded.current) return;
-    if (
-      (isBash(entry.name) && entry.resultComplete && hasUsefulOutput) ||
-      (hasDiff && entry.resultComplete)
-    ) {
-      autoExpanded.current = true;
-      setExpanded(true);
-    }
-  }, [entry.name, entry.resultComplete, hasDiff, hasUsefulOutput]);
 
   useEffect(() => {
     if (!running) return;
@@ -228,58 +609,89 @@ export const ToolCallRow = memo(function ToolCallRow({
 
   const parsedJson = !isWriteTool(entry.name) && !isBash(entry.name) ? parseJson(output) : null;
   const tone = toolTone(entry.name);
-  const summary = summarizeArguments(entry, workspaceRoot);
-  const duration = elapsedMs > 0 ? formatDuration(elapsedMs) : "";
+  const summary = summarizeArguments(entry, workspaceRoot, t);
+  const label = toolLabel(entry, t);
+  const measuredDurationMs =
+    metadata?.duration_ms && metadata.duration_ms > 0
+      ? metadata.duration_ms
+      : elapsedMs > 0
+        ? elapsedMs
+        : null;
+  const duration = measuredDurationMs === null ? "" : formatDuration(measuredDurationMs);
 
   return (
     <div className={`tool-renderer tool-tone-${tone}`}>
-      <button className="tool-renderer-header" onClick={() => setExpanded((value) => !value)}>
-        <Icon size={14} />
-        <span className="tool-renderer-title">
-          {isBash(entry.name) ? <strong>bash</strong> : <strong>{entry.name}</strong>}
-          <code>{isBash(entry.name) ? `$ ${bashCommand(entry) || "..."}` : summary}</code>
-        </span>
-        <span className="tool-renderer-status">
-          {running ? <Loader2 className="spin" size={14} /> : null}
-          {duration && !running ? (
-            <>
-              <Clock size={12} />
-              {duration}
-            </>
-          ) : null}
-          {entry.resultComplete ? (
-            <ChevronDown
-              className={expanded ? "thinking-chevron expanded" : "thinking-chevron"}
-              size={14}
-            />
-          ) : null}
-        </span>
+      <button
+        type="button"
+        className="tool-renderer-header"
+        onClick={() => setExpanded((value) => !value)}
+        aria-expanded={expanded}
+      >
+        <ActivityRipple
+          active={active}
+          row
+          label={t(entry.status === "pending" ? "Tool is waiting" : "Tool is running")}
+        >
+          <Icon size={14} />
+          <span className="tool-renderer-title">
+            {label ? <strong>{label}</strong> : null}
+            <code>
+              {isBash(entry.name) ? `$ ${bashCommand(entry) || t("Unknown")}` : summary}
+              {resultSummary(entry, workspaceRoot, t)}
+            </code>
+          </span>
+          <span className="tool-renderer-status">
+            {entry.status === "failed" ? <X size={14} aria-label={t("Failed")} /> : null}
+            {duration && (isBash(entry.name) || !running) ? (
+              <>
+                <Clock size={12} />
+                {duration}
+              </>
+            ) : null}
+          </span>
+        </ActivityRipple>
       </button>
-      {expanded && entry.result ? (
+      <div className={`tool-renderer-body-shell${expanded ? " expanded" : ""}`}>
         <div className="tool-renderer-body">
-          {isWriteTool(entry.name) && entry.result.diff ? (
-            <DiffRenderer
-              diff={entry.result.diff}
-              filepath={entry.result.filepath || summary}
-              compact
-            />
+          {entry.result && isWriteTool(entry.name) && hasDiff ? (
+            <div className="tool-file-diffs">
+              {fileChanges.map((change) => (
+                <DiffRenderer
+                  key={change.path}
+                  diff={change.diff ?? ""}
+                  filepath={change.path}
+                  compact
+                />
+              ))}
+              {fileChanges.length === 0 && metadata?.diff ? (
+                <DiffRenderer
+                  diff={metadata.diff}
+                  filepath={metadata.filepath || summary}
+                  compact
+                />
+              ) : null}
+            </div>
           ) : null}
-          {isBash(entry.name) ? (
+          {entry.result && isWriteTool(entry.name) && !hasDiff && output ? (
+            <MarkdownRenderer content={output} />
+          ) : null}
+          {entry.result && isBash(entry.name) ? (
             <div className="tool-bash-output">
               {bashDescription(entry) ? (
                 <p className="tool-description">{bashDescription(entry)}</p>
               ) : null}
               <code className="tool-command">$ {bashCommand(entry)}</code>
-              {entry.result.output ? (
-                <pre className="tool-raw-output">{entry.result.output}</pre>
-              ) : null}
+              {output ? <pre className="tool-raw-output">{output}</pre> : null}
             </div>
           ) : null}
-          {entry.name === "read" ? (
-            <CodeLinesRenderer output={entry.result.output} filepath={entry.result.filepath} />
+          {entry.result && entry.name === "read" ? (
+            <CodeLinesRenderer
+              output={entry.result.output}
+              filepath={metadata?.filepath ?? undefined}
+            />
           ) : null}
-          {entry.name === "todowrite" ? <TodoRenderer output={entry.result.output} /> : null}
-          {isReadOnlyTool(entry.name) && entry.name !== "read" ? (
+          {entry.result && entry.name === "todowrite" ? <TodoRenderer output={output} /> : null}
+          {entry.result && isReadOnlyTool(entry.name) && entry.name !== "read" ? (
             parsedJson ? (
               <JsonTreeView
                 data={parsedJson}
@@ -287,17 +699,18 @@ export const ToolCallRow = memo(function ToolCallRow({
                 maxDepth={entry.name === "skill" ? 3 : 5}
               />
             ) : (
-              <MarkdownRenderer content={entry.result.output} />
+              <MarkdownRenderer content={output} />
             )
           ) : null}
-          {WEB_TOOLS.has(entry.name) ? (
+          {entry.result && WEB_TOOLS.has(entry.name) ? (
             parsedJson ? (
               <JsonTreeView data={parsedJson} initialExpanded maxDepth={5} />
             ) : (
-              <MarkdownRenderer content={entry.result.output} />
+              <MarkdownRenderer content={output} />
             )
           ) : null}
-          {!isReadOnlyTool(entry.name) &&
+          {entry.result &&
+          !isReadOnlyTool(entry.name) &&
           !isWriteTool(entry.name) &&
           !isBash(entry.name) &&
           entry.name !== "todowrite" &&
@@ -305,25 +718,25 @@ export const ToolCallRow = memo(function ToolCallRow({
             parsedJson ? (
               <JsonTreeView data={parsedJson} initialExpanded />
             ) : (
-              <MarkdownRenderer content={entry.result.output} />
+              <MarkdownRenderer content={output} />
             )
           ) : null}
-          {!entry.result.output ? <span className="tool-empty-output">No output</span> : null}
-          {isBash(entry.name) &&
-          entry.result.exitCode !== null &&
-          entry.result.exitCode !== undefined ? (
+          {entry.result && !output ? (
+            <span className="tool-empty-output">{t("No output")}</span>
+          ) : null}
+          {entry.result &&
+          isBash(entry.name) &&
+          metadata?.exit_code !== null &&
+          metadata?.exit_code !== undefined ? (
             <div className="tool-exit-code">
-              Exit code: {entry.result.exitCode} {entry.result.exitCode === 0 ? "✓" : "×"}
+              {t("Exit code")}: {metadata.exit_code} {metadata.exit_code === 0 ? "✓" : "×"}
             </div>
           ) : null}
+          {!entry.result ? (
+            <pre className="tool-arguments">{entry.arguments || t("Waiting for arguments…")}</pre>
+          ) : null}
         </div>
-      ) : null}
-      {!entry.resultComplete && entry.result ? (
-        <div className="tool-streaming-line">Updating result…</div>
-      ) : null}
-      {entry.resultComplete && !expanded ? (
-        <span className="tool-collapsed-summary">{resultSummary(entry)}</span>
-      ) : null}
+      </div>
     </div>
   );
 });

@@ -1195,7 +1195,7 @@ impl MessageList {
                 })
                 .map(|block| block.message_id);
             if let Some(block_id) = block_id {
-                // Only tool-containing blocks are foldable. User/System/Shell/
+                // Only tool-containing blocks are foldable. User/System/
                 // Error messages must remain selectable via mouse drag, so a
                 // hit on their card_bounds must not consume the click.
                 let is_foldable = self
