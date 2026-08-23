@@ -21,6 +21,7 @@ pub(crate) mod utils;
 pub async fn run() -> anyhow::Result<()> {
     let runtime = tidev_core::Runtime::builder()
         .workspace_root(std::env::current_dir()?)
+        .console_logging(false)
         .build()
         .await?;
 

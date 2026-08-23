@@ -33,7 +33,7 @@ use uuid::Uuid;
 
 use crate::mode::Mode;
 use tidev_config::auth::ActiveModel;
-use tidev_config::{AppConfig, AuthStore, SendWhileBusy, paths::ConfigPaths};
+use tidev_config::{AppConfig, AuthStore, LogConfig, SendWhileBusy, paths::ConfigPaths};
 use tidev_llm::message::{Message, MessageAttachment, MessageRole};
 use tidev_llm::reasoning::ThinkingLevelType;
 use tidev_search::FileSearchIndex;
@@ -84,6 +84,9 @@ impl tidev_tools::TodoPersistence for TodoStore {
 pub struct Runtime {
     /// Application configuration (behind RwLock for hot-reload).
     config: Arc<StdRwLock<AppConfig>>,
+    /// Runtime-only override for console logging. This must not be persisted
+    /// as part of the application configuration.
+    console_logging_override: Option<bool>,
     /// Authentication store (API keys, web search credentials).
     auth: Arc<StdRwLock<AuthStore>>,
     /// Config paths (directories for config, data, auth file, database).
@@ -452,6 +455,7 @@ impl Runtime {
             f(&mut config);
             config.logging.clone()
         };
+        let effective_logging = effective_logging_config(&logging, self.console_logging_override);
 
         self.llm.update_debug_config(tidev_llm::LlmDebugConfig {
             save_request_body: logging.save_request_body,
@@ -459,7 +463,7 @@ impl Runtime {
             save_response_body: logging.save_response_body,
             max_response_files: logging.max_response_files,
         });
-        tidev_logging::reload(&self.paths.data_dir, &logging);
+        tidev_logging::reload(&self.paths.data_dir, &effective_logging);
     }
 
     /// Save the current config to disk.
@@ -1825,6 +1829,17 @@ pub struct RuntimeBuilder {
     console_logging: Option<bool>,
 }
 
+fn effective_logging_config(
+    logging: &LogConfig,
+    console_logging_override: Option<bool>,
+) -> LogConfig {
+    let mut effective = logging.clone();
+    if let Some(enabled) = console_logging_override {
+        effective.console = enabled;
+    }
+    effective
+}
+
 impl RuntimeBuilder {
     fn new() -> Self {
         Self {
@@ -1876,6 +1891,7 @@ impl RuntimeBuilder {
     /// Build the runtime.
     pub async fn build(self) -> Result<Runtime> {
         let _start = Instant::now();
+        let console_logging_override = self.console_logging;
 
         // 1. Config paths.
         let mut paths = ConfigPaths::discover()?;
@@ -1892,10 +1908,8 @@ impl RuntimeBuilder {
 
         // 2. Config + auth (with project-level overlay).
         let workspace_root = self.workspace_root.clone().unwrap_or_default();
-        let mut config = AppConfig::load_with_overlay(&paths, &workspace_root)?;
-        if let Some(enabled) = self.console_logging {
-            config.logging.console = enabled;
-        }
+        let config = AppConfig::load_with_overlay(&paths, &workspace_root)?;
+        let effective_logging = effective_logging_config(&config.logging, console_logging_override);
         let auth = AuthStore::load_or_create(&paths)?;
 
         // ── Startup initialisation ─────────────────────────────────
@@ -1904,7 +1918,7 @@ impl RuntimeBuilder {
         // the old tidev v0.6.x startup sequence.
 
         // 3. Logging (file + console via custom TidevLogger).
-        tidev_logging::init(&paths.data_dir, &config.logging);
+        tidev_logging::init(&paths.data_dir, &effective_logging);
         log::info!(
             "Runtime initialising, workspace={}",
             workspace_root.display()
@@ -2082,6 +2096,7 @@ impl RuntimeBuilder {
 
         Ok(Runtime {
             config: Arc::new(StdRwLock::new(config)),
+            console_logging_override,
             auth: Arc::new(StdRwLock::new(auth)),
             paths,
             session_manager,
@@ -2135,6 +2150,35 @@ mod tests {
             .build()
             .await
             .expect("runtime should build")
+    }
+
+    #[tokio::test]
+    async fn console_logging_override_is_not_persisted() {
+        let dir = std::env::temp_dir().join(format!("tidev-runtime-log-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("temp dir should be created");
+        let config_toml =
+            "default_provider = \"deepseek\"\ndefault_model = \"deepseek-v4-flash\"\n";
+        std::fs::write(dir.join("config.toml"), config_toml).expect("config should be written");
+
+        let runtime = Runtime::builder()
+            .workspace_root(dir.clone())
+            .config_dir(dir.clone())
+            .data_dir(dir.clone())
+            .console_logging(true)
+            .build()
+            .await
+            .expect("runtime should build");
+
+        assert!(!runtime.config().logging.console);
+
+        runtime.update_config(|config| config.tmp.auto_cleanup = true);
+        runtime.save_config().expect("config should save");
+
+        let saved = std::fs::read_to_string(dir.join("config.toml"))
+            .expect("saved config should be readable");
+        assert!(!saved.lines().any(|line| line.trim() == "console = true"));
+
+        runtime.shutdown().await;
     }
 
     async fn recv_created_event(
