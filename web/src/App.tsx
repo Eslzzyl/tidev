@@ -1,5 +1,13 @@
 import { lazy, Suspense, useLayoutEffect, useRef, useState } from "react";
-import { BarChart3, FolderTree, GitBranch, MessageSquare, Settings, Terminal } from "lucide-react";
+import {
+  BarChart3,
+  FolderTree,
+  GitBranch,
+  Menu,
+  MessageSquare,
+  Settings,
+  Terminal,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { AuthGate } from "./components/AuthGate";
@@ -33,6 +41,7 @@ const features: { id: Feature; label: string; icon: typeof MessageSquare }[] = [
 export default function App() {
   const { t } = useTranslation();
   const [feature, setFeature] = useState<Feature>("chat");
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const featureNavRef = useRef<HTMLElement>(null);
   const featureButtonRefs = useRef<Partial<Record<Feature, HTMLButtonElement | null>>>({});
   const [featureIndicator, setFeatureIndicator] = useState({
@@ -103,9 +112,7 @@ export default function App() {
     deleteSession,
     submitWelcome,
     handleRevert,
-    handleRedo,
     handleFork,
-    handleCompact,
     submit,
     chooseModel,
     chooseThinkingLevel,
@@ -123,6 +130,16 @@ export default function App() {
   return (
     <div className="app-shell">
       <header className="topbar">
+        {feature === "chat" && selectedSessionId !== null ? (
+          <button
+            className="mobile-chat-sidebar-button"
+            onClick={() => setMobileSidebarOpen(true)}
+            aria-label={t("Open conversations")}
+            title={t("Open conversations")}
+          >
+            <Menu size={17} strokeWidth={1.8} />
+          </button>
+        ) : null}
         <div className="brand-mark">
           <span className="brand-glyph">t</span>
           <span>tidev</span>
@@ -135,7 +152,10 @@ export default function App() {
               ref={(button) => {
                 featureButtonRefs.current[id] = button;
               }}
-              onClick={() => setFeature(id)}
+              onClick={() => {
+                setMobileSidebarOpen(false);
+                setFeature(id);
+              }}
             >
               <Icon size={16} strokeWidth={1.8} />
               {t(label)}
@@ -212,6 +232,7 @@ export default function App() {
                   enterToSend={enterToSend}
                   sending={sending}
                   canceling={canceling}
+                  mobileSidebarOpen={mobileSidebarOpen}
                   fileMention={fileMention}
                   fileMentionIndex={fileMentionIndex}
                   onSessionSearchChange={setSessionSearch}
@@ -228,8 +249,7 @@ export default function App() {
                   onRevert={handleRevert}
                   onFork={handleFork}
                   onRespond={(requestId, tools) => void respondToRequest(requestId, tools)}
-                  onRedo={() => void handleRedo()}
-                  onCompact={() => void handleCompact()}
+                  onMobileSidebarClose={() => setMobileSidebarOpen(false)}
                   onDraftChange={setDraft}
                   onModeChange={setMode}
                   onSelectModel={(model) => void chooseModel(model)}

@@ -360,21 +360,20 @@ button {
   width: 262px;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--line);
-  background: var(--panel);
+  border-right: 1px solid var(--line-soft);
+  background: var(--panel-strong);
 }
 .sidebar-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 25px 17px 15px 20px;
+  padding: 22px 16px 15px;
 }
-.sidebar-heading strong,
-.panel-header h1 {
+.sidebar-heading strong {
   display: block;
   margin: 4px 0 0;
   color: var(--text);
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 620;
 }
 .eyebrow {
@@ -397,23 +396,58 @@ button {
   cursor: pointer;
 }
 .icon-button:hover {
-  color: var(--accent-strong);
-  border-color: var(--selected-border);
-  background: var(--selected);
+  color: var(--text);
+  border-color: transparent;
+  background: color-mix(in srgb, var(--text) 6%, var(--panel-strong));
+}
+.sidebar-heading .icon-button {
+  width: 32px;
+  height: 32px;
+  border-color: transparent;
+  border-radius: 8px;
+}
+.sidebar-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.sidebar-actions .icon-button.active,
+.sidebar-actions .icon-button:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 7%, var(--panel-strong));
 }
 .session-search {
   display: flex;
   align-items: center;
   gap: 7px;
-  margin: 0 9px 7px;
-  padding: 7px 8px;
-  border: 1px solid var(--line);
-  border-radius: 5px;
+  margin: 0 12px 10px;
+  max-height: 42px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
   color: var(--muted);
-  background: var(--panel-strong);
+  background: color-mix(in srgb, var(--text) 5%, var(--panel-strong));
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    max-height 160ms ease,
+    margin-bottom 160ms ease,
+    padding-block 160ms ease,
+    opacity 120ms ease,
+    transform 160ms ease;
+}
+.session-search.collapsed {
+  max-height: 0;
+  margin-bottom: 0;
+  padding-block: 0;
+  border-color: transparent;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-4px);
 }
 .session-search:focus-within {
-  border-color: var(--accent);
+  border-color: var(--line);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--text) 5%, transparent);
 }
 .session-search input {
   min-width: 0;
@@ -422,48 +456,64 @@ button {
   outline: 0;
   color: var(--text);
   background: transparent;
-  font-size: 11px;
+  font-size: 12px;
 }
 .session-search input::placeholder {
   color: var(--muted);
+}
+.session-search-clear {
+  display: grid;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+}
+.session-search-clear:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 7%, var(--panel-strong));
 }
 .session-list {
   min-height: 0;
   flex: 1;
   overflow: auto;
-  padding: 5px 9px;
+  padding: 2px 8px 8px;
 }
 .session-item {
   position: relative;
   display: flex;
-  min-height: 54px;
+  min-height: 50px;
   flex-direction: row;
   width: 100%;
   gap: 0;
   padding: 0;
-  border: 1px solid transparent;
-  border-radius: 7px;
+  border: 0;
+  border-radius: 8px;
   background: transparent;
-  color: var(--muted);
+  color: var(--text);
   cursor: pointer;
   text-align: left;
 }
 .session-item:hover {
   color: var(--text);
-  background: var(--hover);
+  background: color-mix(in srgb, var(--text) 4%, var(--panel-strong));
 }
 .session-item.selected {
   color: var(--text);
-  border-color: var(--selected-border);
-  background: var(--selected);
+  background: color-mix(in srgb, var(--text) 7%, var(--panel-strong));
 }
 .session-select {
   min-width: 0;
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 11px 46px 11px 11px;
+  gap: 4px;
+  padding: 9px 10px;
   border: 0;
   color: inherit;
   background: transparent;
@@ -472,11 +522,16 @@ button {
 }
 .session-actions {
   position: absolute;
-  top: 50%;
+  top: 7px;
   right: 7px;
   display: flex;
   gap: 2px;
-  transform: translateY(-50%);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.session-item:hover .session-actions,
+.session-item:focus-within .session-actions {
+  opacity: 1;
 }
 .session-actions button {
   display: grid;
@@ -502,8 +557,8 @@ button {
   flex: 1;
   margin: 8px;
   padding: 5px 6px;
-  border: 1px solid var(--accent);
-  border-radius: 4px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
   outline: 0;
   color: var(--text);
   background: var(--panel-strong);
@@ -520,30 +575,45 @@ button {
   color: #e5e5e5;
 }
 .session-title {
+  width: 100%;
   overflow: hidden;
-  color: inherit;
+  color: var(--text);
   font-size: 13px;
+  font-weight: 500;
+  padding-right: 60px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.panel-heading {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 10px;
-}
-
-.mobile-sidebar-button,
+.mobile-chat-sidebar-button,
 .mobile-sidebar-backdrop {
   display: none;
 }
 .session-meta {
+  min-width: 0;
+  width: 100%;
   display: flex;
   align-items: center;
   gap: 7px;
-  color: var(--muted);
+  overflow: hidden;
+  color: color-mix(in srgb, var(--text) 68%, var(--panel-strong));
   font-size: 11px;
+  white-space: nowrap;
+}
+.session-model {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-meta-separator,
+.session-date {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.session-meta-separator {
+  margin-left: auto;
 }
 .busy-indicator {
   width: 6px;
@@ -555,8 +625,8 @@ button {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 14px 20px 17px;
-  border-top: 1px solid var(--line-soft);
+  padding: 11px 16px 15px;
+  border-top: 0;
   color: var(--muted);
   font-size: 11px;
 }
@@ -578,30 +648,6 @@ button {
   display: flex;
   flex-direction: column;
   background: var(--bg);
-}
-.panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 78px;
-  padding: 18px 34px;
-  border-bottom: 1px solid var(--line-soft);
-}
-.panel-header h1 {
-  font-size: 17px;
-  letter-spacing: -0.02em;
-}
-.panel-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.model-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  color: var(--muted);
-  font-size: 12px;
 }
 .message-stage {
   min-height: 0;
@@ -2205,9 +2251,6 @@ button {
   .session-sidebar {
     width: 205px;
   }
-  .panel-header {
-    padding-inline: 18px;
-  }
   .message-scroll {
     padding-inline: 12px;
   }
@@ -2239,38 +2282,6 @@ button {
 
 .chat-panel {
   min-height: 0;
-}
-
-.panel-header {
-  min-height: 70px;
-  padding: 15px 24px;
-  background: color-mix(in srgb, var(--panel-strong) 96%, var(--panel));
-}
-
-.panel-header h1 {
-  max-width: min(62vw, 720px);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.panel-actions {
-  gap: 9px;
-}
-
-.ghost-button {
-  padding: 5px 8px;
-  border: 0;
-  border-radius: 6px;
-  color: var(--muted);
-  background: transparent;
-  cursor: pointer;
-  font-size: 11px;
-}
-
-.ghost-button:hover {
-  color: var(--text);
-  background: var(--hover);
 }
 
 .message-stage {
@@ -2868,12 +2879,7 @@ button {
     width: 100%;
   }
 
-  .panel-header {
-    min-height: 62px;
-    padding-inline: 16px;
-  }
-
-  .mobile-sidebar-button {
+  .mobile-chat-sidebar-button {
     display: grid;
     width: 28px;
     height: 28px;
@@ -2887,7 +2893,7 @@ button {
     cursor: pointer;
   }
 
-  .mobile-sidebar-button:hover {
+  .mobile-chat-sidebar-button:hover {
     color: var(--text);
     background: var(--hover);
   }
@@ -2908,17 +2914,6 @@ button {
   .mobile-sidebar-backdrop.visible {
     opacity: 1;
     pointer-events: auto;
-  }
-
-  .panel-actions .ghost-button {
-    display: none;
-  }
-
-  .model-label {
-    max-width: 120px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   .message-scroll {

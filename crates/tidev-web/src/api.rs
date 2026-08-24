@@ -18,6 +18,7 @@ use tidev_core::{
     PromptSubmission,
 };
 use tidev_llm::message::Message;
+use tidev_utils::path::display_path_with_tilde;
 use tokio::fs;
 use tokio::sync::mpsc::UnboundedReceiver;
 use uuid::Uuid;
@@ -1704,8 +1705,13 @@ async fn git_stash_pop(
 }
 
 async fn get_workspace(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
-    let ws = state.runtime.workspace_root().to_string_lossy().to_string();
-    Json(serde_json::json!({ "workspace_root": ws.clone(), "workspace_display": ws }))
+    let workspace_root = state.runtime.workspace_root();
+    let ws = workspace_root.to_string_lossy().to_string();
+    let workspace_display = display_path_with_tilde(workspace_root);
+    Json(serde_json::json!({
+        "workspace_root": ws,
+        "workspace_display": workspace_display
+    }))
 }
 
 async fn get_init() -> Json<serde_json::Value> {

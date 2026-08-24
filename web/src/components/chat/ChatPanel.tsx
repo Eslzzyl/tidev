@@ -1,5 +1,3 @@
-import { Menu, Sparkles } from "lucide-react";
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type {
@@ -36,6 +34,7 @@ export interface ChatPanelProps {
   enterToSend: boolean;
   sending: boolean;
   canceling: boolean;
+  mobileSidebarOpen: boolean;
   fileMention: { query: string; atPos: number } | null;
   fileMentionIndex: number;
   onSessionSearchChange: (value: string) => void;
@@ -49,8 +48,7 @@ export interface ChatPanelProps {
   onRevert: (messageId: string) => void;
   onFork: (messageId: string) => void;
   onRespond: (requestId: string, tools: ApprovedTool[]) => void;
-  onRedo: () => void;
-  onCompact: () => void;
+  onMobileSidebarClose: () => void;
   onDraftChange: (value: string) => void;
   onModeChange: (mode: "build" | "plan") => void;
   onSelectModel: (model: Model) => void;
@@ -84,6 +82,7 @@ export function ChatPanel({
   enterToSend,
   sending,
   canceling,
+  mobileSidebarOpen,
   fileMention,
   fileMentionIndex,
   onSessionSearchChange,
@@ -97,8 +96,7 @@ export function ChatPanel({
   onRevert,
   onFork,
   onRespond,
-  onRedo,
-  onCompact,
+  onMobileSidebarClose,
   onDraftChange,
   onModeChange,
   onSelectModel,
@@ -111,16 +109,15 @@ export function ChatPanel({
   onFileMentionClose,
 }: ChatPanelProps) {
   const { t } = useTranslation();
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const pendingRequests = requests.filter((request) => request.session_id === selectedSessionId);
 
   const handleSelectSession = (sessionId: string) => {
-    setMobileSidebarOpen(false);
+    onMobileSidebarClose();
     onSelectSession(sessionId);
   };
 
   const handleCreateSession = () => {
-    setMobileSidebarOpen(false);
+    onMobileSidebarClose();
     onCreateSession();
   };
 
@@ -130,7 +127,7 @@ export function ChatPanel({
         className={
           mobileSidebarOpen ? "mobile-sidebar-backdrop visible" : "mobile-sidebar-backdrop"
         }
-        onClick={() => setMobileSidebarOpen(false)}
+        onClick={onMobileSidebarClose}
         aria-label={t("Close conversations")}
       />
       <SessionSidebar
@@ -151,34 +148,6 @@ export function ChatPanel({
         onDelete={onDeleteSession}
       />
       <section className="chat-panel">
-        <div className="panel-header">
-          <div className="panel-heading">
-            <button
-              className="mobile-sidebar-button"
-              onClick={() => setMobileSidebarOpen(true)}
-              aria-label={t("Open conversations")}
-              title={t("Open conversations")}
-            >
-              <Menu size={16} />
-            </button>
-            <div>
-              <span className="eyebrow">{t("Conversation")}</span>
-              <h1>{selectedSession?.title ?? t("New conversation")}</h1>
-            </div>
-          </div>
-          <div className="panel-actions">
-            <button className="ghost-button" onClick={onRedo} title={t("Redo")}>
-              Redo
-            </button>
-            <button className="ghost-button" onClick={onCompact} title={t("Compact context")}>
-              Compact
-            </button>
-            <span className="model-label">
-              <Sparkles size={15} />
-              {selectedSession?.model_display_name ?? "Runtime model"}
-            </span>
-          </div>
-        </div>
         <div className="message-stage">
           <MessageList
             messages={messages}

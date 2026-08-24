@@ -1,6 +1,8 @@
-import { Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { Pencil, Plus, Search, Trash2, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { useWorkspace } from "../../hooks/workspaceQueries";
 import type { Session } from "../../types/api";
 import { formatDate, shortPath } from "../../utils/chat";
 
@@ -40,10 +42,33 @@ export function SessionSidebar({
   onDelete,
 }: SessionSidebarProps) {
   const { t } = useTranslation();
+  const { data: workspaceInfo } = useWorkspace();
+  const [searchOpen, setSearchOpen] = useState(() => search.trim().length > 0);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const normalizedSearch = search.trim().toLowerCase();
   const visibleSessions = sessions.filter((session) =>
     session.title.toLowerCase().includes(normalizedSearch),
   );
+  const selectedWorkspaceRoot = sessions.find(
+    (session) => session.session_id === selectedSessionId,
+  )?.workspace_root;
+  const workspaceRoot = workspaceInfo?.workspace_root ?? selectedWorkspaceRoot;
+  const workspaceDisplay =
+    workspaceInfo?.workspace_display ?? (workspaceRoot ? shortPath(workspaceRoot) : "");
+
+  useEffect(() => {
+    if (searchOpen) searchInputRef.current?.focus();
+  }, [searchOpen]);
+
+  const handleSearchToggle = () => {
+    if (searchOpen) onSearchChange("");
+    setSearchOpen((open) => !open);
+  };
+
+  const handleSearchClose = () => {
+    onSearchChange("");
+    setSearchOpen(false);
+  };
 
   return (
     <aside className={mobileOpen ? "session-sidebar mobile-open" : "session-sidebar"}>
@@ -52,18 +77,51 @@ export function SessionSidebar({
           <span className="eyebrow">{t("Workspace")}</span>
           <strong>{t("Conversations")}</strong>
         </div>
-        <button className="icon-button" onClick={onCreate} title={t("New conversation")}>
-          <Plus size={17} />
-        </button>
+        <div className="sidebar-actions">
+          <button
+            className={searchOpen ? "icon-button active" : "icon-button"}
+            onClick={handleSearchToggle}
+            title={searchOpen ? t("Close search") : t("Search sessions")}
+            aria-label={searchOpen ? t("Close search") : t("Search sessions")}
+            aria-expanded={searchOpen}
+          >
+            <Search size={16} />
+          </button>
+          <button className="icon-button" onClick={onCreate} title={t("New conversation")}>
+            <Plus size={17} />
+          </button>
+        </div>
       </div>
-      <div className="session-search">
+      <div
+        className={searchOpen ? "session-search expanded" : "session-search collapsed"}
+        aria-hidden={!searchOpen}
+      >
         <Search size={14} />
         <input
+          ref={searchInputRef}
           value={search}
           onChange={(event) => onSearchChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") handleSearchClose();
+          }}
           placeholder={t("Search sessions…")}
           aria-label={t("Search sessions")}
+          tabIndex={searchOpen ? 0 : -1}
         />
+        {search ? (
+          <button
+            className="session-search-clear"
+            onClick={() => {
+              onSearchChange("");
+              searchInputRef.current?.focus();
+            }}
+            title={t("Clear search")}
+            aria-label={t("Clear search")}
+            tabIndex={searchOpen ? 0 : -1}
+          >
+            <X size={14} />
+          </button>
+        ) : null}
       </div>
       <div className="session-list">
         {loading ? <div className="empty-state">{t("Loading sessions…")}</div> : null}
@@ -98,7 +156,11 @@ export function SessionSidebar({
                 <span className="session-title">{session.title || t("Untitled conversation")}</span>
                 <span className="session-meta">
                   {session.busy ? <span className="busy-indicator" /> : null}
-                  {session.model_display_name} · {formatDate(session.updated_at)}
+                  <span className="session-model">{session.model_display_name}</span>
+                  <span className="session-meta-separator" aria-hidden="true">
+                    ·
+                  </span>
+                  <time className="session-date">{formatDate(session.updated_at)}</time>
                 </span>
               </button>
             )}
@@ -123,12 +185,13 @@ export function SessionSidebar({
           </div>
         ))}
       </div>
-      <div className="sidebar-footer">
-        <span>{t("{{count}} conversations", { count: sessions.length })}</span>
-        <span className="workspace-path" title={sessions[0]?.workspace_root}>
-          {shortPath(sessions[0]?.workspace_root ?? "")}
-        </span>
-      </div>
+      {workspaceDisplay ? (
+        <div className="sidebar-footer">
+          <span className="workspace-path" title={workspaceRoot}>
+            {workspaceDisplay}
+          </span>
+        </div>
+      ) : null}
     </aside>
   );
 }
