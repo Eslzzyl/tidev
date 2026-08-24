@@ -2342,7 +2342,7 @@ button {
  * deliberately scoped to the assistant content; the page itself remains a
  * continuous two-column layout without an outer card shell. */
 .thinking-block {
-  margin: 0 0 1px;
+  margin: 0;
   color: var(--muted);
 }
 .thinking-header {
@@ -2440,7 +2440,7 @@ button {
 }
 .tool-renderer-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   width: 100%;
   gap: 7px;
   min-height: 22px;
@@ -2460,7 +2460,7 @@ button {
   display: flex;
   min-width: 0;
   flex: 1;
-  align-items: flex-start;
+  align-items: center;
   flex-wrap: wrap;
   gap: 7px;
   overflow: visible;
@@ -2497,8 +2497,8 @@ button {
 }
 .tool-renderer-status {
   display: inline-flex;
-  align-items: flex-start;
-  align-self: flex-start;
+  align-items: center;
+  align-self: center;
   flex: 0 0 auto;
   gap: 5px;
   font-size: 10px;
@@ -2606,7 +2606,7 @@ button {
 }
 .instruction-message {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 7px;
   min-width: 0;
   min-height: 22px;
@@ -2853,15 +2853,7 @@ button {
 }
 
 .assistant-segment-row {
-  padding: 0 14px;
-}
-
-.assistant-segment-row-first {
-  padding-top: 8px;
-}
-
-.assistant-segment-row-spaced {
-  padding-top: 2px;
+  padding: 2px 14px 0;
 }
 
 .assistant-segment-row .assistant-message-content,

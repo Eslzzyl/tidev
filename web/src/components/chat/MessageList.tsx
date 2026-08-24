@@ -68,7 +68,6 @@ interface SegmentItem {
   segment: RoundSegment;
   entry?: ToolCallEntry;
   active: boolean;
-  first: boolean;
   reasoningStartedAt?: string | null;
   reasoningCompletedAt?: string | null;
 }
@@ -133,7 +132,6 @@ function makeSegmentItems(
       segment,
       entry,
       active,
-      first: visible.length === 0,
       reasoningStartedAt,
       reasoningCompletedAt,
     });
@@ -537,7 +535,6 @@ const SegmentItemView = memo(function SegmentItemView({
     "chat-message",
     "assistant-message",
     "assistant-segment-row",
-    item.first ? "assistant-segment-row-first" : "assistant-segment-row-spaced",
     stream ? "streaming-segment-row" : "",
   ]
     .filter(Boolean)
@@ -706,7 +703,7 @@ export const MessageList = memo(function MessageList({
         );
       case "stream-empty":
         return (
-          <article className="chat-message assistant-message assistant-segment-row assistant-segment-row-first">
+          <article className="chat-message assistant-message assistant-segment-row">
             <div className="assistant-message-inner">
               <div className="assistant-message-content message-content">
                 <span className="cursor-block" />
