@@ -2388,22 +2388,18 @@ button {
   font-size: 10px;
   white-space: normal;
 }
-.thinking-body {
-  display: grid;
-  grid-template-rows: 0fr;
-  opacity: 0;
+.expandable-body {
+  display: none;
+  height: 0;
   overflow: hidden;
-  transform: scaleY(0);
-  transform-origin: top;
-  transition:
-    grid-template-rows 220ms ease,
-    opacity 180ms ease,
-    transform 220ms ease;
 }
-.thinking-body.expanded {
-  grid-template-rows: 1fr;
-  opacity: 1;
-  transform: scaleY(1);
+.expandable-body-visible,
+.expandable-body-hiding {
+  display: block;
+  transition: height 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.thinking-body {
+  overflow: hidden;
 }
 .thinking-markdown {
   min-height: 0;
@@ -2508,21 +2504,7 @@ button {
   font-size: 10px;
 }
 .tool-renderer-body-shell {
-  display: grid;
-  grid-template-rows: 0fr;
-  opacity: 0;
   overflow: hidden;
-  transform: scaleY(0);
-  transform-origin: top;
-  transition:
-    grid-template-rows 220ms ease,
-    opacity 180ms ease,
-    transform 220ms ease;
-}
-.tool-renderer-body-shell.expanded {
-  grid-template-rows: 1fr;
-  opacity: 1;
-  transform: scaleY(1);
 }
 .tool-renderer-body {
   min-height: 0;
@@ -2535,20 +2517,6 @@ button {
   border-top: 1px solid var(--line);
   color: var(--text);
   font-size: 12px;
-  transition:
-    gap 220ms ease,
-    padding 220ms ease,
-    border-color 220ms ease,
-    border-top-width 220ms ease;
-}
-.tool-renderer-body-shell:not(.expanded) .tool-renderer-body {
-  gap: 0;
-  padding-top: 0;
-  padding-bottom: 0;
-  border-top-color: transparent;
-}
-.tool-renderer-body-shell:not(.expanded) .tool-renderer-body {
-  border-top-width: 0;
 }
 .tool-renderer-body > .markdown-renderer > :first-child,
 .tool-renderer-body > :first-child {
@@ -2873,6 +2841,56 @@ button {
   }
 
   .system-message-block {
+    padding-inline: 8px;
+  }
+}
+
+/* The transcript is a flat virtual list. Keep each measured item small and
+ * let the virtualizer own vertical placement instead of animating a large
+ * assistant subtree. */
+.assistant-meta-row {
+  padding-bottom: 0;
+}
+
+.assistant-segment-row {
+  padding: 0 14px;
+}
+
+.assistant-segment-row-first {
+  padding-top: 8px;
+}
+
+.assistant-segment-row-spaced {
+  padding-top: 2px;
+}
+
+.assistant-segment-row .assistant-message-content,
+.assistant-footer-row .assistant-message-content {
+  margin-top: 0;
+}
+
+.chat-segment-content {
+  width: min(100%, var(--message-column-width));
+  margin: 0 auto;
+}
+
+.assistant-footer-row {
+  padding: 0 14px 36px;
+}
+
+.stream-error {
+  width: min(100%, var(--message-column-width));
+  margin: 0 auto;
+  padding: 0 14px 36px;
+}
+
+@media (max-width: 760px) {
+  .assistant-segment-row,
+  .assistant-footer-row {
+    padding-inline: 8px;
+  }
+
+  .stream-error {
     padding-inline: 8px;
   }
 }

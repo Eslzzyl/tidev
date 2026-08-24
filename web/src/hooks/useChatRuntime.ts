@@ -19,6 +19,7 @@ import type {
 import type { StreamMessage } from "../types/chat";
 import { parseSlashCommand } from "../commands";
 import { asString, eventPayload } from "../utils/events";
+import { beginPerformance, endPerformance } from "../utils/performance";
 import { toolCallEntry, toolResultStatus, type ToolCallEntry } from "../utils/round";
 import i18n from "../i18n";
 
@@ -38,16 +39,17 @@ function createStream(key: string, requestId: number): StreamMessage {
 function cloneStream(stream: StreamMessage): StreamMessage {
   return {
     ...stream,
-    segments: stream.segments.map((segment) => ({ ...segment })),
+    segments: stream.segments.slice(),
     toolCallMap: { ...stream.toolCallMap },
   };
 }
 
 function appendSegment(stream: StreamMessage, type: "text" | "reasoning", content: string) {
   if (!content) return;
-  const last = stream.segments[stream.segments.length - 1];
+  const lastIndex = stream.segments.length - 1;
+  const last = stream.segments[lastIndex];
   if (last?.type === type) {
-    last.content += content;
+    stream.segments[lastIndex] = { ...last, content: last.content + content };
   } else {
     stream.segments.push({ type, content });
   }
@@ -63,7 +65,7 @@ function reconcileSegment(stream: StreamMessage, type: "text" | "reasoning", con
   }
   if (existing.content === content || existing.content.endsWith(content)) return;
   if (content.startsWith(existing.content)) {
-    existing.content = content;
+    stream.segments[index] = { ...existing, content };
   } else if (!existing.content.includes(content)) {
     stream.segments.push({ type, content });
   }
@@ -203,6 +205,49 @@ export function useChatRuntime() {
   const cursorRef = useRef<number | null>(
     Number(localStorage.getItem("tidev:last-event-cursor")) || null,
   );
+  type StreamState = Record<string, StreamMessage>;
+  type StreamStateUpdater = (current: StreamState) => StreamState;
+  const pendingStreamUpdatesRef = useRef<StreamStateUpdater[]>([]);
+  const streamUpdateFrameRef = useRef<number | null>(null);
+  const streamUpdateFrameKindRef = useRef<"animation" | "timeout" | null>(null);
+
+  const flushStreamUpdates = useCallback(() => {
+    streamUpdateFrameRef.current = null;
+    streamUpdateFrameKindRef.current = null;
+    const pending = pendingStreamUpdatesRef.current.splice(0);
+    if (pending.length === 0) return;
+    setStreams((current) => pending.reduce((next, update) => update(next), current));
+  }, []);
+
+  const scheduleStreamUpdate = useCallback(
+    (update: StreamStateUpdater) => {
+      pendingStreamUpdatesRef.current.push(update);
+      if (streamUpdateFrameRef.current !== null) return;
+      if (typeof window.requestAnimationFrame === "function") {
+        streamUpdateFrameKindRef.current = "animation";
+        streamUpdateFrameRef.current = window.requestAnimationFrame(flushStreamUpdates);
+      } else {
+        streamUpdateFrameKindRef.current = "timeout";
+        streamUpdateFrameRef.current = window.setTimeout(flushStreamUpdates, 0);
+      }
+    },
+    [flushStreamUpdates],
+  );
+
+  const clearPendingStreamUpdates = useCallback(() => {
+    if (streamUpdateFrameRef.current !== null) {
+      if (streamUpdateFrameKindRef.current === "animation") {
+        window.cancelAnimationFrame(streamUpdateFrameRef.current);
+      } else {
+        window.clearTimeout(streamUpdateFrameRef.current);
+      }
+      streamUpdateFrameRef.current = null;
+      streamUpdateFrameKindRef.current = null;
+    }
+    pendingStreamUpdatesRef.current = [];
+  }, []);
+
+  useEffect(() => clearPendingStreamUpdates, [clearPendingStreamUpdates]);
 
   useEffect(() => {
     void checkAuthStatus();
@@ -253,21 +298,27 @@ export function useChatRuntime() {
   );
 
   const loadMessages = useCallback(async (sessionId: string) => {
+    const performanceSpan = beginPerformance("session.messages.fetch");
     try {
       const response = await api.listMessages(sessionId);
+      endPerformance(performanceSpan, { messageCount: response.messages.length });
       if (selectedSessionRef.current === sessionId) {
         setMessages(response.messages);
       }
     } catch (reason) {
+      endPerformance(performanceSpan, { failed: true });
       setError(reason instanceof Error ? reason.message : i18n.t("Failed to load messages"));
     }
   }, []);
 
   const loadTodos = useCallback(async (sessionId: string) => {
+    const performanceSpan = beginPerformance("session.todos.fetch");
     try {
       const response = await api.getTodos(sessionId);
+      endPerformance(performanceSpan, { todoCount: response.todos.length });
       if (selectedSessionRef.current === sessionId) setTodos(response.todos);
     } catch (reason) {
+      endPerformance(performanceSpan, { failed: true });
       setError(reason instanceof Error ? reason.message : i18n.t("Failed to load to-do list"));
     }
   }, []);
@@ -276,6 +327,7 @@ export function useChatRuntime() {
     (sessionId: string) => {
       selectedSessionRef.current = sessionId;
       setSelectedSessionId(sessionId);
+      clearPendingStreamUpdates();
       setStreams({});
       setTodos([]);
       setError(null);
@@ -283,7 +335,7 @@ export function useChatRuntime() {
       void loadMessages(sessionId);
       void loadTodos(sessionId);
     },
-    [loadMessages, loadTodos],
+    [clearPendingStreamUpdates, loadMessages, loadTodos],
   );
 
   useEffect(() => {
@@ -342,7 +394,7 @@ export function useChatRuntime() {
         const requestId = Number(payload.request_id);
         if (Number.isFinite(requestId)) {
           const key = `${sessionId}:${requestId}`;
-          setStreams((current) => {
+          scheduleStreamUpdate((current) => {
             const stream = current[key] ?? createStream(key, requestId);
             return {
               ...current,
@@ -369,7 +421,7 @@ export function useChatRuntime() {
         const requestId = Number(payload.request_id);
         if (!Number.isFinite(requestId)) return;
         const key = `${sessionId}:${requestId}`;
-        setStreams((current) => {
+        scheduleStreamUpdate((current) => {
           const next = cloneStream(current[key] ?? createStream(key, requestId));
           next.status = "streaming";
           if (kind === "ToolCallUpdated") {
@@ -399,7 +451,7 @@ export function useChatRuntime() {
         const toolCall = toolCallFromPayload(payload.tool_call);
         if (!Number.isFinite(requestId) || !toolCall) return;
         const key = `${sessionId}:${requestId}`;
-        setStreams((current) => {
+        scheduleStreamUpdate((current) => {
           const next = cloneStream(current[key] ?? createStream(key, requestId));
           const entry = ensureToolCall(next, toolCall);
           if (entry.status !== "completed" && entry.status !== "failed") {
@@ -416,12 +468,15 @@ export function useChatRuntime() {
         if (!Number.isFinite(requestId) || !toolCall || !result) return;
         const key = `${sessionId}:${requestId}`;
         const childSessionId = asString(payload.child_session_id);
-        setStreams((current) => {
+        scheduleStreamUpdate((current) => {
           const next = cloneStream(current[key] ?? createStream(key, requestId));
           const entry = ensureToolCall(next, toolCall);
-          entry.result = result;
-          entry.status = toolResultStatus(result);
-          if (childSessionId) entry.childSessionId = childSessionId;
+          next.toolCallMap[toolCall.id] = {
+            ...entry,
+            result,
+            status: toolResultStatus(result),
+            ...(childSessionId ? { childSessionId } : {}),
+          };
           return { ...current, [key]: next };
         });
         return;
@@ -433,7 +488,7 @@ export function useChatRuntime() {
         if (!Number.isFinite(requestId) || !toolCallId || !childSessionId) return;
         const currentToolCall = toolCallFromPayload(payload.current_tool_call);
         const key = `${sessionId}:${requestId}`;
-        setStreams((current) => {
+        scheduleStreamUpdate((current) => {
           const next = cloneStream(current[key] ?? createStream(key, requestId));
           if (!next.toolCallMap[toolCallId]) {
             ensureToolCall(
@@ -465,7 +520,7 @@ export function useChatRuntime() {
         const finished = payload.finished === true;
         const exitCode = typeof payload.exit_code === "number" ? payload.exit_code : null;
         const content = asString(payload.content);
-        setStreams((current) => {
+        scheduleStreamUpdate((current) => {
           const keys = Object.keys(current).filter(
             (key) => key.startsWith(`${sessionId}:`) && current[key]?.toolCallMap[toolCallId],
           );
@@ -487,7 +542,7 @@ export function useChatRuntime() {
         const requestId = Number(payload.request_id);
         if (!Number.isFinite(requestId)) return;
         const key = `${sessionId}:${requestId}`;
-        setStreams((current) => {
+        scheduleStreamUpdate((current) => {
           const next = cloneStream(current[key] ?? createStream(key, requestId));
           next.status = "failed";
           next.error = asString(payload.error);
@@ -502,7 +557,7 @@ export function useChatRuntime() {
         const requestId = Number(payload.request_id);
         if (!Number.isFinite(requestId)) return;
         const key = `${sessionId}:${requestId}`;
-        setStreams((current) => {
+        scheduleStreamUpdate((current) => {
           const next = cloneStream(current[key] ?? createStream(key, requestId));
           const turn = (payload.turn ?? {}) as Record<string, unknown>;
           const turnCompletedAt = asString(turn.completed_at) || null;
@@ -529,7 +584,7 @@ export function useChatRuntime() {
         const requestId = Number(payload.request_id);
         if (!Number.isFinite(requestId)) return;
         const key = `${sessionId}:${requestId}`;
-        setStreams((current) => {
+        scheduleStreamUpdate((current) => {
           const stream = current[key];
           if (!stream) return current;
           if (stream.providerFinished && stream.status !== "failed") {
@@ -566,7 +621,7 @@ export function useChatRuntime() {
         void loadMessages(sessionId);
       }
     },
-    [loadMessages, loadTodos],
+    [loadMessages, loadTodos, scheduleStreamUpdate],
   );
 
   useEffect(() => {
@@ -595,6 +650,7 @@ export function useChatRuntime() {
     selectedSessionRef.current = null;
     setSelectedSessionId(null);
     setMessages([]);
+    clearPendingStreamUpdates();
     setStreams({});
     setDraft("");
     setFileMention(null);

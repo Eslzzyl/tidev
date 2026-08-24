@@ -48,6 +48,7 @@ import type {
 } from "../types/api";
 import { getAuthToken, useAuthStore } from "../stores/useAuthStore";
 import i18n from "../i18n";
+import { beginPerformance, endPerformance, recordPerformance } from "../utils/performance";
 
 const API_BASE = "/api";
 
@@ -70,7 +71,26 @@ function fetchWithAuth(url: string, options?: RequestInit): Promise<Response> {
   });
 }
 
+function recordResourceTiming(kind: string, url: string) {
+  if (typeof window === "undefined" || typeof window.performance === "undefined") return;
+  const entries = window.performance
+    .getEntriesByType("resource")
+    .filter((entry) => entry.name.endsWith(url));
+  const resource = entries.at(-1) as PerformanceResourceTiming | undefined;
+  if (!resource) return;
+  recordPerformance(`api.${kind}.resource`, resource.duration, {
+    transferSize: resource.transferSize,
+    encodedBodySize: resource.encodedBodySize,
+  });
+}
+
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
+  const performanceKind = url.includes("/messages")
+    ? "messages"
+    : url.includes("/todos")
+      ? "todos"
+      : null;
+  let requestSpan = performanceKind ? beginPerformance(`api.${performanceKind}.response`) : null;
   try {
     const response = await fetch(url, {
       ...options,
@@ -80,6 +100,8 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
         ...options?.headers,
       },
     });
+    endPerformance(requestSpan, { status: response.status });
+    requestSpan = null;
 
     if (response.status === 401) {
       // Token is invalid or expired — trigger auth re-entry
@@ -92,8 +114,13 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
       throw new Error(error.error || `HTTP ${response.status}`);
     }
 
-    return response.json();
+    const jsonSpan = performanceKind ? beginPerformance(`api.${performanceKind}.json`) : null;
+    const result = await response.json();
+    endPerformance(jsonSpan);
+    if (performanceKind) recordResourceTiming(performanceKind, url);
+    return result;
   } catch (error) {
+    endPerformance(requestSpan, { failed: true });
     // Handle network errors (e.g., cannot connect to backend)
     if (error instanceof TypeError && error.message.includes("fetch")) {
       throw new Error(

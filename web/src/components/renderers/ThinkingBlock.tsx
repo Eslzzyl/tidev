@@ -3,6 +3,7 @@ import type { TFunction } from "i18next";
 import { Lightbulb } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { ExpandableBody } from "../ui/ExpandableBody";
 import { ActivityRipple } from "./ActivityRipple";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 
@@ -12,6 +13,8 @@ interface Props {
   active?: boolean;
   startedAt?: string;
   completedAt?: string;
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
 }
 
 function formatThoughtDuration(milliseconds: number, t: TFunction) {
@@ -50,27 +53,31 @@ function ElapsedTimer({
   active: boolean;
 }) {
   const { t } = useTranslation();
-  const [elapsedMs, setElapsedMs] = useState<number | null>(null);
+  const start = Date.parse(startedAt);
+  const completed = completedAt ? Date.parse(completedAt) : Number.NaN;
+  const fixedElapsedMs = Number.isNaN(start)
+    ? null
+    : !Number.isNaN(completed)
+      ? Math.max(0, completed - start)
+      : !active
+        ? Math.max(0, Date.now() - start)
+        : null;
+  const [liveElapsedMs, setLiveElapsedMs] = useState<number | null>(() =>
+    Number.isNaN(start) ? null : Math.max(0, Date.now() - start),
+  );
 
   useEffect(() => {
-    const start = Date.parse(startedAt);
-    const completed = completedAt ? Date.parse(completedAt) : Number.NaN;
-    if (Number.isNaN(start)) {
-      setElapsedMs(null);
-      return;
-    }
-
-    const update = () => {
-      const end = Number.isNaN(completed) ? Date.now() : completed;
-      setElapsedMs(Math.max(0, end - start));
-    };
-
-    update();
-    if (!Number.isNaN(completed) || !active) return;
+    if (Number.isNaN(start) || !Number.isNaN(completed) || !active) return;
+    const update = () =>
+      setLiveElapsedMs((current) => {
+        const next = Math.max(0, Date.now() - start);
+        return current === next ? current : next;
+      });
     const timer = setInterval(update, 100);
     return () => clearInterval(timer);
   }, [active, completedAt, startedAt]);
 
+  const elapsedMs = fixedElapsedMs ?? liveElapsedMs;
   if (elapsedMs === null) {
     return <span className="thinking-elapsed">{t("Thinking")}</span>;
   }
@@ -90,16 +97,25 @@ export const ThinkingBlock = memo(function ThinkingBlock({
   active = false,
   startedAt,
   completedAt,
+  expanded: controlledExpanded,
+  onExpandedChange,
 }: Props) {
   const { t } = useTranslation();
-  const [expanded, setExpanded] = useState(false);
+  const [localExpanded, setLocalExpanded] = useState(false);
+  const expanded = controlledExpanded ?? localExpanded;
+
+  function toggleExpanded() {
+    const next = !expanded;
+    if (controlledExpanded === undefined) setLocalExpanded(next);
+    onExpandedChange?.(next);
+  }
 
   return (
     <div className="thinking-block">
       <div className="thinking-header">
         <button
           className="thinking-toggle"
-          onClick={() => setExpanded((value) => !value)}
+          onClick={toggleExpanded}
           aria-expanded={expanded}
         >
           <ActivityRipple active={active} row label={t("Thinking")}>
@@ -117,11 +133,11 @@ export const ThinkingBlock = memo(function ThinkingBlock({
           </ActivityRipple>
         </button>
       </div>
-      <div className={expanded ? "thinking-body expanded" : "thinking-body"}>
+      <ExpandableBody expanded={expanded} className="thinking-body">
         <div className="thinking-markdown">
           <MarkdownRenderer content={content} />
         </div>
-      </div>
+      </ExpandableBody>
     </div>
   );
 });

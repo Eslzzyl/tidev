@@ -1,5 +1,15 @@
-import { useMemo, useState, useEffect, useCallback } from "react";
+import {
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import type { HLJSApi } from "highlight.js";
+
+import { useChatScrollRef } from "../chat/ChatScrollContext";
 
 interface CodeLine {
   lineNum: number;
@@ -15,41 +25,30 @@ interface Props {
   filepath?: string;
 }
 
-/**
- * Extract the file path from tool output XML.
- */
+const CODE_LINE_HEIGHT = 22;
+const CODE_VIEWPORT_HEIGHT = 640;
+
 function extractPath(output: string): string | null {
-  const m = output.match(/<path>(.*?)<\/path>/);
-  return m ? m[1] : null;
+  const match = output.match(/<path>(.*?)<\/path>/);
+  return match ? match[1] : null;
 }
 
-/**
- * Parse lines from the <content>…</content> section.
- * Each line is expected to be `lineNum: text`.
- */
 function parseContentLines(output: string): CodeLine[] {
-  // Try to extract content between <content> and </content>
   const contentMatch = output.match(/<content>\n?([\s\S]*?)\n?<\/content>/);
   const body = contentMatch ? contentMatch[1] : output;
-
   const lines: CodeLine[] = [];
-  const linePattern = /^(\d+):\s?(.*)$/m;
+  const linePattern = /^(\d+):\s?(.*)$/;
 
   for (const raw of body.split("\n")) {
-    const m = raw.match(linePattern);
-    if (m) {
-      lines.push({ lineNum: parseInt(m[1], 10), text: m[2] });
-    }
+    const match = raw.match(linePattern);
+    if (match) lines.push({ lineNum: Number(match[1]), text: match[2] });
   }
 
   return lines;
 }
 
-/**
- * Detect the programming language from the file path.
- */
-function detectLanguage(fp: string): string {
-  const ext = fp.split(".").pop()?.toLowerCase() || "";
+function detectLanguage(filepath: string): string {
+  const ext = filepath.split(".").pop()?.toLowerCase() || "";
   const langMap: Record<string, string> = {
     rs: "rust",
     ts: "typescript",
@@ -102,32 +101,84 @@ function escapeHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+function useScrollMargin(
+  scrollRef: ReturnType<typeof useChatScrollRef>,
+  containerRef: RefObject<HTMLDivElement | null>,
+) {
+  const [scrollMargin, setScrollMargin] = useState(0);
+
+  useLayoutEffect(() => {
+    const scrollElement = scrollRef?.current;
+    const container = containerRef.current;
+    if (!scrollElement || !container) return;
+
+    const update = () => {
+      const scrollRect = scrollElement.getBoundingClientRect();
+      const containerRect = container.getBoundingClientRect();
+      const next = containerRect.top - scrollRect.top + scrollElement.scrollTop;
+      setScrollMargin((current) => (Math.abs(current - next) < 0.5 ? current : next));
+    };
+
+    update();
+    const resizeObserver =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+    resizeObserver?.observe(scrollElement);
+    resizeObserver?.observe(container);
+    window.addEventListener("resize", update);
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, [containerRef, scrollRef]);
+
+  return scrollMargin;
+}
+
 export function CodeLinesRenderer({ output, filepath }: Props) {
   const [hljs, setHljs] = useState<HLJSApi | null>(null);
+  const externalScrollRef = useChatScrollRef();
+  const localScrollRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  // Dynamically load highlight.js on first render
-  useEffect(() => {
-    import("highlight.js").then((mod) => setHljs(mod.default));
+  useLayoutEffect(() => {
+    let active = true;
+    void import("highlight.js").then((mod) => {
+      if (active) setHljs(mod.default);
+    });
+    return () => {
+      active = false;
+    };
   }, []);
 
+  const filepathValue = useMemo(() => filepath || extractPath(output), [output, filepath]);
+  const codeLines = useMemo(() => parseContentLines(output), [output]);
+  const language = useMemo(
+    () => (filepathValue ? detectLanguage(filepathValue) : ""),
+    [filepathValue],
+  );
+  const scrollMargin = useScrollMargin(externalScrollRef, containerRef);
+  const virtualizer = useVirtualizer({
+    count: codeLines.length,
+    getScrollElement: () => externalScrollRef?.current ?? localScrollRef.current,
+    estimateSize: () => CODE_LINE_HEIGHT,
+    getItemKey: (index) => String(codeLines[index]?.lineNum ?? index),
+    initialOffset: () => externalScrollRef?.current?.scrollTop ?? 0,
+    overscan: 20,
+    scrollMargin,
+  });
+
   const highlightLine = useCallback(
-    (line: string, language: string): string => {
+    (line: string): string => {
       if (!language || !hljs) return escapeHtml(line);
       try {
-        const result = hljs.highlight(line, { language, ignoreIllegals: true });
-        return result.value;
+        return hljs.highlight(line, { language, ignoreIllegals: true }).value;
       } catch {
         return escapeHtml(line);
       }
     },
-    [hljs],
+    [hljs, language],
   );
 
-  const fp = useMemo(() => filepath || extractPath(output), [output, filepath]);
-  const codeLines = useMemo(() => parseContentLines(output), [output]);
-  const language = useMemo(() => (fp ? detectLanguage(fp) : ""), [fp]);
-
-  // Fallback: if no structured lines found, render as plain text
   if (codeLines.length === 0) {
     return (
       <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-xs leading-relaxed text-neutral-600 dark:text-neutral-400">
@@ -136,26 +187,58 @@ export function CodeLinesRenderer({ output, filepath }: Props) {
     );
   }
 
+  const viewportHeight = Math.min(
+    CODE_VIEWPORT_HEIGHT,
+    Math.max(CODE_LINE_HEIGHT, codeLines.length * CODE_LINE_HEIGHT),
+  );
+  const usesExternalScroll = externalScrollRef !== null;
+  const totalHeight = virtualizer.getTotalSize();
+
   return (
-    <div className="overflow-x-auto rounded-md border border-neutral-200 dark:border-neutral-700">
-      <table className="w-full border-collapse text-xs leading-relaxed">
-        <tbody>
-          {codeLines.map(({ lineNum, text }) => (
-            <tr key={lineNum} className="group">
-              <td className="select-none border-r border-neutral-200 px-2 text-right text-neutral-400 dark:border-neutral-700 dark:text-neutral-500">
-                {lineNum}
-              </td>
-              <td className="px-3 font-mono text-neutral-800 dark:text-neutral-200">
-                <code
-                  dangerouslySetInnerHTML={{
-                    __html: highlightLine(text, language),
-                  }}
-                />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div
+      ref={usesExternalScroll ? containerRef : localScrollRef}
+      className="overflow-x-auto rounded-md border border-neutral-200 dark:border-neutral-700"
+      style={{
+        height: `${usesExternalScroll ? totalHeight : viewportHeight}px`,
+        overflowY: usesExternalScroll ? "visible" : "auto",
+      }}
+    >
+      <div
+        style={{
+          position: "relative",
+          height: `${totalHeight}px`,
+          minWidth: "max-content",
+        }}
+      >
+        {virtualizer.getVirtualItems().map((virtualItem) => {
+          const line = codeLines[virtualItem.index];
+          if (!line) return null;
+          return (
+            <div
+              className="group flex min-w-full font-mono text-xs leading-relaxed"
+              data-index={virtualItem.index}
+              key={virtualItem.key}
+              ref={virtualizer.measureElement}
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                minHeight: `${CODE_LINE_HEIGHT}px`,
+                transform: `translateY(${virtualItem.start - scrollMargin}px)`,
+                width: "100%",
+              }}
+            >
+              <span className="select-none border-r border-neutral-200 px-2 text-right text-neutral-400 dark:border-neutral-700 dark:text-neutral-500">
+                {line.lineNum}
+              </span>
+              <code
+                className="px-3 text-neutral-800 dark:text-neutral-200"
+                dangerouslySetInnerHTML={{ __html: highlightLine(line.text) }}
+              />
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

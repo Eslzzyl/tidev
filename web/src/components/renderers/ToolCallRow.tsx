@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState, type ComponentType } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import type { TFunction } from "i18next";
 import {
   Clock,
@@ -16,8 +16,9 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import type { MessageAttachment } from "../../types/api";
+import type { MessageAttachment, ToolExecutionResult } from "../../types/api";
 import type { ToolCallEntry } from "../../utils/round";
+import { ExpandableBody } from "../ui/ExpandableBody";
 import { JsonTreeView } from "../ui/JsonTreeView";
 import { ActivityRipple } from "./ActivityRipple";
 import { CodeLinesRenderer } from "./CodeLinesRenderer";
@@ -29,6 +30,17 @@ import { TodoRenderer } from "./TodoRenderer";
 interface Props {
   entry: ToolCallEntry;
   workspaceRoot?: string;
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
+}
+
+interface ToolCallBodyProps {
+  entry: ToolCallEntry;
+  args: ToolArguments;
+  metadata: ToolExecutionResult["metadata"] | undefined;
+  output: string;
+  summary: string;
+  t: TFunction;
 }
 
 const READ_ONLY_TOOLS = new Set(["read", "grep", "glob", "skill"]);
@@ -50,6 +62,8 @@ const TOOL_LABELS: Record<string, string> = {
   webfetch: "Fetch web page",
   question: "Ask",
 };
+
+type ToolArguments = Record<string, unknown> | null;
 
 function isBash(name: string) {
   return name === "bash" || name === "shell";
@@ -112,10 +126,9 @@ function toolTone(name: string) {
   return "default";
 }
 
-function toolLabel(entry: ToolCallEntry, t: TFunction) {
+function toolLabel(entry: ToolCallEntry, t: TFunction, args: ToolArguments) {
   if (entry.name === "grep" || entry.name === "glob") return "";
   if (entry.name === "skill") {
-    const args = parseArguments(entry);
     const hasName = Boolean(stringArgument(args, "name"));
     return t(
       hasName && stringArgument(args, "path")
@@ -128,7 +141,7 @@ function toolLabel(entry: ToolCallEntry, t: TFunction) {
   return t(TOOL_LABELS[entry.name] ?? "Tool call");
 }
 
-function parseArguments(entry: ToolCallEntry): Record<string, unknown> | null {
+function parseArguments(entry: ToolCallEntry): ToolArguments {
   try {
     const value = JSON.parse(entry.arguments) as unknown;
     return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
@@ -137,13 +150,17 @@ function parseArguments(entry: ToolCallEntry): Record<string, unknown> | null {
   }
 }
 
-function stringArgument(args: Record<string, unknown> | null, key: string) {
+function stringArgument(args: ToolArguments, key: string) {
   const value = args?.[key];
   return typeof value === "string" ? value : "";
 }
 
-function summarizeArguments(entry: ToolCallEntry, workspaceRoot: string, t: TFunction) {
-  const args = parseArguments(entry);
+function summarizeArguments(
+  entry: ToolCallEntry,
+  workspaceRoot: string,
+  t: TFunction,
+  args: ToolArguments,
+) {
   if (!args) return entry.arguments || "…";
   switch (entry.name) {
     case "read":
@@ -209,12 +226,12 @@ function summarizeArguments(entry: ToolCallEntry, workspaceRoot: string, t: TFun
   }
 }
 
-function bashCommand(entry: ToolCallEntry) {
-  return stringArgument(parseArguments(entry), "command");
+function bashCommand(args: ToolArguments) {
+  return stringArgument(args, "command");
 }
 
-function bashDescription(entry: ToolCallEntry) {
-  return stringArgument(parseArguments(entry), "description");
+function bashDescription(args: ToolArguments) {
+  return stringArgument(args, "description");
 }
 
 function formatDuration(milliseconds: number) {
@@ -233,6 +250,100 @@ function parseJson(output: string): unknown | null {
     return null;
   }
 }
+
+const ToolCallBody = memo(function ToolCallBody({
+  entry,
+  args,
+  metadata,
+  output,
+  summary,
+  t,
+}: ToolCallBodyProps) {
+  const fileChanges = metadata?.file_changes.filter((change) => Boolean(change.diff)) ?? [];
+  const hasDiff = Boolean(metadata?.diff) || fileChanges.length > 0;
+  const parsedJson = !isWriteTool(entry.name) && !isBash(entry.name) ? parseJson(output) : null;
+
+  return (
+    <div className="tool-renderer-body">
+      {entry.result && isWriteTool(entry.name) && hasDiff ? (
+        <div className="tool-file-diffs">
+          {fileChanges.map((change) => (
+            <DiffRenderer
+              key={change.path}
+              diff={change.diff ?? ""}
+              filepath={change.path}
+              compact
+            />
+          ))}
+          {fileChanges.length === 0 && metadata?.diff ? (
+            <DiffRenderer diff={metadata.diff} filepath={metadata.filepath || summary} compact />
+          ) : null}
+        </div>
+      ) : null}
+      {entry.result && isWriteTool(entry.name) && !hasDiff && output ? (
+        <MarkdownRenderer content={output} />
+      ) : null}
+      {entry.result && isBash(entry.name) ? (
+        <div className="tool-bash-output">
+          {bashDescription(args) ? (
+            <p className="tool-description">{bashDescription(args)}</p>
+          ) : null}
+          <code className="tool-command">$ {bashCommand(args)}</code>
+          {output ? <pre className="tool-raw-output">{output}</pre> : null}
+        </div>
+      ) : null}
+      {entry.result && entry.name === "read" ? (
+        <CodeLinesRenderer
+          output={entry.result.output}
+          filepath={metadata?.filepath ?? undefined}
+        />
+      ) : null}
+      {entry.result && entry.name === "todowrite" ? <TodoRenderer output={output} /> : null}
+      {entry.result && isReadOnlyTool(entry.name) && entry.name !== "read" ? (
+        parsedJson ? (
+          <JsonTreeView
+            data={parsedJson}
+            initialExpanded
+            maxDepth={entry.name === "skill" ? 3 : 5}
+          />
+        ) : (
+          <MarkdownRenderer content={output} />
+        )
+      ) : null}
+      {entry.result && WEB_TOOLS.has(entry.name) ? (
+        parsedJson ? (
+          <JsonTreeView data={parsedJson} initialExpanded maxDepth={5} />
+        ) : (
+          <MarkdownRenderer content={output} />
+        )
+      ) : null}
+      {entry.result &&
+      !isReadOnlyTool(entry.name) &&
+      !isWriteTool(entry.name) &&
+      !isBash(entry.name) &&
+      entry.name !== "todowrite" &&
+      !WEB_TOOLS.has(entry.name) ? (
+        parsedJson ? (
+          <JsonTreeView data={parsedJson} initialExpanded />
+        ) : (
+          <MarkdownRenderer content={output} />
+        )
+      ) : null}
+      {entry.result && !output ? <span className="tool-empty-output">{t("No output")}</span> : null}
+      {entry.result &&
+      isBash(entry.name) &&
+      metadata?.exit_code !== null &&
+      metadata?.exit_code !== undefined ? (
+        <div className="tool-exit-code">
+          {t("Exit code")}: {metadata.exit_code} {metadata.exit_code === 0 ? "✓" : "×"}
+        </div>
+      ) : null}
+      {!entry.result ? (
+        <pre className="tool-arguments">{entry.arguments || t("Waiting for arguments…")}</pre>
+      ) : null}
+    </div>
+  );
+});
 
 function statusSuffix(entry: ToolCallEntry, t: TFunction) {
   if (entry.status === "failed") return t(", failed");
@@ -495,8 +606,8 @@ function inlineFileChanges(
   entry: ToolCallEntry,
   workspaceRoot: string,
   unknownPath: string,
+  args: ToolArguments,
 ): InlineFileChange[] {
-  const args = parseArguments(entry);
   const metadata = entry.result?.metadata;
   if (metadata?.file_changes.length) {
     return metadata.file_changes.map((change) => ({
@@ -551,8 +662,13 @@ function inlineFileChanges(
   return [];
 }
 
-function fileChangeSummary(entry: ToolCallEntry, workspaceRoot: string, t: TFunction) {
-  return inlineFileChanges(entry, workspaceRoot, t("Unknown"))
+function fileChangeSummary(
+  entry: ToolCallEntry,
+  workspaceRoot: string,
+  t: TFunction,
+  args: ToolArguments,
+) {
+  return inlineFileChanges(entry, workspaceRoot, t("Unknown"), args)
     .map((change) => {
       const counts = diffCountLabel(change.counts);
       return counts ? `${change.path} ${counts}` : change.path;
@@ -560,7 +676,12 @@ function fileChangeSummary(entry: ToolCallEntry, workspaceRoot: string, t: TFunc
     .join(t("File change separator"));
 }
 
-function resultSummary(entry: ToolCallEntry, workspaceRoot: string, t: TFunction) {
+function resultSummary(
+  entry: ToolCallEntry,
+  workspaceRoot: string,
+  t: TFunction,
+  args: ToolArguments,
+) {
   const resultSuffix = (summary: string) => t("Result suffix", { summary });
   if (entry.name === "grep" || entry.name === "glob") {
     if (entry.status !== "completed" || !entry.result) return statusSuffix(entry, t);
@@ -573,25 +694,40 @@ function resultSummary(entry: ToolCallEntry, workspaceRoot: string, t: TFunction
   if (entry.name === "skill" && entry.result) return resultSuffix(skillResultSummary(entry, t));
   if (entry.status !== "completed" || !entry.result) return statusSuffix(entry, t);
   if (isWriteTool(entry.name)) {
-    const changes = fileChangeSummary(entry, workspaceRoot, t);
+    const changes = fileChangeSummary(entry, workspaceRoot, t, args);
     return changes ? resultSuffix(changes) : statusSuffix(entry, t);
   }
   return statusSuffix(entry, t);
 }
 
-export const ToolCallRow = memo(function ToolCallRow({ entry, workspaceRoot = "" }: Props) {
+export const ToolCallRow = memo(function ToolCallRow({
+  entry,
+  workspaceRoot = "",
+  expanded: controlledExpanded,
+  onExpandedChange,
+}: Props) {
   const { t } = useTranslation();
-  const [expanded, setExpanded] = useState(false);
+  const [localExpanded, setLocalExpanded] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
   const startTime = useRef<number | null>(null);
+  const expanded = controlledExpanded ?? localExpanded;
 
   const output = entry.result?.output?.trim() || "";
   const active = entry.status === "pending" || entry.status === "running";
   const running = entry.status === "running";
   const metadata = entry.result?.metadata;
-  const fileChanges = metadata?.file_changes.filter((change) => Boolean(change.diff)) ?? [];
-  const hasDiff = Boolean(metadata?.diff) || fileChanges.length > 0;
   const Icon = toolIcon(entry.name);
+  const args = useMemo(() => parseArguments(entry), [entry.arguments]);
+  const tone = toolTone(entry.name);
+  const summary = useMemo(
+    () => summarizeArguments(entry, workspaceRoot, t, args),
+    [args, entry, t, workspaceRoot],
+  );
+  const label = useMemo(() => toolLabel(entry, t, args), [args, entry, t]);
+  const result = useMemo(
+    () => resultSummary(entry, workspaceRoot, t, args),
+    [args, entry, t, workspaceRoot],
+  );
 
   useEffect(() => {
     if (!running) return;
@@ -604,13 +740,18 @@ export const ToolCallRow = memo(function ToolCallRow({ entry, workspaceRoot = ""
   }, [running]);
 
   if (entry.name === "task") {
-    return <SubagentCard entry={entry} />;
+    return (
+      <SubagentCard
+        entry={entry}
+        expanded={expanded}
+        onExpandedChange={(next) => {
+          if (controlledExpanded === undefined) setLocalExpanded(next);
+          onExpandedChange?.(next);
+        }}
+      />
+    );
   }
 
-  const parsedJson = !isWriteTool(entry.name) && !isBash(entry.name) ? parseJson(output) : null;
-  const tone = toolTone(entry.name);
-  const summary = summarizeArguments(entry, workspaceRoot, t);
-  const label = toolLabel(entry, t);
   const measuredDurationMs =
     metadata?.duration_ms && metadata.duration_ms > 0
       ? metadata.duration_ms
@@ -624,7 +765,11 @@ export const ToolCallRow = memo(function ToolCallRow({ entry, workspaceRoot = ""
       <button
         type="button"
         className="tool-renderer-header"
-        onClick={() => setExpanded((value) => !value)}
+        onClick={() => {
+          const next = !expanded;
+          if (controlledExpanded === undefined) setLocalExpanded(next);
+          onExpandedChange?.(next);
+        }}
         aria-expanded={expanded}
       >
         <ActivityRipple
@@ -636,8 +781,8 @@ export const ToolCallRow = memo(function ToolCallRow({ entry, workspaceRoot = ""
           <span className="tool-renderer-title">
             {label ? <strong>{label}</strong> : null}
             <code>
-              {isBash(entry.name) ? `$ ${bashCommand(entry) || t("Unknown")}` : summary}
-              {resultSummary(entry, workspaceRoot, t)}
+              {isBash(entry.name) ? `$ ${bashCommand(args) || t("Unknown")}` : summary}
+              {result}
             </code>
           </span>
           <span className="tool-renderer-status">
@@ -651,92 +796,16 @@ export const ToolCallRow = memo(function ToolCallRow({ entry, workspaceRoot = ""
           </span>
         </ActivityRipple>
       </button>
-      <div className={`tool-renderer-body-shell${expanded ? " expanded" : ""}`}>
-        <div className="tool-renderer-body">
-          {entry.result && isWriteTool(entry.name) && hasDiff ? (
-            <div className="tool-file-diffs">
-              {fileChanges.map((change) => (
-                <DiffRenderer
-                  key={change.path}
-                  diff={change.diff ?? ""}
-                  filepath={change.path}
-                  compact
-                />
-              ))}
-              {fileChanges.length === 0 && metadata?.diff ? (
-                <DiffRenderer
-                  diff={metadata.diff}
-                  filepath={metadata.filepath || summary}
-                  compact
-                />
-              ) : null}
-            </div>
-          ) : null}
-          {entry.result && isWriteTool(entry.name) && !hasDiff && output ? (
-            <MarkdownRenderer content={output} />
-          ) : null}
-          {entry.result && isBash(entry.name) ? (
-            <div className="tool-bash-output">
-              {bashDescription(entry) ? (
-                <p className="tool-description">{bashDescription(entry)}</p>
-              ) : null}
-              <code className="tool-command">$ {bashCommand(entry)}</code>
-              {output ? <pre className="tool-raw-output">{output}</pre> : null}
-            </div>
-          ) : null}
-          {entry.result && entry.name === "read" ? (
-            <CodeLinesRenderer
-              output={entry.result.output}
-              filepath={metadata?.filepath ?? undefined}
-            />
-          ) : null}
-          {entry.result && entry.name === "todowrite" ? <TodoRenderer output={output} /> : null}
-          {entry.result && isReadOnlyTool(entry.name) && entry.name !== "read" ? (
-            parsedJson ? (
-              <JsonTreeView
-                data={parsedJson}
-                initialExpanded
-                maxDepth={entry.name === "skill" ? 3 : 5}
-              />
-            ) : (
-              <MarkdownRenderer content={output} />
-            )
-          ) : null}
-          {entry.result && WEB_TOOLS.has(entry.name) ? (
-            parsedJson ? (
-              <JsonTreeView data={parsedJson} initialExpanded maxDepth={5} />
-            ) : (
-              <MarkdownRenderer content={output} />
-            )
-          ) : null}
-          {entry.result &&
-          !isReadOnlyTool(entry.name) &&
-          !isWriteTool(entry.name) &&
-          !isBash(entry.name) &&
-          entry.name !== "todowrite" &&
-          !WEB_TOOLS.has(entry.name) ? (
-            parsedJson ? (
-              <JsonTreeView data={parsedJson} initialExpanded />
-            ) : (
-              <MarkdownRenderer content={output} />
-            )
-          ) : null}
-          {entry.result && !output ? (
-            <span className="tool-empty-output">{t("No output")}</span>
-          ) : null}
-          {entry.result &&
-          isBash(entry.name) &&
-          metadata?.exit_code !== null &&
-          metadata?.exit_code !== undefined ? (
-            <div className="tool-exit-code">
-              {t("Exit code")}: {metadata.exit_code} {metadata.exit_code === 0 ? "✓" : "×"}
-            </div>
-          ) : null}
-          {!entry.result ? (
-            <pre className="tool-arguments">{entry.arguments || t("Waiting for arguments…")}</pre>
-          ) : null}
-        </div>
-      </div>
+      <ExpandableBody expanded={expanded} className="tool-renderer-body-shell">
+        <ToolCallBody
+          entry={entry}
+          args={args}
+          metadata={metadata}
+          output={output}
+          summary={summary}
+          t={t}
+        />
+      </ExpandableBody>
     </div>
   );
 });

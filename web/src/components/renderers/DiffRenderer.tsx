@@ -544,6 +544,7 @@ export function DiffRenderer({ diff, filepath, compact = false }: Props) {
     getScrollElement: () => diffScrollContext?.scrollRef.current ?? viewportRef.current,
     estimateSize: (index) => (rows[index]?.hunkEnd ? DIFF_ROW_HEIGHT + 1 : DIFF_ROW_HEIGHT),
     getItemKey: (index) => rows[index]?.key ?? String(index),
+    initialOffset: () => diffScrollContext?.scrollRef.current?.scrollTop ?? 0,
     overscan: DIFF_OVERSCAN,
     scrollMargin,
   });

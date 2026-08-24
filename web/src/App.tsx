@@ -225,8 +225,8 @@ export default function App() {
                   onRename={(sessionId) => void renameSession(sessionId)}
                   onCancelRename={() => setRenamingSessionId(null)}
                   onDeleteSession={(session) => void deleteSession(session)}
-                  onRevert={(messageId) => void handleRevert(messageId)}
-                  onFork={(messageId) => void handleFork(messageId)}
+                  onRevert={handleRevert}
+                  onFork={handleFork}
                   onRespond={(requestId, tools) => void respondToRequest(requestId, tools)}
                   onRedo={() => void handleRedo()}
                   onCompact={() => void handleCompact()}
