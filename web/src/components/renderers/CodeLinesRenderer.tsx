@@ -181,7 +181,7 @@ export function CodeLinesRenderer({ output, filepath }: Props) {
 
   if (codeLines.length === 0) {
     return (
-      <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-xs leading-relaxed text-neutral-600 dark:text-neutral-400">
+      <pre className="tool-code-lines-fallback">
         {output}
       </pre>
     );
@@ -197,7 +197,7 @@ export function CodeLinesRenderer({ output, filepath }: Props) {
   return (
     <div
       ref={usesExternalScroll ? containerRef : localScrollRef}
-      className="overflow-x-auto rounded-md border border-neutral-200 dark:border-neutral-700"
+      className="tool-code-lines overflow-x-auto"
       style={{
         height: `${usesExternalScroll ? totalHeight : viewportHeight}px`,
         overflowY: usesExternalScroll ? "visible" : "auto",
@@ -228,11 +228,11 @@ export function CodeLinesRenderer({ output, filepath }: Props) {
                 width: "100%",
               }}
             >
-              <span className="select-none border-r border-neutral-200 px-2 text-right text-neutral-400 dark:border-neutral-700 dark:text-neutral-500">
+              <span className="tool-code-line-number w-8 shrink-0 select-none px-2 text-right text-neutral-400 dark:text-neutral-500">
                 {line.lineNum}
               </span>
               <code
-                className="px-3 text-neutral-800 dark:text-neutral-200"
+                className="tool-code-line text-neutral-800 dark:text-neutral-200"
                 dangerouslySetInnerHTML={{ __html: highlightLine(line.text) }}
               />
             </div>

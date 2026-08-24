@@ -715,7 +715,6 @@ button {
   min-height: 34px;
   padding: 0 0 12px;
   border: 0;
-  border-bottom: 1px solid var(--line-soft);
   color: var(--muted);
   background: transparent;
   font-size: 15px;
@@ -737,7 +736,7 @@ button {
 }
 
 .assistant-turn-meta.is-collapsible:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  outline: 2px solid color-mix(in srgb, var(--muted) 45%, transparent);
   outline-offset: 3px;
 }
 
@@ -833,8 +832,8 @@ button {
 .message-content :not(pre) > code {
   padding: 2px 5px;
   border-radius: 4px;
-  color: var(--accent-strong);
-  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 8%, var(--panel));
 }
 .plain-content {
   white-space: pre-wrap;
@@ -855,8 +854,6 @@ button {
 }
 .reasoning div {
   margin-top: 7px;
-  padding-left: 11px;
-  border-left: 1px solid var(--accent);
   white-space: pre-wrap;
 }
 .tool-list {
@@ -890,7 +887,7 @@ button {
   font-size: 11px;
 }
 .tool-chip span {
-  color: var(--accent-strong);
+  color: var(--text);
   font-weight: 600;
 }
 .tool-chip code {
@@ -899,7 +896,7 @@ button {
   white-space: nowrap;
 }
 .streaming-label {
-  color: var(--accent);
+  color: var(--muted);
   font-size: 10px;
   font-weight: 500;
 }
@@ -908,7 +905,7 @@ button {
   width: 7px;
   height: 16px;
   vertical-align: -3px;
-  background: var(--accent);
+  background: var(--muted);
   animation: blink 900ms steps(1) infinite;
 }
 .stream-error,
@@ -2363,7 +2360,7 @@ button {
   color: var(--muted);
   background: transparent;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 650;
   transition: color 160ms ease;
 }
@@ -2385,7 +2382,7 @@ button {
   gap: 4px;
   min-width: 0;
   color: var(--muted);
-  font-size: 10px;
+  font-size: inherit;
   white-space: normal;
 }
 .expandable-body {
@@ -2404,8 +2401,8 @@ button {
 .thinking-markdown {
   min-height: 0;
   overflow: hidden;
-  padding: 1px 0 0 12px;
-  border-left: 1px solid var(--line);
+  margin-left: 20px;
+  padding: 1px 0 0;
   color: var(--muted);
   font-size: 12px;
 }
@@ -2416,12 +2413,14 @@ button {
   margin-bottom: 0;
 }
 .tool-renderer {
+  --tool-font-size: 12px;
   position: relative;
   margin: 0;
   border: 0;
   border-radius: 0;
   color: var(--muted);
   background: transparent;
+  font-size: var(--tool-font-size);
 }
 .tool-renderer.tool-tone-read {
   color: var(--muted);
@@ -2449,12 +2448,21 @@ button {
   color: var(--muted);
   background: transparent;
   cursor: pointer;
+  font-size: var(--tool-font-size);
   text-align: left;
   transition: color 160ms ease;
 }
 .tool-renderer-header:hover {
   color: var(--text);
   background: transparent;
+}
+.tool-renderer-header:focus {
+  outline: none;
+}
+.tool-renderer-header:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--muted) 45%, transparent);
+  outline-offset: 3px;
+  border-radius: 6px;
 }
 .tool-renderer-title {
   display: flex;
@@ -2468,7 +2476,7 @@ button {
 .tool-renderer-title strong {
   flex: 0 0 auto;
   color: inherit;
-  font-size: 11px;
+  font-size: var(--tool-font-size);
   font-weight: 650;
 }
 .tool-renderer-title code {
@@ -2478,7 +2486,7 @@ button {
   flex: 1 1 auto;
   color: var(--muted);
   font-family: var(--ui-mono-font);
-  font-size: 11px;
+  font-size: var(--tool-font-size);
   text-overflow: clip;
   white-space: nowrap;
   -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent 100%);
@@ -2488,6 +2496,7 @@ button {
   min-width: 0;
   flex: 1 1 auto;
   overflow: hidden;
+  font-size: var(--tool-font-size);
   text-overflow: clip;
   white-space: nowrap;
   -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent 100%);
@@ -2515,12 +2524,10 @@ button {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-left: 20px;
-  padding: 4px 0 6px 8px;
-  border-left: 1px solid var(--line);
-  border-top: 1px solid var(--line);
+  margin: 4px 0 8px 20px;
+  padding: 6px 0 2px;
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--tool-font-size);
 }
 .tool-renderer-body > .markdown-renderer > :first-child,
 .tool-renderer-body > :first-child {
@@ -2533,37 +2540,34 @@ button {
 .tool-bash-output {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 8px;
 }
 .tool-description {
   margin: 0;
-  padding: 6px 8px;
-  border-radius: 5px;
   color: var(--muted);
-  background: color-mix(in srgb, var(--text) 5%, transparent);
-  font-size: 11px;
+  font-size: var(--tool-font-size);
+  line-height: 1.5;
 }
 .tool-command {
   display: block;
-  overflow-x: auto;
-  padding: 6px 8px;
-  border-radius: 5px;
+  overflow: visible;
+  padding: 0;
   color: var(--muted);
-  background: color-mix(in srgb, var(--text) 6%, transparent);
+  background: transparent;
   font-family: var(--ui-mono-font);
-  font-size: 11px;
+  font-size: var(--tool-font-size);
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   word-break: break-word;
 }
 .tool-raw-output {
-  max-height: 420px;
-  overflow: auto;
+  overflow: visible;
   margin: 0;
-  padding: 2px 0;
+  padding: 0;
   color: var(--text);
   background: transparent;
   font-family: var(--ui-mono-font);
-  font-size: 11px;
+  font-size: var(--tool-font-size);
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
@@ -2581,24 +2585,151 @@ button {
   display: none;
 }
 .tool-arguments {
-  max-height: 260px;
-  overflow: auto;
+  overflow: visible;
   margin: 0;
-  padding: 6px 8px;
-  border-radius: 5px;
+  padding: 0;
   color: var(--muted);
-  background: color-mix(in srgb, var(--text) 5%, transparent);
+  background: transparent;
   font-family: var(--ui-mono-font);
-  font-size: 11px;
+  font-size: var(--tool-font-size);
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   word-break: break-word;
 }
 .tool-exit-code {
-  margin: 0 -8px -8px;
-  padding: 5px 8px;
-  border-top: 1px solid var(--line);
+  margin: 0;
+  padding: 0;
   color: var(--muted);
   font-size: 10px;
+}
+.message-content .tool-description {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+}
+.message-content .tool-renderer-body .tool-command {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  overflow: visible;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: var(--muted);
+  background: transparent;
+  font-family: var(--ui-mono-font);
+  font-size: var(--tool-font-size);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.message-content .tool-raw-output {
+  max-height: none;
+  overflow: visible;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: var(--text);
+  background: transparent;
+  font-family: var(--ui-mono-font);
+  font-size: var(--tool-font-size);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.message-content .tool-arguments {
+  max-height: none;
+  overflow: visible;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: var(--muted);
+  background: transparent;
+  font-family: var(--ui-mono-font);
+  font-size: var(--tool-font-size);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.message-content .tool-renderer-body .tool-code-lines {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.message-content .tool-renderer-body .tool-code-lines-fallback {
+  overflow: visible;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--ui-mono-font);
+  font-size: var(--tool-font-size);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.message-content .tool-renderer-body .tool-code-lines .tool-code-line-number {
+  border-right: 0;
+  padding-left: 0;
+}
+.message-content .tool-renderer-body .tool-code-lines .tool-code-line {
+  display: block;
+  min-width: 0;
+  padding: 0 0 0 12px;
+  border: 0;
+  border-radius: 0;
+  color: var(--text);
+  background: transparent;
+  font-size: inherit;
+  line-height: inherit;
+  white-space: pre;
+}
+.message-content .tool-renderer-body .tool-code-lines .hljs,
+.message-content .tool-renderer-body .tool-code-lines [class*="hljs-"] {
+  background: transparent;
+}
+.message-content .tool-renderer-body .tool-json-tree {
+  padding: 0;
+  background: transparent;
+}
+.message-content .tool-renderer-body .tool-diff-renderer {
+  border: 0;
+  border-radius: 0;
+}
+.message-content .tool-renderer-body .markdown-body {
+  font-size: var(--tool-font-size);
+}
+.message-content .tool-renderer-body .markdown-body :not(pre) > code,
+.message-content .tool-renderer-body .markdown-body pre code {
+  font-size: var(--tool-font-size);
+}
+.message-content .markdown-body a,
+.system-message-block .markdown-body a {
+  color: var(--muted);
+}
+.message-content .markdown-body a:hover,
+.system-message-block .markdown-body a:hover {
+  color: var(--text);
+}
+.message-content .markdown-body :not(pre) > code,
+.system-message-block .markdown-body :not(pre) > code {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 8%, var(--panel));
+}
+.message-content .markdown-body button[class*="text-blue-"],
+.system-message-block .markdown-body button[class*="text-blue-"] {
+  color: var(--muted);
+}
+.message-content .tool-renderer-body .text-blue-600 {
+  color: var(--muted);
 }
 .system-message-block {
   max-width: 900px;
@@ -2643,9 +2774,7 @@ button {
   text-transform: uppercase;
 }
 .system-divider span {
-  height: 1px;
-  flex: 1;
-  background: var(--line);
+  display: none;
 }
 .todo-renderer {
   display: flex;
@@ -2673,8 +2802,7 @@ button {
   border-color: transparent;
 }
 .subagent-prompt {
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--line);
+  padding-bottom: 0;
 }
 .subagent-prompt span,
 .subagent-session-label {
@@ -2700,8 +2828,6 @@ button {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding-left: 9px;
-  border-left: 1px solid color-mix(in srgb, #f59e0b 48%, var(--line));
 }
 .subagent-message {
   color: var(--text);

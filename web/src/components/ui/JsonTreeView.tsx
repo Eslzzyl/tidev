@@ -6,6 +6,7 @@ interface JsonTreeViewProps {
   data: unknown;
   initialExpanded?: boolean;
   maxDepth?: number;
+  embedded?: boolean;
 }
 
 type JsonType = "string" | "number" | "boolean" | "null" | "array" | "object";
@@ -16,12 +17,14 @@ function getType(value: unknown): JsonType {
   return typeof value as JsonType;
 }
 
-function getValueColor(type: JsonType): string {
+function getValueColor(type: JsonType, embedded: boolean): string {
   switch (type) {
     case "string":
       return "text-emerald-600 dark:text-emerald-400";
     case "number":
-      return "text-blue-600 dark:text-blue-400";
+      return embedded
+        ? "text-neutral-600 dark:text-neutral-400"
+        : "text-blue-600 dark:text-blue-400";
     case "boolean":
       return "text-violet-600 dark:text-violet-400";
     case "null":
@@ -47,9 +50,10 @@ interface TreeNodeProps {
   value: unknown;
   depth: number;
   maxDepth: number;
+  embedded: boolean;
 }
 
-function TreeNode({ keyName, value, depth, maxDepth }: TreeNodeProps) {
+function TreeNode({ keyName, value, depth, maxDepth, embedded }: TreeNodeProps) {
   const { t } = useTranslation();
   const [isExpanded, setIsExpanded] = useState(depth < maxDepth);
   const type = getType(value);
@@ -88,7 +92,11 @@ function TreeNode({ keyName, value, depth, maxDepth }: TreeNodeProps) {
           </span>
         </button>
         {isExpanded && !empty && (
-          <div className="ml-4 border-l border-neutral-200 pl-3 dark:border-neutral-700">
+          <div
+            className={
+              embedded ? "ml-4" : "ml-4 border-l border-neutral-200 pl-3 dark:border-neutral-700"
+            }
+          >
             {entries.map(([k, v], _i) => (
               <TreeNode
                 key={k}
@@ -96,6 +104,7 @@ function TreeNode({ keyName, value, depth, maxDepth }: TreeNodeProps) {
                 value={v}
                 depth={depth + 1}
                 maxDepth={maxDepth}
+                embedded={embedded}
               />
             ))}
           </div>
@@ -110,13 +119,18 @@ function TreeNode({ keyName, value, depth, maxDepth }: TreeNodeProps) {
       <span className="inline-flex items-center gap-0.5">
         <span className="w-3.5" />
         {keyName !== null && <span className="text-neutral-500">&ldquo;{keyName}&rdquo;: </span>}
-        <span className={getValueColor(type)}>{formatValue(value, type)}</span>
+        <span className={getValueColor(type, embedded)}>{formatValue(value, type)}</span>
       </span>
     </div>
   );
 }
 
-export function JsonTreeView({ data, initialExpanded = false, maxDepth = 3 }: JsonTreeViewProps) {
+export function JsonTreeView({
+  data,
+  initialExpanded = false,
+  maxDepth = 3,
+  embedded = false,
+}: JsonTreeViewProps) {
   const { t } = useTranslation();
   const [isExpanded, setIsExpanded] = useState(initialExpanded);
 
@@ -124,7 +138,7 @@ export function JsonTreeView({ data, initialExpanded = false, maxDepth = 3 }: Js
     const type = getType(data);
     return (
       <div className="font-mono text-xs leading-5">
-        <span className={getValueColor(type)}>{formatValue(data, type)}</span>
+        <span className={getValueColor(type, embedded)}>{formatValue(data, type)}</span>
       </div>
     );
   }
@@ -137,7 +151,9 @@ export function JsonTreeView({ data, initialExpanded = false, maxDepth = 3 }: Js
   const bracket = type === "object" ? ["{", "}"] : ["[", "]"];
 
   return (
-    <div className="rounded bg-neutral-50 p-2 dark:bg-neutral-900/50">
+    <div
+      className={embedded ? "tool-json-tree" : "rounded bg-neutral-50 p-2 dark:bg-neutral-900/50"}
+    >
       <button
         onClick={() => setIsExpanded(!isExpanded)}
         className="inline-flex items-center gap-1 rounded px-1 py-0.5 text-xs font-medium text-neutral-600 hover:bg-neutral-200/50 dark:text-neutral-400 dark:hover:bg-neutral-800"
@@ -149,7 +165,11 @@ export function JsonTreeView({ data, initialExpanded = false, maxDepth = 3 }: Js
       {isExpanded && (
         <div className="mt-1 font-mono text-xs leading-5">
           <span className="text-neutral-500">{bracket[0]}</span>
-          <div className="ml-3 border-l border-neutral-200 pl-2 dark:border-neutral-700">
+          <div
+            className={
+              embedded ? "ml-3" : "ml-3 border-l border-neutral-200 pl-2 dark:border-neutral-700"
+            }
+          >
             {entries.map(([k, v], _i) => (
               <TreeNode
                 key={k}
@@ -157,6 +177,7 @@ export function JsonTreeView({ data, initialExpanded = false, maxDepth = 3 }: Js
                 value={v}
                 depth={0}
                 maxDepth={maxDepth}
+                embedded={embedded}
               />
             ))}
           </div>

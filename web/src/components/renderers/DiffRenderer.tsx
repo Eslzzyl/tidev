@@ -19,6 +19,7 @@ import {
   type DiffSyntaxHunkInput,
   type DiffSyntaxHunkResult,
 } from "../../lib/diffSyntax";
+import { useChatScrollRef } from "../chat/ChatScrollContext";
 
 interface Props {
   diff: string;
@@ -76,6 +77,12 @@ interface DiffScrollContextValue {
   contentRef: RefObject<HTMLElement | null>;
 }
 
+type DiffScrollRef =
+  | RefObject<HTMLElement | null>
+  | RefObject<HTMLDivElement | null>
+  | null
+  | undefined;
+
 const DiffScrollContext = createContext<DiffScrollContextValue | null>(null);
 
 export function DiffScrollProvider({
@@ -91,7 +98,7 @@ export function DiffScrollProvider({
 }
 
 function useDiffScrollMargin(
-  scrollRef: RefObject<HTMLElement | null> | undefined,
+  scrollRef: DiffScrollRef,
   contentRef: RefObject<HTMLElement | null> | undefined,
   containerRef: RefObject<HTMLDivElement | null>,
 ) {
@@ -101,7 +108,7 @@ function useDiffScrollMargin(
     const scrollElement = scrollRef?.current;
     const contentElement = contentRef?.current;
     const container = containerRef.current;
-    if (!scrollElement || !contentElement || !container) return;
+    if (!scrollElement || !container) return;
 
     const updateScrollMargin = () => {
       const scrollRect = scrollElement.getBoundingClientRect();
@@ -120,7 +127,7 @@ function useDiffScrollMargin(
 
     const resizeObserver = new ResizeObserver(updateScrollMargin);
     resizeObserver.observe(scrollElement);
-    resizeObserver.observe(contentElement);
+    if (contentElement) resizeObserver.observe(contentElement);
     resizeObserver.observe(container);
     window.addEventListener("resize", updateScrollMargin);
 
@@ -454,12 +461,14 @@ export function DiffRenderer({ diff, filepath, compact = false }: Props) {
   const [rightHorizontalScrollLeft, setRightHorizontalScrollLeft] = useState(0);
   const [inlineHorizontalScrollLeft, setInlineHorizontalScrollLeft] = useState(0);
   const diffScrollContext = useContext(DiffScrollContext);
+  const chatScrollRef = useChatScrollRef();
+  const externalScrollRef = diffScrollContext?.scrollRef ?? chatScrollRef;
   const scrollMargin = useDiffScrollMargin(
-    diffScrollContext?.scrollRef,
+    externalScrollRef,
     diffScrollContext?.contentRef,
     containerRef,
   );
-  const usesExternalScroll = diffScrollContext !== null;
+  const usesExternalScroll = externalScrollRef !== null;
   const isWide = containerWidth >= WIDE_LAYOUT_THRESHOLD;
 
   const language = useMemo(() => detectLanguage(filepath), [filepath]);
@@ -541,10 +550,10 @@ export function DiffRenderer({ diff, filepath, compact = false }: Props) {
 
   const rowVirtualizer = useVirtualizer({
     count: rows.length,
-    getScrollElement: () => diffScrollContext?.scrollRef.current ?? viewportRef.current,
+    getScrollElement: () => externalScrollRef?.current ?? viewportRef.current,
     estimateSize: (index) => (rows[index]?.hunkEnd ? DIFF_ROW_HEIGHT + 1 : DIFF_ROW_HEIGHT),
     getItemKey: (index) => rows[index]?.key ?? String(index),
-    initialOffset: () => diffScrollContext?.scrollRef.current?.scrollTop ?? 0,
+    initialOffset: () => externalScrollRef?.current?.scrollTop ?? 0,
     overscan: DIFF_OVERSCAN,
     scrollMargin,
   });
@@ -860,9 +869,11 @@ export function DiffRenderer({ diff, filepath, compact = false }: Props) {
     <div
       ref={containerRef}
       onWheel={handleContainerWheel}
-      className={`rounded-lg border border-neutral-200 dark:border-neutral-800 ${
-        compact ? "text-xs" : ""
-      }`}
+      className={
+        compact
+          ? "tool-diff-renderer text-xs"
+          : "rounded-lg border border-neutral-200 dark:border-neutral-800"
+      }
       style={{ overscrollBehaviorX: "none" }}
     >
       <div

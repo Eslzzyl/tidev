@@ -285,9 +285,6 @@ const ToolCallBody = memo(function ToolCallBody({
       ) : null}
       {entry.result && isBash(entry.name) ? (
         <div className="tool-bash-output">
-          {bashDescription(args) ? (
-            <p className="tool-description">{bashDescription(args)}</p>
-          ) : null}
           <code className="tool-command">$ {bashCommand(args)}</code>
           {output ? <pre className="tool-raw-output">{output}</pre> : null}
         </div>
@@ -305,6 +302,7 @@ const ToolCallBody = memo(function ToolCallBody({
             data={parsedJson}
             initialExpanded
             maxDepth={entry.name === "skill" ? 3 : 5}
+            embedded
           />
         ) : (
           <MarkdownRenderer content={output} />
@@ -312,7 +310,7 @@ const ToolCallBody = memo(function ToolCallBody({
       ) : null}
       {entry.result && WEB_TOOLS.has(entry.name) ? (
         parsedJson ? (
-          <JsonTreeView data={parsedJson} initialExpanded maxDepth={5} />
+          <JsonTreeView data={parsedJson} initialExpanded maxDepth={5} embedded />
         ) : (
           <MarkdownRenderer content={output} />
         )
@@ -324,7 +322,7 @@ const ToolCallBody = memo(function ToolCallBody({
       entry.name !== "todowrite" &&
       !WEB_TOOLS.has(entry.name) ? (
         parsedJson ? (
-          <JsonTreeView data={parsedJson} initialExpanded />
+          <JsonTreeView data={parsedJson} initialExpanded embedded />
         ) : (
           <MarkdownRenderer content={output} />
         )
@@ -767,6 +765,11 @@ export const ToolCallRow = memo(function ToolCallRow({
         ? elapsedMs
         : null;
   const duration = measuredDurationMs === null ? "" : formatDuration(measuredDurationMs);
+  const description = isBash(entry.name) ? bashDescription(args) : "";
+  const inlineSummary = isBash(entry.name)
+    ? description || `$ ${bashCommand(args) || t("Unknown")}`
+    : summary;
+  const inlineSummaryIsDescription = isBash(entry.name) && Boolean(description);
 
   return (
     <div className={`tool-renderer tool-tone-${tone}`}>
@@ -788,10 +791,17 @@ export const ToolCallRow = memo(function ToolCallRow({
           <Icon size={14} />
           <span className="tool-renderer-title">
             {label ? <strong>{label}</strong> : null}
-            <code>
-              {isBash(entry.name) ? `$ ${bashCommand(args) || t("Unknown")}` : summary}
-              {result}
-            </code>
+            {inlineSummaryIsDescription ? (
+              <span>
+                {inlineSummary}
+                {result}
+              </span>
+            ) : (
+              <code>
+                {inlineSummary}
+                {result}
+              </code>
+            )}
           </span>
           <span className="tool-renderer-status">
             {entry.status === "failed" ? <X size={14} aria-label={t("Failed")} /> : null}
