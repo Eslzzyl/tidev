@@ -2461,9 +2461,9 @@ button {
   min-width: 0;
   flex: 1;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 7px;
-  overflow: visible;
+  overflow: hidden;
 }
 .tool-renderer-title strong {
   flex: 0 0 auto;
@@ -2472,22 +2472,26 @@ button {
   font-weight: 650;
 }
 .tool-renderer-title code {
-  overflow: visible;
+  display: block;
+  overflow: hidden;
   min-width: 0;
-  flex: 1 1 0;
+  flex: 1 1 auto;
   color: var(--muted);
   font-family: var(--ui-mono-font);
   font-size: 11px;
   text-overflow: clip;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  white-space: nowrap;
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent 100%);
+  mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent 100%);
 }
 .tool-renderer-title > span {
   min-width: 0;
-  flex: 1 1 0;
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: clip;
+  white-space: nowrap;
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent 100%);
+  mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent 100%);
 }
 .message-content .tool-renderer-title code {
   padding: 0;

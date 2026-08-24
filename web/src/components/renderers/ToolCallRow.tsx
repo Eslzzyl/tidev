@@ -667,10 +667,12 @@ function fileChangeSummary(
   workspaceRoot: string,
   t: TFunction,
   args: ToolArguments,
+  includePaths = true,
 ) {
   return inlineFileChanges(entry, workspaceRoot, t("Unknown"), args)
     .map((change) => {
       const counts = diffCountLabel(change.counts);
+      if (counts && !includePaths) return counts;
       return counts ? `${change.path} ${counts}` : change.path;
     })
     .join(t("File change separator"));
@@ -694,7 +696,13 @@ function resultSummary(
   if (entry.name === "skill" && entry.result) return resultSuffix(skillResultSummary(entry, t));
   if (entry.status !== "completed" || !entry.result) return statusSuffix(entry, t);
   if (isWriteTool(entry.name)) {
-    const changes = fileChangeSummary(entry, workspaceRoot, t, args);
+    const changes = fileChangeSummary(
+      entry,
+      workspaceRoot,
+      t,
+      args,
+      entry.name === "apply_patch",
+    );
     return changes ? resultSuffix(changes) : statusSuffix(entry, t);
   }
   return statusSuffix(entry, t);
