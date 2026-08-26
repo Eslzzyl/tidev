@@ -172,6 +172,12 @@ export const api = {
       }),
     }),
 
+  retrySession: (sessionId: string, messageId: string) =>
+    fetchJson<{ accepted: boolean }>(`${API_BASE}/sessions/${sessionId}/retry`, {
+      method: "POST",
+      body: JSON.stringify({ message_id: messageId }),
+    }),
+
   sendMessage: (sessionId: string, data: SendMessageRequest) =>
     fetchJson<import("../types/api").PromptResponse>(`${API_BASE}/sessions/${sessionId}/prompts`, {
       method: "POST",

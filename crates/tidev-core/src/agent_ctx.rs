@@ -33,9 +33,10 @@ use tidev_utils::path::{
     extract_boundary_violation_path, extract_sensitive_file_path, load_sensitive_patterns,
 };
 
+use tidev_llm::error::{ProviderError, classify_anyhow_error};
 use tidev_llm::{LlmClient, LlmProviderConfig};
 use tidev_snapshot::SnapshotService;
-use tidev_storage::MessageAppData;
+use tidev_storage::{MessageAppData, ProviderErrorData};
 
 use crate::approval::{
     ApprovalBroker, ApprovedTool, FrontendRequestKind, FrontendResponse, ToolCallWithViolations,
@@ -494,6 +495,42 @@ impl CoreContext {
         let _ = self.event_bus.send_backend(event);
     }
 
+    /// Persist a provider failure as application metadata plus an `error`
+    /// protocol message. Error messages are excluded from model context by
+    /// [`ContextManager`], so this does not change subsequent request bytes.
+    async fn persist_provider_error(
+        &self,
+        messages: &[Message],
+        request_id: u64,
+        error: &ProviderError,
+    ) -> Result<()> {
+        let user_message_id = messages
+            .iter()
+            .rev()
+            .find(|message| message.role == MessageRole::User)
+            .map(|message| message.id);
+        let message = Message::new(MessageRole::Error, &error.message);
+        let app_data = MessageAppData {
+            provider_error: Some(ProviderErrorData {
+                message: error.message.clone(),
+                retryable: error.retryable,
+                request_id,
+                user_message_id,
+            }),
+            ..Default::default()
+        };
+
+        self.buffer
+            .write()
+            .await
+            .append_with_app_data(message.clone(), app_data.clone());
+        self.session_manager.append_messages_with_app_data(
+            self.session_id,
+            std::slice::from_ref(&message),
+            &[(message.id, app_data)].into_iter().collect(),
+        )
+    }
+
     /// Inject new instruction files into the last user message.
     ///
     /// Loads all workspace-root instruction files (AGENTS.md, CLAUDE.md, etc.),
@@ -917,7 +954,7 @@ impl AgentContext for CoreContext {
         thinking_level: &ThinkingLevelType,
         request_id: u64,
     ) -> Result<AssistantTurn> {
-        stream_turn(
+        let result = stream_turn(
             &self.llm,
             self.model_config.clone(),
             messages,
@@ -931,7 +968,25 @@ impl AgentContext for CoreContext {
                 emit_stream_end_on_cancel: true,
             },
         )
-        .await
+        .await;
+
+        match result {
+            Ok(turn) => Ok(turn),
+            Err(error) if self.cancel.is_cancelled() => Err(error),
+            Err(error) => {
+                let provider_error = ProviderError::from(classify_anyhow_error(error));
+                if let Err(persist_error) = self
+                    .persist_provider_error(messages, request_id, &provider_error)
+                    .await
+                {
+                    log::error!(
+                        "failed to persist provider error for session {}: {persist_error:#}",
+                        self.session_id
+                    );
+                }
+                Err(provider_error.into())
+            }
+        }
     }
 
     // -----------------------------------------------------------------------

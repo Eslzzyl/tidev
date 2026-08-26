@@ -60,6 +60,7 @@ function round(overrides: Partial<Round> = {}): Round {
       { type: "text", content: "final reply" },
     ],
     toolCallMap: {},
+    providerErrors: [],
     status: "complete",
     interrupted: false,
     completedAt: "2026-08-22T00:01:00Z",
@@ -169,6 +170,39 @@ describe("round preview state", () => {
     ]) as [Round];
 
     expect(built.toolCallMap["call-1"].status).toBe("failed");
+  });
+
+  it("attaches persisted provider errors to the same user round", () => {
+    const error = message("HTTP 503 overloaded", "error");
+    const [built] = buildRounds([
+      record(message("prompt", "user")),
+      {
+        message: error,
+        app_data: {
+          provider_error: {
+            message: error.content,
+            retryable: true,
+            request_id: 3,
+            user_message_id: "user-1",
+          },
+        },
+      },
+    ]) as [Round];
+
+    expect(built).toMatchObject({
+      interrupted: true,
+      interruptionKind: "failed",
+      providerErrors: [
+        {
+          data: {
+            message: "HTTP 503 overloaded",
+            retryable: true,
+            request_id: 3,
+            user_message_id: "user-1",
+          },
+        },
+      ],
+    });
   });
 
   it("keeps initial instruction notices after the user message in the same round", () => {

@@ -44,7 +44,15 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
         // ─── 2. Notify frontend that a new turn is starting ───────────────
         // CoreContext has already performed injection while loading, so the
         // streaming assistant message is created after any system notices.
-        let _ = event_tx.send(AgentEvent::TurnStarting { request_id });
+        let user_message_id = messages
+            .iter()
+            .rev()
+            .find(|message| message.role == MessageRole::User)
+            .map(|message| message.id);
+        let _ = event_tx.send(AgentEvent::TurnStarting {
+            request_id,
+            user_message_id,
+        });
 
         // ─── 5. Compose system prompt ─────────────────────────────────────
         let system_prompt = config.system_prompt.clone();

@@ -16,7 +16,7 @@ use crate::debug::{
     save_complete_response_for_debugging, save_raw_response_for_debugging,
     save_request_for_debugging,
 };
-use crate::error::classify_response_status;
+use crate::error::{classify_provider_message, classify_response_status};
 use crate::think_parser::ThinkParser;
 use crate::tool_call_format::ToolCallBuilder;
 use crate::turn::finalize_turn;
@@ -266,10 +266,11 @@ pub(crate) async fn stream_anthropic(
                             error.error_type,
                             error.message
                         );
-                        let _ = tx.send(LlmEvent::Failed {
-                            error: format!("{}: {}", error.error_type, error.message),
-                        });
-                        return Ok(());
+                        return Err(classify_provider_message(format!(
+                            "{}: {}",
+                            error.error_type, error.message
+                        ))
+                        .into());
                     }
                 }
             }

@@ -112,6 +112,7 @@ export default function App() {
     deleteSession,
     submitWelcome,
     handleRevert,
+    handleRetryProviderError,
     handleFork,
     submit,
     chooseModel,
@@ -247,6 +248,7 @@ export default function App() {
                   onCancelRename={() => setRenamingSessionId(null)}
                   onDeleteSession={(session) => void deleteSession(session)}
                   onRevert={handleRevert}
+                  onRetryProviderError={handleRetryProviderError}
                   onFork={handleFork}
                   onRespond={(requestId, tools) => void respondToRequest(requestId, tools)}
                   onMobileSidebarClose={() => setMobileSidebarOpen(false)}

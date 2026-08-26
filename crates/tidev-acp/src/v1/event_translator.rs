@@ -69,6 +69,7 @@ impl EventTranslator {
             BackendEvent::TurnStarting {
                 session_id: _,
                 request_id,
+                ..
             } => {
                 let message_id = self.next_message_id(*request_id);
                 // Send an empty agent_message_chunk to signal the start of a new message.
@@ -358,6 +359,7 @@ impl EventTranslator {
                 session_id: _,
                 request_id: _,
                 error,
+                ..
             } => {
                 // Send an error as an agent message chunk.
                 let chunk = acp::ContentChunk::new(acp::ContentBlock::Text(acp::TextContent::new(
@@ -474,6 +476,7 @@ mod tests {
         let notifs = tr.translate(&BackendEvent::TurnStarting {
             session_id: sid(),
             request_id: 1,
+            user_message_id: None,
         });
         assert_eq!(notifs.len(), 1);
         assert_session_id(&notifs);
@@ -492,10 +495,12 @@ mod tests {
         let _n1 = tr.translate(&BackendEvent::TurnStarting {
             session_id: sid(),
             request_id: 1,
+            user_message_id: None,
         });
         let n2 = tr.translate(&BackendEvent::TurnStarting {
             session_id: sid(),
             request_id: 2,
+            user_message_id: None,
         });
         // Second TurnStarting still produces a valid notification.
         assert_eq!(n2.len(), 1);
@@ -743,6 +748,7 @@ mod tests {
             session_id: sid(),
             request_id: 1,
             error: "API error".into(),
+            retryable: false,
         });
         assert_eq!(notifs.len(), 1);
         match &notifs[0].update {

@@ -134,7 +134,15 @@ export interface MessageRecord {
     snapshot_hash?: string | null;
     patch_files?: string | null;
     file_diffs?: string | null;
+    provider_error?: ProviderErrorData | null;
   };
+}
+
+export interface ProviderErrorData {
+  message: string;
+  retryable: boolean;
+  request_id: number;
+  user_message_id: string | null;
 }
 
 export interface EventEnvelope {

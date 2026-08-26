@@ -326,6 +326,7 @@ mod tests {
         let running = translator.translate(&BackendEvent::TurnStarting {
             session_id: Uuid::nil(),
             request_id: 7,
+            user_message_id: None,
         });
         assert_eq!(running.len(), 1);
         assert_eq!(

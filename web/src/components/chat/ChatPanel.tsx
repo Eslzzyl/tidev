@@ -47,6 +47,7 @@ export interface ChatPanelProps {
   onDeleteSession: (session: Session) => void;
   onRevert: (messageId: string) => void;
   onFork: (messageId: string) => void;
+  onRetryProviderError: (messageId: string) => void;
   onRespond: (requestId: string, tools: ApprovedTool[]) => void;
   onMobileSidebarClose: () => void;
   onDraftChange: (value: string) => void;
@@ -95,6 +96,7 @@ export function ChatPanel({
   onDeleteSession,
   onRevert,
   onFork,
+  onRetryProviderError,
   onRespond,
   onMobileSidebarClose,
   onDraftChange,
@@ -155,6 +157,7 @@ export function ChatPanel({
             workspaceRoot={selectedSession?.workspace_root}
             onRevert={onRevert}
             onFork={onFork}
+            onRetryProviderError={onRetryProviderError}
           />
           {pendingRequests.map((request) => (
             <ApprovalCard

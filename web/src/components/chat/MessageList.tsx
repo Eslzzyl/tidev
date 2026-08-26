@@ -8,7 +8,17 @@ import {
   type ReactNode,
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Check, ChevronRight, GitFork, Sparkles, Undo2, X } from "lucide-react";
+import {
+  Check,
+  ChevronRight,
+  CircleAlert,
+  GitFork,
+  LoaderCircle,
+  RefreshCw,
+  Sparkles,
+  Undo2,
+  X,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import type {
@@ -16,6 +26,7 @@ import type {
   FrontendRequest,
   Message,
   MessageRecord,
+  ProviderErrorData,
   ToolCall,
 } from "../../types/api";
 import type { StreamMessage } from "../../types/chat";
@@ -48,6 +59,7 @@ export interface MessageListProps {
   workspaceRoot?: string;
   onRevert?: (messageId: string) => void;
   onFork?: (messageId: string) => void;
+  onRetryProviderError?: (messageId: string) => void;
 }
 
 interface ExpansionTrace {
@@ -94,7 +106,14 @@ type ChatItem =
     }
   | { kind: "stream-segment"; item: SegmentItem }
   | { kind: "stream-empty"; key: string }
-  | { kind: "stream-error"; key: string; message: string };
+  | { kind: "stream-error"; key: string; message: string }
+  | {
+      kind: "provider-error";
+      key: string;
+      error: ProviderErrorData;
+      messageId: string;
+      retrying?: StreamMessage["retrying"];
+    };
 
 function isSystemBlock(item: Round | SystemMessageBlockData): item is SystemMessageBlockData {
   return "kind" in item && item.kind === "system";
@@ -147,6 +166,11 @@ function buildChatItems(
   expandedStreams: Record<string, boolean>,
 ): ChatItem[] {
   const items: ChatItem[] = [];
+  const liveProviderErrorUserIds = new Set(
+    streams
+      .map((stream) => stream.userMessageId)
+      .filter((messageId): messageId is string => Boolean(messageId)),
+  );
 
   for (const value of rounds) {
     if (isSystemBlock(value)) {
@@ -181,7 +205,7 @@ function buildChatItems(
       Boolean(duration) ||
       round.status === "streaming" ||
       collapsible ||
-      interruptionLabel !== null;
+      (interruptionLabel !== null && round.providerErrors.length === 0);
 
     if (showTurnMeta) {
       items.push({
@@ -208,6 +232,17 @@ function buildChatItems(
       items.push({ kind: "round-segment", item: segment });
     }
 
+    for (const providerError of round.providerErrors) {
+      const messageId = providerError.data.user_message_id ?? round.userMessage.id;
+      if (liveProviderErrorUserIds.has(messageId)) continue;
+      items.push({
+        kind: "provider-error",
+        key: `${round.id}:provider-error:${providerError.id}`,
+        error: providerError.data,
+        messageId,
+      });
+    }
+
     const footerParts: string[] = [];
     if (round.modelName) footerParts.push(round.modelName);
     if (round.completedAt) footerParts.push(formatTime(round.completedAt));
@@ -226,14 +261,26 @@ function buildChatItems(
     const previewIndex = stream.segments.findLastIndex(
       (segment) => segment.type === "text" && segment.content.trim(),
     );
+    const providerError =
+      stream.providerError ??
+      (stream.status === "failed" && stream.error
+        ? {
+            message: stream.error,
+            retryable: false,
+            request_id: stream.requestId,
+            user_message_id: stream.userMessageId ?? null,
+          }
+        : null);
 
-    items.push({
-      kind: "stream-meta",
-      key: `${stream.key}:meta`,
-      stream,
-      expanded,
-      collapsible,
-    });
+    if (!providerError) {
+      items.push({
+        kind: "stream-meta",
+        key: `${stream.key}:meta`,
+        stream,
+        expanded,
+        collapsible,
+      });
+    }
 
     const segments = makeSegmentItems(
       stream.segments,
@@ -250,7 +297,15 @@ function buildChatItems(
       items.push({ kind: "stream-segment", item: segment });
     }
 
-    if (isStreaming && stream.segments.length === 0) {
+    if (providerError) {
+      items.push({
+        kind: "provider-error",
+        key: `${stream.key}:provider-error`,
+        error: providerError,
+        messageId: providerError.user_message_id ?? stream.userMessageId ?? "",
+        retrying: stream.retrying,
+      });
+    } else if (isStreaming && stream.segments.length === 0) {
       items.push({ kind: "stream-empty", key: `${stream.key}:empty` });
     } else if (!isStreaming) {
       items.push({
@@ -295,6 +350,8 @@ function estimateChatItemSize(item: ChatItem | undefined) {
       return 24;
     case "stream-error":
       return 36;
+    case "provider-error":
+      return 86;
   }
 }
 
@@ -557,6 +614,7 @@ export const MessageList = memo(function MessageList({
   workspaceRoot = "",
   onRevert,
   onFork,
+  onRetryProviderError,
 }: MessageListProps) {
   const { t } = useTranslation();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -713,6 +771,15 @@ export const MessageList = memo(function MessageList({
         );
       case "stream-error":
         return <div className="stream-error">{item.message}</div>;
+      case "provider-error":
+        return (
+          <ProviderErrorCard
+            error={item.error}
+            messageId={item.messageId}
+            retrying={item.retrying}
+            onRetry={onRetryProviderError}
+          />
+        );
     }
   }
 
@@ -756,6 +823,57 @@ export const MessageList = memo(function MessageList({
     </div>
   );
 });
+
+function ProviderErrorCard({
+  error,
+  messageId,
+  retrying,
+  onRetry,
+}: {
+  error: ProviderErrorData;
+  messageId: string;
+  retrying?: StreamMessage["retrying"];
+  onRetry?: (messageId: string) => void;
+}) {
+  const { t } = useTranslation();
+  const canRetry = error.retryable && !retrying && Boolean(messageId) && Boolean(onRetry);
+
+  return (
+    <article className={retrying ? "provider-error-row is-retrying" : "provider-error-row"}>
+      <div
+        className={retrying ? "provider-error-card is-retrying" : "provider-error-card"}
+        role="alert"
+        aria-live={retrying ? "polite" : "assertive"}
+      >
+        <span className={retrying ? "provider-error-icon is-retrying" : "provider-error-icon"}>
+          {retrying ? <LoaderCircle className="spin" size={21} /> : <CircleAlert size={21} />}
+        </span>
+        <div className="provider-error-content">
+          <p className="provider-error-message">{error.message}</p>
+          {retrying ? (
+            <span className="provider-error-meta">
+              {t("Retrying {{attempt}}/{{maxAttempts}}", {
+                attempt: retrying.attempt,
+                maxAttempts: retrying.maxAttempts,
+              })}
+            </span>
+          ) : null}
+        </div>
+        {canRetry ? (
+          <button
+            type="button"
+            className="provider-error-retry"
+            onClick={() => onRetry?.(messageId)}
+            aria-label={t("Retry provider request")}
+          >
+            <RefreshCw size={15} />
+            {t("Retry")}
+          </button>
+        ) : null}
+      </div>
+    </article>
+  );
+}
 
 function makeRejectedTool(tool: ToolCall): ApprovedTool {
   return {

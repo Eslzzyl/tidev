@@ -4,6 +4,7 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use tokio_util::sync::CancellationToken;
 
+use tidev_llm::error::ProviderError;
 use tidev_llm::message::{AssistantTurn, Message, ToolCall};
 use tidev_llm::reasoning::ThinkingLevelType;
 use tidev_llm::{LlmClient, LlmProviderConfig, ToolDefinition};
@@ -129,8 +130,10 @@ pub async fn stream_turn(
                         turn.responses_output_items = finished_turn.responses_output_items.clone();
                         break;
                     }
-                    AgentEvent::Failed { error, .. } => {
-                        return Err(anyhow::anyhow!("LLM error: {error}"));
+                    AgentEvent::Failed {
+                        error, retryable, ..
+                    } => {
+                        return Err(ProviderError { message: error, retryable }.into());
                     }
                     _ => {}
                 }

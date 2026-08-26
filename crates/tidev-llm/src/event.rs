@@ -26,6 +26,7 @@ pub enum LlmEvent {
     },
     Failed {
         error: String,
+        retryable: bool,
     },
     Retrying {
         attempt: u32,

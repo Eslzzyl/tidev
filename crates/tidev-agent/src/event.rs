@@ -34,6 +34,7 @@ pub enum AgentEvent {
     Failed {
         request_id: u64,
         error: String,
+        retryable: bool,
     },
     Retrying {
         request_id: u64,
@@ -54,6 +55,7 @@ pub enum AgentEvent {
     },
     TurnStarting {
         request_id: u64,
+        user_message_id: Option<uuid::Uuid>,
     },
     StreamEnd {
         request_id: u64,
@@ -151,7 +153,11 @@ pub fn llm_event_to_agent_event(event: LlmEvent, request_id: u64) -> AgentEvent 
             tool_call,
         },
         LlmEvent::Finished { turn } => AgentEvent::Finished { request_id, turn },
-        LlmEvent::Failed { error } => AgentEvent::Failed { request_id, error },
+        LlmEvent::Failed { error, retryable } => AgentEvent::Failed {
+            request_id,
+            error,
+            retryable,
+        },
         LlmEvent::Retrying {
             attempt,
             max_attempts,
@@ -260,7 +266,10 @@ mod tests {
             LlmEvent::Finished {
                 turn: Box::new(AssistantTurn::default()),
             },
-            LlmEvent::Failed { error: "e".into() },
+            LlmEvent::Failed {
+                error: "e".into(),
+                retryable: false,
+            },
             LlmEvent::Retrying {
                 attempt: 1,
                 max_attempts: 2,
@@ -372,15 +381,18 @@ mod tests {
         match llm_event_to_agent_event(
             LlmEvent::Failed {
                 error: "failure payload".into(),
+                retryable: true,
             },
             request_id,
         ) {
             AgentEvent::Failed {
                 request_id: received_request_id,
                 error,
+                retryable,
             } => {
                 assert_eq!(received_request_id, request_id);
                 assert_eq!(error, "failure payload");
+                assert!(retryable);
             }
             other => panic!("unexpected event: {other:?}"),
         }

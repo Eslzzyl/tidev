@@ -1,7 +1,9 @@
 use std::time::Duration;
 
+use serde::{Deserialize, Serialize};
+
 /// Categorizes network errors by whether they are retryable.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NetworkError {
     /// Retryable: server-side errors (5xx), timeout, rate limit.
     Retryable { message: String },
@@ -30,6 +32,34 @@ impl std::fmt::Display for NetworkError {
 
 impl std::error::Error for NetworkError {}
 
+/// Structured provider failure propagated to the host runtime.
+///
+/// The provider error is deliberately separate from protocol messages. Hosts
+/// may persist and render it without adding the error text to the next LLM
+/// request.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProviderError {
+    pub message: String,
+    pub retryable: bool,
+}
+
+impl From<NetworkError> for ProviderError {
+    fn from(error: NetworkError) -> Self {
+        Self {
+            message: error.message().to_string(),
+            retryable: error.is_retryable(),
+        }
+    }
+}
+
+impl std::fmt::Display for ProviderError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl std::error::Error for ProviderError {}
+
 /// Classifies a reqwest `Response` status code into a `NetworkError`.
 pub fn classify_response_status(status: reqwest::StatusCode, body: Option<String>) -> NetworkError {
     let code = status.as_u16();
@@ -50,6 +80,40 @@ pub fn classify_response_status(status: reqwest::StatusCode, body: Option<String
         401 | 403 | 404 | 413 => NetworkError::NonRetryable { message },
         // Unexpected but treat as non-retryable
         _ => NetworkError::NonRetryable { message },
+    }
+}
+
+/// Classifies a provider error received inside an otherwise successful stream.
+///
+/// Streaming APIs sometimes report an error as an SSE event instead of an
+/// HTTP response, so there is no status code to use. Keep the same retry
+/// policy as status-based errors for the common transient markers.
+pub fn classify_provider_message(message: String) -> NetworkError {
+    let searchable = message.to_ascii_lowercase();
+    let retryable = [
+        "rate_limit",
+        "rate limit",
+        "server_error",
+        "server error",
+        "api_error",
+        "internal_server_error",
+        "overloaded",
+        "overload",
+        "at capacity",
+        "service_unavailable",
+        "service unavailable",
+        "temporarily unavailable",
+        "timeout",
+        "timed out",
+        "try again",
+    ]
+    .iter()
+    .any(|marker| searchable.contains(marker));
+
+    if retryable {
+        NetworkError::Retryable { message }
+    } else {
+        NetworkError::NonRetryable { message }
     }
 }
 
@@ -157,6 +221,20 @@ pub fn classify_anyhow_error(error: anyhow::Error) -> NetworkError {
         return network_error.clone();
     }
 
+    // Preserve the retryability assigned by the provider stream path after
+    // it has crossed the generic agent boundary.
+    if let Some(provider_error) = error.downcast_ref::<ProviderError>() {
+        return if provider_error.retryable {
+            NetworkError::Retryable {
+                message: provider_error.message.clone(),
+            }
+        } else {
+            NetworkError::NonRetryable {
+                message: provider_error.message.clone(),
+            }
+        };
+    }
+
     // Non-retryable fallback
     NetworkError::NonRetryable {
         message: error.to_string(),
@@ -203,5 +281,12 @@ mod tests {
 
         let rate_limit = classify_response_status(reqwest::StatusCode::TOO_MANY_REQUESTS, None);
         assert!(rate_limit.is_retryable());
+    }
+
+    #[test]
+    fn test_classify_provider_message() {
+        assert!(classify_provider_message("overloaded_error".into()).is_retryable());
+        assert!(classify_provider_message("api_error: upstream failed".into()).is_retryable());
+        assert!(!classify_provider_message("invalid_request_error".into()).is_retryable());
     }
 }

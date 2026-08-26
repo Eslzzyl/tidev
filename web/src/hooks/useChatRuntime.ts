@@ -11,6 +11,7 @@ import type {
   Message,
   MessageRecord,
   Model,
+  ProviderErrorData,
   Session,
   TodoItem,
   ToolCall,
@@ -147,6 +148,29 @@ function toolResultFromPayload(value: unknown): ToolExecutionResult | null {
     return null;
   }
   return candidate as ToolExecutionResult;
+}
+
+function providerErrorFromPayload(
+  value: unknown,
+  retryableValue: unknown,
+  requestId: number,
+  userMessageId: string | null,
+): ProviderErrorData {
+  const candidate = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  const message = candidate ? asString(candidate.message) : asString(value);
+  return {
+    message: message || i18n.t("Response failed"),
+    retryable:
+      candidate && typeof candidate.retryable === "boolean"
+        ? candidate.retryable
+        : retryableValue === true,
+    request_id:
+      candidate && typeof candidate.request_id === "number" ? candidate.request_id : requestId,
+    user_message_id:
+      candidate && typeof candidate.user_message_id === "string"
+        ? candidate.user_message_id
+        : userMessageId,
+  };
 }
 
 function updateSubagentEntry(
@@ -403,6 +427,10 @@ export function useChatRuntime() {
                 status: "streaming",
                 providerFinished: false,
                 error: undefined,
+                providerError: undefined,
+                retrying: undefined,
+                userMessageId:
+                  asString(payload.user_message_id) || stream.userMessageId || null,
               },
             };
           });
@@ -424,6 +452,8 @@ export function useChatRuntime() {
         scheduleStreamUpdate((current) => {
           const next = cloneStream(current[key] ?? createStream(key, requestId));
           next.status = "streaming";
+          next.retrying = undefined;
+          next.providerError = undefined;
           if (kind === "ToolCallUpdated") {
             const toolCall = toolCallFromPayload(payload.tool_call);
             if (!toolCall) return current;
@@ -538,6 +568,39 @@ export function useChatRuntime() {
         });
         return;
       }
+      if (kind === "Retrying") {
+        const requestId = Number(payload.request_id);
+        if (!Number.isFinite(requestId)) return;
+        const key = `${sessionId}:${requestId}`;
+        const attempt = Number(payload.attempt);
+        const maxAttempts = Number(payload.max_attempts);
+        const reason = asString(payload.reason);
+        const retryAfterSecs =
+          typeof payload.retry_after_secs === "number" ? payload.retry_after_secs : null;
+        scheduleStreamUpdate((current) => {
+          const next = cloneStream(current[key] ?? createStream(key, requestId));
+          next.status = "streaming";
+          next.providerFinished = false;
+          next.error = undefined;
+          next.retrying = {
+            attempt: Number.isFinite(attempt) ? attempt : 1,
+            maxAttempts: Number.isFinite(maxAttempts) ? maxAttempts : 1,
+            reason,
+            retryAfterSecs,
+          };
+          next.providerError = {
+            message: reason || i18n.t("Retrying…"),
+            retryable: true,
+            request_id: requestId,
+            user_message_id: next.userMessageId ?? null,
+          };
+          return { ...current, [key]: next };
+        });
+        setSessions((current) =>
+          current.map((item) => (item.session_id === sessionId ? { ...item, busy: true } : item)),
+        );
+        return;
+      }
       if (kind === "Failed") {
         const requestId = Number(payload.request_id);
         if (!Number.isFinite(requestId)) return;
@@ -545,7 +608,15 @@ export function useChatRuntime() {
         scheduleStreamUpdate((current) => {
           const next = cloneStream(current[key] ?? createStream(key, requestId));
           next.status = "failed";
-          next.error = asString(payload.error);
+          next.retrying = undefined;
+          const providerError = providerErrorFromPayload(
+            payload.error,
+            payload.retryable,
+            requestId,
+            next.userMessageId ?? null,
+          );
+          next.providerError = providerError;
+          next.error = providerError.message;
           return { ...current, [key]: next };
         });
         setSessions((current) =>
@@ -730,6 +801,39 @@ export function useChatRuntime() {
       }
     },
     [loadMessages, loadTodos],
+  );
+
+  const handleRetryProviderError = useCallback(
+    async (messageId: string) => {
+      const sessionId = selectedSessionRef.current;
+      if (!sessionId || sending) return;
+      setError(null);
+      setSending(true);
+      clearPendingStreamUpdates();
+      setStreams((current) => {
+        const next = { ...current };
+        for (const [key, stream] of Object.entries(next)) {
+          if (
+            key.startsWith(`${sessionId}:`) &&
+            (stream.userMessageId === messageId || stream.status !== "streaming")
+          ) {
+            delete next[key];
+          }
+        }
+        return next;
+      });
+      try {
+        await api.retrySession(sessionId, messageId);
+        await loadMessages(sessionId);
+      } catch (reason) {
+        setError(
+          reason instanceof Error ? reason.message : i18n.t("Failed to retry provider request"),
+        );
+      } finally {
+        setSending(false);
+      }
+    },
+    [clearPendingStreamUpdates, loadMessages, sending],
   );
 
   const handleRedo = useCallback(async () => {
@@ -951,6 +1055,7 @@ export function useChatRuntime() {
     deleteSession,
     submitWelcome,
     handleRevert,
+    handleRetryProviderError,
     handleRedo,
     handleFork,
     handleCompact,

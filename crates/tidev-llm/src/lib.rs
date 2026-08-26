@@ -8,7 +8,7 @@
 mod anthropic;
 mod attachments;
 mod debug;
-mod error;
+pub mod error;
 pub mod event;
 mod gemini;
 pub mod message;
@@ -143,7 +143,8 @@ impl LlmClient {
 
         if let Err(error) = result {
             let _ = tx.send(LlmEvent::Failed {
-                error: error.to_string(),
+                error: error.message().to_string(),
+                retryable: error.is_retryable(),
             });
         }
     }
@@ -168,7 +169,7 @@ impl LlmClient {
         tools: Vec<ToolDefinition>,
         tx: UnboundedSender<LlmEvent>,
         thinking_level: crate::reasoning::ThinkingLevelType,
-    ) -> Result<()> {
+    ) -> std::result::Result<(), error::NetworkError> {
         // Determine how many retries we can afford.
         let max = MAX_RETRIES;
 
@@ -189,7 +190,7 @@ impl LlmClient {
                     let network_err = classify_anyhow_error(e);
 
                     if !network_err.is_retryable() {
-                        return Err(anyhow::anyhow!("{}", network_err.message()));
+                        return Err(network_err);
                     }
 
                     let delay = backoff_delay(attempt + 1);
@@ -201,7 +202,7 @@ impl LlmClient {
                     });
 
                     if attempt == max {
-                        return Err(anyhow::anyhow!("{}", network_err.message()));
+                        return Err(network_err);
                     }
 
                     backoff_sleep(attempt + 1).await;

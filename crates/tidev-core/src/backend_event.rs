@@ -42,6 +42,7 @@ pub enum BackendEvent {
         session_id: Uuid,
         request_id: u64,
         error: String,
+        retryable: bool,
     },
     Retrying {
         session_id: Uuid,
@@ -137,6 +138,7 @@ pub enum BackendEvent {
     TurnStarting {
         session_id: Uuid,
         request_id: u64,
+        user_message_id: Option<Uuid>,
     },
     StreamEnd {
         session_id: Uuid,
@@ -246,10 +248,15 @@ pub fn agent_event_to_backend_event(event: AgentEvent, session_id: Uuid) -> Back
             request_id,
             turn,
         },
-        AgentEvent::Failed { request_id, error } => BackendEvent::Failed {
+        AgentEvent::Failed {
+            request_id,
+            error,
+            retryable,
+        } => BackendEvent::Failed {
             session_id,
             request_id,
             error,
+            retryable,
         },
         AgentEvent::Retrying {
             request_id,
@@ -285,9 +292,13 @@ pub fn agent_event_to_backend_event(event: AgentEvent, session_id: Uuid) -> Back
             model_id,
             duration_ms,
         },
-        AgentEvent::TurnStarting { request_id } => BackendEvent::TurnStarting {
+        AgentEvent::TurnStarting {
+            request_id,
+            user_message_id,
+        } => BackendEvent::TurnStarting {
             session_id,
             request_id,
+            user_message_id,
         },
         AgentEvent::StreamEnd {
             request_id,
@@ -514,6 +525,7 @@ mod tests {
             AgentEvent::Failed {
                 request_id: 1,
                 error: "e".into(),
+                retryable: false,
             },
             AgentEvent::Retrying {
                 request_id: 1,
@@ -532,7 +544,10 @@ mod tests {
                 model_id: "model".into(),
                 duration_ms: None,
             },
-            AgentEvent::TurnStarting { request_id: 1 },
+            AgentEvent::TurnStarting {
+                request_id: 1,
+                user_message_id: None,
+            },
             AgentEvent::StreamEnd {
                 request_id: 1,
                 reasoning_started_at: None,
@@ -665,6 +680,7 @@ mod tests {
             AgentEvent::Failed {
                 request_id,
                 error: "failure payload".into(),
+                retryable: true,
             },
             session_id,
         ) {
@@ -672,10 +688,12 @@ mod tests {
                 session_id: received_session_id,
                 request_id: received_request_id,
                 error,
+                retryable,
             } => {
                 assert_eq!(received_session_id, session_id);
                 assert_eq!(received_request_id, request_id);
                 assert_eq!(error, "failure payload");
+                assert!(retryable);
             }
             other => panic!("unexpected event: {other:?}"),
         }
@@ -745,13 +763,21 @@ mod tests {
             other => panic!("unexpected event: {other:?}"),
         }
 
-        match agent_event_to_backend_event(AgentEvent::TurnStarting { request_id }, session_id) {
+        match agent_event_to_backend_event(
+            AgentEvent::TurnStarting {
+                request_id,
+                user_message_id: None,
+            },
+            session_id,
+        ) {
             BackendEvent::TurnStarting {
                 session_id: received_session_id,
                 request_id: received_request_id,
+                user_message_id,
             } => {
                 assert_eq!(received_session_id, session_id);
                 assert_eq!(received_request_id, request_id);
+                assert_eq!(user_message_id, None);
             }
             other => panic!("unexpected event: {other:?}"),
         }
@@ -888,8 +914,10 @@ mod tests {
         let (backend_tx, mut backend_rx) = tokio::sync::mpsc::unbounded_channel();
         let bus = CoreEventBus::new(backend_tx, session_id);
 
-        bus.agent_sender()
-            .send(AgentEvent::TurnStarting { request_id: 7 });
+        bus.agent_sender().send(AgentEvent::TurnStarting {
+            request_id: 7,
+            user_message_id: None,
+        });
         bus.send_backend(BackendEvent::StreamEnd {
             session_id,
             request_id: 7,
@@ -906,6 +934,7 @@ mod tests {
             Some(BackendEvent::TurnStarting {
                 session_id: received_session_id,
                 request_id: 7,
+                user_message_id: None,
             }) if received_session_id == session_id
         ));
         assert!(matches!(

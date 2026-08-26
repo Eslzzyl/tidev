@@ -964,6 +964,45 @@ impl Runtime {
         self.start_agent_loop(session_id, mode).await
     }
 
+    /// Retry the most recent provider failure for a user message.
+    ///
+    /// The failed provider record is removed before the existing session is
+    /// continued. The user message and every other protocol message remain
+    /// unchanged, while the error record stays outside the next LLM context.
+    pub async fn retry_session(&self, session_id: Uuid, user_message_id: Uuid) -> Result<()> {
+        let _submission_guard = self.prompt_submission_lock.lock().await;
+        if self.is_session_busy(session_id) {
+            anyhow::bail!("session is still running");
+        }
+
+        let messages = self.session_manager.load_session_messages(session_id)?;
+        let last_user_id = messages
+            .iter()
+            .rev()
+            .find(|message| message.message.role == MessageRole::User)
+            .map(|message| message.message.id);
+        if last_user_id != Some(user_message_id) {
+            anyhow::bail!("the provider failure is no longer the latest turn");
+        }
+
+        let provider_error_ids: Vec<Uuid> = messages
+            .iter()
+            .filter_map(|session_message| {
+                let error = session_message.app_data.provider_error.as_ref()?;
+                (error.user_message_id == Some(user_message_id) && error.retryable)
+                    .then_some(session_message.message.id)
+            })
+            .collect();
+        if provider_error_ids.is_empty() {
+            anyhow::bail!("the provider failure is not retryable");
+        }
+        self.session_manager
+            .delete_messages(session_id, &provider_error_ids)?;
+        self.reload_message_buffer(session_id).await;
+
+        self.continue_session(session_id, None).await
+    }
+
     /// Quick synchronous check — is any session's agent loop active?
     pub fn is_busy(&self) -> bool {
         !self.busy_sessions.lock().unwrap().is_empty()

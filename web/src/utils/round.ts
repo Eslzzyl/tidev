@@ -1,4 +1,10 @@
-import type { Message, MessageRecord, ToolCall, ToolExecutionResult } from "../types/api";
+import type {
+  Message,
+  MessageRecord,
+  ProviderErrorData,
+  ToolCall,
+  ToolExecutionResult,
+} from "../types/api";
 
 export type ToolCallStatus = "pending" | "running" | "completed" | "failed";
 
@@ -27,12 +33,18 @@ export type RoundSegment =
 
 export type RoundInterruptionKind = "cancelled" | "failed" | "interrupted";
 
+export interface RoundProviderError {
+  id: string;
+  data: ProviderErrorData;
+}
+
 export interface Round {
   id: string;
   userMessage: Message;
   leadingInstructions: Message[];
   segments: RoundSegment[];
   toolCallMap: Record<string, ToolCallEntry>;
+  providerErrors: RoundProviderError[];
   status: "user_only" | "streaming" | "complete";
   interrupted: boolean;
   interruptionKind?: RoundInterruptionKind;
@@ -166,6 +178,7 @@ export function buildRounds(records: MessageRecord[]): (Round | SystemMessageBlo
         leadingInstructions: [],
         segments: [],
         toolCallMap: {},
+        providerErrors: [],
         status: "user_only",
         interrupted: false,
       };
@@ -266,6 +279,16 @@ export function buildRounds(records: MessageRecord[]): (Round | SystemMessageBlo
         }
       } else if (msg.role === "error") {
         markInterrupted(currentRound, "failed");
+        const providerError = record.app_data.provider_error;
+        if (providerError) {
+          currentRound.providerErrors.push({
+            id: msg.id,
+            data: {
+              ...providerError,
+              message: msg.content || providerError.message,
+            },
+          });
+        }
       }
     }
   }

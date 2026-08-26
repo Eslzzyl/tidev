@@ -80,6 +80,11 @@ struct PromptRequest {
 }
 
 #[derive(Debug, Deserialize)]
+struct RetryRequest {
+    message_id: Uuid,
+}
+
+#[derive(Debug, Deserialize)]
 struct ApprovalResponseRequest {
     approved_tools: Vec<ApprovedTool>,
 }
@@ -320,6 +325,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/sessions/{session_id}/todos", get(todos))
         .route("/sessions/{session_id}/messages", get(messages))
         .route("/sessions/{session_id}/prompts", post(submit_prompt))
+        .route("/sessions/{session_id}/retry", post(retry_session))
         .route("/sessions/{session_id}/cancel", post(cancel_session))
         .route("/sessions/{session_id}/revert", post(revert))
         .route("/sessions/{session_id}/redo", post(redo))
@@ -749,6 +755,26 @@ async fn cancel_session(
     Path(session_id): Path<Uuid>,
 ) -> Result<Json<AcceptedResponse>, ApiError> {
     state.runtime.cancel_session(session_id).await;
+    Ok(Json(AcceptedResponse { accepted: true }))
+}
+
+async fn retry_session(
+    State(state): State<Arc<AppState>>,
+    Path(session_id): Path<Uuid>,
+    Json(request): Json<RetryRequest>,
+) -> Result<Json<AcceptedResponse>, ApiError> {
+    if state
+        .runtime
+        .session_manager()
+        .load_session(session_id)?
+        .is_none()
+    {
+        return Err(ApiError::not_found("session not found"));
+    }
+    state
+        .runtime
+        .retry_session(session_id, request.message_id)
+        .await?;
     Ok(Json(AcceptedResponse { accepted: true }))
 }
 

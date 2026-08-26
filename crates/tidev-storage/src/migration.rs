@@ -41,6 +41,11 @@ pub const MIGRATIONS: &[Migration] = &[
         description: "Add child session id to messages",
         sql: "ALTER TABLE messages ADD COLUMN child_session_id TEXT",
     },
+    Migration {
+        version: 41,
+        description: "Add provider error metadata to messages",
+        sql: "ALTER TABLE messages ADD COLUMN provider_error TEXT",
+    },
 ];
 
 #[derive(Deserialize)]
