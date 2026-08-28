@@ -134,6 +134,77 @@ impl Qwen35ThinkingLevel {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+pub enum Qwen38ThinkingLevel {
+    #[default]
+    Off,
+    Low,
+    Medium,
+    XHigh,
+}
+
+impl Qwen38ThinkingLevel {
+    /// Native Chat Completions wire format.
+    ///
+    /// `enable_thinking` is emitted both at the top level (DashScope
+    /// commercial models such as `qwen3.8-max`) and inside
+    /// `chat_template_kwargs` (open-source serving stacks such as
+    /// llama.cpp and vLLM); both keys always carry the same value.
+    /// `reasoning_effort` is only present while thinking is enabled.
+    pub fn extra_body(&self) -> serde_json::Value {
+        match self {
+            Self::Off => serde_json::json!({
+                "enable_thinking": false,
+                "chat_template_kwargs": { "enable_thinking": false }
+            }),
+            Self::Low => serde_json::json!({
+                "enable_thinking": true,
+                "chat_template_kwargs": { "enable_thinking": true },
+                "reasoning_effort": "low"
+            }),
+            Self::Medium => serde_json::json!({
+                "enable_thinking": true,
+                "chat_template_kwargs": { "enable_thinking": true },
+                "reasoning_effort": "medium"
+            }),
+            Self::XHigh => serde_json::json!({
+                "enable_thinking": true,
+                "chat_template_kwargs": { "enable_thinking": true },
+                "reasoning_effort": "xhigh"
+            }),
+        }
+    }
+
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::Off => "Off",
+            Self::Low => "Low",
+            Self::Medium => "Medium",
+            Self::XHigh => "XHigh",
+        }
+    }
+
+    pub fn next(&self) -> Self {
+        match self {
+            Self::Off => Self::Low,
+            Self::Low => Self::Medium,
+            Self::Medium => Self::XHigh,
+            Self::XHigh => Self::Off,
+        }
+    }
+
+    pub fn from_display_name(name: &str) -> Self {
+        match name.to_lowercase().as_str() {
+            "off" => Self::Off,
+            "low" => Self::Low,
+            "medium" => Self::Medium,
+            "xhigh" | "x_high" | "x-high" => Self::XHigh,
+            _ => Self::Off,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum GlmThinkingLevel {
     #[default]
     Off,
@@ -475,6 +546,7 @@ pub enum ThinkingLevelType {
     None,
     DeepSeek(DeepSeekV4ThinkingLevel),
     Qwen(Qwen35ThinkingLevel),
+    Qwen38(Qwen38ThinkingLevel),
     Glm(GlmThinkingLevel),
     Gpt5(Gpt5ThinkingLevel),
     MiniMax(MiniMaxThinkingLevel),
@@ -488,6 +560,7 @@ impl ThinkingLevelType {
             Self::None => "",
             Self::DeepSeek(level) => level.display_name(),
             Self::Qwen(level) => level.display_name(),
+            Self::Qwen38(level) => level.display_name(),
             Self::Glm(level) => level.display_name(),
             Self::Gpt5(level) => level.display_name(),
             Self::MiniMax(level) => level.display_name(),
@@ -501,6 +574,7 @@ impl ThinkingLevelType {
             Self::None => Self::None,
             Self::DeepSeek(level) => Self::DeepSeek(level.next()),
             Self::Qwen(level) => Self::Qwen(level.next()),
+            Self::Qwen38(level) => Self::Qwen38(level.next()),
             Self::Glm(level) => Self::Glm(level.next()),
             Self::Gpt5(level) => Self::Gpt5(level.next()),
             Self::MiniMax(level) => Self::MiniMax(level.next()),
@@ -514,6 +588,7 @@ impl ThinkingLevelType {
             Self::None => None,
             Self::DeepSeek(level) => Some(level.extra_body()),
             Self::Qwen(level) => Some(level.extra_body()),
+            Self::Qwen38(level) => Some(level.extra_body()),
             Self::Glm(level) => Some(level.extra_body()),
             Self::Gpt5(level) => Some(level.extra_body()),
             Self::MiniMax(level) => Some(level.extra_body()),
@@ -529,6 +604,7 @@ impl ThinkingLevelType {
             Self::None => None,
             Self::DeepSeek(DeepSeekV4ThinkingLevel::Off)
             | Self::Qwen(_)
+            | Self::Qwen38(Qwen38ThinkingLevel::Off)
             | Self::Glm(GlmThinkingLevel::Off)
             | Self::Gpt5(Gpt5ThinkingLevel::Off)
             | Self::MiniMax(MiniMaxThinkingLevel::Off)
@@ -540,14 +616,16 @@ impl ThinkingLevelType {
             Self::DeepSeek(DeepSeekV4ThinkingLevel::Max)
             | Self::Glm(GlmThinkingLevel::Max)
             | Self::MiniMax(MiniMaxThinkingLevel::Max) => Some("max"),
-            Self::Gpt5(Gpt5ThinkingLevel::Low) | Self::Claude(ClaudeEffortLevel::Low) => {
-                Some("low")
-            }
-            Self::Gpt5(Gpt5ThinkingLevel::Medium) | Self::Claude(ClaudeEffortLevel::Medium) => {
-                Some("medium")
-            }
+            Self::Gpt5(Gpt5ThinkingLevel::Low)
+            | Self::Claude(ClaudeEffortLevel::Low)
+            | Self::Qwen38(Qwen38ThinkingLevel::Low) => Some("low"),
+            Self::Gpt5(Gpt5ThinkingLevel::Medium)
+            | Self::Claude(ClaudeEffortLevel::Medium)
+            | Self::Qwen38(Qwen38ThinkingLevel::Medium) => Some("medium"),
             Self::Gpt5(Gpt5ThinkingLevel::High) => Some("high"),
-            Self::Gpt5(Gpt5ThinkingLevel::XHigh) => Some("xhigh"),
+            Self::Gpt5(Gpt5ThinkingLevel::XHigh) | Self::Qwen38(Qwen38ThinkingLevel::XHigh) => {
+                Some("xhigh")
+            }
             Self::Gpt5(Gpt5ThinkingLevel::Max) => Some("max"),
             Self::MuseSpark(MuseSparkThinkingLevel::Minimal) => Some("minimal"),
             Self::MuseSpark(MuseSparkThinkingLevel::Low) => Some("low"),
@@ -600,7 +678,12 @@ impl ThinkingLevelType {
             // Qwen(On) has no Anthropic equivalent and returns None.
             // MiniMax uses thinking.type (not output_config).
             "anthropic" => match self {
-                Self::Qwen(Qwen35ThinkingLevel::On) => None,
+                // Qwen has no Anthropic effort equivalent: on-levels carry
+                // no config, Off falls through to the disabled mapping below.
+                Self::Qwen(Qwen35ThinkingLevel::On)
+                | Self::Qwen38(Qwen38ThinkingLevel::Low)
+                | Self::Qwen38(Qwen38ThinkingLevel::Medium)
+                | Self::Qwen38(Qwen38ThinkingLevel::XHigh) => None,
                 Self::MiniMax(MiniMaxThinkingLevel::Off) => {
                     Some(serde_json::json!({"thinking": {"type": "disabled"}}))
                 }
@@ -645,6 +728,7 @@ impl ThinkingLevelType {
                 Self::DeepSeek(DeepSeekV4ThinkingLevel::from_display_name(level))
             }
             ["qwen", level] => Self::Qwen(Qwen35ThinkingLevel::from_display_name(level)),
+            ["qwen38", level] => Self::Qwen38(Qwen38ThinkingLevel::from_display_name(level)),
             ["glm", level] => Self::Glm(GlmThinkingLevel::from_display_name(level)),
             ["gpt5", level] => Self::Gpt5(Gpt5ThinkingLevel::from_display_name(level)),
             ["minimax", level] => Self::MiniMax(MiniMaxThinkingLevel::from_display_name(level)),
@@ -665,6 +749,7 @@ impl fmt::Display for ThinkingLevelType {
                 write!(f, "deepseek:{}", level.display_name().to_lowercase())
             }
             Self::Qwen(level) => write!(f, "qwen:{}", level.display_name().to_lowercase()),
+            Self::Qwen38(level) => write!(f, "qwen38:{}", level.display_name().to_lowercase()),
             Self::Glm(level) => write!(f, "glm:{}", level.display_name().to_lowercase()),
             Self::Gpt5(level) => write!(f, "gpt5:{}", level.display_name().to_lowercase()),
             Self::MiniMax(level) => {
@@ -757,6 +842,7 @@ mod tests {
         for level in [
             ThinkingLevelType::DeepSeek(DeepSeekV4ThinkingLevel::Off),
             ThinkingLevelType::Qwen(Qwen35ThinkingLevel::Off),
+            ThinkingLevelType::Qwen38(Qwen38ThinkingLevel::Off),
             ThinkingLevelType::Glm(GlmThinkingLevel::Off),
             ThinkingLevelType::Gpt5(Gpt5ThinkingLevel::Off),
             ThinkingLevelType::MiniMax(MiniMaxThinkingLevel::Off),
@@ -886,6 +972,140 @@ mod tests {
             level.thinking_config(),
             Some(serde_json::json!({"effort": "none"}))
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Qwen3.8
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn qwen38_off_chat_completions_disables_thinking() {
+        let level = ThinkingLevelType::Qwen38(Qwen38ThinkingLevel::Off);
+        assert_eq!(
+            level.extra_body_for_api("openai_chat_completions"),
+            Some(serde_json::json!({
+                "enable_thinking": false,
+                "chat_template_kwargs": { "enable_thinking": false }
+            }))
+        );
+    }
+
+    #[test]
+    fn qwen38_levels_chat_completions_send_reasoning_effort() {
+        for (level, effort) in [
+            (Qwen38ThinkingLevel::Low, "low"),
+            (Qwen38ThinkingLevel::Medium, "medium"),
+            (Qwen38ThinkingLevel::XHigh, "xhigh"),
+        ] {
+            let typed = ThinkingLevelType::Qwen38(level);
+            assert_eq!(
+                typed.extra_body_for_api("openai_chat_completions"),
+                Some(serde_json::json!({
+                    "enable_thinking": true,
+                    "chat_template_kwargs": { "enable_thinking": true },
+                    "reasoning_effort": effort
+                })),
+                "effort {effort}",
+            );
+        }
+    }
+
+    #[test]
+    fn qwen38_display_and_cycle() {
+        let mut level = Qwen38ThinkingLevel::Off;
+        assert_eq!(level.display_name(), "Off");
+        level = level.next();
+        assert_eq!(level, Qwen38ThinkingLevel::Low);
+        level = level.next();
+        assert_eq!(level, Qwen38ThinkingLevel::Medium);
+        level = level.next();
+        assert_eq!(level, Qwen38ThinkingLevel::XHigh);
+        level = level.next();
+        assert_eq!(level, Qwen38ThinkingLevel::Off);
+        assert_eq!(Qwen38ThinkingLevel::XHigh.display_name(), "XHigh");
+    }
+
+    #[test]
+    fn qwen38_from_display_name() {
+        assert_eq!(
+            Qwen38ThinkingLevel::from_display_name("off"),
+            Qwen38ThinkingLevel::Off
+        );
+        assert_eq!(
+            Qwen38ThinkingLevel::from_display_name("low"),
+            Qwen38ThinkingLevel::Low
+        );
+        assert_eq!(
+            Qwen38ThinkingLevel::from_display_name("medium"),
+            Qwen38ThinkingLevel::Medium
+        );
+        assert_eq!(
+            Qwen38ThinkingLevel::from_display_name("xhigh"),
+            Qwen38ThinkingLevel::XHigh
+        );
+        assert_eq!(
+            Qwen38ThinkingLevel::from_display_name("X_HIGH"),
+            Qwen38ThinkingLevel::XHigh
+        );
+        assert_eq!(
+            Qwen38ThinkingLevel::from_display_name("bogus"),
+            Qwen38ThinkingLevel::Off
+        );
+    }
+
+    #[test]
+    fn qwen38_responses_sends_native_effort() {
+        assert_eq!(
+            ThinkingLevelType::Qwen38(Qwen38ThinkingLevel::XHigh).thinking_config(),
+            Some(serde_json::json!({"effort": "xhigh"}))
+        );
+        assert_eq!(
+            ThinkingLevelType::Qwen38(Qwen38ThinkingLevel::Low).thinking_config(),
+            Some(serde_json::json!({"effort": "low"}))
+        );
+        assert_eq!(
+            ThinkingLevelType::Qwen38(Qwen38ThinkingLevel::Off).thinking_config(),
+            Some(serde_json::json!({"effort": "none"}))
+        );
+    }
+
+    #[test]
+    fn qwen38_on_anthropic_returns_none() {
+        for (level, label) in [
+            (Qwen38ThinkingLevel::Low, "low"),
+            (Qwen38ThinkingLevel::Medium, "medium"),
+            (Qwen38ThinkingLevel::XHigh, "xhigh"),
+        ] {
+            let typed = ThinkingLevelType::Qwen38(level);
+            assert!(
+                typed.extra_body_for_api("anthropic").is_none(),
+                "level {label} should produce no anthropic config",
+            );
+        }
+    }
+
+    #[test]
+    fn qwen38_off_to_anthropic_disables() {
+        let level = ThinkingLevelType::Qwen38(Qwen38ThinkingLevel::Off);
+        assert_eq!(
+            level.extra_body_for_api("anthropic"),
+            Some(serde_json::json!({"thinking": {"type": "disabled"}}))
+        );
+    }
+
+    #[test]
+    fn qwen38_to_gemini_returns_none() {
+        let level = ThinkingLevelType::Qwen38(Qwen38ThinkingLevel::XHigh);
+        assert!(level.extra_body_for_api("google_gemini").is_none());
+    }
+
+    #[test]
+    fn qwen38_round_trip_string() {
+        let level = ThinkingLevelType::Qwen38(Qwen38ThinkingLevel::XHigh);
+        let s = level.to_string();
+        assert_eq!(s, "qwen38:xhigh");
+        let parsed = ThinkingLevelType::from_string(&s);
+        assert_eq!(parsed, level);
     }
 
     #[test]

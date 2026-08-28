@@ -1134,4 +1134,28 @@ mod tests {
         assert_eq!(details[1].detail_type, "reasoning.summary");
         assert_eq!(details[1].summary.as_deref(), Some("## Implementation"));
     }
+
+    #[test]
+    fn qwen38_thinking_level_flattens_into_request_body() {
+        let mut model = test_model(false);
+        model.thinking_level = crate::reasoning::ThinkingLevelType::Qwen38(
+            crate::reasoning::Qwen38ThinkingLevel::Medium,
+        );
+        // Provider-level extra body keys must survive the thinking merge.
+        model.extra_body = Some(serde_json::json!({"service_tier": "flex"}));
+
+        let messages = vec![Message::new(MessageRole::User, "Hello")];
+        let request =
+            build_openai_request(&model, messages, false, &[], model.thinking_level.clone())
+                .expect("build request");
+
+        let body = serde_json::to_value(&request).unwrap();
+        assert_eq!(body["enable_thinking"], serde_json::Value::from(true));
+        assert_eq!(
+            body["chat_template_kwargs"],
+            serde_json::json!({"enable_thinking": true})
+        );
+        assert_eq!(body["reasoning_effort"], "medium");
+        assert_eq!(body["service_tier"], "flex");
+    }
 }

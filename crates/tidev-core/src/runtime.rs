@@ -73,6 +73,28 @@ impl tidev_tools::TodoPersistence for TodoStore {
 }
 
 // ---------------------------------------------------------------------------
+// Persisted thinking level
+// ---------------------------------------------------------------------------
+
+/// Coerce a persisted thinking level string against the model's current
+/// thinking family, falling back to the model default when the saved level
+/// was recorded under a different family (e.g. `qwen:on` saved before the
+/// Qwen3.8 levels existed).
+fn coerce_saved_thinking_level(
+    model: &tidev_config::auth::ActiveModel,
+    saved: &str,
+) -> ThinkingLevelType {
+    let model_id = if !model.request_model_id.is_empty() {
+        model.request_model_id.as_str()
+    } else if !model.display_name.is_empty() {
+        model.display_name.as_str()
+    } else {
+        model.model_id.as_str()
+    };
+    tidev_config::reasoning::ThinkingMatcher::coerce_saved(saved, model_id)
+}
+
+// ---------------------------------------------------------------------------
 // Runtime
 // ---------------------------------------------------------------------------
 
@@ -520,7 +542,7 @@ impl Runtime {
             .store()
             .load_model_thinking_level(&model.provider_id, &model.model_id)
         {
-            model.thinking_level = ThinkingLevelType::from_string(&level);
+            model.thinking_level = coerce_saved_thinking_level(model, &level);
         }
     }
 
@@ -2046,7 +2068,7 @@ impl RuntimeBuilder {
         if let Ok(Some(level_str)) =
             store.load_model_thinking_level(&active_model.provider_id, &active_model.model_id)
         {
-            active_model.thinking_level = ThinkingLevelType::from_string(&level_str);
+            active_model.thinking_level = coerce_saved_thinking_level(&active_model, &level_str);
         }
 
         // Store active model for loop construction.

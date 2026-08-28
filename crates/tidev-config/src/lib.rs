@@ -908,7 +908,9 @@ impl AppConfig {
         if let Some(tl_str) = self.agent.thinking_levels.get(agent_type)
             && model.thinking_level.is_supported()
         {
-            model.thinking_level = ThinkingLevelType::from_string(tl_str);
+            // Coerce so an override saved under another family (e.g.
+            // "qwen:on" before Qwen3.8 levels) falls back to the model default.
+            model.thinking_level = ThinkingMatcher::coerce_saved(tl_str, &model.request_model_id);
         }
 
         Ok(Some(model))
