@@ -138,6 +138,13 @@ enum Command {
     /// Manage sessions
     #[command(subcommand)]
     Session(SessionCommand),
+
+    /// Output the complete content of a stored tool execution result to stdout
+    #[command(name = "tool-output")]
+    ToolOutput {
+        /// The tool output ID (e.g. out-a8f3b9c1)
+        id: String,
+    },
 }
 
 // ── Auth subcommands ─────────────────────────────────────────────────
@@ -345,6 +352,9 @@ async fn main() -> Result<()> {
             } => cli::session_show(&session_id, message_id.as_deref(), format),
             SessionCommand::Prune { older_than_days } => cli::session_prune(older_than_days),
         },
+
+        // ── Tool output dump ────────────────────────────────────
+        Some(Command::ToolOutput { id }) => cli::print_tool_output(&id),
     }
 }
 

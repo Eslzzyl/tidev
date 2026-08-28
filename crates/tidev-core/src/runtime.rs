@@ -73,28 +73,6 @@ impl tidev_tools::TodoPersistence for TodoStore {
 }
 
 // ---------------------------------------------------------------------------
-// Persisted thinking level
-// ---------------------------------------------------------------------------
-
-/// Coerce a persisted thinking level string against the model's current
-/// thinking family, falling back to the model default when the saved level
-/// was recorded under a different family (e.g. `qwen:on` saved before the
-/// Qwen3.8 levels existed).
-fn coerce_saved_thinking_level(
-    model: &tidev_config::auth::ActiveModel,
-    saved: &str,
-) -> ThinkingLevelType {
-    let model_id = if !model.request_model_id.is_empty() {
-        model.request_model_id.as_str()
-    } else if !model.display_name.is_empty() {
-        model.display_name.as_str()
-    } else {
-        model.model_id.as_str()
-    };
-    tidev_config::reasoning::ThinkingMatcher::coerce_saved(saved, model_id)
-}
-
-// ---------------------------------------------------------------------------
 // Runtime
 // ---------------------------------------------------------------------------
 
@@ -531,19 +509,7 @@ impl Runtime {
     pub fn resolve_active_model(&self) -> Result<ActiveModel> {
         let config = self.config();
         let auth = self.auth();
-        let mut model = config.resolve_active_model(&auth)?;
-        self.apply_saved_thinking_level(&mut model);
-        Ok(model)
-    }
-
-    fn apply_saved_thinking_level(&self, model: &mut ActiveModel) {
-        if let Ok(Some(level)) = self
-            .session_manager
-            .store()
-            .load_model_thinking_level(&model.provider_id, &model.model_id)
-        {
-            model.thinking_level = coerce_saved_thinking_level(model, &level);
-        }
+        config.resolve_active_model(&auth)
     }
 
     /// Update the active model (called by TUI on provider/model switch).
@@ -560,22 +526,23 @@ impl Runtime {
         self.default_workspace.file_search_index()
     }
 
-    /// Save a thinking level preference for an agent type to config.
+    /// Save a thinking level preference to config.
     pub fn set_model_thinking_level(
         &self,
-        provider_id: &str,
-        model_id: &str,
+        _provider_id: &str,
+        _model_id: &str,
         thinking_level: &str,
     ) -> Result<()> {
         let mut active = self.active_model.write().unwrap();
         active.thinking_level =
             tidev_llm::reasoning::ThinkingLevelType::from_string(thinking_level);
-        if let Err(e) = self.session_manager.store().save_model_thinking_level(
-            provider_id,
-            model_id,
-            thinking_level,
-        ) {
-            log::warn!("failed to save thinking level preference: {}", e);
+        let level_owned = thinking_level.to_string();
+        drop(active);
+        self.update_config(|cfg| {
+            cfg.default_thinking_level = level_owned;
+        });
+        if let Err(e) = self.save_config() {
+            log::warn!("failed to save thinking level to config: {}", e);
         }
         Ok(())
     }
@@ -2011,16 +1978,17 @@ impl RuntimeBuilder {
         let store = database.create_store()?;
         log::info!("startup: database opened in {:?}", _t_db.elapsed());
 
-        // Delete expired tool outputs on startup (best-effort).
-        if let Ok(count) = store.delete_expired_tool_outputs(7)
+        // Clear expired tool outputs on startup (best-effort).
+        if let Ok(count) = store.clear_expired_tool_outputs(7)
             && count > 0
         {
-            log::info!("Cleaned up {count} old tool output(s)");
+            log::info!("Cleaned up {count} old tool output payload(s)");
         }
+        let _ = store.delete_tombstones_older_than(30);
 
         // 7. LLM client + model resolution (with fallback).
         let _t_llm = Instant::now();
-        let mut active_model = Self::resolve_fallback_model(&config, &auth)
+        let active_model = Self::resolve_fallback_model(&config, &auth)
             .context("no models are configured — set up a provider API key first")?;
         let llm = tidev_llm::LlmClient::new(
             config.logging.save_request_body,
@@ -2064,13 +2032,6 @@ impl RuntimeBuilder {
             );
         }
 
-        // Load saved thinking level preference from database (if any).
-        if let Ok(Some(level_str)) =
-            store.load_model_thinking_level(&active_model.provider_id, &active_model.model_id)
-        {
-            active_model.thinking_level = coerce_saved_thinking_level(&active_model, &level_str);
-        }
-
         // Store active model for loop construction.
         let active_model = Arc::new(StdRwLock::new(active_model));
 
@@ -2087,11 +2048,12 @@ impl RuntimeBuilder {
                 loop {
                     tokio::select! {
                         _ = tokio::time::sleep(interval) => {
-                            if let Ok(count) = cstore.delete_expired_tool_outputs(7)
+                            if let Ok(count) = cstore.clear_expired_tool_outputs(7)
                                 && count > 0
                             {
-                                log::info!("Cleaned up {count} old tool output(s)");
+                                log::info!("Cleaned up {count} old tool output payload(s)");
                             }
+                            let _ = cstore.delete_tombstones_older_than(30);
                         }
                         _ = cancel.cancelled() => break,
                     }

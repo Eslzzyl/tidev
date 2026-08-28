@@ -247,21 +247,6 @@ impl SessionStore {
         })
     }
 
-    /// Query a single optional row from the read connection.
-    fn read_query_opt<T>(
-        &self,
-        sql: &str,
-        params: impl rusqlite::Params,
-        f: impl FnOnce(&rusqlite::Row<'_>) -> rusqlite::Result<T>,
-    ) -> Result<Option<T>> {
-        self.read(|conn| {
-            let mut stmt = conn.prepare(sql)?;
-            stmt.query_row(params, f)
-                .optional()
-                .map_err(anyhow::Error::from)
-        })
-    }
-
     fn session_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRecord> {
         let id = row.get::<_, String>(0)?;
         let parent_session_id = row.get::<_, Option<String>>(1)?;
@@ -386,11 +371,26 @@ pub struct WorkspaceSessionCount {
 /// A tool output retained separately from the protocol message content.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ToolOutputRecord {
-    pub message_id: Uuid,
+    pub id: String,
     pub session_id: Uuid,
+    pub message_id: Uuid,
+    pub tool_call_id: String,
     pub tool_name: String,
-    pub output: String,
+    pub byte_size: usize,
+    pub line_count: usize,
     pub created_at: String,
+}
+
+/// Status and optional content of a stored tool output.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum ToolOutputContent {
+    Available {
+        record: ToolOutputRecord,
+        output: String,
+    },
+    Expired {
+        record: ToolOutputRecord,
+    },
 }
 
 /// A message together with application-owned fields needed for inspection.
@@ -446,14 +446,6 @@ pub struct UsageRecord {
     pub total_tokens: u64,
 }
 
-#[derive(Debug, Clone)]
-pub struct FileReadRecord {
-    pub file_path: String,
-    pub read_at: DateTime<Utc>,
-    pub mtime: Option<i64>,
-    pub size: Option<i64>,
-}
-
 // ---------------------------------------------------------------------------
 // Session CRUD
 // ---------------------------------------------------------------------------
@@ -476,23 +468,15 @@ impl SessionStore {
         let now = Utc::now().to_rfc3339();
         let conn = self.write_conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO sessions (id, parent_session_id, provider_id, provider_display_name, model_id, model_display_name, title, created_at, updated_at, snapshot_start_hash) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-            params![session_id.to_string(), parent_session_id.map(|id| id.to_string()), provider_id, provider_display_name, model_id, model_display_name, title, now, now, snapshot_start_hash],
-        )?;
-        conn.execute(
-            "INSERT OR REPLACE INTO session_workspaces (session_id, workspace_root) VALUES (?1, ?2)",
-            params![session_id.to_string(), workspace_root],
+            "INSERT INTO sessions (id, parent_session_id, workspace_root, provider_id, provider_display_name, model_id, model_display_name, title, created_at, updated_at, snapshot_start_hash) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![session_id.to_string(), parent_session_id.map(|id| id.to_string()), workspace_root, provider_id, provider_display_name, model_id, model_display_name, title, now, now, snapshot_start_hash],
         )?;
         Ok(())
     }
 
     /// Load session record by ID.
     pub fn load_session(&self, session_id: Uuid) -> Result<Option<SessionRecord>> {
-        let sql = format!(
-            "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s \
-             LEFT JOIN session_workspaces sw ON sw.session_id = s.id \
-             WHERE s.id = ?1"
-        );
+        let sql = format!("SELECT {SESSION_SELECT_COLUMNS} FROM sessions s WHERE s.id = ?1");
         self.read(|conn| {
             conn.query_row(&sql, params![session_id.to_string()], |row| {
                 Ok(map_row!(SessionRecord, row,
@@ -573,7 +557,6 @@ impl SessionStore {
     pub fn list_sessions(&self, limit: i64, offset: i64) -> Result<Vec<SessionRecord>> {
         let sql = format!(
             "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s \
-             LEFT JOIN session_workspaces sw ON sw.session_id = s.id \
              WHERE s.parent_session_id IS NULL \
              ORDER BY s.created_at DESC LIMIT ?1 OFFSET ?2"
         );
@@ -612,7 +595,6 @@ impl SessionStore {
     pub fn list_sessions_unfiltered(&self, limit: i64, offset: i64) -> Result<Vec<SessionRecord>> {
         let sql = format!(
             "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s \
-             LEFT JOIN session_workspaces sw ON sw.session_id = s.id \
              ORDER BY s.created_at DESC LIMIT ?1 OFFSET ?2"
         );
         self.read(|conn| {
@@ -654,8 +636,7 @@ impl SessionStore {
     ) -> Result<Vec<SessionRecord>> {
         let sql = format!(
             "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s \
-             INNER JOIN session_workspaces sw ON sw.session_id = s.id \
-             WHERE sw.workspace_root = ?1 AND s.parent_session_id IS NULL \
+             WHERE s.workspace_root = ?1 AND s.parent_session_id IS NULL \
              ORDER BY s.created_at DESC LIMIT ?2 OFFSET ?3"
         );
         self.read(|conn| {
@@ -823,9 +804,8 @@ impl SessionStore {
         self.read_query(
             &format!(
                 "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s \
-                 INNER JOIN session_workspaces sw ON sw.session_id = s.id \
                  WHERE s.updated_at < :cutoff AND s.parent_session_id IS NULL \
-                 ORDER BY sw.workspace_root, s.updated_at DESC"
+                 ORDER BY s.workspace_root, s.updated_at DESC"
             ),
             named_params! { ":cutoff": cutoff_text },
             Self::session_from_row,
@@ -840,7 +820,6 @@ impl SessionStore {
         let records: Vec<SessionRecord> = self.read_query(
             &format!(
                 "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s \
-                 INNER JOIN session_workspaces sw ON sw.session_id = s.id \
                  WHERE s.updated_at < :cutoff AND s.parent_session_id IS NULL \
                  ORDER BY s.updated_at DESC"
             ),
@@ -864,8 +843,7 @@ impl SessionStore {
         let records: Vec<SessionRecord> = self.read_query(
             &format!(
                 "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s \
-                 INNER JOIN session_workspaces sw ON sw.session_id = s.id \
-                 WHERE sw.workspace_root = :workspace_root AND s.parent_session_id IS NULL \
+                 WHERE s.workspace_root = :workspace_root AND s.parent_session_id IS NULL \
                  ORDER BY s.updated_at DESC"
             ),
             named_params! { ":workspace_root": root },
@@ -937,7 +915,7 @@ impl SessionStore {
     pub fn get_current_workspace_sessions_count(&self, workspace_root: &Path) -> Result<i64> {
         self.read(|conn| {
             conn.query_row(
-                "SELECT COUNT(*) FROM session_workspaces WHERE workspace_root = ?1",
+                "SELECT COUNT(*) FROM sessions WHERE workspace_root = ?1 AND parent_session_id IS NULL",
                 params![workspace_root.to_string_lossy().to_string()],
                 |row| row.get(0),
             )
@@ -954,23 +932,29 @@ impl SessionStore {
     pub fn load_tool_outputs(&self, session_id: Uuid) -> Result<HashMap<Uuid, ToolOutputRecord>> {
         self.read(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT message_id, session_id, tool_name, output, created_at \
+                "SELECT id, session_id, message_id, tool_call_id, tool_name, byte_size, line_count, created_at \
                  FROM tool_outputs WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC",
             )?;
             let rows = stmt.query_map(params![session_id.to_string()], |row| {
-                let message_id = Uuid::parse_str(&row.get::<_, String>(0)?).unwrap_or_default();
+                let id: String = row.get(0)?;
                 let stored_session_id =
                     Uuid::parse_str(&row.get::<_, String>(1)?).unwrap_or(session_id);
-                let output = match row.get::<_, Vec<u8>>(3) {
-                    Ok(blob) => decompress_text(&blob),
-                    Err(_) => row.get::<_, String>(3)?,
-                };
+                let message_id = Uuid::parse_str(&row.get::<_, String>(2)?).unwrap_or_default();
+                let tool_call_id: String = row.get(3)?;
+                let tool_name: String = row.get(4)?;
+                let byte_size: usize = row.get::<_, i64>(5)? as usize;
+                let line_count: usize = row.get::<_, i64>(6)? as usize;
+                let created_at: String = row.get(7)?;
+
                 Ok(ToolOutputRecord {
-                    message_id,
+                    id,
                     session_id: stored_session_id,
-                    tool_name: row.get(2)?,
-                    output,
-                    created_at: row.get(4)?,
+                    message_id,
+                    tool_call_id,
+                    tool_name,
+                    byte_size,
+                    line_count,
+                    created_at,
                 })
             })?;
             let mut tool_outputs = HashMap::new();
@@ -982,114 +966,101 @@ impl SessionStore {
         })
     }
 
-    /// Load tool output content for a message from tool_outputs table.
-    pub fn load_tool_output(&self, message_id: Uuid) -> Result<Option<String>> {
-        self.read_query_opt(
-            "SELECT output FROM tool_outputs WHERE message_id = :message_id",
-            named_params! { ":message_id": message_id.to_string() },
-            |row| {
-                let blob: Vec<u8> = row.get(0)?;
-                Ok(decompress_text(&blob))
-            },
-        )
+    /// Load tool output content by output id, message_id, or tool_call_id.
+    pub fn load_tool_output(&self, id_or_alias: &str) -> Result<Option<ToolOutputContent>> {
+        self.read(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, session_id, message_id, tool_call_id, tool_name, output, byte_size, line_count, created_at \
+                 FROM tool_outputs \
+                 WHERE id = ?1 OR message_id = ?1 OR tool_call_id = ?1 \
+                 LIMIT 1",
+            )?;
+            let mut rows = stmt.query_map(params![id_or_alias], |row| {
+                let id: String = row.get(0)?;
+                let session_id = Uuid::parse_str(&row.get::<_, String>(1)?).unwrap_or_default();
+                let message_id = Uuid::parse_str(&row.get::<_, String>(2)?).unwrap_or_default();
+                let tool_call_id: String = row.get(3)?;
+                let tool_name: String = row.get(4)?;
+                let output_blob: Option<Vec<u8>> = row.get(5)?;
+                let byte_size: usize = row.get::<_, i64>(6)? as usize;
+                let line_count: usize = row.get::<_, i64>(7)? as usize;
+                let created_at: String = row.get(8)?;
+
+                let record = ToolOutputRecord {
+                    id,
+                    session_id,
+                    message_id,
+                    tool_call_id,
+                    tool_name,
+                    byte_size,
+                    line_count,
+                    created_at,
+                };
+
+                match output_blob {
+                    Some(blob) => Ok(ToolOutputContent::Available {
+                        record,
+                        output: decompress_text(&blob),
+                    }),
+                    None => Ok(ToolOutputContent::Expired { record }),
+                }
+            })?;
+            match rows.next() {
+                Some(Ok(content)) => Ok(Some(content)),
+                _ => Ok(None),
+            }
+        })
     }
 
-    /// Save tool output for a message.
+    /// Save tool output for a tool call.
     pub fn save_tool_output(
         &self,
+        id: &str,
         session_id: Uuid,
         message_id: Uuid,
+        tool_call_id: &str,
         tool_name: &str,
-        output: &str,
+        raw_output: &str,
     ) -> Result<()> {
-        let compressed = compress_text(output);
+        let compressed = compress_text(raw_output);
+        let byte_size = raw_output.len() as i64;
+        let line_count = raw_output.lines().count() as i64;
+        let now = Utc::now().to_rfc3339();
         self.write_execute(
             "INSERT OR REPLACE INTO tool_outputs \
-             (message_id, session_id, tool_name, output, created_at) \
-             VALUES (:message_id, :session_id, :tool_name, :output, :created_at)",
+             (id, session_id, message_id, tool_call_id, tool_name, output, byte_size, line_count, created_at) \
+             VALUES (:id, :session_id, :message_id, :tool_call_id, :tool_name, :output, :byte_size, :line_count, :created_at)",
             named_params! {
-                ":message_id": message_id.to_string(),
+                ":id": id,
                 ":session_id": session_id.to_string(),
+                ":message_id": message_id.to_string(),
+                ":tool_call_id": tool_call_id,
                 ":tool_name": tool_name,
                 ":output": compressed,
-                ":created_at": Utc::now().to_rfc3339(),
+                ":byte_size": byte_size,
+                ":line_count": line_count,
+                ":created_at": now,
             },
         )?;
         Ok(())
     }
 
-    /// Delete tool outputs older than `max_age_days`.
-    pub fn delete_expired_tool_outputs(&self, max_age_days: i64) -> Result<usize> {
+    /// Clear big payloads for tool outputs older than `max_age_days` (tombstone pattern).
+    /// Sets `output` column to NULL while preserving metadata for inspection.
+    pub fn clear_expired_tool_outputs(&self, max_age_days: i64) -> Result<usize> {
         let cutoff = (Utc::now() - Duration::days(max_age_days)).to_rfc3339();
         self.write_execute(
-            "DELETE FROM tool_outputs WHERE created_at < :cutoff",
+            "UPDATE tool_outputs SET output = NULL WHERE created_at < :cutoff AND output IS NOT NULL",
             named_params! { ":cutoff": cutoff },
         )
     }
 
-    /// Start a background thread that periodically deletes tool outputs
-    /// older than `max_age_days`.  The thread runs every `interval` and
-    /// uses a cloned database connection so it does not block the main
-    /// thread.
-    pub fn start_output_cleanup(&self, max_age_days: i64, interval: std::time::Duration) {
-        let conn = self.write_conn.clone();
-        std::thread::spawn(move || {
-            loop {
-                std::thread::sleep(interval);
-                let cutoff = (Utc::now() - Duration::days(max_age_days)).to_rfc3339();
-                match conn.lock().unwrap().execute(
-                    "DELETE FROM tool_outputs WHERE created_at < :cutoff",
-                    rusqlite::named_params! { ":cutoff": cutoff },
-                ) {
-                    Ok(count) if count > 0 => {
-                        log::info!("Cleaned up {count} old tool output(s)");
-                    }
-                    Ok(_) => {}
-                    Err(e) => {
-                        log::warn!("Failed to clean old tool outputs: {e}");
-                    }
-                }
-            }
-        });
-    }
-
-    /// Save the user's thinking level preference for a specific model.
-    pub fn save_model_thinking_level(
-        &self,
-        provider_id: &str,
-        model_id: &str,
-        thinking_level: &str,
-    ) -> Result<()> {
-        let now = Utc::now().to_rfc3339();
+    /// Delete tombstone records older than `max_age_days`.
+    pub fn delete_tombstones_older_than(&self, max_age_days: i64) -> Result<usize> {
+        let cutoff = (Utc::now() - Duration::days(max_age_days)).to_rfc3339();
         self.write_execute(
-            "INSERT OR REPLACE INTO model_thinking_levels \
-             (provider_id, model_id, thinking_level, updated_at) \
-             VALUES (:provider_id, :model_id, :thinking_level, :updated_at)",
-            named_params! {
-                ":provider_id": provider_id,
-                ":model_id": model_id,
-                ":thinking_level": thinking_level,
-                ":updated_at": now,
-            },
-        )?;
-        Ok(())
-    }
-
-    /// Load the user's thinking level preference for a specific model.
-    pub fn load_model_thinking_level(
-        &self,
-        provider_id: &str,
-        model_id: &str,
-    ) -> Result<Option<String>> {
-        self.read_query_opt(
-            "SELECT thinking_level FROM model_thinking_levels \
-             WHERE provider_id = :provider_id AND model_id = :model_id \
-             LIMIT 1",
-            named_params! {
-                ":provider_id": provider_id,
-                ":model_id": model_id,
-            },
-            |row| row.get::<_, String>(0),
+            "DELETE FROM tool_outputs WHERE created_at < :cutoff AND output IS NULL",
+            named_params! { ":cutoff": cutoff },
         )
     }
 
@@ -1105,9 +1076,9 @@ impl SessionStore {
     pub fn count_sessions_by_workspace(&self) -> Result<Vec<WorkspaceSessionCount>> {
         self.read(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT sw.workspace_root, COUNT(*) as cnt FROM sessions s \
-                 LEFT JOIN session_workspaces sw ON sw.session_id = s.id \
-                 GROUP BY sw.workspace_root ORDER BY cnt DESC",
+                "SELECT s.workspace_root, COUNT(*) as cnt FROM sessions s \
+                 WHERE s.workspace_root != '' \
+                 GROUP BY s.workspace_root ORDER BY cnt DESC",
             )?;
             let rows = stmt.query_map([], |row| {
                 Ok(WorkspaceSessionCount {
@@ -1127,7 +1098,6 @@ impl SessionStore {
     pub fn search_sessions(&self, query: &str, limit: i64) -> Result<Vec<SessionRecord>> {
         let sql = format!(
             "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s \
-             LEFT JOIN session_workspaces sw ON sw.session_id = s.id \
              WHERE s.title LIKE ?1 OR s.id = ?2 \
              ORDER BY s.created_at DESC LIMIT ?3"
         );
@@ -1169,7 +1139,8 @@ impl SessionStore {
     pub fn list_workspaces(&self, limit: i64, offset: i64) -> Result<Vec<String>> {
         self.read(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT DISTINCT workspace_root FROM session_workspaces \
+                "SELECT DISTINCT workspace_root FROM sessions \
+                 WHERE workspace_root != '' \
                  ORDER BY workspace_root LIMIT ?1 OFFSET ?2",
             )?;
             let rows = stmt.query_map(params![limit, offset], |row| row.get(0))?;
@@ -1755,7 +1726,9 @@ impl SessionStore {
             let sql = format!(
                 "SELECT id, parent_session_id, provider_id, provider_display_name, \
                         model_id, model_display_name, title, created_at, updated_at, \
-                        status, ended_at, context_summary, context_retained_from, system_prompt \
+                        status, ended_at, context_summary, context_retained_from, system_prompt, \
+                        workspace_root, snapshot_start_hash, instruction_sources, todos, \
+                        revert_message_id, revert_redo_snapshot \
                  FROM sessions WHERE id IN ({placeholder})"
             );
             let params: Vec<&dyn rusqlite::types::ToSql> = sid_strs
@@ -1779,98 +1752,32 @@ impl SessionStore {
                     row.get::<_, String>(11)?,
                     row.get::<_, i64>(12)?,
                     row.get::<_, String>(13)?,
+                    row.get::<_, String>(14)?,
+                    row.get::<_, Option<String>>(15)?,
+                    row.get::<_, String>(16)?,
+                    row.get::<_, String>(17)?,
+                    row.get::<_, Option<String>>(18)?,
+                    row.get::<_, Option<String>>(19)?,
                 ))
             })?;
             let mut insert = tx.prepare(
                 "INSERT OR REPLACE INTO sessions \
                  (id, parent_session_id, provider_id, provider_display_name, \
                   model_id, model_display_name, title, created_at, updated_at, \
-                  status, ended_at, context_summary, context_retained_from, system_prompt) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                  status, ended_at, context_summary, context_retained_from, system_prompt, \
+                  workspace_root, snapshot_start_hash, instruction_sources, todos, \
+                  revert_message_id, revert_redo_snapshot) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
             )?;
             for row in &rows {
                 insert.execute(params![
                     row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7, row.8, row.9, row.10,
-                    row.11, row.12, row.13,
+                    row.11, row.12, row.13, row.14, row.15, row.16, row.17, row.18, row.19,
                 ])?;
             }
         }
 
-        // ── 3. session_workspaces ────────────────────────────────────────
-        {
-            let sql = format!(
-                "SELECT session_id, workspace_root FROM session_workspaces \
-                 WHERE session_id IN ({placeholder})"
-            );
-            let params: Vec<&dyn rusqlite::types::ToSql> = sid_strs
-                .iter()
-                .map(|s| s as &dyn rusqlite::types::ToSql)
-                .collect();
-            let rows = self.read_query(&sql, params.as_slice(), |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?;
-            let mut insert = tx.prepare(
-                "INSERT OR REPLACE INTO session_workspaces (session_id, workspace_root) \
-                 VALUES (?1, ?2)",
-            )?;
-            for (sid, root) in &rows {
-                insert.execute(params![sid, root])?;
-            }
-        }
-
-        // ── 4. session_instruction_sources ───────────────────────────────
-        {
-            let sql = format!(
-                "SELECT session_id, source FROM session_instruction_sources \
-                 WHERE session_id IN ({placeholder})"
-            );
-            let params: Vec<&dyn rusqlite::types::ToSql> = sid_strs
-                .iter()
-                .map(|s| s as &dyn rusqlite::types::ToSql)
-                .collect();
-            let rows = self.read_query(&sql, params.as_slice(), |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?;
-            let mut insert = tx.prepare(
-                "INSERT OR REPLACE INTO session_instruction_sources (session_id, source) \
-                 VALUES (?1, ?2)",
-            )?;
-            for (sid, src) in &rows {
-                insert.execute(params![sid, src])?;
-            }
-        }
-
-        // ── 5. session_reverts ── decompress redo_snapshot BLOB → TEXT ───
-        {
-            let sql = format!(
-                "SELECT session_id, message_id, CAST(redo_snapshot AS BLOB), created_at \
-                 FROM session_reverts WHERE session_id IN ({placeholder})"
-            );
-            let params: Vec<&dyn rusqlite::types::ToSql> = sid_strs
-                .iter()
-                .map(|s| s as &dyn rusqlite::types::ToSql)
-                .collect();
-            let rows = self.read_query(&sql, params.as_slice(), |row| {
-                let blob: Option<Vec<u8>> = row.get(2)?;
-                let redo_text = blob.as_deref().map(decompress_text);
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    redo_text,
-                    row.get::<_, String>(3)?,
-                ))
-            })?;
-            let mut insert = tx.prepare(
-                "INSERT OR REPLACE INTO session_reverts \
-                 (session_id, message_id, redo_snapshot, created_at) \
-                 VALUES (?1, ?2, ?3, ?4)",
-            )?;
-            for (sid, mid, snap, created) in &rows {
-                insert.execute(params![sid, mid, snap, created])?;
-            }
-        }
-
-        // ── 6. messages ── decompress BLOB columns → TEXT ────────────────
+        // ── 3. messages ── decompress BLOB columns → TEXT ────────────────
         {
             let sql = format!(
                 "SELECT id, session_id, role, CAST(content AS BLOB), attachments, \
@@ -1942,30 +1849,40 @@ impl SessionStore {
             }
         }
 
-        // ── 7. todos ──────────────────────────────────────────────────────
+        // ── 4. tool_outputs ── decompress BLOB columns → TEXT ────────────
         {
             let sql = format!(
-                "SELECT session_id, position, content, status FROM todos \
-                 WHERE session_id IN ({placeholder})"
+                "SELECT id, session_id, message_id, tool_call_id, tool_name, CAST(output AS BLOB), \
+                        byte_size, line_count, created_at \
+                 FROM tool_outputs WHERE session_id IN ({placeholder}) ORDER BY created_at ASC, rowid ASC"
             );
             let params: Vec<&dyn rusqlite::types::ToSql> = sid_strs
                 .iter()
                 .map(|s| s as &dyn rusqlite::types::ToSql)
                 .collect();
             let rows = self.read_query(&sql, params.as_slice(), |row| {
+                let output = opt_blob_to_text(row, 5)?;
                 Ok((
                     row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
                     row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    output,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, i64>(7)?,
+                    row.get::<_, String>(8)?,
                 ))
             })?;
             let mut insert = tx.prepare(
-                "INSERT OR REPLACE INTO todos (session_id, position, content, status) \
-                 VALUES (?1, ?2, ?3, ?4)",
+                "INSERT OR REPLACE INTO tool_outputs \
+                 (id, session_id, message_id, tool_call_id, tool_name, output, byte_size, line_count, created_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             )?;
-            for (sid, pos, content, status) in &rows {
-                insert.execute(params![sid, pos, content, status])?;
+            for row in &rows {
+                insert.execute(params![
+                    row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7, row.8,
+                ])?;
             }
         }
 
@@ -2040,7 +1957,9 @@ impl SessionStore {
             let sql = format!(
                 "SELECT id, parent_session_id, provider_id, provider_display_name, \
                         model_id, model_display_name, title, created_at, updated_at, \
-                        status, ended_at, context_summary, context_retained_from, system_prompt \
+                        status, ended_at, context_summary, context_retained_from, system_prompt, \
+                        workspace_root, snapshot_start_hash, instruction_sources, todos, \
+                        revert_message_id, revert_redo_snapshot \
                  FROM sessions WHERE id IN ({imp_placeholder})"
             );
             let mut stmt = import_conn.prepare(&sql)?;
@@ -2061,6 +1980,12 @@ impl SessionStore {
                         row.get::<_, String>(11)?,
                         row.get::<_, i64>(12)?,
                         row.get::<_, String>(13)?,
+                        row.get::<_, String>(14)?,
+                        row.get::<_, Option<String>>(15)?,
+                        row.get::<_, String>(16)?,
+                        row.get::<_, String>(17)?,
+                        row.get::<_, Option<String>>(18)?,
+                        row.get::<_, Option<String>>(19)?,
                     ))
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -2071,95 +1996,19 @@ impl SessionStore {
                     "INSERT OR REPLACE INTO sessions \
                      (id, parent_session_id, provider_id, provider_display_name, model_id, \
                       model_display_name, title, created_at, updated_at, status, ended_at, \
-                      context_summary, context_retained_from, system_prompt) \
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                      context_summary, context_retained_from, system_prompt, \
+                      workspace_root, snapshot_start_hash, instruction_sources, todos, \
+                      revert_message_id, revert_redo_snapshot) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
                     params![
                         r.0, r.1, r.2, r.3, r.4, r.5, r.6, r.7, r.8, r.9, r.10, r.11, r.12, r.13,
+                        r.14, r.15, r.16, r.17, r.18, r.19,
                     ],
                 )?;
             }
         }
 
-        // ── 2. session_workspaces ─────────────────────────────────────────
-        {
-            let sql = format!(
-                "SELECT session_id, workspace_root FROM session_workspaces \
-                 WHERE session_id IN ({imp_placeholder})"
-            );
-            let mut stmt = import_conn.prepare(&sql)?;
-            let rows = stmt
-                .query_map(imp_params.as_slice(), |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                })?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-
-            let conn = self.write_conn.lock().unwrap();
-            for (sid, root) in &rows {
-                conn.execute(
-                    "INSERT OR REPLACE INTO session_workspaces (session_id, workspace_root) \
-                     VALUES (?1, ?2)",
-                    params![sid, root],
-                )?;
-            }
-        }
-
-        // ── 3. session_instruction_sources ────────────────────────────────
-        {
-            let sql = format!(
-                "SELECT session_id, source FROM session_instruction_sources \
-                 WHERE session_id IN ({imp_placeholder})"
-            );
-            let mut stmt = import_conn.prepare(&sql)?;
-            let rows = stmt
-                .query_map(imp_params.as_slice(), |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                })?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-
-            let conn = self.write_conn.lock().unwrap();
-            for (sid, source) in &rows {
-                conn.execute(
-                    "INSERT OR REPLACE INTO session_instruction_sources \
-                     (session_id, source) VALUES (?1, ?2)",
-                    params![sid, source],
-                )?;
-            }
-        }
-
-        // ── 4. session_reverts ────────────────────────────────────────────
-        {
-            let sql = format!(
-                "SELECT session_id, message_id, redo_snapshot, created_at \
-                 FROM session_reverts WHERE session_id IN ({imp_placeholder})"
-            );
-            let mut stmt = import_conn.prepare(&sql)?;
-            let rows = stmt
-                .query_map(imp_params.as_slice(), |row| {
-                    let redo_text: Option<String> = row.get(2)?;
-                    // redo_snapshot is TEXT in export, stored as BLOB in main DB.
-                    // We keep it as raw bytes (no zstd here, it's already decompressed
-                    // at export time and saved as JSON text).
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        redo_text,
-                        row.get::<_, String>(3)?,
-                    ))
-                })?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-
-            let conn = self.write_conn.lock().unwrap();
-            for (sid, mid, redo, created) in &rows {
-                conn.execute(
-                    "INSERT OR REPLACE INTO session_reverts \
-                     (session_id, message_id, redo_snapshot, created_at) \
-                     VALUES (?1, ?2, ?3, ?4)",
-                    params![sid, mid, redo.as_deref(), created],
-                )?;
-            }
-        }
-
-        // ── 5. messages ── compress TEXT columns → BLOB ───────────────────
+        // ── 2. messages ── compress TEXT columns → BLOB ───────────────────
         {
             let sql = format!(
                 "SELECT id, session_id, role, content, attachments, reasoning, tool_calls, \
@@ -2230,30 +2079,41 @@ impl SessionStore {
             }
         }
 
-        // ── 6. todos ──────────────────────────────────────────────────────
+        // ── 3. tool_outputs ── compress TEXT columns → BLOB ───────────────
         {
             let sql = format!(
-                "SELECT session_id, position, content, status FROM todos \
-                 WHERE session_id IN ({imp_placeholder})"
+                "SELECT id, session_id, message_id, tool_call_id, tool_name, output, \
+                        byte_size, line_count, created_at \
+                 FROM tool_outputs WHERE session_id IN ({imp_placeholder}) ORDER BY created_at ASC, rowid ASC"
             );
             let mut stmt = import_conn.prepare(&sql)?;
             let rows = stmt
                 .query_map(imp_params.as_slice(), |row| {
+                    let output_text: Option<String> = row.get(5)?;
+                    let output_blob = output_text.as_deref().map(compress_text);
                     Ok((
                         row.get::<_, String>(0)?,
-                        row.get::<_, i64>(1)?,
+                        row.get::<_, String>(1)?,
                         row.get::<_, String>(2)?,
                         row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        output_blob,
+                        row.get::<_, i64>(6)?,
+                        row.get::<_, i64>(7)?,
+                        row.get::<_, String>(8)?,
                     ))
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
 
             let conn = self.write_conn.lock().unwrap();
-            for (sid, pos, content, status) in &rows {
+            for r in &rows {
                 conn.execute(
-                    "INSERT OR REPLACE INTO todos (session_id, position, content, status) \
-                     VALUES (?1, ?2, ?3, ?4)",
-                    params![sid, pos, content, status],
+                    "INSERT OR REPLACE INTO tool_outputs \
+                     (id, session_id, message_id, tool_call_id, tool_name, output, byte_size, line_count, created_at) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    params![
+                        r.0, r.1, r.2, r.3, r.4, r.5, r.6, r.7, r.8,
+                    ],
                 )?;
             }
         }
@@ -2288,57 +2148,6 @@ fn opt_blob_to_text(row: &rusqlite::Row<'_>, idx: usize) -> rusqlite::Result<Opt
     }
 }
 
-impl SessionStore {
-    /// Record that a file was read.
-    pub fn record_file_read(
-        &self,
-        session_id: Uuid,
-        file_path: &str,
-        read_at: DateTime<Utc>,
-        mtime: Option<i64>,
-        size: Option<i64>,
-    ) -> Result<()> {
-        let conn = self.write_conn.lock().unwrap();
-        conn.execute(
-            "INSERT OR REPLACE INTO file_reads (session_id, file_path, read_at, mtime, size) \
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![
-                session_id.to_string(),
-                file_path,
-                read_at.to_rfc3339(),
-                mtime,
-                size,
-            ],
-        )?;
-        Ok(())
-    }
-
-    /// Load file reads for a session.
-    pub fn load_file_reads(&self, session_id: Uuid) -> Result<Vec<FileReadRecord>> {
-        self.read(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT file_path, read_at, mtime, size FROM file_reads \
-                 WHERE session_id = ?1 ORDER BY read_at DESC",
-            )?;
-            let rows = stmt.query_map(params![session_id.to_string()], |row| {
-                Ok(FileReadRecord {
-                    file_path: row.get(0)?,
-                    read_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(1)?)
-                        .map(|dt| dt.with_timezone(&Utc))
-                        .unwrap_or_default(),
-                    mtime: row.get(2)?,
-                    size: row.get(3)?,
-                })
-            })?;
-            let mut records = Vec::new();
-            for row in rows {
-                records.push(row?);
-            }
-            Ok(records)
-        })
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Todo persistence
 // ---------------------------------------------------------------------------
@@ -2351,36 +2160,28 @@ impl SessionStore {
         todos: &[tidev_tools::types::TodoItem],
     ) -> Result<()> {
         let conn = self.write_conn.lock().unwrap();
+        let json = serde_json::to_string(todos)?;
         conn.execute(
-            "DELETE FROM todos WHERE session_id = ?1",
-            params![session_id.to_string()],
+            "UPDATE sessions SET todos = ?1 WHERE id = ?2",
+            params![json, session_id.to_string()],
         )?;
-        for (i, item) in todos.iter().enumerate() {
-            conn.execute(
-                "INSERT INTO todos (session_id, position, content, status) VALUES (?1, ?2, ?3, ?4)",
-                params![session_id.to_string(), i as i64, item.content, item.status],
-            )?;
-        }
         Ok(())
     }
 
     /// Load todo items for a session.
     pub fn load_todos(&self, session_id: Uuid) -> Result<Vec<tidev_tools::types::TodoItem>> {
         self.read(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT content, status FROM todos WHERE session_id = ?1 ORDER BY position ASC",
-            )?;
-            let rows = stmt.query_map(params![session_id.to_string()], |row| {
-                Ok(tidev_tools::types::TodoItem {
-                    content: row.get(0)?,
-                    status: row.get(1)?,
-                })
+            let mut stmt = conn.prepare("SELECT todos FROM sessions WHERE id = ?1")?;
+            let mut rows = stmt.query_map(params![session_id.to_string()], |row| {
+                row.get::<_, String>(0)
             })?;
-            let mut items = Vec::new();
-            for row in rows {
-                items.push(row?);
+            if let Some(Ok(json)) = rows.next() {
+                let items: Vec<tidev_tools::types::TodoItem> =
+                    serde_json::from_str(&json).unwrap_or_default();
+                Ok(items)
+            } else {
+                Ok(Vec::new())
             }
-            Ok(items)
         })
     }
 }
@@ -2462,45 +2263,56 @@ impl SessionStore {
     /// Save instruction sources for a session (replaces all existing).
     pub fn save_instruction_sources(&self, session_id: Uuid, sources: &[String]) -> Result<()> {
         let conn = self.write_conn.lock().unwrap();
+        let json = serde_json::to_string(sources)?;
         conn.execute(
-            "DELETE FROM session_instruction_sources WHERE session_id = ?1",
-            params![session_id.to_string()],
+            "UPDATE sessions SET instruction_sources = ?1 WHERE id = ?2",
+            params![json, session_id.to_string()],
         )?;
-        for source in sources {
-            conn.execute(
-                "INSERT INTO session_instruction_sources (session_id, source) VALUES (?1, ?2)",
-                params![session_id.to_string(), source],
-            )?;
-        }
         Ok(())
     }
 
-    /// Append instruction sources for a session (INSERT OR IGNORE — deduplicates
-    /// against existing rows so the same source is never stored twice).
+    /// Append instruction sources for a session (deduplicates against existing items
+    /// so the same source is never stored twice).
     pub fn append_instruction_sources(&self, session_id: Uuid, sources: &[String]) -> Result<()> {
         let conn = self.write_conn.lock().unwrap();
+        let current_json: Option<String> = conn
+            .query_row(
+                "SELECT instruction_sources FROM sessions WHERE id = ?1",
+                params![session_id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let mut existing: Vec<String> = current_json
+            .and_then(|j| serde_json::from_str(&j).ok())
+            .unwrap_or_default();
         for source in sources {
-            conn.execute(
-                "INSERT OR IGNORE INTO session_instruction_sources (session_id, source) VALUES (?1, ?2)",
-                params![session_id.to_string(), source],
-            )?;
+            if !existing.contains(source) {
+                existing.push(source.clone());
+            }
         }
+        let json = serde_json::to_string(&existing)?;
+        conn.execute(
+            "UPDATE sessions SET instruction_sources = ?1 WHERE id = ?2",
+            params![json, session_id.to_string()],
+        )?;
         Ok(())
     }
 
     /// Load instruction sources for a session.
     pub fn load_instruction_sources(&self, session_id: Uuid) -> Result<Vec<String>> {
         self.read(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT source FROM session_instruction_sources WHERE session_id = ?1 \
-                 ORDER BY source",
-            )?;
-            let rows = stmt.query_map(params![session_id.to_string()], |row| row.get(0))?;
-            let mut sources = Vec::new();
-            for row in rows {
-                sources.push(row?);
+            let mut stmt =
+                conn.prepare("SELECT instruction_sources FROM sessions WHERE id = ?1")?;
+            let mut rows = stmt.query_map(params![session_id.to_string()], |row| {
+                row.get::<_, String>(0)
+            })?;
+            if let Some(Ok(json)) = rows.next() {
+                let mut sources: Vec<String> = serde_json::from_str(&json).unwrap_or_default();
+                sources.sort();
+                Ok(sources)
+            } else {
+                Ok(Vec::new())
             }
-            Ok(sources)
         })
     }
 }
@@ -2776,7 +2588,14 @@ mod tests {
             .append_messages_with_app_data(sid, std::slice::from_ref(&message), &app_data)
             .unwrap();
         store
-            .save_tool_output(sid, message.id, "shell", "complete tool output")
+            .save_tool_output(
+                "out-test-1",
+                sid,
+                message.id,
+                "call-1",
+                "shell",
+                "complete tool output",
+            )
             .unwrap();
 
         let inspection = store
@@ -2787,13 +2606,10 @@ mod tests {
         assert_eq!(inspection.messages.len(), 1);
         assert_eq!(inspection.messages[0].sequence, 0);
         assert_eq!(inspection.messages[0].app_data, app_data[&message.id]);
-        assert_eq!(
-            inspection.messages[0]
-                .tool_output
-                .as_ref()
-                .map(|output| output.output.as_str()),
-            Some("complete tool output")
-        );
+        let tool_out = inspection.messages[0].tool_output.as_ref().unwrap();
+        assert_eq!(tool_out.id, "out-test-1");
+        assert_eq!(tool_out.tool_name, "shell");
+        assert_eq!(tool_out.byte_size, "complete tool output".len());
     }
 
     #[test]
@@ -2922,11 +2738,77 @@ mod tests {
         let sid = create_test_session(&store, "/workspace", "toolout test");
         let msg_id = Uuid::new_v4();
         store
-            .save_tool_output(sid, msg_id, "read", "file content here")
+            .save_tool_output(
+                "out-abc12345",
+                sid,
+                msg_id,
+                "call-xyz",
+                "read",
+                "file content here",
+            )
             .unwrap();
 
-        let loaded = store.load_tool_output(msg_id).unwrap();
-        assert_eq!(loaded.as_deref(), Some("file content here"));
+        // Lookup by ID
+        let loaded = store.load_tool_output("out-abc12345").unwrap().unwrap();
+        match loaded {
+            ToolOutputContent::Available { record, output } => {
+                assert_eq!(record.id, "out-abc12345");
+                assert_eq!(record.session_id, sid);
+                assert_eq!(record.message_id, msg_id);
+                assert_eq!(record.tool_name, "read");
+                assert_eq!(record.byte_size, 17);
+                assert_eq!(record.line_count, 1);
+                assert_eq!(output, "file content here");
+            }
+            ToolOutputContent::Expired { .. } => panic!("should be available"),
+        }
+
+        // Lookup by message_id
+        assert!(
+            store
+                .load_tool_output(&msg_id.to_string())
+                .unwrap()
+                .is_some()
+        );
+        // Lookup by tool_call_id
+        assert!(store.load_tool_output("call-xyz").unwrap().is_some());
+    }
+
+    #[test]
+    fn tool_output_tombstone_expiration() {
+        let (store, _tmp) = test_store();
+        let sid = create_test_session(&store, "/workspace", "toolout expire test");
+        let msg_id = Uuid::new_v4();
+        store
+            .save_tool_output(
+                "out-expire-1",
+                sid,
+                msg_id,
+                "call-exp",
+                "bash",
+                "big output",
+            )
+            .unwrap();
+
+        // Clear output older than -1 days (clears everything up to tomorrow)
+        let cleared = store.clear_expired_tool_outputs(-1).unwrap();
+        assert_eq!(cleared, 1);
+
+        // Record still exists in Expired state
+        let loaded = store.load_tool_output("out-expire-1").unwrap().unwrap();
+        match loaded {
+            ToolOutputContent::Available { .. } => panic!("should be expired"),
+            ToolOutputContent::Expired { record } => {
+                assert_eq!(record.id, "out-expire-1");
+                assert_eq!(record.tool_name, "bash");
+                assert_eq!(record.byte_size, 10);
+            }
+        }
+
+        // Delete tombstones
+        let deleted = store.delete_tombstones_older_than(-1).unwrap();
+        assert_eq!(deleted, 1);
+        assert!(store.load_tool_output("out-expire-1").unwrap().is_none());
     }
 
     #[test]
@@ -3010,6 +2892,125 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].title, "Refactor database layer");
     }
+
+    #[test]
+    fn instruction_sources_save_and_load() {
+        let (store, _tmp) = test_store();
+        let sid = create_test_session(&store, "/workspace", "instr test");
+        store
+            .save_instruction_sources(
+                sid,
+                &["/path/to/AGENTS.md".into(), "/path/to/PROJECT.md".into()],
+            )
+            .unwrap();
+
+        let loaded = store.load_instruction_sources(sid).unwrap();
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0], "/path/to/AGENTS.md");
+        assert_eq!(loaded[1], "/path/to/PROJECT.md");
+
+        store
+            .append_instruction_sources(
+                sid,
+                &["/path/to/AGENTS.md".into(), "/path/to/EXTRA.md".into()],
+            )
+            .unwrap();
+        let loaded2 = store.load_instruction_sources(sid).unwrap();
+        assert_eq!(loaded2.len(), 3);
+        assert_eq!(loaded2[0], "/path/to/AGENTS.md");
+        assert_eq!(loaded2[1], "/path/to/EXTRA.md");
+        assert_eq!(loaded2[2], "/path/to/PROJECT.md");
+    }
+
+    #[test]
+    fn sqlite_export_import_roundtrip() {
+        let (store, tmp) = test_store();
+        let sid = create_test_session(&store, "/workspace", "export import test");
+        let todos = vec![tidev_tools::types::TodoItem {
+            content: "Task 1".into(),
+            status: "pending".into(),
+        }];
+        store.save_todos(sid, &todos).unwrap();
+        store
+            .save_instruction_sources(sid, &["/workspace/AGENTS.md".into()])
+            .unwrap();
+
+        let revert_target_msg = Uuid::new_v4();
+        store
+            .save_revert_state(sid, revert_target_msg, Some(b"snap-hash-123"))
+            .unwrap();
+
+        let msg_id = Uuid::new_v4();
+        let msg = Message::new(MessageRole::Tool, "truncated snippet");
+        store.append_message(sid, &msg).unwrap();
+        store
+            .save_tool_output(
+                "out-export-1",
+                sid,
+                msg.id,
+                "call-exp-1",
+                "shell",
+                "full shell output text",
+            )
+            .unwrap();
+
+        let export_path = tmp.path().join("export.db");
+        store.export_to_sqlite(&[sid], &export_path).unwrap();
+
+        let (store2, _tmp2) = test_store();
+        let imported = store2.import_from_sqlite(&export_path, None, true).unwrap();
+        assert_eq!(imported, vec![sid]);
+
+        let loaded_session = store2.load_session(sid).unwrap().unwrap();
+        assert_eq!(loaded_session.workspace_root, "/workspace");
+        assert_eq!(loaded_session.title, "export import test");
+
+        let loaded_todos = store2.load_todos(sid).unwrap();
+        assert_eq!(loaded_todos.len(), 1);
+        assert_eq!(loaded_todos[0].content, "Task 1");
+
+        let loaded_instr = store2.load_instruction_sources(sid).unwrap();
+        assert_eq!(loaded_instr, vec!["/workspace/AGENTS.md"]);
+
+        let loaded_revert = store2.load_revert_state(sid).unwrap().unwrap();
+        assert_eq!(loaded_revert.0, revert_target_msg);
+        assert_eq!(
+            loaded_revert.1.as_deref(),
+            Some(b"snap-hash-123".as_slice())
+        );
+
+        let loaded_tool_out = store2.load_tool_output("out-export-1").unwrap().unwrap();
+        match loaded_tool_out {
+            ToolOutputContent::Available { record, output } => {
+                assert_eq!(record.id, "out-export-1");
+                assert_eq!(record.tool_name, "shell");
+                assert_eq!(output, "full shell output text");
+            }
+            ToolOutputContent::Expired { .. } => panic!("should be available"),
+        }
+    }
+
+    #[test]
+    fn revert_state_crud() {
+        let (store, _tmp) = test_store();
+        let sid = create_test_session(&store, "/workspace", "revert test");
+
+        // Initially None
+        assert!(store.load_revert_state(sid).unwrap().is_none());
+
+        // Set revert state
+        let target_msg = Uuid::new_v4();
+        store
+            .save_revert_state(sid, target_msg, Some(b"redo-hash-456"))
+            .unwrap();
+        let state = store.load_revert_state(sid).unwrap().unwrap();
+        assert_eq!(state.0, target_msg);
+        assert_eq!(state.1.as_deref(), Some(b"redo-hash-456".as_slice()));
+
+        // Clear revert state
+        store.save_revert_state(sid, Uuid::nil(), None).unwrap();
+        assert!(store.load_revert_state(sid).unwrap().is_none());
+    }
 }
 // ---------------------------------------------------------------------------
 // Session revert support
@@ -3023,12 +3024,16 @@ impl SessionStore {
         message_id: Uuid,
         redo_snapshot: Option<&[u8]>,
     ) -> Result<()> {
-        let now = Utc::now().to_rfc3339();
         let conn = self.write_conn.lock().unwrap();
+        let msg_id_opt = if message_id.is_nil() {
+            None
+        } else {
+            Some(message_id.to_string())
+        };
+        let snap_opt = redo_snapshot.map(|s| String::from_utf8_lossy(s).to_string());
         conn.execute(
-            "INSERT OR REPLACE INTO session_reverts (session_id, message_id, redo_snapshot, created_at) \
-             VALUES (?1, ?2, ?3, ?4)",
-            params![session_id.to_string(), message_id.to_string(), redo_snapshot, now],
+            "UPDATE sessions SET revert_message_id = ?1, revert_redo_snapshot = ?2 WHERE id = ?3",
+            params![msg_id_opt, snap_opt, session_id.to_string()],
         )?;
         Ok(())
     }
@@ -3037,15 +3042,22 @@ impl SessionStore {
     pub fn load_revert_state(&self, session_id: Uuid) -> Result<Option<(Uuid, Option<Vec<u8>>)>> {
         self.read(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT message_id, redo_snapshot FROM session_reverts WHERE session_id = ?1",
+                "SELECT revert_message_id, revert_redo_snapshot FROM sessions WHERE id = ?1",
             )?;
             let mut rows = stmt.query_map(params![session_id.to_string()], |row| {
-                let msg_id: String = row.get(0)?;
-                let snapshot: Option<Vec<u8>> = row.get(1)?;
-                Ok((Uuid::parse_str(&msg_id).unwrap_or_default(), snapshot))
+                let msg_id_opt: Option<String> = row.get(0)?;
+                let snapshot_opt: Option<String> = row.get(1)?;
+                Ok((msg_id_opt, snapshot_opt))
             })?;
             match rows.next() {
-                Some(Ok(result)) => Ok(Some(result)),
+                Some(Ok((Some(msg_id_str), snap))) => {
+                    let id = Uuid::parse_str(&msg_id_str).unwrap_or_default();
+                    if id.is_nil() {
+                        Ok(None)
+                    } else {
+                        Ok(Some((id, snap.map(|s| s.into_bytes()))))
+                    }
+                }
                 _ => Ok(None),
             }
         })

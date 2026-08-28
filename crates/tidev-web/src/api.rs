@@ -505,26 +505,8 @@ async fn list_models(State(state): State<Arc<AppState>>) -> Json<Vec<ModelDto>> 
             let thinking_level = if is_active {
                 active.thinking_level.to_string()
             } else {
-                let saved = state
-                    .runtime
-                    .session_manager()
-                    .store()
-                    .load_model_thinking_level(&model.provider_id, &model.model_id)
-                    .ok()
-                    .flatten();
-                // Coerce persisted levels against the model's current thinking
-                // family so stale values (e.g. "qwen:on" from before the
-                // Qwen3.8 levels) fall back to the model default.
-                let level = match saved {
-                    Some(level) => tidev_config::reasoning::ThinkingMatcher::coerce_saved(
-                        &level,
-                        &model.request_model_id,
-                    ),
-                    None => tidev_config::reasoning::ThinkingMatcher::match_for_model(
-                        &model.request_model_id,
-                    ),
-                };
-                level.to_string()
+                tidev_config::reasoning::ThinkingMatcher::match_for_model(&model.request_model_id)
+                    .to_string()
             };
             ModelDto {
                 connected: auth.api_key(&model.provider_id).is_some(),

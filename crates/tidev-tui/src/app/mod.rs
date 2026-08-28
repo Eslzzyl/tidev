@@ -455,7 +455,7 @@ impl App {
             chat.invalidate_layout();
         }
 
-        // Mark as shown in memory only — the backend owns `session_instruction_sources`.
+        // Mark as shown in memory only — the backend owns instruction source persistence.
         let owned: Vec<String> = new_sources.into_iter().cloned().collect();
         self.shown_instruction_sources.extend(owned);
     }

@@ -459,10 +459,33 @@ fn print_message_text(message: &StoredMessageView) -> Result<()> {
     );
     if let Some(tool_output) = &message.tool_output {
         println!(
-            "\nRetained full tool output ({}):\n{}",
-            tool_output.tool_name, tool_output.output
+            "\nRetained tool output metadata (ID: {}, {}):\nSize: {} bytes, {} lines",
+            tool_output.id, tool_output.tool_name, tool_output.byte_size, tool_output.line_count
         );
         println!("Tool output created: {}", tool_output.created_at);
+    }
+    Ok(())
+}
+
+/// Output the complete content of a stored tool execution result to stdout.
+pub fn print_tool_output(id: &str) -> Result<()> {
+    let (_paths, store) = open_store()?;
+    match store.load_tool_output(id)? {
+        Some(tidev_storage::ToolOutputContent::Available { output, .. }) => {
+            use std::io::Write;
+            let mut stdout = std::io::stdout().lock();
+            stdout.write_all(output.as_bytes())?;
+            stdout.flush()?;
+        }
+        Some(tidev_storage::ToolOutputContent::Expired { record }) => {
+            eprintln!(
+                "[Tool output '{}' ({}, {} bytes, created at {}) has expired and was cleaned up]",
+                record.id, record.tool_name, record.byte_size, record.created_at
+            );
+        }
+        None => {
+            anyhow::bail!("tool output '{id}' not found");
+        }
     }
     Ok(())
 }

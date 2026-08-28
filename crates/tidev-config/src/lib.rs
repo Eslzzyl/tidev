@@ -415,6 +415,8 @@ pub struct AppConfig {
     pub default_provider: String,
     #[serde(default = "default_model")]
     pub default_model: String,
+    #[serde(default)]
+    pub default_thinking_level: String,
     #[serde(default = "default_theme")]
     pub theme: String,
     #[serde(default)]
@@ -545,6 +547,7 @@ impl Default for AppConfig {
         Self {
             default_provider: default_provider(),
             default_model: default_model(),
+            default_thinking_level: String::new(),
             theme: "dark".to_string(),
             ui: UiConfig::default(),
             logging: LogConfig::default(),
@@ -630,6 +633,9 @@ impl AppConfig {
         }
         if has("default_model") {
             self.default_model = overlay.default_model;
+        }
+        if has("default_thinking_level") {
+            self.default_thinking_level = overlay.default_thinking_level;
         }
 
         // Providers and models use overlay semantics: provider fields replace
@@ -792,7 +798,14 @@ impl AppConfig {
     }
 
     pub fn resolve_active_model(&self, auth: &AuthStore) -> Result<ActiveModel> {
-        self.resolve_model(auth, None, None)
+        let mut model = self.resolve_model(auth, None, None)?;
+        if !self.default_thinking_level.is_empty() && model.thinking_level.is_supported() {
+            model.thinking_level = ThinkingMatcher::coerce_saved(
+                &self.default_thinking_level,
+                &model.request_model_id,
+            );
+        }
+        Ok(model)
     }
 
     /// Resolve a model for a given provider using its first configured model.
@@ -1382,5 +1395,16 @@ max_input_lines = 6
         let serialized = toml::to_string(&config).expect("config should serialize");
         let parsed: AppConfig = toml::from_str(&serialized).expect("config should round-trip");
         assert_eq!(parsed.ui.send_while_busy, SendWhileBusy::Queue);
+    }
+
+    #[test]
+    fn default_thinking_level_round_trip_and_overlay() {
+        let toml_str = r#"
+default_provider = "deepseek"
+default_model = "deepseek-reasoner"
+default_thinking_level = "deepseek:High"
+"#;
+        let config: AppConfig = toml::from_str(toml_str).expect("config should parse");
+        assert_eq!(config.default_thinking_level, "deepseek:High");
     }
 }

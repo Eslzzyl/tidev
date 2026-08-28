@@ -1173,6 +1173,27 @@ impl AgentContext for CoreContext {
         // capture the post-round snapshot and diff against pre-round.
         let has_tool_results = messages.iter().any(|m| m.role == MessageRole::Tool);
         let mut enriched = messages.to_vec();
+
+        // If any tool message has large output, archive full output and truncate message content
+        if has_tool_results {
+            for msg in &mut enriched {
+                if msg.role == MessageRole::Tool && should_truncate_tool_output(&msg.content) {
+                    let output_id = format!("out-{}", &Uuid::new_v4().to_string()[..8]);
+                    if let Err(e) = self.session_manager.store().save_tool_output(
+                        &output_id,
+                        session_id,
+                        msg.id,
+                        msg.tool_call_id.as_deref().unwrap_or(""),
+                        msg.tool_name.as_deref().unwrap_or("tool"),
+                        &msg.content,
+                    ) {
+                        log::warn!("failed to archive large tool output {output_id}: {e}");
+                    }
+                    msg.content = truncate_and_archive_tool_output(&output_id, &msg.content);
+                }
+            }
+        }
+
         let mut app_data: HashMap<Uuid, MessageAppData> = enriched
             .iter()
             .map(|message| (message.id, MessageAppData::default()))
@@ -1768,4 +1789,73 @@ mod full_tool_output_semantics_tests {
         assert!(task_result.metadata.preserve_full_output);
         assert!(!regular_result.metadata.preserve_full_output);
     }
+
+    #[test]
+    fn test_truncate_and_archive_tool_output() {
+        let short = "short output";
+        assert!(!should_truncate_tool_output(short));
+
+        let many_lines: String = (1..=300).map(|i| format!("line {i}\n")).collect();
+        assert!(should_truncate_tool_output(&many_lines));
+        let truncated = truncate_and_archive_tool_output("out-test1234", &many_lines);
+        assert!(truncated.contains("line 1"));
+        assert!(truncated.contains("line 150"));
+        assert!(truncated.contains("... [skipped 120 lines] ..."));
+        assert!(truncated.contains("line 300"));
+        assert!(truncated.contains("tidev tool-output out-test1234"));
+    }
+}
+
+pub(crate) fn should_truncate_tool_output(output: &str) -> bool {
+    output.len() > 30_000 || output.lines().count() > 250
+}
+
+pub(crate) fn truncate_and_archive_tool_output(output_id: &str, raw_output: &str) -> String {
+    let total_bytes = raw_output.len();
+    let total_lines = raw_output.lines().count();
+
+    let (shown_text, shown_lines) = if total_lines > 250 {
+        let lines: Vec<&str> = raw_output.lines().collect();
+        let head_count = 150.min(lines.len());
+        let tail_count = 30.min(lines.len().saturating_sub(head_count));
+        let head = lines[..head_count].join("\n");
+        let tail = if tail_count > 0 {
+            format!(
+                "\n\n... [skipped {} lines] ...\n\n{}",
+                lines.len() - head_count - tail_count,
+                lines[lines.len() - tail_count..].join("\n")
+            )
+        } else {
+            String::new()
+        };
+        (format!("{head}{tail}"), head_count + tail_count)
+    } else {
+        // Line count is small, but byte size is large (> 30KB)
+        let mut head_end = 20_000.min(total_bytes);
+        while head_end > 0 && !raw_output.is_char_boundary(head_end) {
+            head_end -= 1;
+        }
+        let head = &raw_output[..head_end];
+        let mut tail_start = total_bytes.saturating_sub(5_000);
+        while tail_start < total_bytes && !raw_output.is_char_boundary(tail_start) {
+            tail_start += 1;
+        }
+        let tail = &raw_output[tail_start..];
+        let text = format!(
+            "{head}\n\n... [skipped {} bytes] ...\n\n{tail}",
+            total_bytes - head_end - (total_bytes - tail_start)
+        );
+        let lines_in_text = text.lines().count();
+        (text, lines_in_text)
+    };
+
+    let shown_kb = (shown_text.len() as f64 / 1024.0).round() as usize;
+    let total_kb = (total_bytes as f64 / 1024.0).round() as usize;
+
+    format!(
+        "{shown_text}\n\n[Output truncated: showing {shown_lines} of {total_lines} lines ({shown_kb}KB of {total_kb}KB).\n\
+        Full output saved with ID: {output_id}\n\
+        To inspect the full output, run: tidev tool-output {output_id} | <filter_command>\n\
+        Example: tidev tool-output {output_id} | grep -E 'error|failed|warn' -C 3]"
+    )
 }
