@@ -1083,6 +1083,10 @@ impl App {
         }
 
         self.abort_confirmation_deadline = None;
+        // Drop stale notices (e.g. "Sending...") that belong to the session
+        // being left, otherwise the footer would surface them on the
+        // welcome screen.
+        self.last_notice = None;
         self.context_usage = None;
         self.shown_instruction_sources.clear();
     }
