@@ -45,6 +45,9 @@ pub(crate) enum SessionAction {
     Undo,
     Redo,
     Compact,
+    /// The currently open session was deleted via the session panel; reset
+    /// the app to the welcome screen.
+    CurrentSessionDeleted,
     /// Cycle thinking level (Shift+Tab / Ctrl+T).
     CycleThinkingLevel,
     /// Reload session list from store (after view mode change).

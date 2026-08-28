@@ -496,37 +496,79 @@ impl Component for SessionPanel {
                     SessionPanelDialog::DeleteConfirm { session_ids, .. } => {
                         // Execute deletion (sync)
                         let ids = session_ids.clone();
+                        let current_deleted = ids.contains(&self.current_session_id);
+                        // Stop the currently open session's loop before its
+                        // rows disappear so the cancellation stays
+                        // cooperative instead of error-driven.
+                        if current_deleted {
+                            let rt = ctx.runtime.clone();
+                            let sid = self.current_session_id;
+                            tokio::spawn(async move {
+                                rt.cancel_session(sid).await;
+                            });
+                        }
                         if let Err(e) = ctx.runtime.session_manager().store().delete_sessions(&ids)
                         {
                             log::error!("Failed to delete sessions: {e}");
                         }
-                        vec![]
+                        if current_deleted {
+                            vec![Action::Session(SessionAction::CurrentSessionDeleted)]
+                        } else {
+                            vec![]
+                        }
                     }
                     SessionPanelDialog::Cleanup {
                         selected_duration,
                         cleanup_workspace,
                         ..
                     } => {
-                        if *cleanup_workspace {
+                        let deleted = if *cleanup_workspace {
                             let ws = ctx.runtime.workspace_root();
-                            if let Err(e) = ctx
+                            match ctx
                                 .runtime
                                 .session_manager()
                                 .store()
                                 .delete_sessions_in_workspace(Path::new(ws))
                             {
-                                log::error!("Failed to cleanup workspace: {e}");
+                                Ok(records) => records,
+                                Err(e) => {
+                                    log::error!("Failed to cleanup workspace: {e}");
+                                    Vec::new()
+                                }
                             }
-                        } else if let Some(duration) = selected_duration
-                            && let Err(e) = ctx
+                        } else if let Some(duration) = selected_duration {
+                            match ctx
                                 .runtime
                                 .session_manager()
                                 .store()
                                 .delete_sessions_older_than(*duration)
-                        {
-                            log::error!("Failed to cleanup sessions: {e}");
+                            {
+                                Ok(records) => records,
+                                Err(e) => {
+                                    log::error!("Failed to cleanup sessions: {e}");
+                                    Vec::new()
+                                }
+                            }
+                        } else {
+                            Vec::new()
+                        };
+                        // Same handling as the delete dialog when the
+                        // currently open session was cleaned up.
+                        let current_deleted = deleted
+                            .iter()
+                            .any(|record| record.session_id == self.current_session_id);
+                        if current_deleted {
+                            let rt = ctx.runtime.clone();
+                            let sid = self.current_session_id;
+                            tokio::spawn(async move {
+                                rt.cancel_session(sid).await;
+                            });
                         }
-                        vec![]
+                        if current_deleted {
+                            vec![Action::Session(SessionAction::CurrentSessionDeleted)]
+                        } else {
+                            vec![]
+                        }
                     }
                     SessionPanelDialog::ExportConfirm { session_ids, .. } => {
                         let export_dir = ctx.runtime.paths().data_dir.join("export");

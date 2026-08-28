@@ -766,52 +766,30 @@ impl App {
                     }
                 }
                 Action::Session(SessionAction::Create) => {
-                    self.current_session_id = None;
-
-                    let active_model = self.runtime.resolve_active_model().ok();
-
-                    // Restore the runtime's active model to the default so
-                    // the composer/header no longer shows the previous
-                    // session's model.
-                    if let Some(ref model) = active_model {
-                        self.runtime.set_active_model(model.clone());
-                        if let Some(ref mut composer) = self.composer {
-                            composer.set_model_supports_images(model.supports_images);
-                        }
-                    }
-
-                    let chat_context = crate::chat_context::ChatContext::new(
-                        uuid::Uuid::nil(),
-                        String::new(),
-                        Vec::new(),
-                        None,
-                        active_model
-                            .as_ref()
-                            .map(|m| m.display_name.clone())
-                            .unwrap_or_default(),
-                        active_model
-                            .as_ref()
-                            .map(|m| m.provider_display_name.clone())
-                            .unwrap_or_default(),
-                    );
-                    self.message_list
-                        .get_or_insert_with(MessageList::new)
-                        .set_chat_context(chat_context);
-
-                    self.screen = AppScreen::Welcome;
-
-                    if let Some(ref mut composer) = self.composer {
-                        composer.clear();
-                    }
-
+                    self.reset_to_welcome();
                     self.pending_approvals.clear();
                     self.active_approval_session = None;
-                    self.abort_confirmation_deadline = None;
-                    self.context_usage = None;
                     self.pending_inputs.clear();
                     self.pending_compacts.clear();
                     self.compacting_sessions.clear();
-                    self.shown_instruction_sources.clear();
+                }
+                Action::Session(SessionAction::CurrentSessionDeleted) => {
+                    let Some(sid) = self.current_session_id else {
+                        return;
+                    };
+                    // Drop only the state the deleted session would consume,
+                    // leaving other sessions' pending state intact.
+                    self.composer_texts.remove(&sid);
+                    self.context_usage_cache.remove(&sid);
+                    self.pending_inputs.retain(|input| input.session_id != sid);
+                    self.pending_compacts.remove(&sid);
+                    self.compacting_sessions.remove(&sid);
+                    self.pending_modes.remove(&sid);
+                    self.pending_approvals.remove(&sid);
+                    if self.active_approval_session == Some(sid) {
+                        self.active_approval_session = None;
+                    }
+                    self.reset_to_welcome();
                 }
                 Action::Chat(action) => {
                     match &action {
@@ -1058,6 +1036,55 @@ impl App {
                 }
             }
         }
+    }
+
+    /// Reset the app to the welcome screen with a fresh empty chat context.
+    ///
+    /// Shared by `SessionAction::Create` (which additionally clears every
+    /// session's pending state) and `SessionAction::CurrentSessionDeleted`
+    /// (which drops only the deleted session's state before calling this).
+    fn reset_to_welcome(&mut self) {
+        self.current_session_id = None;
+
+        let active_model = self.runtime.resolve_active_model().ok();
+
+        // Restore the runtime's active model to the default so
+        // the composer/header no longer shows the previous
+        // session's model.
+        if let Some(ref model) = active_model {
+            self.runtime.set_active_model(model.clone());
+            if let Some(ref mut composer) = self.composer {
+                composer.set_model_supports_images(model.supports_images);
+            }
+        }
+
+        let chat_context = crate::chat_context::ChatContext::new(
+            uuid::Uuid::nil(),
+            String::new(),
+            Vec::new(),
+            None,
+            active_model
+                .as_ref()
+                .map(|m| m.display_name.clone())
+                .unwrap_or_default(),
+            active_model
+                .as_ref()
+                .map(|m| m.provider_display_name.clone())
+                .unwrap_or_default(),
+        );
+        self.message_list
+            .get_or_insert_with(MessageList::new)
+            .set_chat_context(chat_context);
+
+        self.screen = AppScreen::Welcome;
+
+        if let Some(ref mut composer) = self.composer {
+            composer.clear();
+        }
+
+        self.abort_confirmation_deadline = None;
+        self.context_usage = None;
+        self.shown_instruction_sources.clear();
     }
 }
 
