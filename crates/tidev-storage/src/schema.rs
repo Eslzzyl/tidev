@@ -57,15 +57,9 @@ CREATE TABLE IF NOT EXISTS messages (
     cache_write_tokens INTEGER,
     model_id TEXT,
     tokens_per_second REAL,
-    snapshot_hash TEXT,
-    patch_files BLOB,
-    file_diffs BLOB,
     mode TEXT,
     thinking_level TEXT,
-    reasoning_started_at TEXT,
-    reasoning_completed_at TEXT,
-    child_session_id TEXT,
-    provider_error TEXT
+    app_data BLOB NOT NULL DEFAULT '{}'
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_session_created_at
@@ -150,15 +144,9 @@ CREATE TABLE IF NOT EXISTS messages (
     cache_write_tokens INTEGER,
     model_id TEXT,
     tokens_per_second REAL,
-    snapshot_hash TEXT,
-    patch_files TEXT,
-    file_diffs TEXT,
     mode TEXT,
     thinking_level TEXT,
-    reasoning_started_at TEXT,
-    reasoning_completed_at TEXT,
-    child_session_id TEXT,
-    provider_error TEXT
+    app_data TEXT NOT NULL DEFAULT '{}'
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_session_created_at

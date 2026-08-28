@@ -103,8 +103,7 @@ struct RawMessageRow {
     model_id: Option<String>,
     tokens_per_second: Option<f64>,
     thinking_level: Option<String>,
-    reasoning_started_at: Option<String>,
-    reasoning_completed_at: Option<String>,
+    app_data: Vec<u8>,
 }
 
 /// Application-owned fields stored alongside a protocol message.
@@ -114,13 +113,22 @@ struct RawMessageRow {
 /// can be read without rewriting rows.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MessageAppData {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub snapshot_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub patch_files: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file_diffs: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub child_session_id: Option<Uuid>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_error: Option<ProviderErrorData>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_started_at: Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_completed_at: Option<DateTime<Utc>>,
 }
 
 /// Application-owned details for a provider failure shown in the chat.
@@ -162,6 +170,12 @@ impl RawMessageRow {
             .thinking_level
             .and_then(|t| serde_json::from_str(&t).ok());
 
+        let app_data: MessageAppData = if self.app_data.is_empty() {
+            MessageAppData::default()
+        } else {
+            serde_json::from_str(&decompress_text(&self.app_data)).unwrap_or_default()
+        };
+
         Message {
             id: Uuid::parse_str(&self.id).unwrap_or_default(),
             role: MessageRole::from_db_value(&self.role),
@@ -189,16 +203,8 @@ impl RawMessageRow {
             model_id: self.model_id,
             tokens_per_second: self.tokens_per_second.map(|v| v as f32),
             thinking_level,
-            reasoning_started_at: self.reasoning_started_at.and_then(|s| {
-                DateTime::parse_from_rfc3339(&s)
-                    .ok()
-                    .map(|dt| dt.with_timezone(&Utc))
-            }),
-            reasoning_completed_at: self.reasoning_completed_at.and_then(|s| {
-                DateTime::parse_from_rfc3339(&s)
-                    .ok()
-                    .map(|dt| dt.with_timezone(&Utc))
-            }),
+            reasoning_started_at: app_data.reasoning_started_at,
+            reasoning_completed_at: app_data.reasoning_completed_at,
         }
     }
 }
@@ -1171,15 +1177,24 @@ impl SessionStore {
     ) -> Result<()> {
         let now = msg.created_at.to_rfc3339();
         let completed = msg.completed_at.map(|t| t.to_rfc3339());
+        let mut combined_app_data = app_data.clone();
+        if combined_app_data.reasoning_started_at.is_none() {
+            combined_app_data.reasoning_started_at = msg.reasoning_started_at;
+        }
+        if combined_app_data.reasoning_completed_at.is_none() {
+            combined_app_data.reasoning_completed_at = msg.reasoning_completed_at;
+        }
+        let app_data_json =
+            serde_json::to_string(&combined_app_data).unwrap_or_else(|_| "{}".to_string());
+
         conn.execute(
             "INSERT INTO messages (id, session_id, role, content, attachments, reasoning, \
              tool_calls, tool_call_id, tool_name, metadata, created_at, completed_at, \
              streaming, input_tokens, output_tokens, total_tokens, cache_read_tokens, \
-             cache_write_tokens, model_id, tokens_per_second, snapshot_hash, patch_files, \
-             file_diffs, mode, thinking_level, reasoning_started_at, reasoning_completed_at, \
-             child_session_id, provider_error) \
+             cache_write_tokens, model_id, tokens_per_second, mode, thinking_level, \
+             app_data) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, \
-             ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)",
+             ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
             params![
                 msg.id.to_string(),
                 session_id.to_string(),
@@ -1205,23 +1220,11 @@ impl SessionStore {
                 msg.cache_write_tokens,
                 msg.model_id,
                 msg.tokens_per_second,
-                app_data.snapshot_hash,
-                compress_text(app_data.patch_files.as_deref().unwrap_or("")),
-                app_data.file_diffs.as_deref().map(compress_text),
-                app_data
-                    .mode
-                    .as_ref()
-                    .map(|m| serde_json::to_string(m).unwrap_or_default()),
+                app_data.mode.as_deref(),
                 msg.thinking_level
                     .as_ref()
                     .map(|t| serde_json::to_string(t).unwrap_or_default()),
-                msg.reasoning_started_at.map(|t| t.to_rfc3339()),
-                msg.reasoning_completed_at.map(|t| t.to_rfc3339()),
-                app_data.child_session_id.map(|id| id.to_string()),
-                app_data
-                    .provider_error
-                    .as_ref()
-                    .and_then(|error| serde_json::to_string(error).ok()),
+                compress_text(&app_data_json),
             ],
         )?;
         Ok(())
@@ -1314,11 +1317,10 @@ impl SessionStore {
         self.read(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT id, role, content, attachments, reasoning, tool_calls, tool_call_id, \
-             tool_name, metadata, created_at, completed_at, streaming, input_tokens, \
-             output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, \
-             tokens_per_second, thinking_level, \
-             reasoning_started_at, reasoning_completed_at \
-             FROM messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC",
+                 tool_name, metadata, created_at, completed_at, streaming, input_tokens, \
+                 output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, \
+                 tokens_per_second, thinking_level, app_data \
+                 FROM messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC",
             )?;
 
             // ── Phase 1: collect raw rows (no decompression) ──────────
@@ -1345,8 +1347,7 @@ impl SessionStore {
                         model_id: row.get(17).ok().flatten(),
                         tokens_per_second: row.get(18).ok().flatten(),
                         thinking_level: row.get(19).ok().flatten(),
-                        reasoning_started_at: row.get(20).ok().flatten(),
-                        reasoning_completed_at: row.get(21).ok().flatten(),
+                        app_data: row.get::<_, Vec<u8>>(20).unwrap_or_default(),
                     })
                 })?;
                 let mut raw = Vec::new();
@@ -1369,43 +1370,21 @@ impl SessionStore {
     /// Load application-owned fields for all messages in a session.
     pub fn load_message_app_data(&self, session_id: Uuid) -> Result<HashMap<Uuid, MessageAppData>> {
         self.read(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT id, snapshot_hash, patch_files, file_diffs, mode, child_session_id, \
-                        provider_error \
-                 FROM messages WHERE session_id = ?1",
-            )?;
+            let mut stmt =
+                conn.prepare("SELECT id, mode, app_data FROM messages WHERE session_id = ?1")?;
             let rows = stmt.query_map(params![session_id.to_string()], |row| {
                 let id = Uuid::parse_str(&row.get::<_, String>(0)?).unwrap_or_default();
-                let patch_files = row
-                    .get::<_, Vec<u8>>(2)
-                    .ok()
-                    .filter(|bytes| !bytes.is_empty())
-                    .map(|bytes| decompress_text(&bytes))
-                    .filter(|value| !value.is_empty());
-                let file_diffs = row
-                    .get::<_, Vec<u8>>(3)
-                    .ok()
-                    .filter(|bytes| !bytes.is_empty())
-                    .map(|bytes| decompress_text(&bytes))
-                    .filter(|value| !value.is_empty());
-                let mode = row
-                    .get::<_, Option<String>>(4)?
-                    .and_then(|raw| serde_json::from_str::<String>(&raw).ok().or(Some(raw)));
-                Ok((
-                    id,
-                    MessageAppData {
-                        snapshot_hash: row.get(1)?,
-                        patch_files,
-                        file_diffs,
-                        mode,
-                        child_session_id: row
-                            .get::<_, Option<String>>(5)?
-                            .and_then(|value| Uuid::parse_str(&value).ok()),
-                        provider_error: row
-                            .get::<_, Option<String>>(6)?
-                            .and_then(|value| serde_json::from_str(&value).ok()),
-                    },
-                ))
+                let mode: Option<String> = row.get(1)?;
+                let app_data_blob: Vec<u8> = row.get(2).unwrap_or_default();
+                let mut app_data: MessageAppData = if app_data_blob.is_empty() {
+                    MessageAppData::default()
+                } else {
+                    serde_json::from_str(&decompress_text(&app_data_blob)).unwrap_or_default()
+                };
+                if mode.is_some() {
+                    app_data.mode = mode;
+                }
+                Ok((id, app_data))
             })?;
             let mut app_data = HashMap::new();
             for row in rows {
@@ -1483,10 +1462,23 @@ impl SessionStore {
         child_session_id: Uuid,
     ) -> Result<()> {
         let conn = self.write_conn.lock().unwrap();
+        let app_data_blob: Option<Vec<u8>> = conn
+            .query_row(
+                "SELECT app_data FROM messages WHERE id = ?1 AND session_id = ?2",
+                params![message_id.to_string(), session_id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let mut app_data: MessageAppData = app_data_blob
+            .filter(|b| !b.is_empty())
+            .map(|b| serde_json::from_str(&decompress_text(&b)).unwrap_or_default())
+            .unwrap_or_default();
+        app_data.child_session_id = Some(child_session_id);
+        let json = serde_json::to_string(&app_data).unwrap_or_else(|_| "{}".to_string());
         conn.execute(
-            "UPDATE messages SET child_session_id = ?1 WHERE id = ?2 AND session_id = ?3",
+            "UPDATE messages SET app_data = ?1 WHERE id = ?2 AND session_id = ?3",
             params![
-                child_session_id.to_string(),
+                compress_text(&json),
                 message_id.to_string(),
                 session_id.to_string()
             ],
@@ -1600,8 +1592,7 @@ impl SessionStore {
                 "SELECT id, role, content, attachments, reasoning, tool_calls, tool_call_id, \
                  tool_name, metadata, created_at, completed_at, streaming, input_tokens, \
                  output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, model_id, \
-                 tokens_per_second, thinking_level, \
-                 reasoning_started_at, reasoning_completed_at \
+                 tokens_per_second, thinking_level, app_data \
                  FROM messages WHERE session_id = ?1 ORDER BY created_at DESC, rowid DESC LIMIT 1",
             )?;
             let mut rows = stmt.query_map(params![session_id.to_string()], |row| {
@@ -1641,8 +1632,12 @@ impl SessionStore {
             .unwrap_or_else(|_| "[]".to_string());
 
         let thinking_level: Option<String> = row.get(19).ok().flatten();
-        let reasoning_started_at: Option<String> = row.get(20).ok().flatten();
-        let reasoning_completed_at: Option<String> = row.get(21).ok().flatten();
+        let app_data_blob: Vec<u8> = row.get(20).unwrap_or_default();
+        let app_data: MessageAppData = if app_data_blob.is_empty() {
+            MessageAppData::default()
+        } else {
+            serde_json::from_str(&decompress_text(&app_data_blob)).unwrap_or_default()
+        };
 
         Message {
             id: Uuid::parse_str(&row.get::<_, String>(0).unwrap_or_default()).unwrap_or_default(),
@@ -1671,16 +1666,8 @@ impl SessionStore {
             model_id: row.get(17).ok().flatten(),
             tokens_per_second: row.get(18).ok().flatten(),
             thinking_level: thinking_level.and_then(|t| serde_json::from_str(&t).ok()),
-            reasoning_started_at: reasoning_started_at.and_then(|s| {
-                DateTime::parse_from_rfc3339(&s)
-                    .ok()
-                    .map(|dt| dt.with_timezone(&Utc))
-            }),
-            reasoning_completed_at: reasoning_completed_at.and_then(|s| {
-                DateTime::parse_from_rfc3339(&s)
-                    .ok()
-                    .map(|dt| dt.with_timezone(&Utc))
-            }),
+            reasoning_started_at: app_data.reasoning_started_at,
+            reasoning_completed_at: app_data.reasoning_completed_at,
         }
     }
 
@@ -1785,8 +1772,7 @@ impl SessionStore {
                         tool_name, CAST(metadata AS BLOB), created_at, completed_at, \
                         streaming, input_tokens, output_tokens, total_tokens, \
                         cache_read_tokens, cache_write_tokens, model_id, tokens_per_second, \
-                        snapshot_hash, CAST(patch_files AS BLOB), CAST(file_diffs AS BLOB), \
-                        mode, thinking_level, child_session_id, provider_error \
+                        mode, thinking_level, CAST(app_data AS BLOB) \
                  FROM messages WHERE session_id IN ({placeholder}) ORDER BY created_at ASC, rowid ASC"
             );
             let params: Vec<&dyn rusqlite::types::ToSql> = sid_strs
@@ -1798,8 +1784,7 @@ impl SessionStore {
                 let reasoning = opt_blob_to_text(row, 5)?;
                 let tool_calls = blob_or_empty_to_text(row, 6)?;
                 let metadata = blob_or_empty_to_text(row, 9)?;
-                let patch_files = opt_blob_to_text(row, 21)?;
-                let file_diffs = opt_blob_to_text(row, 22)?;
+                let app_data = blob_or_empty_to_text(row, 22)?;
                 Ok((
                     row.get::<_, String>(0)?, // id
                     row.get::<_, String>(1)?, // session_id
@@ -1821,13 +1806,9 @@ impl SessionStore {
                     row.get::<_, Option<i64>>(17)?,
                     row.get::<_, Option<String>>(18)?,
                     row.get::<_, Option<f64>>(19)?,
-                    row.get::<_, Option<String>>(20)?,
-                    patch_files,
-                    file_diffs,
-                    row.get::<_, Option<String>>(23)?, // mode
-                    row.get::<_, Option<String>>(24)?, // thinking_level
-                    row.get::<_, Option<String>>(25)?, // child_session_id
-                    row.get::<_, Option<String>>(26)?, // provider_error
+                    row.get::<_, Option<String>>(20)?, // mode
+                    row.get::<_, Option<String>>(21)?, // thinking_level
+                    app_data,
                 ))
             })?;
             let mut insert = tx.prepare(
@@ -1835,16 +1816,15 @@ impl SessionStore {
                  (id, session_id, role, content, attachments, reasoning, tool_calls, \
                   tool_call_id, tool_name, metadata, created_at, completed_at, streaming, \
                   input_tokens, output_tokens, total_tokens, cache_read_tokens, \
-                  cache_write_tokens, model_id, tokens_per_second, snapshot_hash, \
-                  patch_files, file_diffs, mode, thinking_level, child_session_id, provider_error) \
+                  cache_write_tokens, model_id, tokens_per_second, mode, thinking_level, app_data) \
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, \
-                         ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27)",
+                         ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
             )?;
             for row in &rows {
                 insert.execute(params![
                     row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7, row.8, row.9, row.10,
                     row.11, row.12, row.13, row.14, row.15, row.16, row.17, row.18, row.19, row.20,
-                    row.21, row.22, row.23, row.24, row.25, row.26,
+                    row.21, row.22,
                 ])?;
             }
         }
@@ -2014,8 +1994,8 @@ impl SessionStore {
                 "SELECT id, session_id, role, content, attachments, reasoning, tool_calls, \
                         tool_call_id, tool_name, metadata, created_at, completed_at, streaming, \
                         input_tokens, output_tokens, total_tokens, cache_read_tokens, \
-                        cache_write_tokens, model_id, tokens_per_second, snapshot_hash, \
-                        patch_files, file_diffs, mode, thinking_level, child_session_id, provider_error \
+                        cache_write_tokens, model_id, tokens_per_second, mode, \
+                        thinking_level, app_data \
                  FROM messages WHERE session_id IN ({imp_placeholder}) ORDER BY created_at ASC, rowid ASC"
             );
             let mut stmt = import_conn.prepare(&sql)?;
@@ -2025,8 +2005,7 @@ impl SessionStore {
                     let reasoning: Option<String> = row.get(5)?;
                     let tool_calls: String = row.get(6)?;
                     let metadata: String = row.get(9)?;
-                    let patch_files: Option<String> = row.get(21)?;
-                    let file_diffs: Option<String> = row.get(22)?;
+                    let app_data: String = row.get(22).unwrap_or_else(|_| "{}".to_string());
                     Ok((
                         row.get::<_, String>(0)?, // id
                         row.get::<_, String>(1)?, // session_id
@@ -2048,13 +2027,9 @@ impl SessionStore {
                         row.get::<_, Option<i64>>(17)?,
                         row.get::<_, Option<String>>(18)?, // model_id
                         row.get::<_, Option<f64>>(19)?,    // tokens_per_second
-                        row.get::<_, Option<String>>(20)?, // snapshot_hash
-                        patch_files.map(|p| compress_text(&p)),
-                        file_diffs.map(|d| compress_text(&d)),
-                        row.get::<_, Option<String>>(23)?, // mode
-                        row.get::<_, Option<String>>(24)?, // thinking_level
-                        row.get::<_, Option<String>>(25)?, // child_session_id
-                        row.get::<_, Option<String>>(26)?, // provider_error
+                        row.get::<_, Option<String>>(20)?, // mode
+                        row.get::<_, Option<String>>(21)?, // thinking_level
+                        compress_text(&app_data),
                     ))
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -2066,14 +2041,13 @@ impl SessionStore {
                      (id, session_id, role, content, attachments, reasoning, tool_calls, \
                       tool_call_id, tool_name, metadata, created_at, completed_at, streaming, \
                       input_tokens, output_tokens, total_tokens, cache_read_tokens, \
-                      cache_write_tokens, model_id, tokens_per_second, snapshot_hash, \
-                      patch_files, file_diffs, mode, thinking_level, child_session_id, provider_error) \
+                      cache_write_tokens, model_id, tokens_per_second, mode, \
+                      thinking_level, app_data) \
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, \
-                             ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27)",
+                             ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
                     params![
                         r.0, r.1, r.2, r.3, r.4, r.5, r.6, r.7, r.8, r.9, r.10, r.11, r.12, r.13,
-                        r.14, r.15, r.16, r.17, r.18, r.19, r.20, r.21, r.22, r.23, r.24, r.25,
-                        r.26,
+                        r.14, r.15, r.16, r.17, r.18, r.19, r.20, r.21, r.22,
                     ],
                 )?;
             }
@@ -2205,13 +2179,33 @@ impl SessionStore {
         file_diffs: &str,
     ) -> Result<()> {
         let conn = self.write_conn.lock().unwrap();
+        let app_data_blob: Option<Vec<u8>> = conn
+            .query_row(
+                "SELECT app_data FROM messages WHERE id = ?1 AND session_id = ?2",
+                params![message_id.to_string(), session_id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let mut app_data: MessageAppData = app_data_blob
+            .filter(|b| !b.is_empty())
+            .map(|b| serde_json::from_str(&decompress_text(&b)).unwrap_or_default())
+            .unwrap_or_default();
+        app_data.snapshot_hash = Some(snapshot_hash.to_string());
+        app_data.patch_files = if patch_files.is_empty() {
+            None
+        } else {
+            Some(patch_files.to_string())
+        };
+        app_data.file_diffs = if file_diffs.is_empty() {
+            None
+        } else {
+            Some(file_diffs.to_string())
+        };
+        let json = serde_json::to_string(&app_data).unwrap_or_else(|_| "{}".to_string());
         conn.execute(
-            "UPDATE messages SET snapshot_hash = ?1, patch_files = ?2, file_diffs = ?3 \
-             WHERE id = ?4 AND session_id = ?5",
+            "UPDATE messages SET app_data = ?1 WHERE id = ?2 AND session_id = ?3",
             params![
-                snapshot_hash,
-                compress_text(patch_files),
-                compress_text(file_diffs),
+                compress_text(&json),
                 message_id.to_string(),
                 session_id.to_string(),
             ],
@@ -2222,23 +2216,17 @@ impl SessionStore {
     /// Load snapshot patch data for a message.
     pub fn load_snapshot(&self, message_id: Uuid) -> Result<Option<(String, String, String)>> {
         self.read(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT snapshot_hash, patch_files, file_diffs FROM messages WHERE id = ?1",
-            )?;
+            let mut stmt = conn.prepare("SELECT app_data FROM messages WHERE id = ?1")?;
             let mut rows = stmt.query_map(params![message_id.to_string()], |row| {
-                let hash: String = row.get(0).unwrap_or_default();
-                let patches = row
-                    .get::<_, Vec<u8>>(1)
-                    .ok()
-                    .filter(|b| !b.is_empty())
-                    .map(|b| decompress_text(&b))
-                    .unwrap_or_default();
-                let diffs = row
-                    .get::<_, Vec<u8>>(2)
-                    .ok()
-                    .filter(|b| !b.is_empty())
-                    .map(|b| decompress_text(&b))
-                    .unwrap_or_default();
+                let blob: Vec<u8> = row.get(0).unwrap_or_default();
+                let app_data: MessageAppData = if blob.is_empty() {
+                    MessageAppData::default()
+                } else {
+                    serde_json::from_str(&decompress_text(&blob)).unwrap_or_default()
+                };
+                let hash = app_data.snapshot_hash.unwrap_or_default();
+                let patches = app_data.patch_files.unwrap_or_default();
+                let diffs = app_data.file_diffs.unwrap_or_default();
                 Ok((hash, patches, diffs))
             })?;
             match rows.next() {
@@ -2540,6 +2528,7 @@ mod tests {
                     request_id: 7,
                     user_message_id: Some(msg.id),
                 }),
+                ..Default::default()
             },
         );
         store
@@ -2940,7 +2929,6 @@ mod tests {
             .save_revert_state(sid, revert_target_msg, Some(b"snap-hash-123"))
             .unwrap();
 
-        let msg_id = Uuid::new_v4();
         let msg = Message::new(MessageRole::Tool, "truncated snippet");
         store.append_message(sid, &msg).unwrap();
         store
