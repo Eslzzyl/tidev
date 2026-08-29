@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { ExpandableBody } from "../ui/ExpandableBody";
 import { ActivityRipple } from "./ActivityRipple";
 import { MarkdownRenderer } from "./MarkdownRenderer";
+import { formatDurationHuman } from "../../utils/format";
 
 interface Props {
   content: string;
@@ -15,32 +16,6 @@ interface Props {
   completedAt?: string;
   expanded?: boolean;
   onExpandedChange?: (expanded: boolean) => void;
-}
-
-function formatThoughtDuration(milliseconds: number, t: TFunction) {
-  if (milliseconds < 1000) {
-    return t("{{count}} milliseconds", { count: milliseconds });
-  }
-
-  const totalSeconds = Math.floor(milliseconds / 1000);
-  if (totalSeconds < 60) {
-    return t("{{count}} seconds", { count: (milliseconds / 1000).toFixed(1) });
-  }
-
-  const seconds = totalSeconds % 60;
-  const totalMinutes = Math.floor(totalSeconds / 60);
-  if (totalMinutes < 60) {
-    return t("{{minutes}} minutes {{seconds}} seconds", {
-      minutes: totalMinutes,
-      seconds,
-    });
-  }
-
-  return t("{{hours}} hours {{minutes}} minutes {{seconds}} seconds", {
-    hours: Math.floor(totalMinutes / 60),
-    minutes: totalMinutes % 60,
-    seconds,
-  });
 }
 
 function ElapsedTimer({
@@ -85,7 +60,7 @@ function ElapsedTimer({
   return (
     <span className="thinking-elapsed">
       {t("Thought for {{duration}}", {
-        duration: formatThoughtDuration(elapsedMs, t),
+        duration: formatDurationHuman(elapsedMs, t, !active),
       })}
     </span>
   );

@@ -946,13 +946,17 @@ button {
   font-size: 10px;
   font-weight: 500;
 }
-.cursor-block {
-  display: inline-block;
-  width: 7px;
-  height: 16px;
-  vertical-align: -3px;
-  background: var(--muted);
-  animation: blink 900ms steps(1) infinite;
+.stream-waiting {
+  display: inline-flex;
+  align-items: center;
+  font-size: 13.5px;
+  color: var(--muted);
+  padding: 4px 0;
+  user-select: none;
+}
+.stream-waiting-text {
+  font-weight: 500;
+  letter-spacing: 0.01em;
 }
 .stream-error,
 .error-banner {
@@ -2174,19 +2178,36 @@ button {
 .activity-ripple {
   position: relative;
   display: inline-flex;
-  min-width: 0.7em;
-  min-height: 1.2em;
   align-items: center;
-  justify-content: center;
-  overflow: visible;
   vertical-align: middle;
   color: var(--muted);
 }
 .activity-ripple-content {
   position: relative;
-  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   color: var(--muted);
   white-space: nowrap;
+  mask-image: linear-gradient(
+    90deg,
+    rgba(0, 0, 0, 0.38) 0%,
+    rgba(0, 0, 0, 0.38) 25%,
+    rgba(0, 0, 0, 1) 50%,
+    rgba(0, 0, 0, 0.38) 75%,
+    rgba(0, 0, 0, 0.38) 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    rgba(0, 0, 0, 0.38) 0%,
+    rgba(0, 0, 0, 0.38) 25%,
+    rgba(0, 0, 0, 1) 50%,
+    rgba(0, 0, 0, 0.38) 75%,
+    rgba(0, 0, 0, 0.38) 100%
+  );
+  mask-size: 250% 100%;
+  -webkit-mask-size: 250% 100%;
+  animation: text-shimmer-wave 2.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 .activity-ripple-row {
   display: flex;
@@ -2196,7 +2217,6 @@ button {
   flex: 1 1 auto;
   align-items: flex-start;
   position: relative;
-  overflow: visible;
 }
 .activity-ripple-row .activity-ripple-content {
   display: flex;
@@ -2207,18 +2227,6 @@ button {
   gap: 7px;
   white-space: normal;
 }
-.activity-ripple-row::before,
-.activity-ripple-row::after {
-  inset: 0;
-  width: auto;
-  height: auto;
-  border-radius: 8px;
-  transform: scale(0.98);
-  animation-name: activity-ripple-row-wave;
-}
-.activity-ripple-row::after {
-  animation-delay: 0.82s;
-}
 .activity-ripple-content:empty {
   width: 0.42em;
   height: 0.42em;
@@ -2226,73 +2234,27 @@ button {
   background: currentColor;
   opacity: 0.72;
 }
-.activity-ripple::before,
-.activity-ripple::after {
-  position: absolute;
-  inset: 50% auto auto 50%;
-  width: 100%;
-  height: 1.35em;
-  border: 1px solid color-mix(in srgb, var(--muted) 72%, transparent);
-  border-radius: 999px;
-  background: radial-gradient(
-    ellipse at center,
-    color-mix(in srgb, var(--muted) 24%, transparent),
-    transparent 68%
-  );
-  content: "";
-  pointer-events: none;
-  transform: translate(-50%, -50%) scale(0.35);
-  animation: activity-ripple-wave 1.65s ease-out infinite;
-}
-.activity-ripple::after {
-  animation-delay: 0.82s;
-}
-@keyframes activity-ripple-wave {
+
+@keyframes text-shimmer-wave {
   0% {
-    opacity: 0;
-    transform: translate(-50%, -50%) scale(0.35);
-  }
-  18% {
-    opacity: 0.62;
+    mask-position: 150% 0;
+    -webkit-mask-position: 150% 0;
   }
   100% {
-    opacity: 0;
-    transform: translate(-50%, -50%) scale(1.55);
-  }
-}
-@keyframes activity-ripple-row-wave {
-  0% {
-    opacity: 0;
-    transform: scale(0.98);
-  }
-  18% {
-    opacity: 0.42;
-  }
-  100% {
-    opacity: 0;
-    transform: scale(1.015);
+    mask-position: -50% 0;
+    -webkit-mask-position: -50% 0;
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .activity-ripple::before,
-  .activity-ripple::after {
+  .activity-ripple-content {
     animation: none;
-    opacity: 0.25;
-    transform: translate(-50%, -50%) scale(0.95);
-  }
-  .activity-ripple-row::before,
-  .activity-ripple-row::after {
-    transform: scale(1);
+    mask-image: none;
+    -webkit-mask-image: none;
   }
 }
 @keyframes spin {
   to {
     transform: rotate(360deg);
-  }
-}
-@keyframes blink {
-  50% {
-    opacity: 0;
   }
 }
 @media (max-width: 760px) {

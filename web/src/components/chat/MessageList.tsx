@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   Check,
@@ -28,6 +28,7 @@ import { InstructionMessage, SystemMessageBlock } from "../renderers/SystemMessa
 import { ThinkingBlock } from "../renderers/ThinkingBlock";
 import { ToolCallRow } from "../renderers/ToolCallRow";
 import { MarkdownRenderer } from "../renderers/MarkdownRenderer";
+import { ActivityRipple } from "../renderers/ActivityRipple";
 import {
   buildRounds,
   getRoundPreviewIndex,
@@ -37,7 +38,7 @@ import {
   type SystemMessageBlock as SystemMessageBlockData,
   type ToolCallEntry,
 } from "../../utils/round";
-import { formatTime, getDuration, stripSystemReminderTags } from "../../utils/format";
+import { formatDurationHuman, formatTime, getDuration, stripSystemReminderTags } from "../../utils/format";
 
 export interface MessageListProps {
   messages: MessageRecord[];
@@ -75,6 +76,7 @@ type ChatItem =
       kind: "stream-meta";
       key: string;
       stream: StreamMessage;
+      startedAt?: string;
       expanded: boolean;
       collapsible: boolean;
     }
@@ -145,6 +147,12 @@ function buildChatItems(
       .map((stream) => stream.userMessageId)
       .filter((messageId): messageId is string => Boolean(messageId)),
   );
+  const userMessageTimestampMap = new Map<string, string>();
+  for (const value of rounds) {
+    if (!isSystemBlock(value) && value.userMessage.created_at) {
+      userMessageTimestampMap.set(value.userMessage.id, value.userMessage.created_at);
+    }
+  }
 
   for (const value of rounds) {
     if (isSystemBlock(value)) {
@@ -247,10 +255,15 @@ function buildChatItems(
         : null);
 
     if (!providerError) {
+      const startedAt =
+        (stream.userMessageId ? userMessageTimestampMap.get(stream.userMessageId) : undefined) ??
+        stream.reasoningStartedAt ??
+        undefined;
       items.push({
         kind: "stream-meta",
         key: `${stream.key}:meta`,
         stream,
+        startedAt,
         expanded,
         collapsible,
       });
@@ -382,6 +395,48 @@ function UserMessageItem({
   );
 }
 
+function WorkDuration({
+  startedAt,
+  completedAt,
+  active,
+}: {
+  startedAt?: string;
+  completedAt?: string;
+  active: boolean;
+}) {
+  const { t } = useTranslation();
+  const start = startedAt ? Date.parse(startedAt) : Number.NaN;
+  const completed = completedAt ? Date.parse(completedAt) : Number.NaN;
+  const fixedElapsedMs = Number.isNaN(start)
+    ? null
+    : !Number.isNaN(completed)
+      ? Math.max(0, completed - start)
+      : !active
+        ? Math.max(0, Date.now() - start)
+        : null;
+
+  const [liveElapsedMs, setLiveElapsedMs] = useState<number | null>(() =>
+    Number.isNaN(start) ? null : Math.max(0, Date.now() - start),
+  );
+
+  useEffect(() => {
+    if (Number.isNaN(start) || !Number.isNaN(completed) || !active) return;
+    const update = () =>
+      setLiveElapsedMs(Math.max(0, Date.now() - start));
+    update();
+    const timer = setInterval(update, 500);
+    return () => clearInterval(timer);
+  }, [active, completedAt, start]);
+
+  const elapsedMs = fixedElapsedMs ?? liveElapsedMs;
+  if (elapsedMs === null || Number.isNaN(elapsedMs)) {
+    return <span>{active ? t("Working…") : t("Assistant")}</span>;
+  }
+
+  const duration = formatDurationHuman(elapsedMs, t, !active);
+  return <span>{t("Worked for {{duration}}", { duration })}</span>;
+}
+
 function RoundMetaItem({
   round,
   expanded,
@@ -394,9 +449,7 @@ function RoundMetaItem({
   onToggle: () => void;
 }) {
   const { t } = useTranslation();
-  const duration = round.completedAt
-    ? getDuration(round.userMessage.created_at ?? "", round.completedAt)
-    : null;
+  const isStreaming = round.status === "streaming";
   const interruptionLabel = round.interrupted
     ? round.interruptionKind === "cancelled"
       ? t("Stopped")
@@ -404,18 +457,21 @@ function RoundMetaItem({
         ? t("Response failed")
         : t("Response interrupted")
     : null;
-  const label = interruptionLabel
-    ? interruptionLabel
-    : duration
-      ? t("Elapsed {{duration}}", { duration })
-      : round.status === "streaming"
-        ? t("streaming")
-        : t("Assistant");
 
   const content = (
     <>
       <span className={interruptionLabel ? "assistant-turn-status interrupted" : undefined}>
-        {label}
+        {interruptionLabel ? (
+          interruptionLabel
+        ) : (
+          <ActivityRipple active={isStreaming}>
+            <WorkDuration
+              startedAt={round.userMessage.created_at}
+              completedAt={round.completedAt ?? undefined}
+              active={isStreaming}
+            />
+          </ActivityRipple>
+        )}
       </span>
       {collapsible ? (
         <ChevronRight
@@ -451,27 +507,39 @@ function RoundMetaItem({
 
 function StreamMetaItem({
   stream,
+  startedAt,
   expanded,
   collapsible,
   onToggle,
 }: {
   stream: StreamMessage;
+  startedAt?: string;
   expanded: boolean;
   collapsible: boolean;
   onToggle: () => void;
 }) {
   const { t } = useTranslation();
   const isStreaming = stream.status === "streaming";
-  const statusLabel = isStreaming
-    ? t("streaming")
-    : stream.status === "failed"
+  const interruptionLabel =
+    stream.status === "failed"
       ? t("Response failed")
-      : t("Response interrupted");
+      : stream.status === "interrupted"
+        ? t("Response interrupted")
+        : null;
   const contentId = `stream-content-${stream.key.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
   const content = (
     <>
-      <span className={isStreaming ? undefined : "assistant-turn-status interrupted"}>
-        {statusLabel}
+      <span className={isStreaming || !interruptionLabel ? undefined : "assistant-turn-status interrupted"}>
+        {interruptionLabel ? (
+          interruptionLabel
+        ) : (
+          <ActivityRipple active={isStreaming}>
+            <WorkDuration
+              startedAt={startedAt}
+              active={isStreaming}
+            />
+          </ActivityRipple>
+        )}
       </span>
       {collapsible ? (
         <ChevronRight
@@ -671,6 +739,7 @@ export const MessageList = memo(function MessageList({
         return (
           <StreamMetaItem
             stream={item.stream}
+            startedAt={item.startedAt}
             expanded={item.expanded}
             collapsible={item.collapsible}
             onToggle={() => toggleStream(item.stream.key)}
@@ -691,7 +760,11 @@ export const MessageList = memo(function MessageList({
           <article className="chat-message assistant-message assistant-segment-row">
             <div className="assistant-message-inner">
               <div className="assistant-message-content message-content">
-                <span className="cursor-block" />
+                <div className="stream-waiting">
+                  <ActivityRipple active row label={t("Waiting for response…")}>
+                    <span className="stream-waiting-text">{t("Waiting for response…")}</span>
+                  </ActivityRipple>
+                </div>
               </div>
             </div>
           </article>

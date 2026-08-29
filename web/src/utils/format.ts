@@ -65,6 +65,45 @@ export function getDuration(createdAt: string, completedAt: string): string | nu
 }
 
 /**
+ * Format a duration in milliseconds into a localized human-readable string:
+ * - < 60s: "5s" / "5.2s" (or "5 秒" / "5.2 秒")
+ * - 1m - 60m: "2min 15s" (or "2 分 15 秒")
+ * - >= 1h: "1h 12min 30s" (or "1 小时 12 分 30 秒")
+ */
+export function formatDurationHuman(
+  milliseconds: number,
+  t: (key: string, options?: Record<string, unknown>) => string,
+  decimalSeconds = false,
+): string {
+  if (milliseconds < 1000) {
+    return decimalSeconds
+      ? t("{{count}} seconds", { count: (milliseconds / 1000).toFixed(1) })
+      : t("{{count}} seconds", { count: 1 });
+  }
+
+  const totalSeconds = Math.floor(milliseconds / 1000);
+  if (totalSeconds < 60) {
+    const count = decimalSeconds ? (milliseconds / 1000).toFixed(1) : totalSeconds;
+    return t("{{count}} seconds", { count });
+  }
+
+  const seconds = totalSeconds % 60;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  if (totalMinutes < 60) {
+    return t("{{minutes}} minutes {{seconds}} seconds", {
+      minutes: totalMinutes,
+      seconds,
+    });
+  }
+
+  return t("{{hours}} hours {{minutes}} minutes {{seconds}} seconds", {
+    hours: Math.floor(totalMinutes / 60),
+    minutes: totalMinutes % 60,
+    seconds,
+  });
+}
+
+/**
  * Format a number with commas.
  */
 export function formatNumber(n: number): string {
