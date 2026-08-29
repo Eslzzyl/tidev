@@ -69,14 +69,6 @@ fn parse_datetime(value: &str) -> std::result::Result<DateTime<Utc>, chrono::Par
     Ok(DateTime::parse_from_rfc3339(value)?.with_timezone(&Utc))
 }
 
-/// Convert a string to `Some(s)` only if non-empty; otherwise `None`.
-///
-/// Used when reading `NOT NULL DEFAULT ''` columns where the empty string
-/// should be treated as absence (i.e. equivalent to SQL `NULL`).
-fn opt_non_empty(s: String) -> Option<String> {
-    if s.trim().is_empty() { None } else { Some(s) }
-}
-
 /// Raw per-row data from the messages table, collected before
 /// any CPU-intensive decompression or JSON parsing.
 ///
@@ -279,9 +271,9 @@ impl SessionStore {
         let updated_at = row.get::<_, String>(8)?;
         let status = row.get::<_, String>(9)?;
         let ended_at = row.get::<_, Option<String>>(10)?;
-        let context_summary = row.get::<_, String>(11)?;
+        let context_summary = opt_blob_to_text(row, 11)?;
         let context_retained_from = row.get::<_, i64>(12)? as usize;
-        let system_prompt = row.get::<_, String>(13)?;
+        let system_prompt = blob_or_empty_to_text(row, 13)?;
         let workspace_root = row.get::<_, String>(14)?;
 
         let parent_session_id = parent_session_id
@@ -330,11 +322,7 @@ impl SessionStore {
                 }
                 _ => None,
             },
-            context_summary: if context_summary.trim().is_empty() {
-                None
-            } else {
-                Some(context_summary)
-            },
+            context_summary,
             context_retained_from,
             system_prompt,
             snapshot_start_hash: None,
@@ -512,9 +500,9 @@ impl SessionStore {
                     updated_at: 8 => DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?).unwrap().with_timezone(&Utc),
                     status: 9 => row.get::<_, String>(9)?,
                     ended_at: 10 => row.get::<_, Option<String>>(10)?.and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|dt| dt.with_timezone(&Utc))),
-                    context_summary: 11 => opt_non_empty(row.get::<_, String>(11)?),
+                    context_summary: 11 => opt_blob_to_text(row, 11)?,
                     context_retained_from: 12 => row.get::<_, i64>(12)? as usize,
-                    system_prompt: 13 => row.get::<_, String>(13)?,
+                    system_prompt: 13 => blob_or_empty_to_text(row, 13)?,
                     snapshot_start_hash: 15 => row.get::<_, Option<String>>(15)?,
                 ))
             })
@@ -596,9 +584,9 @@ impl SessionStore {
                 updated_at: 8 => DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?).unwrap().with_timezone(&Utc),
                 status: 9 => row.get::<_, String>(9)?,
                 ended_at: 10 => row.get::<_, Option<String>>(10)?.and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|dt| dt.with_timezone(&Utc))),
-                context_summary: 11 => opt_non_empty(row.get::<_, String>(11)?),
+                context_summary: 11 => opt_blob_to_text(row, 11)?,
                 context_retained_from: 12 => row.get::<_, i64>(12)? as usize,
-                system_prompt: 13 => row.get::<_, String>(13)?,
+                system_prompt: 13 => blob_or_empty_to_text(row, 13)?,
                 snapshot_start_hash: 15 => row.get::<_, Option<String>>(15)?,
             ))
         })?;
@@ -633,10 +621,10 @@ impl SessionStore {
                 updated_at: 8 => DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?).unwrap().with_timezone(&Utc),
                 status: 9 => row.get::<_, String>(9)?,
                 ended_at: 10 => row.get::<_, Option<String>>(10)?.and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|dt| dt.with_timezone(&Utc))),
-                context_summary: 11 => opt_non_empty(row.get::<_, String>(11)?),
+                context_summary: 11 => opt_blob_to_text(row, 11)?,
                 context_retained_from: 12 => row.get::<_, i64>(12)? as usize,
-                system_prompt: 13 => row.get::<_, String>(13)?,
-                    snapshot_start_hash: 15 => row.get::<_, Option<String>>(15)?,
+                system_prompt: 13 => blob_or_empty_to_text(row, 13)?,
+                snapshot_start_hash: 15 => row.get::<_, Option<String>>(15)?,
             ))
         })?;
         let mut sessions = Vec::new();
@@ -677,10 +665,10 @@ impl SessionStore {
                         updated_at: 8 => DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?).unwrap().with_timezone(&Utc),
                         status: 9 => row.get::<_, String>(9)?,
                         ended_at: 10 => row.get::<_, Option<String>>(10)?.and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|dt| dt.with_timezone(&Utc))),
-                        context_summary: 11 => opt_non_empty(row.get::<_, String>(11)?),
+                        context_summary: 11 => opt_blob_to_text(row, 11)?,
                         context_retained_from: 12 => row.get::<_, i64>(12)? as usize,
-                        system_prompt: 13 => row.get::<_, String>(13)?,
-                    snapshot_start_hash: 15 => row.get::<_, Option<String>>(15)?,
+                        system_prompt: 13 => blob_or_empty_to_text(row, 13)?,
+                        snapshot_start_hash: 15 => row.get::<_, Option<String>>(15)?,
                     ))
                 },
             )?;
@@ -725,7 +713,7 @@ impl SessionStore {
         }
         if let Some(v) = context_summary {
             sets.push(format!("context_summary = ?{idx}"));
-            params.push(Box::new(v.to_string()));
+            params.push(Box::new(compress_text(v)));
             idx += 1;
         }
         if let Some(v) = context_retained_from {
@@ -735,7 +723,7 @@ impl SessionStore {
         }
         if let Some(v) = system_prompt {
             sets.push(format!("system_prompt = ?{idx}"));
-            params.push(Box::new(v.to_string()));
+            params.push(Box::new(compress_text(v)));
             idx += 1;
         }
         if let Some(v) = provider_id {
@@ -1141,10 +1129,10 @@ impl SessionStore {
                 updated_at: 8 => DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?).unwrap().with_timezone(&Utc),
                 status: 9 => row.get::<_, String>(9)?,
                 ended_at: 10 => row.get::<_, Option<String>>(10)?.and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|dt| dt.with_timezone(&Utc))),
-                context_summary: 11 => opt_non_empty(row.get::<_, String>(11)?),
+                context_summary: 11 => opt_blob_to_text(row, 11)?,
                 context_retained_from: 12 => row.get::<_, i64>(12)? as usize,
-                system_prompt: 13 => row.get::<_, String>(13)?,
-                    snapshot_start_hash: 15 => row.get::<_, Option<String>>(15)?,
+                system_prompt: 13 => blob_or_empty_to_text(row, 13)?,
+                snapshot_start_hash: 15 => row.get::<_, Option<String>>(15)?,
             ))
         })?;
         let mut sessions = Vec::new();
@@ -1764,9 +1752,9 @@ impl SessionStore {
             let sql = format!(
                 "SELECT id, parent_session_id, provider_id, provider_display_name, \
                         model_id, model_display_name, title, created_at, updated_at, \
-                        status, ended_at, context_summary, context_retained_from, system_prompt, \
-                        workspace_root, snapshot_start_hash, instruction_sources, todos, \
-                        revert_message_id, revert_redo_snapshot \
+                        status, ended_at, CAST(context_summary AS BLOB), context_retained_from, \
+                        CAST(system_prompt AS BLOB), workspace_root, snapshot_start_hash, \
+                        instruction_sources, todos, revert_message_id, revert_redo_snapshot \
                  FROM sessions WHERE id IN ({placeholder})"
             );
             let params: Vec<&dyn rusqlite::types::ToSql> = sid_strs
@@ -1775,6 +1763,8 @@ impl SessionStore {
                 .collect();
             let rows = self.read_query(&sql, params.as_slice(), |row| {
                 let parent: Option<String> = row.get(1)?;
+                let context_summary = blob_or_empty_to_text(row, 11)?;
+                let system_prompt = blob_or_empty_to_text(row, 13)?;
                 Ok((
                     row.get::<_, String>(0)?,
                     parent,
@@ -1787,9 +1777,9 @@ impl SessionStore {
                     row.get::<_, String>(8)?,
                     row.get::<_, String>(9)?,
                     row.get::<_, Option<String>>(10)?,
-                    row.get::<_, String>(11)?,
+                    context_summary,
                     row.get::<_, i64>(12)?,
-                    row.get::<_, String>(13)?,
+                    system_prompt,
                     row.get::<_, String>(14)?,
                     row.get::<_, Option<String>>(15)?,
                     row.get::<_, String>(16)?,
@@ -1996,6 +1986,8 @@ impl SessionStore {
             let mut stmt = import_conn.prepare(&sql)?;
             let rows = stmt
                 .query_map(imp_params.as_slice(), |row| {
+                    let context_summary: String = row.get(11)?;
+                    let system_prompt: String = row.get(13)?;
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, Option<String>>(1)?,
@@ -2008,9 +2000,9 @@ impl SessionStore {
                         row.get::<_, String>(8)?,
                         row.get::<_, String>(9)?,
                         row.get::<_, Option<String>>(10)?,
-                        row.get::<_, String>(11)?,
+                        compress_text(&context_summary),
                         row.get::<_, i64>(12)?,
-                        row.get::<_, String>(13)?,
+                        compress_text(&system_prompt),
                         row.get::<_, String>(14)?,
                         row.get::<_, Option<String>>(15)?,
                         row.get::<_, String>(16)?,
@@ -2176,23 +2168,72 @@ impl SessionStore {
 
 // ── Export helpers ───────────────────────────────────────────────────
 
-/// Read a non-nullable BLOB column, decompress it to text.
-/// Returns an empty string if the BLOB is empty.
+/// Read a non-nullable BLOB (or TEXT) column, decompress it to text.
+/// Returns an empty string if the value is empty or NULL.
 fn blob_or_empty_to_text(row: &rusqlite::Row<'_>, idx: usize) -> rusqlite::Result<String> {
-    let blob: Vec<u8> = row.get(idx)?;
-    if blob.is_empty() {
-        Ok(String::new())
-    } else {
-        Ok(decompress_text(&blob))
+    match row.get_ref(idx)? {
+        rusqlite::types::ValueRef::Null => Ok(String::new()),
+        rusqlite::types::ValueRef::Blob(b) => {
+            if b.is_empty() {
+                Ok(String::new())
+            } else {
+                Ok(decompress_text(b))
+            }
+        }
+        rusqlite::types::ValueRef::Text(t) => {
+            if t.is_empty() {
+                Ok(String::new())
+            } else {
+                Ok(decompress_text(t))
+            }
+        }
+        other => Err(rusqlite::Error::FromSqlConversionFailure(
+            idx,
+            other.data_type(),
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "expected BLOB, TEXT, or NULL",
+            )),
+        )),
     }
 }
 
-/// Read an optional BLOB column, decompress it to optional text.
+/// Read an optional BLOB (or TEXT) column, decompress it to optional text.
 fn opt_blob_to_text(row: &rusqlite::Row<'_>, idx: usize) -> rusqlite::Result<Option<String>> {
-    let blob: Option<Vec<u8>> = row.get(idx)?;
-    match blob {
-        Some(b) if !b.is_empty() => Ok(Some(decompress_text(&b))),
-        _ => Ok(None),
+    match row.get_ref(idx)? {
+        rusqlite::types::ValueRef::Null => Ok(None),
+        rusqlite::types::ValueRef::Blob(b) => {
+            if b.is_empty() {
+                Ok(None)
+            } else {
+                let text = decompress_text(b);
+                if text.trim().is_empty() {
+                    Ok(None)
+                } else {
+                    Ok(Some(text))
+                }
+            }
+        }
+        rusqlite::types::ValueRef::Text(t) => {
+            if t.is_empty() {
+                Ok(None)
+            } else {
+                let text = decompress_text(t);
+                if text.trim().is_empty() {
+                    Ok(None)
+                } else {
+                    Ok(Some(text))
+                }
+            }
+        }
+        other => Err(rusqlite::Error::FromSqlConversionFailure(
+            idx,
+            other.data_type(),
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "expected BLOB, TEXT, or NULL",
+            )),
+        )),
     }
 }
 
@@ -3221,6 +3262,104 @@ mod tests {
             }
             ToolOutputContent::Expired { .. } => panic!("should be available"),
         }
+    }
+
+    #[test]
+    fn session_compressed_fields_storage_test() {
+        let (store, tmp) = test_store();
+        let sid = create_test_session(&store, "/workspace", "session compress test");
+
+        // 1. Initial state: both context_summary and system_prompt should be empty 0-length blobs in SQLite
+        let (raw_summary, raw_prompt): (Vec<u8>, Vec<u8>) = store
+            .read(|conn| {
+                Ok(conn.query_row(
+                    "SELECT context_summary, system_prompt FROM sessions WHERE id = ?1",
+                    params![sid.to_string()],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )?)
+            })
+            .unwrap();
+        assert!(
+            raw_summary.is_empty(),
+            "initial context_summary should be 0-length blob"
+        );
+        assert!(
+            raw_prompt.is_empty(),
+            "initial system_prompt should be 0-length blob"
+        );
+
+        let loaded = store.load_session(sid).unwrap().unwrap();
+        assert_eq!(loaded.context_summary, None);
+        assert_eq!(loaded.system_prompt, "");
+
+        // 2. Update with large repetitive content
+        let large_prompt = "You are an AI pair programmer following AGENTS.md rules. ".repeat(200);
+        let summary_text = "Context summary: modified 10 files and ran cargo test. ".repeat(50);
+
+        store
+            .update_session(
+                sid,
+                None,
+                None,
+                Some(&summary_text),
+                Some(15),
+                Some(&large_prompt),
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+
+        // 3. Verify SQLite raw BLOBs are zstd-compressed
+        const ZSTD_MAGIC: [u8; 4] = [0x28, 0xB5, 0x2F, 0xFD];
+        let (comp_summary, comp_prompt): (Vec<u8>, Vec<u8>) = store
+            .read(|conn| {
+                Ok(conn.query_row(
+                    "SELECT context_summary, system_prompt FROM sessions WHERE id = ?1",
+                    params![sid.to_string()],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )?)
+            })
+            .unwrap();
+
+        assert_eq!(&comp_summary[..4], &ZSTD_MAGIC);
+        assert!(comp_summary.len() < summary_text.len());
+
+        assert_eq!(&comp_prompt[..4], &ZSTD_MAGIC);
+        assert!(comp_prompt.len() < large_prompt.len());
+
+        // 4. Verify load_session and list_sessions decompress correctly
+        let loaded = store.load_session(sid).unwrap().unwrap();
+        assert_eq!(
+            loaded.context_summary.as_deref(),
+            Some(summary_text.as_str())
+        );
+        assert_eq!(loaded.system_prompt, large_prompt);
+        assert_eq!(loaded.context_retained_from, 15);
+
+        let listed = store.list_sessions(10, 0).unwrap();
+        let session_item = listed.iter().find(|s| s.session_id == sid).unwrap();
+        assert_eq!(
+            session_item.context_summary.as_deref(),
+            Some(summary_text.as_str())
+        );
+        assert_eq!(session_item.system_prompt, large_prompt);
+
+        // 5. Export and import roundtrip
+        let export_path = tmp.path().join("session_export.db");
+        store.export_to_sqlite(&[sid], &export_path).unwrap();
+
+        let (store2, _tmp2) = test_store();
+        let imported = store2.import_from_sqlite(&export_path, None, true).unwrap();
+        assert_eq!(imported, vec![sid]);
+
+        let imported_session = store2.load_session(sid).unwrap().unwrap();
+        assert_eq!(
+            imported_session.context_summary.as_deref(),
+            Some(summary_text.as_str())
+        );
+        assert_eq!(imported_session.system_prompt, large_prompt);
     }
 }
 // ---------------------------------------------------------------------------
