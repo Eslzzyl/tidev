@@ -60,8 +60,17 @@ export function WelcomePage({
 }: WelcomePageProps) {
   const { t } = useTranslation();
   const compositionRef = useRef(false);
+  const compositionJustCommittedRef = useRef(false);
+  const compositionEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(
+    () => () => {
+      if (compositionEndTimerRef.current) clearTimeout(compositionEndTimerRef.current);
+    },
+    [],
+  );
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(true);
   const [commandIndex, setCommandIndex] = useState(0);
   const [cursorPosition, setCursorPosition] = useState(() => draft.length);
@@ -196,9 +205,16 @@ export function WelcomePage({
             }}
             onCompositionStart={() => {
               compositionRef.current = true;
+              compositionJustCommittedRef.current = false;
+              if (compositionEndTimerRef.current) clearTimeout(compositionEndTimerRef.current);
             }}
             onCompositionEnd={() => {
               compositionRef.current = false;
+              compositionJustCommittedRef.current = true;
+              if (compositionEndTimerRef.current) clearTimeout(compositionEndTimerRef.current);
+              compositionEndTimerRef.current = setTimeout(() => {
+                compositionJustCommittedRef.current = false;
+              }, 0);
             }}
             onKeyDown={(event) => {
               if (commandPaletteVisible) {
@@ -239,10 +255,16 @@ export function WelcomePage({
                   return;
                 }
               }
+              if (event.key === "Tab") {
+                event.preventDefault();
+                onModeChange(mode === "plan" ? "build" : "plan");
+                return;
+              }
               if (
                 event.key === "Enter" &&
                 !event.nativeEvent.isComposing &&
                 !compositionRef.current &&
+                !compositionJustCommittedRef.current &&
                 ((enterToSend && !event.shiftKey) ||
                   (!enterToSend && (event.ctrlKey || event.metaKey)))
               ) {
