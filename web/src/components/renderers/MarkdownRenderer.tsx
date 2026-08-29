@@ -103,7 +103,7 @@ function CodeBlock({ language, children }: { language: string; children: string 
     <div className="group relative my-3 overflow-hidden rounded-lg border border-neutral-200 dark:border-neutral-700">
       {/* Header with language label and actions */}
       <div className="flex items-center justify-between border-b border-neutral-200 bg-neutral-50 px-3 py-1.5 dark:border-neutral-700 dark:bg-neutral-900">
-        <span className="text-[10px] font-medium uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
+        <span className="markdown-code-language uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
           {language || "code"}
         </span>
         <div className="flex items-center gap-1">
@@ -125,7 +125,7 @@ function CodeBlock({ language, children }: { language: string; children: string 
       </div>
 
       {/* Code content */}
-      <pre className="overflow-x-auto p-4 text-sm leading-relaxed">
+      <pre className="markdown-code-block overflow-x-auto p-4">
         <code className="font-mono text-neutral-800 dark:text-neutral-200">{children}</code>
       </pre>
     </div>
@@ -171,13 +171,13 @@ function Mermaid({ chart }: { chart: string }) {
   if (error) {
     return (
       <div className="my-3 rounded border border-red-200 bg-red-50 p-3 dark:border-red-800 dark:bg-red-950">
-        <p className="mb-1 text-xs font-medium text-red-600 dark:text-red-400">
+        <p className="markdown-error-label mb-1 text-red-600 dark:text-red-400">
           {t("Diagram rendering failed")}
         </p>
-        <pre className="text-xs text-red-500 dark:text-red-300">{chart}</pre>
+        <pre className="markdown-error-source text-red-500 dark:text-red-300">{chart}</pre>
         <button
           onClick={() => setKey((k) => k + 1)}
-          className="mt-2 text-xs text-blue-500 hover:underline"
+          className="markdown-error-retry mt-2 text-blue-500 hover:underline"
         >
           {t("Retry")}
         </button>
@@ -256,7 +256,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({ content }: Prop
             if (!match && !content.includes("\n")) {
               return (
                 <code
-                  className="rounded bg-neutral-100 px-1.5 py-0.5 text-sm font-mono text-pink-600 dark:bg-neutral-800 dark:text-pink-400"
+                  className="markdown-inline-code rounded bg-neutral-100 px-1.5 py-0.5 font-mono text-pink-600 dark:bg-neutral-800 dark:text-pink-400"
                   {...props}
                 >
                   {children}

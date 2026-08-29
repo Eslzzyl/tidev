@@ -1,17 +1,9 @@
-import {
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type ReactNode,
-  type TransitionEvent,
-} from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode, type TransitionEvent } from "react";
 
 const EXPAND_DURATION_MS = 180;
 const COLLAPSE_DURATION_MS = EXPAND_DURATION_MS;
 
 type ExpandablePhase = "hidden" | "visible" | "hiding";
-type BodyHeight = number | "auto";
 
 interface Props {
   expanded: boolean;
@@ -35,9 +27,7 @@ function cancelFrame(frame: number) {
 
 export function ExpandableBody({ expanded, className, children }: Props) {
   const [phase, setPhase] = useState<ExpandablePhase>(expanded ? "visible" : "hidden");
-  const [height, setHeight] = useState<BodyHeight>(expanded ? "auto" : 0);
-  const bodyRef = useRef<HTMLDivElement>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
+  const [openTarget, setOpenTarget] = useState(expanded);
   const collapseTimer = useRef<number | null>(null);
   const transitionFrame = useRef<number | null>(null);
   const initialized = useRef(false);
@@ -55,10 +45,6 @@ export function ExpandableBody({ expanded, className, children }: Props) {
       cancelFrame(transitionFrame.current);
       transitionFrame.current = null;
     }
-  }
-
-  function contentHeight() {
-    return Math.ceil(contentRef.current?.getBoundingClientRect().height ?? 0);
   }
 
   useLayoutEffect(() => {
@@ -82,29 +68,29 @@ export function ExpandableBody({ expanded, className, children }: Props) {
       // appear at its natural height. Only a live collapse-to-expand change
       // gets an opening animation.
       if (!initialized.current || wasExpanded) {
-        setHeight("auto");
+        setOpenTarget(true);
         return;
       }
 
-      setHeight(0);
+      setOpenTarget(false);
       transitionFrame.current = requestFrame(() => {
         transitionFrame.current = null;
-        setHeight(contentHeight());
+        setOpenTarget(true);
       });
       return;
     }
 
     previousExpanded.current = false;
     if (phase !== "visible") {
-      setHeight(0);
+      setOpenTarget(false);
       return;
     }
 
     setPhase("hiding");
-    setHeight(contentHeight());
+    setOpenTarget(true);
     transitionFrame.current = requestFrame(() => {
       transitionFrame.current = null;
-      setHeight(0);
+      setOpenTarget(false);
     });
     clearCollapseTimer();
     collapseTimer.current = window.setTimeout(() => {
@@ -113,33 +99,16 @@ export function ExpandableBody({ expanded, className, children }: Props) {
     }, COLLAPSE_DURATION_MS + 40);
   }, [expanded]);
 
-  useEffect(() => {
-    const content = contentRef.current;
-    if (!content || typeof ResizeObserver === "undefined") return;
-
-    const observer = new ResizeObserver(() => {
-      if (!expanded) return;
-      setHeight((current) => (current === "auto" ? current : contentHeight()));
-    });
-    observer.observe(content);
-    return () => observer.disconnect();
-  }, [expanded]);
-
   if (!expanded && phase === "hidden") return null;
 
   const renderPhase = expanded ? "visible" : phase;
 
   function handleTransitionEnd(event: TransitionEvent<HTMLDivElement>) {
-    if (event.target !== event.currentTarget || event.propertyName !== "height") return;
-
-    if (renderPhase === "visible" && expanded) {
-      setHeight("auto");
-      return;
-    }
+    if (event.target !== event.currentTarget || event.propertyName !== "grid-template-rows") return;
 
     if (renderPhase === "hiding" && !expanded) {
       clearCollapseTimer();
-      setHeight(0);
+      setOpenTarget(false);
       setPhase("hidden");
     }
   }
@@ -148,10 +117,9 @@ export function ExpandableBody({ expanded, className, children }: Props) {
     <div
       className={`${className} expandable-body expandable-body-${renderPhase}`}
       onTransitionEnd={handleTransitionEnd}
-      ref={bodyRef}
-      style={{ height: height === "auto" ? "auto" : `${height}px` }}
+      style={{ gridTemplateRows: openTarget ? "1fr" : "0fr" }}
     >
-      <div ref={contentRef}>{children}</div>
+      <div>{children}</div>
     </div>
   );
 }

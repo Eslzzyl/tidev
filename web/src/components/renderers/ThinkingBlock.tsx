@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { ExpandableBody } from "../ui/ExpandableBody";
 import { ActivityRipple } from "./ActivityRipple";
 import { MarkdownRenderer } from "./MarkdownRenderer";
-import { formatDurationHuman } from "../../utils/format";
+import { formatThinkingDuration } from "../../utils/format";
 
 interface Props {
   content: string;
@@ -36,21 +36,30 @@ function ElapsedTimer({
       : !active
         ? Math.max(0, Date.now() - start)
         : null;
-  const [liveElapsedMs, setLiveElapsedMs] = useState<number | null>(() =>
-    Number.isNaN(start) ? null : Math.max(0, Date.now() - start),
-  );
+  const [liveNow, setLiveNow] = useState(() => Date.now());
 
   useEffect(() => {
     if (Number.isNaN(start) || !Number.isNaN(completed) || !active) return;
-    const update = () =>
-      setLiveElapsedMs((current) => {
-        const next = Math.max(0, Date.now() - start);
-        return current === next ? current : next;
-      });
-    const timer = setInterval(update, 100);
-    return () => clearInterval(timer);
-  }, [active, completedAt, startedAt]);
+    let timer: number | undefined;
 
+    const update = () => {
+      const now = Date.now();
+      const elapsedMs = Math.max(0, now - start);
+      setLiveNow(now);
+
+      const cadenceMs = elapsedMs < 60_000 ? 100 : 1000;
+      const remainderMs = elapsedMs % cadenceMs;
+      const delayMs = Math.max(1, cadenceMs - remainderMs);
+      timer = window.setTimeout(update, delayMs);
+    };
+
+    update();
+    return () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [active, completedAt, start]);
+
+  const liveElapsedMs = Number.isNaN(start) ? null : Math.max(0, liveNow - start);
   const elapsedMs = fixedElapsedMs ?? liveElapsedMs;
   if (elapsedMs === null) {
     return <span className="thinking-elapsed">{t("Thinking")}</span>;
@@ -59,7 +68,7 @@ function ElapsedTimer({
   return (
     <span className="thinking-elapsed">
       {t("Thought for {{duration}}", {
-        duration: formatDurationHuman(elapsedMs, t, !active),
+        duration: formatThinkingDuration(elapsedMs, t),
       })}
     </span>
   );

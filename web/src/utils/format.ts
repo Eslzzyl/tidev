@@ -23,9 +23,11 @@ export function formatSessionDate(dateStr: string): string {
 /**
  * Format a date string for chat message display.
  */
-export function formatTime(isoStr: string): string {
+export function formatTime(isoStr: string, includeSeconds = false): string {
   const d = new Date(isoStr);
-  return d.toLocaleTimeString(i18n.language, { hour: "2-digit", minute: "2-digit" });
+  const options: Intl.DateTimeFormatOptions = { hour: "2-digit", minute: "2-digit" };
+  if (includeSeconds) options.second = "2-digit";
+  return d.toLocaleTimeString(i18n.language, options);
 }
 
 /**
@@ -85,6 +87,45 @@ export function formatDurationHuman(
   if (totalSeconds < 60) {
     const count = decimalSeconds ? (milliseconds / 1000).toFixed(1) : totalSeconds;
     return t("{{count}} seconds", { count });
+  }
+
+  const seconds = totalSeconds % 60;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  if (totalMinutes < 60) {
+    return t("{{minutes}} minutes {{seconds}} seconds", {
+      minutes: totalMinutes,
+      seconds,
+    });
+  }
+
+  return t("{{hours}} hours {{minutes}} minutes {{seconds}} seconds", {
+    hours: Math.floor(totalMinutes / 60),
+    minutes: totalMinutes % 60,
+    seconds,
+  });
+}
+
+/**
+ * Format a live thinking duration with a visible early cadence:
+ * - < 1s: integer milliseconds
+ * - 1s - <1m: tenths of a second
+ * - 1m - <1h: whole minutes and seconds
+ * - >= 1h: whole hours, minutes, and seconds
+ */
+export function formatThinkingDuration(
+  milliseconds: number,
+  t: (key: string, options?: Record<string, unknown>) => string,
+): string {
+  const elapsedMs = Math.max(0, milliseconds);
+  if (elapsedMs < 1000) {
+    return t("{{count}} milliseconds", { count: Math.floor(elapsedMs) });
+  }
+
+  const totalSeconds = Math.floor(elapsedMs / 1000);
+  if (totalSeconds < 60) {
+    return t("{{count}} seconds", {
+      count: (Math.floor(elapsedMs / 100) / 10).toFixed(1),
+    });
   }
 
   const seconds = totalSeconds % 60;

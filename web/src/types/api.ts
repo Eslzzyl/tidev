@@ -101,6 +101,8 @@ export interface ToolExecutionResult {
   metadata: ToolMetadata;
 }
 
+export type ThinkingLevelValue = string | Record<string, string | null>;
+
 export interface Message {
   id: string;
   role: "user" | "assistant" | "system" | "tool" | "error";
@@ -123,7 +125,7 @@ export interface Message {
   cache_write_tokens: number | null;
   model_id: string | null;
   tokens_per_second: number | null;
-  thinking_level: string | null;
+  thinking_level: ThinkingLevelValue | null;
 }
 
 export interface MessageRecord {

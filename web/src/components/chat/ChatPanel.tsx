@@ -8,7 +8,7 @@ import type {
   Session,
   TodoItem,
 } from "../../types/api";
-import type { StreamMessage } from "../../types/chat";
+import type { InstructionNotice, StreamMessage } from "../../types/chat";
 import { ChatComposer } from "./ChatComposer";
 import { ApprovalCard, MessageList } from "./MessageList";
 import { SessionSidebar } from "./SessionSidebar";
@@ -21,6 +21,7 @@ export interface ChatPanelProps {
   activeModel: Model | undefined;
   messages: MessageRecord[];
   streams: StreamMessage[];
+  instructionNotices: InstructionNotice[];
   requests: FrontendRequest[];
   todos: TodoItem[];
   error: string | null;
@@ -60,6 +61,9 @@ export interface ChatPanelProps {
   onFileMentionIndexChange: (index: number) => void;
   onFileSelect: (path: string) => number | undefined;
   onFileMentionClose: () => void;
+  focusComposer?: boolean;
+  onComposerFocus?: () => void;
+  scrollToBottomRequest?: number;
 }
 
 export function ChatPanel({
@@ -70,6 +74,7 @@ export function ChatPanel({
   activeModel,
   messages,
   streams,
+  instructionNotices,
   requests,
   todos,
   error,
@@ -109,6 +114,9 @@ export function ChatPanel({
   onFileMentionIndexChange,
   onFileSelect,
   onFileMentionClose,
+  focusComposer = false,
+  onComposerFocus,
+  scrollToBottomRequest = 0,
 }: ChatPanelProps) {
   const { t } = useTranslation();
   const pendingRequests = requests.filter((request) => request.session_id === selectedSessionId);
@@ -154,10 +162,15 @@ export function ChatPanel({
           <MessageList
             messages={messages}
             streams={streams}
+            instructionNotices={instructionNotices}
+            sessionId={selectedSessionId}
+            session={selectedSession}
+            models={models}
             workspaceRoot={selectedSession?.workspace_root}
             onRevert={onRevert}
             onFork={onFork}
             onRetryProviderError={onRetryProviderError}
+            scrollToBottomRequest={scrollToBottomRequest}
           />
           {pendingRequests.map((request) => (
             <ApprovalCard
@@ -192,6 +205,8 @@ export function ChatPanel({
           onFileMentionIndexChange={onFileMentionIndexChange}
           onFileSelect={onFileSelect}
           onFileMentionClose={onFileMentionClose}
+          autoFocus={focusComposer}
+          onAutoFocus={onComposerFocus}
         />
       </section>
     </>

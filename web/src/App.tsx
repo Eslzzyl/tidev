@@ -83,6 +83,7 @@ export default function App() {
     activeModel,
     messages,
     visibleStreams,
+    instructionNotices,
     requests,
     models,
     todos,
@@ -92,6 +93,9 @@ export default function App() {
     sending,
     canceling,
     welcomeSending,
+    focusComposerAfterWelcome,
+    clearComposerFocusRequest,
+    scrollToBottomRequest,
     thinkingLevel,
     sessionSearch,
     renamingSessionId,
@@ -220,6 +224,7 @@ export default function App() {
                   activeModel={activeModel}
                   messages={messages}
                   streams={visibleStreams}
+                  instructionNotices={instructionNotices}
                   requests={requests}
                   todos={todos}
                   error={error}
@@ -264,6 +269,9 @@ export default function App() {
                   onFileMentionIndexChange={setFileMentionIndex}
                   onFileSelect={handleFileSelect}
                   onFileMentionClose={() => setFileMention(null)}
+                  focusComposer={focusComposerAfterWelcome}
+                  onComposerFocus={clearComposerFocusRequest}
+                  scrollToBottomRequest={scrollToBottomRequest}
                 />
               </>
             )

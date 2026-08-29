@@ -1,4 +1,5 @@
 import i18n from "../i18n";
+import type { ThinkingLevelValue } from "../types/api";
 
 export function formatDate(value: string): string {
   const date = new Date(value);
@@ -22,9 +23,26 @@ const THINKING_LEVEL_LABELS_ZH: Record<string, string> = {
   max: "最高",
 };
 
-export function formatThinkingLevel(value: string, locale = i18n.language): string {
-  const [, level = value] = value.split(":", 2);
-  const normalized = level.trim().toLowerCase();
+function serializeThinkingLevel(value: ThinkingLevelValue): string {
+  if (typeof value === "string") return value;
+  const [provider, level] = Object.entries(value)[0] ?? [];
+  if (!provider) return "";
+  return typeof level === "string" ? `${provider}:${level}` : "";
+}
+
+export function isThinkingLevelEnabled(value: ThinkingLevelValue): boolean {
+  const serialized = serializeThinkingLevel(value);
+  const [, level = serialized] = serialized.split(":", 2);
+  return !["", "none", "off"].includes(level.trim().toLowerCase());
+}
+
+export function formatThinkingLevel(value: ThinkingLevelValue, locale = i18n.language): string {
+  const serialized = serializeThinkingLevel(value);
+  const [, level = serialized] = serialized.split(":", 2);
+  const normalized = level
+    .trim()
+    .toLowerCase()
+    .replace(/^x[-_]high$/, "xhigh");
   if (locale.startsWith("zh")) return THINKING_LEVEL_LABELS_ZH[normalized] ?? level;
   return level.charAt(0).toUpperCase() + level.slice(1);
 }

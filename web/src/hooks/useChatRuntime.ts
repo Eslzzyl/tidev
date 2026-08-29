@@ -17,7 +17,7 @@ import type {
   ToolCall,
   ToolExecutionResult,
 } from "../types/api";
-import type { StreamMessage } from "../types/chat";
+import type { InstructionNotice, StreamMessage } from "../types/chat";
 import { parseSlashCommand } from "../commands";
 import { asString, eventPayload } from "../utils/events";
 import { toolCallEntry, toolResultStatus, type ToolCallEntry } from "../utils/round";
@@ -44,8 +44,21 @@ function cloneStream(stream: StreamMessage): StreamMessage {
   };
 }
 
+function freezeReasoning(stream: StreamMessage) {
+  const lastIndex = stream.segments.length - 1;
+  const last = stream.segments[lastIndex];
+  if (last?.type !== "reasoning" || !stream.reasoningStartedAt) return;
+
+  const completedAt = stream.reasoningCompletedAt ?? new Date().toISOString();
+  stream.reasoningCompletedAt = completedAt;
+  if (!last.completedAt) {
+    stream.segments[lastIndex] = { ...last, completedAt };
+  }
+}
+
 function appendSegment(stream: StreamMessage, type: "text" | "reasoning", content: string) {
   if (!content) return;
+  if (type === "text") freezeReasoning(stream);
   const lastIndex = stream.segments.length - 1;
   const last = stream.segments[lastIndex];
   if (last?.type === type) {
@@ -72,6 +85,7 @@ function reconcileSegment(stream: StreamMessage, type: "text" | "reasoning", con
 }
 
 function ensureToolCall(stream: StreamMessage, toolCall: ToolCall): ToolCallEntry {
+  freezeReasoning(stream);
   const existing = stream.toolCallMap[toolCall.id];
   if (existing) {
     const updated = { ...existing, name: toolCall.name, arguments: toolCall.arguments };
@@ -207,6 +221,7 @@ export function useChatRuntime() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<MessageRecord[]>([]);
+  const [instructionNotices, setInstructionNotices] = useState<InstructionNotice[]>([]);
   const [streams, setStreams] = useState<Record<string, StreamMessage>>({});
   const [requests, setRequests] = useState<FrontendRequest[]>([]);
   const [models, setModels] = useState<Model[]>([]);
@@ -217,6 +232,8 @@ export function useChatRuntime() {
   const [sending, setSending] = useState(false);
   const [canceling, setCanceling] = useState(false);
   const [welcomeSending, setWelcomeSending] = useState(false);
+  const [focusComposerAfterWelcome, setFocusComposerAfterWelcome] = useState(false);
+  const [scrollToBottomRequest, setScrollToBottomRequest] = useState(0);
   const [thinkingLevel, setThinkingLevel] = useState<string | undefined>();
   const [sessionSearch, setSessionSearch] = useState("");
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
@@ -225,6 +242,10 @@ export function useChatRuntime() {
   const [fileMention, setFileMention] = useState<{ query: string; atPos: number } | null>(null);
   const [fileMentionIndex, setFileMentionIndex] = useState(0);
   const selectedSessionRef = useRef<string | null>(null);
+  const instructionNoticesRef = useRef<InstructionNotice[]>([]);
+  const instructionNoticeRevisionRef = useRef(0);
+  const shownInstructionSourcesRef = useRef<Set<string>>(new Set());
+  const instructionToolSessionsRef = useRef<Set<string>>(new Set());
   const cursorRef = useRef<number | null>(
     Number(localStorage.getItem("tidev:last-event-cursor")) || null,
   );
@@ -320,15 +341,29 @@ export function useChatRuntime() {
     [draft, fileMention],
   );
 
+  const clearPendingInstructionNotices = useCallback(() => {
+    instructionNoticesRef.current = [];
+    instructionNoticeRevisionRef.current += 1;
+    setInstructionNotices([]);
+  }, []);
+
+  const resetInstructionState = useCallback(() => {
+    clearPendingInstructionNotices();
+    shownInstructionSourcesRef.current.clear();
+    instructionToolSessionsRef.current.clear();
+  }, [clearPendingInstructionNotices]);
+
   const loadMessages = useCallback(async (sessionId: string) => {
-    if (!sessionId?.trim()) return;
+    if (!sessionId?.trim()) return false;
     try {
       const response = await api.listMessages(sessionId);
       if (selectedSessionRef.current === sessionId) {
         setMessages(response.messages);
       }
+      return true;
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : i18n.t("Failed to load messages"));
+      return false;
     }
   }, []);
 
@@ -347,6 +382,7 @@ export function useChatRuntime() {
       selectedSessionRef.current = sessionId;
       setSelectedSessionId(sessionId);
       clearPendingStreamUpdates();
+      resetInstructionState();
       setStreams({});
       setTodos([]);
       setError(null);
@@ -354,8 +390,12 @@ export function useChatRuntime() {
       void loadMessages(sessionId);
       void loadTodos(sessionId);
     },
-    [clearPendingStreamUpdates, loadMessages, loadTodos],
+    [clearPendingStreamUpdates, loadMessages, loadTodos, resetInstructionState],
   );
+
+  const clearComposerFocusRequest = useCallback(() => {
+    setFocusComposerAfterWelcome(false);
+  }, []);
 
   useEffect(() => {
     if (authChecking || (authRequired && !authenticated)) return;
@@ -409,6 +449,32 @@ export function useChatRuntime() {
         }
         return;
       }
+      if (kind === "InstructionsLoaded") {
+        if (selectedSessionRef.current !== sessionId || !Array.isArray(payload.sources)) return;
+        const newSources = new Set<string>();
+        const sources = payload.sources.filter((source): source is string => {
+          if (
+            typeof source !== "string" ||
+            source.trim().length === 0 ||
+            shownInstructionSourcesRef.current.has(source) ||
+            newSources.has(source)
+          ) {
+            return false;
+          }
+          newSources.add(source);
+          return true;
+        });
+        if (sources.length === 0) return;
+        for (const source of sources) shownInstructionSourcesRef.current.add(source);
+        const merged = [
+          ...instructionNoticesRef.current,
+          { sources, deferred: instructionToolSessionsRef.current.has(sessionId) },
+        ];
+        instructionNoticesRef.current = merged;
+        instructionNoticeRevisionRef.current += 1;
+        setInstructionNotices(merged);
+        return;
+      }
       if (kind === "TurnStarting") {
         const requestId = Number(payload.request_id);
         if (Number.isFinite(requestId)) {
@@ -443,6 +509,7 @@ export function useChatRuntime() {
         const requestId = Number(payload.request_id);
         if (!Number.isFinite(requestId)) return;
         const key = `${sessionId}:${requestId}`;
+        if (kind === "ToolCallUpdated") instructionToolSessionsRef.current.add(sessionId);
         scheduleStreamUpdate((current) => {
           const next = cloneStream(current[key] ?? createStream(key, requestId));
           next.status = "streaming";
@@ -475,6 +542,7 @@ export function useChatRuntime() {
         const toolCall = toolCallFromPayload(payload.tool_call);
         if (!Number.isFinite(requestId) || !toolCall) return;
         const key = `${sessionId}:${requestId}`;
+        instructionToolSessionsRef.current.add(sessionId);
         scheduleStreamUpdate((current) => {
           const next = cloneStream(current[key] ?? createStream(key, requestId));
           const entry = ensureToolCall(next, toolCall);
@@ -599,6 +667,7 @@ export function useChatRuntime() {
         const requestId = Number(payload.request_id);
         if (!Number.isFinite(requestId)) return;
         const key = `${sessionId}:${requestId}`;
+        instructionToolSessionsRef.current.delete(sessionId);
         scheduleStreamUpdate((current) => {
           const next = cloneStream(current[key] ?? createStream(key, requestId));
           next.status = "failed";
@@ -622,9 +691,12 @@ export function useChatRuntime() {
         const requestId = Number(payload.request_id);
         if (!Number.isFinite(requestId)) return;
         const key = `${sessionId}:${requestId}`;
+        const turn = (payload.turn ?? {}) as Record<string, unknown>;
+        if (Array.isArray(turn.tool_calls) && turn.tool_calls.length > 0) {
+          instructionToolSessionsRef.current.add(sessionId);
+        }
         scheduleStreamUpdate((current) => {
           const next = cloneStream(current[key] ?? createStream(key, requestId));
-          const turn = (payload.turn ?? {}) as Record<string, unknown>;
           const turnCompletedAt = asString(turn.completed_at) || null;
           reconcileSegment(next, "text", asString(turn.content));
           reconcileSegment(next, "reasoning", asString(turn.reasoning));
@@ -649,6 +721,7 @@ export function useChatRuntime() {
         const requestId = Number(payload.request_id);
         if (!Number.isFinite(requestId)) return;
         const key = `${sessionId}:${requestId}`;
+        instructionToolSessionsRef.current.delete(sessionId);
         scheduleStreamUpdate((current) => {
           const stream = current[key];
           if (!stream) return current;
@@ -677,7 +750,16 @@ export function useChatRuntime() {
           current.map((item) => (item.session_id === sessionId ? { ...item, busy: false } : item)),
         );
         if (selectedSessionRef.current === sessionId) {
-          void loadMessages(sessionId);
+          const instructionRevision = instructionNoticeRevisionRef.current;
+          void loadMessages(sessionId).then((loaded) => {
+            if (
+              loaded &&
+              selectedSessionRef.current === sessionId &&
+              instructionNoticeRevisionRef.current === instructionRevision
+            ) {
+              clearPendingInstructionNotices();
+            }
+          });
           void loadTodos(sessionId);
         }
         return;
@@ -686,7 +768,7 @@ export function useChatRuntime() {
         void loadMessages(sessionId);
       }
     },
-    [loadMessages, loadTodos, scheduleStreamUpdate],
+    [clearPendingInstructionNotices, loadMessages, loadTodos, scheduleStreamUpdate],
   );
 
   useEffect(() => {
@@ -722,6 +804,7 @@ export function useChatRuntime() {
     setSelectedSessionId(null);
     setMessages([]);
     clearPendingStreamUpdates();
+    resetInstructionState();
     setStreams({});
     setDraft("");
     setFileMention(null);
@@ -772,6 +855,8 @@ export function useChatRuntime() {
     try {
       const response = await api.createSession(content.slice(0, 80));
       setSessions((current) => [response.session, ...current]);
+      setFocusComposerAfterWelcome(true);
+      setScrollToBottomRequest((current) => current + 1);
       selectSession(response.session.session_id);
       setDraft("");
       await api.sendPrompt(
@@ -938,6 +1023,7 @@ export function useChatRuntime() {
     }
     const messageId = crypto.randomUUID();
     setSending(true);
+    setScrollToBottomRequest((current) => current + 1);
     setDraft("");
     try {
       await api.sendPrompt(sessionId, content, mode, messageId, thinkingLevel);
@@ -1036,6 +1122,9 @@ export function useChatRuntime() {
     sending,
     canceling,
     welcomeSending,
+    focusComposerAfterWelcome,
+    clearComposerFocusRequest,
+    scrollToBottomRequest,
     thinkingLevel,
     sessionSearch,
     renamingSessionId,
@@ -1067,5 +1156,6 @@ export function useChatRuntime() {
     cancelSession,
     updateFileMention,
     handleFileSelect,
+    instructionNotices,
   };
 }

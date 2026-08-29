@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, Clipboard } from "lucide-react";
+import { Check, Copy } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 interface CopyButtonProps {
@@ -22,11 +22,13 @@ export function CopyButton({ content }: CopyButtonProps) {
 
   return (
     <button
+      type="button"
       onClick={handleCopy}
-      className="ml-2 rounded p-1 text-neutral-400 transition-colors hover:text-neutral-600 dark:text-neutral-500 dark:hover:text-neutral-300"
+      className="message-action"
       title={t("Copy to clipboard")}
+      aria-label={t("Copy to clipboard")}
     >
-      {copied ? <Check className="h-4 w-4" /> : <Clipboard className="h-4 w-4" />}
+      {copied ? <Check size={17} /> : <Copy size={17} />}
     </button>
   );
 }

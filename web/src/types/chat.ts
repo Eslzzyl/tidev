@@ -3,6 +3,11 @@ import type { ProviderErrorData } from "./api";
 
 export type Feature = "chat" | "files" | "terminal" | "git" | "stats";
 
+export interface InstructionNotice {
+  sources: string[];
+  deferred: boolean;
+}
+
 export interface StreamMessage {
   key: string;
   requestId: number;

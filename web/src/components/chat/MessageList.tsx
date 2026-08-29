@@ -1,5 +1,16 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type UIEvent,
+} from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import type { TFunction } from "i18next";
 import {
   Check,
   ChevronRight,
@@ -18,12 +29,15 @@ import type {
   FrontendRequest,
   Message,
   MessageRecord,
+  Model,
   ProviderErrorData,
+  Session,
   ToolCall,
 } from "../../types/api";
-import type { StreamMessage } from "../../types/chat";
+import type { InstructionNotice, StreamMessage } from "../../types/chat";
 import { ChatScrollContext } from "./ChatScrollContext";
 import { CopyButton } from "../ui/CopyButton";
+import { ExpandableBody } from "../ui/ExpandableBody";
 import { InstructionMessage, SystemMessageBlock } from "../renderers/SystemMessageBlock";
 import { ThinkingBlock } from "../renderers/ThinkingBlock";
 import { ToolCallRow } from "../renderers/ToolCallRow";
@@ -31,8 +45,8 @@ import { MarkdownRenderer } from "../renderers/MarkdownRenderer";
 import { ActivityRipple } from "../renderers/ActivityRipple";
 import {
   buildRounds,
-  getRoundPreviewIndex,
   isRoundCollapsible,
+  parseInstructionMessage,
   type Round,
   type RoundSegment,
   type SystemMessageBlock as SystemMessageBlockData,
@@ -44,14 +58,20 @@ import {
   getDuration,
   stripSystemReminderTags,
 } from "../../utils/format";
+import { formatThinkingLevel, isThinkingLevelEnabled } from "../../utils/chat";
 
 export interface MessageListProps {
   messages: MessageRecord[];
   streams: StreamMessage[];
+  instructionNotices?: InstructionNotice[];
+  sessionId?: string;
+  session?: Session;
+  models?: Model[];
   workspaceRoot?: string;
   onRevert?: (messageId: string) => void;
   onFork?: (messageId: string) => void;
   onRetryProviderError?: (messageId: string) => void;
+  scrollToBottomRequest?: number;
 }
 
 interface SegmentItem {
@@ -59,33 +79,31 @@ interface SegmentItem {
   contentId?: string;
   segment: RoundSegment;
   entry?: ToolCallEntry;
+  instructionContent?: string;
   active: boolean;
+  collapsed: boolean;
   reasoningStartedAt?: string | null;
   reasoningCompletedAt?: string | null;
 }
 
+type AssistantStatus = "streaming" | "complete" | "cancelled" | "failed" | "interrupted";
+
 type ChatItem =
   | { kind: "user"; key: string; round: Round }
-  | { kind: "instruction"; key: string; message: Message }
   | {
-      kind: "round-meta";
+      kind: "assistant-meta";
       key: string;
-      round: Round;
-      expanded: boolean;
-      collapsible: boolean;
-    }
-  | { kind: "round-segment"; item: SegmentItem }
-  | { kind: "round-footer"; key: string; footerParts: string[] }
-  | { kind: "system"; key: string; block: SystemMessageBlockData }
-  | {
-      kind: "stream-meta";
-      key: string;
-      stream: StreamMessage;
+      turnId: string;
+      status: AssistantStatus;
+      active: boolean;
       startedAt?: string;
+      completedAt?: string;
       expanded: boolean;
       collapsible: boolean;
     }
-  | { kind: "stream-segment"; item: SegmentItem }
+  | { kind: "assistant-segment"; item: SegmentItem }
+  | { kind: "round-footer"; key: string; footerParts: string[]; content: string }
+  | { kind: "system"; key: string; block: SystemMessageBlockData }
   | { kind: "stream-empty"; key: string }
   | { kind: "stream-error"; key: string; message: string }
   | {
@@ -104,8 +122,111 @@ function hasAssistant(round: Round) {
   return round.segments.length > 0 || round.status !== "user_only" || round.interrupted;
 }
 
-function roundIsExpanded(round: Round, expandedRounds: Record<string, boolean>) {
-  return expandedRounds[round.id] ?? !isRoundCollapsible(round);
+function turnContentId(turnId: string) {
+  return `assistant-content-${turnId.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+}
+
+function roundAssistantStatus(round: Round): AssistantStatus {
+  if (!round.interrupted) return round.status === "streaming" ? "streaming" : "complete";
+  if (round.interruptionKind === "cancelled") return "cancelled";
+  return round.interruptionKind === "failed" ? "failed" : "interrupted";
+}
+
+function relativeInstructionPath(source: string, workspaceRoot: string) {
+  const normalizedSource = source.replaceAll("\\", "/");
+  const normalizedRoot = workspaceRoot.replaceAll("\\", "/").replace(/\/+$/, "");
+  if (!normalizedRoot) return normalizedSource;
+  if (normalizedSource === normalizedRoot) return ".";
+  return normalizedSource.startsWith(`${normalizedRoot}/`)
+    ? normalizedSource.slice(normalizedRoot.length + 1)
+    : normalizedSource;
+}
+
+function instructionMessageContent(sources: string[], workspaceRoot: string) {
+  const displayPaths = sources.map((source) => relativeInstructionPath(source, workspaceRoot));
+  return displayPaths.length === 1
+    ? `Loaded instructions from ${displayPaths[0]}`
+    : `Loaded ${displayPaths.length} instruction files: ${displayPaths.join(", ")}`;
+}
+
+function instructionReminderBlocks(content: string) {
+  return content.match(/<system-reminder>[\s\S]*?<\/system-reminder>/g) ?? [];
+}
+
+function normalizedInstructionPath(path: string) {
+  return path.trim().replaceAll("\\", "/").replace(/^\.\//, "").replace(/\/+$/, "");
+}
+
+function instructionSourceMatches(actual: string, expected: string, workspaceRoot: string) {
+  const normalizedActual = normalizedInstructionPath(actual);
+  const normalizedExpected = normalizedInstructionPath(expected);
+  const relativeExpected = normalizedInstructionPath(
+    relativeInstructionPath(expected, workspaceRoot),
+  );
+
+  return (
+    normalizedActual === normalizedExpected ||
+    normalizedActual === relativeExpected ||
+    normalizedActual.endsWith(`/${relativeExpected}`) ||
+    relativeExpected.endsWith(`/${normalizedActual}`)
+  );
+}
+
+function instructionPayloadForSources(
+  contents: string[],
+  sources: string[],
+  workspaceRoot: string,
+): string | undefined {
+  const blocks = contents.flatMap(instructionReminderBlocks);
+  if (blocks.length === 0) return undefined;
+  if (sources.length === 0) return blocks.join("\n\n");
+
+  const matchingBlocks = blocks.filter((block) => {
+    const blockSources = block.match(/^Instructions from:\s*(.+)$/gm) ?? [];
+    return blockSources.some((line) => {
+      const actualSource = line.replace(/^Instructions from:\s*/, "");
+      return sources.some((source) =>
+        instructionSourceMatches(actualSource, source, workspaceRoot),
+      );
+    });
+  });
+
+  return matchingBlocks.length > 0
+    ? matchingBlocks.join("\n\n")
+    : blocks.length === 1
+      ? blocks[0]
+      : undefined;
+}
+
+function liveInstructionMessage(
+  template: Message,
+  sources: string[],
+  workspaceRoot: string,
+  noticeIndex: number,
+): Message {
+  return {
+    ...template,
+    id: `live-instructions-${noticeIndex}`,
+    role: "system",
+    content: instructionMessageContent(sources, workspaceRoot),
+    attachments: [],
+    reasoning: "",
+    tool_calls: [],
+    tool_call_id: null,
+    tool_name: null,
+    completed_at: null,
+    streaming: false,
+    reasoning_started_at: null,
+    reasoning_completed_at: null,
+    input_tokens: null,
+    output_tokens: null,
+    total_tokens: null,
+    cache_read_tokens: null,
+    cache_write_tokens: null,
+    model_id: null,
+    tokens_per_second: null,
+    thinking_level: null,
+  };
 }
 
 function makeSegmentItems(
@@ -118,35 +239,142 @@ function makeSegmentItems(
   reasoningCompletedAt?: string | null,
   keyPrefix = "segment",
   contentId?: string,
+  activeFromIndex = 0,
+  activeReasoningStartedAt?: string | null,
+  activeReasoningCompletedAt?: string | null,
+  instructionContentByMessageId?: ReadonlyMap<string, string | undefined>,
 ): SegmentItem[] {
   const visible: SegmentItem[] = [];
 
   segments.forEach((segment, index) => {
-    if (segment.type !== "instruction" && !showAll && index !== previewIndex) return;
     const entry = segment.type === "tool_call" ? toolCallMap[segment.toolCallId] : undefined;
     if (segment.type === "tool_call" && !entry) return;
 
+    const isLiveSegment = index >= activeFromIndex;
+    const segmentStartedAt = isLiveSegment
+      ? (activeReasoningStartedAt ?? reasoningStartedAt)
+      : reasoningStartedAt;
+    const segmentCompletedAt = isLiveSegment
+      ? (activeReasoningCompletedAt ?? reasoningCompletedAt)
+      : reasoningCompletedAt;
+    const segmentActive =
+      active &&
+      isLiveSegment &&
+      segment.type === "reasoning" &&
+      index === segments.length - 1 &&
+      !segment.completedAt &&
+      !segmentCompletedAt;
     visible.push({
       key: `${keyPrefix}-${index}-${segment.type === "tool_call" ? segment.toolCallId : "content"}`,
       contentId: visible.length === 0 ? contentId : undefined,
       segment,
       entry,
-      active,
-      reasoningStartedAt,
-      reasoningCompletedAt,
+      instructionContent:
+        segment.type === "instruction"
+          ? instructionContentByMessageId?.get(segment.message.id)
+          : undefined,
+      active: segmentActive,
+      collapsed: !showAll && index !== previewIndex,
+      reasoningStartedAt: segmentStartedAt,
+      reasoningCompletedAt: segmentCompletedAt,
     });
   });
 
   return visible;
 }
 
+function getTextPreviewIndex(segments: RoundSegment[]) {
+  return segments.findLastIndex((segment) => segment.type === "text" && segment.content.trim());
+}
+
+function streamProviderError(stream: StreamMessage): ProviderErrorData | null {
+  return (
+    stream.providerError ??
+    (stream.status === "failed" && stream.error
+      ? {
+          message: stream.error,
+          retryable: false,
+          request_id: stream.requestId,
+          user_message_id: stream.userMessageId ?? null,
+        }
+      : null)
+  );
+}
+
+function resolveModelDisplayName(
+  modelId: string | undefined,
+  models: Model[],
+  session: Session | undefined,
+): string | null {
+  if (!modelId) return session?.model_display_name || null;
+
+  const separator = modelId.indexOf(":");
+  const providerId = separator > 0 ? modelId.slice(0, separator) : undefined;
+  const rawModelId = separator > 0 ? modelId.slice(separator + 1) : modelId;
+
+  if (
+    session &&
+    session.model_id === rawModelId &&
+    (!providerId || session.provider_id === providerId)
+  ) {
+    return session.model_display_name || rawModelId;
+  }
+
+  const model = models.find(
+    (candidate) =>
+      candidate.model_id === rawModelId && (!providerId || candidate.provider_id === providerId),
+  );
+  return model?.model_display_name || modelId;
+}
+
+function buildRoundFooterParts(
+  round: Round,
+  models: Model[],
+  session: Session | undefined,
+  t: TFunction,
+): string[] {
+  const parts: string[] = [];
+  const modelName = resolveModelDisplayName(round.modelId, models, session);
+  if (modelName) parts.push(modelName);
+
+  if (round.thinkingLevel && isThinkingLevelEnabled(round.thinkingLevel)) {
+    parts.push(formatThinkingLevel(round.thinkingLevel));
+  }
+
+  if (round.completedAt) {
+    const duration = getDuration(round.userMessage.created_at ?? "", round.completedAt);
+    if (duration) parts.push(duration);
+  }
+
+  if (round.tokensPerSecond !== undefined && Number.isFinite(round.tokensPerSecond)) {
+    parts.push(`${round.tokensPerSecond.toFixed(1)} t/s`);
+  }
+
+  if (round.completedAt) {
+    parts.push(formatTime(round.completedAt, true));
+  }
+
+  if (round.mode === "plan" || round.mode === "build") {
+    parts.push(t(round.mode === "plan" ? "Plan" : "Build"));
+  }
+
+  return parts;
+}
+
 function buildChatItems(
   rounds: (Round | SystemMessageBlockData)[],
   streams: StreamMessage[],
-  expandedRounds: Record<string, boolean>,
-  expandedStreams: Record<string, boolean>,
+  expandedTurns: Record<string, boolean>,
+  instructionNotices: InstructionNotice[],
+  workspaceRoot: string,
+  models: Model[],
+  session: Session | undefined,
+  t: TFunction,
 ): ChatItem[] {
   const items: ChatItem[] = [];
+  const mergedStreamKeys = new Set<string>();
+  const latestRound = [...rounds].reverse().find((item): item is Round => !isSystemBlock(item));
+  const instructionTurnId = latestRound?.userMessage.id;
   const liveProviderErrorUserIds = new Set(
     streams
       .map((stream) => stream.userMessageId)
@@ -166,17 +394,101 @@ function buildChatItems(
     }
 
     const round = value;
-    const expanded = roundIsExpanded(round, expandedRounds);
-    const collapsible = isRoundCollapsible(round);
-    const previewIndex = getRoundPreviewIndex(round);
-    const assistant = hasAssistant(round);
+    const turnId = round.userMessage.id;
+    const persistedSegments: RoundSegment[] = [
+      ...round.leadingInstructions.map((message) => ({ type: "instruction" as const, message })),
+      ...round.segments,
+    ];
+    const liveStream = streams.find(
+      (stream) => stream.status === "streaming" && stream.userMessageId === turnId,
+    );
+    const liveStreamHasToolCall = liveStream?.segments.some(
+      (segment) => segment.type === "tool_call",
+    );
+    const pendingInstructions =
+      turnId === instructionTurnId
+        ? instructionNotices
+            .map((notice, index) => ({
+              message: liveInstructionMessage(
+                round.userMessage,
+                notice.sources,
+                workspaceRoot,
+                index,
+              ),
+              deferred: notice.deferred,
+            }))
+            .filter(
+              ({ message, deferred }) =>
+                (!deferred || !liveStream || !liveStreamHasToolCall) &&
+                !persistedSegments.some(
+                  (segment) =>
+                    segment.type === "instruction" && segment.message.content === message.content,
+                ),
+            )
+        : [];
+    const assistant = hasAssistant(round) || Boolean(liveStream) || pendingInstructions.length > 0;
 
-    items.push({ kind: "user", key: `${round.id}:user`, round });
-    for (const message of round.leadingInstructions) {
-      items.push({ kind: "instruction", key: `${round.id}:instruction:${message.id}`, message });
-    }
+    items.push({ kind: "user", key: `${turnId}:user`, round });
 
     if (!assistant) continue;
+
+    if (liveStream) mergedStreamKeys.add(liveStream.key);
+    const insertInstructionBeforeLive = Boolean(liveStream && pendingInstructions.length > 0);
+    let mergedSegments = liveStream
+      ? [...persistedSegments, ...liveStream.segments]
+      : persistedSegments;
+    let activeFromIndex = persistedSegments.length;
+    if (pendingInstructions.length > 0) {
+      const instructionSegments = pendingInstructions.map(({ message }) => ({
+        type: "instruction" as const,
+        message,
+      }));
+      if (insertInstructionBeforeLive) {
+        mergedSegments = [
+          ...persistedSegments,
+          ...instructionSegments,
+          ...(liveStream?.segments ?? []),
+        ];
+        activeFromIndex += instructionSegments.length;
+      } else {
+        mergedSegments = [...mergedSegments, ...instructionSegments];
+      }
+    }
+    const mergedToolCallMap = liveStream
+      ? { ...round.toolCallMap, ...liveStream.toolCallMap }
+      : round.toolCallMap;
+    const instructionContents = [
+      round.userMessage.content,
+      ...Object.values(mergedToolCallMap).map((entry) => entry.result?.output ?? ""),
+    ];
+    const instructionContentByMessageId = new Map<string, string | undefined>();
+    for (const segment of mergedSegments) {
+      if (segment.type !== "instruction") continue;
+      const details = parseInstructionMessage(segment.message.content);
+      const sources = details
+        ? details.sources
+            .split(",")
+            .map((source) => source.trim())
+            .filter(Boolean)
+        : [];
+      instructionContentByMessageId.set(
+        segment.message.id,
+        instructionPayloadForSources(instructionContents, sources, workspaceRoot),
+      );
+    }
+    const hasPendingInstructions = pendingInstructions.length > 0;
+    const hasLiveContinuation = Boolean(liveStream);
+    const renderableSegmentCount = mergedSegments.filter(
+      (segment) => segment.type !== "tool_call" || Boolean(mergedToolCallMap[segment.toolCallId]),
+    ).length;
+    const collapsible =
+      isRoundCollapsible(round) ||
+      (renderableSegmentCount > 1 &&
+        (hasLiveContinuation || round.status === "complete" || Boolean(round.completedAt)));
+    const expanded = expandedTurns[turnId] ?? (hasLiveContinuation || !collapsible);
+    const previewIndex = getTextPreviewIndex(mergedSegments);
+    const hasFinalAnswer = previewIndex >= 0 && previewIndex === mergedSegments.length - 1;
+    const active = liveStream?.status === "streaming" || pendingInstructions.length > 0;
 
     const interruptionLabel = round.interrupted
       ? round.interruptionKind === "cancelled"
@@ -189,34 +501,46 @@ function buildChatItems(
       ? getDuration(round.userMessage.created_at ?? "", round.completedAt)
       : null;
     const showTurnMeta =
-      Boolean(duration) ||
-      round.status === "streaming" ||
-      collapsible ||
-      (interruptionLabel !== null && round.providerErrors.length === 0);
+      hasLiveContinuation ||
+      hasPendingInstructions ||
+      ((hasFinalAnswer || round.interrupted) &&
+        (Boolean(duration) ||
+          collapsible ||
+          (interruptionLabel !== null && round.providerErrors.length === 0)));
 
     if (showTurnMeta) {
       items.push({
-        kind: "round-meta",
-        key: `${round.id}:meta`,
-        round,
+        kind: "assistant-meta",
+        key: `${turnId}:meta`,
+        turnId,
+        status:
+          liveStream?.status ??
+          (pendingInstructions.length > 0 ? "streaming" : roundAssistantStatus(round)),
+        active,
+        startedAt: round.userMessage.created_at,
+        completedAt: hasLiveContinuation ? undefined : round.completedAt,
         expanded,
         collapsible,
       });
     }
 
     const segments = makeSegmentItems(
-      round.segments,
-      round.toolCallMap,
+      mergedSegments,
+      mergedToolCallMap,
       !collapsible || expanded,
       previewIndex,
-      round.status === "streaming",
+      active,
       round.reasoningStartedAt,
       round.reasoningCompletedAt ?? round.completedAt,
-      `${round.id}:segment`,
-      `assistant-content-${round.id}`,
+      `${turnId}:segment`,
+      turnContentId(turnId),
+      activeFromIndex,
+      liveStream?.reasoningStartedAt,
+      liveStream?.reasoningCompletedAt,
+      instructionContentByMessageId,
     );
     for (const segment of segments) {
-      items.push({ kind: "round-segment", item: segment });
+      items.push({ kind: "assistant-segment", item: segment });
     }
 
     for (const providerError of round.providerErrors) {
@@ -224,40 +548,52 @@ function buildChatItems(
       if (liveProviderErrorUserIds.has(messageId)) continue;
       items.push({
         kind: "provider-error",
-        key: `${round.id}:provider-error:${providerError.id}`,
+        key: `${turnId}:provider-error:${providerError.id}`,
         error: providerError.data,
         messageId,
       });
     }
 
-    const footerParts: string[] = [];
-    if (round.modelName) footerParts.push(round.modelName);
-    if (round.completedAt) footerParts.push(formatTime(round.completedAt));
-    else if (round.status === "streaming" && round.userMessage.created_at) {
-      footerParts.push(formatTime(round.userMessage.created_at));
+    const liveProviderError = liveStream ? streamProviderError(liveStream) : null;
+    if (liveStream && liveProviderError) {
+      items.push({
+        kind: "provider-error",
+        key: `${turnId}:provider-error`,
+        error: liveProviderError,
+        messageId: liveProviderError.user_message_id ?? liveStream.userMessageId ?? "",
+        retrying: liveStream.retrying,
+      });
     }
-    if (round.status === "complete" && !round.interrupted && footerParts.length) {
-      items.push({ kind: "round-footer", key: `${round.id}:footer`, footerParts });
+
+    const footerParts = buildRoundFooterParts(round, models, session, t);
+    const finalReplyContent =
+      hasFinalAnswer && mergedSegments[previewIndex]?.type === "text"
+        ? stripSystemReminderTags(mergedSegments[previewIndex].content)
+        : "";
+    if (
+      !hasLiveContinuation &&
+      round.status === "complete" &&
+      !round.interrupted &&
+      hasFinalAnswer &&
+      footerParts.length
+    ) {
+      items.push({
+        kind: "round-footer",
+        key: `${turnId}:footer`,
+        footerParts,
+        content: finalReplyContent,
+      });
     }
   }
 
   for (const stream of streams) {
+    if (mergedStreamKeys.has(stream.key)) continue;
     const isStreaming = stream.status === "streaming";
-    const collapsible = !isStreaming && stream.segments.length > 1;
-    const expanded = expandedStreams[stream.key] ?? isStreaming;
-    const previewIndex = stream.segments.findLastIndex(
-      (segment) => segment.type === "text" && segment.content.trim(),
-    );
-    const providerError =
-      stream.providerError ??
-      (stream.status === "failed" && stream.error
-        ? {
-            message: stream.error,
-            retryable: false,
-            request_id: stream.requestId,
-            user_message_id: stream.userMessageId ?? null,
-          }
-        : null);
+    const turnId = stream.userMessageId ?? stream.key;
+    const previewIndex = getTextPreviewIndex(stream.segments);
+    const collapsible = stream.segments.length > 1 && previewIndex > 0;
+    const expanded = expandedTurns[turnId] ?? (isStreaming || !collapsible);
+    const providerError = streamProviderError(stream);
 
     if (!providerError) {
       const startedAt =
@@ -265,9 +601,11 @@ function buildChatItems(
         stream.reasoningStartedAt ??
         undefined;
       items.push({
-        kind: "stream-meta",
-        key: `${stream.key}:meta`,
-        stream,
+        kind: "assistant-meta",
+        key: `${turnId}:meta`,
+        turnId,
+        status: stream.status,
+        active: isStreaming,
         startedAt,
         expanded,
         collapsible,
@@ -282,27 +620,27 @@ function buildChatItems(
       isStreaming,
       stream.reasoningStartedAt,
       stream.reasoningCompletedAt,
-      `${stream.key}:segment`,
-      `stream-content-${stream.key.replace(/[^a-zA-Z0-9_-]/g, "-")}`,
+      `${turnId}:segment`,
+      turnContentId(turnId),
     );
     for (const segment of segments) {
-      items.push({ kind: "stream-segment", item: segment });
+      items.push({ kind: "assistant-segment", item: segment });
     }
 
     if (providerError) {
       items.push({
         kind: "provider-error",
-        key: `${stream.key}:provider-error`,
+        key: `${turnId}:provider-error`,
         error: providerError,
         messageId: providerError.user_message_id ?? stream.userMessageId ?? "",
         retrying: stream.retrying,
       });
     } else if (isStreaming && stream.segments.length === 0) {
-      items.push({ kind: "stream-empty", key: `${stream.key}:empty` });
+      items.push({ kind: "stream-empty", key: `${turnId}:empty` });
     } else if (!isStreaming) {
       items.push({
         kind: "stream-error",
-        key: `${stream.key}:error`,
+        key: `${turnId}:error`,
         message: stream.error ?? "Response failed",
       });
     }
@@ -316,13 +654,10 @@ function estimateChatItemSize(item: ChatItem | undefined) {
   switch (item.kind) {
     case "user":
       return 118;
-    case "instruction":
-      return 28;
-    case "round-meta":
-    case "stream-meta":
+    case "assistant-meta":
       return 42;
-    case "round-segment":
-    case "stream-segment":
+    case "assistant-segment":
+      if (item.item.collapsed) return 0;
       switch (item.item.segment.type) {
         case "tool_call":
           return 34;
@@ -347,9 +682,11 @@ function estimateChatItemSize(item: ChatItem | undefined) {
   }
 }
 
+const CHAT_SCROLL_BOTTOM_THRESHOLD = 32;
+
 function getChatItemKey(item: ChatItem | undefined, index: number) {
   if (!item) return index;
-  return item.kind === "round-segment" || item.kind === "stream-segment" ? item.item.key : item.key;
+  return item.kind === "assistant-segment" ? item.item.key : item.key;
 }
 
 function UserMessageItem({
@@ -441,26 +778,34 @@ function WorkDuration({
   return <span>{t("Worked for {{duration}}", { duration })}</span>;
 }
 
-function RoundMetaItem({
-  round,
+function AssistantMetaItem({
+  turnId,
+  status,
+  active,
+  startedAt,
+  completedAt,
   expanded,
   collapsible,
   onToggle,
 }: {
-  round: Round;
+  turnId: string;
+  status: AssistantStatus;
+  active: boolean;
+  startedAt?: string;
+  completedAt?: string;
   expanded: boolean;
   collapsible: boolean;
   onToggle: () => void;
 }) {
   const { t } = useTranslation();
-  const isStreaming = round.status === "streaming";
-  const interruptionLabel = round.interrupted
-    ? round.interruptionKind === "cancelled"
+  const interruptionLabel =
+    status === "cancelled"
       ? t("Stopped")
-      : round.interruptionKind === "failed"
+      : status === "failed"
         ? t("Response failed")
-        : t("Response interrupted")
-    : null;
+        : status === "interrupted"
+          ? t("Response interrupted")
+          : null;
 
   const content = (
     <>
@@ -468,12 +813,8 @@ function RoundMetaItem({
         {interruptionLabel ? (
           interruptionLabel
         ) : (
-          <ActivityRipple active={isStreaming}>
-            <WorkDuration
-              startedAt={round.userMessage.created_at}
-              completedAt={round.completedAt ?? undefined}
-              active={isStreaming}
-            />
+          <ActivityRipple active={active}>
+            <WorkDuration startedAt={startedAt} completedAt={completedAt} active={active} />
           </ActivityRipple>
         )}
       </span>
@@ -496,76 +837,7 @@ function RoundMetaItem({
             className="assistant-turn-meta is-collapsible"
             onClick={onToggle}
             aria-expanded={expanded}
-            aria-controls={`assistant-content-${round.id}`}
-            aria-label={expanded ? t("Collapse previous messages") : t("Expand previous messages")}
-          >
-            {content}
-          </button>
-        ) : (
-          <div className="assistant-turn-meta">{content}</div>
-        )}
-      </div>
-    </article>
-  );
-}
-
-function StreamMetaItem({
-  stream,
-  startedAt,
-  expanded,
-  collapsible,
-  onToggle,
-}: {
-  stream: StreamMessage;
-  startedAt?: string;
-  expanded: boolean;
-  collapsible: boolean;
-  onToggle: () => void;
-}) {
-  const { t } = useTranslation();
-  const isStreaming = stream.status === "streaming";
-  const interruptionLabel =
-    stream.status === "failed"
-      ? t("Response failed")
-      : stream.status === "interrupted"
-        ? t("Response interrupted")
-        : null;
-  const contentId = `stream-content-${stream.key.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
-  const content = (
-    <>
-      <span
-        className={
-          isStreaming || !interruptionLabel ? undefined : "assistant-turn-status interrupted"
-        }
-      >
-        {interruptionLabel ? (
-          interruptionLabel
-        ) : (
-          <ActivityRipple active={isStreaming}>
-            <WorkDuration startedAt={startedAt} active={isStreaming} />
-          </ActivityRipple>
-        )}
-      </span>
-      {collapsible ? (
-        <ChevronRight
-          className={`assistant-turn-chevron${expanded ? " expanded" : ""}`}
-          size={18}
-          aria-hidden="true"
-        />
-      ) : null}
-    </>
-  );
-
-  return (
-    <article className="chat-message assistant-message assistant-meta-row streaming-meta-row">
-      <div className="assistant-message-inner">
-        {collapsible ? (
-          <button
-            type="button"
-            className="assistant-turn-meta is-collapsible"
-            onClick={onToggle}
-            aria-expanded={expanded}
-            aria-controls={contentId}
+            aria-controls={turnContentId(turnId)}
             aria-label={expanded ? t("Collapse previous messages") : t("Expand previous messages")}
           >
             {content}
@@ -581,11 +853,22 @@ function StreamMetaItem({
 function renderSegment(
   item: SegmentItem,
   workspaceRoot: string,
+  sessionId: string | undefined,
   expanded: boolean,
   onExpandedChange: (expanded: boolean) => void,
 ): ReactNode {
   const { segment, entry } = item;
-  if (segment.type === "instruction") return <InstructionMessage message={segment.message} />;
+  if (segment.type === "instruction") {
+    return (
+      <InstructionMessage
+        message={segment.message}
+        content={item.instructionContent}
+        sessionId={sessionId}
+        expanded={expanded}
+        onExpandedChange={onExpandedChange}
+      />
+    );
+  }
   if (segment.type === "reasoning" && segment.content) {
     return (
       <ThinkingBlock
@@ -617,17 +900,19 @@ function renderSegment(
 const SegmentItemView = memo(function SegmentItemView({
   item,
   workspaceRoot,
-  stream,
+  sessionId,
   expanded,
+  collapsed,
   onExpandedChange,
 }: {
   item: SegmentItem;
   workspaceRoot: string;
-  stream?: boolean;
+  sessionId?: string;
   expanded: boolean;
+  collapsed: boolean;
   onExpandedChange: (detailKey: string, expanded: boolean) => void;
 }) {
-  const content = renderSegment(item, workspaceRoot, expanded, (next) => {
+  const content = renderSegment(item, workspaceRoot, sessionId, expanded, (next) => {
     onExpandedChange(item.key, next);
   });
   if (!content) return null;
@@ -635,18 +920,20 @@ const SegmentItemView = memo(function SegmentItemView({
     "chat-message",
     "assistant-message",
     "assistant-segment-row",
-    stream ? "streaming-segment-row" : "",
+    collapsed ? "is-collapsed" : "",
   ]
     .filter(Boolean)
     .join(" ");
 
   return (
     <article className={className} id={item.contentId}>
-      <div className="assistant-message-inner">
-        <div className="assistant-message-content message-content">
-          <div className="chat-segment-content">{content}</div>
+      <ExpandableBody expanded={!collapsed} className="assistant-segment-expandable">
+        <div className="assistant-message-inner">
+          <div className="assistant-message-content message-content">
+            <div className="chat-segment-content">{content}</div>
+          </div>
         </div>
-      </div>
+      </ExpandableBody>
     </article>
   );
 });
@@ -654,22 +941,36 @@ const SegmentItemView = memo(function SegmentItemView({
 export const MessageList = memo(function MessageList({
   messages,
   streams,
+  instructionNotices = [],
+  sessionId,
+  session,
+  models = [],
   workspaceRoot = "",
   onRevert,
   onFork,
   onRetryProviderError,
+  scrollToBottomRequest = 0,
 }: MessageListProps) {
   const { t } = useTranslation();
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [expandedRounds, setExpandedRounds] = useState<Record<string, boolean>>({});
-  const [expandedStreams, setExpandedStreams] = useState<Record<string, boolean>>({});
+  const [expandedTurns, setExpandedTurns] = useState<Record<string, boolean>>({});
   const [expandedDetails, setExpandedDetails] = useState<Record<string, boolean>>({});
 
   const rounds = useMemo(() => buildRounds(messages), [messages]);
 
   const items = useMemo(
-    () => buildChatItems(rounds, streams, expandedRounds, expandedStreams),
-    [rounds, streams, expandedRounds, expandedStreams],
+    () =>
+      buildChatItems(
+        rounds,
+        streams,
+        expandedTurns,
+        instructionNotices,
+        workspaceRoot,
+        models,
+        session,
+        t,
+      ),
+    [rounds, streams, expandedTurns, instructionNotices, workspaceRoot, models, session, t],
   );
 
   const virtualizer = useVirtualizer({
@@ -679,21 +980,66 @@ export const MessageList = memo(function MessageList({
     overscan: 6,
     getItemKey: (index) => getChatItemKey(items[index], index),
     useFlushSync: false,
+    anchorTo: "end",
+    scrollEndThreshold: CHAT_SCROLL_BOTTOM_THRESHOLD,
   });
+  const totalSize = virtualizer.getTotalSize();
+  const followTailRef = useRef(true);
+  const scrollFrameRef = useRef<number | null>(null);
+  const previousScrollMetricsRef = useRef<{
+    sessionId?: string;
+    itemCount: number;
+    totalSize: number;
+  } | null>(null);
+  const previousScrollToBottomRequestRef = useRef(scrollToBottomRequest);
 
-  function toggleRound(roundId: string) {
-    const round = rounds.find((item): item is Round => !isSystemBlock(item) && item.id === roundId);
-    setExpandedRounds((current) => ({
-      ...current,
-      [roundId]: !(current[roundId] ?? (round ? !isRoundCollapsible(round) : false)),
-    }));
-  }
+  const handleScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
+    // Virtualizer corrections during measurement also dispatch scroll events.
+    // They must not turn off tail-following while a round is collapsing.
+    if (!event.nativeEvent.isTrusted) return;
+    const element = event.currentTarget;
+    followTailRef.current =
+      element.scrollHeight - element.scrollTop - element.clientHeight <=
+      CHAT_SCROLL_BOTTOM_THRESHOLD;
+  }, []);
 
-  function toggleStream(streamKey: string) {
-    setExpandedStreams((current) => ({
-      ...current,
-      [streamKey]: !(current[streamKey] ?? false),
-    }));
+  useLayoutEffect(() => {
+    const element = scrollRef.current;
+    const previous = previousScrollMetricsRef.current;
+    const scrollWasRequested = previousScrollToBottomRequestRef.current !== scrollToBottomRequest;
+    previousScrollToBottomRequestRef.current = scrollToBottomRequest;
+    previousScrollMetricsRef.current = { sessionId, itemCount: items.length, totalSize };
+    if (!element || (!followTailRef.current && !scrollWasRequested)) return;
+
+    if (scrollWasRequested) followTailRef.current = true;
+
+    const contentChanged =
+      !previous ||
+      previous.sessionId !== sessionId ||
+      previous.itemCount !== items.length ||
+      previous.totalSize !== totalSize;
+    if (!contentChanged && !scrollWasRequested) return;
+
+    if (scrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(scrollFrameRef.current);
+    }
+    scrollFrameRef.current = window.requestAnimationFrame(() => {
+      scrollFrameRef.current = null;
+      const current = scrollRef.current;
+      if (!current || !followTailRef.current) return;
+      current.scrollTop = Math.max(0, current.scrollHeight - current.clientHeight);
+    });
+
+    return () => {
+      if (scrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(scrollFrameRef.current);
+        scrollFrameRef.current = null;
+      }
+    };
+  }, [items.length, scrollToBottomRequest, sessionId, totalSize]);
+
+  function toggleTurn(turnId: string, expanded: boolean) {
+    setExpandedTurns((current) => ({ ...current, [turnId]: !expanded }));
   }
 
   const toggleDetail = useCallback((detailKey: string, expanded: boolean) => {
@@ -704,27 +1050,27 @@ export const MessageList = memo(function MessageList({
     switch (item.kind) {
       case "user":
         return <UserMessageItem round={item.round} onRevert={onRevert} onFork={onFork} />;
-      case "instruction":
+      case "assistant-meta":
         return (
-          <div className="round-instruction">
-            <InstructionMessage message={item.message} />
-          </div>
-        );
-      case "round-meta":
-        return (
-          <RoundMetaItem
-            round={item.round}
+          <AssistantMetaItem
+            turnId={item.turnId}
+            status={item.status}
+            active={item.active}
+            startedAt={item.startedAt}
+            completedAt={item.completedAt}
             expanded={item.expanded}
             collapsible={item.collapsible}
-            onToggle={() => toggleRound(item.round.id)}
+            onToggle={() => toggleTurn(item.turnId, item.expanded)}
           />
         );
-      case "round-segment":
+      case "assistant-segment":
         return (
           <SegmentItemView
             item={item.item}
             workspaceRoot={workspaceRoot}
+            sessionId={sessionId}
             expanded={expandedDetails[item.item.key] ?? false}
+            collapsed={item.item.collapsed}
             onExpandedChange={toggleDetail}
           />
         );
@@ -733,33 +1079,16 @@ export const MessageList = memo(function MessageList({
           <article className="chat-message assistant-message assistant-footer-row">
             <div className="assistant-message-inner">
               <div className="assistant-message-content message-content">
-                <div className="round-footer">{item.footerParts.join(" · ")}</div>
+                <div className="round-footer">
+                  <span>{item.footerParts.join(" · ")}</span>
+                  {item.content ? <CopyButton content={item.content} /> : null}
+                </div>
               </div>
             </div>
           </article>
         );
       case "system":
-        return <SystemMessageBlock message={item.block.message} />;
-      case "stream-meta":
-        return (
-          <StreamMetaItem
-            stream={item.stream}
-            startedAt={item.startedAt}
-            expanded={item.expanded}
-            collapsible={item.collapsible}
-            onToggle={() => toggleStream(item.stream.key)}
-          />
-        );
-      case "stream-segment":
-        return (
-          <SegmentItemView
-            item={item.item}
-            workspaceRoot={workspaceRoot}
-            stream
-            expanded={expandedDetails[item.item.key] ?? false}
-            onExpandedChange={toggleDetail}
-          />
-        );
+        return <SystemMessageBlock message={item.block.message} sessionId={sessionId} />;
       case "stream-empty":
         return (
           <article className="chat-message assistant-message assistant-segment-row">
@@ -805,7 +1134,7 @@ export const MessageList = memo(function MessageList({
   }
 
   return (
-    <div className="message-scroll" ref={scrollRef}>
+    <div className="message-scroll" ref={scrollRef} onScroll={handleScroll}>
       <ChatScrollContext.Provider value={scrollRef}>
         <div
           className="message-virtual-canvas"

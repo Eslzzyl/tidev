@@ -49,7 +49,10 @@ export interface Round {
   interrupted: boolean;
   interruptionKind?: RoundInterruptionKind;
   completedAt?: string;
-  modelName?: string;
+  modelId?: string;
+  thinkingLevel?: Message["thinking_level"];
+  tokensPerSecond?: number;
+  mode?: string;
   reasoningStartedAt?: string;
   reasoningCompletedAt?: string;
 }
@@ -181,6 +184,8 @@ export function buildRounds(records: MessageRecord[]): (Round | SystemMessageBlo
         providerErrors: [],
         status: "user_only",
         interrupted: false,
+        mode: record.app_data.mode ?? undefined,
+        thinkingLevel: msg.thinking_level ?? undefined,
       };
       rounds.push(currentRound);
     } else if (msg.role === "system") {
@@ -252,7 +257,13 @@ export function buildRounds(records: MessageRecord[]): (Round | SystemMessageBlo
         }
         currentRound.status = msg.streaming ? "streaming" : "complete";
         if (msg.model_id) {
-          currentRound.modelName = msg.model_id;
+          currentRound.modelId = msg.model_id;
+        }
+        if (msg.thinking_level !== null) {
+          currentRound.thinkingLevel = msg.thinking_level;
+        }
+        if (msg.tokens_per_second !== null) {
+          currentRound.tokensPerSecond = msg.tokens_per_second;
         }
       } else if (msg.role === "tool" && msg.tool_call_id) {
         if (msg.content.trim() === "User cancelled the request") {

@@ -204,7 +204,7 @@ export function CodeLinesRenderer({ output, filepath }: Props) {
           if (!line) return null;
           return (
             <div
-              className="group flex min-w-full font-mono text-xs leading-relaxed"
+              className="tool-code-line-row group flex min-w-full"
               data-index={virtualItem.index}
               key={virtualItem.key}
               ref={virtualizer.measureElement}

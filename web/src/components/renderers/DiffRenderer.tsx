@@ -731,7 +731,7 @@ export function DiffRenderer({ diff, filepath, compact = false }: Props) {
 
     if (isContext) {
       return (
-        <div className="flex min-h-[22px] font-mono text-xs leading-[22px]" data-diff-pane="inline">
+        <div className="tool-diff-line flex min-h-[22px]" data-diff-pane="inline">
           <span className="w-8 shrink-0 select-none text-right text-neutral-400">
             {row.left.lineNum}
           </span>
@@ -753,7 +753,7 @@ export function DiffRenderer({ diff, filepath, compact = false }: Props) {
     if (hasDel) {
       return (
         <div
-          className="flex min-h-[22px] font-mono text-xs leading-[22px] bg-red-50 dark:bg-red-950/40"
+          className="tool-diff-line flex min-h-[22px] bg-red-50 dark:bg-red-950/40"
           data-diff-pane="inline"
         >
           <span className="w-8 shrink-0 select-none text-right text-neutral-400">
@@ -777,7 +777,7 @@ export function DiffRenderer({ diff, filepath, compact = false }: Props) {
     if (hasAdd) {
       return (
         <div
-          className="flex min-h-[22px] font-mono text-xs leading-[22px] bg-green-50 dark:bg-green-950/40"
+          className="tool-diff-line flex min-h-[22px] bg-green-50 dark:bg-green-950/40"
           data-diff-pane="inline"
         >
           <span className="w-8 shrink-0 select-none text-right text-neutral-400">
@@ -805,7 +805,7 @@ export function DiffRenderer({ diff, filepath, compact = false }: Props) {
     <div className="flex border-b border-neutral-100 dark:border-neutral-800">
       {/* Left side (old) */}
       <div
-        className={`flex min-h-[22px] min-w-0 flex-1 overflow-hidden font-mono text-xs leading-[22px] border-r border-neutral-200 dark:border-neutral-700 ${
+        className={`tool-diff-line flex min-h-[22px] min-w-0 flex-1 overflow-hidden border-r border-neutral-200 dark:border-neutral-700 ${
           row.left.type === "del" ? "bg-red-50 dark:bg-red-950/40" : ""
         }`}
         data-diff-pane="left"
@@ -834,7 +834,7 @@ export function DiffRenderer({ diff, filepath, compact = false }: Props) {
 
       {/* Right side (new) */}
       <div
-        className={`flex min-h-[22px] min-w-0 flex-1 overflow-hidden font-mono text-xs leading-[22px] ${
+        className={`tool-diff-line flex min-h-[22px] min-w-0 flex-1 overflow-hidden ${
           row.right.type === "add" ? "bg-green-50 dark:bg-green-950/40" : ""
         }`}
         data-diff-pane="right"
@@ -871,7 +871,7 @@ export function DiffRenderer({ diff, filepath, compact = false }: Props) {
       onWheel={handleContainerWheel}
       className={
         compact
-          ? "tool-diff-renderer text-xs"
+          ? "tool-diff-renderer"
           : "rounded-lg border border-neutral-200 dark:border-neutral-800"
       }
       style={{ overscrollBehaviorX: "none" }}
@@ -981,7 +981,7 @@ export function CollapsibleDiffFile({
       {/* File header */}
       <button
         onClick={() => !hideCollapseToggle && setLocalExpanded(!isExpanded)}
-        className="flex w-full items-center gap-2 border-b border-neutral-200 bg-neutral-50 px-3 py-2 text-left text-xs font-medium text-neutral-700 transition-colors hover:bg-neutral-100 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
+        className="flex w-full items-center gap-2 border-b border-neutral-200 bg-neutral-50 px-3 py-2 text-left text-xs text-neutral-700 transition-colors hover:bg-neutral-100 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
       >
         {hideCollapseToggle ? null : isExpanded ? (
           <ChevronDown className="h-3.5 w-3.5 text-neutral-400" />
@@ -1031,7 +1031,7 @@ export function DiffCollapseProvider({ children }: { children: React.ReactNode }
     <DiffCollapseContext.Provider value={{ allExpanded, toggleAll }}>
       <div>
         <div className="mb-2 flex items-center justify-between">
-          <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
+          <span className="text-xs text-neutral-500 dark:text-neutral-400">
             {t("File Changes")}
           </span>
           <button

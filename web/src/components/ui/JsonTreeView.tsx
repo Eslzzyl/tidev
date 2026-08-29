@@ -68,7 +68,7 @@ function TreeNode({ keyName, value, depth, maxDepth, embedded }: TreeNodeProps) 
     const empty = entries.length === 0;
 
     return (
-      <div className="font-mono text-xs leading-5">
+      <div className="tool-json-node">
         <button
           onClick={() => setIsExpanded(!isExpanded)}
           className="inline-flex items-center gap-0.5 rounded px-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
@@ -115,7 +115,7 @@ function TreeNode({ keyName, value, depth, maxDepth, embedded }: TreeNodeProps) 
 
   // Leaf node
   return (
-    <div className="font-mono text-xs leading-5">
+    <div className="tool-json-node">
       <span className="inline-flex items-center gap-0.5">
         <span className="w-3.5" />
         {keyName !== null && <span className="text-neutral-500">&ldquo;{keyName}&rdquo;: </span>}
@@ -137,7 +137,7 @@ export function JsonTreeView({
   if (!data || typeof data !== "object") {
     const type = getType(data);
     return (
-      <div className="font-mono text-xs leading-5">
+      <div className="tool-json-node">
         <span className={getValueColor(type, embedded)}>{formatValue(data, type)}</span>
       </div>
     );
@@ -156,14 +156,14 @@ export function JsonTreeView({
     >
       <button
         onClick={() => setIsExpanded(!isExpanded)}
-        className="inline-flex items-center gap-1 rounded px-1 py-0.5 text-xs font-medium text-neutral-600 hover:bg-neutral-200/50 dark:text-neutral-400 dark:hover:bg-neutral-800"
+        className="tool-json-toggle inline-flex items-center gap-1 rounded px-1 py-0.5 text-neutral-600 hover:bg-neutral-200/50 dark:text-neutral-400 dark:hover:bg-neutral-800"
       >
         {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
         {type === "object" ? t("JSON") : t("Array")} ({entries.length}{" "}
         {type === "object" ? t("keys") : t("items")})
       </button>
       {isExpanded && (
-        <div className="mt-1 font-mono text-xs leading-5">
+        <div className="tool-json-content mt-1">
           <span className="text-neutral-500">{bracket[0]}</span>
           <div
             className={
