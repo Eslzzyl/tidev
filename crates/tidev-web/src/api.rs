@@ -2380,3 +2380,21 @@ fn frontend_name(mode: FrontendMode) -> &'static str {
         FrontendMode::Fallback => "fallback",
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_deserialize_prompt_request_with_lowercase_mode() {
+        let json_data = r#"{"content":"hello","mode":"plan"}"#;
+        let req: PromptRequest = serde_json::from_str(json_data).unwrap();
+        assert_eq!(req.content, "hello");
+        assert_eq!(req.mode, Some(Mode::Plan));
+
+        let json_data_build = r#"{"content":"run","mode":"build"}"#;
+        let req_build: PromptRequest = serde_json::from_str(json_data_build).unwrap();
+        assert_eq!(req_build.content, "run");
+        assert_eq!(req_build.mode, Some(Mode::Build));
+    }
+}

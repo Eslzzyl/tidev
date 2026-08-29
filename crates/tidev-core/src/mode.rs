@@ -1,8 +1,11 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Mode {
+    #[serde(alias = "Plan", alias = "PLAN")]
     Plan,
+    #[serde(alias = "Build", alias = "BUILD")]
     Build,
 }
 
@@ -55,5 +58,33 @@ impl std::str::FromStr for Mode {
             "build" => Ok(Self::Build),
             _ => Err(format!("unknown session mode: {s}")),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_mode_serde() {
+        assert_eq!(serde_json::to_string(&Mode::Plan).unwrap(), "\"plan\"");
+        assert_eq!(serde_json::to_string(&Mode::Build).unwrap(), "\"build\"");
+
+        assert_eq!(
+            serde_json::from_str::<Mode>("\"plan\"").unwrap(),
+            Mode::Plan
+        );
+        assert_eq!(
+            serde_json::from_str::<Mode>("\"build\"").unwrap(),
+            Mode::Build
+        );
+        assert_eq!(
+            serde_json::from_str::<Mode>("\"Plan\"").unwrap(),
+            Mode::Plan
+        );
+        assert_eq!(
+            serde_json::from_str::<Mode>("\"Build\"").unwrap(),
+            Mode::Build
+        );
     }
 }
