@@ -47,7 +47,8 @@ workspace，由 `crates/` 下的 14 个 crate 组成；`web/` 下是独立的 We
 ## 常用命令
 
 - `cargo check --workspace` —— 全仓编译检查
-- `cargo test --workspace --all-targets` —— 全仓测试
+- `cargo test -p <crate>` —— 单 crate 测试（如 `cargo test -p tidev-tools`）
+- `cargo test --workspace --all-targets` —— 全仓测试（仅重大重构时运行）
 - `cargo fmt` —— 格式化
 - `cargo clippy --workspace -- -D warnings` —— lint 检查
 
@@ -55,7 +56,10 @@ workspace，由 `crates/` 下的 14 个 crate 组成；`web/` 下是独立的 We
 
 - 修改代码后运行 `cargo fmt`，确保格式正确。
 - clippy 警告视为普通警告，一并处理，不留下新警告。
-- 每次提交保持 `cargo check --workspace` 与 `cargo test --workspace` 通过。
+- **测试执行策略**（按改动风险分级，避免不必要的全仓测试开销）：
+  - **低风险修改**（如文档、注释、纯前端变动、局部无外部依赖的调整）：只要确保 `cargo check --workspace` 通过即可，不强制跑测试。
+  - **中等改动/模块功能修改**：只运行受影响或关联的 crate 测试（如 `cargo test -p tidev-xxx`）。
+  - **重大重构/跨模块核心调整**：在涉及核心架构、跨 crate 公共接口变更或关键链路重写时，才运行全量测试 `cargo test --workspace --all-targets`。
 
 ## 文档索引
 
