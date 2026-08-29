@@ -14,11 +14,16 @@ fn main() {
         web_dir.join("package.json"),
         web_dir.join("pnpm-lock.yaml"),
         web_dir.join("vite.config.ts"),
+        web_dir.join("tsconfig.json"),
+        web_dir.join("tsconfig.app.json"),
+        web_dir.join("tsconfig.node.json"),
         web_dir.join("index.html"),
         web_dir.join("src"),
         web_dir.join("public"),
     ] {
-        println!("cargo:rerun-if-changed={}", path.display());
+        if path.exists() {
+            println!("cargo:rerun-if-changed={}", path.display());
+        }
     }
 
     if env::var("PROFILE").as_deref() != Ok("release") {
