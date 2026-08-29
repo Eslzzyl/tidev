@@ -153,18 +153,32 @@ impl RawMessageRow {
             return Message::new(MessageRole::User, "");
         }
 
-        let metadata: tidev_llm::message::ToolMetadata =
-            serde_json::from_str(&decompress_text(&self.metadata)).unwrap_or_default();
+        let metadata: tidev_llm::message::ToolMetadata = if self.metadata.is_empty() {
+            tidev_llm::message::ToolMetadata::default()
+        } else {
+            serde_json::from_str(&decompress_text(&self.metadata)).unwrap_or_default()
+        };
 
-        let content = decompress_text(&self.content);
+        let content = if self.content.is_empty() {
+            String::new()
+        } else {
+            decompress_text(&self.content)
+        };
 
         let attachments: Vec<tidev_llm::message::MessageAttachment> =
             serde_json::from_str(&self.attachments).unwrap_or_default();
 
-        let reasoning = decompress_text(&self.reasoning);
+        let reasoning = if self.reasoning.is_empty() {
+            String::new()
+        } else {
+            decompress_text(&self.reasoning)
+        };
 
-        let tool_calls: Vec<tidev_llm::message::ToolCall> =
-            serde_json::from_str(&decompress_text(&self.tool_calls)).unwrap_or_default();
+        let tool_calls: Vec<tidev_llm::message::ToolCall> = if self.tool_calls.is_empty() {
+            Vec::new()
+        } else {
+            serde_json::from_str(&decompress_text(&self.tool_calls)).unwrap_or_default()
+        };
 
         let thinking_level = self
             .thinking_level
@@ -1184,8 +1198,33 @@ impl SessionStore {
         if combined_app_data.reasoning_completed_at.is_none() {
             combined_app_data.reasoning_completed_at = msg.reasoning_completed_at;
         }
-        let app_data_json =
-            serde_json::to_string(&combined_app_data).unwrap_or_else(|_| "{}".to_string());
+        let content_blob = compress_text(&msg.content);
+        let reasoning_blob = if msg.reasoning.is_empty() {
+            None
+        } else {
+            Some(compress_text(&msg.reasoning))
+        };
+        let tool_calls_blob = if msg.tool_calls.is_empty() {
+            Vec::new()
+        } else {
+            compress_text(
+                &serde_json::to_string(&msg.tool_calls).unwrap_or_else(|_| "[]".to_string()),
+            )
+        };
+        let metadata_blob = if msg.metadata == tidev_llm::message::ToolMetadata::default() {
+            Vec::new()
+        } else {
+            compress_text(
+                &serde_json::to_string(&msg.metadata).unwrap_or_else(|_| "{}".to_string()),
+            )
+        };
+        let app_data_blob = if combined_app_data == MessageAppData::default() {
+            Vec::new()
+        } else {
+            let app_data_json =
+                serde_json::to_string(&combined_app_data).unwrap_or_else(|_| "{}".to_string());
+            compress_text(&app_data_json)
+        };
 
         conn.execute(
             "INSERT INTO messages (id, session_id, role, content, attachments, reasoning, \
@@ -1199,17 +1238,13 @@ impl SessionStore {
                 msg.id.to_string(),
                 session_id.to_string(),
                 msg.role.db_value(),
-                compress_text(&msg.content),
+                content_blob,
                 serde_json::to_string(&msg.attachments).unwrap_or_else(|_| "[]".to_string()),
-                compress_text(&msg.reasoning),
-                compress_text(
-                    &serde_json::to_string(&msg.tool_calls).unwrap_or_else(|_| "[]".to_string())
-                ),
+                reasoning_blob,
+                tool_calls_blob,
                 msg.tool_call_id.as_deref(),
                 msg.tool_name.as_deref(),
-                compress_text(
-                    &serde_json::to_string(&msg.metadata).unwrap_or_else(|_| "{}".to_string())
-                ),
+                metadata_blob,
                 now,
                 completed,
                 msg.streaming as i64,
@@ -1224,7 +1259,7 @@ impl SessionStore {
                 msg.thinking_level
                     .as_ref()
                     .map(|t| serde_json::to_string(t).unwrap_or_default()),
-                compress_text(&app_data_json),
+                app_data_blob,
             ],
         )?;
         Ok(())
@@ -1421,15 +1456,16 @@ impl SessionStore {
         message_id: Uuid,
         tool_calls: &[tidev_llm::message::ToolCall],
     ) -> Result<()> {
-        let json = serde_json::to_string(tool_calls)?;
+        let blob = if tool_calls.is_empty() {
+            Vec::new()
+        } else {
+            let json = serde_json::to_string(tool_calls)?;
+            compress_text(&json)
+        };
         let conn = self.write_conn.lock().unwrap();
         conn.execute(
             "UPDATE messages SET tool_calls = ?1 WHERE id = ?2 AND session_id = ?3",
-            params![
-                compress_text(&json),
-                message_id.to_string(),
-                session_id.to_string()
-            ],
+            params![blob, message_id.to_string(), session_id.to_string()],
         )?;
         Ok(())
     }
@@ -1441,15 +1477,16 @@ impl SessionStore {
         message_id: Uuid,
         metadata: &tidev_llm::message::ToolMetadata,
     ) -> Result<()> {
-        let json = serde_json::to_string(metadata)?;
+        let blob = if metadata == &tidev_llm::message::ToolMetadata::default() {
+            Vec::new()
+        } else {
+            let json = serde_json::to_string(metadata)?;
+            compress_text(&json)
+        };
         let conn = self.write_conn.lock().unwrap();
         conn.execute(
             "UPDATE messages SET metadata = ?1 WHERE id = ?2 AND session_id = ?3",
-            params![
-                compress_text(&json),
-                message_id.to_string(),
-                session_id.to_string()
-            ],
+            params![blob, message_id.to_string(), session_id.to_string()],
         )?;
         Ok(())
     }
@@ -1474,14 +1511,15 @@ impl SessionStore {
             .map(|b| serde_json::from_str(&decompress_text(&b)).unwrap_or_default())
             .unwrap_or_default();
         app_data.child_session_id = Some(child_session_id);
-        let json = serde_json::to_string(&app_data).unwrap_or_else(|_| "{}".to_string());
+        let blob = if app_data == MessageAppData::default() {
+            Vec::new()
+        } else {
+            let json = serde_json::to_string(&app_data).unwrap_or_else(|_| "{}".to_string());
+            compress_text(&json)
+        };
         conn.execute(
             "UPDATE messages SET app_data = ?1 WHERE id = ?2 AND session_id = ?3",
-            params![
-                compress_text(&json),
-                message_id.to_string(),
-                session_id.to_string()
-            ],
+            params![blob, message_id.to_string(), session_id.to_string()],
         )?;
         Ok(())
     }
@@ -1608,28 +1646,41 @@ impl SessionStore {
     /// Build a Message from a SQLite row (used by load_messages and get_last_message).
     fn build_message_from_row(row: &rusqlite::Row) -> Message {
         let role_str: String = row.get(1).unwrap_or_default();
-        let content = row
-            .get::<_, Vec<u8>>(2)
-            .map(|b| decompress_text(&b))
-            .unwrap_or_else(|_| row.get::<_, String>(2).unwrap_or_default());
+        let content_blob: Vec<u8> = row.get(2).unwrap_or_default();
+        let content = if content_blob.is_empty() {
+            row.get::<_, String>(2).unwrap_or_default()
+        } else {
+            decompress_text(&content_blob)
+        };
         let attachments_raw: String = row.get(3).unwrap_or_default();
         let attachments: Vec<tidev_llm::message::MessageAttachment> =
             serde_json::from_str(&attachments_raw).unwrap_or_default();
         let metadata_raw: Vec<u8> = row.get(8).unwrap_or_default();
-        let metadata: tidev_llm::message::ToolMetadata =
-            serde_json::from_str(&decompress_text(&metadata_raw)).unwrap_or_default();
+        let metadata: tidev_llm::message::ToolMetadata = if metadata_raw.is_empty() {
+            tidev_llm::message::ToolMetadata::default()
+        } else {
+            serde_json::from_str(&decompress_text(&metadata_raw)).unwrap_or_default()
+        };
         let completed_at: Option<String> = row.get(10).ok().flatten();
         let streaming: bool = row.get::<_, i64>(11).unwrap_or(0) != 0;
 
         let reasoning = row
             .get::<_, Vec<u8>>(4)
-            .map(|b| decompress_text(&b))
+            .map(|b| {
+                if b.is_empty() {
+                    String::new()
+                } else {
+                    decompress_text(&b)
+                }
+            })
             .unwrap_or_default();
 
-        let tool_calls_json = row
-            .get::<_, Vec<u8>>(5)
-            .map(|b| decompress_text(&b))
-            .unwrap_or_else(|_| "[]".to_string());
+        let tool_calls_blob: Vec<u8> = row.get(5).unwrap_or_default();
+        let tool_calls: Vec<tidev_llm::message::ToolCall> = if tool_calls_blob.is_empty() {
+            Vec::new()
+        } else {
+            serde_json::from_str(&decompress_text(&tool_calls_blob)).unwrap_or_default()
+        };
 
         let thinking_level: Option<String> = row.get(19).ok().flatten();
         let app_data_blob: Vec<u8> = row.get(20).unwrap_or_default();
@@ -1645,7 +1696,7 @@ impl SessionStore {
             content,
             attachments,
             reasoning,
-            tool_calls: serde_json::from_str(&tool_calls_json).unwrap_or_default(),
+            tool_calls,
             tool_call_id: row.get(6).ok().flatten(),
             tool_name: row.get(7).ok().flatten(),
             metadata,
@@ -2006,17 +2057,36 @@ impl SessionStore {
                     let tool_calls: String = row.get(6)?;
                     let metadata: String = row.get(9)?;
                     let app_data: String = row.get(22).unwrap_or_else(|_| "{}".to_string());
+                    let tool_calls_blob = if tool_calls.trim() == "[]" || tool_calls.is_empty() {
+                        Vec::new()
+                    } else {
+                        compress_text(&tool_calls)
+                    };
+                    let metadata_blob = if metadata.trim() == "{}" || metadata.is_empty() {
+                        Vec::new()
+                    } else {
+                        compress_text(&metadata)
+                    };
+                    let app_data_blob = if app_data.trim() == "{}" || app_data.is_empty() {
+                        Vec::new()
+                    } else {
+                        compress_text(&app_data)
+                    };
+                    let reasoning_blob = match reasoning {
+                        Some(r) if !r.is_empty() => Some(compress_text(&r)),
+                        _ => None,
+                    };
                     Ok((
                         row.get::<_, String>(0)?, // id
                         row.get::<_, String>(1)?, // session_id
                         row.get::<_, String>(2)?, // role
                         compress_text(&content),
                         row.get::<_, String>(4)?, // attachments (JSON, stored as TEXT in both)
-                        reasoning.map(|r| compress_text(&r)),
-                        compress_text(&tool_calls),
+                        reasoning_blob,
+                        tool_calls_blob,
                         row.get::<_, Option<String>>(7)?, // tool_call_id
                         row.get::<_, Option<String>>(8)?, // tool_name
-                        compress_text(&metadata),
+                        metadata_blob,
                         row.get::<_, String>(10)?,         // created_at
                         row.get::<_, Option<String>>(11)?, // completed_at
                         row.get::<_, i64>(12)?,            // streaming
@@ -2029,7 +2099,7 @@ impl SessionStore {
                         row.get::<_, Option<f64>>(19)?,    // tokens_per_second
                         row.get::<_, Option<String>>(20)?, // mode
                         row.get::<_, Option<String>>(21)?, // thinking_level
-                        compress_text(&app_data),
+                        app_data_blob,
                     ))
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -2043,8 +2113,8 @@ impl SessionStore {
                       input_tokens, output_tokens, total_tokens, cache_read_tokens, \
                       cache_write_tokens, model_id, tokens_per_second, mode, \
                       thinking_level, app_data) \
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, \
-                             ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
+                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, \
+                              ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
                     params![
                         r.0, r.1, r.2, r.3, r.4, r.5, r.6, r.7, r.8, r.9, r.10, r.11, r.12, r.13,
                         r.14, r.15, r.16, r.17, r.18, r.19, r.20, r.21, r.22,
@@ -2064,7 +2134,11 @@ impl SessionStore {
             let rows = stmt
                 .query_map(imp_params.as_slice(), |row| {
                     let output_text: Option<String> = row.get(5)?;
-                    let output_blob = output_text.as_deref().map(compress_text);
+                    let output_blob = match output_text {
+                        Some(t) if !t.is_empty() => Some(compress_text(&t)),
+                        Some(_) => Some(Vec::new()),
+                        None => None,
+                    };
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
@@ -2201,14 +2275,15 @@ impl SessionStore {
         } else {
             Some(file_diffs.to_string())
         };
-        let json = serde_json::to_string(&app_data).unwrap_or_else(|_| "{}".to_string());
+        let blob = if app_data == MessageAppData::default() {
+            Vec::new()
+        } else {
+            let json = serde_json::to_string(&app_data).unwrap_or_else(|_| "{}".to_string());
+            compress_text(&json)
+        };
         conn.execute(
             "UPDATE messages SET app_data = ?1 WHERE id = ?2 AND session_id = ?3",
-            params![
-                compress_text(&json),
-                message_id.to_string(),
-                session_id.to_string(),
-            ],
+            params![blob, message_id.to_string(), session_id.to_string(),],
         )?;
         Ok(())
     }
@@ -2998,6 +3073,154 @@ mod tests {
         // Clear revert state
         store.save_revert_state(sid, Uuid::nil(), None).unwrap();
         assert!(store.load_revert_state(sid).unwrap().is_none());
+    }
+
+    #[test]
+    fn empty_fields_stored_as_zero_length_blob_and_null() {
+        let (store, _tmp) = test_store();
+        let sid = create_test_session(&store, "/workspace", "empty fields test");
+
+        let msg = Message::new(MessageRole::User, "");
+        store.append_message(sid, &msg).unwrap();
+
+        // Check SQLite raw columns directly
+        let (content_blob, reasoning_blob, tool_calls_blob, metadata_blob, app_data_blob): (
+            Vec<u8>,
+            Option<Vec<u8>>,
+            Vec<u8>,
+            Vec<u8>,
+            Vec<u8>,
+        ) = store
+            .read(|conn| {
+                Ok(conn.query_row(
+                    "SELECT content, reasoning, tool_calls, metadata, app_data FROM messages WHERE id = ?1",
+                    params![msg.id.to_string()],
+                    |row| {
+                        Ok((
+                            row.get(0)?,
+                            row.get(1)?,
+                            row.get(2)?,
+                            row.get(3)?,
+                            row.get(4)?,
+                        ))
+                    },
+                )?)
+            })
+            .unwrap();
+
+        assert!(
+            content_blob.is_empty(),
+            "empty content should be stored as 0-length blob"
+        );
+        assert!(
+            reasoning_blob.is_none(),
+            "empty reasoning should be stored as NULL"
+        );
+        assert!(
+            tool_calls_blob.is_empty(),
+            "empty tool_calls should be stored as 0-length blob"
+        );
+        assert!(
+            metadata_blob.is_empty(),
+            "default metadata should be stored as 0-length blob"
+        );
+        assert!(
+            app_data_blob.is_empty(),
+            "default app_data should be stored as 0-length blob"
+        );
+
+        // Verify roundtrip loading
+        let loaded = store.load_messages(sid).unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].content, "");
+        assert_eq!(loaded[0].reasoning, "");
+        assert_eq!(loaded[0].tool_calls, Vec::new());
+        assert_eq!(
+            loaded[0].metadata,
+            tidev_llm::message::ToolMetadata::default()
+        );
+    }
+
+    #[test]
+    fn legacy_empty_zstd_frames_backward_compatibility() {
+        let (store, _tmp) = test_store();
+        let sid = create_test_session(&store, "/workspace", "legacy compat test");
+
+        // Manually insert legacy 9/11-byte zstd frames for empty values
+        let legacy_content = zstd::stream::encode_all(std::io::Cursor::new(""), 3).unwrap();
+        let legacy_reasoning = zstd::stream::encode_all(std::io::Cursor::new(""), 3).unwrap();
+        let legacy_tool_calls = zstd::stream::encode_all(std::io::Cursor::new("[]"), 3).unwrap();
+        let legacy_metadata = zstd::stream::encode_all(std::io::Cursor::new("{}"), 3).unwrap();
+        let legacy_app_data = zstd::stream::encode_all(std::io::Cursor::new("{}"), 3).unwrap();
+
+        let msg_id = Uuid::new_v4();
+        let now = Utc::now().to_rfc3339();
+
+        store
+            .write_execute(
+                "INSERT INTO messages (id, session_id, role, content, attachments, reasoning, \
+                 tool_calls, metadata, created_at, app_data) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                params![
+                    msg_id.to_string(),
+                    sid.to_string(),
+                    "assistant",
+                    legacy_content,
+                    "[]",
+                    legacy_reasoning,
+                    legacy_tool_calls,
+                    legacy_metadata,
+                    now,
+                    legacy_app_data,
+                ],
+            )
+            .unwrap();
+
+        let loaded = store.load_messages(sid).unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].id, msg_id);
+        assert_eq!(loaded[0].content, "");
+        assert_eq!(loaded[0].reasoning, "");
+        assert_eq!(loaded[0].tool_calls, Vec::new());
+        assert_eq!(
+            loaded[0].metadata,
+            tidev_llm::message::ToolMetadata::default()
+        );
+    }
+
+    #[test]
+    fn empty_tool_output_stored_as_empty_blob() {
+        let (store, _tmp) = test_store();
+        let sid = create_test_session(&store, "/workspace", "empty tool output test");
+        let msg_id = Uuid::new_v4();
+
+        store
+            .save_tool_output("out-empty-1", sid, msg_id, "call-1", "shell", "")
+            .unwrap();
+
+        let raw_blob: Vec<u8> = store
+            .read(|conn| {
+                Ok(conn.query_row(
+                    "SELECT output FROM tool_outputs WHERE id = 'out-empty-1'",
+                    [],
+                    |row| row.get(0),
+                )?)
+            })
+            .unwrap();
+        assert!(
+            raw_blob.is_empty(),
+            "empty tool output should be stored as 0-length blob"
+        );
+
+        let loaded = store.load_tool_output("out-empty-1").unwrap().unwrap();
+        match loaded {
+            ToolOutputContent::Available { record, output } => {
+                assert_eq!(record.id, "out-empty-1");
+                assert_eq!(output, "");
+                assert_eq!(record.byte_size, 0);
+            }
+            ToolOutputContent::Expired { .. } => panic!("should be available"),
+        }
     }
 }
 // ---------------------------------------------------------------------------
