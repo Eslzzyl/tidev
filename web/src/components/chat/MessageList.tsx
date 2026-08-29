@@ -38,7 +38,12 @@ import {
   type SystemMessageBlock as SystemMessageBlockData,
   type ToolCallEntry,
 } from "../../utils/round";
-import { formatDurationHuman, formatTime, getDuration, stripSystemReminderTags } from "../../utils/format";
+import {
+  formatDurationHuman,
+  formatTime,
+  getDuration,
+  stripSystemReminderTags,
+} from "../../utils/format";
 
 export interface MessageListProps {
   messages: MessageRecord[];
@@ -421,8 +426,7 @@ function WorkDuration({
 
   useEffect(() => {
     if (Number.isNaN(start) || !Number.isNaN(completed) || !active) return;
-    const update = () =>
-      setLiveElapsedMs(Math.max(0, Date.now() - start));
+    const update = () => setLiveElapsedMs(Math.max(0, Date.now() - start));
     update();
     const timer = setInterval(update, 500);
     return () => clearInterval(timer);
@@ -529,15 +533,16 @@ function StreamMetaItem({
   const contentId = `stream-content-${stream.key.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
   const content = (
     <>
-      <span className={isStreaming || !interruptionLabel ? undefined : "assistant-turn-status interrupted"}>
+      <span
+        className={
+          isStreaming || !interruptionLabel ? undefined : "assistant-turn-status interrupted"
+        }
+      >
         {interruptionLabel ? (
           interruptionLabel
         ) : (
           <ActivityRipple active={isStreaming}>
-            <WorkDuration
-              startedAt={startedAt}
-              active={isStreaming}
-            />
+            <WorkDuration startedAt={startedAt} active={isStreaming} />
           </ActivityRipple>
         )}
       </span>

@@ -694,13 +694,7 @@ function resultSummary(
   if (entry.name === "skill" && entry.result) return resultSuffix(skillResultSummary(entry, t));
   if (entry.status !== "completed" || !entry.result) return statusSuffix(entry, t);
   if (isWriteTool(entry.name)) {
-    const changes = fileChangeSummary(
-      entry,
-      workspaceRoot,
-      t,
-      args,
-      entry.name === "apply_patch",
-    );
+    const changes = fileChangeSummary(entry, workspaceRoot, t, args, entry.name === "apply_patch");
     return changes ? resultSuffix(changes) : statusSuffix(entry, t);
   }
   return statusSuffix(entry, t);

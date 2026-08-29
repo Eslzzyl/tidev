@@ -1,11 +1,4 @@
-import {
-  useCallback,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type RefObject,
-} from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { HLJSApi } from "highlight.js";
 
@@ -180,11 +173,7 @@ export function CodeLinesRenderer({ output, filepath }: Props) {
   );
 
   if (codeLines.length === 0) {
-    return (
-      <pre className="tool-code-lines-fallback">
-        {output}
-      </pre>
-    );
+    return <pre className="tool-code-lines-fallback">{output}</pre>;
   }
 
   const viewportHeight = Math.min(

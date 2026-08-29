@@ -85,10 +85,11 @@ export function SubagentCard({
   const displayedStatus = statusLabel(entry.subagentStatus, t);
 
   useEffect(() => {
-    if (!expanded || !entry.childSessionId || records || loading) return;
+    const childSessionId = entry.childSessionId?.trim();
+    if (!expanded || !childSessionId || records || loading) return;
     setLoading(true);
     void api
-      .listMessages(entry.childSessionId)
+      .listMessages(childSessionId)
       .then((response) => setRecords(response.messages))
       .catch((error) => console.error("Failed to load subagent messages", error))
       .finally(() => setLoading(false));

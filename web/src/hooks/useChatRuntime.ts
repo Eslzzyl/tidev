@@ -321,6 +321,7 @@ export function useChatRuntime() {
   );
 
   const loadMessages = useCallback(async (sessionId: string) => {
+    if (!sessionId?.trim()) return;
     try {
       const response = await api.listMessages(sessionId);
       if (selectedSessionRef.current === sessionId) {
@@ -332,6 +333,7 @@ export function useChatRuntime() {
   }, []);
 
   const loadTodos = useCallback(async (sessionId: string) => {
+    if (!sessionId?.trim()) return;
     try {
       const response = await api.getTodos(sessionId);
       if (selectedSessionRef.current === sessionId) setTodos(response.todos);
@@ -692,7 +694,13 @@ export function useChatRuntime() {
     const backend = openBackendEvents(
       cursorRef.current,
       applyEvent,
-      () => void loadMessages(selectedSessionRef.current ?? ""),
+      () => {
+        const currentSessionId = selectedSessionRef.current;
+        if (currentSessionId) {
+          void loadMessages(currentSessionId);
+          void loadTodos(currentSessionId);
+        }
+      },
       () => undefined,
     );
     const approval = openFrontendRequests(
@@ -707,7 +715,7 @@ export function useChatRuntime() {
       backend.close();
       approval.close();
     };
-  }, [applyEvent, authChecking, authRequired, authenticated, loadMessages]);
+  }, [applyEvent, authChecking, authRequired, authenticated, loadMessages, loadTodos]);
 
   const createSession = () => {
     selectedSessionRef.current = null;
@@ -983,6 +991,7 @@ export function useChatRuntime() {
   }, []);
 
   const cancelSession = useCallback(async (sessionId: string) => {
+    if (!sessionId?.trim()) return;
     setCanceling(true);
     try {
       await api.abortRequest(sessionId, { request_id: 0 });

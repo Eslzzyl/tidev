@@ -105,6 +105,15 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   }
 }
 
+function sessionPath(sessionId: string, subpath = ""): string {
+  const trimmed = sessionId?.trim();
+  if (!trimmed) {
+    throw new Error(i18n.t("Session ID is required"));
+  }
+  const encoded = encodeURIComponent(trimmed);
+  return subpath ? `${API_BASE}/sessions/${encoded}/${subpath}` : `${API_BASE}/sessions/${encoded}`;
+}
+
 export const api = {
   // Workspace
   getWorkspace: () => fetchJson<WorkspaceInfo>(`${API_BASE}/workspace`),
@@ -119,14 +128,14 @@ export const api = {
       body: JSON.stringify(typeof data === "string" ? { title: data } : data),
     }),
 
-  getSession: (id: string) => fetchJson<SessionDetail>(`${API_BASE}/sessions/${id}`),
+  getSession: (id: string) => fetchJson<SessionDetail>(sessionPath(id)),
 
   deleteSession: (id: string) =>
-    fetchJson<{ accepted: boolean }>(`${API_BASE}/sessions/${id}`, { method: "DELETE" }),
+    fetchJson<{ accepted: boolean }>(sessionPath(id), { method: "DELETE" }),
 
   // Messages
   listMessages: (sessionId: string) =>
-    fetchJson<{ messages: MessageRecord[] }>(`${API_BASE}/sessions/${sessionId}/messages`),
+    fetchJson<{ messages: MessageRecord[] }>(sessionPath(sessionId, "messages")),
 
   sendPrompt: (
     sessionId: string,
@@ -135,7 +144,7 @@ export const api = {
     messageId: string,
     thinkingLevel?: string,
   ) =>
-    fetchJson<import("../types/api").PromptResponse>(`${API_BASE}/sessions/${sessionId}/prompts`, {
+    fetchJson<import("../types/api").PromptResponse>(sessionPath(sessionId, "prompts"), {
       method: "POST",
       body: JSON.stringify({
         content,
@@ -146,19 +155,19 @@ export const api = {
     }),
 
   retrySession: (sessionId: string, messageId: string) =>
-    fetchJson<{ accepted: boolean }>(`${API_BASE}/sessions/${sessionId}/retry`, {
+    fetchJson<{ accepted: boolean }>(sessionPath(sessionId, "retry"), {
       method: "POST",
       body: JSON.stringify({ message_id: messageId }),
     }),
 
   sendMessage: (sessionId: string, data: SendMessageRequest) =>
-    fetchJson<import("../types/api").PromptResponse>(`${API_BASE}/sessions/${sessionId}/prompts`, {
+    fetchJson<import("../types/api").PromptResponse>(sessionPath(sessionId, "prompts"), {
       method: "POST",
       body: JSON.stringify(data),
     }),
 
   abortRequest: (sessionId: string, data: AbortRequest) =>
-    fetchJson<{ accepted: boolean }>(`${API_BASE}/sessions/${sessionId}/cancel`, {
+    fetchJson<{ accepted: boolean }>(sessionPath(sessionId, "cancel"), {
       method: "POST",
       body: JSON.stringify(data.request_id ? data : undefined),
     }),
@@ -179,38 +188,37 @@ export const api = {
     ),
 
   // Todos
-  getTodos: (sessionId: string) =>
-    fetchJson<TodosResponse>(`${API_BASE}/sessions/${sessionId}/todos`),
+  getTodos: (sessionId: string) => fetchJson<TodosResponse>(sessionPath(sessionId, "todos")),
 
   // Revert / Undo
   revertToMessage: (sessionId: string, messageId: string) =>
-    fetchJson<{ accepted: boolean }>(`${API_BASE}/sessions/${sessionId}/revert`, {
+    fetchJson<{ accepted: boolean }>(sessionPath(sessionId, "revert"), {
       method: "POST",
       body: JSON.stringify({ message_id: messageId }),
     }),
 
   // Fork session from a message
   forkSession: (sessionId: string, messageId: string, title?: string) =>
-    fetchJson<Session>(`${API_BASE}/sessions/${sessionId}/fork`, {
+    fetchJson<Session>(sessionPath(sessionId, "fork"), {
       method: "POST",
       body: JSON.stringify({ message_id: messageId, title }),
     }),
 
   // Redo
   redoSession: (sessionId: string) =>
-    fetchJson<{ accepted: boolean }>(`${API_BASE}/sessions/${sessionId}/redo`, {
+    fetchJson<{ accepted: boolean }>(sessionPath(sessionId, "redo"), {
       method: "POST",
     }),
 
   // Compact session context
   compactSession: (sessionId: string) =>
-    fetchJson<{ accepted: boolean }>(`${API_BASE}/sessions/${sessionId}/compact`, {
+    fetchJson<{ accepted: boolean }>(sessionPath(sessionId, "compact"), {
       method: "POST",
     }),
 
   // Rename session
   renameSession: (sessionId: string, title: string) =>
-    fetchJson<Session>(`${API_BASE}/sessions/${sessionId}`, {
+    fetchJson<Session>(sessionPath(sessionId), {
       method: "PATCH",
       body: JSON.stringify({ title }),
     }),

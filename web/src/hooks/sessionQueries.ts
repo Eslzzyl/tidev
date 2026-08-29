@@ -13,25 +13,27 @@ export function useSessions() {
 }
 
 export function useSession(id: string | null) {
+  const sessionId = id?.trim() || "";
   return useQuery({
-    queryKey: queryKeys.session(id ?? ""),
-    queryFn: () => api.getSession(id!),
-    enabled: !!id,
+    queryKey: queryKeys.session(sessionId),
+    queryFn: () => api.getSession(sessionId),
+    enabled: !!sessionId,
     staleTime: 30_000,
   });
 }
 
 export function useSessionMessages(id: string | null) {
+  const sessionId = id?.trim() || "";
   return useQuery({
-    queryKey: queryKeys.sessionMessages(id ?? ""),
+    queryKey: queryKeys.sessionMessages(sessionId),
     queryFn: async () => {
       const [{ messages }, { todos }] = await Promise.all([
-        api.listMessages(id!),
-        api.getTodos(id!),
+        api.listMessages(sessionId),
+        api.getTodos(sessionId),
       ]);
       return { messages, todos };
     },
-    enabled: !!id,
+    enabled: !!sessionId,
     staleTime: 30_000,
   });
 }

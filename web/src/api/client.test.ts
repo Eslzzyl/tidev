@@ -40,4 +40,16 @@ describe("prompt API contract", () => {
 
     await expect(api.listMessages("session-1")).resolves.toEqual(response);
   });
+
+  it("rejects empty or whitespace-only session IDs without making requests", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(() => api.listMessages("")).toThrow("Session ID is required");
+    expect(() => api.listMessages("   ")).toThrow("Session ID is required");
+    expect(() => api.getSession("")).toThrow("Session ID is required");
+    expect(() => api.getTodos("")).toThrow("Session ID is required");
+    expect(() => api.sendPrompt("", "hello", "build", "msg-1")).toThrow("Session ID is required");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

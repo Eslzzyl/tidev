@@ -1,5 +1,4 @@
 import { memo, useEffect, useState } from "react";
-import type { TFunction } from "i18next";
 import { Lightbulb } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -88,11 +87,7 @@ export const ThinkingBlock = memo(function ThinkingBlock({
   return (
     <div className="thinking-block">
       <div className="thinking-header">
-        <button
-          className="thinking-toggle"
-          onClick={toggleExpanded}
-          aria-expanded={expanded}
-        >
+        <button className="thinking-toggle" onClick={toggleExpanded} aria-expanded={expanded}>
           <ActivityRipple active={active} row label={t("Thinking")}>
             <Lightbulb size={14} />
             <span className="thinking-label">
