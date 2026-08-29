@@ -20,7 +20,6 @@ import type {
 import type { StreamMessage } from "../types/chat";
 import { parseSlashCommand } from "../commands";
 import { asString, eventPayload } from "../utils/events";
-import { beginPerformance, endPerformance } from "../utils/performance";
 import { toolCallEntry, toolResultStatus, type ToolCallEntry } from "../utils/round";
 import i18n from "../i18n";
 
@@ -322,27 +321,21 @@ export function useChatRuntime() {
   );
 
   const loadMessages = useCallback(async (sessionId: string) => {
-    const performanceSpan = beginPerformance("session.messages.fetch");
     try {
       const response = await api.listMessages(sessionId);
-      endPerformance(performanceSpan, { messageCount: response.messages.length });
       if (selectedSessionRef.current === sessionId) {
         setMessages(response.messages);
       }
     } catch (reason) {
-      endPerformance(performanceSpan, { failed: true });
       setError(reason instanceof Error ? reason.message : i18n.t("Failed to load messages"));
     }
   }, []);
 
   const loadTodos = useCallback(async (sessionId: string) => {
-    const performanceSpan = beginPerformance("session.todos.fetch");
     try {
       const response = await api.getTodos(sessionId);
-      endPerformance(performanceSpan, { todoCount: response.todos.length });
       if (selectedSessionRef.current === sessionId) setTodos(response.todos);
     } catch (reason) {
-      endPerformance(performanceSpan, { failed: true });
       setError(reason instanceof Error ? reason.message : i18n.t("Failed to load to-do list"));
     }
   }, []);
@@ -429,8 +422,7 @@ export function useChatRuntime() {
                 error: undefined,
                 providerError: undefined,
                 retrying: undefined,
-                userMessageId:
-                  asString(payload.user_message_id) || stream.userMessageId || null,
+                userMessageId: asString(payload.user_message_id) || stream.userMessageId || null,
               },
             };
           });

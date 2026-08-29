@@ -1,12 +1,4 @@
-import {
-  memo,
-  useCallback,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { memo, useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   Check,
@@ -46,12 +38,6 @@ import {
   type ToolCallEntry,
 } from "../../utils/round";
 import { formatTime, getDuration, stripSystemReminderTags } from "../../utils/format";
-import {
-  beginPerformance,
-  endPerformance,
-  schedulePerformanceFrame,
-  type PerformanceSpan,
-} from "../../utils/performance";
 
 export interface MessageListProps {
   messages: MessageRecord[];
@@ -60,18 +46,6 @@ export interface MessageListProps {
   onRevert?: (messageId: string) => void;
   onFork?: (messageId: string) => void;
   onRetryProviderError?: (messageId: string) => void;
-}
-
-interface ExpansionTrace {
-  roundId: string;
-  details: {
-    segmentCount: number;
-    toolCallCount: number;
-  };
-  commit: PerformanceSpan | null;
-  firstFrame: PerformanceSpan | null;
-  contentCommit: PerformanceSpan | null;
-  contentFirstFrame: PerformanceSpan | null;
 }
 
 interface SegmentItem {
@@ -357,9 +331,7 @@ function estimateChatItemSize(item: ChatItem | undefined) {
 
 function getChatItemKey(item: ChatItem | undefined, index: number) {
   if (!item) return index;
-  return item.kind === "round-segment" || item.kind === "stream-segment"
-    ? item.item.key
-    : item.key;
+  return item.kind === "round-segment" || item.kind === "stream-segment" ? item.item.key : item.key;
 }
 
 function UserMessageItem({
@@ -465,9 +437,7 @@ function RoundMetaItem({
             onClick={onToggle}
             aria-expanded={expanded}
             aria-controls={`assistant-content-${round.id}`}
-            aria-label={
-              expanded ? t("Collapse previous messages") : t("Expand previous messages")
-            }
+            aria-label={expanded ? t("Collapse previous messages") : t("Expand previous messages")}
           >
             {content}
           </button>
@@ -621,16 +591,8 @@ export const MessageList = memo(function MessageList({
   const [expandedRounds, setExpandedRounds] = useState<Record<string, boolean>>({});
   const [expandedStreams, setExpandedStreams] = useState<Record<string, boolean>>({});
   const [expandedDetails, setExpandedDetails] = useState<Record<string, boolean>>({});
-  const pendingExpansions = useRef(new Map<string, ExpansionTrace>());
 
-  const rounds = useMemo(() => {
-    const performanceSpan = beginPerformance("session.message-list.build-rounds", {
-      messageCount: messages.length,
-    });
-    const result = buildRounds(messages);
-    endPerformance(performanceSpan, { roundCount: result.length });
-    return result;
-  }, [messages]);
+  const rounds = useMemo(() => buildRounds(messages), [messages]);
 
   const items = useMemo(
     () => buildChatItems(rounds, streams, expandedRounds, expandedStreams),
@@ -646,46 +608,11 @@ export const MessageList = memo(function MessageList({
     useFlushSync: false,
   });
 
-  useLayoutEffect(() => {
-    const pending = [...pendingExpansions.current.values()].find((trace) => trace.commit);
-    if (!pending) return;
-
-    const details = pending.details;
-    endPerformance(pending.commit, details);
-    endPerformance(pending.contentCommit, details);
-    pending.commit = null;
-    pending.contentCommit = null;
-    return schedulePerformanceFrame(() => {
-      endPerformance(pending.firstFrame, details);
-      endPerformance(pending.contentFirstFrame, details);
-      pending.firstFrame = null;
-      pending.contentFirstFrame = null;
-      pendingExpansions.current.delete(pending.roundId);
-    });
-  }, [items]);
-
   function toggleRound(roundId: string) {
     const round = rounds.find((item): item is Round => !isSystemBlock(item) && item.id === roundId);
-    const currentExpanded = expandedRounds[roundId] ?? (round ? !isRoundCollapsible(round) : false);
-    if (!currentExpanded && round) {
-      const details = {
-        segmentCount: round.segments.length,
-        toolCallCount: Object.keys(round.toolCallMap).length,
-      };
-      pendingExpansions.current.set(roundId, {
-        roundId,
-        details,
-        commit: beginPerformance("chat.round-expand.commit", details),
-        firstFrame: beginPerformance("chat.round-expand.first-frame", details),
-        contentCommit: beginPerformance("chat.round-expand.content-commit", details),
-        contentFirstFrame: beginPerformance("chat.round-expand.content-first-frame", details),
-      });
-    }
     setExpandedRounds((current) => ({
       ...current,
-      [roundId]: !(
-        current[roundId] ?? (round ? !isRoundCollapsible(round) : false)
-      ),
+      [roundId]: !(current[roundId] ?? (round ? !isRoundCollapsible(round) : false)),
     }));
   }
 
@@ -802,7 +729,10 @@ export const MessageList = memo(function MessageList({
   return (
     <div className="message-scroll" ref={scrollRef}>
       <ChatScrollContext.Provider value={scrollRef}>
-        <div className="message-virtual-canvas" style={{ height: `${virtualizer.getTotalSize()}px` }}>
+        <div
+          className="message-virtual-canvas"
+          style={{ height: `${virtualizer.getTotalSize()}px` }}
+        >
           {virtualizer.getVirtualItems().map((virtualItem) => {
             const item = items[virtualItem.index];
             if (!item) return null;

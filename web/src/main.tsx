@@ -7,9 +7,6 @@ import "./i18n";
 import App from "./App";
 import "./index.css";
 import "./styles.css";
-import { installPerformanceObservers } from "./utils/performance";
-
-installPerformanceObservers();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
