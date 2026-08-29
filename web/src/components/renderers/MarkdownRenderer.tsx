@@ -233,6 +233,14 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({ content }: Prop
           a: CustomLink,
           img: CustomImage,
 
+          table({ children }) {
+            return (
+              <div className="markdown-table-scroll">
+                <table>{children}</table>
+              </div>
+            );
+          },
+
           // Enhanced code blocks
           code({ className, children, ...props }) {
             const match = /language-(\w+)/.exec(className || "");
