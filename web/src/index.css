@@ -327,6 +327,11 @@ summary {
 }
 
 /* Markdown body styles */
+.markdown-body {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .markdown-body pre {
   margin-top: 0.75rem;
   margin-bottom: 0.75rem;
@@ -426,7 +431,9 @@ summary {
 .markdown-table-scroll {
   margin-top: 0.75rem;
   margin-bottom: 0.75rem;
+  width: 100%;
   max-width: 100%;
+  min-width: 0;
   overflow-x: auto;
   border: 1px solid var(--line);
   border-radius: 1rem;

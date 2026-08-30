@@ -915,6 +915,7 @@ body {
 .assistant-message-inner {
   width: 100%;
   max-width: 100%;
+  min-width: 0;
   margin: 0 auto;
 }
 
@@ -2513,6 +2514,8 @@ body {
 }
 
 .assistant-message-content {
+  min-width: 0;
+  max-width: 100%;
   margin-top: 20px;
   padding: 0;
   border: 0;
@@ -2698,6 +2701,9 @@ body {
   display: grid;
   grid-template-rows: 0fr;
   overflow: hidden;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
 }
 .expandable-body-visible,
 .expandable-body-hiding {
@@ -2705,6 +2711,8 @@ body {
 }
 .expandable-body > * {
   min-height: 0;
+  min-width: 0;
+  max-width: 100%;
 }
 .thinking-body {
   overflow: hidden;
@@ -3073,6 +3081,8 @@ body {
 .message-content .markdown-body {
   font-size: inherit;
   line-height: inherit;
+  min-width: 0;
+  max-width: 100%;
 }
 .message-content .markdown-body pre.markdown-code-block {
   font-size: var(--chat-code-size);
@@ -3346,8 +3356,9 @@ body {
 }
 
 .chat-segment-content {
-  width: min(100%, var(--message-column-width));
-  margin: 0 auto;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .assistant-footer-row {
