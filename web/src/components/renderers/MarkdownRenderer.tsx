@@ -4,8 +4,40 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
-import { Check, Copy, Download, Maximize2, Minimize2 } from "lucide-react";
+import { Check, Code2, Copy, Maximize2, Minimize2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import type { HLJSApi } from "highlight.js";
+
+let hljsInstance: HLJSApi | null = null;
+let hljsPromise: Promise<HLJSApi> | null = null;
+
+function getHljs(): Promise<HLJSApi> {
+  if (hljsInstance) return Promise.resolve(hljsInstance);
+  if (!hljsPromise) {
+    hljsPromise = import("highlight.js").then((mod) => {
+      hljsInstance = mod.default;
+      return hljsInstance;
+    });
+  }
+  return hljsPromise;
+}
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function highlightCode(code: string, language: string, hljs: HLJSApi | null): string {
+  if (!hljs || !language) return escapeHtml(code);
+  try {
+    const lang = language.toLowerCase();
+    if (hljs.getLanguage(lang)) {
+      return hljs.highlight(code, { language: lang, ignoreIllegals: true }).value;
+    }
+  } catch {
+    // Fall back to escaped text if highlight fails
+  }
+  return escapeHtml(code);
+}
 
 // Dynamically import mermaid to avoid issues
 let mermaidInstance: {
@@ -76,11 +108,30 @@ function CustomImage(props: React.ComponentPropsWithoutRef<"img">) {
 }
 
 /**
- * Enhanced code block with language label, copy, and download buttons.
+ * Enhanced code block with syntax highlighting, language label, copy, and download buttons.
  */
 function CodeBlock({ language, children }: { language: string; children: string }) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
+  const [highlightedHtml, setHighlightedHtml] = useState<string>(() =>
+    highlightCode(children, language, hljsInstance),
+  );
+
+  useEffect(() => {
+    let active = true;
+    if (hljsInstance) {
+      setHighlightedHtml(highlightCode(children, language, hljsInstance));
+    } else {
+      getHljs().then((hljs) => {
+        if (active) {
+          setHighlightedHtml(highlightCode(children, language, hljs));
+        }
+      });
+    }
+    return () => {
+      active = false;
+    };
+  }, [children, language]);
 
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(children);
@@ -88,45 +139,39 @@ function CodeBlock({ language, children }: { language: string; children: string 
     setTimeout(() => setCopied(false), 2000);
   }, [children]);
 
-  const handleDownload = useCallback(() => {
-    const ext = languageToExtension(language);
-    const blob = new Blob([children], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `code.${ext}`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }, [children, language]);
-
   return (
-    <div className="group relative my-3 overflow-hidden rounded-lg border border-neutral-200 dark:border-neutral-700">
-      {/* Header with language label and actions */}
-      <div className="flex items-center justify-between border-b border-neutral-200 bg-neutral-50 px-3 py-1.5 dark:border-neutral-700 dark:bg-neutral-900">
-        <span className="markdown-code-language uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
-          {language || "code"}
-        </span>
+    <div className="markdown-code-card group relative my-3 overflow-hidden rounded-xl border border-neutral-200/80 bg-neutral-50/80 dark:border-neutral-800 dark:bg-[#0e131b]">
+      {/* Header with icon, language label and actions */}
+      <div className="markdown-code-header flex h-9 items-center justify-between border-b border-neutral-200/60 px-3.5 dark:border-neutral-800/80">
+        <div className="flex items-center gap-1.5 text-xs text-neutral-500 dark:text-neutral-400">
+          <Code2 className="h-3.5 w-3.5 opacity-70" />
+          <span className="font-mono text-[11px] font-medium tracking-tight">
+            {formatLanguageName(language)}
+          </span>
+        </div>
         <div className="flex items-center gap-1">
           <button
+            type="button"
             onClick={handleCopy}
-            className="rounded p-1 text-neutral-400 hover:bg-neutral-200 hover:text-neutral-600 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
-            title={t("Copy code")}
+            className="inline-flex h-6 w-6 items-center justify-center rounded-md text-neutral-400 transition-colors hover:bg-neutral-200/60 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+            title={copied ? t("Copied!") : t("Copy code")}
+            aria-label={copied ? t("Copied!") : t("Copy code")}
           >
-            {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-          </button>
-          <button
-            onClick={handleDownload}
-            className="rounded p-1 text-neutral-400 hover:bg-neutral-200 hover:text-neutral-600 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
-            title={t("Download code")}
-          >
-            <Download className="h-3.5 w-3.5" />
+            {copied ? (
+              <Check className="h-3.5 w-3.5 text-emerald-500" />
+            ) : (
+              <Copy className="h-3.5 w-3.5" />
+            )}
           </button>
         </div>
       </div>
 
       {/* Code content */}
-      <pre className="markdown-code-block overflow-x-auto p-4">
-        <code className="font-mono text-neutral-800 dark:text-neutral-200">{children}</code>
+      <pre className="markdown-code-block m-0 overflow-x-auto p-4 font-mono text-[13px] leading-relaxed bg-transparent rounded-none">
+        <code
+          className="hljs font-mono text-neutral-800 dark:text-neutral-200"
+          dangerouslySetInnerHTML={{ __html: highlightedHtml }}
+        />
       </pre>
     </div>
   );
@@ -280,33 +325,55 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({ content }: Prop
   );
 });
 
-function languageToExtension(language: string): string {
+function formatLanguageName(language: string): string {
   const map: Record<string, string> = {
-    typescript: "ts",
-    javascript: "js",
-    python: "py",
-    rust: "rs",
-    go: "go",
-    ruby: "rb",
-    java: "java",
-    c: "c",
-    cpp: "cpp",
-    csharp: "cs",
-    css: "css",
-    html: "html",
-    json: "json",
-    yaml: "yaml",
-    yml: "yaml",
-    toml: "toml",
-    markdown: "md",
-    bash: "sh",
-    shell: "sh",
-    sql: "sql",
-    xml: "xml",
-    php: "php",
-    swift: "swift",
-    kotlin: "kt",
-    scala: "scala",
+    rust: "Rust",
+    rs: "Rust",
+    typescript: "TypeScript",
+    ts: "TypeScript",
+    tsx: "TSX",
+    javascript: "JavaScript",
+    js: "JavaScript",
+    jsx: "JSX",
+    python: "Python",
+    py: "Python",
+    go: "Go",
+    ruby: "Ruby",
+    rb: "Ruby",
+    java: "Java",
+    c: "C",
+    cpp: "C++",
+    "c++": "C++",
+    csharp: "C#",
+    "c#": "C#",
+    cs: "C#",
+    html: "HTML",
+    css: "CSS",
+    scss: "SCSS",
+    sass: "Sass",
+    less: "Less",
+    json: "JSON",
+    yaml: "YAML",
+    yml: "YAML",
+    toml: "TOML",
+    sql: "SQL",
+    sh: "Shell",
+    bash: "Bash",
+    zsh: "Zsh",
+    shell: "Shell",
+    markdown: "Markdown",
+    md: "Markdown",
+    xml: "XML",
+    php: "PHP",
+    swift: "Swift",
+    kotlin: "Kotlin",
+    kt: "Kotlin",
+    scala: "Scala",
+    lua: "Lua",
+    dart: "Dart",
+    zig: "Zig",
+    diff: "Diff",
   };
-  return map[language] || "txt";
+  const key = language.trim().toLowerCase();
+  return map[key] || (key ? key.charAt(0).toUpperCase() + key.slice(1) : "Code");
 }

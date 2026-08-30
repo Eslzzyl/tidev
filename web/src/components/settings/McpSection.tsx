@@ -59,7 +59,9 @@ function serverToDraft(server: McpServerInfo): ServerDraft {
     env: "",
     url: "",
     headers: "",
-    disabled: Boolean(server.disabled ?? (server.config as { disabled?: boolean } | null)?.disabled),
+    disabled: Boolean(
+      server.disabled ?? (server.config as { disabled?: boolean } | null)?.disabled,
+    ),
   };
 
   if (server.config) {

@@ -3065,6 +3065,42 @@ body {
   font-size: var(--chat-code-size);
   line-height: var(--chat-code-line-height);
 }
+.markdown-code-card {
+  margin: 0.75rem 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--code-bg);
+  overflow: hidden;
+}
+.markdown-code-header {
+  display: flex;
+  height: 36px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px 0 14px;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--muted);
+  font-size: var(--chat-meta-size);
+  line-height: var(--chat-meta-line-height);
+}
+.markdown-code-header button {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+  transition:
+    color 120ms ease,
+    background 120ms ease;
+}
+.markdown-code-header button:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
 .message-content .tool-renderer-body .tool-diff-renderer {
   border: 0;
   border-radius: 0;
@@ -3084,9 +3120,34 @@ body {
   min-width: 0;
   max-width: 100%;
 }
-.message-content .markdown-body pre.markdown-code-block {
+.message-content .markdown-body pre.markdown-code-block,
+.system-message-block .markdown-body pre.markdown-code-block,
+.markdown-body pre.markdown-code-block,
+pre.markdown-code-block {
+  margin: 0 !important;
+  padding: 14px 16px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  font-family: var(--ui-mono-font);
   font-size: var(--chat-code-size);
   line-height: var(--chat-code-line-height);
+  overflow-x: auto;
+}
+.message-content .markdown-body pre.markdown-code-block code,
+.system-message-block .markdown-body pre.markdown-code-block code,
+.markdown-body pre.markdown-code-block code,
+pre.markdown-code-block code {
+  display: block;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-family: var(--ui-mono-font);
+  font-size: inherit;
+  line-height: inherit;
+  white-space: pre;
 }
 .message-content .markdown-body :not(pre) > code.markdown-inline-code {
   font-size: var(--chat-code-size);
@@ -3115,10 +3176,6 @@ body {
 .system-message-block .markdown-body {
   font-size: inherit;
   line-height: inherit;
-}
-.system-message-block .markdown-body pre.markdown-code-block {
-  font-size: var(--chat-code-size);
-  line-height: var(--chat-code-line-height);
 }
 .system-message-block .markdown-body :not(pre) > code.markdown-inline-code {
   font-size: var(--chat-code-size);

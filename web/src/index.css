@@ -332,7 +332,7 @@ summary {
   max-width: 100%;
 }
 
-.markdown-body pre {
+.markdown-body pre:not(.markdown-code-block) {
   margin-top: 0.75rem;
   margin-bottom: 0.75rem;
   overflow-x: auto;
@@ -341,11 +341,11 @@ summary {
   padding: 1rem;
 }
 
-.dark .markdown-body pre {
+.dark .markdown-body pre:not(.markdown-code-block) {
   background-color: #262626;
 }
 
-.markdown-body pre code {
+.markdown-body pre:not(.markdown-code-block) code {
   display: block;
   background-color: transparent;
   padding: 0;
@@ -354,7 +354,7 @@ summary {
   color: #262626;
 }
 
-.dark .markdown-body pre code {
+.dark .markdown-body pre:not(.markdown-code-block) code {
   color: #f5f5f5;
 }
 
