@@ -16,6 +16,7 @@ export interface UIState {
   sidebarOpen: boolean;
   rightSidebarOpen: boolean;
   settingsPanelOpen: boolean;
+  settingsInitialCategory: string | null;
   mobileMenuOpen: boolean;
   mobileRightSidebarOpen: boolean;
   theme: Theme;
@@ -36,7 +37,7 @@ export interface UIActions {
   toggleRightSidebar: () => void;
   openRightSidebar: () => void;
   closeRightSidebar: () => void;
-  openSettingsPanel: () => void;
+  openSettingsPanel: (category?: unknown) => void;
   closeSettingsPanel: () => void;
   toggleMobileMenu: () => void;
   closeMobileMenu: () => void;
@@ -89,6 +90,7 @@ const initialState: UIState = {
   sidebarOpen: true,
   rightSidebarOpen: true,
   settingsPanelOpen: false,
+  settingsInitialCategory: null,
   mobileMenuOpen: false,
   mobileRightSidebarOpen: false,
   theme: legacyPreferences.theme ?? "system",
@@ -134,8 +136,12 @@ export const useUIStore = create<UIState & UIActions>()(
       openRightSidebar: () => set({ rightSidebarOpen: true }),
       closeRightSidebar: () => set({ rightSidebarOpen: false }),
 
-      openSettingsPanel: () => set({ settingsPanelOpen: true }),
-      closeSettingsPanel: () => set({ settingsPanelOpen: false }),
+      openSettingsPanel: (category?: unknown) =>
+        set({
+          settingsPanelOpen: true,
+          settingsInitialCategory: typeof category === "string" ? category : null,
+        }),
+      closeSettingsPanel: () => set({ settingsPanelOpen: false, settingsInitialCategory: null }),
 
       toggleMobileMenu: () => set((s) => ({ mobileMenuOpen: !s.mobileMenuOpen })),
       closeMobileMenu: () => set({ mobileMenuOpen: false }),

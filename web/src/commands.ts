@@ -10,7 +10,8 @@ export type CommandAction =
   | "skills"
   | "connect"
   | "compact"
-  | "fork";
+  | "fork"
+  | "mcp";
 
 export interface CommandSpec {
   name: string;
@@ -27,6 +28,13 @@ export interface CommandSuggestion {
 
 /** All available slash commands */
 export const COMMANDS: CommandSpec[] = [
+  {
+    name: "mcp",
+    aliases: [],
+    description: "Manage MCP server connections and tools",
+    usage: "/mcp",
+    action: "mcp",
+  },
   {
     name: "message",
     aliases: ["msg"],

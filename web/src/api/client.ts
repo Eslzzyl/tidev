@@ -45,6 +45,8 @@ import type {
   ModelUsageEntry,
   ProviderUsageEntry,
   SessionUsageEntry,
+  McpServerInfo,
+  UpsertMcpServerRequest,
 } from "../types/api";
 import { getAuthToken, useAuthStore } from "../stores/useAuthStore";
 import i18n from "../i18n";
@@ -554,6 +556,32 @@ export const api = {
       headers: getAuthHeaders(),
     });
   },
+
+  listMcpServers: () => fetchJson<McpServerInfo[]>(`${API_BASE}/mcp/servers`),
+  upsertMcpServer: (request: UpsertMcpServerRequest) =>
+    fetchJson<{ accepted: boolean }>(`${API_BASE}/mcp/servers`, {
+      method: "POST",
+      body: JSON.stringify(request),
+    }),
+  deleteMcpServer: (name: string) =>
+    fetchJson<{ accepted: boolean }>(`${API_BASE}/mcp/servers/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    }),
+  connectMcpServer: (name: string) =>
+    fetchJson<{ accepted: boolean }>(
+      `${API_BASE}/mcp/servers/${encodeURIComponent(name)}/connect`,
+      { method: "POST" },
+    ),
+  disconnectMcpServer: (name: string) =>
+    fetchJson<{ accepted: boolean }>(
+      `${API_BASE}/mcp/servers/${encodeURIComponent(name)}/disconnect`,
+      { method: "POST" },
+    ),
+  refreshMcpServer: (name: string) =>
+    fetchJson<{ accepted: boolean }>(
+      `${API_BASE}/mcp/servers/${encodeURIComponent(name)}/refresh`,
+      { method: "POST" },
+    ),
 };
 
 /**
@@ -633,4 +661,50 @@ export async function waitForServerRestart(timeout = 60_000): Promise<void> {
 
   console.log("[restart] Timed out waiting for server restart");
   throw new Error(i18n.t("Server did not come back within timeout"));
+}
+
+export async function listMcpServers(): Promise<McpServerInfo[]> {
+  return fetchJson<McpServerInfo[]>(`${API_BASE}/mcp/servers`);
+}
+
+export async function upsertMcpServer(
+  request: UpsertMcpServerRequest,
+): Promise<{ accepted: boolean }> {
+  return fetchJson<{ accepted: boolean }>(`${API_BASE}/mcp/servers`, {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+}
+
+export async function deleteMcpServer(name: string): Promise<{ accepted: boolean }> {
+  return fetchJson<{ accepted: boolean }>(`${API_BASE}/mcp/servers/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function connectMcpServer(name: string): Promise<{ accepted: boolean }> {
+  return fetchJson<{ accepted: boolean }>(
+    `${API_BASE}/mcp/servers/${encodeURIComponent(name)}/connect`,
+    {
+      method: "POST",
+    },
+  );
+}
+
+export async function disconnectMcpServer(name: string): Promise<{ accepted: boolean }> {
+  return fetchJson<{ accepted: boolean }>(
+    `${API_BASE}/mcp/servers/${encodeURIComponent(name)}/disconnect`,
+    {
+      method: "POST",
+    },
+  );
+}
+
+export async function refreshMcpServer(name: string): Promise<{ accepted: boolean }> {
+  return fetchJson<{ accepted: boolean }>(
+    `${API_BASE}/mcp/servers/${encodeURIComponent(name)}/refresh`,
+    {
+      method: "POST",
+    },
+  );
 }

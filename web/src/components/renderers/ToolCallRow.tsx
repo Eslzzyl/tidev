@@ -126,7 +126,20 @@ function toolTone(name: string) {
   return "default";
 }
 
+export function parseMcpToolName(name: string): { server: string; tool: string } | null {
+  if (!name.startsWith("mcp__")) return null;
+  const parts = name.slice(5).split("__");
+  if (parts.length >= 2 && parts[0] && parts[1]) {
+    return { server: parts[0], tool: parts.slice(1).join("__") };
+  }
+  return null;
+}
+
 function toolLabel(entry: ToolCallEntry, t: TFunction, args: ToolArguments) {
+  const mcp = parseMcpToolName(entry.name);
+  if (mcp) {
+    return `MCP ${mcp.server} ❯ ${mcp.tool}`;
+  }
   if (entry.name === "grep" || entry.name === "glob") return "";
   if (entry.name === "skill") {
     const hasName = Boolean(stringArgument(args, "name"));
@@ -162,6 +175,27 @@ function summarizeArguments(
   args: ToolArguments,
 ) {
   if (!args) return entry.arguments || "…";
+  const mcp = parseMcpToolName(entry.name);
+  if (mcp) {
+    const entries = Object.entries(args);
+    if (entries.length === 0) return "";
+    if (entries.length === 1) {
+      const [k, v] = entries[0];
+      if (typeof v === "string") {
+        return `${k}="${v.length > 60 ? v.slice(0, 57) + "..." : v}"`;
+      }
+      return `${k}=${JSON.stringify(v)}`;
+    }
+    const parts = entries.map(([k, v]) => {
+      const str =
+        typeof v === "string"
+          ? `"${v.length > 35 ? v.slice(0, 32) + "..." : v}"`
+          : JSON.stringify(v);
+      return `${k}=${str}`;
+    });
+    const joined = parts.join(", ");
+    return joined.length > 80 ? `${joined.slice(0, 77)}...` : joined;
+  }
   switch (entry.name) {
     case "read":
     case "write":
@@ -240,15 +274,43 @@ function formatDuration(milliseconds: number) {
   return `${Math.floor(milliseconds / 60000)}m ${Math.floor((milliseconds % 60000) / 1000)}s`;
 }
 
-function parseJson(output: string): unknown | null {
+export function normalizeToolOutput(output: string): {
+  data: unknown | null;
+  text: string;
+  isJson: boolean;
+} {
   const trimmed = output.trim();
-  if (!trimmed.startsWith("[") && !trimmed.startsWith("{")) return null;
+  if (!trimmed) return { data: null, text: "", isJson: false };
   try {
-    const value = JSON.parse(output) as unknown;
-    return value && typeof value === "object" ? value : null;
+    const val = JSON.parse(trimmed) as unknown;
+    if (val && typeof val === "object" && !Array.isArray(val)) {
+      const record = val as Record<string, unknown>;
+      const keys = Object.keys(record);
+      if (keys.length === 1 && "result" in record) {
+        const inner = record.result;
+        if (typeof inner === "string") {
+          const innerTrimmed = inner.trim();
+          try {
+            const innerVal = JSON.parse(innerTrimmed) as unknown;
+            if (innerVal && typeof innerVal === "object") {
+              return { data: innerVal, text: JSON.stringify(innerVal, null, 2), isJson: true };
+            }
+          } catch {
+            return { data: null, text: inner, isJson: false };
+          }
+          return { data: null, text: inner, isJson: false };
+        } else if (inner && typeof inner === "object") {
+          return { data: inner, text: JSON.stringify(inner, null, 2), isJson: true };
+        }
+      }
+      return { data: val, text: JSON.stringify(val, null, 2), isJson: true };
+    } else if (Array.isArray(val)) {
+      return { data: val, text: JSON.stringify(val, null, 2), isJson: true };
+    }
   } catch {
-    return null;
+    // not json
   }
+  return { data: null, text: output, isJson: false };
 }
 
 const ToolCallBody = memo(function ToolCallBody({
@@ -261,7 +323,9 @@ const ToolCallBody = memo(function ToolCallBody({
 }: ToolCallBodyProps) {
   const fileChanges = metadata?.file_changes.filter((change) => Boolean(change.diff)) ?? [];
   const hasDiff = Boolean(metadata?.diff) || fileChanges.length > 0;
-  const parsedJson = !isWriteTool(entry.name) && !isBash(entry.name) ? parseJson(output) : null;
+  const normalized = useMemo(() => normalizeToolOutput(output), [output]);
+  const parsedJson = !isWriteTool(entry.name) && !isBash(entry.name) ? normalized.data : null;
+  const displayText = normalized.text;
 
   return (
     <div className="tool-renderer-body">
@@ -280,13 +344,13 @@ const ToolCallBody = memo(function ToolCallBody({
           ) : null}
         </div>
       ) : null}
-      {entry.result && isWriteTool(entry.name) && !hasDiff && output ? (
-        <MarkdownRenderer content={output} />
+      {entry.result && isWriteTool(entry.name) && !hasDiff && displayText ? (
+        <MarkdownRenderer content={displayText} />
       ) : null}
       {entry.result && isBash(entry.name) ? (
         <div className="tool-bash-output">
           <code className="tool-command">$ {bashCommand(args)}</code>
-          {output ? <pre className="tool-raw-output">{output}</pre> : null}
+          {displayText ? <pre className="tool-raw-output">{displayText}</pre> : null}
         </div>
       ) : null}
       {entry.result && entry.name === "read" ? (
@@ -295,7 +359,7 @@ const ToolCallBody = memo(function ToolCallBody({
           filepath={metadata?.filepath ?? undefined}
         />
       ) : null}
-      {entry.result && entry.name === "todowrite" ? <TodoRenderer output={output} /> : null}
+      {entry.result && entry.name === "todowrite" ? <TodoRenderer output={displayText} /> : null}
       {entry.result && isReadOnlyTool(entry.name) && entry.name !== "read" ? (
         parsedJson ? (
           <JsonTreeView
@@ -305,14 +369,14 @@ const ToolCallBody = memo(function ToolCallBody({
             embedded
           />
         ) : (
-          <MarkdownRenderer content={output} />
+          <MarkdownRenderer content={displayText} />
         )
       ) : null}
       {entry.result && WEB_TOOLS.has(entry.name) ? (
         parsedJson ? (
           <JsonTreeView data={parsedJson} initialExpanded maxDepth={5} embedded />
         ) : (
-          <MarkdownRenderer content={output} />
+          <MarkdownRenderer content={displayText} />
         )
       ) : null}
       {entry.result &&
@@ -324,10 +388,12 @@ const ToolCallBody = memo(function ToolCallBody({
         parsedJson ? (
           <JsonTreeView data={parsedJson} initialExpanded embedded />
         ) : (
-          <MarkdownRenderer content={output} />
+          <MarkdownRenderer content={displayText} />
         )
       ) : null}
-      {entry.result && !output ? <span className="tool-empty-output">{t("No output")}</span> : null}
+      {entry.result && !displayText ? (
+        <span className="tool-empty-output">{t("No output")}</span>
+      ) : null}
       {entry.result &&
       isBash(entry.name) &&
       metadata?.exit_code !== null &&

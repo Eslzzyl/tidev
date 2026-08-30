@@ -1,5 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { X, Palette, Type, Keyboard, Terminal as TerminalIcon, Lock, Info } from "lucide-react";
+import {
+  X,
+  Palette,
+  Type,
+  Keyboard,
+  Terminal as TerminalIcon,
+  Lock,
+  Boxes,
+  Info,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useUIStore } from "../../stores/useUIStore";
 import { useClickOutside } from "../../hooks/useClickOutside";
@@ -8,9 +17,17 @@ import { EditorSection } from "./EditorSection";
 import { InteractionSection } from "./InteractionSection";
 import { TerminalSection } from "./TerminalSection";
 import { SecuritySection } from "./SecuritySection";
+import { McpSection } from "./McpSection";
 import { AboutSection } from "./AboutSection";
 
-type CategoryId = "appearance" | "editor" | "interaction" | "terminal" | "security" | "about";
+type CategoryId =
+  | "appearance"
+  | "editor"
+  | "interaction"
+  | "terminal"
+  | "security"
+  | "mcp"
+  | "about";
 
 interface Category {
   id: CategoryId;
@@ -36,14 +53,22 @@ const categories: Category[] = [
     icon: <TerminalIcon className="h-4 w-4" />,
   },
   { id: "security", label: "Security", icon: <Lock className="h-4 w-4" /> },
+  { id: "mcp", label: "MCP Servers", icon: <Boxes className="h-4 w-4" /> },
   { id: "about", label: "About", icon: <Info className="h-4 w-4" /> },
 ];
 
 export function SettingsPanel() {
   const { t } = useTranslation();
   const settingsPanelOpen = useUIStore((s) => s.settingsPanelOpen);
+  const settingsInitialCategory = useUIStore((s) => s.settingsInitialCategory);
   const closeSettingsPanel = useUIStore((s) => s.closeSettingsPanel);
   const [activeCategory, setActiveCategory] = useState<CategoryId>("appearance");
+
+  useEffect(() => {
+    if (settingsInitialCategory && categories.some((c) => c.id === settingsInitialCategory)) {
+      setActiveCategory(settingsInitialCategory as CategoryId);
+    }
+  }, [settingsInitialCategory]);
 
   const panelRef = useClickOutside(closeSettingsPanel);
   const navRef = useRef<HTMLDivElement>(null);
@@ -154,6 +179,7 @@ export function SettingsPanel() {
             {activeCategory === "interaction" && <InteractionSection />}
             {activeCategory === "terminal" && <TerminalSection />}
             {activeCategory === "security" && <SecuritySection />}
+            {activeCategory === "mcp" && <McpSection />}
             {activeCategory === "about" && <AboutSection />}
           </div>
         </div>

@@ -1002,9 +1002,13 @@ export function useChatRuntime() {
         createSession();
         return true;
       }
+      if (command === "mcp") {
+        useUIStore.getState().openSettingsPanel("mcp");
+        return true;
+      }
       return false;
     },
-    [messages, handleRevert, handleRedo, handleFork, handleCompact],
+    [messages, handleRevert, handleRedo, handleFork, handleCompact, createSession],
   );
 
   const submit = async () => {

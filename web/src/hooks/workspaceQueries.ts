@@ -184,3 +184,69 @@ export function useDeleteProvider() {
     },
   });
 }
+
+// ── MCP Servers ───────────────────────────────────────────────────────────
+
+export function useMcpServers() {
+  return useQuery({
+    queryKey: queryKeys.mcpServers,
+    queryFn: api.listMcpServers,
+    staleTime: 5_000,
+    refetchInterval: 5_000,
+  });
+}
+
+export function useUpsertMcpServer() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.upsertMcpServer,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.mcpServers });
+      queryClient.invalidateQueries({ queryKey: queryKeys.tools });
+    },
+  });
+}
+
+export function useDeleteMcpServer() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => api.deleteMcpServer(name),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.mcpServers });
+      queryClient.invalidateQueries({ queryKey: queryKeys.tools });
+    },
+  });
+}
+
+export function useConnectMcpServer() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => api.connectMcpServer(name),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.mcpServers });
+      queryClient.invalidateQueries({ queryKey: queryKeys.tools });
+    },
+  });
+}
+
+export function useDisconnectMcpServer() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => api.disconnectMcpServer(name),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.mcpServers });
+      queryClient.invalidateQueries({ queryKey: queryKeys.tools });
+    },
+  });
+}
+
+export function useRefreshMcpServer() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => api.refreshMcpServer(name),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.mcpServers });
+      queryClient.invalidateQueries({ queryKey: queryKeys.tools });
+    },
+  });
+}

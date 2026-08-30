@@ -569,19 +569,175 @@ fn render_tool_call_lines(
             ));
         }
         _ => {
-            let summary = summarize_tool_call(tool_call, content_width);
-            lines.extend(wrap_tool_title(
-                Line::from(vec![Span::styled(
-                    summary,
-                    Style::default().fg(palette.accent_soft),
-                )]),
-                content_width,
-                "  ",
-            ));
+            if let Some((server, tool)) = parse_mcp_tool_name(&tool_call.name) {
+                let mut title_spans = vec![
+                    Span::styled("MCP ", Style::default().fg(palette.accent_soft)),
+                    Span::styled(server.to_string(), Style::default().fg(palette.accent_soft)),
+                    Span::styled(" ❯ ", Style::default().fg(palette.muted)),
+                    Span::styled(
+                        tool.to_string(),
+                        Style::default()
+                            .fg(palette.text)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ];
+                if let Some(code) = exit_code {
+                    if code == 0 {
+                        title_spans.push(Span::styled("  ✓", Style::default().fg(palette.success)));
+                    } else {
+                        title_spans.push(Span::styled(
+                            format!("  ✗ {}", code),
+                            Style::default().fg(palette.error),
+                        ));
+                    }
+                }
+                lines.extend(wrap_tool_title(
+                    Line::from(title_spans),
+                    content_width,
+                    "      ",
+                ));
+
+                if let Ok(serde_json::Value::Object(map)) =
+                    serde_json::from_str::<serde_json::Value>(&tool_call.arguments)
+                {
+                    render_structured_arguments(&mut lines, &map, content_width, palette);
+                }
+            } else {
+                let title = if tool_call.name.is_empty() {
+                    "Tool".to_string()
+                } else {
+                    format!("Tool {}", tool_call.name)
+                };
+                lines.extend(wrap_tool_title(
+                    Line::from(vec![Span::styled(
+                        title,
+                        Style::default().fg(palette.accent_soft),
+                    )]),
+                    content_width,
+                    "  ",
+                ));
+
+                if let Ok(serde_json::Value::Object(map)) =
+                    serde_json::from_str::<serde_json::Value>(&tool_call.arguments)
+                {
+                    render_structured_arguments(&mut lines, &map, content_width, palette);
+                } else {
+                    let summary = summarize_tool_call(tool_call, content_width);
+                    if !summary.is_empty() {
+                        lines.push(Line::from(vec![Span::styled(
+                            format!("  {summary}"),
+                            Style::default().fg(palette.muted),
+                        )]));
+                    }
+                }
+            }
         }
     }
 
     lines
+}
+
+pub(crate) fn parse_mcp_tool_name(name: &str) -> Option<(&str, &str)> {
+    let stripped = name.strip_prefix("mcp__")?;
+    let (server, tool) = stripped.split_once("__")?;
+    if server.is_empty() || tool.is_empty() {
+        None
+    } else {
+        Some((server, tool))
+    }
+}
+
+fn render_structured_arguments(
+    lines: &mut Vec<Line<'static>>,
+    map: &serde_json::Map<String, serde_json::Value>,
+    content_width: usize,
+    palette: ThemePalette,
+) {
+    if map.is_empty() {
+        return;
+    }
+    for (k, v) in map {
+        match v {
+            serde_json::Value::String(s) => {
+                if s.contains('\n') {
+                    // Multiline string parameter (e.g. code snippet or prompt)
+                    lines.push(Line::from(vec![Span::styled(
+                        format!("  {k}:"),
+                        Style::default().fg(palette.accent_soft),
+                    )]));
+                    for code_line in s.lines() {
+                        let expanded = expand_tabs(code_line, 4);
+                        let line_obj = Line::from(expanded);
+                        let wrapped = word_wrap_line(
+                            &line_obj,
+                            WrapOptions::new(content_width.saturating_sub(6)).break_words(true),
+                        );
+                        for wl in wrapped {
+                            let mut spans = vec![Span::styled("    ", Style::default())];
+                            spans.extend(wl.spans.iter().map(|sp| {
+                                Span::styled(
+                                    sp.content.to_string(),
+                                    Style::default().fg(palette.text),
+                                )
+                            }));
+                            lines.push(Line::from(spans));
+                        }
+                    }
+                } else {
+                    // Single line string parameter
+                    let line = Line::from(vec![
+                        Span::styled(format!("  {k}: "), Style::default().fg(palette.muted)),
+                        Span::styled(format!("\"{}\"", s), Style::default().fg(palette.text)),
+                    ]);
+                    let wrapped =
+                        word_wrap_line(&line, WrapOptions::new(content_width).break_words(true));
+                    for wl in wrapped {
+                        lines.push(Line::from(
+                            wl.spans
+                                .into_iter()
+                                .map(|sp| Span::styled(sp.content.to_string(), sp.style))
+                                .collect::<Vec<_>>(),
+                        ));
+                    }
+                }
+            }
+            serde_json::Value::Number(n) => {
+                lines.push(Line::from(vec![
+                    Span::styled(format!("  {k}: "), Style::default().fg(palette.muted)),
+                    Span::styled(n.to_string(), Style::default().fg(palette.accent)),
+                ]));
+            }
+            serde_json::Value::Bool(b) => {
+                lines.push(Line::from(vec![
+                    Span::styled(format!("  {k}: "), Style::default().fg(palette.muted)),
+                    Span::styled(b.to_string(), Style::default().fg(palette.accent)),
+                ]));
+            }
+            serde_json::Value::Null => {
+                lines.push(Line::from(vec![
+                    Span::styled(format!("  {k}: "), Style::default().fg(palette.muted)),
+                    Span::styled("null", Style::default().fg(palette.muted)),
+                ]));
+            }
+            other => {
+                let json_str = serde_json::to_string(other).unwrap_or_else(|_| "...".to_string());
+                let line = Line::from(vec![
+                    Span::styled(format!("  {k}: "), Style::default().fg(palette.muted)),
+                    Span::styled(json_str, Style::default().fg(palette.text)),
+                ]);
+                let wrapped =
+                    word_wrap_line(&line, WrapOptions::new(content_width).break_words(true));
+                for wl in wrapped {
+                    lines.push(Line::from(
+                        wl.spans
+                            .into_iter()
+                            .map(|sp| Span::styled(sp.content.to_string(), sp.style))
+                            .collect::<Vec<_>>(),
+                    ));
+                }
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -763,10 +919,12 @@ fn render_tool_result_detail_lines(
         );
     }
 
-    // Fallback: standard output preview
+    // Fallback: standard output preview (normalized and unescaped for JSON/MCP outputs)
+    let (normalized_output, lang) = normalize_tool_output(effective_output);
     (
         render_output_preview_lines(
-            effective_output,
+            &normalized_output,
+            lang,
             content_width,
             palette,
             is_expanded,
@@ -781,8 +939,55 @@ fn render_tool_result_detail_lines(
 // Output preview
 // ---------------------------------------------------------------------------
 
+/// Unpack and format tool result output, unescaping nested JSON/MCP responses.
+pub(crate) fn normalize_tool_output(output: &str) -> (String, Option<&'static str>) {
+    let trimmed = output.trim();
+    if trimmed.is_empty() {
+        return (output.to_string(), None);
+    }
+
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
+        // Check if it's a wrapper like {"result": "..."} or {"result": {...}}
+        if let serde_json::Value::Object(ref map) = val
+            && map.len() == 1
+            && let Some(inner) = map.get("result")
+        {
+            match inner {
+                serde_json::Value::String(s) => {
+                    let inner_trimmed = s.trim();
+                    // Is inner string itself JSON?
+                    if let Ok(inner_val) = serde_json::from_str::<serde_json::Value>(inner_trimmed)
+                        && let Ok(pretty) = serde_json::to_string_pretty(&inner_val)
+                    {
+                        return (pretty, Some("json"));
+                    }
+                    return (s.clone(), None);
+                }
+                serde_json::Value::Object(_) | serde_json::Value::Array(_) => {
+                    if let Ok(pretty) = serde_json::to_string_pretty(inner) {
+                        return (pretty, Some("json"));
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // Direct JSON (object or array)
+        if matches!(
+            val,
+            serde_json::Value::Object(_) | serde_json::Value::Array(_)
+        ) && let Ok(pretty) = serde_json::to_string_pretty(&val)
+        {
+            return (pretty, Some("json"));
+        }
+    }
+
+    (output.to_string(), None)
+}
+
 pub(crate) fn render_output_preview_lines(
     output: &str,
+    lang: Option<&str>,
     content_width: usize,
     palette: ThemePalette,
     is_expanded: bool,
@@ -808,18 +1013,53 @@ pub(crate) fn render_output_preview_lines(
     let default_style = Style::default().fg(fg);
     let wrap_width = content_width;
 
-    for line_text in output.lines().take(max_lines) {
-        let expanded = expand_tabs(line_text, 4);
-        let styled_lines = ansi_to_styled_line(&expanded, default_style);
-        for sl in &styled_lines {
-            let wrapped = word_wrap_line(sl, WrapOptions::new(wrap_width).break_words(true));
-            for wl in wrapped.iter() {
-                let spans: Vec<Span<'static>> = wl
-                    .spans
-                    .iter()
-                    .map(|s| Span::styled(s.content.to_string(), s.style))
-                    .collect();
-                lines.push(Line::from(spans));
+    if !is_error && let Some(language) = lang {
+        let highlighted = crate::markdown::highlight_code_to_lines(output, language);
+        if !highlighted.is_empty() {
+            for hl_line in highlighted.into_iter().take(max_lines) {
+                let wrapped =
+                    word_wrap_line(&hl_line, WrapOptions::new(wrap_width).break_words(true));
+                for wl in wrapped.iter() {
+                    let spans: Vec<Span<'static>> = wl
+                        .spans
+                        .iter()
+                        .map(|s| Span::styled(s.content.to_string(), s.style))
+                        .collect();
+                    lines.push(Line::from(spans));
+                }
+            }
+        } else {
+            for line_text in output.lines().take(max_lines) {
+                let expanded = expand_tabs(line_text, 4);
+                let styled_lines = ansi_to_styled_line(&expanded, default_style);
+                for sl in &styled_lines {
+                    let wrapped =
+                        word_wrap_line(sl, WrapOptions::new(wrap_width).break_words(true));
+                    for wl in wrapped.iter() {
+                        let spans: Vec<Span<'static>> = wl
+                            .spans
+                            .iter()
+                            .map(|s| Span::styled(s.content.to_string(), s.style))
+                            .collect();
+                        lines.push(Line::from(spans));
+                    }
+                }
+            }
+        }
+    } else {
+        for line_text in output.lines().take(max_lines) {
+            let expanded = expand_tabs(line_text, 4);
+            let styled_lines = ansi_to_styled_line(&expanded, default_style);
+            for sl in &styled_lines {
+                let wrapped = word_wrap_line(sl, WrapOptions::new(wrap_width).break_words(true));
+                for wl in wrapped.iter() {
+                    let spans: Vec<Span<'static>> = wl
+                        .spans
+                        .iter()
+                        .map(|s| Span::styled(s.content.to_string(), s.style))
+                        .collect();
+                    lines.push(Line::from(spans));
+                }
             }
         }
     }
@@ -1766,5 +2006,95 @@ mod tests {
         assert!(rendered.contains("Edit"));
         assert!(rendered.contains("src/main.rs"));
         assert!(rendered.contains("▶"));
+    }
+
+    #[test]
+    fn test_parse_mcp_tool_name() {
+        assert_eq!(
+            parse_mcp_tool_name("mcp__blender__get_scene_info"),
+            Some(("blender", "get_scene_info"))
+        );
+        assert_eq!(
+            parse_mcp_tool_name("mcp__my_server__read_file"),
+            Some(("my_server", "read_file"))
+        );
+        assert_eq!(parse_mcp_tool_name("shell"), None);
+        assert_eq!(parse_mcp_tool_name("mcp____"), None);
+        assert_eq!(parse_mcp_tool_name("mcp__onlyserver"), None);
+    }
+
+    #[test]
+    fn test_normalize_tool_output_nested_json() {
+        let nested_json = r#"{"result": "{\n  \"up_to_date\": true,\n  \"version\": 4\n}"}"#;
+        let (output, lang) = normalize_tool_output(nested_json);
+        assert_eq!(lang, Some("json"));
+        assert!(output.contains("\"up_to_date\": true"));
+        assert!(!output.contains(r#"{"result":"#));
+    }
+
+    #[test]
+    fn test_normalize_tool_output_nested_plain_text() {
+        let nested_text = r#"{"result": "Code executed successfully: 5.2.1 LTS 3\n"}"#;
+        let (output, lang) = normalize_tool_output(nested_text);
+        assert_eq!(lang, None);
+        assert_eq!(output, "Code executed successfully: 5.2.1 LTS 3\n");
+    }
+
+    #[test]
+    fn test_normalize_tool_output_direct_json() {
+        let direct_json = r#"{"name":"Scene","object_count":3}"#;
+        let (output, lang) = normalize_tool_output(direct_json);
+        assert_eq!(lang, Some("json"));
+        assert!(output.contains("\"name\": \"Scene\""));
+        assert!(output.contains("\"object_count\": 3"));
+    }
+
+    #[test]
+    fn test_mcp_tool_card_rendering() {
+        let tool_call = ToolCall {
+            id: "call_mcp_1".into(),
+            name: "mcp__blender__execute_blender_code".into(),
+            arguments:
+                r#"{"code":"import bpy\nprint(bpy.app.version)","user_prompt":"check version"}"#
+                    .into(),
+            thought_signature: None,
+        };
+        let result =
+            ToolExecutionResult::new(r#"{"result": "Code executed successfully: 5.2.1 LTS 3"}"#);
+        let result_msg =
+            Message::tool_result("call_mcp_1", "mcp__blender__execute_blender_code", result);
+
+        let palette = test_palette();
+        let empty_set = HashSet::new();
+        let ctx = RenderContext {
+            palette,
+            spinner: ".",
+            workspace_root: Path::new("/test"),
+            expanded_tool_results: &empty_set,
+            hovered_card: None,
+            model_display_name: "test",
+            running_subagents: &[],
+            hovered_inline_subagent: None,
+            thinking_collapsed_overrides: &empty_set,
+            default_collapse_thinking: false,
+            default_collapse_diffs: false,
+            message_app_data: None,
+            reasoning_displays: &EMPTY_REASONING_DISPLAYS,
+        };
+
+        let (lines, _) =
+            render_tool_call_with_result(&tool_call, Some(&result_msg), 80, false, &ctx, false);
+        let rendered: String = lines
+            .iter()
+            .flat_map(|line| line.line.spans.iter().map(|span| span.content.as_ref()))
+            .collect();
+
+        assert!(rendered.contains("MCP"));
+        assert!(rendered.contains("blender"));
+        assert!(rendered.contains("execute_blender_code"));
+        assert!(rendered.contains("code:"));
+        assert!(rendered.contains("import bpy"));
+        assert!(rendered.contains("user_prompt:"));
+        assert!(rendered.contains("Code executed successfully: 5.2.1 LTS 3"));
     }
 }

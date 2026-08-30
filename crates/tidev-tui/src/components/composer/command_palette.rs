@@ -51,6 +51,8 @@ pub(crate) enum CommandAction {
     Git,
     /// Toggle the right-hand sidebar.
     ToggleRightSidebar,
+    /// Open the MCP server management panel.
+    Mcp,
 }
 
 // ---------------------------------------------------------------------------
@@ -99,6 +101,12 @@ pub(crate) static COMMANDS: &[CommandSpec] = &[
         aliases: &["models"],
         description: "Open the model panel",
         action: CommandAction::Model,
+    },
+    CommandSpec {
+        name: "mcp",
+        aliases: &["mcps"],
+        description: "Open the MCP server management panel",
+        action: CommandAction::Mcp,
     },
     CommandSpec {
         name: "search",
@@ -565,6 +573,15 @@ pub(crate) fn execute_command(
                 )]
             }
         }
+        CommandAction::Mcp => {
+            if args.is_empty() {
+                vec![Action::Overlay(OverlayAction::Open(
+                    OverlayKind::McpServerPanel,
+                ))]
+            } else {
+                vec![Action::Notice("Usage: /mcp".to_string())]
+            }
+        }
     }
 }
 
@@ -708,6 +725,36 @@ mod tests {
         assert!(matches!(
             execute_command(CommandAction::Git, &["status".into()], &catalog).as_slice(),
             [Action::Notice(message)] if message == "Usage: /git"
+        ));
+    }
+
+    #[test]
+    fn test_mcp_command_opens_panel_without_arguments() {
+        let reg = CommandRegistry::new();
+        assert_eq!(
+            reg.command("mcp").map(|spec| spec.action),
+            Some(CommandAction::Mcp)
+        );
+        assert_eq!(
+            reg.command("mcps").map(|spec| spec.action),
+            Some(CommandAction::Mcp)
+        );
+
+        let catalog = test_catalog();
+        assert!(matches!(
+            execute_command(CommandAction::Mcp, &[], &catalog).as_slice(),
+            [Action::Overlay(OverlayAction::Open(
+                OverlayKind::McpServerPanel
+            ))]
+        ));
+    }
+
+    #[test]
+    fn test_mcp_command_rejects_arguments() {
+        let catalog = test_catalog();
+        assert!(matches!(
+            execute_command(CommandAction::Mcp, &["extra".into()], &catalog).as_slice(),
+            [Action::Notice(message)] if message == "Usage: /mcp"
         ));
     }
 

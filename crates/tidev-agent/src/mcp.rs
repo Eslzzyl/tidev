@@ -653,7 +653,9 @@ impl McpRegistry {
                 for (key, value) in env {
                     command.env(key, value);
                 }
-                let transport = TokioChildProcess::new(command)
+                let (transport, _) = TokioChildProcess::builder(command)
+                    .stderr(std::process::Stdio::null())
+                    .spawn()
                     .context("failed to start stdio MCP server process")?;
                 client_info
                     .serve(transport)

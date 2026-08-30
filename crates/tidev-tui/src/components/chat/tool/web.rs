@@ -26,7 +26,14 @@ pub(super) fn render_websearch_result_lines(
     }
 
     if is_error {
-        return render_output_preview_lines(output, content_width, palette, is_expanded, true);
+        return render_output_preview_lines(
+            output,
+            None,
+            content_width,
+            palette,
+            is_expanded,
+            true,
+        );
     }
 
     lines.push(HyperlinkLine::new(Line::from(vec![Span::styled(
@@ -89,7 +96,14 @@ pub(super) fn render_webfetch_result_lines(
     }
 
     if is_error {
-        return render_output_preview_lines(output, content_width, palette, is_expanded, true);
+        return render_output_preview_lines(
+            output,
+            None,
+            content_width,
+            palette,
+            is_expanded,
+            true,
+        );
     }
 
     lines.push(HyperlinkLine::new(Line::from(vec![Span::styled(

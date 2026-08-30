@@ -8,10 +8,10 @@ use std::collections::BTreeMap;
 
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, MouseButton, MouseEvent, MouseEventKind};
-use ratatui::layout::{Margin, Rect};
+use ratatui::layout::{Constraint, Layout, Margin, Position, Rect};
 use ratatui::prelude::{Color, Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, Clear, Paragraph};
 
 use tidev_config::mcp::McpServerConfig;
 use tidev_core::mcp::{McpConnectionStatus, McpManager, McpServerSummary};
@@ -118,6 +118,7 @@ pub(crate) struct McpServerPanel {
     selected_index: usize,
     query: String,
     list_scroll: usize,
+    preview_scroll: usize,
     query_active: bool,
     editing: bool,
     edit_draft: ServerDraft,
@@ -137,6 +138,7 @@ impl McpServerPanel {
             selected_index: 0,
             query: String::new(),
             list_scroll: 0,
+            preview_scroll: 0,
             query_active: false,
             editing: false,
             edit_draft: ServerDraft::new(),
@@ -154,15 +156,6 @@ impl McpServerPanel {
         self.filtered_indices
             .get(self.selected_index)
             .and_then(|&idx| self.summaries.get(idx))
-    }
-
-    fn status_color(status: &McpConnectionStatus) -> Color {
-        match status {
-            McpConnectionStatus::Connected => Color::Green,
-            McpConnectionStatus::Connecting => Color::Yellow,
-            McpConnectionStatus::Disconnected => Color::DarkGray,
-            McpConnectionStatus::Failed(_) => Color::Red,
-        }
     }
 
     fn refresh_list(&mut self) {
@@ -191,6 +184,7 @@ impl McpServerPanel {
             .selected_index
             .min(self.filtered_indices.len().saturating_sub(1));
         self.list_scroll = 0;
+        self.preview_scroll = 0;
     }
 
     fn ensure_scroll_visible(&mut self, item_count: usize) {
@@ -209,6 +203,7 @@ impl McpServerPanel {
         } else {
             self.selected_index = self.filtered_indices.len().saturating_sub(1);
         }
+        self.preview_scroll = 0;
         self.ensure_scroll_visible(8);
     }
 
@@ -218,7 +213,16 @@ impl McpServerPanel {
         } else {
             self.selected_index = 0;
         }
+        self.preview_scroll = 0;
         self.ensure_scroll_visible(8);
+    }
+
+    fn scroll_preview_up(&mut self, step: usize) {
+        self.preview_scroll = self.preview_scroll.saturating_sub(step);
+    }
+
+    fn scroll_preview_down(&mut self, step: usize) {
+        self.preview_scroll = self.preview_scroll.saturating_add(step);
     }
 
     fn toggle_selected(&mut self) -> Option<Action> {
@@ -326,6 +330,208 @@ impl McpServerPanel {
             }
         }
     }
+
+    fn generate_details_lines(
+        &self,
+        summary: &McpServerSummary,
+        config: Option<&McpServerConfig>,
+        tools: &[tidev_tools::types::ToolDefinition],
+        palette: &crate::theme::ThemePalette,
+        details_width: usize,
+    ) -> Vec<Line<'static>> {
+        let mut lines = Vec::new();
+
+        // ── Status & Transport ──
+        let (status_icon, status_label, status_color) = match &summary.status {
+            McpConnectionStatus::Connected => ("●", "Connected", Color::Green),
+            McpConnectionStatus::Connecting => ("◌", "Connecting", Color::Yellow),
+            McpConnectionStatus::Disconnected => ("○", "Disconnected", palette.muted),
+            McpConnectionStatus::Failed(_) => ("✕", "Failed", Color::Red),
+        };
+
+        lines.push(Line::from(vec![
+            Span::styled("  Status:    ", Style::default().fg(palette.muted)),
+            Span::styled(
+                format!("{status_icon} {status_label}"),
+                Style::default()
+                    .fg(status_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]));
+
+        lines.push(Line::from(vec![
+            Span::styled("  Transport: ", Style::default().fg(palette.muted)),
+            Span::styled(
+                summary.kind.clone(),
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]));
+
+        // ── Configuration details ──
+        if let Some(config) = config {
+            match config {
+                McpServerConfig::Stdio {
+                    command,
+                    args,
+                    cwd,
+                    env,
+                } => {
+                    lines.push(Line::from(vec![
+                        Span::styled("  Command:   ", Style::default().fg(palette.muted)),
+                        Span::styled(command.clone(), Style::default().fg(palette.text)),
+                    ]));
+                    if !args.is_empty() {
+                        let args_str = args.join(" ");
+                        let wrapped =
+                            textwrap::wrap(&args_str, details_width.saturating_sub(16).max(20));
+                        if wrapped.len() <= 1 {
+                            lines.push(Line::from(vec![
+                                Span::styled("  Args:      ", Style::default().fg(palette.muted)),
+                                Span::styled(args_str, Style::default().fg(palette.text)),
+                            ]));
+                        } else {
+                            lines.push(Line::from(vec![
+                                Span::styled("  Args:      ", Style::default().fg(palette.muted)),
+                                Span::styled(
+                                    wrapped[0].to_string(),
+                                    Style::default().fg(palette.text),
+                                ),
+                            ]));
+                            for w in &wrapped[1..] {
+                                lines.push(Line::from(vec![
+                                    Span::styled(
+                                        "             ",
+                                        Style::default().fg(palette.muted),
+                                    ),
+                                    Span::styled(w.to_string(), Style::default().fg(palette.text)),
+                                ]));
+                            }
+                        }
+                    }
+                    if let Some(cwd) = cwd {
+                        lines.push(Line::from(vec![
+                            Span::styled("  Cwd:       ", Style::default().fg(palette.muted)),
+                            Span::styled(cwd.clone(), Style::default().fg(palette.text)),
+                        ]));
+                    }
+                    if !env.is_empty() {
+                        let env_str = env
+                            .iter()
+                            .map(|(k, v)| format!("{k}={v}"))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        lines.push(Line::from(vec![
+                            Span::styled("  Env:       ", Style::default().fg(palette.muted)),
+                            Span::styled(env_str, Style::default().fg(palette.muted)),
+                        ]));
+                    }
+                }
+                McpServerConfig::Http { url, headers } | McpServerConfig::Sse { url, headers } => {
+                    lines.push(Line::from(vec![
+                        Span::styled("  URL:       ", Style::default().fg(palette.muted)),
+                        Span::styled(url.clone(), Style::default().fg(palette.text)),
+                    ]));
+                    if !headers.is_empty() {
+                        let headers_str = headers
+                            .iter()
+                            .map(|(k, v)| format!("{k}: {v}"))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        lines.push(Line::from(vec![
+                            Span::styled("  Headers:   ", Style::default().fg(palette.muted)),
+                            Span::styled(headers_str, Style::default().fg(palette.muted)),
+                        ]));
+                    }
+                }
+            }
+        }
+
+        if let McpConnectionStatus::Failed(err) = &summary.status {
+            lines.push(Line::from(""));
+            let err_wrap = textwrap::wrap(err.as_str(), details_width.saturating_sub(14).max(20));
+            if err_wrap.is_empty() {
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        "  Error:     ",
+                        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(err.clone(), Style::default().fg(Color::Red)),
+                ]));
+            } else {
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        "  Error:     ",
+                        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(err_wrap[0].to_string(), Style::default().fg(Color::Red)),
+                ]));
+                for line in &err_wrap[1..] {
+                    lines.push(Line::from(vec![
+                        Span::styled("             ", Style::default().fg(Color::Red)),
+                        Span::styled(line.to_string(), Style::default().fg(Color::Red)),
+                    ]));
+                }
+            }
+        }
+
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![Span::styled(
+            format!("  Tools ({})", tools.len()),
+            Style::default()
+                .fg(palette.accent)
+                .add_modifier(Modifier::BOLD),
+        )]));
+
+        let desc_wrap_width = details_width.saturating_sub(8).max(20);
+
+        if tools.is_empty() {
+            if summary.status == McpConnectionStatus::Connected {
+                lines.push(Line::from(Span::styled(
+                    "    (No tools registered by this server)",
+                    Style::default().fg(palette.muted),
+                )));
+            } else {
+                lines.push(Line::from(Span::styled(
+                    "    (Press [Enter] to connect and discover tools)",
+                    Style::default().fg(palette.muted),
+                )));
+            }
+        } else {
+            for (i, tool) in tools.iter().enumerate() {
+                if i > 0 {
+                    lines.push(Line::from(""));
+                }
+                let (_, raw_tool_name) = tool.mcp_target().unwrap_or(("", tool.name.as_str()));
+                lines.push(Line::from(vec![
+                    Span::styled("    ● ", Style::default().fg(palette.accent)),
+                    Span::styled(
+                        raw_tool_name.to_string(),
+                        Style::default()
+                            .fg(palette.text)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ]));
+                if !tool.description.trim().is_empty() {
+                    for desc_line in tool.description.lines() {
+                        let trimmed = desc_line.trim();
+                        if trimmed.is_empty() {
+                            continue;
+                        }
+                        for wrapped in textwrap::wrap(trimmed, desc_wrap_width) {
+                            lines.push(Line::from(vec![Span::styled(
+                                format!("      {wrapped}"),
+                                Style::default().fg(palette.muted),
+                            )]));
+                        }
+                    }
+                }
+            }
+        }
+
+        lines
+    }
 }
 
 impl Component for McpServerPanel {
@@ -333,11 +539,11 @@ impl Component for McpServerPanel {
         true
     }
 
-    fn blocks_input(&self) -> bool {
-        true
+    fn z_order(&self) -> u8 {
+        10
     }
 
-    fn overlay_uses_main_area(&self) -> bool {
+    fn blocks_input(&self) -> bool {
         true
     }
 
@@ -346,12 +552,23 @@ impl Component for McpServerPanel {
     }
 
     fn handle_key_event(&mut self, key: KeyEvent) -> Option<Action> {
-        if key.kind != KeyEventKind::Press {
+        if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
             return None;
         }
 
         // ── Editor mode ────────────────────────────────────────────────
         if self.editing {
+            let is_stdio = self.edit_draft.kind == "stdio";
+            let field_ids: &[usize] = if is_stdio {
+                &[0, 1, 2, 3, 4, 5]
+            } else {
+                &[0, 1, 6, 7]
+            };
+            let current_pos = field_ids
+                .iter()
+                .position(|&id| id == self.edit_scroll)
+                .unwrap_or(0);
+
             match key.code {
                 KeyCode::Esc => {
                     self.editing = false;
@@ -362,11 +579,30 @@ impl Component for McpServerPanel {
                     return self.save_draft();
                 }
                 KeyCode::Tab | KeyCode::Down => {
-                    self.edit_scroll = (self.edit_scroll + 1).min(7);
+                    let next_pos = (current_pos + 1) % field_ids.len();
+                    self.edit_scroll = field_ids[next_pos];
                     return Some(Action::Noop);
                 }
-                KeyCode::Up => {
-                    self.edit_scroll = self.edit_scroll.saturating_sub(1);
+                KeyCode::BackTab | KeyCode::Up => {
+                    let prev_pos = if current_pos == 0 {
+                        field_ids.len() - 1
+                    } else {
+                        current_pos - 1
+                    };
+                    self.edit_scroll = field_ids[prev_pos];
+                    return Some(Action::Noop);
+                }
+                KeyCode::Char(' ') if self.edit_scroll == 1 => {
+                    self.edit_draft.edit_field(1, |_| {});
+                    let is_stdio = self.edit_draft.kind == "stdio";
+                    let new_field_ids: &[usize] = if is_stdio {
+                        &[0, 1, 2, 3, 4, 5]
+                    } else {
+                        &[0, 1, 6, 7]
+                    };
+                    if !new_field_ids.contains(&self.edit_scroll) {
+                        self.edit_scroll = 1;
+                    }
                     return Some(Action::Noop);
                 }
                 KeyCode::Backspace => {
@@ -386,27 +622,58 @@ impl Component for McpServerPanel {
             return None;
         }
 
-        // ── List mode ──────────────────────────────────────────────────
+        // ── List mode: Search query active ─────────────────────────────
+        if self.query_active {
+            match key.code {
+                KeyCode::Esc | KeyCode::Enter => {
+                    self.query_active = false;
+                    return Some(Action::Noop);
+                }
+                KeyCode::Backspace => {
+                    if !self.query.is_empty() {
+                        self.query.pop();
+                        self.refilter();
+                    }
+                    return Some(Action::Noop);
+                }
+                KeyCode::Char(ch) => {
+                    self.query.push(ch);
+                    self.refilter();
+                    return Some(Action::Noop);
+                }
+                _ => return None,
+            }
+        }
+
+        // ── List mode: Normal navigation ───────────────────────────────
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => Some(Action::Overlay(OverlayAction::Close(
                 OverlayKind::McpServerPanel,
             ))),
-            KeyCode::Up => {
+            KeyCode::Up | KeyCode::Char('k') => {
                 self.move_up(1);
                 Some(Action::Noop)
             }
-            KeyCode::Down => {
+            KeyCode::Down | KeyCode::Char('j') => {
                 self.move_down(1);
                 Some(Action::Noop)
             }
+            KeyCode::Left | KeyCode::Char('h') => {
+                self.scroll_preview_up(3);
+                Some(Action::Noop)
+            }
+            KeyCode::Right | KeyCode::Char('l') => {
+                self.scroll_preview_down(3);
+                Some(Action::Noop)
+            }
             KeyCode::PageUp => {
-                for _ in 0..8 {
+                for _ in 0..5 {
                     self.move_up(1);
                 }
                 Some(Action::Noop)
             }
             KeyCode::PageDown => {
-                for _ in 0..8 {
+                for _ in 0..5 {
                     self.move_down(1);
                 }
                 Some(Action::Noop)
@@ -422,24 +689,8 @@ impl Component for McpServerPanel {
                 Some(Action::Noop)
             }
             KeyCode::Char('d') => self.remove_selected(),
-            KeyCode::Char('/') | KeyCode::F(2) => {
-                self.query_active = !self.query_active;
-                if self.query_active {
-                    self.query.clear();
-                    self.refilter();
-                }
-                Some(Action::Noop)
-            }
-            KeyCode::Backspace if self.query_active => {
-                if !self.query.is_empty() {
-                    self.query.pop();
-                    self.refilter();
-                }
-                Some(Action::Noop)
-            }
-            KeyCode::Char(ch) if self.query_active => {
-                self.query.push(ch);
-                self.refilter();
+            KeyCode::Char('/') | KeyCode::Char('s') => {
+                self.query_active = true;
                 Some(Action::Noop)
             }
             _ => None,
@@ -447,23 +698,63 @@ impl Component for McpServerPanel {
     }
 
     fn handle_mouse_event(&mut self, mouse: MouseEvent, area: Rect) -> Option<Action> {
-        if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
+        let position = Position::new(mouse.column, mouse.row);
+        if !area.contains(position) {
             return None;
         }
-        // Simple click handling: check if click is within the item list
-        let inner = area.inner(Margin {
-            horizontal: 2,
-            vertical: 3,
+
+        let overlay_w = (area.width * 92 / 100)
+            .clamp(76, 120)
+            .min(area.width.saturating_sub(2));
+        let overlay_h = (area.height * 85 / 100)
+            .clamp(18, 40)
+            .min(area.height.saturating_sub(2));
+        let overlay = centered_rect(overlay_w, overlay_h, area);
+        if !overlay.contains(position) {
+            return None;
+        }
+
+        let inner = overlay.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
         });
-        if mouse.column < inner.x || mouse.column >= inner.x + inner.width || mouse.row < inner.y {
-            return None;
+        let inner_w = inner.width as usize;
+        let left_w = (inner_w * 24 / 100).clamp(22, 28) as u16;
+        let in_left = position.x < inner.x + left_w;
+
+        match mouse.kind {
+            MouseEventKind::ScrollUp => {
+                if in_left {
+                    self.move_up(3);
+                } else {
+                    self.scroll_preview_up(3);
+                }
+                Some(Action::Consumed)
+            }
+            MouseEventKind::ScrollDown => {
+                if in_left {
+                    self.move_down(3);
+                } else {
+                    self.scroll_preview_down(3);
+                }
+                Some(Action::Consumed)
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                if in_left {
+                    let list_start_y = inner.y + 4; // Title(1) + Body Top(1) + Filter(1) + Header(1) + Divider(1)
+                    if position.y >= list_start_y && position.y < inner.y + inner.height - 1 {
+                        let row = (position.y - list_start_y) as usize;
+                        let idx = self.list_scroll + row;
+                        if idx < self.filtered_count() {
+                            self.selected_index = idx;
+                            self.preview_scroll = 0;
+                        }
+                    }
+                }
+                Some(Action::Noop)
+            }
+            _ => Some(Action::Noop),
         }
-        let item_index = (mouse.row - inner.y) as usize;
-        if item_index < self.filtered_count() {
-            self.selected_index = item_index;
-            self.ensure_scroll_visible(inner.height as usize);
-        }
-        None
     }
 
     fn update(&mut self, action: &Action, _ctx: &UpdateContext) -> Vec<Action> {
@@ -479,58 +770,201 @@ impl Component for McpServerPanel {
     fn draw(&mut self, frame: &mut Frame, area: Rect, ctx: &DrawContext) {
         // ── Editor mode ────────────────────────────────────────────────
         if self.editing {
-            self.draw_editor(frame, area);
+            self.draw_editor(frame, area, ctx);
             return;
         }
 
         // ── Main panel ─────────────────────────────────────────────────
-        let palette = ctx.palette; // 4-value ThemePalette
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .title(" MCP Servers ")
-            .title_bottom(if self.query_active {
-                " Filter: "
-            } else {
-                " [Enter] toggle  [r] refresh  [n] add  [e] edit  [d] delete  [/] filter  [Esc] close "
-            });
-        let inner = block.inner(area);
-        frame.render_widget(Clear, area);
-        frame.render_widget(block, area);
+        let palette = ctx.palette;
+        let overlay_w = (area.width * 92 / 100)
+            .clamp(76, 120)
+            .min(area.width.saturating_sub(2));
+        let overlay_h = (area.height * 85 / 100)
+            .clamp(18, 40)
+            .min(area.height.saturating_sub(2));
+        let overlay = centered_rect(overlay_w, overlay_h, area);
+        frame.render_widget(Clear, overlay);
+        let block = Block::default().style(Style::default().bg(palette.panel_alt));
+        frame.render_widget(block, overlay);
 
-        // ── Query bar ──────────────────────────────────────────────────
+        let inner = overlay.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
+
+        // ── Title Header ──
+        let title_text = if self.summaries.is_empty() {
+            " MCP Servers ".to_string()
+        } else {
+            format!(
+                " MCP Servers · {}/{} ",
+                (self.selected_index + 1).min(self.filtered_count()),
+                self.filtered_count()
+            )
+        };
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![Span::styled(
+                title_text,
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
+            )]))
+            .style(Style::default().bg(palette.panel_alt)),
+            Rect::new(inner.x, inner.y, inner.width, 1),
+        );
+
+        let body = Rect::new(
+            inner.x,
+            inner.y + 1,
+            inner.width,
+            inner.height.saturating_sub(2),
+        );
+
+        // ── Empty State ──
+        if self.summaries.is_empty() {
+            let empty_text = vec![
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  No MCP servers configured",
+                    Style::default().fg(palette.muted),
+                )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  Press [n] to add a new server",
+                    Style::default().fg(palette.text),
+                )),
+                Line::from(Span::styled(
+                    "  Or configure mcpServers in ~/.config/tidev/mcp.json",
+                    Style::default().fg(palette.muted),
+                )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  Press Esc or q to close",
+                    Style::default().fg(palette.muted),
+                )),
+            ];
+            frame.render_widget(
+                Paragraph::new(empty_text).style(Style::default().bg(palette.panel_alt)),
+                body,
+            );
+
+            let footer_y = inner.y + inner.height - 1;
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    "  [n] add server  •  [Esc] close",
+                    Style::default().fg(palette.muted),
+                )))
+                .style(Style::default().bg(palette.panel_alt)),
+                Rect::new(inner.x, footer_y, inner.width, 1),
+            );
+            return;
+        }
+
+        // ── Split Layout: Left list + Right preview ──
+        let inner_w = body.width as usize;
+        let left_w = (inner_w * 24 / 100).clamp(22, 28) as u16;
+        let layout = Layout::horizontal([
+            Constraint::Length(left_w),
+            Constraint::Length(1),
+            Constraint::Min(20),
+        ])
+        .split(body);
+        let left_area = layout[0];
+        let sep_area = layout[1];
+        let right_area = layout[2];
+
+        // Vertical divider between left and right
+        let sep_lines: Vec<Line> = (0..body.height)
+            .map(|_| Line::from(Span::styled("│", Style::default().fg(palette.border))))
+            .collect();
+        frame.render_widget(
+            Paragraph::new(sep_lines).style(Style::default().bg(palette.panel_alt)),
+            sep_area,
+        );
+
+        // ── Left Pane ──
+        // 1. Filter bar
+        let filter_area = Rect::new(left_area.x, left_area.y, left_area.width, 1);
+        let (visible_query, cursor) = single_line_input_cursor(filter_area, 10, &self.query);
+        let filter_text = if self.query_active {
+            format!("  Search: {visible_query}")
+        } else if self.query.is_empty() {
+            "  Search... (/)".to_string()
+        } else {
+            format!("  Search: {}", self.query)
+        };
+        let filter_style = if self.query_active {
+            Style::default().fg(palette.accent)
+        } else {
+            Style::default().fg(palette.muted)
+        };
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![Span::styled(filter_text, filter_style)]))
+                .style(Style::default().bg(palette.panel_alt)),
+            filter_area,
+        );
         if self.query_active {
-            let query_area = Rect::new(inner.x, inner.y, inner.width, 1);
-            let (visible_query, cursor) = single_line_input_cursor(query_area, 8, &self.query);
-            let query_bar =
-                Paragraph::new(Line::from(Span::raw(format!("Filter: {visible_query}"))))
-                    .style(Style::default().fg(Color::Cyan));
-            frame.render_widget(query_bar, query_area);
             frame.set_cursor_position(cursor);
         }
 
-        // ── Item list ──────────────────────────────────────────────────
-        let list_area = if self.query_active {
-            Rect::new(
-                inner.x,
-                inner.y + 1,
-                inner.width,
-                inner.height.saturating_sub(2),
-            )
+        // 2. Column header
+        let left_header_area = Rect::new(left_area.x, left_area.y + 1, left_area.width, 1);
+        let name_col_w = (left_area.width as usize).saturating_sub(11).max(4);
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled("   ", Style::default().fg(palette.accent)),
+                Span::styled(
+                    format!("{:<name_col_w$}", "Server"),
+                    Style::default()
+                        .fg(palette.accent)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "  Kind",
+                    Style::default()
+                        .fg(palette.accent)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]))
+            .style(Style::default().bg(palette.panel_alt)),
+            left_header_area,
+        );
+
+        // 3. Divider
+        let left_divider_area = Rect::new(left_area.x, left_area.y + 2, left_area.width, 1);
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                "─".repeat(left_area.width as usize),
+                Style::default().fg(palette.border),
+            )))
+            .style(Style::default().bg(palette.panel_alt)),
+            left_divider_area,
+        );
+
+        // 4. Server list
+        let list_content_y = left_area.y + 3;
+        let list_content_height = left_area.height.saturating_sub(3);
+        let list_area = Rect::new(
+            left_area.x,
+            list_content_y,
+            left_area.width,
+            list_content_height,
+        );
+
+        let (list_content_area, list_sb_area) = if list_area.width > 2 {
+            let chunks =
+                Layout::horizontal([Constraint::Min(1), Constraint::Length(1)]).split(list_area);
+            (chunks[0], Some(chunks[1]))
         } else {
-            Rect::new(
-                inner.x,
-                inner.y,
-                inner.width,
-                inner.height.saturating_sub(1),
-            )
+            (list_area, None)
         };
 
-        let display_count = list_area.height as usize;
+        let visible_items = list_content_area.height as usize;
         let total = self.filtered_count();
         let scroll = self.list_scroll;
 
-        for i in 0..display_count.min(total.saturating_sub(scroll)) {
+        let mut list_lines = Vec::new();
+        for i in 0..visible_items.min(total.saturating_sub(scroll)) {
             let idx = scroll + i;
             let Some(&summary_idx) = self.filtered_indices.get(idx) else {
                 break;
@@ -540,188 +974,336 @@ impl Component for McpServerPanel {
             };
 
             let is_selected = idx == self.selected_index;
-            let status_color = Self::status_color(&summary.status);
-            let status_icon = match &summary.status {
-                McpConnectionStatus::Connected => "●",
-                McpConnectionStatus::Connecting => "◌",
-                McpConnectionStatus::Disconnected => "○",
-                McpConnectionStatus::Failed(_) => "✕",
+            let (status_icon, status_color) = match &summary.status {
+                McpConnectionStatus::Connected => ("●", Color::Green),
+                McpConnectionStatus::Connecting => ("◌", Color::Yellow),
+                McpConnectionStatus::Disconnected => ("○", palette.muted),
+                McpConnectionStatus::Failed(_) => ("✕", Color::Red),
             };
 
-            let line_y = list_area.y + i as u16;
+            let max_name_len = (list_content_area.width as usize).saturating_sub(10).max(4);
+            let mut display_name = summary.name.clone();
+            if display_name.len() > max_name_len {
+                display_name.truncate(max_name_len.saturating_sub(1));
+                display_name.push('…');
+            }
 
-            let style = if is_selected {
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::White)
-                    .add_modifier(Modifier::BOLD)
+            let row_bg = if is_selected {
+                palette.selection_bg
             } else {
-                Style::default().fg(status_color)
+                palette.panel_alt
+            };
+            let text_fg = if is_selected {
+                palette.selection_fg
+            } else {
+                palette.text
+            };
+            let muted_fg = if is_selected {
+                palette.selection_fg
+            } else {
+                palette.muted
             };
 
             let line = Line::from(vec![
-                Span::styled(format!(" {} ", status_icon), style.fg(status_color)),
                 Span::styled(
-                    format!(" {:<20} ", summary.name),
-                    if is_selected {
-                        Style::default()
-                            .fg(Color::Black)
-                            .bg(Color::White)
-                            .add_modifier(Modifier::BOLD)
-                    } else {
-                        Style::default()
-                            .fg(Color::White)
-                            .add_modifier(Modifier::BOLD)
-                    },
+                    format!(" {status_icon} "),
+                    Style::default()
+                        .fg(if is_selected { text_fg } else { status_color })
+                        .bg(row_bg),
                 ),
                 Span::styled(
-                    format!(" {:<6}", summary.kind),
-                    if is_selected {
-                        Style::default().fg(Color::Black).bg(Color::White)
-                    } else {
-                        Style::default().fg(Color::Cyan)
-                    },
+                    format!("{display_name:<max_name_len$}"),
+                    Style::default()
+                        .fg(text_fg)
+                        .bg(row_bg)
+                        .add_modifier(if is_selected {
+                            Modifier::BOLD
+                        } else {
+                            Modifier::empty()
+                        }),
                 ),
                 Span::styled(
-                    format!(" {} tools", summary.tool_count),
-                    if is_selected {
-                        Style::default().fg(Color::Black).bg(Color::White)
-                    } else {
-                        Style::default().fg(Color::Gray)
-                    },
-                ),
-                Span::raw(" "),
-                Span::styled(
-                    summary.status_text(),
-                    if is_selected {
-                        Style::default().fg(Color::Black).bg(Color::White)
-                    } else {
-                        Style::default().fg(status_color)
-                    },
+                    format!(" {:>4} ", summary.kind),
+                    Style::default().fg(muted_fg).bg(row_bg),
                 ),
             ]);
-
-            frame.render_widget(
-                Paragraph::new(line),
-                Rect::new(list_area.x, line_y, list_area.width, 1),
-            );
+            list_lines.push(line);
         }
 
-        // ── Scrollbar ──────────────────────────────────────────────────
-        render_scrollbar(frame, list_area, scroll, display_count, palette, false);
-
-        // ── Help text ──────────────────────────────────────────────────
-        if !self.query_active {
-            let help = Paragraph::new(Line::from(Span::styled(
-                " [Enter] toggle  [r] refresh  [n] add  [e] edit  [d] delete  [/] filter  [Esc] close ",
-                Style::default().fg(Color::DarkGray),
-            )));
-            frame.render_widget(
-                help,
-                Rect::new(
-                    inner.x,
-                    inner.y + inner.height.saturating_sub(1),
-                    inner.width,
-                    1,
-                ),
-            );
+        while list_lines.len() < visible_items {
+            list_lines.push(Line::from(""));
         }
+
+        frame.render_widget(
+            Paragraph::new(list_lines).style(Style::default().bg(palette.panel_alt)),
+            list_content_area,
+        );
+
+        if let Some(sb_area) = list_sb_area
+            && total > visible_items
+        {
+            render_scrollbar(frame, sb_area, scroll, total, palette, false);
+        }
+
+        // ── Right Pane: Details ──
+        let right_header_area = Rect::new(right_area.x, right_area.y, right_area.width, 1);
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![Span::styled(
+                "  Server Details",
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
+            )]))
+            .style(Style::default().bg(palette.panel_alt)),
+            right_header_area,
+        );
+
+        let right_divider_area = Rect::new(right_area.x, right_area.y + 1, right_area.width, 1);
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                "─".repeat(right_area.width as usize),
+                Style::default().fg(palette.border),
+            )))
+            .style(Style::default().bg(palette.panel_alt)),
+            right_divider_area,
+        );
+
+        let right_content_y = right_area.y + 2;
+        let right_content_height = right_area.height.saturating_sub(2);
+        let right_content_area = Rect::new(
+            right_area.x,
+            right_content_y,
+            right_area.width,
+            right_content_height,
+        );
+
+        let (details_area, details_sb_area) = if right_content_area.width > 2 {
+            let chunks = Layout::horizontal([Constraint::Min(1), Constraint::Length(1)])
+                .split(right_content_area);
+            (chunks[0], Some(chunks[1]))
+        } else {
+            (right_content_area, None)
+        };
+
+        if let Some(summary) = self.selected_summary() {
+            let config = self.mcp.server_config(&summary.name);
+            let tools = self
+                .mcp
+                .all_definitions()
+                .into_iter()
+                .filter(|tool| {
+                    tool.mcp_target()
+                        .is_some_and(|(server, _)| server == summary.name)
+                })
+                .collect::<Vec<_>>();
+
+            let all_lines = self.generate_details_lines(
+                summary,
+                config.as_ref(),
+                &tools,
+                &palette,
+                details_area.width as usize,
+            );
+
+            let total_detail_lines = all_lines.len();
+            let visible_detail_items = details_area.height as usize;
+            let max_scroll = total_detail_lines.saturating_sub(visible_detail_items);
+            self.preview_scroll = self.preview_scroll.min(max_scroll);
+            let scroll = self.preview_scroll;
+
+            let visible_lines: Vec<Line> = all_lines
+                .into_iter()
+                .skip(scroll)
+                .take(visible_detail_items)
+                .collect();
+
+            frame.render_widget(
+                Paragraph::new(visible_lines).style(Style::default().bg(palette.panel_alt)),
+                details_area,
+            );
+
+            if let Some(sb_area) = details_sb_area
+                && total_detail_lines > visible_detail_items
+            {
+                render_scrollbar(frame, sb_area, scroll, total_detail_lines, palette, false);
+            }
+        }
+
+        // ── Footer Toolbar ──
+        let footer_y = inner.y + inner.height - 1;
+        let footer_text = if self.query_active {
+            "  Enter: confirm search  •  Esc: cancel"
+        } else if inner.width >= 86 {
+            "  [Enter] Toggle  •  [r] Refresh  •  [n] Add  •  [e] Edit  •  [d] Delete  •  [/] Search  •  [Esc] Close"
+        } else if inner.width >= 68 {
+            "  [Enter] Toggle  [r] Refresh  [n] Add  [e] Edit  [d] Delete  [/] Search  [Esc] Close"
+        } else {
+            "  [Enter] Toggle  [r] Sync  [n] Add  [e] Edit  [d] Del  [Esc] Close"
+        };
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                footer_text,
+                Style::default().fg(palette.muted),
+            )))
+            .style(Style::default().bg(palette.panel_alt)),
+            Rect::new(inner.x, footer_y, inner.width, 1),
+        );
     }
 }
 
 // ── Editor drawing ─────────────────────────────────────────────────────────
 
 impl McpServerPanel {
-    fn draw_editor(&mut self, frame: &mut Frame, area: Rect) {
-        let editor_area = centered_rect(65, 70, area);
+    fn draw_editor(&mut self, frame: &mut Frame, area: Rect, ctx: &DrawContext) {
+        let palette = ctx.palette;
+        let is_stdio = self.edit_draft.kind == "stdio";
+        let height = if is_stdio { 16u16 } else { 14u16 };
+        let editor_area = centered_rect(area.width.min(68), area.height.min(height), area);
 
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .title(" MCP Server ");
-        let inner = block.inner(editor_area);
         frame.render_widget(Clear, editor_area);
+        let block = Block::default().style(Style::default().bg(palette.panel_alt));
         frame.render_widget(block, editor_area);
 
-        // ── Fields ────────────────────────────────────────────────────
-        let fields = [
-            ("Name", &self.edit_draft.name, 0),
-            ("Kind", &self.edit_draft.kind, 1),
-            ("Cmd", &self.edit_draft.command, 2),
-            ("Args", &self.edit_draft.args, 3),
-            ("Cwd", &self.edit_draft.cwd, 4),
-            ("Env", &self.edit_draft.env, 5),
-            ("URL", &self.edit_draft.url, 6),
-            ("Header", &self.edit_draft.headers, 7),
-        ];
+        let inner = editor_area.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
 
-        let field_start_y = inner.y;
-        for (label, value, idx) in &fields {
-            let y = field_start_y + *idx as u16;
-            let is_active = self.edit_scroll == *idx;
+        // Title
+        let title = if let Some(ref orig) = self.edit_original_name {
+            format!(" Edit MCP Server: {} ", orig)
+        } else {
+            " Add MCP Server ".to_string()
+        };
+
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![Span::styled(
+                title,
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
+            )]))
+            .style(Style::default().bg(palette.panel_alt)),
+            Rect::new(inner.x, inner.y, inner.width, 1),
+        );
+
+        // Divider
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                "─".repeat(inner.width as usize),
+                Style::default().fg(palette.border),
+            )))
+            .style(Style::default().bg(palette.panel_alt)),
+            Rect::new(inner.x, inner.y + 1, inner.width, 1),
+        );
+
+        // Active fields based on kind
+        let fields: Vec<(&'static str, &str, usize, &'static str)> = if is_stdio {
+            vec![
+                ("Name", &self.edit_draft.name, 0, ""),
+                (
+                    "Kind",
+                    &self.edit_draft.kind,
+                    1,
+                    " (Space to cycle: stdio → http → sse)",
+                ),
+                ("Command", &self.edit_draft.command, 2, ""),
+                ("Args", &self.edit_draft.args, 3, " (optional)"),
+                (
+                    "Cwd",
+                    &self.edit_draft.cwd,
+                    4,
+                    " (optional, relative to workspace)",
+                ),
+                ("Env", &self.edit_draft.env, 5, " (KEY=VAL, optional)"),
+            ]
+        } else {
+            vec![
+                ("Name", &self.edit_draft.name, 0, ""),
+                (
+                    "Kind",
+                    &self.edit_draft.kind,
+                    1,
+                    " (Space to cycle: stdio → http → sse)",
+                ),
+                ("URL", &self.edit_draft.url, 6, ""),
+                (
+                    "Headers",
+                    &self.edit_draft.headers,
+                    7,
+                    " (Header: value, optional)",
+                ),
+            ]
+        };
+
+        let field_start_y = inner.y + 2;
+        for (i, (label, value, field_id, hint)) in fields.iter().enumerate() {
+            let y = field_start_y + i as u16;
+            let is_active = self.edit_scroll == *field_id;
+
             let label_style = if is_active {
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(palette.accent)
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::White)
-            };
-
-            let colon = Span::styled(": ", label_style);
-            let value_style = if is_active {
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::White)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::White)
+                Style::default().fg(palette.muted)
             };
 
             let field_area = Rect::new(inner.x, y, inner.width, 1);
-            let (visible_value, cursor) = single_line_input_cursor(field_area, 10, value);
+            let (visible_value, cursor) = single_line_input_cursor(field_area, 12, value);
             let display_value = if is_active {
                 visible_value.to_string()
             } else {
                 value.to_string()
             };
 
+            let value_style = if is_active {
+                Style::default()
+                    .fg(palette.selection_fg)
+                    .bg(palette.selection_bg)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(palette.text)
+            };
+
+            let mut spans = vec![
+                Span::styled(format!("  {:<8}: ", label), label_style),
+                Span::styled(display_value, value_style),
+            ];
+            if !hint.is_empty() {
+                spans.push(Span::styled(*hint, Style::default().fg(palette.muted)));
+            }
+
             frame.render_widget(
-                Paragraph::new(Line::from(vec![
-                    Span::styled(format!("  {:<6}", label), label_style),
-                    colon,
-                    Span::styled(display_value, value_style),
-                ])),
+                Paragraph::new(Line::from(spans)).style(Style::default().bg(palette.panel_alt)),
                 field_area,
             );
-            if is_active {
+            if is_active && *field_id != 1 {
                 frame.set_cursor_position(cursor);
             }
         }
 
-        // ── Error message ─────────────────────────────────────────────
+        // Error message
         if let Some(ref err) = self.error_message {
-            let err_style = Style::default().fg(Color::Red);
+            let err_y = field_start_y + fields.len() as u16;
             frame.render_widget(
                 Paragraph::new(Line::from(Span::styled(
                     format!("  Error: {err}"),
-                    err_style,
-                ))),
-                Rect::new(
-                    inner.x,
-                    field_start_y + fields.len() as u16 + 1,
-                    inner.width,
-                    1,
-                ),
+                    Style::default().fg(Color::Red),
+                )))
+                .style(Style::default().bg(palette.panel_alt)),
+                Rect::new(inner.x, err_y, inner.width, 1),
             );
         }
 
-        // ── Help text ─────────────────────────────────────────────────
-        let help_y = inner.y + inner.height.saturating_sub(1);
+        // Help text at bottom
+        let help_y = inner.y + inner.height - 1;
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
-                "  [Tab/↑↓] nav  [Enter] save  [Esc] cancel",
-                Style::default().fg(Color::DarkGray),
-            ))),
+                "  [Tab/↑↓] next field  •  [Enter] save  •  [Esc] cancel",
+                Style::default().fg(palette.muted),
+            )))
+            .style(Style::default().bg(palette.panel_alt)),
             Rect::new(inner.x, help_y, inner.width, 1),
         );
     }

@@ -12,10 +12,11 @@ export const queryKeys = {
   // Init
   initPrompt: ["init", "prompt"] as const,
 
-  // Models / Tools / Skills
+  // Models / Tools / Skills / MCP
   models: ["models"] as const,
   tools: ["tools"] as const,
   skills: ["skills"] as const,
+  mcpServers: ["mcp", "servers"] as const,
 
   // Config
   defaultModel: ["config", "default-model"] as const,

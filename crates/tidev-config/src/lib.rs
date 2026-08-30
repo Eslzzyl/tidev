@@ -445,7 +445,7 @@ pub struct AppConfig {
     pub tmp: TmpConfig,
     #[serde(default)]
     pub websearch: WebSearchConfig,
-    #[serde(default, skip_serializing_if = "McpConfig::is_empty")]
+    #[serde(skip)]
     pub mcp: McpConfig,
     #[serde(default)]
     pub snapshot: SnapshotConfig,
@@ -582,7 +582,7 @@ impl AppConfig {
 
     /// Load the global config file only.
     fn load_global(paths: &ConfigPaths) -> Result<Self> {
-        let config: Self = if paths.config_file.exists() {
+        let mut config: Self = if paths.config_file.exists() {
             let contents = std::fs::read_to_string(&paths.config_file)
                 .with_context(|| format!("failed to read {}", paths.config_file.display()))?;
             toml::from_str(&contents)
@@ -593,6 +593,7 @@ impl AppConfig {
             config.save(paths)?;
             config
         };
+        config.mcp = McpConfig::load(paths)?;
         Ok(config)
     }
 
@@ -612,6 +613,9 @@ impl AppConfig {
                 .with_context(|| format!("failed to parse {}", project_config_path.display()))?;
             config.merge(overlay, &contents);
         }
+
+        // Overlay workspace-level MCP config (.tidev/mcp.json)
+        config.mcp = McpConfig::load_with_workspace(paths, workspace_root)?;
 
         config.bundled_providers = bundled_provider_catalog()?;
         config.rebuild_effective_providers()?;
@@ -703,12 +707,13 @@ impl AppConfig {
 
     // ── Saving ───────────────────────────────────────────────────────
 
-    /// Save the config to the default config file.
+    /// Save the config to the default config file and save MCP config to mcp.json.
     pub fn save(&self, paths: &ConfigPaths) -> Result<()> {
         paths.ensure_directories()?;
         let contents = toml::to_string_pretty(self).context("failed to serialize config")?;
         std::fs::write(&paths.config_file, contents)
             .with_context(|| format!("failed to write {}", paths.config_file.display()))?;
+        self.mcp.save(paths)?;
         Ok(())
     }
 

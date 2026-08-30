@@ -563,3 +563,45 @@ export interface SessionUsageEntry {
   created_at: string;
   updated_at: string;
 }
+
+export type McpServerStatus = "connected" | "connecting" | "disconnected" | "failed";
+
+export type McpServerConfig =
+  | {
+      type: "stdio";
+      command: string;
+      args?: string[];
+      cwd?: string | null;
+      env?: Record<string, string>;
+    }
+  | {
+      type: "http";
+      url: string;
+      headers?: Record<string, string>;
+    }
+  | {
+      type: "sse";
+      url: string;
+      headers?: Record<string, string>;
+    };
+
+export interface McpToolSummary {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+}
+
+export interface McpServerInfo {
+  name: string;
+  kind: string;
+  status: McpServerStatus;
+  error?: string | null;
+  config?: McpServerConfig | null;
+  tools: McpToolSummary[];
+}
+
+export interface UpsertMcpServerRequest {
+  name: string;
+  config: McpServerConfig;
+  original_name?: string;
+}

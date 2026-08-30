@@ -214,6 +214,30 @@ struct AuthStatusResponse {
     auth_required: bool,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct McpServerDto {
+    pub name: String,
+    pub kind: String,
+    pub status: String,
+    pub error: Option<String>,
+    pub config: Option<tidev_config::mcp::McpServerConfig>,
+    pub tools: Vec<McpToolDto>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct McpToolDto {
+    pub name: String,
+    pub description: String,
+    pub parameters: serde_json::Value,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpsertMcpServerRequest {
+    pub name: String,
+    pub config: tidev_config::mcp::McpServerConfig,
+    pub original_name: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 struct AuthVerifyResponse {
     valid: bool,
@@ -392,6 +416,17 @@ pub fn router() -> Router<Arc<AppState>> {
             "/config/terminal-shell",
             get(get_terminal_shell).post(set_terminal_shell),
         )
+        .route(
+            "/mcp/servers",
+            get(list_mcp_servers).post(upsert_mcp_server),
+        )
+        .route("/mcp/servers/{name}", delete(delete_mcp_server))
+        .route("/mcp/servers/{name}/connect", post(connect_mcp_server))
+        .route(
+            "/mcp/servers/{name}/disconnect",
+            post(disconnect_mcp_server),
+        )
+        .route("/mcp/servers/{name}/refresh", post(refresh_mcp_server))
 }
 
 pub async fn auth_middleware(
@@ -2253,6 +2288,139 @@ async fn set_terminal_shell(
         configured: !shell.is_empty(),
         shell,
     }))
+}
+
+async fn list_mcp_servers(State(state): State<Arc<AppState>>) -> Json<Vec<McpServerDto>> {
+    let mcp = state.runtime.mcp_manager();
+    let summaries = mcp.summaries();
+    let all_tools = mcp.all_definitions();
+
+    let mut dtos = Vec::new();
+    for summary in summaries {
+        let config = mcp.server_config(&summary.name);
+        let (status_str, error_str) = match &summary.status {
+            tidev_core::mcp::McpConnectionStatus::Connected => ("connected", None),
+            tidev_core::mcp::McpConnectionStatus::Connecting => ("connecting", None),
+            tidev_core::mcp::McpConnectionStatus::Disconnected => ("disconnected", None),
+            tidev_core::mcp::McpConnectionStatus::Failed(err) => ("failed", Some(err.clone())),
+        };
+
+        let tools = all_tools
+            .iter()
+            .filter(|tool| {
+                tool.mcp_target()
+                    .is_some_and(|(server, _)| server == summary.name)
+            })
+            .map(|tool| {
+                let (_, raw_tool_name) = tool.mcp_target().unwrap_or(("", tool.name.as_str()));
+                McpToolDto {
+                    name: raw_tool_name.to_string(),
+                    description: tool.description.clone(),
+                    parameters: tool.parameters.clone(),
+                }
+            })
+            .collect();
+
+        dtos.push(McpServerDto {
+            name: summary.name,
+            kind: summary.kind,
+            status: status_str.to_string(),
+            error: error_str,
+            config,
+            tools,
+        });
+    }
+
+    Json(dtos)
+}
+
+async fn upsert_mcp_server(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<UpsertMcpServerRequest>,
+) -> Result<Json<AcceptedResponse>, ApiError> {
+    let name = request.name.trim().to_string();
+    if name.is_empty() {
+        return Err(ApiError::bad_request("Server name cannot be empty"));
+    }
+
+    let mcp = state.runtime.mcp_manager().clone();
+    if let Some(ref orig) = request.original_name {
+        if orig != &name {
+            let _ = mcp.remove_server(orig).await;
+            state.runtime.update_config(|cfg| {
+                cfg.mcp.servers.remove(orig);
+            });
+        }
+    }
+
+    mcp.upsert_server(name.clone(), request.config.clone())
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+
+    state.runtime.update_config(|cfg| {
+        cfg.mcp.servers.insert(name, request.config);
+    });
+    state.runtime.save_config()?;
+
+    Ok(Json(AcceptedResponse { accepted: true }))
+}
+
+async fn delete_mcp_server(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+) -> Result<Json<AcceptedResponse>, ApiError> {
+    state
+        .runtime
+        .mcp_manager()
+        .remove_server(&name)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+
+    state.runtime.update_config(|cfg| {
+        cfg.mcp.servers.remove(&name);
+    });
+    state.runtime.save_config()?;
+
+    Ok(Json(AcceptedResponse { accepted: true }))
+}
+
+async fn connect_mcp_server(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+) -> Result<Json<AcceptedResponse>, ApiError> {
+    state
+        .runtime
+        .mcp_manager()
+        .refresh_server(&name)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    Ok(Json(AcceptedResponse { accepted: true }))
+}
+
+async fn disconnect_mcp_server(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+) -> Result<Json<AcceptedResponse>, ApiError> {
+    state
+        .runtime
+        .mcp_manager()
+        .disconnect_server(&name)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    Ok(Json(AcceptedResponse { accepted: true }))
+}
+
+async fn refresh_mcp_server(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+) -> Result<Json<AcceptedResponse>, ApiError> {
+    state
+        .runtime
+        .mcp_manager()
+        .refresh_server(&name)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    Ok(Json(AcceptedResponse { accepted: true }))
 }
 
 pub(crate) fn configured_auth_token(state: &AppState) -> Option<String> {

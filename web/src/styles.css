@@ -158,12 +158,14 @@ body {
   overflow: hidden;
   background: var(--bg);
 }
-button,
-textarea {
-  font: inherit;
-}
-button {
-  color: inherit;
+@layer base {
+  button,
+  textarea {
+    font: inherit;
+  }
+  button {
+    color: inherit;
+  }
 }
 
 .app-shell {

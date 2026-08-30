@@ -132,6 +132,7 @@ mod tests {
     use crate::components::overlays::connect::ConnectDialog;
     use crate::components::overlays::fork::ForkConfirmDialog;
     use crate::components::overlays::image::ImageViewer;
+    use crate::components::overlays::mcp::McpServerPanel;
     use crate::components::overlays::message::MessagePanel;
     use crate::components::overlays::model::ModelPanel;
     use crate::components::overlays::panel_launcher::PanelLauncher;
@@ -473,6 +474,16 @@ mod tests {
     #[test]
     fn agents_panel_does_not_use_main_area() {
         let panel = AgentsPanel::new();
+        assert!(!panel.overlay_uses_main_area());
+    }
+
+    #[test]
+    fn mcp_server_panel_does_not_use_main_area() {
+        let mcp = tidev_core::mcp::McpManager::new(
+            PathBuf::from("/tmp"),
+            std::collections::BTreeMap::new(),
+        );
+        let panel = McpServerPanel::new(&mcp);
         assert!(!panel.overlay_uses_main_area());
     }
 
