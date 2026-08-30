@@ -40,6 +40,14 @@ impl McpManager {
         }
     }
 
+    pub fn has_connecting(&self) -> bool {
+        self.registry.has_connecting()
+    }
+
+    pub async fn wait_until_ready(&self, timeout: std::time::Duration) -> Result<()> {
+        self.registry.wait_until_ready(timeout).await
+    }
+
     pub async fn refresh_all(&self) -> Result<()> {
         self.registry.refresh_all().await
     }

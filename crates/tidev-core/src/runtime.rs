@@ -1140,6 +1140,16 @@ impl Runtime {
         let active_model = self.active_model.read().unwrap().clone();
         let llm_config = crate::agent_ctx::to_llm_provider_config(&active_model);
 
+        // If any MCP server is still connecting (e.g. background startup discovery),
+        // wait briefly so the initial turn receives complete tool definitions and
+        // preserves prompt caching across subsequent turns.
+        if workspace.mcp_manager().has_connecting() {
+            let _ = workspace
+                .mcp_manager()
+                .wait_until_ready(Duration::from_secs(5))
+                .await;
+        }
+
         let filtered_tools = workspace
             .tool_registry()
             .definitions_for_model(&active_model);
@@ -2020,16 +2030,19 @@ impl RuntimeBuilder {
             _t_workspace.elapsed()
         );
 
-        // 9b. Best-effort MCP server refresh for the default workspace.
-        let _t_mcp_refresh = Instant::now();
+        // 9b. Best-effort MCP server refresh for the default workspace (spawned in background).
         if !config.mcp.is_empty() {
-            if let Err(e) = default_workspace.mcp_manager().refresh_all().await {
-                log::warn!("MCP server refresh (best-effort): {e:#}");
-            }
-            log::info!(
-                "startup: MCP refresh done in {:?}",
-                _t_mcp_refresh.elapsed()
-            );
+            let mcp = default_workspace.mcp_manager().clone();
+            tokio::spawn(async move {
+                let _t_mcp_refresh = Instant::now();
+                if let Err(e) = mcp.refresh_all().await {
+                    log::warn!("MCP server refresh (best-effort): {e:#}");
+                }
+                log::info!(
+                    "startup: MCP refresh done in {:?}",
+                    _t_mcp_refresh.elapsed()
+                );
+            });
         }
 
         // Store active model for loop construction.

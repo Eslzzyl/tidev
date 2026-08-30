@@ -318,14 +318,16 @@ impl Tui {
             app.update_input_area_auto_scroll();
 
             // Spinner wake-up: during a pending request (active but not yet
-            // streaming) or compaction, re-dirty the message list whenever the
-            // ASCII spinner frame advances so the footer keeps animating.
-            if app.has_active_request() || app.is_compacting() {
+            // streaming), compaction, or background MCP connecting, re-dirty the UI
+            // whenever the ASCII spinner frame advances so the spinner keeps animating.
+            if app.has_active_request() || app.is_compacting() || app.has_connecting_mcp() {
                 let frame = (app.spinner_elapsed().as_millis() / 100) as u64;
-                if frame != app.last_spinner_frame
-                    && let Some(ml) = &mut app.message_list
-                {
-                    ml.dirty = true;
+                if frame != app.last_spinner_frame {
+                    app.last_spinner_frame = frame;
+                    if let Some(ml) = &mut app.message_list {
+                        ml.dirty = true;
+                    }
+                    app.welcome_dirty = true;
                 }
             }
 

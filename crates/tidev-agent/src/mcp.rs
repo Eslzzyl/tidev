@@ -399,18 +399,48 @@ impl McpRegistry {
         }
     }
 
-    /// Connect or refresh all configured servers, retaining best-effort startup.
+    /// Whether any MCP server is currently connecting.
+    pub fn has_connecting(&self) -> bool {
+        let inner = self.inner.lock().unwrap();
+        inner
+            .servers
+            .values()
+            .any(|state| matches!(state.status, McpConnectionStatus::Connecting))
+    }
+
+    /// Wait until all MCP servers currently in `Connecting` state transition
+    /// to `Connected`, `Failed`, or `Disconnected` (or until `timeout` expires).
+    pub async fn wait_until_ready(&self, timeout: Duration) -> Result<()> {
+        if !self.has_connecting() {
+            return Ok(());
+        }
+
+        let start = tokio::time::Instant::now();
+        let interval = Duration::from_millis(50);
+
+        while start.elapsed() < timeout {
+            if !self.has_connecting() {
+                return Ok(());
+            }
+            tokio::time::sleep(interval).await;
+        }
+
+        Ok(())
+    }
+
+    /// Connect or refresh all configured servers concurrently, retaining best-effort startup.
     pub async fn refresh_all(&self) -> Result<()> {
         let names = {
             let inner = self.inner.lock().unwrap();
             inner.servers.keys().cloned().collect::<Vec<_>>()
         };
 
-        for name in names {
+        let futures = names.into_iter().map(|name| async move {
             if let Err(error) = self.refresh_server(&name).await {
                 self.mark_failed(&name, error.to_string());
             }
-        }
+        });
+        futures_util::future::join_all(futures).await;
         Ok(())
     }
 
@@ -551,12 +581,14 @@ impl McpRegistry {
 
     pub fn all_tools(&self) -> Vec<McpToolInfo> {
         let inner = self.inner.lock().unwrap();
-        inner
+        let mut tools: Vec<McpToolInfo> = inner
             .servers
             .values()
             .filter(|state| matches!(state.status, McpConnectionStatus::Connected))
             .flat_map(|state| state.tools.iter().map(|tool| tool.info.clone()))
-            .collect()
+            .collect();
+        tools.sort_by(|a, b| a.definition.name.cmp(&b.definition.name));
+        tools
     }
 
     /// Return connected MCP tools as generic agent tool implementations.
@@ -565,17 +597,16 @@ impl McpRegistry {
     /// MCP and built-in tools through one runtime dispatch path.
     pub fn tool_implementations(&self) -> Vec<Arc<dyn Tool>> {
         let inner = self.inner.lock().unwrap();
-        inner
+        let mut tools: Vec<Arc<McpTool>> = inner
             .servers
             .values()
             .filter(|state| matches!(state.status, McpConnectionStatus::Connected))
-            .flat_map(|state| {
-                state
-                    .tools
-                    .iter()
-                    .cloned()
-                    .map(|tool| tool as Arc<dyn Tool>)
-            })
+            .flat_map(|state| state.tools.iter().cloned())
+            .collect();
+        tools.sort_by(|a, b| a.info.definition.name.cmp(&b.info.definition.name));
+        tools
+            .into_iter()
+            .map(|tool| tool as Arc<dyn Tool>)
             .collect()
     }
 
@@ -1113,5 +1144,54 @@ mod tests {
         ));
         assert_eq!(summaries[0].tool_count, 0);
         assert!(registry.all_definitions().is_empty());
+    }
+
+    #[tokio::test]
+    async fn wait_until_ready_returns_immediately_when_no_connecting() {
+        let registry = McpRegistry::new(BTreeMap::new());
+        assert!(!registry.has_connecting());
+        assert!(
+            registry
+                .wait_until_ready(Duration::from_millis(50))
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn refresh_all_runs_and_marks_failed_without_blocking() {
+        let registry = McpRegistry::new(BTreeMap::from([
+            (
+                "broken1".to_string(),
+                McpServerSpec::Stdio {
+                    command: "/definitely/missing-1".into(),
+                    args: Vec::new(),
+                    cwd: None,
+                    env: BTreeMap::new(),
+                },
+            ),
+            (
+                "broken2".to_string(),
+                McpServerSpec::Stdio {
+                    command: "/definitely/missing-2".into(),
+                    args: Vec::new(),
+                    cwd: None,
+                    env: BTreeMap::new(),
+                },
+            ),
+        ]));
+
+        assert!(registry.refresh_all().await.is_ok());
+        assert!(!registry.has_connecting());
+        let summaries = registry.summaries();
+        assert_eq!(summaries.len(), 2);
+        assert!(matches!(
+            summaries[0].status,
+            McpConnectionStatus::Failed(_)
+        ));
+        assert!(matches!(
+            summaries[1].status,
+            McpConnectionStatus::Failed(_)
+        ));
     }
 }

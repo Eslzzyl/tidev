@@ -7,9 +7,10 @@ use crate::components::chat::render::wrap_text_lines;
 use crate::components::selection::copy_to_clipboard;
 use crate::context::DrawContext;
 use ratatui::layout::{Alignment, Constraint, Layout, Margin, Rect};
-use ratatui::prelude::{Frame, Modifier, Style};
+use ratatui::prelude::{Color, Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph};
+use tidev_core::mcp::McpConnectionStatus;
 use tidev_utils::path::display_path_with_tilde;
 use unicode_width::UnicodeWidthStr;
 
@@ -246,6 +247,89 @@ impl App {
 
         // 8. Ready
         "Ready".to_string()
+    }
+
+    /// Return formatted MCP status line and its display width, if any MCP servers are configured.
+    pub(crate) fn mcp_status_line(&self) -> Option<(Line<'static>, usize)> {
+        let summaries = self.runtime.mcp_manager().summaries();
+        if summaries.is_empty() {
+            return None;
+        }
+
+        let palette = &self.current_palette;
+        let total = summaries.len();
+        let connecting_count = summaries
+            .iter()
+            .filter(|s| matches!(s.status, McpConnectionStatus::Connecting))
+            .count();
+        let connected_count = summaries
+            .iter()
+            .filter(|s| matches!(s.status, McpConnectionStatus::Connected))
+            .count();
+        let failed_count = summaries
+            .iter()
+            .filter(|s| matches!(s.status, McpConnectionStatus::Failed(_)))
+            .count();
+        let tool_count: usize = summaries.iter().map(|s| s.tool_count).sum();
+
+        if connecting_count > 0 {
+            let spinner = self.loading_spinner();
+            let label = if total == 1 {
+                format!("{spinner} MCP: Connecting...")
+            } else {
+                format!("{spinner} MCP: Connecting ({connecting_count}/{total})...")
+            };
+            let width = label.width();
+            return Some((
+                Line::from(vec![Span::styled(
+                    label,
+                    Style::default().fg(palette.muted),
+                )]),
+                width,
+            ));
+        }
+
+        if failed_count > 0 {
+            let failed_text = format!("MCP: {failed_count} failed");
+            let mut width = 2 + failed_text.width();
+            let mut spans = vec![
+                Span::styled("✕ ", Style::default().fg(Color::Red)),
+                Span::styled(failed_text, Style::default().fg(Color::Red)),
+            ];
+            if connected_count > 0 {
+                let online_text = format!(" · {connected_count} online");
+                width += online_text.width();
+                spans.push(Span::styled(
+                    online_text,
+                    Style::default().fg(palette.muted),
+                ));
+            }
+            return Some((Line::from(spans), width));
+        }
+
+        if connected_count > 0 {
+            let tool_label = if tool_count == 1 { "tool" } else { "tools" };
+            let text = format!("MCP: {connected_count} active ({tool_count} {tool_label})");
+            let width = 2 + text.width();
+            return Some((
+                Line::from(vec![
+                    Span::styled("● ", Style::default().fg(Color::Green)),
+                    Span::styled(text, Style::default().fg(palette.muted)),
+                ]),
+                width,
+            ));
+        }
+
+        // All disconnected
+        let text = format!("MCP: {total} offline");
+        let width = 2 + text.width();
+        Some((
+            Line::from(vec![
+                Span::styled("○ ", Style::default().fg(palette.muted)),
+                Span::styled(text, Style::default().fg(palette.muted)),
+            ]),
+            width,
+        ))
     }
 
     pub fn draw(&mut self, frame: &mut Frame) {
@@ -515,7 +599,7 @@ impl App {
         //   terminal area so they appear properly centered across the screen.
         self.overlays.draw(frame, area, main_area, &draw_ctx);
 
-        // ── Footer status line (right-aligned, matching v0.6.x) ──
+        // ── Footer status line (left: MCP status, right: session/footer status) ──
         let status_text = self.footer_status_text();
         let status_width = status_text
             .width()
@@ -533,6 +617,18 @@ impl App {
             .style(Style::default().bg(palette.background)),
             Rect::new(status_x, notice_line.y, status_width, 1),
         );
+
+        // Left-aligned MCP status on notice line
+        if let Some((mcp_line, mcp_line_width)) = self.mcp_status_line() {
+            let max_mcp_width = notice_line.width.saturating_sub(status_width + 4);
+            let mcp_width = (mcp_line_width as u16).min(max_mcp_width);
+            if mcp_width > 0 {
+                frame.render_widget(
+                    Paragraph::new(mcp_line).style(Style::default().bg(palette.background)),
+                    Rect::new(notice_line.x + 2, notice_line.y, mcp_width, 1),
+                );
+            }
+        }
 
         // ── Toast notification ──
         // Small popup at the top-right of the message area, auto-expires.
@@ -734,28 +830,51 @@ impl App {
             composer.draw(frame, sections[2], &draw_ctx);
         }
 
-        // Workspace path on the very last row
+        // Workspace path on the very last row (left) and MCP status (right)
         let display_path = display_path_with_tilde(self.runtime.workspace_root());
-        let workspace_area = Rect::new(
-            area.x + 1,
-            area.bottom() - 1,
-            area.width.saturating_sub(2),
-            1,
-        );
-        frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                &display_path,
-                Style::default().fg(palette.muted),
-            ))),
-            workspace_area,
-        );
+        let path_width = (display_path.width() as u16).min(area.width.saturating_sub(4));
+        let bottom_y = area.bottom().saturating_sub(1);
+
+        let mcp_info = self.mcp_status_line();
+        let (mcp_line, mcp_width) = match mcp_info {
+            Some((line, w)) => (Some(line), (w as u16).min(area.width.saturating_sub(4))),
+            None => (None, 0),
+        };
+
+        let max_path_width = if mcp_width > 0 {
+            area.width.saturating_sub(mcp_width + 6)
+        } else {
+            area.width.saturating_sub(4)
+        };
+        let clamped_path_width = path_width.min(max_path_width);
+
+        if clamped_path_width > 0 {
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    &display_path,
+                    Style::default().fg(palette.muted),
+                ))),
+                Rect::new(area.x + 2, bottom_y, clamped_path_width, 1),
+            );
+        }
+
+        if let Some(mcp_line) = mcp_line
+            && mcp_width > 0
+            && area.width > clamped_path_width + mcp_width + 4
+        {
+            let mcp_x = area.x + area.width.saturating_sub(mcp_width + 2);
+            frame.render_widget(
+                Paragraph::new(mcp_line),
+                Rect::new(mcp_x, bottom_y, mcp_width, 1),
+            );
+        }
 
         // Notice, if any, on the row directly above workspace path
         if let Some((message, _)) = &self.last_notice
             && !message.is_empty()
         {
             let notice_y = area.bottom().saturating_sub(2);
-            if notice_y < workspace_area.y {
+            if notice_y < bottom_y {
                 frame.render_widget(
                     Paragraph::new(Line::from(Span::styled(
                         message,

@@ -216,6 +216,10 @@ pub struct App {
     /// Used to detect when the spinner has advanced so we can re-dirty
     /// during the pending-request gap and keep the animation alive.
     pub(crate) last_spinner_frame: u64,
+    /// Whether the welcome screen needs re-drawing (e.g. MCP connection status updated).
+    pub(crate) welcome_dirty: bool,
+    /// Last rendered MCP server summaries (used to detect status changes and trigger redraw).
+    last_mcp_summaries: Vec<tidev_core::mcp::McpServerSummary>,
     /// Terminal graphics protocol picker (cached to avoid blocking on every
     /// ImageViewer open).
     image_picker: Option<Picker>,
@@ -300,6 +304,8 @@ impl App {
             screen: AppScreen::Welcome,
             spinner_start: Instant::now(),
             last_spinner_frame: 0,
+            welcome_dirty: false,
+            last_mcp_summaries: Vec::new(),
             message_list: None,
             cursor_rendered: false,
             composer_cursor_position: None,
@@ -338,8 +344,10 @@ impl App {
 
     /// Whether any component needs re-drawing.
     pub fn is_dirty(&self) -> bool {
-        self.message_list.as_ref().is_some_and(|c| c.is_dirty())
+        self.welcome_dirty
+            || self.message_list.as_ref().is_some_and(|c| c.is_dirty())
             || self.composer.as_ref().is_some_and(|c| c.is_dirty())
+            || self.runtime.mcp_manager().summaries() != self.last_mcp_summaries
     }
 
     /// Whether the frame being rendered should leave the terminal cursor
@@ -360,12 +368,19 @@ impl App {
 
     /// Mark all components as clean after rendering.
     pub fn mark_clean(&mut self) {
+        self.welcome_dirty = false;
+        self.last_mcp_summaries = self.runtime.mcp_manager().summaries();
         if let Some(c) = &mut self.message_list {
             c.mark_clean();
         }
         if let Some(c) = &mut self.composer {
             c.mark_clean();
         }
+    }
+
+    /// Whether any MCP server is currently connecting in the background.
+    pub(crate) fn has_connecting_mcp(&self) -> bool {
+        self.runtime.mcp_manager().has_connecting()
     }
 
     // ── Notifications ──
