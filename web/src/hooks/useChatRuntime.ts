@@ -982,13 +982,17 @@ export function useChatRuntime() {
     }
   };
 
-  const submitWelcome = async () => {
+  const submitWelcome = async (workspaceRoot: string) => {
     const content = draft.trim();
-    if (!content || welcomeSending) return;
+    const selectedWorkspaceRoot = workspaceRoot.trim();
+    if (!content || !selectedWorkspaceRoot || welcomeSending) return;
     setWelcomeSending(true);
     setError(null);
     try {
-      const response = await api.createSession(content.slice(0, 80));
+      const response = await api.createSession({
+        title: content.slice(0, 80),
+        workspace_root: selectedWorkspaceRoot,
+      });
       setSessionSearch("");
       setSessionWorkspaceRoot(null);
       setSessions((current) => mergeSessions([response.session], current));

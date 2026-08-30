@@ -242,11 +242,12 @@ export default function App() {
                   thinkingLevel={thinkingLevel}
                   fileMention={fileMention}
                   fileMentionIndex={fileMentionIndex}
+                  recentWorkspaceRoots={sessionWorkspaceRoots}
                   onChangeDraft={setDraft}
                   onModeChange={setMode}
                   onSelectModel={(model) => void chooseModel(model)}
                   onSelectThinkingLevel={(level) => void chooseThinkingLevel(level)}
-                  onSubmit={() => void submitWelcome()}
+                  onSubmit={(workspaceRoot) => void submitWelcome(workspaceRoot)}
                   onFileMentionChange={updateFileMention}
                   onFileMentionIndexChange={setFileMentionIndex}
                   onFileSelect={handleFileSelect}

@@ -1244,22 +1244,164 @@ body {
   color: var(--muted);
   font-size: 13px;
 }
-.welcome-composer {
+.welcome-composer-shell {
+  position: relative;
   width: min(100%, 650px);
+}
+.welcome-workspace-context {
+  position: relative;
+  display: flex;
+  width: calc(100% - 28px);
+  min-height: 58px;
+  align-items: center;
+  gap: 20px;
+  margin: 0 14px;
+  padding: 10px 20px 22px;
+  border-radius: 20px 20px 0 0;
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 3%, var(--panel));
+  font-size: 13px;
+}
+.welcome-workspace-button,
+.welcome-workspace-branch {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+}
+.welcome-workspace-button {
+  padding: 5px 8px;
+  margin-left: -8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+.welcome-workspace-button:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+.welcome-workspace-button span,
+.welcome-workspace-branch span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.welcome-workspace-button span {
+  max-width: 220px;
+  font-weight: 600;
+}
+.welcome-workspace-branch {
+  max-width: 220px;
+  color: var(--text);
+}
+.welcome-workspace-picker {
+  position: fixed;
+  z-index: 10;
+  top: 50%;
+  left: 50%;
+  width: min(470px, calc(100vw - 48px));
+  max-height: min(430px, calc(100vh - 48px));
+  overflow-y: auto;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel-strong);
+  box-shadow: 0 16px 36px color-mix(in srgb, var(--text) 16%, transparent);
+  transform: translate(-50%, -50%);
+}
+.welcome-workspace-path-form {
+  display: flex;
+  gap: 8px;
+}
+.welcome-workspace-path-form input {
+  min-width: 0;
+  flex: 1;
+  height: 34px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  outline: 0;
+  color: var(--text);
+  background: var(--bg);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.welcome-workspace-path-form input:focus {
+  border-color: var(--text);
+}
+.welcome-workspace-path-form button {
+  display: inline-flex;
+  min-width: 84px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 7px;
+  color: var(--accent-contrast);
+  background: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+}
+.welcome-workspace-path-form button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.welcome-workspace-error,
+.welcome-workspace-empty,
+.welcome-workspace-recent > p {
+  margin: 8px 2px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.welcome-workspace-error {
+  color: var(--danger);
+}
+.welcome-workspace-options {
+  display: grid;
+  gap: 2px;
+  margin-top: 8px;
+}
+.welcome-workspace-option {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 7px;
+  color: var(--text);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.welcome-workspace-option:hover,
+.welcome-workspace-option.selected {
+  background: var(--hover);
+}
+.welcome-workspace-option span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.welcome-workspace-recent {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-soft);
+}
+.welcome-composer {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  margin-top: -20px;
   padding: 13px 14px 11px;
   border: 1px solid var(--line);
-  border-radius: 18px;
+  border-radius: 24px;
   background: var(--panel-strong);
   box-shadow: 0 8px 30px color-mix(in srgb, var(--text) 8%, transparent);
-  transition:
-    border-color 180ms ease,
-    box-shadow 180ms ease;
-}
-.welcome-composer:focus-within {
-  border-color: var(--accent);
-  box-shadow:
-    0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent),
-    0 8px 30px color-mix(in srgb, var(--text) 8%, transparent);
 }
 .welcome-input {
   position: relative;

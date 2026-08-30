@@ -10,6 +10,8 @@ import type {
   SendMessageRequest,
   AbortRequest,
   WorkspaceInfo,
+  WorkspaceContext,
+  WorkspaceCompletionResponse,
   FileSuggestion,
   TodosResponse,
   SkillInfo,
@@ -123,6 +125,18 @@ function sessionPath(sessionId: string, subpath = ""): string {
 export const api = {
   // Workspace
   getWorkspace: () => fetchJson<WorkspaceInfo>(`${API_BASE}/workspace`),
+
+  getWorkspaceContext: (path: string) => {
+    const params = new URLSearchParams({ path });
+    return fetchJson<WorkspaceContext>(`${API_BASE}/workspaces/context?${params.toString()}`);
+  },
+
+  completeWorkspacePath: (path: string) => {
+    const params = new URLSearchParams({ path });
+    return fetchJson<WorkspaceCompletionResponse>(
+      `${API_BASE}/workspaces/complete?${params.toString()}`,
+    );
+  },
 
   // Sessions
   listSessions: ({

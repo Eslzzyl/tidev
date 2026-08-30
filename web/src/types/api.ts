@@ -289,6 +289,18 @@ export interface WorkspaceInfo {
   workspace_display: string;
 }
 
+export interface WorkspaceContext {
+  workspace_root: string;
+  workspace_display: string;
+  workspace_name: string;
+  git_branch: string | null;
+}
+
+export interface WorkspaceCompletionResponse {
+  directories: string[];
+  parent: string | null;
+}
+
 export interface CreateSessionResponse {
   session: Session;
 }

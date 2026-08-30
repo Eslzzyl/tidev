@@ -18,7 +18,7 @@ use tidev_core::{
     PromptSubmission,
 };
 use tidev_llm::message::Message;
-use tidev_utils::path::display_path_with_tilde;
+use tidev_utils::path::{display_path_with_tilde, expand_tilde};
 use tokio::fs;
 use tokio::sync::mpsc::UnboundedReceiver;
 use uuid::Uuid;
@@ -67,6 +67,12 @@ struct StatsQuery {
 #[derive(Debug, Deserialize)]
 struct CreateSessionRequest {
     title: Option<String>,
+    workspace_root: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct WorkspacePathQuery {
+    path: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -167,6 +173,20 @@ struct SessionListResponse {
     items: Vec<SessionDto>,
     next_cursor: Option<SessionListCursorDto>,
     workspace_roots: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct WorkspaceContextResponse {
+    workspace_root: String,
+    workspace_display: String,
+    workspace_name: String,
+    git_branch: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct WorkspaceCompletionResponse {
+    directories: Vec<String>,
+    parent: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -421,6 +441,8 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/git/stash", post(git_stash))
         .route("/git/stash/pop", post(git_stash_pop))
         .route("/workspace", get(get_workspace))
+        .route("/workspaces/context", get(workspace_context))
+        .route("/workspaces/complete", get(workspace_complete))
         .route("/init", get(get_init))
         .route("/tools", get(list_tools))
         .route("/skills", get(list_skills))
@@ -700,7 +722,16 @@ async fn create_session(
     if title.is_empty() {
         return Err(ApiError::bad_request("session title cannot be empty"));
     }
-    let session_id = state.runtime.create_default_session(title)?;
+    let session_id = match request.workspace_root.as_deref() {
+        Some(workspace_root) if !workspace_root.trim().is_empty() => {
+            let workspace_root = canonical_workspace_path(workspace_root).await?;
+            state
+                .runtime
+                .create_session_with_workspace(title, workspace_root)
+                .await?
+        }
+        _ => state.runtime.create_default_session(title)?,
+    };
     let session = state
         .runtime
         .session_manager()
@@ -1827,6 +1858,155 @@ async fn git_stash_pop(
     }))
 }
 
+fn workspace_input_path(raw_path: &str) -> Result<PathBuf, ApiError> {
+    let raw_path = raw_path.trim();
+    if raw_path.is_empty() {
+        return Err(ApiError::bad_request("workspace path is required"));
+    }
+    let path = expand_tilde(StdPath::new(raw_path))
+        .map_err(|error| ApiError::bad_request(format!("invalid workspace path: {error}")))?;
+    if !path.is_absolute() {
+        return Err(ApiError::bad_request(
+            "workspace path must be absolute or start with ~/",
+        ));
+    }
+    Ok(path)
+}
+
+fn workspace_completion_path(path: &StdPath, use_tilde: bool) -> String {
+    if use_tilde {
+        display_path_with_tilde(path)
+    } else {
+        path.to_string_lossy().to_string()
+    }
+}
+
+async fn canonical_workspace_path(raw_path: &str) -> Result<PathBuf, ApiError> {
+    let path = workspace_input_path(raw_path)?;
+    let canonical = fs::canonicalize(&path)
+        .await
+        .map_err(|e| ApiError::not_found(format!("workspace directory not found: {e}")))?;
+    let metadata = fs::metadata(&canonical)
+        .await
+        .map_err(|e| ApiError::not_found(format!("workspace directory not found: {e}")))?;
+    if !metadata.is_dir() {
+        return Err(ApiError::bad_request("workspace path must be a directory"));
+    }
+    Ok(canonical)
+}
+
+fn workspace_name(path: &StdPath) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| path.to_string_lossy().to_string())
+}
+
+fn workspace_git_branch(path: &PathBuf) -> Option<String> {
+    let branch = run_git(&["rev-parse", "--abbrev-ref", "HEAD"], path)
+        .ok()?
+        .trim()
+        .to_string();
+    if branch.is_empty() {
+        return None;
+    }
+    if branch != "HEAD" {
+        return Some(branch);
+    }
+
+    let short_sha = run_git(&["rev-parse", "--short", "HEAD"], path)
+        .ok()?
+        .trim()
+        .to_string();
+    (!short_sha.is_empty()).then(|| format!("@{short_sha}"))
+}
+
+async fn workspace_context(
+    Query(query): Query<WorkspacePathQuery>,
+) -> Result<Json<WorkspaceContextResponse>, ApiError> {
+    let workspace_root = canonical_workspace_path(&query.path).await?;
+    let git_path = workspace_root.clone();
+    let git_branch = tokio::task::spawn_blocking(move || workspace_git_branch(&git_path))
+        .await
+        .map_err(|_| ApiError::internal("workspace git inspection failed"))?;
+    Ok(Json(WorkspaceContextResponse {
+        workspace_display: display_path_with_tilde(&workspace_root),
+        workspace_name: workspace_name(&workspace_root),
+        workspace_root: workspace_root.to_string_lossy().to_string(),
+        git_branch,
+    }))
+}
+
+async fn workspace_complete(
+    Query(query): Query<WorkspacePathQuery>,
+) -> Result<Json<WorkspaceCompletionResponse>, ApiError> {
+    let raw_path = query.path.trim();
+    let input = workspace_input_path(raw_path)?;
+    let use_tilde = raw_path == "~" || raw_path.starts_with("~/");
+    let navigation_parent = input
+        .parent()
+        .filter(|parent| *parent != input)
+        .map(|parent| workspace_completion_path(parent, use_tilde));
+
+    let (parent, prefix) = if raw_path == "~" || raw_path.ends_with('/') {
+        (input, String::new())
+    } else {
+        let parent = input
+            .parent()
+            .map(StdPath::to_path_buf)
+            .ok_or_else(|| ApiError::bad_request("workspace path has no parent directory"))?;
+        let prefix = input
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_string();
+        (parent, prefix)
+    };
+    let parent = match fs::canonicalize(parent).await {
+        Ok(parent) => parent,
+        Err(_) => {
+            return Ok(Json(WorkspaceCompletionResponse {
+                directories: vec![],
+                parent: navigation_parent,
+            }));
+        }
+    };
+    let mut entries = match fs::read_dir(&parent).await {
+        Ok(entries) => entries,
+        Err(_) => {
+            return Ok(Json(WorkspaceCompletionResponse {
+                directories: vec![],
+                parent: navigation_parent,
+            }));
+        }
+    };
+    let mut directories = Vec::new();
+    while let Some(entry) = entries.next_entry().await.map_err(|error| {
+        ApiError::internal(format!("failed to read workspace directory: {error}"))
+    })? {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !name.starts_with(&prefix) {
+            continue;
+        }
+        let is_directory = entry
+            .metadata()
+            .await
+            .map(|metadata| metadata.is_dir())
+            .unwrap_or(false);
+        if is_directory {
+            directories.push(workspace_completion_path(&entry.path(), use_tilde));
+        }
+    }
+    directories.sort_unstable_by_key(|path| path.to_lowercase());
+    directories.truncate(50);
+    Ok(Json(WorkspaceCompletionResponse {
+        directories,
+        parent: navigation_parent,
+    }))
+}
+
 async fn get_workspace(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
     let workspace_root = state.runtime.workspace_root();
     let ws = workspace_root.to_string_lossy().to_string();
@@ -2693,5 +2873,13 @@ mod tests {
         let req_build: PromptRequest = serde_json::from_str(json_data_build).unwrap();
         assert_eq!(req_build.content, "run");
         assert_eq!(req_build.mode, Some(Mode::Build));
+    }
+
+    #[test]
+    fn workspace_path_expands_home_shortcut() {
+        let home = workspace_input_path("~").unwrap();
+        assert!(home.is_absolute());
+        assert_eq!(workspace_input_path("~/tidev").unwrap(), home.join("tidev"));
+        assert!(workspace_input_path("tidev").is_err());
     }
 }
