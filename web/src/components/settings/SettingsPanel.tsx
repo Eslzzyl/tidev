@@ -11,6 +11,8 @@ import {
   Info,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { useRoute, useLocation } from "wouter";
+import { routes } from "../../lib/routes";
 import { useUIStore } from "../../stores/useUIStore";
 import { useClickOutside } from "../../hooks/useClickOutside";
 import { AppearanceSection } from "./AppearanceSection";
@@ -63,18 +65,42 @@ const categories: Category[] = [
 
 export function SettingsPanel() {
   const { t } = useTranslation();
+  const [matchRoute, params] = useRoute<{ category?: string }>("/settings/:category?");
+  const [, navigate] = useLocation();
+
   const settingsPanelOpen = useUIStore((s) => s.settingsPanelOpen);
   const settingsInitialCategory = useUIStore((s) => s.settingsInitialCategory);
-  const closeSettingsPanel = useUIStore((s) => s.closeSettingsPanel);
+  const closeSettingsStore = useUIStore((s) => s.closeSettingsPanel);
   const [activeCategory, setActiveCategory] = useState<CategoryId>("appearance");
 
+  const isOpen = settingsPanelOpen || matchRoute;
+
+  const closeSettings = useCallback(() => {
+    closeSettingsStore();
+    if (matchRoute) {
+      navigate(routes.chat());
+    }
+  }, [closeSettingsStore, matchRoute, navigate]);
+
   useEffect(() => {
-    if (settingsInitialCategory && categories.some((c) => c.id === settingsInitialCategory)) {
+    if (matchRoute && params?.category && categories.some((c) => c.id === params.category)) {
+      setActiveCategory(params.category as CategoryId);
+    } else if (
+      settingsInitialCategory &&
+      categories.some((c) => c.id === settingsInitialCategory)
+    ) {
       setActiveCategory(settingsInitialCategory as CategoryId);
     }
-  }, [settingsInitialCategory]);
+  }, [matchRoute, params?.category, settingsInitialCategory]);
 
-  const panelRef = useClickOutside(closeSettingsPanel);
+  const handleSelectCategory = (catId: CategoryId) => {
+    setActiveCategory(catId);
+    if (matchRoute) {
+      navigate(routes.settings(catId));
+    }
+  };
+
+  const panelRef = useClickOutside(closeSettings);
   const navRef = useRef<HTMLDivElement>(null);
   const [activeRect, setActiveRect] = useState<{
     top: number;
@@ -102,14 +128,14 @@ export function SettingsPanel() {
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        closeSettingsPanel();
+        closeSettings();
       }
     },
-    [closeSettingsPanel],
+    [closeSettings],
   );
 
   useEffect(() => {
-    if (settingsPanelOpen) {
+    if (isOpen) {
       document.addEventListener("keydown", handleKeyDown);
       // Prevent body scroll while panel is open
       document.body.style.overflow = "hidden";
@@ -118,9 +144,9 @@ export function SettingsPanel() {
       document.removeEventListener("keydown", handleKeyDown);
       document.body.style.overflow = "";
     };
-  }, [settingsPanelOpen, handleKeyDown]);
+  }, [isOpen, handleKeyDown]);
 
-  if (!settingsPanelOpen) return null;
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-60 flex items-center justify-center motion-safe:animate-fade-in bg-black/50 p-4">
@@ -134,7 +160,7 @@ export function SettingsPanel() {
             {t("Settings")}
           </h2>
           <button
-            onClick={closeSettingsPanel}
+            onClick={closeSettings}
             className="rounded p-1 text-neutral-500 transition-colors duration-150 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
             aria-label={t("Close settings")}
           >
@@ -160,7 +186,7 @@ export function SettingsPanel() {
               <button
                 key={cat.id}
                 data-cat-id={cat.id}
-                onClick={() => setActiveCategory(cat.id)}
+                onClick={() => handleSelectCategory(cat.id)}
                 className={`relative flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-all duration-150 active:scale-[0.97] ${
                   activeCategory === cat.id
                     ? "font-medium text-neutral-900 dark:text-neutral-100"

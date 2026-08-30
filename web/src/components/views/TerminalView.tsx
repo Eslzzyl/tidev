@@ -12,6 +12,9 @@ import { ContextMenu } from "../ui/ContextMenu";
 import { RenameDialog } from "../ui/RenameDialog";
 import { useTranslation } from "react-i18next";
 
+import { useRoute, useLocation } from "wouter";
+import { routes } from "../../lib/routes";
+
 const TERMINAL_FONT_SIZE = 17;
 
 /** Dark terminal theme */
@@ -96,6 +99,10 @@ function createResttyTheme(theme: typeof DARK_THEME) {
 
 export function TerminalView() {
   const { t } = useTranslation();
+  const [, params] = useRoute<{ tabId?: string }>("/terminal/:tabId?");
+  const [, navigate] = useLocation();
+  const routeTabId = params?.tabId ?? null;
+
   const tabs = useTerminalStore((s) => s.tabs);
   const activeTabId = useTerminalStore((s) => s.activeTabId);
   const createTab = useTerminalStore((s) => s.createTab);
@@ -106,6 +113,37 @@ export function TerminalView() {
   const restoreRunningSessions = useTerminalStore((s) => s.restoreRunningSessions);
   const theme = useUIStore((s) => s.theme);
   const isDark = getEffectiveTheme(theme) === "dark";
+
+  // Sync route tabId -> activeTabId
+  useEffect(() => {
+    if (routeTabId && tabs.some((t) => t.id === routeTabId)) {
+      if (activeTabId !== routeTabId) {
+        setActiveTab(routeTabId);
+      }
+    }
+  }, [routeTabId, tabs, activeTabId, setActiveTab]);
+
+  const handleSelectTab = useCallback(
+    (tabId: string) => {
+      setActiveTab(tabId);
+      navigate(routes.terminal(tabId));
+    },
+    [navigate, setActiveTab],
+  );
+
+  const handleCreateTab = useCallback(() => {
+    const newId = createTab();
+    navigate(routes.terminal(newId));
+  }, [createTab, navigate]);
+
+  const handleCloseTab = useCallback(
+    async (tabId: string) => {
+      await closeTab(tabId);
+      const nextActiveId = useTerminalStore.getState().activeTabId;
+      navigate(routes.terminal(nextActiveId));
+    },
+    [closeTab, navigate],
+  );
 
   // On mount: restore running sessions from server, or create a new tab
   const restoreAttempted = useRef(false);
@@ -138,7 +176,7 @@ export function TerminalView() {
       {
         label: "Close",
         icon: <X size={14} />,
-        onClick: () => closeTab(tabId),
+        onClick: () => void handleCloseTab(tabId),
       },
     ];
 
@@ -168,10 +206,11 @@ export function TerminalView() {
       // If no sessions were restored, create a new terminal
       const state = useTerminalStore.getState();
       if (state.tabs.length === 0) {
-        createTab();
+        const id = createTab();
+        navigate(routes.terminal(id), { replace: true });
       }
     });
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [createTab, navigate, restoreRunningSessions, tabs.length]);
 
   return (
     <div className={`flex h-full flex-col ${isDark ? "bg-black" : "bg-white"}`}>
@@ -183,7 +222,7 @@ export function TerminalView() {
           {tabs.map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => handleSelectTab(tab.id)}
               onContextMenu={(e) => handleContextMenu(e, tab.id)}
               className={`flex items-center gap-1 px-3 py-1.5 text-xs font-medium transition-colors ${
                 tab.id === activeTabId
@@ -202,14 +241,14 @@ export function TerminalView() {
                 aria-label={t("Close terminal")}
                 onClick={(e) => {
                   e.stopPropagation();
-                  closeTab(tab.id);
+                  void handleCloseTab(tab.id);
                 }}
               />
             </button>
           ))}
         </div>
         <button
-          onClick={() => createTab()}
+          onClick={handleCreateTab}
           className={`mr-1 rounded p-1 transition-colors ${
             isDark
               ? "text-neutral-400 hover:bg-neutral-800 hover:text-white"

@@ -12,12 +12,14 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { useLocation, useRoute, Switch, Route, Redirect } from "wouter";
 import { AuthGate } from "./components/AuthGate";
 import { ChatPanel } from "./components/chat/ChatPanel";
 import { WelcomePage } from "./components/chat/WelcomePage";
 import { SettingsPanel } from "./components/settings/SettingsPanel";
 import { useChatRuntime } from "./hooks/useChatRuntime";
 import { useWorkspace } from "./hooks/workspaceQueries";
+import { getActiveFeature, routes } from "./lib/routes";
 import type { Session } from "./types/api";
 import type { Feature } from "./types/chat";
 import { shortPath } from "./utils/chat";
@@ -45,7 +47,11 @@ const features: { id: Feature; label: string; icon: typeof MessageSquare }[] = [
 
 export default function App() {
   const { t } = useTranslation();
-  const [feature, setFeature] = useState<Feature>("chat");
+  const [location, navigate] = useLocation();
+  const [isChatRoute, chatParams] = useRoute<{ sessionId?: string }>("/chat/:sessionId?");
+  const routeSessionId = isChatRoute ? (chatParams?.sessionId ?? null) : undefined;
+
+  const feature: Feature = getActiveFeature(location);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const featureNavRef = useRef<HTMLElement>(null);
   const featureButtonRefs = useRef<Partial<Record<Feature, HTMLButtonElement | null>>>({});
@@ -75,6 +81,10 @@ export default function App() {
     if (featureNavRef.current) observer.observe(featureNavRef.current);
     return () => observer.disconnect();
   }, [feature]);
+
+  const onSelectSessionRoute = useRef((sessionId: string | null) => {
+    navigate(routes.chat(sessionId));
+  }).current;
 
   const {
     authChecking,
@@ -136,12 +146,121 @@ export default function App() {
     cancelSession,
     updateFileMention,
     handleFileSelect,
-  } = useChatRuntime();
+  } = useChatRuntime({
+    routeSessionId,
+    onSelectSessionRoute,
+  });
   if (authChecking) {
     return <AuthLoading />;
   }
 
   if (authRequired && !authenticated) return <AuthGate />;
+
+  const handleFeatureNav = (id: Feature) => {
+    setMobileSidebarOpen(false);
+    if (id === "chat") {
+      navigate(routes.chat(selectedSessionId));
+    } else if (id === "files") {
+      navigate(routes.files());
+    } else if (id === "terminal") {
+      navigate(routes.terminal());
+    } else if (id === "git") {
+      navigate(routes.git("changes"));
+    } else if (id === "stats") {
+      navigate(routes.stats());
+    }
+  };
+
+  const renderChat = () => (
+    <ChatPanel
+      loading={loading}
+      loadingMoreSessions={loadingMoreSessions}
+      hasMoreSessions={nextSessionCursor !== null}
+      sessions={sessions}
+      workspaceRoots={sessionWorkspaceRoots}
+      workspaceRootFilter={sessionWorkspaceRoot}
+      selectedSessionId={selectedSessionId}
+      selectedSession={selectedSession}
+      activeModel={activeModel}
+      messages={messages}
+      streams={visibleStreams}
+      instructionNotices={instructionNotices}
+      requests={requests}
+      todos={todos}
+      error={error}
+      sessionSearch={sessionSearch}
+      renamingSessionId={renamingSessionId}
+      renameValue={renameValue}
+      draft={draft}
+      mode={mode}
+      models={models}
+      thinkingLevel={thinkingLevel}
+      enterToSend={enterToSend}
+      sending={sending}
+      canceling={canceling}
+      mobileSidebarOpen={mobileSidebarOpen}
+      fileMention={fileMention}
+      fileMentionIndex={fileMentionIndex}
+      welcome={
+        <WelcomePage
+          draft={draft}
+          error={error}
+          loading={loading}
+          mode={mode}
+          enterToSend={enterToSend}
+          sending={welcomeSending}
+          models={models}
+          activeModel={activeModel}
+          thinkingLevel={thinkingLevel}
+          fileMention={fileMention}
+          fileMentionIndex={fileMentionIndex}
+          recentWorkspaceRoots={sessionWorkspaceRoots}
+          onChangeDraft={setDraft}
+          onModeChange={setMode}
+          onSelectModel={(model) => void chooseModel(model)}
+          onSelectThinkingLevel={(level) => void chooseThinkingLevel(level)}
+          onSubmit={(workspaceRoot) => void submitWelcome(workspaceRoot)}
+          onFileMentionChange={updateFileMention}
+          onFileMentionIndexChange={setFileMentionIndex}
+          onFileSelect={handleFileSelect}
+          onFileMentionClose={() => setFileMention(null)}
+        />
+      }
+      onSessionSearchChange={setSessionSearch}
+      onWorkspaceRootFilterChange={setSessionWorkspaceRoot}
+      onLoadMoreSessions={() => void loadMoreSessions()}
+      onCreateSession={createSession}
+      onSelectSession={selectSession}
+      onStartRename={(session) => {
+        setRenamingSessionId(session.session_id);
+        setRenameValue(session.title);
+      }}
+      onRenameChange={setRenameValue}
+      onRename={(sessionId) => void renameSession(sessionId)}
+      onCancelRename={() => setRenamingSessionId(null)}
+      onDeleteSession={(session) => void deleteSession(session)}
+      onRevert={handleRevert}
+      onRetryProviderError={handleRetryProviderError}
+      onFork={handleFork}
+      onRespond={(requestId, tools) => void respondToRequest(requestId, tools)}
+      onMobileSidebarClose={() => setMobileSidebarOpen(false)}
+      onDraftChange={setDraft}
+      onModeChange={setMode}
+      onSelectModel={(model) => void chooseModel(model)}
+      onSelectThinkingLevel={(level) => void chooseThinkingLevel(level)}
+      onSubmit={() => void submit()}
+      onCancel={() => {
+        if (selectedSessionId) void cancelSession(selectedSessionId);
+      }}
+      onFileMentionChange={updateFileMention}
+      onFileMentionIndexChange={setFileMentionIndex}
+      onFileSelect={handleFileSelect}
+      onFileMentionClose={() => setFileMention(null)}
+      focusComposer={focusComposerAfterWelcome}
+      onComposerFocus={clearComposerFocusRequest}
+      scrollToBottomRequest={scrollToBottomRequest}
+    />
+  );
 
   return (
     <div className="app-shell">
@@ -168,10 +287,7 @@ export default function App() {
               ref={(button) => {
                 featureButtonRefs.current[id] = button;
               }}
-              onClick={() => {
-                setMobileSidebarOpen(false);
-                setFeature(id);
-              }}
+              onClick={() => handleFeatureNav(id)}
             >
               <Icon size={16} strokeWidth={1.8} />
               {t(label)}
@@ -182,7 +298,7 @@ export default function App() {
             aria-hidden="true"
             style={{
               width: `${featureIndicator.width}px`,
-              transform: `translateX(${featureIndicator.left}px)`,
+              transform: `${featureIndicator.left ? `translateX(${featureIndicator.left}px)` : "none"}`,
               opacity: featureIndicator.visible ? 1 : 0,
             }}
           />
@@ -199,110 +315,34 @@ export default function App() {
 
       <main className="workspace">
         <Suspense fallback={<FeatureLoading />}>
-          {feature === "chat" ? (
-            <ChatPanel
-              loading={loading}
-              loadingMoreSessions={loadingMoreSessions}
-              hasMoreSessions={nextSessionCursor !== null}
-              sessions={sessions}
-              workspaceRoots={sessionWorkspaceRoots}
-              workspaceRootFilter={sessionWorkspaceRoot}
-              selectedSessionId={selectedSessionId}
-              selectedSession={selectedSession}
-              activeModel={activeModel}
-              messages={messages}
-              streams={visibleStreams}
-              instructionNotices={instructionNotices}
-              requests={requests}
-              todos={todos}
-              error={error}
-              sessionSearch={sessionSearch}
-              renamingSessionId={renamingSessionId}
-              renameValue={renameValue}
-              draft={draft}
-              mode={mode}
-              models={models}
-              thinkingLevel={thinkingLevel}
-              enterToSend={enterToSend}
-              sending={sending}
-              canceling={canceling}
-              mobileSidebarOpen={mobileSidebarOpen}
-              fileMention={fileMention}
-              fileMentionIndex={fileMentionIndex}
-              welcome={
-                <WelcomePage
-                  draft={draft}
-                  error={error}
-                  loading={loading}
-                  mode={mode}
-                  enterToSend={enterToSend}
-                  sending={welcomeSending}
-                  models={models}
-                  activeModel={activeModel}
-                  thinkingLevel={thinkingLevel}
-                  fileMention={fileMention}
-                  fileMentionIndex={fileMentionIndex}
-                  recentWorkspaceRoots={sessionWorkspaceRoots}
-                  onChangeDraft={setDraft}
-                  onModeChange={setMode}
-                  onSelectModel={(model) => void chooseModel(model)}
-                  onSelectThinkingLevel={(level) => void chooseThinkingLevel(level)}
-                  onSubmit={(workspaceRoot) => void submitWelcome(workspaceRoot)}
-                  onFileMentionChange={updateFileMention}
-                  onFileMentionIndexChange={setFileMentionIndex}
-                  onFileSelect={handleFileSelect}
-                  onFileMentionClose={() => setFileMention(null)}
-                />
-              }
-              onSessionSearchChange={setSessionSearch}
-              onWorkspaceRootFilterChange={setSessionWorkspaceRoot}
-              onLoadMoreSessions={() => void loadMoreSessions()}
-              onCreateSession={createSession}
-              onSelectSession={selectSession}
-              onStartRename={(session) => {
-                setRenamingSessionId(session.session_id);
-                setRenameValue(session.title);
-              }}
-              onRenameChange={setRenameValue}
-              onRename={(sessionId) => void renameSession(sessionId)}
-              onCancelRename={() => setRenamingSessionId(null)}
-              onDeleteSession={(session) => void deleteSession(session)}
-              onRevert={handleRevert}
-              onRetryProviderError={handleRetryProviderError}
-              onFork={handleFork}
-              onRespond={(requestId, tools) => void respondToRequest(requestId, tools)}
-              onMobileSidebarClose={() => setMobileSidebarOpen(false)}
-              onDraftChange={setDraft}
-              onModeChange={setMode}
-              onSelectModel={(model) => void chooseModel(model)}
-              onSelectThinkingLevel={(level) => void chooseThinkingLevel(level)}
-              onSubmit={() => void submit()}
-              onCancel={() => {
-                if (selectedSessionId) void cancelSession(selectedSessionId);
-              }}
-              onFileMentionChange={updateFileMention}
-              onFileMentionIndexChange={setFileMentionIndex}
-              onFileSelect={handleFileSelect}
-              onFileMentionClose={() => setFileMention(null)}
-              focusComposer={focusComposerAfterWelcome}
-              onComposerFocus={clearComposerFocusRequest}
-              scrollToBottomRequest={scrollToBottomRequest}
-            />
-          ) : feature === "files" ? (
-            <FeatureWorkspaceContext session={selectedSession}>
-              <FilesView />
-            </FeatureWorkspaceContext>
-          ) : feature === "terminal" ? (
-            <FeatureWorkspaceContext session={selectedSession}>
-              <TerminalView />
-            </FeatureWorkspaceContext>
-          ) : feature === "git" ? (
-            <FeatureWorkspaceContext session={selectedSession}>
-              <GitView />
-            </FeatureWorkspaceContext>
-          ) : feature === "stats" ? (
-            <StatsView />
-          ) : null}
+          <Switch>
+            <Route path="/chat/:sessionId?">{renderChat()}</Route>
+            <Route path="/files">
+              <FeatureWorkspaceContext session={selectedSession}>
+                <FilesView />
+              </FeatureWorkspaceContext>
+            </Route>
+            <Route path="/terminal/:tabId?">
+              <FeatureWorkspaceContext session={selectedSession}>
+                <TerminalView />
+              </FeatureWorkspaceContext>
+            </Route>
+            <Route path="/git/:tab?/:sha?">
+              <FeatureWorkspaceContext session={selectedSession}>
+                <GitView />
+              </FeatureWorkspaceContext>
+            </Route>
+            <Route path="/stats">
+              <StatsView />
+            </Route>
+            <Route path="/settings/:category?">{renderChat()}</Route>
+            <Route path="/">
+              <Redirect to="/chat" />
+            </Route>
+            <Route>
+              <Redirect to="/chat" />
+            </Route>
+          </Switch>
         </Suspense>
       </main>
       <SettingsPanel />

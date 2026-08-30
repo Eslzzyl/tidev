@@ -26,18 +26,6 @@ import i18n from "../i18n";
 
 const SESSION_PAGE_SIZE = 50;
 
-function sessionIdFromLocation(): string | null {
-  const sessionId = new URLSearchParams(window.location.search).get("session");
-  return sessionId?.trim() || null;
-}
-
-function updateSessionLocation(sessionId: string | null): void {
-  const url = new URL(window.location.href);
-  if (sessionId) url.searchParams.set("session", sessionId);
-  else url.searchParams.delete("session");
-  window.history.replaceState(null, "", url);
-}
-
 function mergeSessions(current: Session[], incoming: Session[]): Session[] {
   const seen = new Set<string>();
   return [...current, ...incoming].filter((session) => {
@@ -235,7 +223,13 @@ function updateSubagentEntry(
   stream.toolCallMap[toolCallId] = updated;
 }
 
-export function useChatRuntime() {
+export interface UseChatRuntimeOptions {
+  routeSessionId?: string | null;
+  onSelectSessionRoute?: (sessionId: string | null) => void;
+}
+
+export function useChatRuntime(options?: UseChatRuntimeOptions) {
+  const { routeSessionId, onSelectSessionRoute } = options ?? {};
   const authChecking = useAuthStore((state) => state.isLoading);
   const authRequired = useAuthStore((state) => state.isAuthRequired);
   const authenticated = useAuthStore((state) => state.isAuthenticated);
@@ -427,7 +421,7 @@ export function useChatRuntime() {
   }, []);
 
   const selectSession = useCallback(
-    (sessionId: string, session?: Session) => {
+    (sessionId: string, session?: Session, triggerRoute = true) => {
       selectedSessionRef.current = sessionId;
       setSelectedSessionId(sessionId);
       const summary = session ?? sessionsRef.current.find((item) => item.session_id === sessionId);
@@ -446,7 +440,9 @@ export function useChatRuntime() {
             }
           });
       }
-      updateSessionLocation(sessionId);
+      if (triggerRoute) {
+        onSelectSessionRoute?.(sessionId);
+      }
       clearPendingStreamUpdates();
       resetInstructionState();
       setStreams({});
@@ -456,8 +452,50 @@ export function useChatRuntime() {
       void loadMessages(sessionId);
       void loadTodos(sessionId);
     },
-    [clearPendingStreamUpdates, loadMessages, loadTodos, resetInstructionState],
+    [
+      clearPendingStreamUpdates,
+      loadMessages,
+      loadTodos,
+      onSelectSessionRoute,
+      resetInstructionState,
+    ],
   );
+
+  const createSession = useCallback(
+    (triggerRoute = true) => {
+      selectedSessionRef.current = null;
+      setSelectedSessionId(null);
+      setSelectedSession(undefined);
+      if (triggerRoute) {
+        onSelectSessionRoute?.(null);
+      }
+      setSessionSearch("");
+      setSessionWorkspaceRoot(null);
+      setMessages([]);
+      clearPendingStreamUpdates();
+      resetInstructionState();
+      setStreams({});
+      setDraft("");
+      setFileMention(null);
+      setError(null);
+    },
+    [clearPendingStreamUpdates, onSelectSessionRoute, resetInstructionState],
+  );
+
+  useEffect(() => {
+    if (routeSessionId === undefined) return;
+    if (routeSessionId) {
+      if (selectedSessionRef.current !== routeSessionId) {
+        selectSession(
+          routeSessionId,
+          sessionsRef.current.find((item) => item.session_id === routeSessionId),
+          false,
+        );
+      }
+    } else if (selectedSessionRef.current !== null) {
+      createSession(false);
+    }
+  }, [routeSessionId, selectSession, createSession]);
 
   const clearComposerFocusRequest = useCallback(() => {
     setFocusComposerAfterWelcome(false);
@@ -484,11 +522,11 @@ export function useChatRuntime() {
             : current,
         );
 
-        const requestedSessionId = sessionIdFromLocation();
-        if (requestedSessionId && selectedSessionRef.current === null) {
+        if (routeSessionId && selectedSessionRef.current === null) {
           selectSession(
-            requestedSessionId,
-            page.items.find((session) => session.session_id === requestedSessionId),
+            routeSessionId,
+            page.items.find((session) => session.session_id === routeSessionId),
+            false,
           );
         }
       })
@@ -508,6 +546,7 @@ export function useChatRuntime() {
     authRequired,
     authenticated,
     debouncedSessionSearch,
+    routeSessionId,
     selectSession,
     sessionWorkspaceRoot,
   ]);
@@ -925,22 +964,6 @@ export function useChatRuntime() {
       approval.close();
     };
   }, [applyEvent, authChecking, authRequired, authenticated, loadMessages, loadTodos]);
-
-  const createSession = () => {
-    selectedSessionRef.current = null;
-    setSelectedSessionId(null);
-    setSelectedSession(undefined);
-    updateSessionLocation(null);
-    setSessionSearch("");
-    setSessionWorkspaceRoot(null);
-    setMessages([]);
-    clearPendingStreamUpdates();
-    resetInstructionState();
-    setStreams({});
-    setDraft("");
-    setFileMention(null);
-    setError(null);
-  };
 
   const renameSession = async (sessionId: string) => {
     const title = renameValue.trim();

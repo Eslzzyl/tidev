@@ -33,6 +33,8 @@ import { ChangesPanel } from "./git/GitChangesPanel";
 import { GraphHistoryPanel, CommitDetailPanel } from "./git/GitHistoryPanels";
 import { BranchesPanel } from "./git/GitBranchesPanel";
 import { useTranslation } from "react-i18next";
+import { useRoute, useLocation } from "wouter";
+import { routes } from "../../lib/routes";
 
 type GitTab = "changes" | "history" | "branches";
 
@@ -40,7 +42,12 @@ const MIN_PANEL_PCT = 20; // minimum panel width in %
 
 export function GitView() {
   const { t } = useTranslation();
-  const [activeTab, setActiveTab] = useState<GitTab>("changes");
+  const [, params] = useRoute<{ tab?: string; sha?: string }>("/git/:tab?/:sha?");
+  const [, navigate] = useLocation();
+  const activeTab: GitTab =
+    params?.tab === "history" || params?.tab === "branches" ? params.tab : "changes";
+  const routeSha = params?.sha ?? null;
+
   const [status, setStatus] = useState<GitStatusResponse | null>(null);
   const [branches, setBranches] = useState<GitBranchResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -190,25 +197,31 @@ export function GitView() {
 
   // ── History commit detail ───────────────────────────────────────────
 
-  const selectCommit = useCallback(async (sha: string) => {
-    setLoadingDetail(true);
-    setDetailError(null);
-    setSelectedCommit(null);
-    setFileDiffs({});
-    setExpandedFiles(new Set());
-    try {
-      const detail = await queryClient.fetchQuery({
-        queryKey: ["git", "show", sha],
-        queryFn: () => api.gitShowCommit(sha),
-      });
-      setSelectedCommit(detail);
-      setDetailOpen(true);
-    } catch (err) {
-      setDetailError(err instanceof Error ? err.message : t("Failed to load commit details"));
-    } finally {
-      setLoadingDetail(false);
-    }
-  }, []);
+  const selectCommit = useCallback(
+    async (sha: string, updateUrl = true) => {
+      if (updateUrl) {
+        navigate(routes.git("history", sha));
+      }
+      setLoadingDetail(true);
+      setDetailError(null);
+      setSelectedCommit(null);
+      setFileDiffs({});
+      setExpandedFiles(new Set());
+      try {
+        const detail = await queryClient.fetchQuery({
+          queryKey: ["git", "show", sha],
+          queryFn: () => api.gitShowCommit(sha),
+        });
+        setSelectedCommit(detail);
+        setDetailOpen(true);
+      } catch (err) {
+        setDetailError(err instanceof Error ? err.message : t("Failed to load commit details"));
+      } finally {
+        setLoadingDetail(false);
+      }
+    },
+    [navigate, t],
+  );
 
   const loadFileDiff = useCallback(
     async (filePath: string) => {
@@ -241,7 +254,7 @@ export function GitView() {
         setLoadingFileDiff(null);
       }
     },
-    [selectedCommit, fileDiffs],
+    [selectedCommit, fileDiffs, t],
   );
 
   const loadAllDiffs = useCallback(async () => {
@@ -263,7 +276,7 @@ export function GitView() {
     } finally {
       setLoadingAllDiffs(false);
     }
-  }, [selectedCommit, expandedFiles]);
+  }, [selectedCommit, t]);
 
   const toggleAllDiffs = useCallback(async () => {
     if (!selectedCommit) return;
@@ -283,7 +296,23 @@ export function GitView() {
     setFileDiffs({});
     setExpandedFiles(new Set());
     setDetailError(null);
-  }, []);
+    if (routeSha) {
+      navigate(routes.git("history"));
+    }
+  }, [navigate, routeSha]);
+
+  useEffect(() => {
+    if (activeTab === "history" && routeSha) {
+      if (selectedCommit?.sha !== routeSha) {
+        void selectCommit(routeSha, false);
+      }
+    } else if (!routeSha && selectedCommit) {
+      setSelectedCommit(null);
+      setFileDiffs({});
+      setExpandedFiles(new Set());
+      setDetailOpen(false);
+    }
+  }, [activeTab, routeSha, selectCommit, selectedCommit]);
 
   const handleCloseMobile = useCallback(() => {
     setAnimateOut(true);
@@ -564,7 +593,7 @@ export function GitView() {
         {tabs.map((tab) => (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => navigate(routes.git(tab.id))}
             className={`flex items-center gap-1.5 px-4 py-2 text-xs font-medium transition-colors ${
               activeTab === tab.id
                 ? "border-b-2 border-neutral-900 text-neutral-900 dark:border-neutral-100 dark:text-neutral-100"

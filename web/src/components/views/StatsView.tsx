@@ -30,6 +30,8 @@ import { queryClient } from "../../lib/queryClient";
 import { useStatsOverview } from "../../hooks/useQueries";
 import type { ProviderUsageEntry } from "../../types/api";
 import { useTranslation } from "react-i18next";
+import { useLocation } from "wouter";
+import { routes } from "../../lib/routes";
 import i18n from "../../i18n";
 
 // ── Color palettes ───────────────────────────────────────────────────────
@@ -204,10 +206,46 @@ function ChartContainer({
 
 export function StatsView() {
   const { t } = useTranslation();
-  // UI state
-  const [granularity, setGranularity] = useState<Granularity>("hour");
-  const [range, setRange] = useState<StatsRange>("24h");
+  const [location, navigate] = useLocation();
+
+  const getInitialParams = () => {
+    if (typeof window === "undefined")
+      return { range: "24h" as StatsRange, granularity: "hour" as Granularity };
+    const params = new URLSearchParams(window.location.search);
+    const r = params.get("range") as StatsRange | null;
+    const g = params.get("granularity") as Granularity | null;
+    return {
+      range: r && ["24h", "7d", "30d", "all"].includes(r) ? r : ("24h" as StatsRange),
+      granularity: g && ["hour", "day", "week", "month"].includes(g) ? g : ("hour" as Granularity),
+    };
+  };
+
+  const initialParams = useMemo(getInitialParams, []);
+  const [granularity, setGranularity] = useState<Granularity>(initialParams.granularity);
+  const [range, setRange] = useState<StatsRange>(initialParams.range);
   const [isDark, setIsDark] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const r = params.get("range") as StatsRange | null;
+    const g = params.get("granularity") as Granularity | null;
+    if (r && ["24h", "7d", "30d", "all"].includes(r) && r !== range) {
+      setRange(r);
+    }
+    if (g && ["hour", "day", "week", "month"].includes(g) && g !== granularity) {
+      setGranularity(g);
+    }
+  }, [location]);
+
+  const handleRangeChange = (newRange: StatsRange) => {
+    setRange(newRange);
+    navigate(routes.stats(newRange, granularity), { replace: true });
+  };
+
+  const handleGranularityChange = (newGranularity: Granularity) => {
+    setGranularity(newGranularity);
+    navigate(routes.stats(range, newGranularity), { replace: true });
+  };
 
   // Detect dark mode
   useEffect(() => {
@@ -323,7 +361,7 @@ export function StatsView() {
               {RANGE_OPTIONS.map((option) => (
                 <button
                   key={option.value}
-                  onClick={() => setRange(option.value)}
+                  onClick={() => handleRangeChange(option.value)}
                   className={`stats-range-button ${range === option.value ? "is-active" : ""}`}
                 >
                   {option.value === "all" ? t("All") : option.label}
@@ -335,7 +373,7 @@ export function StatsView() {
               {(["hour", "day", "week", "month"] as Granularity[]).map((g) => (
                 <button
                   key={g}
-                  onClick={() => setGranularity(g)}
+                  onClick={() => handleGranularityChange(g)}
                   className={`stats-granularity-button px-3 py-1.5 text-xs font-medium transition-colors ${
                     granularity === g
                       ? "is-active bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900"

@@ -9,6 +9,9 @@ import { queryClient } from "../../lib/queryClient";
 import { CreateItemDialog } from "../ui/CreateItemDialog";
 import { useTranslation } from "react-i18next";
 
+import { useLocation } from "wouter";
+import { routes } from "../../lib/routes";
+
 const SEARCH_CACHE_SIZE = 50;
 const MIN_FILETREE_WIDTH = 180;
 const MAX_FILETREE_WIDTH = 500;
@@ -29,6 +32,7 @@ function loadFileTreeWidth(): number {
 
 export function FilesView() {
   const { t } = useTranslation();
+  const [, navigate] = useLocation();
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<{ path: string; display: string }[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -48,8 +52,29 @@ export function FilesView() {
   const rootLoaded = useFileStore((s) => s.rootLoaded);
   const loadRoot = useFileStore((s) => s.loadRoot);
   const rootLoading = useFileStore((s) => s.rootLoading);
+  const openFile = useFileStore((s) => s.openFile);
+  const activeFilePath = useFileStore((s) => s.activeFilePath);
   const createFile = useFileStore((s) => s.createFile);
   const gitBranch = useGitFileStore((s) => s.branch);
+
+  // Synchronize URL query `path` with activeFilePath
+  const urlPath =
+    typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("path") : null;
+
+  useEffect(() => {
+    if (urlPath && urlPath !== activeFilePath) {
+      void openFile(urlPath);
+    }
+  }, [urlPath, activeFilePath, openFile]);
+
+  useEffect(() => {
+    const currentUrlParam = new URLSearchParams(window.location.search).get("path");
+    if (activeFilePath && currentUrlParam !== activeFilePath) {
+      navigate(routes.files(activeFilePath), { replace: true });
+    } else if (!activeFilePath && currentUrlParam) {
+      navigate(routes.files(), { replace: true });
+    }
+  }, [activeFilePath, navigate]);
 
   // Search cache: query -> results
   const searchCacheRef = useRef<Record<string, { path: string; display: string }[]>>({});
