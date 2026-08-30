@@ -49,6 +49,8 @@ import type {
   SessionUsageEntry,
   McpServerInfo,
   UpsertMcpServerRequest,
+  SessionListCursor,
+  SessionListResponse,
 } from "../types/api";
 import { getAuthToken, useAuthStore } from "../stores/useAuthStore";
 import i18n from "../i18n";
@@ -123,8 +125,26 @@ export const api = {
   getWorkspace: () => fetchJson<WorkspaceInfo>(`${API_BASE}/workspace`),
 
   // Sessions
-  listSessions: (limit = 100) =>
-    fetchJson<Session[]>(`${API_BASE}/sessions?limit=${encodeURIComponent(limit)}`),
+  listSessions: ({
+    limit = 50,
+    query,
+    workspaceRoot,
+    cursor,
+  }: {
+    limit?: number;
+    query?: string;
+    workspaceRoot?: string | null;
+    cursor?: SessionListCursor | null;
+  } = {}) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (query?.trim()) params.set("q", query.trim());
+    if (workspaceRoot?.trim()) params.set("workspace_root", workspaceRoot);
+    if (cursor) {
+      params.set("before_updated_at", cursor.updated_at);
+      params.set("before_session_id", cursor.session_id);
+    }
+    return fetchJson<SessionListResponse>(API_BASE + "/sessions?" + params.toString());
+  },
 
   createSession: (data: CreateSessionRequest | string) =>
     fetchJson<CreateSessionResponse>(`${API_BASE}/sessions`, {

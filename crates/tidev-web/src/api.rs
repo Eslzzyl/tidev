@@ -49,7 +49,10 @@ struct EventsQuery {
 #[derive(Debug, Deserialize)]
 struct ListQuery {
     limit: Option<i64>,
-    offset: Option<i64>,
+    q: Option<String>,
+    workspace_root: Option<String>,
+    before_updated_at: Option<String>,
+    before_session_id: Option<Uuid>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -151,6 +154,19 @@ struct SessionDto {
     context_summary: Option<String>,
     context_retained_from: usize,
     busy: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct SessionListCursorDto {
+    updated_at: String,
+    session_id: Uuid,
+}
+
+#[derive(Debug, Serialize)]
+struct SessionListResponse {
+    items: Vec<SessionDto>,
+    next_cursor: Option<SessionListCursorDto>,
+    workspace_roots: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -628,20 +644,48 @@ async fn set_thinking_level(
 async fn list_sessions(
     State(state): State<Arc<AppState>>,
     Query(query): Query<ListQuery>,
-) -> Result<Json<Vec<SessionDto>>, ApiError> {
+) -> Result<Json<SessionListResponse>, ApiError> {
     let limit = query.limit.unwrap_or(50).clamp(1, 200);
-    let offset = query.offset.unwrap_or(0).max(0);
-    let workspace = state.runtime.workspace_root().to_string_lossy().to_string();
-    let sessions = state
-        .runtime
-        .session_manager()
-        .store()
-        .list_sessions_for_workspace(&workspace, limit, offset)?;
+    let cursor = match (query.before_updated_at.as_deref(), query.before_session_id) {
+        (None, None) => None,
+        (Some(updated_at), Some(session_id)) => {
+            let updated_at = DateTime::parse_from_rfc3339(updated_at)
+                .map_err(|_| ApiError::bad_request("invalid session cursor timestamp"))?
+                .with_timezone(&Utc);
+            Some((updated_at, session_id))
+        }
+        _ => {
+            return Err(ApiError::bad_request(
+                "session cursor requires both before_updated_at and before_session_id",
+            ));
+        }
+    };
+    let store = state.runtime.session_manager().store();
+    let mut sessions = store.list_sessions_by_activity(
+        limit + 1,
+        cursor,
+        query.q.as_deref(),
+        query.workspace_root.as_deref(),
+    )?;
+    let next_cursor = if sessions.len() > limit as usize {
+        sessions.pop();
+        sessions.last().map(|session| SessionListCursorDto {
+            updated_at: session.updated_at.to_rfc3339(),
+            session_id: session.session_id,
+        })
+    } else {
+        None
+    };
+    let workspace_roots = store.list_session_workspace_roots()?;
     let items = sessions
         .into_iter()
         .map(|session| session_dto(&state.runtime, session))
         .collect();
-    Ok(Json(items))
+    Ok(Json(SessionListResponse {
+        items,
+        next_cursor,
+        workspace_roots,
+    }))
 }
 
 async fn create_session(

@@ -13,6 +13,7 @@ import type {
   Model,
   ProviderErrorData,
   Session,
+  SessionListCursor,
   TodoItem,
   ToolCall,
   ToolExecutionResult,
@@ -22,6 +23,29 @@ import { parseSlashCommand } from "../commands";
 import { asString, eventPayload } from "../utils/events";
 import { toolCallEntry, toolResultStatus, type ToolCallEntry } from "../utils/round";
 import i18n from "../i18n";
+
+const SESSION_PAGE_SIZE = 50;
+
+function sessionIdFromLocation(): string | null {
+  const sessionId = new URLSearchParams(window.location.search).get("session");
+  return sessionId?.trim() || null;
+}
+
+function updateSessionLocation(sessionId: string | null): void {
+  const url = new URL(window.location.href);
+  if (sessionId) url.searchParams.set("session", sessionId);
+  else url.searchParams.delete("session");
+  window.history.replaceState(null, "", url);
+}
+
+function mergeSessions(current: Session[], incoming: Session[]): Session[] {
+  const seen = new Set<string>();
+  return [...current, ...incoming].filter((session) => {
+    if (seen.has(session.session_id)) return false;
+    seen.add(session.session_id);
+    return true;
+  });
+}
 
 function createStream(key: string, requestId: number): StreamMessage {
   return {
@@ -220,6 +244,11 @@ export function useChatRuntime() {
   const enterToSend = useUIStore((state) => state.settings.enterToSend);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [selectedSession, setSelectedSession] = useState<Session | undefined>();
+  const [sessionWorkspaceRoots, setSessionWorkspaceRoots] = useState<string[]>([]);
+  const [sessionWorkspaceRoot, setSessionWorkspaceRoot] = useState<string | null>(null);
+  const [nextSessionCursor, setNextSessionCursor] = useState<SessionListCursor | null>(null);
+  const [loadingMoreSessions, setLoadingMoreSessions] = useState(false);
   const [messages, setMessages] = useState<MessageRecord[]>([]);
   const [instructionNotices, setInstructionNotices] = useState<InstructionNotice[]>([]);
   const [streams, setStreams] = useState<Record<string, StreamMessage>>({});
@@ -245,12 +274,14 @@ export function useChatRuntime() {
   const [scrollToBottomRequest, setScrollToBottomRequest] = useState(0);
   const [thinkingLevel, setThinkingLevel] = useState<string | undefined>();
   const [sessionSearch, setSessionSearch] = useState("");
+  const [debouncedSessionSearch, setDebouncedSessionSearch] = useState("");
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [fileMention, setFileMention] = useState<{ query: string; atPos: number } | null>(null);
   const [fileMentionIndex, setFileMentionIndex] = useState(0);
   const selectedSessionRef = useRef<string | null>(null);
+  const sessionsRef = useRef<Session[]>([]);
   const instructionNoticesRef = useRef<InstructionNotice[]>([]);
   const instructionNoticeRevisionRef = useRef(0);
   const shownInstructionSourcesRef = useRef<Set<string>>(new Set());
@@ -258,6 +289,15 @@ export function useChatRuntime() {
   const cursorRef = useRef<number | null>(
     Number(localStorage.getItem("tidev:last-event-cursor")) || null,
   );
+  useEffect(() => {
+    sessionsRef.current = sessions;
+  }, [sessions]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedSessionSearch(sessionSearch);
+    }, 200);
+    return () => window.clearTimeout(timer);
+  }, [sessionSearch]);
   type StreamState = Record<string, StreamMessage>;
   type StreamStateUpdater = (current: StreamState) => StreamState;
   const pendingStreamUpdatesRef = useRef<StreamStateUpdater[]>([]);
@@ -387,9 +427,26 @@ export function useChatRuntime() {
   }, []);
 
   const selectSession = useCallback(
-    (sessionId: string) => {
+    (sessionId: string, session?: Session) => {
       selectedSessionRef.current = sessionId;
       setSelectedSessionId(sessionId);
+      const summary = session ?? sessionsRef.current.find((item) => item.session_id === sessionId);
+      if (summary) {
+        setSelectedSession(summary);
+      } else {
+        setSelectedSession(undefined);
+        void api
+          .getSession(sessionId)
+          .then((loaded) => {
+            if (selectedSessionRef.current === sessionId) setSelectedSession(loaded);
+          })
+          .catch((reason) => {
+            if (selectedSessionRef.current === sessionId) {
+              setError(reason instanceof Error ? reason.message : i18n.t("Failed to load session"));
+            }
+          });
+      }
+      updateSessionLocation(sessionId);
       clearPendingStreamUpdates();
       resetInstructionState();
       setStreams({});
@@ -409,20 +466,88 @@ export function useChatRuntime() {
   useEffect(() => {
     if (authChecking || (authRequired && !authenticated)) return;
     let disposed = false;
+    setLoading(true);
     void api
-      .listSessions()
-      .then(async (items) => {
+      .listSessions({
+        limit: SESSION_PAGE_SIZE,
+        query: debouncedSessionSearch,
+        workspaceRoot: sessionWorkspaceRoot,
+      })
+      .then((page) => {
         if (disposed) return;
-        setSessions(items);
+        setSessions(page.items);
+        setSessionWorkspaceRoots(page.workspace_roots);
+        setNextSessionCursor(page.next_cursor);
+        setSelectedSession((current) =>
+          current
+            ? (page.items.find((session) => session.session_id === current.session_id) ?? current)
+            : current,
+        );
+
+        const requestedSessionId = sessionIdFromLocation();
+        if (requestedSessionId && selectedSessionRef.current === null) {
+          selectSession(
+            requestedSessionId,
+            page.items.find((session) => session.session_id === requestedSessionId),
+          );
+        }
       })
       .catch((reason) =>
         setError(reason instanceof Error ? reason.message : i18n.t("Failed to load sessions")),
       )
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!disposed) {
+          setLoading(false);
+        }
+      });
     return () => {
       disposed = true;
     };
-  }, [authChecking, authRequired, authenticated]);
+  }, [
+    authChecking,
+    authRequired,
+    authenticated,
+    debouncedSessionSearch,
+    selectSession,
+    sessionWorkspaceRoot,
+  ]);
+
+  const loadMoreSessions = useCallback(async () => {
+    if (!nextSessionCursor || loadingMoreSessions) return;
+    setLoadingMoreSessions(true);
+    try {
+      const page = await api.listSessions({
+        limit: SESSION_PAGE_SIZE,
+        query: debouncedSessionSearch,
+        workspaceRoot: sessionWorkspaceRoot,
+        cursor: nextSessionCursor,
+      });
+      setSessions((current) => mergeSessions(current, page.items));
+      setSessionWorkspaceRoots(page.workspace_roots);
+      setNextSessionCursor(page.next_cursor);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : i18n.t("Failed to load sessions"));
+    } finally {
+      setLoadingMoreSessions(false);
+    }
+  }, [debouncedSessionSearch, loadingMoreSessions, nextSessionCursor, sessionWorkspaceRoot]);
+
+  const touchSession = useCallback((sessionId: string, busy?: boolean) => {
+    const updatedAt = new Date().toISOString();
+    const update = (session: Session): Session => ({
+      ...session,
+      updated_at: updatedAt,
+      ...(busy === undefined ? {} : { busy }),
+    });
+    setSessions((current) => {
+      const session = current.find((item) => item.session_id === sessionId);
+      if (!session) return current;
+      return [update(session), ...current.filter((item) => item.session_id !== sessionId)];
+    });
+    setSelectedSession((current) =>
+      current?.session_id === sessionId ? update(current) : current,
+    );
+  }, []);
 
   const refreshModels = useCallback(async () => {
     try {
@@ -449,6 +574,7 @@ export function useChatRuntime() {
       if (kind === "UserMessageCreated") {
         const message = payload.message as Message | undefined;
         const appData = payload.app_data as MessageRecord["app_data"] | undefined;
+        touchSession(sessionId);
         if (message && payload.queued !== true && selectedSessionRef.current === sessionId) {
           setMessages((current) =>
             current.some((item) => item.message.id === message.id)
@@ -504,9 +630,7 @@ export function useChatRuntime() {
             };
           });
         }
-        setSessions((current) =>
-          current.map((item) => (item.session_id === sessionId ? { ...item, busy: true } : item)),
-        );
+        touchSession(sessionId, true);
         return;
       }
       if (
@@ -667,9 +791,7 @@ export function useChatRuntime() {
           };
           return { ...current, [key]: next };
         });
-        setSessions((current) =>
-          current.map((item) => (item.session_id === sessionId ? { ...item, busy: true } : item)),
-        );
+        touchSession(sessionId, true);
         return;
       }
       if (kind === "Failed") {
@@ -691,9 +813,7 @@ export function useChatRuntime() {
           next.error = providerError.message;
           return { ...current, [key]: next };
         });
-        setSessions((current) =>
-          current.map((item) => (item.session_id === sessionId ? { ...item, busy: false } : item)),
-        );
+        touchSession(sessionId, false);
         return;
       }
       if (kind === "Finished") {
@@ -755,9 +875,7 @@ export function useChatRuntime() {
             },
           };
         });
-        setSessions((current) =>
-          current.map((item) => (item.session_id === sessionId ? { ...item, busy: false } : item)),
-        );
+        touchSession(sessionId, false);
         if (selectedSessionRef.current === sessionId) {
           const instructionRevision = instructionNoticeRevisionRef.current;
           void loadMessages(sessionId).then((loaded) => {
@@ -777,7 +895,7 @@ export function useChatRuntime() {
         void loadMessages(sessionId);
       }
     },
-    [clearPendingInstructionNotices, loadMessages, loadTodos, scheduleStreamUpdate],
+    [clearPendingInstructionNotices, loadMessages, loadTodos, scheduleStreamUpdate, touchSession],
   );
 
   useEffect(() => {
@@ -811,6 +929,10 @@ export function useChatRuntime() {
   const createSession = () => {
     selectedSessionRef.current = null;
     setSelectedSessionId(null);
+    setSelectedSession(undefined);
+    updateSessionLocation(null);
+    setSessionSearch("");
+    setSessionWorkspaceRoot(null);
     setMessages([]);
     clearPendingStreamUpdates();
     resetInstructionState();
@@ -831,6 +953,7 @@ export function useChatRuntime() {
       setSessions((current) =>
         current.map((item) => (item.session_id === sessionId ? updated : item)),
       );
+      setSelectedSession((current) => (current?.session_id === sessionId ? updated : current));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : i18n.t("Failed to rename session"));
     } finally {
@@ -850,6 +973,9 @@ export function useChatRuntime() {
     try {
       await api.deleteSession(session.session_id);
       setSessions((current) => current.filter((item) => item.session_id !== session.session_id));
+      setSelectedSession((current) =>
+        current?.session_id === session.session_id ? undefined : current,
+      );
       if (selectedSessionRef.current === session.session_id) createSession();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : i18n.t("Failed to delete session"));
@@ -863,10 +989,17 @@ export function useChatRuntime() {
     setError(null);
     try {
       const response = await api.createSession(content.slice(0, 80));
-      setSessions((current) => [response.session, ...current]);
+      setSessionSearch("");
+      setSessionWorkspaceRoot(null);
+      setSessions((current) => mergeSessions([response.session], current));
+      setSessionWorkspaceRoots((current) =>
+        current.includes(response.session.workspace_root)
+          ? current
+          : [response.session.workspace_root, ...current],
+      );
       setFocusComposerAfterWelcome(true);
       setScrollToBottomRequest((current) => current + 1);
-      selectSession(response.session.session_id);
+      selectSession(response.session.session_id, response.session);
       setDraft("");
       await api.sendPrompt(
         response.session.session_id,
@@ -948,8 +1081,11 @@ export function useChatRuntime() {
       if (!sessionId) return;
       try {
         const forked = await api.forkSession(sessionId, messageId);
-        setSessions((current) => [forked, ...current]);
-        selectSession(forked.session_id);
+        setSessions((current) => mergeSessions([forked], current));
+        setSessionWorkspaceRoots((current) =>
+          current.includes(forked.workspace_root) ? current : [forked.workspace_root, ...current],
+        );
+        selectSession(forked.session_id, forked);
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : i18n.t("Failed to fork"));
       }
@@ -1001,6 +1137,7 @@ export function useChatRuntime() {
             setSessions((current) =>
               current.map((item) => (item.session_id === sid ? updated : item)),
             );
+            setSelectedSession((current) => (current?.session_id === sid ? updated : current));
           } catch (reason) {
             setError(reason instanceof Error ? reason.message : i18n.t("Failed to rename"));
           }
@@ -1109,7 +1246,6 @@ export function useChatRuntime() {
     () => Object.values(streams).filter((item) => item.key.startsWith(`${selectedSessionId}:`)),
     [selectedSessionId, streams],
   );
-  const selectedSession = sessions.find((session) => session.session_id === selectedSessionId);
   const activeModel =
     models.find((model) => model.active) ??
     models.find(
@@ -1125,6 +1261,10 @@ export function useChatRuntime() {
     openSettingsPanel,
     enterToSend,
     sessions,
+    sessionWorkspaceRoots,
+    sessionWorkspaceRoot,
+    nextSessionCursor,
+    loadingMoreSessions,
     selectedSessionId,
     selectedSession,
     activeModel,
@@ -1152,12 +1292,14 @@ export function useChatRuntime() {
     setDraft,
     setMode,
     setSessionSearch,
+    setSessionWorkspaceRoot,
     setRenamingSessionId,
     setRenameValue,
     setFileMentionIndex,
     setFileMention,
     selectSession,
     createSession,
+    loadMoreSessions,
     renameSession,
     deleteSession,
     submitWelcome,

@@ -12,7 +12,8 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Duration, Utc};
 use rayon::prelude::*;
 use rusqlite::{
-    Connection, OptionalExtension, named_params, params, params_from_iter, types::Type,
+    Connection, OptionalExtension, named_params, params, params_from_iter,
+    types::{ToSql, Type},
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -596,6 +597,73 @@ impl SessionStore {
         }
         Ok(sessions)
         })
+    }
+
+    /// List top-level sessions by their most recent activity.
+    ///
+    /// The cursor is exclusive. Ordering by both timestamp and ID keeps a page
+    /// stable when several sessions share the same update time.
+    pub fn list_sessions_by_activity(
+        &self,
+        limit: i64,
+        cursor: Option<(DateTime<Utc>, Uuid)>,
+        query: Option<&str>,
+        workspace_root: Option<&str>,
+    ) -> Result<Vec<SessionRecord>> {
+        let mut clauses = vec![String::from("s.parent_session_id IS NULL")];
+        let mut values: Vec<Box<dyn ToSql>> = Vec::new();
+
+        if let Some(workspace_root) = workspace_root.filter(|root| !root.trim().is_empty()) {
+            clauses.push("s.workspace_root = ?".to_string());
+            values.push(Box::new(workspace_root.to_string()));
+        }
+
+        if let Some(query) = query.map(str::trim).filter(|query| !query.is_empty()) {
+            let escaped = query
+                .replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_");
+            let pattern = format!("%{escaped}%");
+            clauses.push(
+                "(s.title LIKE ? ESCAPE '\\' OR s.workspace_root LIKE ? ESCAPE '\\')".to_string(),
+            );
+            values.push(Box::new(pattern.clone()));
+            values.push(Box::new(pattern));
+        }
+
+        if let Some((updated_at, session_id)) = cursor {
+            clauses.push("(s.updated_at < ? OR (s.updated_at = ? AND s.id < ?))".to_string());
+            let timestamp = updated_at.to_rfc3339();
+            values.push(Box::new(timestamp.clone()));
+            values.push(Box::new(timestamp));
+            values.push(Box::new(session_id.to_string()));
+        }
+
+        values.push(Box::new(limit.max(1)));
+        let sql = format!(
+            "SELECT {SESSION_SELECT_COLUMNS} FROM sessions s \
+             WHERE {} \
+             ORDER BY s.updated_at DESC, s.id DESC LIMIT ?",
+            clauses.join(" AND ")
+        );
+
+        self.read_query(
+            &sql,
+            params_from_iter(values.iter().map(|value| value.as_ref())),
+            Self::session_from_row,
+        )
+    }
+
+    /// List each workspace that has at least one top-level session.
+    pub fn list_session_workspace_roots(&self) -> Result<Vec<String>> {
+        self.read_query(
+            "SELECT s.workspace_root FROM sessions s \
+             WHERE s.parent_session_id IS NULL \
+             GROUP BY s.workspace_root \
+             ORDER BY MAX(s.updated_at) DESC, s.workspace_root ASC",
+            [],
+            |row| row.get(0),
+        )
     }
 
     /// List all sessions including children (no parent_session_id filter).
@@ -2559,6 +2627,44 @@ mod tests {
         let ws_b_sessions = store.list_sessions_for_workspace("/ws-b", 10, 0).unwrap();
         assert_eq!(ws_b_sessions.len(), 1);
         assert_eq!(ws_b_sessions[0].title, "B");
+    }
+
+    #[test]
+    fn activity_listing_filters_and_paginates_top_level_sessions() {
+        let (store, _tmp) = test_store();
+        let _tidev = create_test_session(&store, "/work/tidev", "Fix sidebar");
+        let _vnagent = create_test_session(&store, "/work/vnagent", "Review storyboard");
+        let _other = create_test_session(&store, "/work/fundlab", "Run research");
+
+        let matching = store
+            .list_sessions_by_activity(10, None, Some("tidev"), None)
+            .unwrap();
+        assert_eq!(matching.len(), 1);
+        assert_eq!(matching[0].workspace_root, "/work/tidev");
+
+        let scoped = store
+            .list_sessions_by_activity(10, None, None, Some("/work/vnagent"))
+            .unwrap();
+        assert_eq!(scoped.len(), 1);
+        assert_eq!(scoped[0].title, "Review storyboard");
+
+        let first_page = store
+            .list_sessions_by_activity(1, None, None, None)
+            .unwrap();
+        assert_eq!(first_page.len(), 1);
+        let cursor = (first_page[0].updated_at, first_page[0].session_id);
+        let second_page = store
+            .list_sessions_by_activity(10, Some(cursor), None, None)
+            .unwrap();
+        assert_eq!(second_page.len(), 2);
+        assert!(
+            second_page
+                .iter()
+                .all(|session| session.session_id != first_page[0].session_id)
+        );
+
+        let roots = store.list_session_workspace_roots().unwrap();
+        assert_eq!(roots, vec!["/work/fundlab", "/work/vnagent", "/work/tidev"]);
     }
 
     #[test]

@@ -22,6 +22,17 @@ export interface SessionDetail extends Session {
   revert_message_id?: string | null;
 }
 
+export interface SessionListCursor {
+  updated_at: string;
+  session_id: string;
+}
+
+export interface SessionListResponse {
+  items: Session[];
+  next_cursor: SessionListCursor | null;
+  workspace_roots: string[];
+}
+
 export interface FileDiff {
   path: string;
   file_path?: string;

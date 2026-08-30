@@ -36,6 +36,12 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS idx_sessions_workspace
     ON sessions(workspace_root);
 
+CREATE INDEX IF NOT EXISTS idx_sessions_activity
+    ON sessions(parent_session_id, updated_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_workspace_activity
+    ON sessions(workspace_root, parent_session_id, updated_at DESC, id DESC);
+
 CREATE TABLE IF NOT EXISTS messages (
     id TEXT PRIMARY KEY,
     session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -122,6 +128,12 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 CREATE INDEX IF NOT EXISTS idx_sessions_workspace
     ON sessions(workspace_root);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_activity
+    ON sessions(parent_session_id, updated_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_workspace_activity
+    ON sessions(workspace_root, parent_session_id, updated_at DESC, id DESC);
 
 CREATE TABLE IF NOT EXISTS messages (
     id TEXT PRIMARY KEY,

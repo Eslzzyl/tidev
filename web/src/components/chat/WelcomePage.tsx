@@ -1,13 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Clock3, LoaderCircle, Send } from "lucide-react";
+import { LoaderCircle, Send } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { commandFragment, getSuggestions } from "../../commands";
-import type { Model, Session } from "../../types/api";
+import type { Model } from "../../types/api";
 import { CommandPopover } from "../CommandPopover";
 import { FileMentionPopover } from "../FileMentionPopover";
 import { ModelPicker } from "../ModelPicker";
-import { formatDate } from "../../utils/chat";
 
 export interface WelcomePageProps {
   draft: string;
@@ -16,7 +15,6 @@ export interface WelcomePageProps {
   mode: "build" | "plan";
   enterToSend: boolean;
   sending: boolean;
-  sessions: Session[];
   models: Model[];
   activeModel: Model | undefined;
   thinkingLevel: string | undefined;
@@ -24,7 +22,6 @@ export interface WelcomePageProps {
   fileMentionIndex: number;
   onChangeDraft: (value: string) => void;
   onModeChange: (mode: "build" | "plan") => void;
-  onSelectSession: (sessionId: string) => void;
   onSelectModel: (model: Model) => void;
   onSelectThinkingLevel: (level: string) => void;
   onSubmit: () => void;
@@ -41,7 +38,6 @@ export function WelcomePage({
   mode,
   enterToSend,
   sending,
-  sessions,
   models,
   activeModel,
   thinkingLevel,
@@ -49,7 +45,6 @@ export function WelcomePage({
   fileMentionIndex,
   onChangeDraft,
   onModeChange,
-  onSelectSession,
   onSelectModel,
   onSelectThinkingLevel,
   onSubmit,
@@ -309,26 +304,6 @@ export function WelcomePage({
         </div>
       </div>
       {error ? <div className="error-banner welcome-error">{error}</div> : null}
-      {sessions.length > 0 ? (
-        <div className="recent-sessions">
-          <div className="recent-heading">
-            <Clock3 size={16} />
-            <span>{t("Recent Sessions")}</span>
-          </div>
-          <div className="recent-session-grid">
-            {sessions.slice(0, 5).map((session) => (
-              <button
-                className="recent-session"
-                key={session.session_id}
-                onClick={() => onSelectSession(session.session_id)}
-              >
-                <span>{session.title || t("Untitled conversation")}</span>
-                <time>{formatDate(session.updated_at)}</time>
-              </button>
-            ))}
-          </div>
-        </div>
-      ) : null}
     </section>
   );
 }

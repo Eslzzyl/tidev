@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+import { Folder } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import type {
@@ -12,11 +14,16 @@ import type { InstructionNotice, StreamMessage } from "../../types/chat";
 import { ChatComposer } from "./ChatComposer";
 import { ApprovalCard, MessageList } from "./MessageList";
 import { SessionSidebar } from "./SessionSidebar";
+import { shortPath } from "../../utils/chat";
 
 export interface ChatPanelProps {
   loading: boolean;
+  loadingMoreSessions: boolean;
+  hasMoreSessions: boolean;
   sessions: Session[];
-  selectedSessionId: string;
+  workspaceRoots: string[];
+  workspaceRootFilter: string | null;
+  selectedSessionId: string | null;
   selectedSession: Session | undefined;
   activeModel: Model | undefined;
   messages: MessageRecord[];
@@ -38,7 +45,10 @@ export interface ChatPanelProps {
   mobileSidebarOpen: boolean;
   fileMention: { query: string; atPos: number } | null;
   fileMentionIndex: number;
+  welcome: ReactNode;
   onSessionSearchChange: (value: string) => void;
+  onWorkspaceRootFilterChange: (workspaceRoot: string | null) => void;
+  onLoadMoreSessions: () => void;
   onCreateSession: () => void;
   onSelectSession: (sessionId: string) => void;
   onStartRename: (session: Session) => void;
@@ -68,7 +78,11 @@ export interface ChatPanelProps {
 
 export function ChatPanel({
   loading,
+  loadingMoreSessions,
+  hasMoreSessions,
   sessions,
+  workspaceRoots,
+  workspaceRootFilter,
   selectedSessionId,
   selectedSession,
   activeModel,
@@ -91,7 +105,10 @@ export function ChatPanel({
   mobileSidebarOpen,
   fileMention,
   fileMentionIndex,
+  welcome,
   onSessionSearchChange,
+  onWorkspaceRootFilterChange,
+  onLoadMoreSessions,
   onCreateSession,
   onSelectSession,
   onStartRename,
@@ -142,13 +159,19 @@ export function ChatPanel({
       />
       <SessionSidebar
         loading={loading}
+        loadingMore={loadingMoreSessions}
+        hasMore={hasMoreSessions}
         mobileOpen={mobileSidebarOpen}
         sessions={sessions}
+        workspaceRoots={workspaceRoots}
+        workspaceRootFilter={workspaceRootFilter}
         selectedSessionId={selectedSessionId}
         search={sessionSearch}
         renamingSessionId={renamingSessionId}
         renameValue={renameValue}
         onSearchChange={onSessionSearchChange}
+        onWorkspaceRootFilterChange={onWorkspaceRootFilterChange}
+        onLoadMore={onLoadMoreSessions}
         onCreate={handleCreateSession}
         onSelect={handleSelectSession}
         onStartRename={onStartRename}
@@ -158,56 +181,79 @@ export function ChatPanel({
         onDelete={onDeleteSession}
       />
       <section className="chat-panel">
-        <div className="message-stage">
-          <MessageList
-            messages={messages}
-            streams={streams}
-            instructionNotices={instructionNotices}
-            sessionId={selectedSessionId}
-            session={selectedSession}
-            models={models}
-            workspaceRoot={selectedSession?.workspace_root}
-            onRevert={onRevert}
-            onFork={onFork}
-            onRetryProviderError={onRetryProviderError}
-            scrollToBottomRequest={scrollToBottomRequest}
-          />
-          {pendingRequests.map((request) => (
-            <ApprovalCard
-              key={request.request_id}
-              request={request}
-              onRespond={(tools) => onRespond(request.request_id, tools)}
+        {selectedSessionId === null ? (
+          welcome
+        ) : (
+          <>
+            {selectedSession ? (
+              <header className="session-context">
+                <div>
+                  <span className="session-context-title">
+                    {selectedSession.title || t("Untitled conversation")}
+                  </span>
+                  <span
+                    className="session-context-workspace"
+                    title={selectedSession.workspace_root}
+                  >
+                    <Folder size={13} aria-hidden="true" />
+                    {t("Session directory")}: {shortPath(selectedSession.workspace_root)}
+                  </span>
+                </div>
+                <span className="session-context-model">{selectedSession.model_display_name}</span>
+              </header>
+            ) : null}
+            <div className="message-stage">
+              <MessageList
+                messages={messages}
+                streams={streams}
+                instructionNotices={instructionNotices}
+                sessionId={selectedSessionId}
+                session={selectedSession}
+                models={models}
+                workspaceRoot={selectedSession?.workspace_root}
+                onRevert={onRevert}
+                onFork={onFork}
+                onRetryProviderError={onRetryProviderError}
+                scrollToBottomRequest={scrollToBottomRequest}
+              />
+              {pendingRequests.map((request) => (
+                <ApprovalCard
+                  key={request.request_id}
+                  request={request}
+                  onRespond={(tools) => onRespond(request.request_id, tools)}
+                />
+              ))}
+              {error ? <div className="error-banner">{error}</div> : null}
+            </div>
+            <ChatComposer
+              draft={draft}
+              mode={mode}
+              models={models}
+              activeModel={activeModel}
+              thinkingLevel={thinkingLevel}
+              todos={todos}
+              enterToSend={enterToSend}
+              isBusy={selectedSession?.busy ?? false}
+              sending={sending}
+              canceling={canceling}
+              selectedSessionId={selectedSessionId}
+              fileMention={fileMention}
+              fileMentionIndex={fileMentionIndex}
+              onDraftChange={onDraftChange}
+              onModeChange={onModeChange}
+              onSelectModel={onSelectModel}
+              onSelectThinkingLevel={onSelectThinkingLevel}
+              onSubmit={onSubmit}
+              onCancel={onCancel}
+              onFileMentionChange={onFileMentionChange}
+              onFileMentionIndexChange={onFileMentionIndexChange}
+              onFileSelect={onFileSelect}
+              onFileMentionClose={onFileMentionClose}
+              autoFocus={focusComposer}
+              onAutoFocus={onComposerFocus}
             />
-          ))}
-          {error ? <div className="error-banner">{error}</div> : null}
-        </div>
-        <ChatComposer
-          draft={draft}
-          mode={mode}
-          models={models}
-          activeModel={activeModel}
-          thinkingLevel={thinkingLevel}
-          todos={todos}
-          enterToSend={enterToSend}
-          isBusy={selectedSession?.busy ?? false}
-          sending={sending}
-          canceling={canceling}
-          selectedSessionId={selectedSessionId}
-          fileMention={fileMention}
-          fileMentionIndex={fileMentionIndex}
-          onDraftChange={onDraftChange}
-          onModeChange={onModeChange}
-          onSelectModel={onSelectModel}
-          onSelectThinkingLevel={onSelectThinkingLevel}
-          onSubmit={onSubmit}
-          onCancel={onCancel}
-          onFileMentionChange={onFileMentionChange}
-          onFileMentionIndexChange={onFileMentionIndexChange}
-          onFileSelect={onFileSelect}
-          onFileMentionClose={onFileMentionClose}
-          autoFocus={focusComposer}
-          onAutoFocus={onComposerFocus}
-        />
+          </>
+        )}
       </section>
     </>
   );

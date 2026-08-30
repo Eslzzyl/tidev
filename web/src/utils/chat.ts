@@ -7,6 +7,20 @@ export function formatDate(value: string): string {
   return new Intl.DateTimeFormat(i18n.language, { month: "short", day: "numeric" }).format(date);
 }
 
+export function formatSessionActivity(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const now = new Date();
+  const sameDay =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate();
+  if (!sameDay) return formatDate(value);
+  return new Intl.DateTimeFormat(i18n.language, { hour: "2-digit", minute: "2-digit" }).format(
+    date,
+  );
+}
+
 export function shortPath(value: string): string {
   if (!value) return "";
   const parts = value.split(/[\\/]/).filter(Boolean);
