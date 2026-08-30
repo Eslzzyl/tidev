@@ -487,6 +487,7 @@ async fn independent_consumer_connects_stdio_mcp_and_calls_discovered_tool() -> 
             args: Vec::new(),
             cwd: None,
             env: BTreeMap::new(),
+            disabled: false,
         },
     )]));
 
@@ -645,6 +646,7 @@ async fn independent_consumer_connects_legacy_sse_and_calls_discovered_tool() ->
         McpServerSpec::Sse {
             url,
             headers: BTreeMap::from([("x-fixture-token".into(), "legacy-token".into())]),
+            disabled: false,
         },
     )]));
 

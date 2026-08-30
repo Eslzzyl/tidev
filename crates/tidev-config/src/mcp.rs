@@ -91,16 +91,19 @@ pub enum McpServerConfig {
         args: Vec<String>,
         cwd: Option<String>,
         env: BTreeMap<String, String>,
+        disabled: bool,
     },
     /// A server accessible via HTTP POST.
     Http {
         url: String,
         headers: BTreeMap<String, String>,
+        disabled: bool,
     },
     /// A legacy SSE server using a GET stream and a separate POST message endpoint.
     Sse {
         url: String,
         headers: BTreeMap<String, String>,
+        disabled: bool,
     },
 }
 
@@ -110,6 +113,22 @@ impl McpServerConfig {
             Self::Stdio { .. } => "stdio",
             Self::Http { .. } => "http",
             Self::Sse { .. } => "sse",
+        }
+    }
+
+    pub fn is_disabled(&self) -> bool {
+        match self {
+            Self::Stdio { disabled, .. }
+            | Self::Http { disabled, .. }
+            | Self::Sse { disabled, .. } => *disabled,
+        }
+    }
+
+    pub fn set_disabled(&mut self, is_disabled: bool) {
+        match self {
+            Self::Stdio { disabled, .. }
+            | Self::Http { disabled, .. }
+            | Self::Sse { disabled, .. } => *disabled = is_disabled,
         }
     }
 }
@@ -127,6 +146,10 @@ struct RawMcpServerConfig {
     url: Option<String>,
     #[serde(default)]
     headers: BTreeMap<String, String>,
+    #[serde(default)]
+    disabled: Option<bool>,
+    #[serde(default)]
+    enabled: Option<bool>,
 }
 
 impl<'de> Deserialize<'de> for McpServerConfig {
@@ -136,6 +159,9 @@ impl<'de> Deserialize<'de> for McpServerConfig {
     {
         let raw = RawMcpServerConfig::deserialize(deserializer)?;
         let kind = raw.r#type.as_deref().map(str::to_ascii_lowercase);
+        let disabled = raw
+            .disabled
+            .unwrap_or_else(|| raw.enabled.map(|e| !e).unwrap_or(false));
 
         match kind.as_deref() {
             Some("stdio") => {
@@ -147,6 +173,7 @@ impl<'de> Deserialize<'de> for McpServerConfig {
                     args: raw.args,
                     cwd: raw.cwd,
                     env: raw.env,
+                    disabled,
                 })
             }
             Some("sse") => {
@@ -156,6 +183,7 @@ impl<'de> Deserialize<'de> for McpServerConfig {
                 Ok(Self::Sse {
                     url,
                     headers: raw.headers,
+                    disabled,
                 })
             }
             Some("http") => {
@@ -165,6 +193,7 @@ impl<'de> Deserialize<'de> for McpServerConfig {
                 Ok(Self::Http {
                     url,
                     headers: raw.headers,
+                    disabled,
                 })
             }
             Some(other) => Err(serde::de::Error::custom(format!(
@@ -177,11 +206,13 @@ impl<'de> Deserialize<'de> for McpServerConfig {
                         args: raw.args,
                         cwd: raw.cwd,
                         env: raw.env,
+                        disabled,
                     })
                 } else if let Some(url) = raw.url {
                     Ok(Self::Http {
                         url,
                         headers: raw.headers,
+                        disabled,
                     })
                 } else {
                     Err(serde::de::Error::custom(
@@ -207,6 +238,8 @@ impl Serialize for McpServerConfig {
             cwd: Option<&'a str>,
             #[serde(skip_serializing_if = "BTreeMap::is_empty")]
             env: &'a BTreeMap<String, String>,
+            #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+            disabled: bool,
         }
 
         #[derive(Serialize)]
@@ -214,6 +247,8 @@ impl Serialize for McpServerConfig {
             url: &'a str,
             #[serde(skip_serializing_if = "BTreeMap::is_empty")]
             headers: &'a BTreeMap<String, String>,
+            #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+            disabled: bool,
         }
 
         #[derive(Serialize)]
@@ -222,6 +257,8 @@ impl Serialize for McpServerConfig {
             url: &'a str,
             #[serde(skip_serializing_if = "BTreeMap::is_empty")]
             headers: &'a BTreeMap<String, String>,
+            #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+            disabled: bool,
         }
 
         match self {
@@ -230,18 +267,34 @@ impl Serialize for McpServerConfig {
                 args,
                 cwd,
                 env,
+                disabled,
             } => StdioHelper {
                 command,
                 args,
                 cwd: cwd.as_deref(),
                 env,
+                disabled: *disabled,
             }
             .serialize(serializer),
-            Self::Http { url, headers } => HttpHelper { url, headers }.serialize(serializer),
-            Self::Sse { url, headers } => SseHelper {
+            Self::Http {
+                url,
+                headers,
+                disabled,
+            } => HttpHelper {
+                url,
+                headers,
+                disabled: *disabled,
+            }
+            .serialize(serializer),
+            Self::Sse {
+                url,
+                headers,
+                disabled,
+            } => SseHelper {
                 r#type: "sse",
                 url,
                 headers,
+                disabled: *disabled,
             }
             .serialize(serializer),
         }
@@ -269,6 +322,7 @@ mod tests {
                 args: vec!["server.js".into()],
                 cwd: None,
                 env: BTreeMap::new(),
+                disabled: false,
             },
         );
         assert!(!cfg.is_empty());
@@ -281,6 +335,7 @@ mod tests {
             args: vec!["-m".into(), "mcp_server".into()],
             cwd: Some("/project".into()),
             env: BTreeMap::from([("KEY".into(), "val".into())]),
+            disabled: false,
         };
 
         let json_str = serde_json::to_string_pretty(&config).unwrap();
@@ -292,11 +347,13 @@ mod tests {
                 args,
                 cwd,
                 env,
+                disabled,
             } => {
                 assert_eq!(command, "python");
                 assert_eq!(args, vec!["-m", "mcp_server"]);
                 assert_eq!(cwd, Some("/project".into()));
                 assert_eq!(env.get("KEY"), Some(&"val".into()));
+                assert!(!disabled);
             }
             other => panic!("expected Stdio, got {other:?}"),
         }
@@ -307,15 +364,22 @@ mod tests {
         let config = McpServerConfig::Http {
             url: "https://example.com/mcp".into(),
             headers: BTreeMap::from([("Authorization".into(), "Bearer token".into())]),
+            disabled: true,
         };
 
         let json_str = serde_json::to_string_pretty(&config).unwrap();
+        assert!(json_str.contains("\"disabled\": true"));
         let parsed: McpServerConfig = serde_json::from_str(&json_str).unwrap();
 
         match parsed {
-            McpServerConfig::Http { url, headers } => {
+            McpServerConfig::Http {
+                url,
+                headers,
+                disabled,
+            } => {
                 assert_eq!(url, "https://example.com/mcp");
                 assert_eq!(headers.get("Authorization").unwrap(), "Bearer token");
+                assert!(disabled);
             }
             other => panic!("expected Http, got {other:?}"),
         }
@@ -326,15 +390,22 @@ mod tests {
         let config = McpServerConfig::Sse {
             url: "http://localhost:8080/sse".into(),
             headers: BTreeMap::new(),
+            disabled: false,
         };
 
         let json_str = serde_json::to_string_pretty(&config).unwrap();
+        assert!(!json_str.contains("disabled"));
         let parsed: McpServerConfig = serde_json::from_str(&json_str).unwrap();
 
         match parsed {
-            McpServerConfig::Sse { url, headers } => {
+            McpServerConfig::Sse {
+                url,
+                headers,
+                disabled,
+            } => {
                 assert_eq!(url, "http://localhost:8080/sse");
                 assert!(headers.is_empty());
+                assert!(!disabled);
             }
             other => panic!("expected Sse, got {other:?}"),
         }
@@ -349,14 +420,16 @@ mod tests {
                     "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path"]
                 },
                 "remote": {
-                    "url": "https://api.example.com/mcp"
+                    "url": "https://api.example.com/mcp",
+                    "disabled": true
                 },
                 "events": {
                     "type": "sse",
                     "url": "https://api.example.com/sse",
                     "headers": {
                         "X-Token": "secret"
-                    }
+                    },
+                    "enabled": false
                 }
             }
         }"#;
@@ -365,15 +438,15 @@ mod tests {
         assert_eq!(parsed.mcp_servers.len(), 3);
         assert!(matches!(
             parsed.mcp_servers.get("filesystem").unwrap(),
-            McpServerConfig::Stdio { command, .. } if command == "npx"
+            McpServerConfig::Stdio { command, disabled, .. } if command == "npx" && !disabled
         ));
         assert!(matches!(
             parsed.mcp_servers.get("remote").unwrap(),
-            McpServerConfig::Http { url, .. } if url == "https://api.example.com/mcp"
+            McpServerConfig::Http { url, disabled, .. } if url == "https://api.example.com/mcp" && *disabled
         ));
         assert!(matches!(
             parsed.mcp_servers.get("events").unwrap(),
-            McpServerConfig::Sse { url, headers } if url == "https://api.example.com/sse" && headers.get("X-Token") == Some(&"secret".to_string())
+            McpServerConfig::Sse { url, headers, disabled } if url == "https://api.example.com/sse" && headers.get("X-Token") == Some(&"secret".to_string()) && *disabled
         ));
     }
 
@@ -390,12 +463,14 @@ mod tests {
                 args: vec!["hello".into()],
                 cwd: None,
                 env: BTreeMap::new(),
+                disabled: true,
             },
         );
 
         config.save_to_file(&mcp_path).unwrap();
         let loaded = McpConfig::load_from_file(&mcp_path).unwrap();
         assert_eq!(config, loaded);
+        assert!(loaded.servers.get("test-server").unwrap().is_disabled());
     }
 
     #[test]
@@ -424,6 +499,7 @@ mod tests {
                 args: vec![],
                 cwd: None,
                 env: BTreeMap::new(),
+                disabled: false,
             },
         );
         global_config.servers.insert(
@@ -433,6 +509,7 @@ mod tests {
                 args: vec![],
                 cwd: None,
                 env: BTreeMap::new(),
+                disabled: false,
             },
         );
         global_config.save(&global_paths).unwrap();
@@ -445,6 +522,7 @@ mod tests {
                 args: vec![],
                 cwd: None,
                 env: BTreeMap::new(),
+                disabled: true,
             },
         );
         workspace_config.servers.insert(
@@ -452,6 +530,7 @@ mod tests {
             McpServerConfig::Http {
                 url: "http://example.com".into(),
                 headers: BTreeMap::new(),
+                disabled: false,
             },
         );
         workspace_config
@@ -462,7 +541,12 @@ mod tests {
         assert_eq!(merged.servers.len(), 3);
         assert_eq!(merged.servers["srv1"].kind_label(), "stdio");
         match &merged.servers["srv2"] {
-            McpServerConfig::Stdio { command, .. } => assert_eq!(command, "cmd2_workspace"),
+            McpServerConfig::Stdio {
+                command, disabled, ..
+            } => {
+                assert_eq!(command, "cmd2_workspace");
+                assert!(*disabled);
+            }
             _ => panic!("unexpected kind"),
         }
         assert_eq!(merged.servers["srv3"].kind_label(), "http");

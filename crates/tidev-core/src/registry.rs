@@ -281,6 +281,7 @@ mod tests {
             args: vec!["server.js".into()],
             cwd: None,
             env: BTreeMap::new(),
+            disabled: false,
         }
     }
 

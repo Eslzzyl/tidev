@@ -42,16 +42,19 @@ pub enum McpServerSpec {
         args: Vec<String>,
         cwd: Option<std::path::PathBuf>,
         env: BTreeMap<String, String>,
+        disabled: bool,
     },
     /// A streamable HTTP server.
     Http {
         url: String,
         headers: BTreeMap<String, String>,
+        disabled: bool,
     },
     /// A legacy SSE server using a GET stream and a separate POST message endpoint.
     Sse {
         url: String,
         headers: BTreeMap<String, String>,
+        disabled: bool,
     },
 }
 
@@ -61,6 +64,22 @@ impl McpServerSpec {
             Self::Stdio { .. } => "stdio",
             Self::Http { .. } => "http",
             Self::Sse { .. } => "sse",
+        }
+    }
+
+    pub fn is_disabled(&self) -> bool {
+        match self {
+            Self::Stdio { disabled, .. }
+            | Self::Http { disabled, .. }
+            | Self::Sse { disabled, .. } => *disabled,
+        }
+    }
+
+    pub fn set_disabled(&mut self, is_disabled: bool) {
+        match self {
+            Self::Stdio { disabled, .. }
+            | Self::Http { disabled, .. }
+            | Self::Sse { disabled, .. } => *disabled = is_disabled,
         }
     }
 }
@@ -99,10 +118,14 @@ pub struct McpServerSummary {
     pub kind: String,
     pub status: McpConnectionStatus,
     pub tool_count: usize,
+    pub disabled: bool,
 }
 
 impl McpServerSummary {
     pub fn status_text(&self) -> String {
+        if self.disabled {
+            return "disabled".to_string();
+        }
         match &self.status {
             McpConnectionStatus::Failed(message) => format!("failed: {message}"),
             status => status.label().to_string(),
@@ -135,6 +158,7 @@ struct McpServerState {
     status: McpConnectionStatus,
     client: Option<McpClient>,
     tools: Vec<Arc<McpTool>>,
+    disabled: bool,
 }
 
 /// A discovered MCP tool implementing the generic agent tool contract.
@@ -382,6 +406,7 @@ impl McpRegistry {
         let servers = servers
             .into_iter()
             .map(|(name, spec)| {
+                let disabled = spec.is_disabled();
                 (
                     name,
                     McpServerState {
@@ -389,6 +414,7 @@ impl McpRegistry {
                         status: McpConnectionStatus::Disconnected,
                         client: None,
                         tools: Vec::new(),
+                        disabled,
                     },
                 )
             })
@@ -429,10 +455,16 @@ impl McpRegistry {
     }
 
     /// Connect or refresh all configured servers concurrently, retaining best-effort startup.
+    /// Servers marked as disabled are skipped.
     pub async fn refresh_all(&self) -> Result<()> {
         let names = {
             let inner = self.inner.lock().unwrap();
-            inner.servers.keys().cloned().collect::<Vec<_>>()
+            inner
+                .servers
+                .iter()
+                .filter(|(_, state)| !state.disabled)
+                .map(|(name, _)| name.clone())
+                .collect::<Vec<_>>()
         };
 
         let futures = names.into_iter().map(|name| async move {
@@ -452,6 +484,8 @@ impl McpRegistry {
                 .servers
                 .get_mut(name)
                 .with_context(|| format!("unknown MCP server '{name}'"))?;
+            state.disabled = false;
+            state.spec.set_disabled(false);
             state.status = McpConnectionStatus::Connecting;
             (state.spec.clone(), state.client.take())
         };
@@ -479,8 +513,9 @@ impl McpRegistry {
         Ok(())
     }
 
-    /// Add or update a server specification and reconnect it.
+    /// Add or update a server specification and reconnect it if enabled.
     pub async fn upsert_server(&self, name: String, spec: McpServerSpec) -> Result<()> {
+        let disabled = spec.is_disabled();
         let existing_client = {
             let mut inner = self.inner.lock().unwrap();
             let state = inner
@@ -491,8 +526,10 @@ impl McpRegistry {
                     status: McpConnectionStatus::Disconnected,
                     client: None,
                     tools: Vec::new(),
+                    disabled,
                 });
             state.spec = spec;
+            state.disabled = disabled;
             state.status = McpConnectionStatus::Disconnected;
             state.tools.clear();
             state.client.take()
@@ -501,7 +538,12 @@ impl McpRegistry {
         if let Some(mut client) = existing_client {
             let _ = client.close().await;
         }
-        self.refresh_server(&name).await
+
+        if !disabled {
+            self.refresh_server(&name).await
+        } else {
+            Ok(())
+        }
     }
 
     pub async fn remove_server(&self, name: &str) -> Result<()> {
@@ -575,6 +617,7 @@ impl McpRegistry {
                 kind: state.spec.kind_label().to_string(),
                 status: state.status.clone(),
                 tool_count: state.tools.len(),
+                disabled: state.disabled,
             })
             .collect()
     }
@@ -675,6 +718,7 @@ impl McpRegistry {
                 args,
                 cwd,
                 env,
+                ..
             } => {
                 let mut command = Command::new(command);
                 command.args(args);
@@ -693,7 +737,7 @@ impl McpRegistry {
                     .await
                     .context("failed to connect to stdio MCP server")
             }
-            McpServerSpec::Http { url, headers } => {
+            McpServerSpec::Http { url, headers, .. } => {
                 let custom_headers = Self::to_http_headers(headers)?;
                 let transport = StreamableHttpClientTransport::from_config(
                     rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig::with_uri(url.as_str())
@@ -704,7 +748,7 @@ impl McpRegistry {
                     .await
                     .context("failed to connect to HTTP MCP server")
             }
-            McpServerSpec::Sse { url, headers } => {
+            McpServerSpec::Sse { url, headers, .. } => {
                 let custom_headers = Self::to_http_headers(headers)?;
                 let custom_headers = Self::to_reqwest_headers(custom_headers);
                 let transport = LegacySseTransport::connect(url, custom_headers).await?;
@@ -1114,6 +1158,7 @@ mod tests {
             args: vec!["server.js".into()],
             cwd: None,
             env: BTreeMap::new(),
+            disabled: false,
         };
         let registry = McpRegistry::new(BTreeMap::from([
             ("b".to_string(), spec.clone()),
@@ -1122,6 +1167,7 @@ mod tests {
         let summaries = registry.summaries();
         assert_eq!(summaries[0].name, "a");
         assert_eq!(summaries[1].status, McpConnectionStatus::Disconnected);
+        assert!(!summaries[0].disabled);
     }
 
     #[tokio::test]
@@ -1133,6 +1179,7 @@ mod tests {
                 args: Vec::new(),
                 cwd: None,
                 env: BTreeMap::new(),
+                disabled: false,
             },
         )]));
 
@@ -1159,6 +1206,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn refresh_all_skips_disabled_servers() {
+        let registry = McpRegistry::new(BTreeMap::from([
+            (
+                "disabled_broken".to_string(),
+                McpServerSpec::Stdio {
+                    command: "/definitely/missing-1".into(),
+                    args: Vec::new(),
+                    cwd: None,
+                    env: BTreeMap::new(),
+                    disabled: true,
+                },
+            ),
+            (
+                "enabled_broken".to_string(),
+                McpServerSpec::Stdio {
+                    command: "/definitely/missing-2".into(),
+                    args: Vec::new(),
+                    cwd: None,
+                    env: BTreeMap::new(),
+                    disabled: false,
+                },
+            ),
+        ]));
+
+        assert!(registry.refresh_all().await.is_ok());
+        let summaries = registry.summaries();
+        let disabled_summary = summaries
+            .iter()
+            .find(|s| s.name == "disabled_broken")
+            .unwrap();
+        let enabled_summary = summaries
+            .iter()
+            .find(|s| s.name == "enabled_broken")
+            .unwrap();
+
+        assert_eq!(disabled_summary.status, McpConnectionStatus::Disconnected);
+        assert!(disabled_summary.disabled);
+        assert_eq!(disabled_summary.status_text(), "disabled");
+        assert!(matches!(
+            enabled_summary.status,
+            McpConnectionStatus::Failed(_)
+        ));
+    }
+
+    #[tokio::test]
     async fn refresh_all_runs_and_marks_failed_without_blocking() {
         let registry = McpRegistry::new(BTreeMap::from([
             (
@@ -1168,6 +1260,7 @@ mod tests {
                     args: Vec::new(),
                     cwd: None,
                     env: BTreeMap::new(),
+                    disabled: false,
                 },
             ),
             (
@@ -1177,6 +1270,7 @@ mod tests {
                     args: Vec::new(),
                     cwd: None,
                     env: BTreeMap::new(),
+                    disabled: false,
                 },
             ),
         ]));

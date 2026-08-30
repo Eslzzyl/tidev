@@ -600,7 +600,7 @@ export interface SessionUsageEntry {
   updated_at: string;
 }
 
-export type McpServerStatus = "connected" | "connecting" | "disconnected" | "failed";
+export type McpServerStatus = "connected" | "connecting" | "disconnected" | "disabled" | "failed";
 
 export type McpServerConfig =
   | {
@@ -609,16 +609,19 @@ export type McpServerConfig =
       args?: string[];
       cwd?: string | null;
       env?: Record<string, string>;
+      disabled?: boolean;
     }
   | {
       type: "http";
       url: string;
       headers?: Record<string, string>;
+      disabled?: boolean;
     }
   | {
       type: "sse";
       url: string;
       headers?: Record<string, string>;
+      disabled?: boolean;
     };
 
 export interface McpToolSummary {
@@ -632,6 +635,7 @@ export interface McpServerInfo {
   kind: string;
   status: McpServerStatus;
   error?: string | null;
+  disabled?: boolean;
   config?: McpServerConfig | null;
   tools: McpToolSummary[];
 }

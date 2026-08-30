@@ -34,6 +34,7 @@ interface ServerDraft {
   env: string;
   url: string;
   headers: string;
+  disabled: boolean;
 }
 
 const DEFAULT_DRAFT: ServerDraft = {
@@ -45,6 +46,7 @@ const DEFAULT_DRAFT: ServerDraft = {
   env: "",
   url: "",
   headers: "",
+  disabled: false,
 };
 
 function serverToDraft(server: McpServerInfo): ServerDraft {
@@ -57,6 +59,7 @@ function serverToDraft(server: McpServerInfo): ServerDraft {
     env: "",
     url: "",
     headers: "",
+    disabled: Boolean(server.disabled ?? (server.config as { disabled?: boolean } | null)?.disabled),
   };
 
   if (server.config) {
@@ -131,6 +134,7 @@ function draftToConfig(draft: ServerDraft): { config: McpServerConfig; error?: s
         args,
         cwd: draft.cwd.trim() || null,
         env,
+        disabled: draft.disabled,
       },
     };
   }
@@ -154,6 +158,7 @@ function draftToConfig(draft: ServerDraft): { config: McpServerConfig; error?: s
       type: draft.type,
       url: draft.url.trim(),
       headers,
+      disabled: draft.disabled,
     },
   };
 }
@@ -304,6 +309,7 @@ export function McpSection() {
             const isConnected = server.status === "connected";
             const isConnecting = server.status === "connecting";
             const isFailed = server.status === "failed";
+            const isDisabled = server.status === "disabled" || Boolean(server.disabled);
 
             return (
               <div
@@ -323,7 +329,9 @@ export function McpSection() {
                               ? "bg-amber-500 animate-pulse"
                               : isFailed
                                 ? "bg-red-500"
-                                : "bg-neutral-400"
+                                : isDisabled
+                                  ? "bg-neutral-400 opacity-60"
+                                  : "bg-neutral-400"
                         }`}
                       />
                     </div>
@@ -352,7 +360,9 @@ export function McpSection() {
                                 ? "text-amber-600 dark:text-amber-400"
                                 : isFailed
                                   ? "text-red-600 dark:text-red-400"
-                                  : "text-neutral-500"
+                                  : isDisabled
+                                    ? "text-neutral-400 dark:text-neutral-500"
+                                    : "text-neutral-500"
                           }`}
                         >
                           {isConnected
@@ -361,7 +371,9 @@ export function McpSection() {
                               ? t("Connecting...")
                               : isFailed
                                 ? t("Failed")
-                                : t("Disconnected")}
+                                : isDisabled
+                                  ? t("Disabled")
+                                  : t("Disconnected")}
                         </span>
                       </div>
 
@@ -637,6 +649,24 @@ export function McpSection() {
                   </div>
                 </>
               )}
+
+              {/* Enabled Switch */}
+              <div className="flex items-center justify-between rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
+                <div>
+                  <label className="text-xs font-medium text-neutral-700 dark:text-neutral-300 block">
+                    {t("Enabled")}
+                  </label>
+                  <p className="text-[11px] text-neutral-500 dark:text-neutral-400">
+                    {t("Enable this server and connect on startup")}
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={!draft.disabled}
+                  onChange={(e) => setDraft({ ...draft, disabled: !e.target.checked })}
+                  className="h-4 w-4 rounded border-neutral-300 text-neutral-900 focus:ring-neutral-500 dark:border-neutral-700 dark:bg-neutral-800"
+                />
+              </div>
             </div>
 
             {/* Modal Footer */}

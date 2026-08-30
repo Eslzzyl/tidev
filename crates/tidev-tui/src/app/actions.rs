@@ -284,7 +284,7 @@ impl App {
                     }
                 }
                 Action::Mcp(action) => {
-                    self.handle_mcp_action(action, &mut queue);
+                    self.handle_mcp_action(action);
                 }
                 Action::Git(action) => match action {
                     GitAction::Refresh => {
@@ -1095,26 +1095,39 @@ impl App {
 impl App {
     /// Process an [`McpAction`] — update both the in-memory McpManager and
     /// the persisted AppConfig, then save to disk.
-    fn handle_mcp_action(&mut self, action: McpAction, queue: &mut Vec<Action>) {
+    fn handle_mcp_action(&mut self, action: McpAction) {
         match action {
             McpAction::Toggle(name) => {
                 let mcp = self.runtime.mcp_manager().clone();
-                tokio::spawn(async move {
-                    let _ = mcp.toggle_server(&name).await;
+                let name_for_config = name.clone();
+                let mut target_config = None;
+                self.runtime.update_config(|cfg| {
+                    if let Some(srv) = cfg.mcp.servers.get_mut(&name_for_config) {
+                        let new_disabled = !srv.is_disabled();
+                        srv.set_disabled(new_disabled);
+                        target_config = Some((new_disabled, srv.clone()));
+                    }
                 });
-                // Queue a refresh so the panel re-reads summaries after the op.
-                queue.push(Action::Overlay(OverlayAction::Open(
-                    OverlayKind::McpServerPanel,
-                )));
+                let _ = self.runtime.save_config();
+
+                tokio::spawn(async move {
+                    if let Some((disabled, cfg)) = target_config {
+                        let _ = mcp.upsert_server(name_for_config.clone(), cfg).await;
+                        if disabled {
+                            let _ = mcp.disconnect_server(&name_for_config).await;
+                        } else {
+                            let _ = mcp.refresh_server(&name_for_config).await;
+                        }
+                    } else {
+                        let _ = mcp.toggle_server(&name).await;
+                    }
+                });
             }
             McpAction::Refresh(name) => {
                 let mcp = self.runtime.mcp_manager().clone();
                 tokio::spawn(async move {
                     let _ = mcp.refresh_server(&name).await;
                 });
-                queue.push(Action::Overlay(OverlayAction::Open(
-                    OverlayKind::McpServerPanel,
-                )));
             }
             McpAction::Remove(name) => {
                 // Remove from McpManager.
@@ -1129,10 +1142,6 @@ impl App {
                     cfg.mcp.servers.remove(&name);
                 });
                 let _ = self.runtime.save_config();
-
-                queue.push(Action::Overlay(OverlayAction::Open(
-                    OverlayKind::McpServerPanel,
-                )));
             }
             McpAction::Upsert {
                 name,
@@ -1165,10 +1174,6 @@ impl App {
                     cfg.mcp.servers.insert(name, config);
                 });
                 let _ = self.runtime.save_config();
-
-                queue.push(Action::Overlay(OverlayAction::Open(
-                    OverlayKind::McpServerPanel,
-                )));
             }
         }
     }

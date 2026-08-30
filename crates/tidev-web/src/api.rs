@@ -256,6 +256,7 @@ pub struct McpServerDto {
     pub kind: String,
     pub status: String,
     pub error: Option<String>,
+    pub disabled: bool,
     pub config: Option<tidev_config::mcp::McpServerConfig>,
     pub tools: Vec<McpToolDto>,
 }
@@ -2607,10 +2608,17 @@ async fn list_mcp_servers(State(state): State<Arc<AppState>>) -> Json<Vec<McpSer
     let mut dtos = Vec::new();
     for summary in summaries {
         let config = mcp.server_config(&summary.name);
+        let is_disabled = summary.disabled || config.as_ref().is_some_and(|c| c.is_disabled());
         let (status_str, error_str) = match &summary.status {
             tidev_core::mcp::McpConnectionStatus::Connected => ("connected", None),
             tidev_core::mcp::McpConnectionStatus::Connecting => ("connecting", None),
-            tidev_core::mcp::McpConnectionStatus::Disconnected => ("disconnected", None),
+            tidev_core::mcp::McpConnectionStatus::Disconnected => {
+                if is_disabled {
+                    ("disabled", None)
+                } else {
+                    ("disconnected", None)
+                }
+            }
             tidev_core::mcp::McpConnectionStatus::Failed(err) => ("failed", Some(err.clone())),
         };
 
@@ -2635,6 +2643,7 @@ async fn list_mcp_servers(State(state): State<Arc<AppState>>) -> Json<Vec<McpSer
             kind: summary.kind,
             status: status_str.to_string(),
             error: error_str,
+            disabled: is_disabled,
             config,
             tools,
         });
@@ -2697,6 +2706,23 @@ async fn connect_mcp_server(
     State(state): State<Arc<AppState>>,
     Path(name): Path<String>,
 ) -> Result<Json<AcceptedResponse>, ApiError> {
+    let mut target_config = None;
+    state.runtime.update_config(|cfg| {
+        if let Some(srv) = cfg.mcp.servers.get_mut(&name) {
+            srv.set_disabled(false);
+            target_config = Some(srv.clone());
+        }
+    });
+    let _ = state.runtime.save_config();
+
+    if let Some(config) = target_config {
+        let _ = state
+            .runtime
+            .mcp_manager()
+            .upsert_server(name.clone(), config)
+            .await;
+    }
+
     state
         .runtime
         .mcp_manager()
@@ -2710,6 +2736,23 @@ async fn disconnect_mcp_server(
     State(state): State<Arc<AppState>>,
     Path(name): Path<String>,
 ) -> Result<Json<AcceptedResponse>, ApiError> {
+    let mut target_config = None;
+    state.runtime.update_config(|cfg| {
+        if let Some(srv) = cfg.mcp.servers.get_mut(&name) {
+            srv.set_disabled(true);
+            target_config = Some(srv.clone());
+        }
+    });
+    let _ = state.runtime.save_config();
+
+    if let Some(config) = target_config {
+        let _ = state
+            .runtime
+            .mcp_manager()
+            .upsert_server(name.clone(), config)
+            .await;
+    }
+
     state
         .runtime
         .mcp_manager()

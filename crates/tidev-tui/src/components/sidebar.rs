@@ -211,7 +211,7 @@ impl Sidebar {
             lines.push(Line::from(""));
             let active_count = mcp_servers
                 .iter()
-                .filter(|s| matches!(s.status, McpConnectionStatus::Connected))
+                .filter(|s| !s.disabled && matches!(s.status, McpConnectionStatus::Connected))
                 .count();
             lines.push(Line::from(vec![
                 Span::styled(
@@ -227,38 +227,47 @@ impl Sidebar {
             ]));
 
             for server in mcp_servers {
-                let (icon, icon_style, detail_text, detail_style) = match &server.status {
-                    McpConnectionStatus::Connected => {
-                        let tool_label = if server.tool_count == 1 {
-                            "1 tool".to_string()
-                        } else {
-                            format!("{} tools", server.tool_count)
-                        };
-                        (
-                            "● ",
-                            Style::default().fg(palette.success),
-                            tool_label,
-                            Style::default().fg(palette.muted),
-                        )
-                    }
-                    McpConnectionStatus::Connecting => (
-                        "◌ ",
-                        Style::default().fg(palette.warning),
-                        "connecting".to_string(),
-                        Style::default().fg(palette.muted),
-                    ),
-                    McpConnectionStatus::Failed(_) => (
-                        "✕ ",
-                        Style::default().fg(palette.error),
-                        "failed".to_string(),
-                        Style::default().fg(palette.error),
-                    ),
-                    McpConnectionStatus::Disconnected => (
+                let (icon, icon_style, detail_text, detail_style) = if server.disabled {
+                    (
                         "○ ",
                         Style::default().fg(palette.muted),
-                        "offline".to_string(),
+                        "disabled".to_string(),
                         Style::default().fg(palette.muted),
-                    ),
+                    )
+                } else {
+                    match &server.status {
+                        McpConnectionStatus::Connected => {
+                            let tool_label = if server.tool_count == 1 {
+                                "1 tool".to_string()
+                            } else {
+                                format!("{} tools", server.tool_count)
+                            };
+                            (
+                                "● ",
+                                Style::default().fg(palette.success),
+                                tool_label,
+                                Style::default().fg(palette.muted),
+                            )
+                        }
+                        McpConnectionStatus::Connecting => (
+                            "◌ ",
+                            Style::default().fg(palette.warning),
+                            "connecting".to_string(),
+                            Style::default().fg(palette.muted),
+                        ),
+                        McpConnectionStatus::Failed(_) => (
+                            "✕ ",
+                            Style::default().fg(palette.error),
+                            "failed".to_string(),
+                            Style::default().fg(palette.error),
+                        ),
+                        McpConnectionStatus::Disconnected => (
+                            "○ ",
+                            Style::default().fg(palette.muted),
+                            "offline".to_string(),
+                            Style::default().fg(palette.muted),
+                        ),
+                    }
                 };
 
                 let icon_width = UnicodeWidthStr::width(icon);
@@ -658,24 +667,28 @@ mod tests {
                 kind: "stdio".into(),
                 status: McpConnectionStatus::Connected,
                 tool_count: 5,
+                disabled: false,
             },
             McpServerSummary {
                 name: "browser".into(),
                 kind: "stdio".into(),
                 status: McpConnectionStatus::Connecting,
                 tool_count: 0,
+                disabled: false,
             },
             McpServerSummary {
                 name: "github".into(),
                 kind: "http".into(),
                 status: McpConnectionStatus::Failed("auth error".into()),
                 tool_count: 0,
+                disabled: false,
             },
             McpServerSummary {
                 name: "slack".into(),
                 kind: "sse".into(),
                 status: McpConnectionStatus::Disconnected,
                 tool_count: 0,
+                disabled: false,
             },
         ];
         let rows = render_sidebar(palette, &[], None, None, &servers);
@@ -693,5 +706,23 @@ mod tests {
         assert!(text.contains("failed"), "should show failed status");
         assert!(text.contains("slack"), "should show disconnected server");
         assert!(text.contains("offline"), "should show offline status");
+    }
+
+    #[test]
+    fn sidebar_mcp_disabled_server_is_not_shown_as_active() {
+        let palette = test_palette();
+        let servers = vec![McpServerSummary {
+            name: "disabled".into(),
+            kind: "stdio".into(),
+            status: McpConnectionStatus::Connected,
+            tool_count: 3,
+            disabled: true,
+        }];
+        let rows = render_sidebar(palette, &[], None, None, &servers);
+        let text: String = rows.join("\n");
+
+        assert!(text.contains("MCP Servers (0/1)"));
+        assert!(text.contains("disabled"));
+        assert!(!text.contains("3 tools"));
     }
 }

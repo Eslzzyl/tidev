@@ -138,6 +138,7 @@ fn mcp_spec_from_environment() -> Option<McpServerSpec> {
         args,
         cwd: env::var("TIDEV_MCP_CWD").ok().map(Into::into),
         env: BTreeMap::new(),
+        disabled: false,
     })
 }
 

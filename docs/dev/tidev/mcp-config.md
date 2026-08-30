@@ -93,6 +93,7 @@ tidev 的 MCP 配置采用业界通用的标准 JSON 文件格式（与 Claude D
 - `args`：命令参数列表，可选
 - `cwd`：可选，工作目录；相对路径会以当前工作区根目录为基准
 - `env`：可选，附加环境变量键值表
+- `disabled` / `enabled`：可选，是否禁用该服务器（`disabled: true` 或 `enabled: false`，禁用后启动时不会自动连接）
 
 ## 6. `http` / `sse` 配置字段
 
@@ -119,6 +120,7 @@ tidev 的 MCP 配置采用业界通用的标准 JSON 文件格式（与 Claude D
 - `url`：MCP 服务器地址（HTTP POST endpoint 或 SSE stream endpoint）
 - `type` / `kind`：传输类型，可选（缺省时根据含有 `command` 或 `url` 自动推断为 `stdio` 或 `http`）
 - `headers`：可选，HTTP 请求头键值对
+- `disabled` / `enabled`：可选，是否禁用该服务器（禁用后启动时不会自动连接）
 
 ## 7. 使用方式
 

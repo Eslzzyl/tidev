@@ -137,6 +137,7 @@ fn to_agent_spec(workspace_root: &Path, config: &McpServerConfig) -> McpServerSp
             args,
             cwd,
             env,
+            disabled,
         } => McpServerSpec::Stdio {
             command: command.clone(),
             args: args.clone(),
@@ -144,14 +145,25 @@ fn to_agent_spec(workspace_root: &Path, config: &McpServerConfig) -> McpServerSp
                 .as_deref()
                 .map(|cwd| resolve_workspace_path(workspace_root, cwd)),
             env: env.clone(),
+            disabled: *disabled,
         },
-        McpServerConfig::Http { url, headers } => McpServerSpec::Http {
+        McpServerConfig::Http {
+            url,
+            headers,
+            disabled,
+        } => McpServerSpec::Http {
             url: url.clone(),
             headers: headers.clone(),
+            disabled: *disabled,
         },
-        McpServerConfig::Sse { url, headers } => McpServerSpec::Sse {
+        McpServerConfig::Sse {
+            url,
+            headers,
+            disabled,
+        } => McpServerSpec::Sse {
             url: url.clone(),
             headers: headers.clone(),
+            disabled: *disabled,
         },
     }
 }
@@ -193,6 +205,7 @@ mod tests {
             args: vec!["server.js".into()],
             cwd: None,
             env: BTreeMap::new(),
+            disabled: false,
         }
     }
 
@@ -228,14 +241,16 @@ mod tests {
         let config = McpServerConfig::Http {
             url: "https://example.com/mcp".into(),
             headers: BTreeMap::from([("Authorization".into(), "Bearer token".into())]),
+            disabled: true,
         };
         let spec = to_agent_spec(Path::new("/workspace"), &config);
 
         assert!(matches!(
             spec,
-            McpServerSpec::Http { url, headers }
+            McpServerSpec::Http { url, headers, disabled }
                 if url == "https://example.com/mcp"
                     && headers.get("Authorization") == Some(&"Bearer token".to_string())
+                    && disabled
         ));
     }
 }

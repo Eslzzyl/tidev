@@ -260,17 +260,21 @@ impl App {
         let total = summaries.len();
         let connecting_count = summaries
             .iter()
-            .filter(|s| matches!(s.status, McpConnectionStatus::Connecting))
+            .filter(|s| !s.disabled && matches!(s.status, McpConnectionStatus::Connecting))
             .count();
         let connected_count = summaries
             .iter()
-            .filter(|s| matches!(s.status, McpConnectionStatus::Connected))
+            .filter(|s| !s.disabled && matches!(s.status, McpConnectionStatus::Connected))
             .count();
         let failed_count = summaries
             .iter()
-            .filter(|s| matches!(s.status, McpConnectionStatus::Failed(_)))
+            .filter(|s| !s.disabled && matches!(s.status, McpConnectionStatus::Failed(_)))
             .count();
-        let tool_count: usize = summaries.iter().map(|s| s.tool_count).sum();
+        let tool_count: usize = summaries
+            .iter()
+            .filter(|s| !s.disabled)
+            .map(|s| s.tool_count)
+            .sum();
 
         if connecting_count > 0 {
             let spinner = self.loading_spinner();

@@ -35,6 +35,7 @@ struct ServerDraft {
     env: String,
     url: String,
     headers: String,
+    disabled: bool,
 }
 
 impl ServerDraft {
@@ -48,6 +49,7 @@ impl ServerDraft {
             env: String::new(),
             url: String::new(),
             headers: String::new(),
+            disabled: false,
         }
     }
 
@@ -77,6 +79,7 @@ impl ServerDraft {
                     args,
                     cwd,
                     env,
+                    disabled: self.disabled,
                 })
             }
             "http" | "sse" => {
@@ -97,9 +100,17 @@ impl ServerDraft {
                     })
                     .collect();
                 if self.kind == "http" {
-                    Ok(McpServerConfig::Http { url, headers })
+                    Ok(McpServerConfig::Http {
+                        url,
+                        headers,
+                        disabled: self.disabled,
+                    })
                 } else {
-                    Ok(McpServerConfig::Sse { url, headers })
+                    Ok(McpServerConfig::Sse {
+                        url,
+                        headers,
+                        disabled: self.disabled,
+                    })
                 }
             }
             other => anyhow::bail!("unknown MCP server kind '{other}'"),
@@ -159,8 +170,22 @@ impl McpServerPanel {
     }
 
     fn refresh_list(&mut self) {
-        self.summaries = self.mcp.summaries();
+        let summaries = self.mcp.summaries();
+        if summaries == self.summaries {
+            return;
+        }
+        let selected_name = self.selected_summary().map(|s| s.name.clone());
+        self.summaries = summaries;
         self.refilter();
+        if let Some(name) = selected_name
+            && let Some(pos) = self
+                .filtered_indices
+                .iter()
+                .position(|&idx| self.summaries.get(idx).is_some_and(|s| s.name == name))
+        {
+            self.selected_index = pos;
+        }
+        self.ensure_scroll_visible(8);
     }
 
     fn refilter(&mut self) {
@@ -256,6 +281,7 @@ impl McpServerPanel {
         let mut draft = ServerDraft::new();
         draft.name = summary_name.clone();
         draft.kind = kind;
+        draft.disabled = config.as_ref().is_some_and(|c| c.is_disabled());
         if let Some(config) = config {
             match config {
                 McpServerConfig::Stdio {
@@ -274,7 +300,7 @@ impl McpServerPanel {
                         .collect::<Vec<_>>()
                         .join("\n");
                 }
-                McpServerConfig::Http { url, headers } => {
+                McpServerConfig::Http { url, headers, .. } => {
                     draft.url = url;
                     draft.headers = headers
                         .iter()
@@ -282,7 +308,7 @@ impl McpServerPanel {
                         .collect::<Vec<_>>()
                         .join("\n");
                 }
-                McpServerConfig::Sse { url, headers } => {
+                McpServerConfig::Sse { url, headers, .. } => {
                     draft.url = url;
                     draft.headers = headers
                         .iter()
@@ -342,11 +368,15 @@ impl McpServerPanel {
         let mut lines = Vec::new();
 
         // ── Status & Transport ──
-        let (status_icon, status_label, status_color) = match &summary.status {
-            McpConnectionStatus::Connected => ("●", "Connected", Color::Green),
-            McpConnectionStatus::Connecting => ("◌", "Connecting", Color::Yellow),
-            McpConnectionStatus::Disconnected => ("○", "Disconnected", palette.muted),
-            McpConnectionStatus::Failed(_) => ("✕", "Failed", Color::Red),
+        let (status_icon, status_label, status_color) = if summary.disabled {
+            ("○", "Disabled", palette.muted)
+        } else {
+            match &summary.status {
+                McpConnectionStatus::Connected => ("●", "Connected", Color::Green),
+                McpConnectionStatus::Connecting => ("◌", "Connecting", Color::Yellow),
+                McpConnectionStatus::Disconnected => ("○", "Disconnected", palette.muted),
+                McpConnectionStatus::Failed(_) => ("✕", "Failed", Color::Red),
+            }
         };
 
         lines.push(Line::from(vec![
@@ -377,6 +407,7 @@ impl McpServerPanel {
                     args,
                     cwd,
                     env,
+                    ..
                 } => {
                     lines.push(Line::from(vec![
                         Span::styled("  Command:   ", Style::default().fg(palette.muted)),
@@ -428,7 +459,8 @@ impl McpServerPanel {
                         ]));
                     }
                 }
-                McpServerConfig::Http { url, headers } | McpServerConfig::Sse { url, headers } => {
+                McpServerConfig::Http { url, headers, .. }
+                | McpServerConfig::Sse { url, headers, .. } => {
                     lines.push(Line::from(vec![
                         Span::styled("  URL:       ", Style::default().fg(palette.muted)),
                         Span::styled(url.clone(), Style::default().fg(palette.text)),
@@ -560,9 +592,9 @@ impl Component for McpServerPanel {
         if self.editing {
             let is_stdio = self.edit_draft.kind == "stdio";
             let field_ids: &[usize] = if is_stdio {
-                &[0, 1, 2, 3, 4, 5]
+                &[0, 1, 2, 3, 4, 5, 8]
             } else {
-                &[0, 1, 6, 7]
+                &[0, 1, 6, 7, 8]
             };
             let current_pos = field_ids
                 .iter()
@@ -592,13 +624,13 @@ impl Component for McpServerPanel {
                     self.edit_scroll = field_ids[prev_pos];
                     return Some(Action::Noop);
                 }
-                KeyCode::Char(' ') if self.edit_scroll == 1 => {
-                    self.edit_draft.edit_field(1, |_| {});
+                KeyCode::Char(' ') if self.edit_scroll == 1 || self.edit_scroll == 8 => {
+                    self.edit_draft.edit_field(self.edit_scroll, |_| {});
                     let is_stdio = self.edit_draft.kind == "stdio";
                     let new_field_ids: &[usize] = if is_stdio {
-                        &[0, 1, 2, 3, 4, 5]
+                        &[0, 1, 2, 3, 4, 5, 8]
                     } else {
-                        &[0, 1, 6, 7]
+                        &[0, 1, 6, 7, 8]
                     };
                     if !new_field_ids.contains(&self.edit_scroll) {
                         self.edit_scroll = 1;
@@ -606,15 +638,19 @@ impl Component for McpServerPanel {
                     return Some(Action::Noop);
                 }
                 KeyCode::Backspace => {
-                    self.edit_draft.edit_field(self.edit_scroll, |v| {
-                        let _ = v.pop();
-                    });
+                    if self.edit_scroll != 8 {
+                        self.edit_draft.edit_field(self.edit_scroll, |v| {
+                            let _ = v.pop();
+                        });
+                    }
                     return Some(Action::Noop);
                 }
                 KeyCode::Char(ch) => {
-                    self.edit_draft.edit_field(self.edit_scroll, |v| {
-                        v.push(ch);
-                    });
+                    if self.edit_scroll != 8 {
+                        self.edit_draft.edit_field(self.edit_scroll, |v| {
+                            v.push(ch);
+                        });
+                    }
                     return Some(Action::Noop);
                 }
                 _ => {}
@@ -773,6 +809,11 @@ impl Component for McpServerPanel {
             self.draw_editor(frame, area, ctx);
             return;
         }
+
+        // MCP connection work completes in background tasks. Synchronize the
+        // panel snapshot before drawing so both panes reflect the same state
+        // as the application sidebar and status line.
+        self.refresh_list();
 
         // ── Main panel ─────────────────────────────────────────────────
         let palette = ctx.palette;
@@ -974,11 +1015,15 @@ impl Component for McpServerPanel {
             };
 
             let is_selected = idx == self.selected_index;
-            let (status_icon, status_color) = match &summary.status {
-                McpConnectionStatus::Connected => ("●", Color::Green),
-                McpConnectionStatus::Connecting => ("◌", Color::Yellow),
-                McpConnectionStatus::Disconnected => ("○", palette.muted),
-                McpConnectionStatus::Failed(_) => ("✕", Color::Red),
+            let (status_icon, status_color) = if summary.disabled {
+                ("○", palette.muted)
+            } else {
+                match &summary.status {
+                    McpConnectionStatus::Connected => ("●", Color::Green),
+                    McpConnectionStatus::Connecting => ("◌", Color::Yellow),
+                    McpConnectionStatus::Disconnected => ("○", palette.muted),
+                    McpConnectionStatus::Failed(_) => ("✕", Color::Red),
+                }
             };
 
             let max_name_len = (list_content_area.width as usize).saturating_sub(10).max(4);
@@ -1157,7 +1202,7 @@ impl McpServerPanel {
     fn draw_editor(&mut self, frame: &mut Frame, area: Rect, ctx: &DrawContext) {
         let palette = ctx.palette;
         let is_stdio = self.edit_draft.kind == "stdio";
-        let height = if is_stdio { 16u16 } else { 14u16 };
+        let height = if is_stdio { 18u16 } else { 16u16 };
         let editor_area = centered_rect(area.width.min(68), area.height.min(height), area);
 
         frame.render_widget(Clear, editor_area);
@@ -1198,40 +1243,65 @@ impl McpServerPanel {
         );
 
         // Active fields based on kind
-        let fields: Vec<(&'static str, &str, usize, &'static str)> = if is_stdio {
+        let fields: Vec<(&'static str, String, usize, &'static str)> = if is_stdio {
             vec![
-                ("Name", &self.edit_draft.name, 0, ""),
+                ("Name", self.edit_draft.name.clone(), 0, ""),
                 (
                     "Kind",
-                    &self.edit_draft.kind,
+                    self.edit_draft.kind.clone(),
                     1,
                     " (Space to cycle: stdio → http → sse)",
                 ),
-                ("Command", &self.edit_draft.command, 2, ""),
-                ("Args", &self.edit_draft.args, 3, " (optional)"),
+                ("Command", self.edit_draft.command.clone(), 2, ""),
+                ("Args", self.edit_draft.args.clone(), 3, " (optional)"),
                 (
                     "Cwd",
-                    &self.edit_draft.cwd,
+                    self.edit_draft.cwd.clone(),
                     4,
                     " (optional, relative to workspace)",
                 ),
-                ("Env", &self.edit_draft.env, 5, " (KEY=VAL, optional)"),
+                (
+                    "Env",
+                    self.edit_draft.env.clone(),
+                    5,
+                    " (KEY=VAL, optional)",
+                ),
+                (
+                    "Enabled",
+                    if self.edit_draft.disabled {
+                        "No".to_string()
+                    } else {
+                        "Yes".to_string()
+                    },
+                    8,
+                    " (Space to toggle: Yes / No)",
+                ),
             ]
         } else {
             vec![
-                ("Name", &self.edit_draft.name, 0, ""),
+                ("Name", self.edit_draft.name.clone(), 0, ""),
                 (
                     "Kind",
-                    &self.edit_draft.kind,
+                    self.edit_draft.kind.clone(),
                     1,
                     " (Space to cycle: stdio → http → sse)",
                 ),
-                ("URL", &self.edit_draft.url, 6, ""),
+                ("URL", self.edit_draft.url.clone(), 6, ""),
                 (
                     "Headers",
-                    &self.edit_draft.headers,
+                    self.edit_draft.headers.clone(),
                     7,
                     " (Header: value, optional)",
+                ),
+                (
+                    "Enabled",
+                    if self.edit_draft.disabled {
+                        "No".to_string()
+                    } else {
+                        "Yes".to_string()
+                    },
+                    8,
+                    " (Space to toggle: Yes / No)",
                 ),
             ]
         };
@@ -1278,7 +1348,7 @@ impl McpServerPanel {
                 Paragraph::new(Line::from(spans)).style(Style::default().bg(palette.panel_alt)),
                 field_area,
             );
-            if is_active && *field_id != 1 {
+            if is_active && *field_id != 1 && *field_id != 8 {
                 frame.set_cursor_position(cursor);
             }
         }
@@ -1339,6 +1409,9 @@ impl EditField for ServerDraft {
             5 => f(&mut self.env),
             6 => f(&mut self.url),
             7 => f(&mut self.headers),
+            8 => {
+                self.disabled = !self.disabled;
+            }
             _ => {}
         }
     }
@@ -1357,6 +1430,7 @@ mod tests {
         draft.args = "-m http.server 8080".to_string();
         draft.cwd = "/project".to_string();
         draft.env = "KEY=val\nFOO=bar".to_string();
+        draft.disabled = true;
 
         let config = draft.to_config().unwrap();
         match config {
@@ -1365,6 +1439,7 @@ mod tests {
                 args,
                 cwd,
                 env,
+                disabled,
                 ..
             } => {
                 assert_eq!(command, "python");
@@ -1372,6 +1447,7 @@ mod tests {
                 assert_eq!(cwd, Some("/project".into()));
                 assert_eq!(env.get("KEY"), Some(&"val".into()));
                 assert_eq!(env.get("FOO"), Some(&"bar".into()));
+                assert!(disabled);
             }
             other => panic!("expected Stdio, got {other:?}"),
         }
@@ -1387,10 +1463,15 @@ mod tests {
 
         let config = draft.to_config().unwrap();
         match config {
-            McpServerConfig::Http { url, headers } => {
+            McpServerConfig::Http {
+                url,
+                headers,
+                disabled,
+            } => {
                 assert_eq!(url, "https://mcp.example.com");
                 assert_eq!(headers.get("Authorization").unwrap(), "Bearer token");
                 assert_eq!(headers.get("X-Trace").unwrap(), "trace-1");
+                assert!(!disabled);
             }
             other => panic!("expected Http, got {other:?}"),
         }
@@ -1402,11 +1483,13 @@ mod tests {
         draft.kind = "sse".to_string();
         draft.name = "sse-server".to_string();
         draft.url = "http://localhost:8080/sse".to_string();
+        draft.disabled = true;
 
         let config = draft.to_config().unwrap();
         match config {
-            McpServerConfig::Sse { url, .. } => {
+            McpServerConfig::Sse { url, disabled, .. } => {
                 assert_eq!(url, "http://localhost:8080/sse");
+                assert!(disabled);
             }
             other => panic!("expected Sse, got {other:?}"),
         }
@@ -1441,6 +1524,7 @@ mod tests {
         assert_eq!(draft.kind, "stdio");
         assert!(draft.name.is_empty());
         assert!(draft.command.is_empty());
+        assert!(!draft.disabled);
     }
 
     #[test]
@@ -1453,6 +1537,16 @@ mod tests {
         assert_eq!(draft.kind, "sse");
         draft.edit_field(1, |_| {});
         assert_eq!(draft.kind, "stdio");
+    }
+
+    #[test]
+    fn test_server_draft_edit_field_toggles_disabled() {
+        let mut draft = ServerDraft::new();
+        assert!(!draft.disabled);
+        draft.edit_field(8, |_| {});
+        assert!(draft.disabled);
+        draft.edit_field(8, |_| {});
+        assert!(!draft.disabled);
     }
 
     #[test]
@@ -1475,5 +1569,119 @@ mod tests {
             }
             other => panic!("expected Stdio, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn test_mcp_server_panel_key_events() {
+        let mut servers = std::collections::BTreeMap::new();
+        servers.insert(
+            "test-server".to_string(),
+            McpServerConfig::Stdio {
+                command: "echo".to_string(),
+                args: vec![],
+                cwd: None,
+                env: std::collections::BTreeMap::new(),
+                disabled: false,
+            },
+        );
+        let mcp = tidev_core::mcp::McpManager::new(std::path::PathBuf::from("/tmp"), servers);
+        let mut panel = McpServerPanel::new(&mcp);
+
+        // Enter triggers toggle action without closing or opening extra overlays
+        let enter_act = panel.handle_key_event(crossterm::event::KeyEvent::from(
+            crossterm::event::KeyCode::Enter,
+        ));
+        assert!(matches!(
+            enter_act,
+            Some(Action::Mcp(McpAction::Toggle(ref name))) if name == "test-server"
+        ));
+
+        // Esc triggers close overlay action
+        let esc_act = panel.handle_key_event(crossterm::event::KeyEvent::from(
+            crossterm::event::KeyCode::Esc,
+        ));
+        assert!(matches!(
+            esc_act,
+            Some(Action::Overlay(OverlayAction::Close(
+                OverlayKind::McpServerPanel
+            )))
+        ));
+    }
+
+    #[test]
+    fn test_mcp_server_panel_refresh_retains_selection() {
+        let mut servers = std::collections::BTreeMap::new();
+        servers.insert(
+            "alpha".to_string(),
+            McpServerConfig::Stdio {
+                command: "echo".to_string(),
+                args: vec![],
+                cwd: None,
+                env: std::collections::BTreeMap::new(),
+                disabled: false,
+            },
+        );
+        servers.insert(
+            "beta".to_string(),
+            McpServerConfig::Stdio {
+                command: "echo".to_string(),
+                args: vec![],
+                cwd: None,
+                env: std::collections::BTreeMap::new(),
+                disabled: false,
+            },
+        );
+        let mcp = tidev_core::mcp::McpManager::new(std::path::PathBuf::from("/tmp"), servers);
+        let mut panel = McpServerPanel::new(&mcp);
+
+        // Move to second item ("beta")
+        panel.move_down(1);
+        assert_eq!(
+            panel.selected_summary().map(|s| s.name.as_str()),
+            Some("beta")
+        );
+
+        // Refresh list maintains selection on "beta"
+        panel.refresh_list();
+        assert_eq!(
+            panel.selected_summary().map(|s| s.name.as_str()),
+            Some("beta")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mcp_server_panel_refreshes_background_status() {
+        let mut servers = std::collections::BTreeMap::new();
+        servers.insert(
+            "test-server".to_string(),
+            McpServerConfig::Stdio {
+                command: "echo".to_string(),
+                args: vec![],
+                cwd: None,
+                env: std::collections::BTreeMap::new(),
+                disabled: false,
+            },
+        );
+        let mcp = tidev_core::mcp::McpManager::new(std::path::PathBuf::from("/tmp"), servers);
+        let mut panel = McpServerPanel::new(&mcp);
+
+        mcp.upsert_server(
+            "test-server".to_string(),
+            McpServerConfig::Stdio {
+                command: "echo".to_string(),
+                args: vec![],
+                cwd: None,
+                env: std::collections::BTreeMap::new(),
+                disabled: true,
+            },
+        )
+        .await
+        .unwrap();
+
+        panel.refresh_list();
+
+        let summary = panel.selected_summary().unwrap();
+        assert!(summary.disabled);
+        assert_eq!(summary.status, McpConnectionStatus::Disconnected);
     }
 }

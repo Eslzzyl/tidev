@@ -619,6 +619,7 @@ async fn merge_mcp_servers(mcp_manager: &tidev_core::mcp::McpManager, servers: &
                         .iter()
                         .map(|header| (header.name.clone(), header.value.clone()))
                         .collect(),
+                    disabled: false,
                 },
             )),
             acp::McpServer::Stdio(server) => Some((
@@ -632,6 +633,7 @@ async fn merge_mcp_servers(mcp_manager: &tidev_core::mcp::McpManager, servers: &
                         .iter()
                         .map(|entry| (entry.name.clone(), entry.value.clone()))
                         .collect(),
+                    disabled: false,
                 },
             )),
             _ => None,

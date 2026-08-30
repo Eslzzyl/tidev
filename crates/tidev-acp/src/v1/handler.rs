@@ -1015,6 +1015,7 @@ fn acp_mcp_server_to_config(
                     args: s.args.clone(),
                     cwd: None,
                     env,
+                    disabled: false,
                 },
             ))
         }
@@ -1027,6 +1028,7 @@ fn acp_mcp_server_to_config(
                     .iter()
                     .map(|header| (header.name.clone(), header.value.clone()))
                     .collect(),
+                disabled: false,
             },
         )),
         acp::McpServer::Sse(s) => Some((
@@ -1038,6 +1040,7 @@ fn acp_mcp_server_to_config(
                     .iter()
                     .map(|header| (header.name.clone(), header.value.clone()))
                     .collect(),
+                disabled: false,
             },
         )),
         _ => {
