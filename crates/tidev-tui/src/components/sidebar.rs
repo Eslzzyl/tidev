@@ -13,6 +13,7 @@ use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph, Wrap};
 use tidev_core::FileDiff;
+use tidev_core::mcp::{McpConnectionStatus, McpServerSummary};
 use tidev_tools::types::TodoItem;
 use tidev_utils::path::display_path_with_tilde;
 use unicode_width::UnicodeWidthStr;
@@ -60,6 +61,7 @@ impl Sidebar {
         chat_context: Option<&ChatContext>,
         context_usage: Option<&ContextUsage>,
         todos: &[TodoItem],
+        mcp_servers: &[McpServerSummary],
     ) {
         if area.width < 4 || area.height < 4 {
             return;
@@ -202,6 +204,80 @@ impl Sidebar {
                 format!("Requests: {request_count}"),
                 Style::default().fg(palette.text),
             )]));
+        }
+
+        // MCP Servers section
+        if !mcp_servers.is_empty() {
+            lines.push(Line::from(""));
+            let active_count = mcp_servers
+                .iter()
+                .filter(|s| matches!(s.status, McpConnectionStatus::Connected))
+                .count();
+            lines.push(Line::from(vec![
+                Span::styled(
+                    "MCP Servers",
+                    Style::default()
+                        .fg(palette.accent)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!(" ({}/{})", active_count, mcp_servers.len()),
+                    Style::default().fg(palette.muted),
+                ),
+            ]));
+
+            for server in mcp_servers {
+                let (icon, icon_style, detail_text, detail_style) = match &server.status {
+                    McpConnectionStatus::Connected => {
+                        let tool_label = if server.tool_count == 1 {
+                            "1 tool".to_string()
+                        } else {
+                            format!("{} tools", server.tool_count)
+                        };
+                        (
+                            "● ",
+                            Style::default().fg(palette.success),
+                            tool_label,
+                            Style::default().fg(palette.muted),
+                        )
+                    }
+                    McpConnectionStatus::Connecting => (
+                        "◌ ",
+                        Style::default().fg(palette.warning),
+                        "connecting".to_string(),
+                        Style::default().fg(palette.muted),
+                    ),
+                    McpConnectionStatus::Failed(_) => (
+                        "✕ ",
+                        Style::default().fg(palette.error),
+                        "failed".to_string(),
+                        Style::default().fg(palette.error),
+                    ),
+                    McpConnectionStatus::Disconnected => (
+                        "○ ",
+                        Style::default().fg(palette.muted),
+                        "offline".to_string(),
+                        Style::default().fg(palette.muted),
+                    ),
+                };
+
+                let icon_width = UnicodeWidthStr::width(icon);
+                let detail_width = UnicodeWidthStr::width(detail_text.as_str());
+                let max_name_width = sidebar_content_width
+                    .saturating_sub(icon_width + detail_width + 1)
+                    .max(1);
+                let name_display = shorten(&server.name, max_name_width);
+                let name_width = UnicodeWidthStr::width(name_display.as_str());
+                let padding =
+                    sidebar_content_width.saturating_sub(icon_width + name_width + detail_width);
+
+                lines.push(Line::from(vec![
+                    Span::styled(icon, icon_style),
+                    Span::styled(name_display, Style::default().fg(palette.text)),
+                    Span::raw(" ".repeat(padding)),
+                    Span::styled(detail_text, detail_style),
+                ]));
+            }
         }
 
         // Changed Files section
@@ -491,6 +567,7 @@ mod tests {
         todos: &[TodoItem],
         chat_context: Option<&ChatContext>,
         context_usage: Option<&ContextUsage>,
+        mcp_servers: &[McpServerSummary],
     ) -> Vec<String> {
         let backend = TestBackend::new(60, 80);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -505,6 +582,7 @@ mod tests {
                 chat_context,
                 context_usage,
                 todos,
+                mcp_servers,
             );
         });
 
@@ -523,7 +601,7 @@ mod tests {
     #[test]
     fn sidebar_todos_empty_shows_no_items() {
         let palette = test_palette();
-        let rows = render_sidebar(palette, &[], None, None);
+        let rows = render_sidebar(palette, &[], None, None, &[]);
         let text: String = rows.join("\n");
 
         assert!(text.contains("Todos (0)"), "should show Todos (0) header");
@@ -550,12 +628,70 @@ mod tests {
                 status: "pending".into(),
             },
         ];
-        let rows = render_sidebar(palette, &todos, None, None);
+        let rows = render_sidebar(palette, &todos, None, None, &[]);
         let text: String = rows.join("\n");
 
         assert!(text.contains("Todos (3)"), "should show Todos (3) header");
         assert!(text.contains("Alpha"), "should show completed item");
         assert!(text.contains("Beta"), "should show in_progress item");
         assert!(text.contains("Gamma"), "should show pending item");
+    }
+
+    #[test]
+    fn sidebar_mcp_hidden_when_empty() {
+        let palette = test_palette();
+        let rows = render_sidebar(palette, &[], None, None, &[]);
+        let text: String = rows.join("\n");
+
+        assert!(
+            !text.contains("MCP Servers"),
+            "should not show MCP Servers header when empty"
+        );
+    }
+
+    #[test]
+    fn sidebar_mcp_renders_servers_and_statuses() {
+        let palette = test_palette();
+        let servers = vec![
+            McpServerSummary {
+                name: "filesystem".into(),
+                kind: "stdio".into(),
+                status: McpConnectionStatus::Connected,
+                tool_count: 5,
+            },
+            McpServerSummary {
+                name: "browser".into(),
+                kind: "stdio".into(),
+                status: McpConnectionStatus::Connecting,
+                tool_count: 0,
+            },
+            McpServerSummary {
+                name: "github".into(),
+                kind: "http".into(),
+                status: McpConnectionStatus::Failed("auth error".into()),
+                tool_count: 0,
+            },
+            McpServerSummary {
+                name: "slack".into(),
+                kind: "sse".into(),
+                status: McpConnectionStatus::Disconnected,
+                tool_count: 0,
+            },
+        ];
+        let rows = render_sidebar(palette, &[], None, None, &servers);
+        let text: String = rows.join("\n");
+
+        assert!(
+            text.contains("MCP Servers (1/4)"),
+            "should show active count and total count in header"
+        );
+        assert!(text.contains("filesystem"), "should show connected server");
+        assert!(text.contains("5 tools"), "should show tool count");
+        assert!(text.contains("browser"), "should show connecting server");
+        assert!(text.contains("connecting"), "should show connecting status");
+        assert!(text.contains("github"), "should show failed server");
+        assert!(text.contains("failed"), "should show failed status");
+        assert!(text.contains("slack"), "should show disconnected server");
+        assert!(text.contains("offline"), "should show offline status");
     }
 }

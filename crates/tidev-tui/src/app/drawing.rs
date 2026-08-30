@@ -581,6 +581,7 @@ impl App {
                 .message_list
                 .as_ref()
                 .and_then(|ml| ml.active_chat_context());
+            let mcp_summaries = self.runtime.mcp_manager().summaries();
             self.sidebar.draw(
                 frame,
                 sidebar_area,
@@ -589,6 +590,7 @@ impl App {
                 chat_ctx,
                 self.context_usage.as_ref(),
                 &self.todos,
+                &mcp_summaries,
             );
         }
 
@@ -599,7 +601,7 @@ impl App {
         //   terminal area so they appear properly centered across the screen.
         self.overlays.draw(frame, area, main_area, &draw_ctx);
 
-        // ── Footer status line (left: MCP status, right: session/footer status) ──
+        // ── Footer status line (right: session/footer status) ──
         let status_text = self.footer_status_text();
         let status_width = status_text
             .width()
@@ -617,18 +619,6 @@ impl App {
             .style(Style::default().bg(palette.background)),
             Rect::new(status_x, notice_line.y, status_width, 1),
         );
-
-        // Left-aligned MCP status on notice line
-        if let Some((mcp_line, mcp_line_width)) = self.mcp_status_line() {
-            let max_mcp_width = notice_line.width.saturating_sub(status_width + 4);
-            let mcp_width = (mcp_line_width as u16).min(max_mcp_width);
-            if mcp_width > 0 {
-                frame.render_widget(
-                    Paragraph::new(mcp_line).style(Style::default().bg(palette.background)),
-                    Rect::new(notice_line.x + 2, notice_line.y, mcp_width, 1),
-                );
-            }
-        }
 
         // ── Toast notification ──
         // Small popup at the top-right of the message area, auto-expires.
