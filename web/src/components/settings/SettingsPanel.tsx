@@ -7,6 +7,7 @@ import {
   Terminal as TerminalIcon,
   Lock,
   Boxes,
+  Sparkles,
   Info,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -18,6 +19,7 @@ import { InteractionSection } from "./InteractionSection";
 import { TerminalSection } from "./TerminalSection";
 import { SecuritySection } from "./SecuritySection";
 import { McpSection } from "./McpSection";
+import { SkillsSection } from "./SkillsSection";
 import { AboutSection } from "./AboutSection";
 
 type CategoryId =
@@ -27,6 +29,7 @@ type CategoryId =
   | "terminal"
   | "security"
   | "mcp"
+  | "skills"
   | "about";
 
 interface Category {
@@ -54,6 +57,7 @@ const categories: Category[] = [
   },
   { id: "security", label: "Security", icon: <Lock className="h-4 w-4" /> },
   { id: "mcp", label: "MCP Servers", icon: <Boxes className="h-4 w-4" /> },
+  { id: "skills", label: "Skills", icon: <Sparkles className="h-4 w-4" /> },
   { id: "about", label: "About", icon: <Info className="h-4 w-4" /> },
 ];
 
@@ -122,7 +126,7 @@ export function SettingsPanel() {
     <div className="fixed inset-0 z-60 flex items-center justify-center motion-safe:animate-fade-in bg-black/50 p-4">
       <div
         ref={panelRef}
-        className="motion-safe:animate-scale-fade flex h-[60vh] w-full max-w-200 flex-col overflow-hidden rounded-xl bg-white shadow-2xl dark:bg-neutral-900"
+        className="motion-safe:animate-scale-fade flex h-[70vh] max-h-[720px] w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl dark:bg-neutral-900"
       >
         {/* Header */}
         <div className="flex shrink-0 items-center justify-between border-b border-neutral-200 px-5 py-3 dark:border-neutral-800">
@@ -180,6 +184,7 @@ export function SettingsPanel() {
             {activeCategory === "terminal" && <TerminalSection />}
             {activeCategory === "security" && <SecuritySection />}
             {activeCategory === "mcp" && <McpSection />}
+            {activeCategory === "skills" && <SkillsSection />}
             {activeCategory === "about" && <AboutSection />}
           </div>
         </div>

@@ -313,7 +313,20 @@ export interface FileSuggestion {
 export interface SkillInfo {
   name: string;
   description: string;
+  directory: string;
   location: string;
+  is_bundled: boolean;
+  companion_files: string[];
+  content: string;
+  document: string;
+}
+
+export interface SkillListResponse {
+  skills: SkillInfo[];
+}
+
+export interface SkillFileResponse {
+  content: string;
 }
 
 // Provider types

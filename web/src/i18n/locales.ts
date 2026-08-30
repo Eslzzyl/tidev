@@ -533,6 +533,30 @@ const en = {
   'Are you sure you want to remove MCP server "{{name}}"?':
     'Are you sure you want to remove MCP server "{{name}}"?',
   "Manage MCP server connections and tools": "Manage MCP server connections and tools",
+  Skills: "Skills",
+  "Browse, preview, and load agent skills and companion documents":
+    "Browse, preview, and load agent skills and companion documents",
+  "Refresh skills": "Refresh skills",
+  "Search skills by name or description...": "Search skills by name or description...",
+  Bundled: "Bundled",
+  Custom: "Custom",
+  "Workspace / Custom": "Workspace / Custom",
+  "Loading skills...": "Loading skills...",
+  "Failed to load skills": "Failed to load skills",
+  "No skills found": "No skills found",
+  "No skills match your search query.": "No skills match your search query.",
+  "No skills discovered in workspace or user directory.":
+    "No skills discovered in workspace or user directory.",
+  "{{count}} companion files": "{{count}} companion files",
+  "Use in Chat": "Use in Chat",
+  "Use this skill in chat composer": "Use this skill in chat composer",
+  "Copy /skill command": "Copy /skill command",
+  "Companion Files": "Companion Files",
+  "Loading file content...": "Loading file content...",
+  "Failed to read companion file": "Failed to read companion file",
+  "No content": "No content",
+  "Select a skill on the left to preview its content.":
+    "Select a skill on the left to preview its content.",
 } as const;
 
 const zhCN: Record<keyof typeof en, string> = {
@@ -1059,6 +1083,28 @@ const zhCN: Record<keyof typeof en, string> = {
   "Save Server": "保存服务",
   'Are you sure you want to remove MCP server "{{name}}"?': '确定要移除 MCP 服务 "{{name}}" 吗？',
   "Manage MCP server connections and tools": "管理 MCP 服务端连接与工具",
+  Skills: "技能",
+  "Browse, preview, and load agent skills and companion documents":
+    "浏览、预览并载入 Agent 技能与其配套文档",
+  "Refresh skills": "刷新技能列表",
+  "Search skills by name or description...": "按名称或描述搜索技能…",
+  Bundled: "内置",
+  Custom: "自定义",
+  "Workspace / Custom": "工作区 / 自定义",
+  "Loading skills...": "正在加载技能列表…",
+  "Failed to load skills": "加载技能列表失败",
+  "No skills found": "未找到相关技能",
+  "No skills match your search query.": "没有匹配当前搜索条件的技能。",
+  "No skills discovered in workspace or user directory.": "工作区或用户目录中未发现可用技能。",
+  "{{count}} companion files": "{{count}} 个配套文件",
+  "Use in Chat": "在聊天中使用",
+  "Use this skill in chat composer": "在输入框中填入并使用此技能",
+  "Copy /skill command": "复制 /skill 指令",
+  "Companion Files": "配套文件",
+  "Loading file content...": "正在加载文件内容…",
+  "Failed to read companion file": "读取配套文件失败",
+  "No content": "无内容",
+  "Select a skill on the left to preview its content.": "在左侧选择技能以预览详细文档。",
 };
 
 export const resources = {

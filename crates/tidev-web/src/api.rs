@@ -238,6 +238,33 @@ pub struct UpsertMcpServerRequest {
     pub original_name: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillDto {
+    pub name: String,
+    pub description: String,
+    pub directory: String,
+    pub location: String,
+    pub is_bundled: bool,
+    pub companion_files: Vec<String>,
+    pub content: String,
+    pub document: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillListResponse {
+    pub skills: Vec<SkillDto>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SkillFileQuery {
+    pub path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillFileResponse {
+    pub content: String,
+}
+
 #[derive(Debug, Serialize)]
 struct AuthVerifyResponse {
     valid: bool,
@@ -381,6 +408,8 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/init", get(get_init))
         .route("/tools", get(list_tools))
         .route("/skills", get(list_skills))
+        .route("/skills/{name}", get(get_skill))
+        .route("/skills/{name}/file", get(get_skill_file))
         .route("/providers", get(list_providers).post(create_provider))
         .route("/providers/{id}", delete(delete_provider))
         .route(
@@ -1772,8 +1801,64 @@ async fn list_tools() -> Json<Vec<serde_json::Value>> {
     Json(vec![])
 }
 
-async fn list_skills() -> Json<Vec<serde_json::Value>> {
-    Json(vec![])
+async fn list_skills(State(state): State<Arc<AppState>>) -> Json<SkillListResponse> {
+    let catalog = state.runtime.skills();
+    let skills = catalog
+        .all()
+        .iter()
+        .map(|s| SkillDto {
+            name: s.name.clone(),
+            description: s.description.clone(),
+            directory: s.directory.to_string_lossy().to_string(),
+            location: s.location.to_string_lossy().to_string(),
+            is_bundled: s.directory.to_string_lossy().starts_with("__builtin__"),
+            companion_files: s
+                .companion_files
+                .iter()
+                .map(|p| p.to_string_lossy().to_string())
+                .collect(),
+            content: s.content.clone(),
+            document: s.document.clone(),
+        })
+        .collect();
+    Json(SkillListResponse { skills })
+}
+
+async fn get_skill(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+) -> Result<Json<SkillDto>, ApiError> {
+    let catalog = state.runtime.skills();
+    let s = catalog
+        .get(&name)
+        .ok_or_else(|| ApiError::not_found(format!("Skill '{name}' not found")))?;
+    Ok(Json(SkillDto {
+        name: s.name.clone(),
+        description: s.description.clone(),
+        directory: s.directory.to_string_lossy().to_string(),
+        location: s.location.to_string_lossy().to_string(),
+        is_bundled: s.directory.to_string_lossy().starts_with("__builtin__"),
+        companion_files: s
+            .companion_files
+            .iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect(),
+        content: s.content.clone(),
+        document: s.document.clone(),
+    }))
+}
+
+async fn get_skill_file(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+    Query(query): Query<SkillFileQuery>,
+) -> Result<Json<SkillFileResponse>, ApiError> {
+    let catalog = state.runtime.skills();
+    let rel_path = query.path.as_deref().unwrap_or("");
+    let content = catalog
+        .read_skill_file(&name, rel_path, 1_000_000)
+        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    Ok(Json(SkillFileResponse { content }))
 }
 
 async fn list_providers() -> Json<Vec<serde_json::Value>> {

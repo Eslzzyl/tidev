@@ -16,6 +16,8 @@ export const queryKeys = {
   models: ["models"] as const,
   tools: ["tools"] as const,
   skills: ["skills"] as const,
+  skill: (name: string) => ["skills", name] as const,
+  skillFile: (name: string, path?: string) => ["skills", name, "file", path] as const,
   mcpServers: ["mcp", "servers"] as const,
 
   // Config

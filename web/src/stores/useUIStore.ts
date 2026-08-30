@@ -17,6 +17,7 @@ export interface UIState {
   rightSidebarOpen: boolean;
   settingsPanelOpen: boolean;
   settingsInitialCategory: string | null;
+  pendingDraft: string | null;
   mobileMenuOpen: boolean;
   mobileRightSidebarOpen: boolean;
   theme: Theme;
@@ -48,6 +49,7 @@ export interface UIActions {
   setLeftSidebarWidth: (width: number) => void;
   setRightSidebarWidth: (width: number) => void;
   setInputValue: (value: string) => void;
+  setPendingDraft: (draft: string | null) => void;
   setLoading: (isLoading: boolean) => void;
   setStreaming: (isStreaming: boolean) => void;
   setConnectionStatus: (status: UIState["connectionStatus"]) => void;
@@ -91,6 +93,7 @@ const initialState: UIState = {
   rightSidebarOpen: true,
   settingsPanelOpen: false,
   settingsInitialCategory: null,
+  pendingDraft: null,
   mobileMenuOpen: false,
   mobileRightSidebarOpen: false,
   theme: legacyPreferences.theme ?? "system",
@@ -166,6 +169,7 @@ export const useUIStore = create<UIState & UIActions>()(
       setRightSidebarWidth: (width) => set({ rightSidebarWidth: clampSidebarWidth(width) }),
 
       setInputValue: (value) => set({ inputValue: value }),
+      setPendingDraft: (draft) => set({ pendingDraft: draft }),
       setLoading: (isLoading) => set({ isLoading }),
       setStreaming: (isStreaming) => set({ isStreaming }),
       setConnectionStatus: (status) => set({ connectionStatus: status }),

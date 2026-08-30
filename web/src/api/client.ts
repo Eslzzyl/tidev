@@ -13,6 +13,8 @@ import type {
   FileSuggestion,
   TodosResponse,
   SkillInfo,
+  SkillListResponse,
+  SkillFileResponse,
   ProviderInfo,
   ConnectProviderRequest,
   CreateProviderRequest,
@@ -181,7 +183,13 @@ export const api = {
   listTools: () => fetchJson<{ tools: ToolInfo[] }>(`${API_BASE}/tools`),
 
   // Skills
-  listSkills: () => fetchJson<{ skills: SkillInfo[] }>(`${API_BASE}/skills`),
+  listSkills: () => fetchJson<SkillListResponse>(`${API_BASE}/skills`),
+  getSkill: (name: string) =>
+    fetchJson<SkillInfo>(`${API_BASE}/skills/${encodeURIComponent(name)}`),
+  getSkillFile: (name: string, path?: string) =>
+    fetchJson<SkillFileResponse>(
+      `${API_BASE}/skills/${encodeURIComponent(name)}/file${path ? `?path=${encodeURIComponent(path)}` : ""}`,
+    ),
 
   // Files (@-mention search)
   searchFiles: (query: string) =>
@@ -706,5 +714,19 @@ export async function refreshMcpServer(name: string): Promise<{ accepted: boolea
     {
       method: "POST",
     },
+  );
+}
+
+export async function listSkills(): Promise<SkillListResponse> {
+  return fetchJson<SkillListResponse>(`${API_BASE}/skills`);
+}
+
+export async function getSkill(name: string): Promise<SkillInfo> {
+  return fetchJson<SkillInfo>(`${API_BASE}/skills/${encodeURIComponent(name)}`);
+}
+
+export async function getSkillFile(name: string, path?: string): Promise<SkillFileResponse> {
+  return fetchJson<SkillFileResponse>(
+    `${API_BASE}/skills/${encodeURIComponent(name)}/file${path ? `?path=${encodeURIComponent(path)}` : ""}`,
   );
 }

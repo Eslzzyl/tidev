@@ -250,3 +250,30 @@ export function useRefreshMcpServer() {
     },
   });
 }
+
+export function useSkillsQuery() {
+  return useQuery({
+    queryKey: queryKeys.skills,
+    queryFn: api.listSkills,
+    staleTime: 10_000,
+  });
+}
+
+export function useSkillDetailQuery(name: string | null) {
+  return useQuery({
+    queryKey: queryKeys.skill(name ?? ""),
+    queryFn: () => (name ? api.getSkill(name) : Promise.reject(new Error("No skill name"))),
+    enabled: !!name,
+    staleTime: 30_000,
+  });
+}
+
+export function useSkillFileQuery(name: string | null, path?: string) {
+  return useQuery({
+    queryKey: queryKeys.skillFile(name ?? "", path),
+    queryFn: () =>
+      name ? api.getSkillFile(name, path) : Promise.reject(new Error("No skill name")),
+    enabled: !!name && !!path,
+    staleTime: 30_000,
+  });
+}

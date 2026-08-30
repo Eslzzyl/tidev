@@ -227,6 +227,15 @@ export function useChatRuntime() {
   const [models, setModels] = useState<Model[]>([]);
   const [todos, setTodos] = useState<TodoItem[]>([]);
   const [draft, setDraft] = useState("");
+  const pendingDraft = useUIStore((s) => s.pendingDraft);
+  const setPendingDraft = useUIStore((s) => s.setPendingDraft);
+
+  useEffect(() => {
+    if (pendingDraft !== null) {
+      setDraft(pendingDraft);
+      setPendingDraft(null);
+    }
+  }, [pendingDraft, setPendingDraft]);
   const [mode, setMode] = useState<"build" | "plan">("build");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -1004,6 +1013,10 @@ export function useChatRuntime() {
       }
       if (command === "mcp") {
         useUIStore.getState().openSettingsPanel("mcp");
+        return true;
+      }
+      if (command === "skills" || command === "skill") {
+        useUIStore.getState().openSettingsPanel("skills");
         return true;
       }
       return false;
