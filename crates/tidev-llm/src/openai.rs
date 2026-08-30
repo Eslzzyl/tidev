@@ -17,7 +17,7 @@ use crate::debug::{
     save_complete_response_for_debugging, save_raw_response_for_debugging,
     save_request_for_debugging,
 };
-use crate::error::classify_response_status;
+use crate::error::{classify_provider_message, classify_response_status};
 use crate::think_parser::ThinkParser;
 use crate::think_parser::strip_think_tags;
 use crate::tool_call_format::ToolCallBuilder;
@@ -141,6 +141,16 @@ pub(crate) async fn stream_openai(
                         turn: Box::new(turn),
                     });
                     return Ok(());
+                }
+
+                if let Some(error) = parse_openai_stream_error(payload) {
+                    save_raw_response_for_debugging(
+                        &raw_payloads,
+                        save_response_body,
+                        max_response_files,
+                    );
+                    log_error!("openai stream error: {error}");
+                    return Err(error.into());
                 }
 
                 let event: ChatCompletionStreamResponse =
@@ -654,6 +664,51 @@ fn user_message_content(model: &LlmProviderConfig, message: &Message) -> Result<
     Ok(serde_json::Value::Array(parts))
 }
 
+/// Recognize an OpenAI-compatible error payload sent as a successful SSE event.
+///
+/// Some providers return `data: {"error": ...}` with HTTP 200. The normal
+/// chunk type accepts that payload because its fields are optional, so it must
+/// be handled before deserializing a completion chunk.
+fn parse_openai_stream_error(payload: &str) -> Option<crate::error::NetworkError> {
+    let value = serde_json::from_str::<serde_json::Value>(payload).ok()?;
+    let error = value.get("error")?;
+    if error.is_null() {
+        return None;
+    }
+
+    let message = error
+        .get("message")
+        .and_then(serde_json::Value::as_str)
+        .filter(|message| !message.is_empty())
+        .map(str::to_owned)
+        .or_else(|| error.as_str().map(str::to_owned))
+        .unwrap_or_else(|| "OpenAI stream returned an error".to_string());
+    let error_type = error
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .filter(|error_type| !error_type.is_empty());
+    let code = error.get("code").filter(|code| !code.is_null());
+
+    let mut details = Vec::new();
+    if let Some(error_type) = error_type {
+        details.push(error_type.to_string());
+    }
+    if let Some(code) = code {
+        details.push(
+            code.as_str()
+                .map(str::to_owned)
+                .unwrap_or_else(|| code.to_string()),
+        );
+    }
+
+    let display = if details.is_empty() {
+        format!("OpenAI stream error: {message}")
+    } else {
+        format!("OpenAI stream error ({}): {message}", details.join(", "))
+    };
+    Some(classify_provider_message(display))
+}
+
 #[derive(Clone, Debug, Deserialize)]
 struct ChatCompletionStreamResponse {
     #[serde(default)]
@@ -821,6 +876,25 @@ mod tests {
     use super::*;
     use crate::message::{Message, MessageRole};
     use crate::types::{ApiType, LlmProviderConfig};
+
+    #[test]
+    fn stream_error_payload_is_reported_as_retryable_failure() {
+        let error = parse_openai_stream_error(
+            r#"{"error":{"code":500,"message":"failed to process mtmd chunk","type":"server_error"}}"#,
+        )
+        .expect("stream error payload should be recognized");
+
+        assert!(error.is_retryable());
+        assert_eq!(
+            error.message(),
+            "OpenAI stream error (server_error, 500): failed to process mtmd chunk"
+        );
+    }
+
+    #[test]
+    fn completion_chunk_is_not_mistaken_for_a_stream_error() {
+        assert!(parse_openai_stream_error(r#"{"choices":[]}"#).is_none());
+    }
 
     #[test]
     fn openai_system_messages_are_combined() {
