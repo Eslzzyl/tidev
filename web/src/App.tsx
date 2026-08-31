@@ -17,6 +17,7 @@ import { AuthGate } from "./components/AuthGate";
 import { ChatPanel } from "./components/chat/ChatPanel";
 import { WelcomePage } from "./components/chat/WelcomePage";
 import { SettingsPanel } from "./components/settings/SettingsPanel";
+import { ComponentShowcase } from "./components/ui/ComponentShowcase";
 import { useChatRuntime } from "./hooks/useChatRuntime";
 import { useWorkspace } from "./hooks/workspaceQueries";
 import { getActiveFeature, routes } from "./lib/routes";
@@ -325,6 +326,9 @@ export default function App() {
       <main className="workspace">
         <Suspense fallback={<FeatureLoading />}>
           <Switch>
+            <Route path="/__components">
+              <ComponentShowcase />
+            </Route>
             <Route path="/chat/:sessionId?">{renderChat()}</Route>
             <Route path="/files">
               <FeatureWorkspaceContext session={selectedSession}>

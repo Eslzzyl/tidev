@@ -1,6 +1,10 @@
 import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 
+import { Button } from "./Button";
+import { Input } from "./FormControls";
+import { Dialog } from "./Overlay";
+
 interface RenameDialogProps {
   currentName: string;
   onSubmit: (newName: string) => void;
@@ -23,14 +27,6 @@ export function RenameDialog({ currentName, onSubmit, onClose }: RenameDialogPro
     }
   }, [currentName]);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
-
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = name.trim();
@@ -42,43 +38,35 @@ export function RenameDialog({ currentName, onSubmit, onClose }: RenameDialogPro
   };
 
   return (
-    <div
-      className="fixed inset-0 z-[9998] flex items-center justify-center bg-black/30"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="w-72 rounded-lg border border-neutral-200 bg-white p-4 shadow-xl dark:border-neutral-700 dark:bg-neutral-900">
-        <div className="mb-3 text-sm font-medium text-neutral-800 dark:text-neutral-200">
-          {t("Rename")}
-        </div>
-
+    <Dialog.Root open onOpenChange={(open) => !open && onClose()}>
+      <Dialog.Content className="ui-dialog-compact" showClose={false}>
+        <Dialog.Header>
+          <Dialog.Title>{t("Rename")}</Dialog.Title>
+        </Dialog.Header>
         <form onSubmit={handleSubmit}>
-          <input
+          <Input
             ref={inputRef}
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="w-full rounded border border-neutral-300 bg-white px-2 py-1.5 text-base outline-none focus:border-blue-400 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100 dark:focus:border-blue-500"
+            autoComplete="off"
           />
-          <div className="mt-3 flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded px-3 py-1 text-xs text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
-            >
-              {t("Cancel")}
-            </button>
-            <button
+          <Dialog.Footer>
+            <Dialog.Close asChild>
+              <Button variant="ghost" type="button">
+                {t("Cancel")}
+              </Button>
+            </Dialog.Close>
+            <Button
               type="submit"
+              variant="primary"
               disabled={!name.trim() || name.trim() === currentName}
-              className="rename-submit-button rounded bg-blue-600 px-3 py-1 text-xs hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-neutral-300 disabled:text-neutral-700 dark:disabled:bg-neutral-700 dark:disabled:text-neutral-200"
             >
               {t("Rename")}
-            </button>
-          </div>
+            </Button>
+          </Dialog.Footer>
         </form>
-      </div>
-    </div>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }

@@ -1,6 +1,10 @@
 import { useState, useRef, useEffect } from "react";
-import { X, File, Folder } from "lucide-react";
+import { File, Folder } from "lucide-react";
 import { useTranslation } from "react-i18next";
+
+import { Button } from "./Button";
+import { Input } from "./FormControls";
+import { Dialog } from "./Overlay";
 
 interface CreateItemDialogProps {
   /** Parent directory path where the item will be created */
@@ -22,14 +26,6 @@ export function CreateItemDialog({ parentPath, type, onSubmit, onClose }: Create
     inputRef.current?.focus();
   }, []);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
-
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = name.trim();
@@ -39,63 +35,44 @@ export function CreateItemDialog({ parentPath, type, onSubmit, onClose }: Create
   };
 
   return (
-    <div
-      className="fixed inset-0 z-[9998] flex items-center justify-center bg-black/30"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="w-80 rounded-lg border border-neutral-200 bg-white p-4 shadow-xl dark:border-neutral-700 dark:bg-neutral-900">
-        <div className="mb-3 flex items-center justify-between">
-          <div className="flex items-center gap-2">
+    <Dialog.Root open onOpenChange={(open) => !open && onClose()}>
+      <Dialog.Content className="ui-dialog-compact">
+        <Dialog.Header>
+          <div className="ui-dialog-title-with-icon">
             {type === "file" ? (
-              <File className="h-4 w-4 text-blue-500" />
+              <File className="ui-dialog-file-icon" />
             ) : (
-              <Folder className="h-4 w-4 text-yellow-500" />
+              <Folder className="ui-dialog-directory-icon" />
             )}
-            <span className="text-sm font-medium text-neutral-800 dark:text-neutral-200">
-              {type === "file" ? t("New File") : t("New Directory")}
-            </span>
+            <Dialog.Title>{type === "file" ? t("New File") : t("New Directory")}</Dialog.Title>
           </div>
-          <button
-            onClick={onClose}
-            className="rounded p-1 text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
+        </Dialog.Header>
 
-        <div className="mb-2 text-[11px] text-neutral-500">
+        <Dialog.Description>
           {t("in")} <span className="font-mono">{parentPath || "/"}</span>
-        </div>
+        </Dialog.Description>
 
         <form onSubmit={handleSubmit}>
-          <input
+          <Input
             ref={inputRef}
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder={type === "file" ? t("filename.ext") : t("directory-name")}
-            className="w-full rounded border border-neutral-300 bg-white px-2 py-1.5 text-base outline-none focus:border-blue-400 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100 dark:focus:border-blue-500"
+            autoComplete="off"
           />
-          <div className="mt-3 flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded px-3 py-1 text-xs text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
-            >
-              {t("Cancel")}
-            </button>
-            <button
-              type="submit"
-              disabled={!name.trim()}
-              className="rounded bg-blue-600 px-3 py-1 text-xs text-white hover:bg-blue-700 disabled:opacity-40"
-            >
+          <Dialog.Footer>
+            <Dialog.Close asChild>
+              <Button variant="ghost" type="button">
+                {t("Cancel")}
+              </Button>
+            </Dialog.Close>
+            <Button variant="primary" type="submit" disabled={!name.trim()}>
               {t("Create")}
-            </button>
-          </div>
+            </Button>
+          </Dialog.Footer>
         </form>
-      </div>
-    </div>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }
