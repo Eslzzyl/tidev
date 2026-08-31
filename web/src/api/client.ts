@@ -25,6 +25,8 @@ import type {
   GetDefaultModelResponse,
   GetAgentModelsResponse,
   SetAgentModelRequest,
+  GetSubagentConfigResponse,
+  SetSubagentConfigRequest,
   GetMemoryModelResponse,
   SetMemoryModelRequest,
   GetModelThinkingLevelResponse,
@@ -309,6 +311,13 @@ export const api = {
 
   setAgentModel: (data: SetAgentModelRequest) =>
     fetchJson<{ success: boolean }>(`${API_BASE}/config/agent-models`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  getSubagentConfig: () => fetchJson<GetSubagentConfigResponse>(`${API_BASE}/config/subagent`),
+  setSubagentConfig: (data: SetSubagentConfigRequest) =>
+    fetchJson<{ success: boolean; enabled: boolean }>(`${API_BASE}/config/subagent`, {
       method: "POST",
       body: JSON.stringify(data),
     }),

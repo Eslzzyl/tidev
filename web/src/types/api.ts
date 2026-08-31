@@ -262,6 +262,14 @@ export interface SetAgentModelRequest {
   thinking_level?: string;
 }
 
+export interface GetSubagentConfigResponse {
+  enabled: boolean;
+}
+
+export interface SetSubagentConfigRequest {
+  enabled: boolean;
+}
+
 export interface GetMemoryModelResponse {
   role: string;
   model_str: string | null;

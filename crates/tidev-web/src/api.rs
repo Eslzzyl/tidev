@@ -13,6 +13,7 @@ use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Datelike, Duration, NaiveDate, TimeZone, Timelike, Utc};
 use serde::{Deserialize, Serialize};
+use tidev_core::agent_type::AgentType;
 use tidev_core::{
     ApprovedTool, EventCursor, EventEnvelope, EventReplay, FrontendRequest, FrontendResponse, Mode,
     PromptSubmission,
@@ -109,6 +110,18 @@ struct SetThinkingLevelRequest {
     provider_id: String,
     model_id: String,
     thinking_level: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct SetAgentModelRequest {
+    agent_type: String,
+    model_str: String,
+    thinking_level: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SetSubagentEnabledRequest {
+    enabled: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -462,6 +475,10 @@ pub fn router() -> Router<Arc<AppState>> {
         .route(
             "/config/agent-models",
             get(get_agent_models).post(set_agent_model),
+        )
+        .route(
+            "/config/subagent",
+            get(get_subagent_config).post(set_subagent_config),
         )
         .route(
             "/config/memory-model",
@@ -2147,6 +2164,7 @@ async fn set_default_model(
 
 async fn get_agent_models(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
     let model = state.runtime.active_model();
+    let config = state.runtime.config();
     Json(serde_json::json!({
         "default_model": {
             "provider_id": model.provider_id,
@@ -2154,12 +2172,66 @@ async fn get_agent_models(State(state): State<Arc<AppState>>) -> Json<serde_json
             "provider_display_name": model.provider_display_name,
             "model_display_name": model.display_name,
         },
-        "agent_models": {},
+        "agent_models": config.agent.models,
+        "agent_thinking_levels": config.agent.thinking_levels,
     }))
 }
 
-async fn set_agent_model() -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "success": true }))
+async fn set_agent_model(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<SetAgentModelRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let agent_type = request.agent_type.trim().to_ascii_lowercase();
+    if AgentType::parse(&agent_type).is_none() {
+        return Err(ApiError::bad_request(format!(
+            "unknown subagent type '{}', expected explorer, librarian, oracle, or fixer",
+            request.agent_type
+        )));
+    }
+
+    let model_str = request.model_str.trim().to_string();
+    let thinking_level = request
+        .thinking_level
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    state.runtime.update_config(|config| {
+        if model_str.is_empty() {
+            config.agent.models.remove(&agent_type);
+        } else {
+            config.agent.models.insert(agent_type.clone(), model_str);
+        }
+
+        if thinking_level.is_empty() {
+            config.agent.thinking_levels.remove(&agent_type);
+        } else {
+            config
+                .agent
+                .thinking_levels
+                .insert(agent_type.clone(), thinking_level);
+        }
+    });
+    state.runtime.save_config()?;
+    Ok(Json(serde_json::json!({ "success": true })))
+}
+
+async fn get_subagent_config(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
+    let config = state.runtime.config();
+    Json(serde_json::json!({ "enabled": config.subagent.enabled }))
+}
+
+async fn set_subagent_config(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<SetSubagentEnabledRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    state.runtime.update_config(|config| {
+        config.subagent.enabled = request.enabled;
+    });
+    state.runtime.save_config()?;
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "enabled": request.enabled,
+    })))
 }
 
 async fn get_memory_model() -> Json<serde_json::Value> {

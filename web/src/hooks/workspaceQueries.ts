@@ -95,6 +95,24 @@ export function useSetAgentModel() {
   });
 }
 
+export function useSubagentConfig() {
+  return useQuery({
+    queryKey: queryKeys.subagentConfig,
+    queryFn: api.getSubagentConfig,
+    staleTime: 60_000,
+  });
+}
+
+export function useSetSubagentConfig() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.setSubagentConfig,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.subagentConfig });
+    },
+  });
+}
+
 export function useMemoryModel() {
   return useQuery({
     queryKey: queryKeys.memoryModel,
