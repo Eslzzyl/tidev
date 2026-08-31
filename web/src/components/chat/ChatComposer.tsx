@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent } from "react";
 import { Check, CircleStop, LoaderCircle, Send } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -7,6 +7,8 @@ import type { Model, TodoItem } from "../../types/api";
 import { CommandPopover } from "../CommandPopover";
 import { FileMentionPopover } from "../FileMentionPopover";
 import { ModelPicker } from "../ModelPicker";
+import { ImageAttachmentStrip } from "./ImageAttachments";
+import { pastedImageFiles, type PendingImage } from "../../utils/imageAttachments";
 
 function isTodoCompleted(todo: TodoItem) {
   return todo.status === "completed";
@@ -92,6 +94,9 @@ export interface ChatComposerProps {
   onFileMentionIndexChange: (index: number) => void;
   onFileSelect: (path: string) => number | undefined;
   onFileMentionClose: () => void;
+  pendingImages: PendingImage[];
+  onImagesPasted: (files: File[]) => void;
+  onRemoveImage: (id: string) => void;
   autoFocus?: boolean;
   onAutoFocus?: () => void;
 }
@@ -120,6 +125,9 @@ export function ChatComposer({
   onFileMentionIndexChange,
   onFileSelect,
   onFileMentionClose,
+  pendingImages,
+  onImagesPasted,
+  onRemoveImage,
   autoFocus = false,
   onAutoFocus,
 }: ChatComposerProps) {
@@ -219,6 +227,30 @@ export function ChatComposer({
     });
   };
 
+  const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = pastedImageFiles(event.clipboardData);
+    if (files.length === 0) return;
+
+    event.preventDefault();
+    const pastedText = event.clipboardData.getData("text/plain");
+    if (pastedText) {
+      const textarea = event.currentTarget;
+      const start = textarea.selectionStart ?? draft.length;
+      const end = textarea.selectionEnd ?? start;
+      const nextDraft = `${draft.slice(0, start)}${pastedText}${draft.slice(end)}`;
+      const nextCursor = start + pastedText.length;
+      setCursorPosition(nextCursor);
+      setCommandPaletteOpen(true);
+      onDraftChange(nextDraft);
+      onFileMentionChange(nextDraft, nextCursor);
+      requestAnimationFrame(() => {
+        textarea.focus();
+        textarea.setSelectionRange(nextCursor, nextCursor);
+      });
+    }
+    onImagesPasted(files);
+  };
+
   return (
     <div ref={composerWrapRef} className="composer-wrap">
       <TodoProgressCard todos={todos} />
@@ -251,9 +283,15 @@ export function ChatComposer({
               onSelect={selectCommand}
             />
           ) : null}
+          <ImageAttachmentStrip
+            images={pendingImages}
+            onRemove={onRemoveImage}
+            disabled={sending || canceling}
+          />
           <textarea
             ref={textareaRef}
             value={draft}
+            onPaste={handlePaste}
             onChange={(event) => {
               const value = event.target.value;
               const cursor = event.target.selectionStart ?? value.length;
@@ -371,7 +409,12 @@ export function ChatComposer({
           </div>
           <button
             className={isBusy ? "send-button stop" : "send-button"}
-            disabled={sending || canceling || !selectedSessionId || (!isBusy && !draft.trim())}
+            disabled={
+              sending ||
+              canceling ||
+              !selectedSessionId ||
+              (!isBusy && !draft.trim() && pendingImages.length === 0)
+            }
             onClick={() => (isBusy ? onCancel() : onSubmit())}
             title={isBusy ? t("Stop current turn") : t("Send prompt")}
           >

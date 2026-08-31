@@ -940,6 +940,7 @@ mod tests {
                 base_url: "https://test.com".into(),
                 context_window: 128000,
                 max_output_tokens: 4096,
+                supports_images: false,
             },
         }
     }

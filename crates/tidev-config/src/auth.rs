@@ -245,6 +245,7 @@ pub struct ModelSummary {
     pub base_url: String,
     pub context_window: usize,
     pub max_output_tokens: usize,
+    pub supports_images: bool,
 }
 
 impl ModelSummary {

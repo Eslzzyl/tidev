@@ -21,6 +21,11 @@ import type {
 import type { InstructionNotice, StreamMessage } from "../types/chat";
 import { parseSlashCommand } from "../commands";
 import { asString, eventPayload } from "../utils/events";
+import {
+  createPendingImages,
+  pendingImagesToPromptAttachments,
+  type PendingImage,
+} from "../utils/imageAttachments";
 import { toolCallEntry, toolResultStatus, type ToolCallEntry } from "../utils/round";
 import i18n from "../i18n";
 
@@ -250,6 +255,7 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
   const [models, setModels] = useState<Model[]>([]);
   const [todos, setTodos] = useState<TodoItem[]>([]);
   const [draft, setDraft] = useState("");
+  const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
   const pendingDraft = useUIStore((s) => s.pendingDraft);
   const setPendingDraft = useUIStore((s) => s.setPendingDraft);
 
@@ -274,18 +280,39 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
   const [error, setError] = useState<string | null>(null);
   const [fileMention, setFileMention] = useState<{ query: string; atPos: number } | null>(null);
   const [fileMentionIndex, setFileMentionIndex] = useState(0);
+  const activeModel = useMemo(
+    () =>
+      models.find((model) => model.active) ??
+      models.find(
+        (model) =>
+          model.model_id === selectedSession?.model_id &&
+          model.provider_id === selectedSession?.provider_id,
+      ),
+    [models, selectedSession],
+  );
   const selectedSessionRef = useRef<string | null>(null);
   const sessionsRef = useRef<Session[]>([]);
   const instructionNoticesRef = useRef<InstructionNotice[]>([]);
   const instructionNoticeRevisionRef = useRef(0);
   const shownInstructionSourcesRef = useRef<Set<string>>(new Set());
   const instructionToolSessionsRef = useRef<Set<string>>(new Set());
+  const pendingBackendMessageSessionsRef = useRef(new Map<string, string>());
+  const pendingImagesRef = useRef<PendingImage[]>([]);
   const cursorRef = useRef<number | null>(
     Number(localStorage.getItem("tidev:last-event-cursor")) || null,
   );
   useEffect(() => {
     sessionsRef.current = sessions;
   }, [sessions]);
+  useEffect(() => {
+    pendingImagesRef.current = pendingImages;
+  }, [pendingImages]);
+  useEffect(
+    () => () => {
+      for (const image of pendingImagesRef.current) URL.revokeObjectURL(image.previewUrl);
+    },
+    [],
+  );
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setDebouncedSessionSearch(sessionSearch);
@@ -384,6 +411,38 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
     [draft, fileMention],
   );
 
+  const handleImagesPasted = useCallback(
+    (files: File[]) => {
+      if (files.length === 0) return;
+      if (!activeModel?.supports_vision) {
+        setError(i18n.t("Current model does not support image attachments"));
+        return;
+      }
+      setError(null);
+      setPendingImages((current) => [...current, ...createPendingImages(files)]);
+    },
+    [activeModel],
+  );
+
+  const removePendingImage = useCallback((id: string) => {
+    setPendingImages((current) => {
+      const removed = current.find((image) => image.id === id);
+      if (removed) URL.revokeObjectURL(removed.previewUrl);
+      return current.filter((image) => image.id !== id);
+    });
+  }, []);
+
+  const clearPendingImages = useCallback(() => {
+    setPendingImages((current) => {
+      for (const image of current) URL.revokeObjectURL(image.previewUrl);
+      return [];
+    });
+  }, []);
+
+  const releasePendingImages = (images: PendingImage[]) => {
+    for (const image of images) URL.revokeObjectURL(image.previewUrl);
+  };
+
   const clearPendingInstructionNotices = useCallback(() => {
     instructionNoticesRef.current = [];
     instructionNoticeRevisionRef.current += 1;
@@ -401,7 +460,19 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
     try {
       const response = await api.listMessages(sessionId);
       if (selectedSessionRef.current === sessionId) {
-        setMessages(response.messages);
+        const loadedIds = new Set(response.messages.map((record) => record.message.id));
+        for (const [messageId, messageSessionId] of pendingBackendMessageSessionsRef.current) {
+          if (messageSessionId === sessionId && loadedIds.has(messageId)) {
+            pendingBackendMessageSessionsRef.current.delete(messageId);
+          }
+        }
+        setMessages((current) => [
+          ...response.messages,
+          ...current.filter(
+            (record) =>
+              pendingBackendMessageSessionsRef.current.get(record.message.id) === sessionId,
+          ),
+        ]);
       }
       return true;
     } catch (reason) {
@@ -476,10 +547,11 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
       resetInstructionState();
       setStreams({});
       setDraft("");
+      clearPendingImages();
       setFileMention(null);
       setError(null);
     },
-    [clearPendingStreamUpdates, onSelectSessionRoute, resetInstructionState],
+    [clearPendingImages, clearPendingStreamUpdates, onSelectSessionRoute, resetInstructionState],
   );
 
   useEffect(() => {
@@ -614,12 +686,20 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
         const message = payload.message as Message | undefined;
         const appData = payload.app_data as MessageRecord["app_data"] | undefined;
         touchSession(sessionId);
-        if (message && payload.queued !== true && selectedSessionRef.current === sessionId) {
-          setMessages((current) =>
-            current.some((item) => item.message.id === message.id)
-              ? current
-              : [...current, { message, app_data: appData ?? {} }],
-          );
+        if (message && selectedSessionRef.current === sessionId) {
+          if (payload.queued === true) {
+            pendingBackendMessageSessionsRef.current.set(message.id, sessionId);
+          } else {
+            pendingBackendMessageSessionsRef.current.delete(message.id);
+          }
+          setMessages((current) => {
+            const index = current.findIndex((item) => item.message.id === message.id);
+            const record = { message, app_data: appData ?? {} };
+            if (index < 0) return [...current, record];
+            const next = current.slice();
+            next[index] = record;
+            return next;
+          });
         }
         return;
       }
@@ -1008,12 +1088,21 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
   const submitWelcome = async (workspaceRoot: string) => {
     const content = draft.trim();
     const selectedWorkspaceRoot = workspaceRoot.trim();
-    if (!content || !selectedWorkspaceRoot || welcomeSending) return;
+    const submittedImages = pendingImages;
+    if ((!content && submittedImages.length === 0) || !selectedWorkspaceRoot || welcomeSending)
+      return;
+    if (submittedImages.length > 0 && !activeModel?.supports_vision) {
+      setError(i18n.t("Current model does not support image attachments"));
+      return;
+    }
     setWelcomeSending(true);
     setError(null);
+    setPendingImages([]);
+    const messageId = crypto.randomUUID();
     try {
+      const attachments = await pendingImagesToPromptAttachments(submittedImages);
       const response = await api.createSession({
-        title: content.slice(0, 80),
+        title: (content || i18n.t("Image prompt")).slice(0, 80),
         workspace_root: selectedWorkspaceRoot,
       });
       setSessionSearch("");
@@ -1032,11 +1121,18 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
         response.session.session_id,
         content,
         mode,
-        crypto.randomUUID(),
+        messageId,
         thinkingLevel,
+        attachments,
       );
+      if (submittedImages.length > 0) {
+        await loadMessages(response.session.session_id);
+      }
+      releasePendingImages(submittedImages);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : i18n.t("Failed to start conversation"));
+      setDraft(content);
+      setPendingImages((current) => [...submittedImages, ...current]);
     } finally {
       setWelcomeSending(false);
     }
@@ -1192,10 +1288,15 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
     const raw = draft;
     const content = raw.trim();
     const sessionId = selectedSessionRef.current;
-    if (!content || !sessionId || sending) return;
+    const submittedImages = pendingImages;
+    if ((!content && submittedImages.length === 0) || !sessionId || sending) return;
+    if (submittedImages.length > 0 && !activeModel?.supports_vision) {
+      setError(i18n.t("Current model does not support image attachments"));
+      return;
+    }
     setFileMention(null);
     // Intercept slash commands before sending as a prompt.
-    if (content.startsWith("/")) {
+    if (submittedImages.length === 0 && content.startsWith("/")) {
       const handled = await handleSlashCommand(content);
       if (handled) {
         setDraft("");
@@ -1206,11 +1307,18 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
     setSending(true);
     setScrollToBottomRequest((current) => current + 1);
     setDraft("");
+    setPendingImages([]);
     try {
-      await api.sendPrompt(sessionId, content, mode, messageId, thinkingLevel);
+      const attachments = await pendingImagesToPromptAttachments(submittedImages);
+      await api.sendPrompt(sessionId, content, mode, messageId, thinkingLevel, attachments);
+      if (submittedImages.length > 0) {
+        await loadMessages(sessionId);
+      }
+      releasePendingImages(submittedImages);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : i18n.t("Failed to send prompt"));
       setDraft(content);
+      setPendingImages((current) => [...submittedImages, ...current]);
     } finally {
       setSending(false);
     }
@@ -1273,13 +1381,6 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
     () => Object.values(streams).filter((item) => item.key.startsWith(`${selectedSessionId}:`)),
     [selectedSessionId, streams],
   );
-  const activeModel =
-    models.find((model) => model.active) ??
-    models.find(
-      (model) =>
-        model.model_id === selectedSession?.model_id &&
-        model.provider_id === selectedSession?.provider_id,
-    );
 
   return {
     authChecking,
@@ -1301,6 +1402,7 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
     models,
     todos,
     draft,
+    pendingImages,
     mode,
     loading,
     sending,
@@ -1342,6 +1444,8 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
     cancelSession,
     updateFileMention,
     handleFileSelect,
+    handleImagesPasted,
+    removePendingImage,
     instructionNotices,
   };
 }

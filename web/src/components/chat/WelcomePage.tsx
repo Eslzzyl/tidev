@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ClipboardEvent } from "react";
 import { ChevronDown, Folder, GitBranch, LoaderCircle, Send } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -9,6 +9,8 @@ import type { Model, WorkspaceContext } from "../../types/api";
 import { CommandPopover } from "../CommandPopover";
 import { FileMentionPopover } from "../FileMentionPopover";
 import { ModelPicker } from "../ModelPicker";
+import { ImageAttachmentStrip } from "./ImageAttachments";
+import { pastedImageFiles, type PendingImage } from "../../utils/imageAttachments";
 
 export interface WelcomePageProps {
   draft: string;
@@ -32,6 +34,9 @@ export interface WelcomePageProps {
   onFileMentionIndexChange: (index: number) => void;
   onFileSelect: (path: string) => number | undefined;
   onFileMentionClose: () => void;
+  pendingImages: PendingImage[];
+  onImagesPasted: (files: File[]) => void;
+  onRemoveImage: (id: string) => void;
 }
 
 export function WelcomePage({
@@ -56,6 +61,9 @@ export function WelcomePage({
   onFileMentionIndexChange,
   onFileSelect,
   onFileMentionClose,
+  pendingImages,
+  onImagesPasted,
+  onRemoveImage,
 }: WelcomePageProps) {
   const { t } = useTranslation();
   const compositionRef = useRef(false);
@@ -248,6 +256,30 @@ export function WelcomePage({
       textarea.focus();
       textarea.setSelectionRange(nextCursor, nextCursor);
     });
+  };
+
+  const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = pastedImageFiles(event.clipboardData);
+    if (files.length === 0) return;
+
+    event.preventDefault();
+    const pastedText = event.clipboardData.getData("text/plain");
+    if (pastedText) {
+      const textarea = event.currentTarget;
+      const start = textarea.selectionStart ?? draft.length;
+      const end = textarea.selectionEnd ?? start;
+      const nextDraft = `${draft.slice(0, start)}${pastedText}${draft.slice(end)}`;
+      const nextCursor = start + pastedText.length;
+      setCursorPosition(nextCursor);
+      setCommandPaletteOpen(true);
+      onChangeDraft(nextDraft);
+      onFileMentionChange(nextDraft, nextCursor);
+      requestAnimationFrame(() => {
+        textarea.focus();
+        textarea.setSelectionRange(nextCursor, nextCursor);
+      });
+    }
+    onImagesPasted(files);
   };
 
   const selectWorkspace = async (path: string) => {
@@ -464,9 +496,15 @@ export function WelcomePage({
                 onSelect={selectCommand}
               />
             ) : null}
+            <ImageAttachmentStrip
+              images={pendingImages}
+              onRemove={onRemoveImage}
+              disabled={loading || sending}
+            />
             <textarea
               ref={textareaRef}
               value={draft}
+              onPaste={handlePaste}
               onChange={(event) => {
                 const value = event.target.value;
                 const cursor = event.target.selectionStart ?? value.length;
@@ -586,7 +624,12 @@ export function WelcomePage({
             </div>
             <button
               className="send-button"
-              disabled={!draft.trim() || !activeWorkspaceRoot || loading || sending}
+              disabled={
+                (!draft.trim() && pendingImages.length === 0) ||
+                !activeWorkspaceRoot ||
+                loading ||
+                sending
+              }
               onClick={() => onSubmit(activeWorkspaceRoot)}
               title={t("Start conversation")}
             >

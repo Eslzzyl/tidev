@@ -36,6 +36,7 @@ import type {
 } from "../../types/api";
 import type { InstructionNotice, StreamMessage } from "../../types/chat";
 import { ChatScrollContext } from "./ChatScrollContext";
+import { MessageImageGallery } from "./ImageAttachments";
 import { CopyButton } from "../ui/CopyButton";
 import { ExpandableBody } from "../ui/ExpandableBody";
 import { InstructionMessage, SystemMessageBlock } from "../renderers/SystemMessageBlock";
@@ -705,7 +706,8 @@ function UserMessageItem({
   return (
     <article className="chat-message user-message">
       <div className="user-message-inner">
-        <div className="user-message-bubble">{content}</div>
+        {content ? <div className="user-message-bubble">{content}</div> : null}
+        <MessageImageGallery attachments={round.userMessage.attachments} />
         <div className="user-message-meta">
           {userTime ? <time>{userTime}</time> : null}
           <CopyButton content={content} />

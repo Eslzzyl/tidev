@@ -772,6 +772,7 @@ impl AppConfig {
                     base_url: provider.base_url.clone(),
                     context_window: model.context_window,
                     max_output_tokens: model.max_output_tokens,
+                    supports_images: model.supports_images,
                 });
             }
         }

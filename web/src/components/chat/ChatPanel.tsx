@@ -12,6 +12,7 @@ import type {
 } from "../../types/api";
 import type { InstructionNotice, StreamMessage } from "../../types/chat";
 import { ChatComposer } from "./ChatComposer";
+import type { PendingImage } from "../../utils/imageAttachments";
 import { ApprovalCard, MessageList } from "./MessageList";
 import { SessionSidebar } from "./SessionSidebar";
 import { shortPath } from "../../utils/chat";
@@ -45,6 +46,7 @@ export interface ChatPanelProps {
   mobileSidebarOpen: boolean;
   fileMention: { query: string; atPos: number } | null;
   fileMentionIndex: number;
+  pendingImages: PendingImage[];
   welcome: ReactNode;
   onSessionSearchChange: (value: string) => void;
   onWorkspaceRootFilterChange: (workspaceRoot: string | null) => void;
@@ -71,6 +73,8 @@ export interface ChatPanelProps {
   onFileMentionIndexChange: (index: number) => void;
   onFileSelect: (path: string) => number | undefined;
   onFileMentionClose: () => void;
+  onImagesPasted: (files: File[]) => void;
+  onRemoveImage: (id: string) => void;
   focusComposer?: boolean;
   onComposerFocus?: () => void;
   scrollToBottomRequest?: number;
@@ -105,6 +109,7 @@ export function ChatPanel({
   mobileSidebarOpen,
   fileMention,
   fileMentionIndex,
+  pendingImages,
   welcome,
   onSessionSearchChange,
   onWorkspaceRootFilterChange,
@@ -131,6 +136,8 @@ export function ChatPanel({
   onFileMentionIndexChange,
   onFileSelect,
   onFileMentionClose,
+  onImagesPasted,
+  onRemoveImage,
   focusComposer = false,
   onComposerFocus,
   scrollToBottomRequest = 0,
@@ -239,6 +246,7 @@ export function ChatPanel({
               selectedSessionId={selectedSessionId}
               fileMention={fileMention}
               fileMentionIndex={fileMentionIndex}
+              pendingImages={pendingImages}
               onDraftChange={onDraftChange}
               onModeChange={onModeChange}
               onSelectModel={onSelectModel}
@@ -249,6 +257,8 @@ export function ChatPanel({
               onFileMentionIndexChange={onFileMentionIndexChange}
               onFileSelect={onFileSelect}
               onFileMentionClose={onFileMentionClose}
+              onImagesPasted={onImagesPasted}
+              onRemoveImage={onRemoveImage}
               autoFocus={focusComposer}
               onAutoFocus={onComposerFocus}
             />

@@ -107,6 +107,7 @@ export default function App() {
     models,
     todos,
     draft,
+    pendingImages,
     mode,
     loading,
     sending,
@@ -146,6 +147,8 @@ export default function App() {
     cancelSession,
     updateFileMention,
     handleFileSelect,
+    handleImagesPasted,
+    removePendingImage,
   } = useChatRuntime({
     routeSessionId,
     onSelectSessionRoute,
@@ -224,6 +227,9 @@ export default function App() {
           onFileMentionIndexChange={setFileMentionIndex}
           onFileSelect={handleFileSelect}
           onFileMentionClose={() => setFileMention(null)}
+          pendingImages={pendingImages}
+          onImagesPasted={handleImagesPasted}
+          onRemoveImage={removePendingImage}
         />
       }
       onSessionSearchChange={setSessionSearch}
@@ -256,6 +262,9 @@ export default function App() {
       onFileMentionIndexChange={setFileMentionIndex}
       onFileSelect={handleFileSelect}
       onFileMentionClose={() => setFileMention(null)}
+      pendingImages={pendingImages}
+      onImagesPasted={handleImagesPasted}
+      onRemoveImage={removePendingImage}
       focusComposer={focusComposerAfterWelcome}
       onComposerFocus={clearComposerFocusRequest}
       scrollToBottomRequest={scrollToBottomRequest}

@@ -198,6 +198,7 @@ export interface Model {
   model_display_name: string;
   connected: boolean;
   active: boolean;
+  supports_vision: boolean;
   thinking_levels: string[];
   thinking_level: string;
 }
@@ -313,12 +314,20 @@ export interface CreateSessionResponse {
   session: Session;
 }
 
+export interface PromptImageAttachment {
+  type: "image";
+  filename: string;
+  mime: string;
+  data: number[];
+}
+
 export interface SendMessageRequest {
   content: string;
   thinking_level?: string;
   model_id?: string;
   provider_id?: string;
   mode?: string;
+  attachments?: PromptImageAttachment[];
 }
 
 export interface SendMessageResponse {

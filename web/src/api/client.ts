@@ -38,6 +38,7 @@ import type {
   RenameItemResponse,
   RemoveItemResponse,
   ReadBase64Response,
+  PromptImageAttachment,
   GitStatusResponse,
   GitBranchResponse,
   GitLogResponse,
@@ -183,16 +184,21 @@ export const api = {
     mode: "build" | "plan",
     messageId: string,
     thinkingLevel?: string,
-  ) =>
-    fetchJson<import("../types/api").PromptResponse>(sessionPath(sessionId, "prompts"), {
+    attachments?: PromptImageAttachment[],
+  ) => {
+    const body: Record<string, unknown> = {
+      content,
+      mode,
+      message_id: messageId,
+      thinking_level: thinkingLevel,
+    };
+    if (attachments && attachments.length > 0) body.attachments = attachments;
+
+    return fetchJson<import("../types/api").PromptResponse>(sessionPath(sessionId, "prompts"), {
       method: "POST",
-      body: JSON.stringify({
-        content,
-        mode,
-        message_id: messageId,
-        thinking_level: thinkingLevel,
-      }),
-    }),
+      body: JSON.stringify(body),
+    });
+  },
 
   retrySession: (sessionId: string, messageId: string) =>
     fetchJson<{ accepted: boolean }>(sessionPath(sessionId, "retry"), {

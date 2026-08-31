@@ -18,7 +18,7 @@ use tidev_core::{
     ApprovedTool, EventCursor, EventEnvelope, EventReplay, FrontendRequest, FrontendResponse, Mode,
     PromptSubmission,
 };
-use tidev_llm::message::Message;
+use tidev_llm::message::{Message, MessageAttachment};
 use tidev_utils::path::{display_path_with_tilde, expand_tilde};
 use tokio::fs;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -87,6 +87,44 @@ struct PromptRequest {
     content: String,
     mode: Option<Mode>,
     thinking_level: Option<String>,
+    #[serde(default)]
+    attachments: Vec<PromptImageAttachmentRequest>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PromptImageAttachmentRequest {
+    #[serde(rename = "type")]
+    attachment_type: String,
+    filename: String,
+    mime: String,
+    data: Vec<u8>,
+}
+
+impl PromptImageAttachmentRequest {
+    fn into_message_attachment(self) -> Result<MessageAttachment, ApiError> {
+        if self.attachment_type != "image" {
+            return Err(ApiError::bad_request(
+                "prompt attachments must have type image",
+            ));
+        }
+        if !self.mime.starts_with("image/") {
+            return Err(ApiError::bad_request(
+                "prompt attachment MIME must be an image",
+            ));
+        }
+        if self.data.is_empty() {
+            return Err(ApiError::bad_request(
+                "prompt image attachment cannot be empty",
+            ));
+        }
+
+        Ok(MessageAttachment::Image {
+            filename: self.filename,
+            mime: self.mime,
+            file_size: self.data.len() as u64,
+            data: self.data,
+        })
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -237,6 +275,7 @@ struct ModelDto {
     model_display_name: String,
     connected: bool,
     active: bool,
+    supports_vision: bool,
     thinking_levels: Vec<String>,
     thinking_level: String,
 }
@@ -631,6 +670,7 @@ async fn list_models(State(state): State<Arc<AppState>>) -> Json<Vec<ModelDto>> 
             ModelDto {
                 connected: auth.api_key(&model.provider_id).is_some(),
                 active: is_active,
+                supports_vision: model.supports_images,
                 provider_id: model.provider_id,
                 provider_display_name: model.provider_display_name,
                 model_id: model.model_id,
@@ -662,6 +702,7 @@ async fn select_model(
         model_display_name: model.display_name.clone(),
         connected: model.api_key.is_some(),
         active: true,
+        supports_vision: model.supports_images,
         thinking_levels,
         thinking_level: model.thinking_level.to_string(),
     };
@@ -866,7 +907,7 @@ async fn submit_prompt(
     Path(session_id): Path<Uuid>,
     Json(request): Json<PromptRequest>,
 ) -> Result<Json<PromptResponse>, ApiError> {
-    if request.content.trim().is_empty() {
+    if request.content.trim().is_empty() && request.attachments.is_empty() {
         return Err(ApiError::bad_request("prompt content cannot be empty"));
     }
     if state
@@ -877,8 +918,19 @@ async fn submit_prompt(
     {
         return Err(ApiError::not_found("session not found"));
     }
+    let attachments = request
+        .attachments
+        .into_iter()
+        .map(PromptImageAttachmentRequest::into_message_attachment)
+        .collect::<Result<Vec<_>, _>>()?;
+    if !attachments.is_empty() && !state.runtime.active_model().supports_images {
+        return Err(ApiError::bad_request(
+            "current model does not support image attachments",
+        ));
+    }
     let mut submission =
         PromptSubmission::new(request.content, request.mode.unwrap_or(Mode::Build));
+    submission.attachments = attachments;
     if let Some(message_id) = request.message_id {
         submission.message_id = message_id;
     }
@@ -2988,6 +3040,43 @@ mod tests {
         let req_build: PromptRequest = serde_json::from_str(json_data_build).unwrap();
         assert_eq!(req_build.content, "run");
         assert_eq!(req_build.mode, Some(Mode::Build));
+        assert!(req_build.attachments.is_empty());
+    }
+
+    #[test]
+    fn prompt_image_attachment_request_preserves_bytes_and_size() {
+        let request: PromptImageAttachmentRequest = serde_json::from_str(
+            r#"{"type":"image","filename":"capture.png","mime":"image/png","data":[1,2,3]}"#,
+        )
+        .unwrap();
+
+        let attachment = request.into_message_attachment().unwrap();
+        match attachment {
+            MessageAttachment::Image {
+                filename,
+                mime,
+                data,
+                file_size,
+            } => {
+                assert_eq!(filename, "capture.png");
+                assert_eq!(mime, "image/png");
+                assert_eq!(data, vec![1, 2, 3]);
+                assert_eq!(file_size, 3);
+            }
+            other => panic!("expected image attachment, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn prompt_image_attachment_request_rejects_non_image_mime() {
+        let request = PromptImageAttachmentRequest {
+            attachment_type: "image".to_owned(),
+            filename: "capture.png".to_owned(),
+            mime: "text/plain".to_owned(),
+            data: vec![1],
+        };
+
+        assert!(request.into_message_attachment().is_err());
     }
 
     #[test]
