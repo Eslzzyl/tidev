@@ -137,17 +137,14 @@ export function AgentsSection() {
   };
 
   return (
-    <section className="space-y-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h2 className="flex items-center gap-2 text-sm font-medium text-neutral-900 dark:text-neutral-100">
-            <Bot className="h-4 w-4" />
-            {t("Agents")}
-          </h2>
-          <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
-            {t("Configure the subagents available to the task tool")}
-          </p>
-        </div>
+    <section className="space-y-6">
+      <div>
+        <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
+          {t("Agents")}
+        </h2>
+        <p className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
+          {t("Configure the subagents available to the task tool")}
+        </p>
       </div>
 
       {isLoading ? (
@@ -156,39 +153,45 @@ export function AgentsSection() {
           {t("Loading agent settings...")}
         </div>
       ) : loadError ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400">
+        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400">
           {t("Failed to load agent settings")}
         </div>
       ) : (
         <>
-          <label className="flex items-center justify-between rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
-            <div>
-              <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
-                {t("Enable subagents")}
-              </span>
-              <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                {t("Allow the task tool to spawn subagents")}
-              </p>
+          <div className="space-y-3">
+            <label className="text-xs font-semibold uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
+              {t("Subagent Capabilities")}
+            </label>
+            <div className="rounded-xl border border-neutral-200/80 bg-neutral-50/50 p-4 dark:border-neutral-800/80 dark:bg-neutral-800/30">
+              <label className="flex items-center justify-between gap-4 cursor-pointer">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white shadow-xs text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
+                    <Bot className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <span className="block truncate text-xs font-medium text-neutral-900 dark:text-neutral-100">
+                      {t("Enable subagents")}
+                    </span>
+                    <span className="block text-[11px] text-neutral-500 dark:text-neutral-400">
+                      {t("Allow the task tool to spawn subagents")}
+                    </span>
+                  </div>
+                </div>
+                <Switch
+                  aria-label={t("Enable subagents")}
+                  checked={subagentConfig?.enabled ?? false}
+                  disabled={isSavingConfig}
+                  onCheckedChange={() => void handleToggle()}
+                />
+              </label>
             </div>
-            <Switch
-              aria-label={t("Enable subagents")}
-              checked={subagentConfig?.enabled ?? false}
-              disabled={isSavingConfig}
-              onCheckedChange={() => void handleToggle()}
-            />
-          </label>
+          </div>
 
-          <div className="rounded-lg border border-neutral-200 dark:border-neutral-800">
-            <div className="border-b border-neutral-200 px-3 py-2 dark:border-neutral-800">
-              <h3 className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
-                {t("Subagent models")}
-              </h3>
-              <p className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
-                {t("Choose a model for each subagent or inherit the main agent model")}
-              </p>
-            </div>
-
-            <div className="divide-y divide-neutral-200 dark:divide-neutral-800">
+          <div className="space-y-3">
+            <label className="text-xs font-semibold uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
+              {t("Subagent models")}
+            </label>
+            <div className="rounded-xl border border-neutral-200/80 bg-neutral-50/50 divide-y divide-neutral-200/60 dark:border-neutral-800/80 dark:bg-neutral-800/30 dark:divide-neutral-800/60">
               {AGENTS.map((agent) => {
                 const configuredModel = agentModels?.agent_models[agent.type];
                 const configuredModelInfo = findModel(models, configuredModel);
@@ -209,31 +212,31 @@ export function AgentsSection() {
                   : INHERIT_MODEL;
 
                 return (
-                  <div key={agent.type} className="space-y-2 p-3">
+                  <div key={agent.type} className="space-y-3 p-4">
                     <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                       <div>
                         <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
+                          <span className="text-xs font-semibold text-neutral-900 dark:text-neutral-100">
                             {t(agent.label)}
                           </span>
-                          <span className="rounded-full bg-neutral-100 px-1.5 py-0.5 text-[10px] text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400">
+                          <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-medium text-neutral-600 shadow-xs dark:bg-neutral-800 dark:text-neutral-400">
                             {agent.readOnly ? t("Read-only") : t("Build")}
                           </span>
                         </div>
-                        <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                        <p className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-0.5">
                           {t(agent.description)}
                         </p>
                       </div>
                       {selectedModel && (
-                        <span className="text-xs text-neutral-400 dark:text-neutral-500">
+                        <span className="font-mono text-[10px] text-neutral-400 dark:text-neutral-500">
                           {modelDisplayName(selectedModel)}
                         </span>
                       )}
                     </div>
 
-                    <div className="grid gap-2 sm:grid-cols-2">
+                    <div className="grid gap-3 sm:grid-cols-2">
                       <label className="flex flex-col gap-1">
-                        <span className="text-xs text-neutral-500 dark:text-neutral-400">
+                        <span className="text-[11px] font-medium text-neutral-600 dark:text-neutral-400">
                           {t("Model")}
                         </span>
                         <Select
@@ -264,7 +267,7 @@ export function AgentsSection() {
                       </label>
 
                       <label className="flex flex-col gap-1">
-                        <span className="text-xs text-neutral-500 dark:text-neutral-400">
+                        <span className="text-[11px] font-medium text-neutral-600 dark:text-neutral-400">
                           {t("Thinking level")}
                         </span>
                         <Select

@@ -92,19 +92,19 @@ export function SkillsSection() {
   const customCount = useMemo(() => skills.filter((s) => !s.is_bundled).length, [skills]);
 
   return (
-    <section className="space-y-4">
+    <section className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <h2 className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
+            <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
               {t("Skills")}
             </h2>
             <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] font-medium text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400">
               {skills.length}
             </span>
           </div>
-          <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
+          <p className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
             {t("Browse, preview, and load agent skills and companion documents")}
           </p>
         </div>

@@ -1848,6 +1848,15 @@
   padding: 16px;
 }
 
+.ui-dialog-wide {
+  width: min(720px, calc(100vw - 32px));
+  max-height: min(90dvh, 840px);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .ui-dialog-line-content {
   width: min(280px, calc(100vw - 32px));
 }

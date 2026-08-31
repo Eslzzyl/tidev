@@ -49,12 +49,16 @@ export function openBackendEvents(
   onEvent: (event: EventEnvelope) => void,
   onResync: () => void,
   onError: () => void,
+  onOpen?: () => void,
 ): EventSource {
   const params = new URLSearchParams();
   if (after !== null) params.set("after", String(after));
   addAuthToken(params);
 
   const source = new EventSource(eventUrl("/api/events", params));
+  if (onOpen) {
+    source.onopen = onOpen;
+  }
   source.addEventListener("backend_event", (event) => {
     const envelope = parseBackendEvent((event as MessageEvent<string>).data);
     if (envelope) onEvent(envelope);
@@ -68,11 +72,15 @@ export function openBackendEvents(
 export function openFrontendRequests(
   onRequest: (request: FrontendRequest) => void,
   onError: () => void,
+  onOpen?: () => void,
 ): EventSource {
   const params = new URLSearchParams();
   addAuthToken(params);
 
   const source = new EventSource(eventUrl("/api/requests", params));
+  if (onOpen) {
+    source.onopen = onOpen;
+  }
   source.addEventListener("frontend_request", (event) => {
     const request = parseFrontendRequest((event as MessageEvent<string>).data);
     if (request) onRequest(request);

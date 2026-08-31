@@ -1,5 +1,14 @@
 import { useState } from "react";
-import { KeyRound, Plus, Server, Trash2, X } from "lucide-react";
+import {
+  KeyRound,
+  Plus,
+  Server,
+  Trash2,
+  X,
+  Sparkles,
+  ChevronDown,
+  ChevronRight,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   useConnectProvider,
@@ -9,7 +18,7 @@ import {
   useProviders,
 } from "../../hooks/workspaceQueries";
 import type { CreateModelRequest, CreateProviderRequest, ProviderInfo } from "../../types/api";
-import { Button, Dialog, Field, IconButton, Input, Select } from "../ui";
+import { Button, Dialog, Field, IconButton, Input, Select, Switch } from "../ui";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 
 const API_TYPE_OPTIONS = [
@@ -56,6 +65,169 @@ const EMPTY_PROVIDER: ProviderDraft = {
   api_key: "",
   models: [{ ...EMPTY_MODEL }],
 };
+
+interface ProviderTemplate {
+  id: string;
+  name: string;
+  provider_id: string;
+  display_name: string;
+  base_url: string;
+  api_type: string;
+  models: ModelDraft[];
+}
+
+const PROVIDER_TEMPLATES: ProviderTemplate[] = [
+  {
+    id: "openai",
+    name: "OpenAI",
+    provider_id: "openai-custom",
+    display_name: "OpenAI",
+    base_url: "https://api.openai.com/v1",
+    api_type: "openai_chat_completions",
+    models: [
+      {
+        model_id: "gpt-4o",
+        display_name: "GPT-4o",
+        request_model_id: "gpt-4o",
+        context_window: "128000",
+        max_output_tokens: "16384",
+        temperature: "0.7",
+        supports_images: true,
+      },
+      {
+        model_id: "gpt-4o-mini",
+        display_name: "GPT-4o Mini",
+        request_model_id: "gpt-4o-mini",
+        context_window: "128000",
+        max_output_tokens: "16384",
+        temperature: "0.7",
+        supports_images: true,
+      },
+    ],
+  },
+  {
+    id: "anthropic",
+    name: "Anthropic",
+    provider_id: "anthropic-custom",
+    display_name: "Anthropic Claude",
+    base_url: "https://api.anthropic.com/v1",
+    api_type: "anthropic",
+    models: [
+      {
+        model_id: "claude-3-7-sonnet",
+        display_name: "Claude 3.7 Sonnet",
+        request_model_id: "claude-3-7-sonnet-20250219",
+        context_window: "200000",
+        max_output_tokens: "64000",
+        temperature: "0.7",
+        supports_images: true,
+      },
+      {
+        model_id: "claude-3-5-sonnet",
+        display_name: "Claude 3.5 Sonnet",
+        request_model_id: "claude-3-5-sonnet-20241022",
+        context_window: "200000",
+        max_output_tokens: "8192",
+        temperature: "0.7",
+        supports_images: true,
+      },
+    ],
+  },
+  {
+    id: "gemini",
+    name: "Google Gemini",
+    provider_id: "google-custom",
+    display_name: "Google Gemini",
+    base_url: "https://generativelanguage.googleapis.com",
+    api_type: "google_gemini",
+    models: [
+      {
+        model_id: "gemini-2.5-flash",
+        display_name: "Gemini 2.5 Flash",
+        request_model_id: "gemini-2.5-flash",
+        context_window: "1048576",
+        max_output_tokens: "65536",
+        temperature: "0.7",
+        supports_images: true,
+      },
+      {
+        model_id: "gemini-2.5-pro",
+        display_name: "Gemini 2.5 Pro",
+        request_model_id: "gemini-2.5-pro",
+        context_window: "2097152",
+        max_output_tokens: "65536",
+        temperature: "0.7",
+        supports_images: true,
+      },
+    ],
+  },
+  {
+    id: "deepseek",
+    name: "DeepSeek",
+    provider_id: "deepseek",
+    display_name: "DeepSeek",
+    base_url: "https://api.deepseek.com/v1",
+    api_type: "openai_chat_completions",
+    models: [
+      {
+        model_id: "deepseek-chat",
+        display_name: "DeepSeek V3",
+        request_model_id: "deepseek-chat",
+        context_window: "64000",
+        max_output_tokens: "8192",
+        temperature: "0.7",
+        supports_images: false,
+      },
+      {
+        model_id: "deepseek-reasoner",
+        display_name: "DeepSeek R1",
+        request_model_id: "deepseek-reasoner",
+        context_window: "64000",
+        max_output_tokens: "8192",
+        temperature: "0.6",
+        supports_images: false,
+      },
+    ],
+  },
+  {
+    id: "openrouter",
+    name: "OpenRouter",
+    provider_id: "openrouter",
+    display_name: "OpenRouter",
+    base_url: "https://openrouter.ai/api/v1",
+    api_type: "openai_chat_completions",
+    models: [
+      {
+        model_id: "anthropic/claude-3.7-sonnet",
+        display_name: "Claude 3.7 Sonnet (OpenRouter)",
+        request_model_id: "anthropic/claude-3.7-sonnet",
+        context_window: "200000",
+        max_output_tokens: "16384",
+        temperature: "0.7",
+        supports_images: true,
+      },
+    ],
+  },
+  {
+    id: "ollama",
+    name: "Ollama (Local)",
+    provider_id: "ollama",
+    display_name: "Ollama Local",
+    base_url: "http://localhost:11434/v1",
+    api_type: "openai_chat_completions",
+    models: [
+      {
+        model_id: "qwen2.5-coder:7b",
+        display_name: "Qwen 2.5 Coder 7B",
+        request_model_id: "qwen2.5-coder:7b",
+        context_window: "32768",
+        max_output_tokens: "8192",
+        temperature: "0.7",
+        supports_images: false,
+      },
+    ],
+  },
+];
 
 function providerDraftToRequest(draft: ProviderDraft): CreateProviderRequest {
   return {
@@ -112,6 +284,7 @@ export function ProvidersSection() {
   const [apiKey, setApiKey] = useState("");
   const [connectError, setConnectError] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>("custom");
   const [draft, setDraft] = useState<ProviderDraft>({
     ...EMPTY_PROVIDER,
     models: [{ ...EMPTY_MODEL }],
@@ -120,6 +293,14 @@ export function ProvidersSection() {
   const [formError, setFormError] = useState<string | null>(null);
   const [providerToDelete, setProviderToDelete] = useState<ProviderInfo | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [expandedModels, setExpandedModels] = useState<Record<string, boolean>>({});
+
+  const toggleModelsExpanded = (providerId: string) => {
+    setExpandedModels((prev) => ({
+      ...prev,
+      [providerId]: !prev[providerId],
+    }));
+  };
 
   const openConnect = (provider: ProviderInfo) => {
     setConnectTarget(provider);
@@ -154,11 +335,32 @@ export function ProvidersSection() {
   };
 
   const openAdd = () => {
+    setSelectedTemplateId("custom");
     setDraft({ ...EMPTY_PROVIDER, models: [{ ...EMPTY_MODEL }] });
     setActiveModelIndex(0);
     setFormError(null);
     setActionError(null);
     setAddOpen(true);
+  };
+
+  const handleSelectTemplate = (templateId: string) => {
+    setSelectedTemplateId(templateId);
+    if (templateId === "custom") {
+      return;
+    }
+    const template = PROVIDER_TEMPLATES.find((tpl) => tpl.id === templateId);
+    if (!template) return;
+
+    setDraft((current) => ({
+      provider_id: template.provider_id,
+      display_name: template.display_name,
+      base_url: template.base_url,
+      api_type: template.api_type,
+      api_key: current.api_key,
+      models: template.models.map((m) => ({ ...m })),
+    }));
+    setActiveModelIndex(0);
+    setFormError(null);
   };
 
   const closeAdd = () => {
@@ -233,19 +435,19 @@ export function ProvidersSection() {
       ...current,
       models: current.models.filter((_, modelIndex) => modelIndex !== index),
     }));
-    setActiveModelIndex(nextIndex);
+    setActiveModelIndex(Math.max(0, nextIndex));
   };
 
   const activeModel = draft.models[activeModelIndex];
 
   return (
-    <section className="space-y-4">
+    <section className="space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
+          <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
             {t("Providers")}
           </h2>
-          <p className="text-xs text-neutral-500 dark:text-neutral-400">
+          <p className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
             {t("Manage provider API keys and custom model endpoints")}
           </p>
         </div>
@@ -262,7 +464,7 @@ export function ProvidersSection() {
 
       {actionError ? (
         <div
-          className="rounded-lg bg-red-50 p-2.5 text-xs text-red-700 dark:bg-red-950/40 dark:text-red-300"
+          className="rounded-xl bg-red-50 p-3 text-xs text-red-700 dark:bg-red-950/40 dark:text-red-300 border border-red-200/60 dark:border-red-900/60"
           role="alert"
         >
           {actionError}
@@ -275,7 +477,7 @@ export function ProvidersSection() {
         </div>
       ) : error ? (
         <div
-          className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400"
+          className="rounded-xl border border-red-200 bg-red-50 p-4 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400"
           role="alert"
         >
           {t("Failed to load providers")}
@@ -298,16 +500,17 @@ export function ProvidersSection() {
               (isConnecting && connectTarget?.id === provider.id) ||
               isDisconnecting ||
               (isDeleting && providerToDelete?.id === provider.id);
+            const isExpanded = expandedModels[provider.id] ?? false;
 
             return (
               <div
                 key={provider.id}
-                className="overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-sm dark:border-neutral-800 dark:bg-neutral-900"
+                className="overflow-hidden rounded-xl border border-neutral-200/80 bg-neutral-50/50 transition shadow-xs dark:border-neutral-800/80 dark:bg-neutral-800/30"
               >
-                <div className="flex flex-wrap items-start justify-between gap-3 p-3.5">
+                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 p-4">
                   <div className="flex min-w-0 items-start gap-3">
                     <span
-                      className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${
+                      className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${
                         provider.connected ? "bg-emerald-500" : "bg-neutral-400"
                       }`}
                       aria-label={provider.connected ? t("Connected") : t("Not connected")}
@@ -317,14 +520,14 @@ export function ProvidersSection() {
                         <span className="truncate text-sm font-semibold text-neutral-900 dark:text-neutral-100">
                           {provider.display_name}
                         </span>
-                        <span className="font-mono text-[10px] text-neutral-500 dark:text-neutral-400">
+                        <span className="font-mono text-[10px] text-neutral-400 dark:text-neutral-500">
                           {provider.id}
                         </span>
                         <span
                           className={`inline-flex rounded-md px-1.5 py-0.5 text-[10px] font-medium ${
                             isBundled
-                              ? "border border-indigo-200/60 bg-indigo-50 text-indigo-700 dark:border-indigo-800/60 dark:bg-indigo-950/50 dark:text-indigo-300"
-                              : "border border-emerald-200/60 bg-emerald-50 text-emerald-700 dark:border-emerald-800/60 dark:bg-emerald-950/50 dark:text-emerald-300"
+                              ? "bg-indigo-50 text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/60"
+                              : "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300 border border-emerald-200/60 dark:border-emerald-800/60"
                           }`}
                         >
                           {isBundled ? t("Preset") : t("Custom")}
@@ -333,14 +536,14 @@ export function ProvidersSection() {
                       <p className="mt-1 truncate font-mono text-xs text-neutral-500 dark:text-neutral-400">
                         {provider.base_url}
                       </p>
-                      <p className="mt-1 text-[11px] text-neutral-500 dark:text-neutral-400">
+                      <p className="mt-1 text-[11px] text-neutral-400 dark:text-neutral-500">
                         {t("{{count}} models", { count: provider.models.length })} ·{" "}
                         {provider.connected ? t("API key configured") : t("API key not configured")}
                       </p>
                     </div>
                   </div>
 
-                  <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+                  <div className="flex shrink-0 flex-wrap items-center gap-1.5">
                     <Button
                       type="button"
                       size="sm"
@@ -378,26 +581,39 @@ export function ProvidersSection() {
                 </div>
 
                 {provider.models.length > 0 ? (
-                  <details className="border-t border-neutral-200 dark:border-neutral-800">
-                    <summary className="cursor-pointer px-3.5 py-2 text-xs font-medium text-neutral-600 dark:text-neutral-400">
-                      {t("View models")}
-                    </summary>
-                    <div className="grid gap-2 border-t border-neutral-200 bg-neutral-50/50 p-3.5 dark:border-neutral-800 dark:bg-neutral-900/50">
-                      {provider.models.map((model) => (
-                        <div
-                          key={model.id}
-                          className="flex items-center justify-between gap-3 rounded-lg border border-neutral-200 bg-white px-2.5 py-2 dark:border-neutral-800 dark:bg-neutral-800/60"
-                        >
-                          <span className="min-w-0 truncate text-xs font-medium text-neutral-800 dark:text-neutral-200">
-                            {model.display_name}
-                          </span>
-                          <span className="shrink-0 font-mono text-[10px] text-neutral-500 dark:text-neutral-400">
-                            {model.id}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </details>
+                  <div className="border-t border-neutral-200/60 dark:border-neutral-800/60">
+                    <button
+                      type="button"
+                      onClick={() => toggleModelsExpanded(provider.id)}
+                      className="flex w-full items-center justify-between px-4 py-2 text-left text-xs font-medium text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200"
+                    >
+                      <span>
+                        {t("View models")} ({provider.models.length})
+                      </span>
+                      {isExpanded ? (
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      ) : (
+                        <ChevronRight className="h-3.5 w-3.5" />
+                      )}
+                    </button>
+                    {isExpanded && (
+                      <div className="grid gap-2 border-t border-neutral-200/60 bg-white/60 p-3.5 dark:border-neutral-800/60 dark:bg-neutral-900/40">
+                        {provider.models.map((model) => (
+                          <div
+                            key={model.id}
+                            className="flex items-center justify-between gap-3 rounded-lg border border-neutral-200/60 bg-white px-3 py-2 dark:border-neutral-800 dark:bg-neutral-800/70"
+                          >
+                            <span className="min-w-0 truncate text-xs font-medium text-neutral-800 dark:text-neutral-200">
+                              {model.display_name}
+                            </span>
+                            <span className="shrink-0 font-mono text-[10px] text-neutral-400 dark:text-neutral-500">
+                              {model.id}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 ) : null}
               </div>
             );
@@ -405,6 +621,7 @@ export function ProvidersSection() {
         </div>
       )}
 
+      {/* Configure Key Dialog */}
       <Dialog.Root open={Boolean(connectTarget)} onOpenChange={(open) => !open && closeConnect()}>
         <Dialog.Content className="ui-dialog-compact" showClose={false}>
           <Dialog.Header>
@@ -421,7 +638,7 @@ export function ProvidersSection() {
             </div>
           </Dialog.Header>
           <form onSubmit={(event) => void handleConnect(event)}>
-            <div className="space-y-4">
+            <div className="space-y-4 py-2">
               <Field
                 label={connectTarget?.display_name}
                 description={connectTarget?.id}
@@ -452,18 +669,21 @@ export function ProvidersSection() {
         </Dialog.Content>
       </Dialog.Root>
 
+      {/* Redesigned Add Provider Dialog */}
       <Dialog.Root open={addOpen} onOpenChange={(open) => !open && closeAdd()}>
-        <Dialog.Content
-          className="max-h-[calc(100dvh-32px)] w-[calc(100vw-32px)] max-w-3xl overflow-x-hidden overflow-y-auto p-0"
-          showClose={false}
-        >
-          <Dialog.Header className="border-b border-neutral-200 px-5 py-4 dark:border-neutral-800 sm:px-6">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <Dialog.Title>{t("Add Provider")}</Dialog.Title>
-                <Dialog.Description>
-                  {t("Create a custom provider with at least one model.")}
-                </Dialog.Description>
+        <Dialog.Content className="ui-dialog-wide" showClose={false}>
+          <Dialog.Header className="border-b border-neutral-200/80 px-6 py-4 dark:border-neutral-800/80 shrink-0">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--accent)] text-white shadow-xs">
+                  <Server className="h-4 w-4" />
+                </div>
+                <div>
+                  <Dialog.Title>{t("Add Provider")}</Dialog.Title>
+                  <Dialog.Description>
+                    {t("Create a custom provider with at least one model.")}
+                  </Dialog.Description>
+                </div>
               </div>
               <IconButton type="button" size="sm" label={t("Close")} onClick={closeAdd}>
                 <X className="h-4 w-4" />
@@ -471,254 +691,290 @@ export function ProvidersSection() {
             </div>
           </Dialog.Header>
 
-          <form onSubmit={(event) => void handleCreate(event)}>
-            <div className="space-y-4 px-5 py-4 sm:px-6">
+          <form
+            onSubmit={(event) => void handleCreate(event)}
+            className="flex flex-col flex-1 min-h-0 overflow-hidden"
+          >
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
               {formError ? (
                 <div
-                  className="rounded-lg bg-red-50 p-2.5 text-xs text-red-700 dark:bg-red-950/40 dark:text-red-300"
+                  className="rounded-xl bg-red-50 p-3 text-xs text-red-700 dark:bg-red-950/40 dark:text-red-300 border border-red-200/60 dark:border-red-900/60"
                   role="alert"
                 >
                   {formError}
                 </div>
               ) : null}
 
-              <div className="space-y-3">
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <Field label={t("Provider ID")} required htmlFor="provider-id">
-                    <Input
-                      id="provider-id"
-                      value={draft.provider_id}
-                      onChange={(event) =>
-                        setDraft((current) => ({ ...current, provider_id: event.target.value }))
-                      }
-                      placeholder="my-provider"
-                      className="font-mono"
-                    />
-                  </Field>
-                  <Field label={t("Display name")} required htmlFor="provider-display-name">
-                    <Input
-                      id="provider-display-name"
-                      value={draft.display_name}
-                      onChange={(event) =>
-                        setDraft((current) => ({ ...current, display_name: event.target.value }))
-                      }
-                      placeholder={t("My Provider")}
-                    />
-                  </Field>
-                </div>
-
-                <Field
-                  label={t("Base URL")}
-                  description={t(
-                    "Use the provider base URL; tidev adds the protocol-specific path.",
-                  )}
-                  required
-                  htmlFor="provider-base-url"
-                >
-                  <Input
-                    id="provider-base-url"
-                    value={draft.base_url}
-                    onChange={(event) =>
-                      setDraft((current) => ({ ...current, base_url: event.target.value }))
-                    }
-                    placeholder="https://api.example.com/v1"
-                    className="font-mono"
-                  />
-                </Field>
-
-                <div className="grid gap-3 sm:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
-                  <Select
-                    label={t("API type")}
-                    value={draft.api_type}
-                    options={API_TYPE_OPTIONS}
-                    triggerClassName="min-w-0 whitespace-nowrap"
-                    onValueChange={(value) =>
-                      setDraft((current) => ({ ...current, api_type: value }))
-                    }
-                  />
-                  <Field label={t("API key")} required htmlFor="new-provider-api-key">
-                    <Input
-                      id="new-provider-api-key"
-                      type="password"
-                      value={draft.api_key}
-                      onChange={(event) =>
-                        setDraft((current) => ({ ...current, api_key: event.target.value }))
-                      }
-                      placeholder={t("Enter API key")}
-                      autoComplete="new-password"
-                    />
-                  </Field>
+              {/* Quick Template Selector */}
+              <div className="space-y-2">
+                <label className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
+                  <Sparkles className="h-3 w-3 text-amber-500" />
+                  {t("Quick Preset")}
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleSelectTemplate("custom")}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
+                      selectedTemplateId === "custom"
+                        ? "bg-[var(--accent)] text-white shadow-xs"
+                        : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200/70 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"
+                    }`}
+                  >
+                    {t("Custom Provider")}
+                  </button>
+                  {PROVIDER_TEMPLATES.map((tpl) => (
+                    <button
+                      type="button"
+                      key={tpl.id}
+                      onClick={() => handleSelectTemplate(tpl.id)}
+                      className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
+                        selectedTemplateId === tpl.id
+                          ? "bg-[var(--accent)] text-white shadow-xs"
+                          : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200/70 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"
+                      }`}
+                    >
+                      {tpl.name}
+                    </button>
+                  ))}
                 </div>
               </div>
 
-              <div className="space-y-3 border-t border-neutral-200 pt-4 dark:border-neutral-800">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-xs font-semibold text-neutral-800 dark:text-neutral-200">
-                        {t("Models")}
-                      </h3>
-                      <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-[10px] font-medium text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
-                        {t("{{count}} models", { count: draft.models.length })}
-                      </span>
-                    </div>
-                    <p className="mt-1 text-[11px] text-neutral-500 dark:text-neutral-400">
-                      {t("Define the models exposed by this provider.")}
-                    </p>
+              {/* Section 1: Provider Details */}
+              <div className="space-y-3">
+                <label className="text-xs font-semibold uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
+                  {t("Provider Details")}
+                </label>
+                <div className="rounded-xl border border-neutral-200/80 bg-neutral-50/50 p-4 space-y-3 dark:border-neutral-800/80 dark:bg-neutral-800/30">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Field label={t("Provider ID")} required htmlFor="provider-id">
+                      <Input
+                        id="provider-id"
+                        value={draft.provider_id}
+                        onChange={(event) =>
+                          setDraft((current) => ({ ...current, provider_id: event.target.value }))
+                        }
+                        placeholder="my-provider"
+                        className="font-mono"
+                      />
+                    </Field>
+                    <Field label={t("Display name")} required htmlFor="provider-display-name">
+                      <Input
+                        id="provider-display-name"
+                        value={draft.display_name}
+                        onChange={(event) =>
+                          setDraft((current) => ({ ...current, display_name: event.target.value }))
+                        }
+                        placeholder={t("My Provider")}
+                      />
+                    </Field>
                   </div>
+
+                  <Field
+                    label={t("Base URL")}
+                    description={t(
+                      "Use the provider base URL; tidev adds the protocol-specific path.",
+                    )}
+                    required
+                    htmlFor="provider-base-url"
+                  >
+                    <Input
+                      id="provider-base-url"
+                      value={draft.base_url}
+                      onChange={(event) =>
+                        setDraft((current) => ({ ...current, base_url: event.target.value }))
+                      }
+                      placeholder="https://api.example.com/v1"
+                      className="font-mono"
+                    />
+                  </Field>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Select
+                      label={t("API type")}
+                      value={draft.api_type}
+                      options={API_TYPE_OPTIONS}
+                      triggerClassName="min-w-0 whitespace-nowrap"
+                      onValueChange={(value) =>
+                        setDraft((current) => ({ ...current, api_type: value }))
+                      }
+                    />
+                    <Field label={t("API key")} required htmlFor="new-provider-api-key">
+                      <Input
+                        id="new-provider-api-key"
+                        type="password"
+                        value={draft.api_key}
+                        onChange={(event) =>
+                          setDraft((current) => ({ ...current, api_key: event.target.value }))
+                        }
+                        placeholder={t("Enter API key")}
+                        autoComplete="new-password"
+                      />
+                    </Field>
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 2: Model Configuration */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
+                    {t("Model Configuration")} ({draft.models.length})
+                  </label>
                   <Button
                     type="button"
                     size="sm"
                     variant="secondary"
-                    className="shrink-0"
-                    leadingIcon={<Plus className="h-3.5 w-3.5" />}
+                    leadingIcon={<Plus className="h-3 w-3" />}
                     onClick={addModel}
                   >
                     {t("Add model")}
                   </Button>
                 </div>
 
-                <div className="grid gap-3 md:grid-cols-[168px_minmax(0,1fr)]">
-                  <div className="space-y-2">
-                    {draft.models.map((model, index) => (
-                      <button
-                        key={index}
-                        type="button"
-                        className={`flex w-full items-center justify-between gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] ${
-                          index === activeModelIndex
-                            ? "border-indigo-300 bg-indigo-50 text-indigo-950 dark:border-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-100"
-                            : "border-neutral-200 bg-white text-neutral-700 hover:border-neutral-300 hover:bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:border-neutral-700 dark:hover:bg-neutral-800"
-                        }`}
-                        onClick={() => setActiveModelIndex(index)}
-                        aria-pressed={index === activeModelIndex}
-                      >
-                        <span className="min-w-0">
-                          <span className="block truncate text-xs font-semibold">
-                            {model.display_name.trim() ||
-                              t("Model {{number}}", { number: index + 1 })}
-                          </span>
-                          <span className="mt-0.5 block truncate font-mono text-[10px] opacity-70">
-                            {model.model_id || t("Model ID")}
-                          </span>
-                        </span>
-                        <span className="shrink-0 text-[10px] font-medium opacity-60">
-                          {index + 1}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-
-                  {activeModel ? (
-                    <div className="space-y-3 rounded-xl border border-neutral-200 bg-neutral-50/60 p-3 dark:border-neutral-800 dark:bg-neutral-900/60">
-                      <div className="flex items-center justify-between gap-3 border-b border-neutral-200 pb-2.5 dark:border-neutral-800">
-                        <span className="text-xs font-semibold text-neutral-800 dark:text-neutral-200">
-                          {t("Model {{number}}", { number: activeModelIndex + 1 })}
-                        </span>
-                        {draft.models.length > 1 ? (
-                          <IconButton
-                            type="button"
-                            size="sm"
-                            variant="danger"
-                            label={t("Remove model")}
-                            onClick={() => removeModel(activeModelIndex)}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </IconButton>
-                        ) : null}
-                      </div>
-                      <div className="grid gap-2.5 sm:grid-cols-2">
-                        <Field label={t("Model ID")} required htmlFor="active-model-id">
-                          <Input
-                            id="active-model-id"
-                            value={activeModel.model_id}
-                            onChange={(event) =>
-                              updateModel(activeModelIndex, { model_id: event.target.value })
-                            }
-                            placeholder="gpt-4o"
-                            className="font-mono"
-                          />
-                        </Field>
-                        <Field label={t("Display name")} required htmlFor="active-model-name">
-                          <Input
-                            id="active-model-name"
-                            value={activeModel.display_name}
-                            onChange={(event) =>
-                              updateModel(activeModelIndex, { display_name: event.target.value })
-                            }
-                            placeholder="GPT-4o"
-                          />
-                        </Field>
-                        <Field label={t("Request model ID")} htmlFor="active-request-model-id">
-                          <Input
-                            id="active-request-model-id"
-                            value={activeModel.request_model_id}
-                            onChange={(event) =>
-                              updateModel(activeModelIndex, {
-                                request_model_id: event.target.value,
-                              })
-                            }
-                            placeholder={t("Same as Model ID")}
-                            className="font-mono"
-                          />
-                        </Field>
-                        <Field label={t("Temperature")} required htmlFor="active-temperature">
-                          <Input
-                            id="active-temperature"
-                            type="number"
-                            step="any"
-                            value={activeModel.temperature}
-                            onChange={(event) =>
-                              updateModel(activeModelIndex, { temperature: event.target.value })
-                            }
-                          />
-                        </Field>
-                        <Field label={t("Context window")} required htmlFor="active-context-window">
-                          <Input
-                            id="active-context-window"
-                            type="number"
-                            min="1"
-                            step="1"
-                            value={activeModel.context_window}
-                            onChange={(event) =>
-                              updateModel(activeModelIndex, { context_window: event.target.value })
-                            }
-                          />
-                        </Field>
-                        <Field
-                          label={t("Max output tokens")}
-                          required
-                          htmlFor="active-max-output-tokens"
+                {/* Model Tabs Header */}
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+                  {draft.models.map((model, index) => (
+                    <button
+                      key={index}
+                      type="button"
+                      onClick={() => setActiveModelIndex(index)}
+                      className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
+                        index === activeModelIndex
+                          ? "bg-[var(--accent)] text-white shadow-xs"
+                          : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200/70 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"
+                      }`}
+                    >
+                      <span>
+                        {model.display_name.trim() || t("Model {{number}}", { number: index + 1 })}
+                      </span>
+                      {draft.models.length > 1 && (
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeModel(index);
+                          }}
+                          className="hover:opacity-75"
                         >
-                          <Input
-                            id="active-max-output-tokens"
-                            type="number"
-                            min="1"
-                            step="1"
-                            value={activeModel.max_output_tokens}
-                            onChange={(event) =>
-                              updateModel(activeModelIndex, {
-                                max_output_tokens: event.target.value,
-                              })
-                            }
-                          />
-                        </Field>
-                      </div>
-                      <label className="flex items-center gap-2 border-t border-neutral-200 pt-2.5 text-xs text-neutral-600 dark:border-neutral-800 dark:text-neutral-400">
-                        <input
-                          type="checkbox"
-                          checked={activeModel.supports_images}
+                          <X className="h-3 w-3" />
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Selected Model Details Form */}
+                {activeModel && (
+                  <div className="rounded-xl border border-neutral-200/80 bg-neutral-50/50 p-4 space-y-3.5 dark:border-neutral-800/80 dark:bg-neutral-800/30">
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <Field label={t("Model ID")} required htmlFor="active-model-id">
+                        <Input
+                          id="active-model-id"
+                          value={activeModel.model_id}
                           onChange={(event) =>
-                            updateModel(activeModelIndex, { supports_images: event.target.checked })
+                            updateModel(activeModelIndex, { model_id: event.target.value })
+                          }
+                          placeholder="gpt-4o"
+                          className="font-mono"
+                        />
+                      </Field>
+                      <Field label={t("Display name")} required htmlFor="active-model-name">
+                        <Input
+                          id="active-model-name"
+                          value={activeModel.display_name}
+                          onChange={(event) =>
+                            updateModel(activeModelIndex, { display_name: event.target.value })
+                          }
+                          placeholder="GPT-4o"
+                        />
+                      </Field>
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <Field label={t("Request model ID")} htmlFor="active-request-model-id">
+                        <Input
+                          id="active-request-model-id"
+                          value={activeModel.request_model_id}
+                          onChange={(event) =>
+                            updateModel(activeModelIndex, {
+                              request_model_id: event.target.value,
+                            })
+                          }
+                          placeholder={t("Same as Model ID")}
+                          className="font-mono"
+                        />
+                      </Field>
+                      <Field label={t("Temperature")} required htmlFor="active-temperature">
+                        <Input
+                          id="active-temperature"
+                          type="number"
+                          step="any"
+                          value={activeModel.temperature}
+                          onChange={(event) =>
+                            updateModel(activeModelIndex, { temperature: event.target.value })
                           }
                         />
-                        {t("Supports images")}
-                      </label>
+                      </Field>
                     </div>
-                  ) : null}
-                </div>
+
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <Field label={t("Context window")} required htmlFor="active-context-window">
+                        <Input
+                          id="active-context-window"
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={activeModel.context_window}
+                          onChange={(event) =>
+                            updateModel(activeModelIndex, { context_window: event.target.value })
+                          }
+                        />
+                      </Field>
+                      <Field
+                        label={t("Max output tokens")}
+                        required
+                        htmlFor="active-max-output-tokens"
+                      >
+                        <Input
+                          id="active-max-output-tokens"
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={activeModel.max_output_tokens}
+                          onChange={(event) =>
+                            updateModel(activeModelIndex, {
+                              max_output_tokens: event.target.value,
+                            })
+                          }
+                        />
+                      </Field>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-2 border-t border-neutral-200/60 dark:border-neutral-800/60">
+                      <div>
+                        <span className="block text-xs font-medium text-neutral-900 dark:text-neutral-100">
+                          {t("Supports images")}
+                        </span>
+                        <span className="block text-[11px] text-neutral-500 dark:text-neutral-400">
+                          {t("Enable image attachment inputs for this model")}
+                        </span>
+                      </div>
+                      <Switch
+                        aria-label={t("Supports images")}
+                        checked={activeModel.supports_images}
+                        onCheckedChange={(checked) =>
+                          updateModel(activeModelIndex, { supports_images: checked })
+                        }
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
-            <Dialog.Footer className="mt-0 border-t border-neutral-200 px-5 py-3 sm:px-6 dark:border-neutral-800">
+
+            <Dialog.Footer className="border-t border-neutral-200/80 px-6 py-4 dark:border-neutral-800/80 shrink-0 bg-neutral-50/50 dark:bg-neutral-800/30">
               <Button type="button" variant="secondary" onClick={closeAdd} disabled={isCreating}>
                 {t("Cancel")}
               </Button>

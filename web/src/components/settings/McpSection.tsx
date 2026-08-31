@@ -256,14 +256,14 @@ export function McpSection() {
   };
 
   return (
-    <section className="space-y-4">
+    <section className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
+          <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
             {t("MCP Servers")}
           </h2>
-          <p className="text-xs text-neutral-500 dark:text-neutral-400">
+          <p className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
             {t("Manage Model Context Protocol (MCP) server connections and tools")}
           </p>
         </div>
@@ -284,7 +284,7 @@ export function McpSection() {
           <span className="text-sm">{t("Loading MCP servers...")}</span>
         </div>
       ) : error ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400">
+        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400">
           {t("Failed to load MCP servers")}
         </div>
       ) : servers.length === 0 ? (
@@ -320,7 +320,7 @@ export function McpSection() {
             return (
               <div
                 key={server.name}
-                className="overflow-hidden rounded-xl border border-neutral-200 bg-white transition shadow-sm dark:border-neutral-800 dark:bg-neutral-900"
+                className="overflow-hidden rounded-xl border border-neutral-200/80 bg-neutral-50/50 transition shadow-xs dark:border-neutral-800/80 dark:bg-neutral-800/30"
               >
                 {/* Server Row */}
                 <div className="flex items-center justify-between p-3.5">

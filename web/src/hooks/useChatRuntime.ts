@@ -241,6 +241,7 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
   const checkAuthStatus = useAuthStore((state) => state.checkAuthStatus);
   const openSettingsPanel = useUIStore((state) => state.openSettingsPanel);
   const enterToSend = useUIStore((state) => state.settings.enterToSend);
+  const setConnectionStatus = useUIStore((state) => state.setConnectionStatus);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [selectedSession, setSelectedSession] = useState<Session | undefined>();
@@ -1019,9 +1020,13 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
 
   useEffect(() => {
     if (authChecking || (authRequired && !authenticated)) return;
+    setConnectionStatus("connecting");
     const backend = openBackendEvents(
       cursorRef.current,
-      applyEvent,
+      (event) => {
+        setConnectionStatus("connected");
+        applyEvent(event);
+      },
       () => {
         const currentSessionId = selectedSessionRef.current;
         if (currentSessionId) {
@@ -1029,21 +1034,39 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
           void loadTodos(currentSessionId);
         }
       },
-      () => undefined,
+      () => {
+        setConnectionStatus("disconnected");
+      },
+      () => {
+        setConnectionStatus("connected");
+      },
     );
     const approval = openFrontendRequests(
-      (request) =>
+      (request) => {
+        setConnectionStatus("connected");
         setRequests((current) => [
           ...current.filter((item) => item.request_id !== request.request_id),
           request,
-        ]),
+        ]);
+      },
       () => undefined,
+      () => {
+        setConnectionStatus("connected");
+      },
     );
     return () => {
       backend.close();
       approval.close();
     };
-  }, [applyEvent, authChecking, authRequired, authenticated, loadMessages, loadTodos]);
+  }, [
+    applyEvent,
+    authChecking,
+    authRequired,
+    authenticated,
+    loadMessages,
+    loadTodos,
+    setConnectionStatus,
+  ]);
 
   const renameSession = async (sessionId: string) => {
     const title = renameValue.trim();
