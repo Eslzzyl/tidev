@@ -10,6 +10,7 @@ import { ImagePreview } from "./ImagePreview";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { useTranslation } from "react-i18next";
 import { IconButton } from "../ui";
+import { ConfirmDialog } from "../ui/ConfirmDialog";
 
 const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "svg", "webp", "ico", "bmp"]);
 const MARKDOWN_EXTS = new Set(["md", "markdown", "mdx"]);
@@ -38,7 +39,7 @@ function tryParseJson(content: string): unknown {
   }
 }
 
-export function CodeViewer() {
+export function CodeViewer({ onSelectFile }: { onSelectFile?: (path: string) => void }) {
   const { t } = useTranslation();
   const openFiles = useFileStore((s) => s.openFiles);
   const activeFilePath = useFileStore((s) => s.activeFilePath);
@@ -49,6 +50,7 @@ export function CodeViewer() {
   const saveFile = useFileStore((s) => s.saveFile);
   const [copied, setCopied] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [closeTargetPath, setCloseTargetPath] = useState<string | null>(null);
   const theme = useUIStore((s) => s.theme);
 
   const isDark = getEffectiveTheme(theme) === "dark";
@@ -137,13 +139,34 @@ export function CodeViewer() {
     });
   }, [saveFile]);
 
-  const handleCloseTab = useCallback(
+  const requestCloseFile = useCallback(
     (path: string, e: React.MouseEvent) => {
       e.stopPropagation();
-      closeFile(path);
+      const file = openFiles.find((item) => item.path === path);
+      if (!file) return;
+
+      if (file.isDirty) {
+        setCloseTargetPath(path);
+      } else {
+        closeFile(path);
+      }
     },
-    [closeFile],
+    [closeFile, openFiles],
   );
+
+  const handleSelectFile = useCallback(
+    (path: string) => {
+      onSelectFile?.(path);
+      setActiveFile(path);
+    },
+    [onSelectFile, setActiveFile],
+  );
+
+  const confirmCloseFile = useCallback(() => {
+    if (!closeTargetPath) return;
+    closeFile(closeTargetPath);
+    setCloseTargetPath(null);
+  }, [closeFile, closeTargetPath]);
 
   const handleGoToLine = useCallback((line: number) => {
     editorRef.current?.goToLine(line);
@@ -170,8 +193,8 @@ export function CodeViewer() {
       <FileTabs
         files={openFiles}
         activePath={activeFilePath}
-        onSelect={setActiveFile}
-        onClose={handleCloseTab}
+        onSelect={handleSelectFile}
+        onClose={requestCloseFile}
       />
 
       {/* Tab header for active file */}
@@ -270,7 +293,7 @@ export function CodeViewer() {
               label={t("Close file")}
               size="sm"
               variant="ghost"
-              onClick={() => activeFilePath && closeFile(activeFilePath)}
+              onClick={(e) => activeFilePath && requestCloseFile(activeFilePath, e)}
             >
               <X className="h-3.5 w-3.5" />
             </IconButton>
@@ -322,6 +345,19 @@ export function CodeViewer() {
           currentLine={goToLineMeta.currentLine}
           onGo={handleGoToLine}
           onClose={() => setGoToLineOpen(false)}
+        />
+      )}
+
+      {closeTargetPath && (
+        <ConfirmDialog
+          title={t("Unsaved changes")}
+          message={t('The file "{{path}}" has unsaved changes. Close it anyway?', {
+            path: closeTargetPath,
+          })}
+          confirmText={t("Close without saving")}
+          danger
+          onConfirm={confirmCloseFile}
+          onCancel={() => setCloseTargetPath(null)}
         />
       )}
     </div>

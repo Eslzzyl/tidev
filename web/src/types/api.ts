@@ -196,6 +196,7 @@ export interface Model {
   provider_display_name: string;
   model_id: string;
   model_display_name: string;
+  context_window: number;
   connected: boolean;
   active: boolean;
   supports_vision: boolean;

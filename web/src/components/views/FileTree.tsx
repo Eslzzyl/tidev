@@ -84,7 +84,7 @@ type DialogState =
   | { type: "delete"; nodePath: string; nodeName: string; isDir: boolean }
   | null;
 
-export function FileTree() {
+export function FileTree({ onOpenFile }: { onOpenFile: (path: string) => void }) {
   const { t } = useTranslation();
   const rootChildren = useFileStore((s) => s.rootChildren);
   const rootLoaded = useFileStore((s) => s.rootLoaded);
@@ -92,8 +92,6 @@ export function FileTree() {
   const error = useFileStore((s) => s.error);
   const loadRoot = useFileStore((s) => s.loadRoot);
   const selectedPath = useFileStore((s) => s.selectedPath);
-  const selectFile = useFileStore((s) => s.selectFile);
-  const openFile = useFileStore((s) => s.openFile);
   const toggleExpand = useFileStore((s) => s.toggleExpand);
   const createFile = useFileStore((s) => s.createFile);
   const renameFile = useFileStore((s) => s.renameFile);
@@ -128,11 +126,10 @@ export function FileTree() {
       if (node.isDirectory) {
         toggleExpand(node.path);
       } else {
-        selectFile(node.path);
-        openFile(node.path);
+        onOpenFile(node.path);
       }
     },
-    [toggleExpand, selectFile, openFile],
+    [onOpenFile, toggleExpand],
   );
 
   const handleContextMenu = useCallback((e: React.MouseEvent, node: TreeNode) => {

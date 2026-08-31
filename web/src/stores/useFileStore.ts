@@ -64,6 +64,11 @@ export interface FileStore {
   refreshTree: () => Promise<void>;
 }
 
+const pendingFileLoads = new Map<string, Promise<OpenFile>>();
+const fileOpenOrder = new Map<string, number>();
+let latestOpenRequestId = 0;
+let nextFileOpenOrder = 0;
+
 function buildTreeNodes(entries: DirectoryEntry[]): TreeNode[] {
   return entries.map((e) => ({
     name: e.name,
@@ -76,6 +81,30 @@ function buildTreeNodes(entries: DirectoryEntry[]): TreeNode[] {
     loading: false,
     children: [],
   }));
+}
+
+function loadFile(path: string): Promise<OpenFile> {
+  return queryClient
+    .fetchQuery({
+      queryKey: ["fs", "read", path],
+      queryFn: () => api.readFile(path),
+    })
+    .then((result) => ({
+      path,
+      content: result.content,
+      language: result.language,
+      isDirty: false,
+      originalContent: result.content,
+    }))
+    .catch((err) => ({
+      path,
+      content: i18n.t("Error loading file: {{message}}", {
+        message: err instanceof Error ? err.message : i18n.t("Unknown error"),
+      }),
+      language: null,
+      isDirty: false,
+      originalContent: "",
+    }));
 }
 
 export const useFileStore = create<FileStore>((set, get) => ({
@@ -147,6 +176,7 @@ export const useFileStore = create<FileStore>((set, get) => ({
   selectFile: (path) => set({ selectedPath: path }),
 
   openFile: async (path: string) => {
+    const requestId = ++latestOpenRequestId;
     set({ selectedPath: path });
 
     // If the file is already open, just switch to it
@@ -156,38 +186,34 @@ export const useFileStore = create<FileStore>((set, get) => ({
       return;
     }
 
-    // Otherwise, load and add to tabs
+    // Share an in-flight request when the same file is opened repeatedly.
+    let loadPromise = pendingFileLoads.get(path);
+    if (!loadPromise) {
+      fileOpenOrder.set(path, ++nextFileOpenOrder);
+      loadPromise = loadFile(path);
+      pendingFileLoads.set(path, loadPromise);
+    }
+
     try {
-      const result = await queryClient.fetchQuery({
-        queryKey: ["fs", "read", path],
-        queryFn: () => api.readFile(path),
+      const loadedFile = await loadPromise;
+      set((s) => {
+        const alreadyOpen = s.openFiles.some((f) => f.path === path);
+        const openFiles = alreadyOpen
+          ? s.openFiles
+          : [...s.openFiles, loadedFile].sort(
+              (a, b) => (fileOpenOrder.get(a.path) ?? 0) - (fileOpenOrder.get(b.path) ?? 0),
+            );
+        const isLatestRequest = requestId === latestOpenRequestId;
+
+        return {
+          openFiles,
+          ...(isLatestRequest ? { activeFilePath: path } : {}),
+        };
       });
-      const openFile: OpenFile = {
-        path,
-        content: result.content,
-        language: result.language,
-        isDirty: false,
-        originalContent: result.content,
-      };
-      set((s) => ({
-        openFiles: [...s.openFiles, openFile],
-        activeFilePath: path,
-      }));
-    } catch (err) {
-      // Add an error entry as a tab so the user can see the error
-      const errorFile: OpenFile = {
-        path,
-        content: i18n.t("Error loading file: {{message}}", {
-          message: err instanceof Error ? err.message : i18n.t("Unknown error"),
-        }),
-        language: null,
-        isDirty: false,
-        originalContent: "",
-      };
-      set((s) => ({
-        openFiles: [...s.openFiles, errorFile],
-        activeFilePath: path,
-      }));
+    } finally {
+      if (pendingFileLoads.get(path) === loadPromise) {
+        pendingFileLoads.delete(path);
+      }
     }
   },
 
@@ -210,14 +236,19 @@ export const useFileStore = create<FileStore>((set, get) => ({
       }
     }
 
+    const shouldUpdateSelection = state.selectedPath === path || state.activeFilePath === path;
+
     set({
       openFiles: newFiles,
       activeFilePath: nextActive,
-      selectedPath: nextActive || state.selectedPath === path ? null : state.selectedPath,
+      selectedPath: shouldUpdateSelection ? nextActive : state.selectedPath,
     });
+    fileOpenOrder.delete(path);
   },
 
   setActiveFile: (path: string) => {
+    // Selecting another tab supersedes any older asynchronous open request.
+    latestOpenRequestId += 1;
     set({ activeFilePath: path, selectedPath: path });
   },
 
@@ -278,6 +309,11 @@ export const useFileStore = create<FileStore>((set, get) => ({
       const state = get();
       const wasOpen = state.openFiles.find((f) => f.path === path);
       if (wasOpen) {
+        const openOrder = fileOpenOrder.get(path);
+        fileOpenOrder.delete(path);
+        if (openOrder !== undefined) {
+          fileOpenOrder.set(newPath, openOrder);
+        }
         set((s) => ({
           openFiles: s.openFiles.map((f) => (f.path === path ? { ...f, path: newPath } : f)),
           activeFilePath: s.activeFilePath === path ? newPath : s.activeFilePath,

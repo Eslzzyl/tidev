@@ -1065,14 +1065,6 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
   };
 
   const deleteSession = async (session: Session) => {
-    if (
-      !window.confirm(
-        i18n.t("Delete conversation “{{title}}”?", {
-          title: session.title || i18n.t("Untitled conversation"),
-        }),
-      )
-    )
-      return;
     try {
       await api.deleteSession(session.session_id);
       setSessions((current) => current.filter((item) => item.session_id !== session.session_id));

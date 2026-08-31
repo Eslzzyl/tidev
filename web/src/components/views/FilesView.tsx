@@ -33,7 +33,7 @@ function loadFileTreeWidth(): number {
 
 export function FilesView() {
   const { t } = useTranslation();
-  const [, navigate] = useLocation();
+  const [location, navigate] = useLocation();
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<{ path: string; display: string }[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -58,24 +58,85 @@ export function FilesView() {
   const createFile = useFileStore((s) => s.createFile);
   const gitBranch = useGitFileStore((s) => s.branch);
 
+  const userOpenPathRef = useRef<string | null>(null);
+  const urlOpenPathRef = useRef<string | null>(null);
+  const previousActivePathRef = useRef(activeFilePath);
+
   // Synchronize URL query `path` with activeFilePath
   const urlPath =
-    typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("path") : null;
+    typeof window !== "undefined"
+      ? new URL(location, window.location.origin).searchParams.get("path")
+      : null;
 
+  // Keep URL-driven opens from being overwritten by the previously active tab while loading.
   useEffect(() => {
+    const previousActivePath = previousActivePathRef.current;
+    const rememberActivePath = () => {
+      previousActivePathRef.current = activeFilePath;
+    };
+    const userOpenPath = userOpenPathRef.current;
+    if (userOpenPath) {
+      if (urlPath !== userOpenPath) {
+        navigate(routes.files(userOpenPath), { replace: true });
+      }
+      if (activeFilePath === userOpenPath) {
+        userOpenPathRef.current = null;
+      }
+      rememberActivePath();
+      return;
+    }
+
+    // A tab switch or close is a local state change and must override the old URL path.
+    if (previousActivePath === urlPath && activeFilePath !== urlPath) {
+      urlOpenPathRef.current = null;
+      navigate(activeFilePath ? routes.files(activeFilePath) : routes.files(), { replace: true });
+      rememberActivePath();
+      return;
+    }
+
     if (urlPath && urlPath !== activeFilePath) {
-      void openFile(urlPath);
+      if (urlOpenPathRef.current !== urlPath) {
+        urlOpenPathRef.current = urlPath;
+        void openFile(urlPath).finally(() => {
+          if (urlOpenPathRef.current === urlPath) {
+            urlOpenPathRef.current = null;
+          }
+        });
+      }
+      rememberActivePath();
+      return;
     }
-  }, [urlPath, activeFilePath, openFile]);
 
-  useEffect(() => {
-    const currentUrlParam = new URLSearchParams(window.location.search).get("path");
-    if (activeFilePath && currentUrlParam !== activeFilePath) {
-      navigate(routes.files(activeFilePath), { replace: true });
-    } else if (!activeFilePath && currentUrlParam) {
-      navigate(routes.files(), { replace: true });
+    if (urlPath === activeFilePath) {
+      urlOpenPathRef.current = null;
+      rememberActivePath();
+      return;
     }
-  }, [activeFilePath, navigate]);
+
+    if (activeFilePath) {
+      navigate(routes.files(activeFilePath), { replace: true });
+    }
+    rememberActivePath();
+  }, [activeFilePath, navigate, openFile, urlPath]);
+
+  const handleOpenFile = useCallback(
+    (path: string) => {
+      userOpenPathRef.current = path;
+      urlOpenPathRef.current = null;
+      navigate(routes.files(path), { replace: true });
+      void openFile(path);
+    },
+    [navigate, openFile],
+  );
+
+  const handleSelectFile = useCallback(
+    (path: string) => {
+      userOpenPathRef.current = path;
+      urlOpenPathRef.current = null;
+      navigate(routes.files(path), { replace: true });
+    },
+    [navigate],
+  );
 
   // Search cache: query -> results
   const searchCacheRef = useRef<Record<string, { path: string; display: string }[]>>({});
@@ -319,7 +380,7 @@ export function FilesView() {
               ) : searchResults.length > 0 ? (
                 <div className="space-y-0.5">
                   {searchResults.map((r) => (
-                    <SearchResultItem key={r.path} item={r} />
+                    <SearchResultItem key={r.path} item={r} onOpenFile={handleOpenFile} />
                   ))}
                 </div>
               ) : (
@@ -327,7 +388,7 @@ export function FilesView() {
               )}
             </div>
           ) : (
-            <FileTree />
+            <FileTree onOpenFile={handleOpenFile} />
           )}
         </div>
       </div>
@@ -359,7 +420,7 @@ export function FilesView() {
 
       {/* Right: Code viewer */}
       <div className="flex-1 overflow-hidden">
-        <CodeViewer />
+        <CodeViewer onSelectFile={handleSelectFile} />
       </div>
 
       {/* Create dialog */}
@@ -375,13 +436,17 @@ export function FilesView() {
   );
 }
 
-function SearchResultItem({ item }: { item: { path: string; display: string } }) {
-  const openFile = useFileStore((s) => s.openFile);
-
+function SearchResultItem({
+  item,
+  onOpenFile,
+}: {
+  item: { path: string; display: string };
+  onOpenFile: (path: string) => void;
+}) {
   return (
     <Button
       type="button"
-      onClick={() => openFile(item.path)}
+      onClick={() => onOpenFile(item.path)}
       className="file-search-result-button"
       variant="ghost"
       size="sm"

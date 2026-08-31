@@ -182,7 +182,10 @@ export function ChangeFileRow({
     <div>
       <Button
         type="button"
-        onClick={onToggle}
+        onClick={(event) => {
+          event.preventDefault();
+          onToggle();
+        }}
         className="git-file-row-button"
         variant="ghost"
         size="sm"

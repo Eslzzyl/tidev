@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent } from "react";
-import { ChevronDown, Folder, GitBranch, LoaderCircle, Send } from "lucide-react";
+import { Folder, GitBranch, LoaderCircle, Send } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { api } from "../../api/client";
@@ -331,7 +331,6 @@ export function WelcomePage({
             variant="secondary"
             size="sm"
             leadingIcon={<Folder size={15} strokeWidth={1.8} />}
-            trailingIcon={<ChevronDown size={13} strokeWidth={1.8} />}
           >
             {workspaceLabel}
           </Button>

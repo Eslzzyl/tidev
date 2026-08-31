@@ -273,6 +273,7 @@ struct ModelDto {
     provider_display_name: String,
     model_id: String,
     model_display_name: String,
+    context_window: usize,
     connected: bool,
     active: bool,
     supports_vision: bool,
@@ -675,6 +676,7 @@ async fn list_models(State(state): State<Arc<AppState>>) -> Json<Vec<ModelDto>> 
                 provider_display_name: model.provider_display_name,
                 model_id: model.model_id,
                 model_display_name: model.model_display_name,
+                context_window: model.context_window,
                 thinking_levels,
                 thinking_level,
             }
@@ -700,6 +702,7 @@ async fn select_model(
         provider_display_name: model.provider_display_name.clone(),
         model_id: model.model_id.clone(),
         model_display_name: model.display_name.clone(),
+        context_window: model.context_window,
         connected: model.api_key.is_some(),
         active: true,
         supports_vision: model.supports_images,

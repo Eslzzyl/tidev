@@ -18,6 +18,7 @@ import { ChatPanel } from "./components/chat/ChatPanel";
 import { WelcomePage } from "./components/chat/WelcomePage";
 import { SettingsPanel } from "./components/settings/SettingsPanel";
 import { ComponentShowcase } from "./components/ui/ComponentShowcase";
+import { ConfirmDialog } from "./components/ui/ConfirmDialog";
 import { useChatRuntime } from "./hooks/useChatRuntime";
 import { useWorkspace } from "./hooks/workspaceQueries";
 import { getActiveFeature, routes } from "./lib/routes";
@@ -54,6 +55,7 @@ export default function App() {
 
   const feature: Feature = getActiveFeature(location);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [sessionToDelete, setSessionToDelete] = useState<Session | null>(null);
   const featureNavRef = useRef<HTMLElement>(null);
   const featureButtonRefs = useRef<Partial<Record<Feature, HTMLButtonElement | null>>>({});
   const [featureIndicator, setFeatureIndicator] = useState({
@@ -245,7 +247,7 @@ export default function App() {
       onRenameChange={setRenameValue}
       onRename={(sessionId) => void renameSession(sessionId)}
       onCancelRename={() => setRenamingSessionId(null)}
-      onDeleteSession={(session) => void deleteSession(session)}
+      onDeleteSession={(session) => setSessionToDelete(session)}
       onRevert={handleRevert}
       onRetryProviderError={handleRetryProviderError}
       onFork={handleFork}
@@ -359,6 +361,23 @@ export default function App() {
         </Suspense>
       </main>
       <SettingsPanel />
+      {sessionToDelete ? (
+        <ConfirmDialog
+          danger
+          title={t("Delete conversation")}
+          message={t("Delete conversation “{{title}}”?", {
+            title: sessionToDelete.title || t("Untitled conversation"),
+          })}
+          confirmText={t("Delete")}
+          cancelText={t("Cancel")}
+          onConfirm={() => {
+            const session = sessionToDelete;
+            setSessionToDelete(null);
+            void deleteSession(session);
+          }}
+          onCancel={() => setSessionToDelete(null)}
+        />
+      ) : null}
     </div>
   );
 }

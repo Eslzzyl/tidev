@@ -3,11 +3,12 @@ import { Check, CircleStop, LoaderCircle, Send } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { commandFragment, getSuggestions } from "../../commands";
-import type { Model, TodoItem } from "../../types/api";
+import type { MessageRecord, Model, TodoItem } from "../../types/api";
 import { CommandPopover } from "../CommandPopover";
 import { FileMentionPopover } from "../FileMentionPopover";
 import { ModelPicker } from "../ModelPicker";
 import { ImageAttachmentStrip } from "./ImageAttachments";
+import { TokenUsageIndicator } from "./TokenUsageIndicator";
 import { pastedImageFiles, type PendingImage } from "../../utils/imageAttachments";
 import { Button, IconButton, Textarea } from "../ui";
 
@@ -74,8 +75,10 @@ function TodoProgressCard({ todos }: { todos: TodoItem[] }) {
 export interface ChatComposerProps {
   draft: string;
   mode: "build" | "plan";
+  messages: MessageRecord[];
   models: Model[];
   activeModel: Model | undefined;
+  contextWindow?: number;
   thinkingLevel: string | undefined;
   todos: TodoItem[];
   enterToSend: boolean;
@@ -105,8 +108,10 @@ export interface ChatComposerProps {
 export function ChatComposer({
   draft,
   mode,
+  messages,
   models,
   activeModel,
+  contextWindow,
   thinkingLevel,
   todos,
   enterToSend,
@@ -409,6 +414,7 @@ export function ChatComposer({
                 onFileMentionClose();
               }}
             />
+            <TokenUsageIndicator messages={messages} contextWindow={contextWindow} />
           </div>
           <IconButton
             label={isBusy ? t("Stop current turn") : t("Send prompt")}

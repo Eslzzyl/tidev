@@ -394,7 +394,10 @@ export function CommitDetailPanel({
               <div key={file.path}>
                 <Button
                   type="button"
-                  onClick={() => onLoadFileDiff(file.path)}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    void onLoadFileDiff(file.path);
+                  }}
                   className="git-file-row-button"
                   variant="ghost"
                   size="sm"

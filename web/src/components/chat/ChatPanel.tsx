@@ -145,6 +145,14 @@ export function ChatPanel({
 }: ChatPanelProps) {
   const { t } = useTranslation();
   const pendingRequests = requests.filter((request) => request.session_id === selectedSessionId);
+  const sessionModel = selectedSession
+    ? models.find(
+        (model) =>
+          model.provider_id === selectedSession.provider_id &&
+          model.model_id === selectedSession.model_id,
+      )
+    : undefined;
+  const contextWindow = sessionModel?.context_window ?? activeModel?.context_window;
 
   const handleSelectSession = (sessionId: string) => {
     onMobileSidebarClose();
@@ -241,8 +249,10 @@ export function ChatPanel({
             <ChatComposer
               draft={draft}
               mode={mode}
+              messages={messages}
               models={models}
               activeModel={activeModel}
+              contextWindow={contextWindow}
               thinkingLevel={thinkingLevel}
               todos={todos}
               enterToSend={enterToSend}
