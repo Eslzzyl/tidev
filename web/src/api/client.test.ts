@@ -52,4 +52,47 @@ describe("prompt API contract", () => {
     expect(() => api.sendPrompt("", "hello", "build", "msg-1")).toThrow("Session ID is required");
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("uses the provider list response envelope", async () => {
+    const response = {
+      providers: [
+        {
+          id: "deepseek",
+          display_name: "DeepSeek",
+          source: "bundled",
+          can_delete: false,
+          connected: false,
+          base_url: "https://api.deepseek.com",
+          api_type: null,
+          models: [],
+        },
+      ],
+    };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => response,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(api.listProviders()).resolves.toEqual(response);
+    expect(fetchMock).toHaveBeenCalledWith("/api/providers", {
+      headers: { "Content-Type": "application/json" },
+    });
+  });
+
+  it("surfaces provider mutation errors from the API", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 403,
+        json: async () => ({ error: "bundled provider cannot be deleted" }),
+      }),
+    );
+
+    await expect(api.deleteProvider("deepseek")).rejects.toThrow(
+      "bundled provider cannot be deleted",
+    );
+  });
 });

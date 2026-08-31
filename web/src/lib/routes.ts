@@ -8,6 +8,7 @@ export type SettingsCategory =
   | "interaction"
   | "terminal"
   | "security"
+  | "providers"
   | "mcp"
   | "skills"
   | "about";

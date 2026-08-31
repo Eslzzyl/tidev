@@ -10,6 +10,7 @@ import {
   Sparkles,
   Bot,
   Info,
+  Server,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useRoute, useLocation } from "wouter";
@@ -24,6 +25,7 @@ import { McpSection } from "./McpSection";
 import { SkillsSection } from "./SkillsSection";
 import { AgentsSection } from "./AgentsSection";
 import { AboutSection } from "./AboutSection";
+import { ProvidersSection } from "./ProvidersSection";
 import { Button, IconButton } from "../ui";
 
 type CategoryId =
@@ -32,6 +34,7 @@ type CategoryId =
   | "interaction"
   | "terminal"
   | "security"
+  | "providers"
   | "agents"
   | "mcp"
   | "skills"
@@ -61,6 +64,7 @@ const categories: Category[] = [
     icon: <TerminalIcon className="h-4 w-4" />,
   },
   { id: "security", label: "Security", icon: <Lock className="h-4 w-4" /> },
+  { id: "providers", label: "Providers", icon: <Server className="h-4 w-4" /> },
   { id: "agents", label: "Agents", icon: <Bot className="h-4 w-4" /> },
   { id: "mcp", label: "MCP Servers", icon: <Boxes className="h-4 w-4" /> },
   { id: "skills", label: "Skills", icon: <Sparkles className="h-4 w-4" /> },
@@ -210,6 +214,7 @@ export function SettingsPanel() {
             {activeCategory === "interaction" && <InteractionSection />}
             {activeCategory === "terminal" && <TerminalSection />}
             {activeCategory === "security" && <SecuritySection />}
+            {activeCategory === "providers" && <ProvidersSection />}
             {activeCategory === "agents" && <AgentsSection />}
             {activeCategory === "mcp" && <McpSection />}
             {activeCategory === "skills" && <SkillsSection />}

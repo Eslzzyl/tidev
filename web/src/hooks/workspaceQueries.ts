@@ -169,6 +169,7 @@ export function useConnectProvider() {
       api.connectProvider(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.providers });
+      queryClient.invalidateQueries({ queryKey: queryKeys.models });
     },
   });
 }
@@ -179,6 +180,7 @@ export function useDisconnectProvider() {
     mutationFn: (id: string) => api.disconnectProvider(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.providers });
+      queryClient.invalidateQueries({ queryKey: queryKeys.models });
     },
   });
 }
@@ -189,6 +191,7 @@ export function useCreateProvider() {
     mutationFn: api.createProvider,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.providers });
+      queryClient.invalidateQueries({ queryKey: queryKeys.models });
     },
   });
 }
@@ -199,6 +202,7 @@ export function useDeleteProvider() {
     mutationFn: (id: string) => api.deleteProvider(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.providers });
+      queryClient.invalidateQueries({ queryKey: queryKeys.models });
     },
   });
 }

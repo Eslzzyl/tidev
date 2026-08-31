@@ -719,6 +719,39 @@ impl AppConfig {
 
     // ── Provider helpers ─────────────────────────────────────────────
 
+    /// Add or replace a user-defined provider and rebuild the effective catalog.
+    pub fn set_user_provider(
+        &mut self,
+        provider_id: String,
+        provider: ProviderConfig,
+    ) -> Result<()> {
+        let previous = self.providers.insert(provider_id.clone(), provider);
+        if let Err(error) = self.rebuild_effective_providers() {
+            match previous {
+                Some(provider) => {
+                    self.providers.insert(provider_id, provider);
+                }
+                None => {
+                    self.providers.remove(&provider_id);
+                }
+            }
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    /// Remove a user-defined provider and rebuild the effective catalog.
+    pub fn remove_user_provider(&mut self, provider_id: &str) -> Result<Option<ProviderConfig>> {
+        let removed = self.providers.remove(provider_id);
+        if let Err(error) = self.rebuild_effective_providers() {
+            if let Some(provider) = removed.clone() {
+                self.providers.insert(provider_id.to_owned(), provider);
+            }
+            return Err(error);
+        }
+        Ok(removed)
+    }
+
     pub fn provider(&self, provider_id: &str) -> Option<&ProviderConfig> {
         self.effective_providers
             .get(provider_id)
@@ -1351,6 +1384,45 @@ max_output_tokens = 10000
             .rebuild_effective_providers()
             .expect_err("new providers must define metadata");
         assert!(error.to_string().contains("display_name"));
+    }
+
+    #[test]
+    fn setting_and_removing_user_provider_updates_effective_catalog() {
+        let mut config = AppConfig::default();
+        let provider = ProviderConfig {
+            display_name: "Custom".to_owned(),
+            base_url: "https://custom.example.com/v1".to_owned(),
+            api_type: None,
+            models: BTreeMap::from([(
+                "custom-model".to_owned(),
+                crate::provider::ModelConfig {
+                    display_name: "Custom Model".to_owned(),
+                    context_window: 128_000,
+                    max_output_tokens: 16_384,
+                    api_type: None,
+                    base_url: None,
+                    temperature: Some(0.7),
+                    system_prompt: None,
+                    supports_streaming: true,
+                    supports_images: false,
+                    supports_parallel_tool_calls: true,
+                    extra_body: None,
+                    request_model_id: None,
+                },
+            )]),
+        };
+
+        config
+            .set_user_provider("custom".to_owned(), provider)
+            .expect("custom provider should be added");
+        assert!(config.provider_ids().contains(&"custom".to_owned()));
+        assert_eq!(config.provider("custom").unwrap().display_name, "Custom");
+
+        config
+            .remove_user_provider("custom")
+            .expect("custom provider should be removed");
+        assert!(!config.provider_ids().contains(&"custom".to_owned()));
+        assert!(config.provider("custom").is_none());
     }
 
     #[test]

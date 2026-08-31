@@ -19,6 +19,7 @@ import type {
   SkillFileResponse,
   ProviderInfo,
   ConnectProviderRequest,
+  ProviderMutationResponse,
   CreateProviderRequest,
   SetDefaultModelRequest,
   SetDefaultModelResponse,
@@ -357,37 +358,25 @@ export const api = {
   listProviders: () => fetchJson<{ providers: ProviderInfo[] }>(`${API_BASE}/providers`),
 
   connectProvider: (id: string, data: ConnectProviderRequest) =>
-    fetchWithAuth(`${API_BASE}/providers/${encodeURIComponent(id)}/connect`, {
+    fetchJson<ProviderMutationResponse>(`${API_BASE}/providers/${encodeURIComponent(id)}/connect`, {
       method: "POST",
       body: JSON.stringify(data),
-    }).then((r) => {
-      if (!r.ok)
-        throw new Error(i18n.t("Failed to connect provider: {{status}}", { status: r.status }));
     }),
 
   disconnectProvider: (id: string) =>
-    fetchWithAuth(`${API_BASE}/providers/${encodeURIComponent(id)}/connect`, {
+    fetchJson<ProviderMutationResponse>(`${API_BASE}/providers/${encodeURIComponent(id)}/connect`, {
       method: "DELETE",
-    }).then((r) => {
-      if (!r.ok)
-        throw new Error(i18n.t("Failed to disconnect provider: {{status}}", { status: r.status }));
     }),
 
   createProvider: (data: CreateProviderRequest) =>
-    fetchWithAuth(`${API_BASE}/providers`, {
+    fetchJson<ProviderInfo>(`${API_BASE}/providers`, {
       method: "POST",
       body: JSON.stringify(data),
-    }).then((r) => {
-      if (!r.ok)
-        throw new Error(i18n.t("Failed to create provider: {{status}}", { status: r.status }));
     }),
 
   deleteProvider: (id: string) =>
-    fetchWithAuth(`${API_BASE}/providers/${encodeURIComponent(id)}`, {
+    fetchJson<ProviderMutationResponse>(`${API_BASE}/providers/${encodeURIComponent(id)}`, {
       method: "DELETE",
-    }).then((r) => {
-      if (!r.ok)
-        throw new Error(i18n.t("Failed to delete provider: {{status}}", { status: r.status }));
     }),
 
   // Filesystem

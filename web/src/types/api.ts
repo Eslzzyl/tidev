@@ -374,19 +374,25 @@ export interface SkillFileResponse {
 export interface ProviderModelInfo {
   id: string;
   display_name: string;
+  request_model_id: string | null;
   context_window: number;
   max_output_tokens: number;
-  temperature: number;
+  api_type: string | null;
+  base_url: string | null;
+  temperature: number | null;
   supports_images: boolean;
   supports_streaming: boolean;
+  supports_parallel_tool_calls: boolean;
 }
 
 export interface ProviderInfo {
   id: string;
   display_name: string;
   source: "bundled" | "user";
+  can_delete: boolean;
   connected: boolean;
   base_url: string;
+  api_type: string | null;
   models: ProviderModelInfo[];
 }
 
@@ -394,19 +400,30 @@ export interface ConnectProviderRequest {
   api_key: string;
 }
 
+export interface ProviderMutationResponse {
+  success: boolean;
+  connected: boolean | null;
+}
+
 export interface CreateModelRequest {
   model_id: string;
   display_name: string;
   context_window: number;
   max_output_tokens: number;
-  temperature: number;
+  request_model_id?: string;
+  api_type?: string;
+  base_url?: string;
+  temperature?: number;
+  supports_streaming?: boolean;
   supports_images?: boolean;
+  supports_parallel_tool_calls?: boolean;
 }
 
 export interface CreateProviderRequest {
   provider_id: string;
   display_name: string;
   base_url: string;
+  api_type?: string;
   api_key: string;
   models: CreateModelRequest[];
 }

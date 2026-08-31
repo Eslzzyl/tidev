@@ -1,5 +1,5 @@
 #![allow(clippy::all)]
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::convert::Infallible;
 use std::path::{Path as StdPath, PathBuf};
 use std::sync::Arc;
@@ -13,6 +13,8 @@ use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Datelike, Duration, NaiveDate, TimeZone, Timelike, Utc};
 use serde::{Deserialize, Serialize};
+use tidev_config::ApiType;
+use tidev_config::provider::{ModelConfig, ProviderConfig};
 use tidev_core::agent_type::AgentType;
 use tidev_core::{
     ApprovedTool, EventCursor, EventEnvelope, EventReplay, FrontendRequest, FrontendResponse, Mode,
@@ -168,6 +170,48 @@ struct SetTerminalShellRequest {
 }
 
 #[derive(Debug, Deserialize)]
+struct ConnectProviderRequest {
+    api_key: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateProviderRequest {
+    provider_id: String,
+    display_name: String,
+    base_url: String,
+    #[serde(default)]
+    api_type: Option<String>,
+    api_key: String,
+    models: Vec<CreateModelRequest>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateModelRequest {
+    model_id: String,
+    display_name: String,
+    #[serde(default)]
+    request_model_id: Option<String>,
+    context_window: usize,
+    max_output_tokens: usize,
+    #[serde(default)]
+    api_type: Option<String>,
+    #[serde(default)]
+    base_url: Option<String>,
+    #[serde(default)]
+    temperature: Option<f32>,
+    #[serde(default = "default_true")]
+    supports_streaming: bool,
+    #[serde(default)]
+    supports_images: bool,
+    #[serde(default = "default_true")]
+    supports_parallel_tool_calls: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Debug, Deserialize)]
 struct AuthVerifyRequest {
     token: String,
 }
@@ -279,6 +323,44 @@ struct ModelDto {
     supports_vision: bool,
     thinking_levels: Vec<String>,
     thinking_level: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ProviderModelDto {
+    id: String,
+    display_name: String,
+    request_model_id: Option<String>,
+    context_window: usize,
+    max_output_tokens: usize,
+    api_type: Option<String>,
+    base_url: Option<String>,
+    temperature: Option<f32>,
+    supports_images: bool,
+    supports_streaming: bool,
+    supports_parallel_tool_calls: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct ProviderDto {
+    id: String,
+    display_name: String,
+    source: &'static str,
+    can_delete: bool,
+    connected: bool,
+    base_url: String,
+    api_type: Option<String>,
+    models: Vec<ProviderModelDto>,
+}
+
+#[derive(Debug, Serialize)]
+struct ProvidersResponse {
+    providers: Vec<ProviderDto>,
+}
+
+#[derive(Debug, Serialize)]
+struct ProviderMutationResponse {
+    success: bool,
+    connected: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -2158,24 +2240,346 @@ async fn get_skill_file(
     Ok(Json(SkillFileResponse { content }))
 }
 
-async fn list_providers() -> Json<Vec<serde_json::Value>> {
-    Json(vec![])
+fn normalized_api_type(value: Option<&str>) -> Result<Option<String>, ApiError> {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+
+    let api_type = match value.to_ascii_lowercase().as_str() {
+        "openai_chat_completions" | "openai" | "chat" => ApiType::OpenAiChatCompletions,
+        "openai_responses" | "responses" => ApiType::OpenAiResponses,
+        "anthropic" | "claude" => ApiType::Anthropic,
+        "google_gemini" | "gemini" | "google" => ApiType::GoogleGemini,
+        _ => {
+            return Err(ApiError::bad_request(format!(
+                "unsupported api_type '{value}'"
+            )));
+        }
+    };
+
+    Ok(Some(api_type.as_str().to_owned()))
 }
 
-async fn create_provider() -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "success": false, "error": "not implemented" }))
+fn required_provider_field(value: &str, field: &str) -> Result<String, ApiError> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(ApiError::bad_request(format!("{field} is required")));
+    }
+    Ok(value.to_owned())
 }
 
-async fn delete_provider(Path(_id): Path<String>) -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "success": true }))
+fn validate_provider_id(value: &str) -> Result<String, ApiError> {
+    let provider_id = required_provider_field(value, "provider_id")?;
+    if !provider_id
+        .chars()
+        .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.'))
+    {
+        return Err(ApiError::bad_request(
+            "provider_id may contain only letters, numbers, '-', '_' and '.'",
+        ));
+    }
+    Ok(provider_id)
 }
 
-async fn connect_provider(Path(_id): Path<String>) -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "success": false }))
+fn build_provider_config(
+    request: &CreateProviderRequest,
+) -> Result<(String, String, ProviderConfig), ApiError> {
+    let provider_id = validate_provider_id(&request.provider_id)?;
+    let display_name = required_provider_field(&request.display_name, "display_name")?;
+    let base_url = required_provider_field(&request.base_url, "base_url")?;
+    let api_type = normalized_api_type(request.api_type.as_deref())?;
+    let api_key = required_provider_field(&request.api_key, "api_key")?;
+
+    if request.models.is_empty() {
+        return Err(ApiError::bad_request(
+            "at least one model is required for a provider",
+        ));
+    }
+
+    let mut models = BTreeMap::new();
+    for request_model in &request.models {
+        let model_id = required_provider_field(&request_model.model_id, "model_id")?;
+        let model_display_name =
+            required_provider_field(&request_model.display_name, "model display_name")?;
+        if request_model.context_window == 0 {
+            return Err(ApiError::bad_request(format!(
+                "model '{model_id}' context_window must be greater than zero"
+            )));
+        }
+        if request_model.max_output_tokens == 0 {
+            return Err(ApiError::bad_request(format!(
+                "model '{model_id}' max_output_tokens must be greater than zero"
+            )));
+        }
+        if request_model
+            .temperature
+            .is_some_and(|temperature| !temperature.is_finite())
+        {
+            return Err(ApiError::bad_request(format!(
+                "model '{model_id}' temperature must be finite"
+            )));
+        }
+        if models.contains_key(&model_id) {
+            return Err(ApiError::conflict(format!(
+                "duplicate model_id '{model_id}'"
+            )));
+        }
+
+        models.insert(
+            model_id,
+            ModelConfig {
+                display_name: model_display_name,
+                context_window: request_model.context_window,
+                max_output_tokens: request_model.max_output_tokens,
+                api_type: normalized_api_type(request_model.api_type.as_deref())?,
+                base_url: request_model
+                    .base_url
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_owned),
+                temperature: request_model.temperature,
+                system_prompt: None,
+                supports_streaming: request_model.supports_streaming,
+                supports_images: request_model.supports_images,
+                supports_parallel_tool_calls: request_model.supports_parallel_tool_calls,
+                extra_body: None,
+                request_model_id: request_model
+                    .request_model_id
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_owned),
+            },
+        );
+    }
+
+    Ok((
+        provider_id,
+        api_key,
+        ProviderConfig {
+            display_name,
+            base_url,
+            api_type,
+            models,
+        },
+    ))
 }
 
-async fn disconnect_provider(Path(_id): Path<String>) -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "success": true }))
+fn provider_model_dto(model_id: &str, model: &ModelConfig) -> ProviderModelDto {
+    ProviderModelDto {
+        id: model_id.to_owned(),
+        display_name: model.display_name.clone(),
+        request_model_id: model.request_model_id.clone(),
+        context_window: model.context_window,
+        max_output_tokens: model.max_output_tokens,
+        api_type: model.api_type.clone(),
+        base_url: model.base_url.clone(),
+        temperature: model.temperature,
+        supports_images: model.supports_images,
+        supports_streaming: model.supports_streaming,
+        supports_parallel_tool_calls: model.supports_parallel_tool_calls,
+    }
+}
+
+fn provider_dto(
+    config: &tidev_config::AppConfig,
+    auth: &tidev_config::AuthStore,
+    provider_id: &str,
+) -> Option<ProviderDto> {
+    let provider = config.provider(provider_id)?;
+    let is_bundled = config.bundled_providers.contains_key(provider_id);
+    Some(ProviderDto {
+        id: provider_id.to_owned(),
+        display_name: provider.display_name.clone(),
+        source: if is_bundled { "bundled" } else { "user" },
+        can_delete: !is_bundled && config.providers.contains_key(provider_id),
+        connected: auth.api_key(provider_id).is_some(),
+        base_url: provider.base_url.clone(),
+        api_type: provider.api_type.clone(),
+        models: provider
+            .models
+            .iter()
+            .map(|(model_id, model)| provider_model_dto(model_id, model))
+            .collect(),
+    })
+}
+
+async fn list_providers(State(state): State<Arc<AppState>>) -> Json<ProvidersResponse> {
+    let config = state.runtime.config();
+    let auth = state.runtime.auth();
+    let providers = config
+        .provider_ids()
+        .iter()
+        .filter_map(|provider_id| provider_dto(&config, &auth, provider_id))
+        .collect();
+    Json(ProvidersResponse { providers })
+}
+
+async fn create_provider(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<CreateProviderRequest>,
+) -> Result<Json<ProviderDto>, ApiError> {
+    let (provider_id, api_key, provider) = build_provider_config(&request)?;
+    let config_before = state.runtime.config();
+    if config_before.provider_exists(&provider_id) {
+        return Err(ApiError::conflict(format!(
+            "provider '{provider_id}' already exists"
+        )));
+    }
+
+    let mut update_error = None;
+    let provider_id_for_update = provider_id.clone();
+    let provider_for_update = provider.clone();
+    state.runtime.update_config(|config| {
+        update_error = config
+            .set_user_provider(provider_id_for_update, provider_for_update)
+            .err();
+    });
+    if let Some(error) = update_error {
+        return Err(error.into());
+    }
+    if let Err(error) = state.runtime.save_config() {
+        state
+            .runtime
+            .update_config(|config| *config = config_before.clone());
+        return Err(error.into());
+    }
+
+    let auth_before = state.runtime.auth();
+    state
+        .runtime
+        .update_auth(|auth| auth.set_api_key(&provider_id, &api_key));
+    if let Err(error) = state.runtime.save_auth() {
+        state.runtime.update_auth(|auth| *auth = auth_before);
+        state
+            .runtime
+            .update_config(|config| *config = config_before);
+        let _ = state.runtime.save_config();
+        return Err(error.into());
+    }
+
+    let config = state.runtime.config();
+    let auth = state.runtime.auth();
+    let provider = provider_dto(&config, &auth, &provider_id)
+        .ok_or_else(|| ApiError::internal("created provider could not be loaded"))?;
+    Ok(Json(provider))
+}
+
+async fn delete_provider(
+    State(state): State<Arc<AppState>>,
+    Path(provider_id): Path<String>,
+) -> Result<Json<ProviderMutationResponse>, ApiError> {
+    let config_before = state.runtime.config();
+    if config_before.bundled_providers.contains_key(&provider_id) {
+        return Err(ApiError::forbidden(format!(
+            "bundled provider '{provider_id}' cannot be deleted"
+        )));
+    }
+    if !config_before.providers.contains_key(&provider_id) {
+        return Err(ApiError::not_found(format!(
+            "provider '{provider_id}' not found"
+        )));
+    }
+
+    let active_provider_id = state.runtime.active_provider_id();
+    if config_before.default_provider == provider_id || active_provider_id == provider_id {
+        return Err(ApiError::conflict(format!(
+            "provider '{provider_id}' is currently active or configured as the default"
+        )));
+    }
+    if config_before.agent.default_subagent_provider == provider_id
+        || config_before.agent.models.values().any(|model| {
+            model
+                .split_once('/')
+                .is_some_and(|(provider, _)| provider == provider_id)
+        })
+    {
+        return Err(ApiError::conflict(format!(
+            "provider '{provider_id}' is referenced by agent configuration"
+        )));
+    }
+
+    let mut update_error = None;
+    let provider_id_for_update = provider_id.clone();
+    state.runtime.update_config(|config| {
+        update_error = config.remove_user_provider(&provider_id_for_update).err();
+    });
+    if let Some(error) = update_error {
+        return Err(error.into());
+    }
+    if let Err(error) = state.runtime.save_config() {
+        state
+            .runtime
+            .update_config(|config| *config = config_before.clone());
+        return Err(error.into());
+    }
+
+    let auth_before = state.runtime.auth();
+    state.runtime.update_auth(|auth| {
+        auth.remove_api_key(&provider_id);
+    });
+    if let Err(error) = state.runtime.save_auth() {
+        state.runtime.update_auth(|auth| *auth = auth_before);
+        state
+            .runtime
+            .update_config(|config| *config = config_before);
+        let _ = state.runtime.save_config();
+        return Err(error.into());
+    }
+
+    Ok(Json(ProviderMutationResponse {
+        success: true,
+        connected: None,
+    }))
+}
+
+async fn connect_provider(
+    State(state): State<Arc<AppState>>,
+    Path(provider_id): Path<String>,
+    Json(request): Json<ConnectProviderRequest>,
+) -> Result<Json<ProviderMutationResponse>, ApiError> {
+    if state.runtime.config().provider(&provider_id).is_none() {
+        return Err(ApiError::not_found(format!(
+            "provider '{provider_id}' not found"
+        )));
+    }
+    let api_key = required_provider_field(&request.api_key, "api_key")?;
+    let auth_before = state.runtime.auth();
+    state
+        .runtime
+        .update_auth(|auth| auth.set_api_key(&provider_id, &api_key));
+    if let Err(error) = state.runtime.save_auth() {
+        state.runtime.update_auth(|auth| *auth = auth_before);
+        return Err(error.into());
+    }
+    Ok(Json(ProviderMutationResponse {
+        success: true,
+        connected: Some(true),
+    }))
+}
+
+async fn disconnect_provider(
+    State(state): State<Arc<AppState>>,
+    Path(provider_id): Path<String>,
+) -> Result<Json<ProviderMutationResponse>, ApiError> {
+    if state.runtime.config().provider(&provider_id).is_none() {
+        return Err(ApiError::not_found(format!(
+            "provider '{provider_id}' not found"
+        )));
+    }
+    let auth_before = state.runtime.auth();
+    state.runtime.update_auth(|auth| {
+        auth.remove_api_key(&provider_id);
+    });
+    if let Err(error) = state.runtime.save_auth() {
+        state.runtime.update_auth(|auth| *auth = auth_before);
+        return Err(error.into());
+    }
+    Ok(Json(ProviderMutationResponse {
+        success: true,
+        connected: Some(false),
+    }))
 }
 
 async fn get_default_model(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
@@ -3088,5 +3492,84 @@ mod tests {
         assert!(home.is_absolute());
         assert_eq!(workspace_input_path("~/tidev").unwrap(), home.join("tidev"));
         assert!(workspace_input_path("tidev").is_err());
+    }
+
+    #[test]
+    fn provider_request_normalizes_api_type_and_model_defaults() {
+        let request: CreateProviderRequest = serde_json::from_value(serde_json::json!({
+            "provider_id": "custom",
+            "display_name": "Custom",
+            "base_url": "https://example.com/v1",
+            "api_type": "openai",
+            "api_key": "secret",
+            "models": [{
+                "model_id": "model",
+                "display_name": "Model",
+                "context_window": 128000,
+                "max_output_tokens": 16000,
+                "temperature": 0.7
+            }]
+        }))
+        .unwrap();
+
+        let (provider_id, api_key, provider) = build_provider_config(&request).unwrap();
+        assert_eq!(provider_id, "custom");
+        assert_eq!(api_key, "secret");
+        assert_eq!(
+            provider.api_type.as_deref(),
+            Some("openai_chat_completions")
+        );
+        assert!(provider.models["model"].supports_streaming);
+        assert!(provider.models["model"].supports_parallel_tool_calls);
+    }
+
+    #[test]
+    fn provider_request_rejects_invalid_id_and_duplicate_models() {
+        let invalid_id: CreateProviderRequest = serde_json::from_value(serde_json::json!({
+            "provider_id": "custom/provider",
+            "display_name": "Custom",
+            "base_url": "https://example.com/v1",
+            "api_key": "secret",
+            "models": [{
+                "model_id": "model",
+                "display_name": "Model",
+                "context_window": 128000,
+                "max_output_tokens": 16000
+            }]
+        }))
+        .unwrap();
+        assert!(build_provider_config(&invalid_id).is_err());
+
+        let duplicate_models: CreateProviderRequest = serde_json::from_value(serde_json::json!({
+            "provider_id": "custom",
+            "display_name": "Custom",
+            "base_url": "https://example.com/v1",
+            "api_key": "secret",
+            "models": [
+                {
+                    "model_id": "model",
+                    "display_name": "Model",
+                    "context_window": 128000,
+                    "max_output_tokens": 16000
+                },
+                {
+                    "model_id": "model",
+                    "display_name": "Model 2",
+                    "context_window": 128000,
+                    "max_output_tokens": 16000
+                }
+            ]
+        }))
+        .unwrap();
+        assert!(build_provider_config(&duplicate_models).is_err());
+    }
+
+    #[test]
+    fn bundled_provider_is_never_deletable_even_without_a_key() {
+        let config = tidev_config::AppConfig::default();
+        let auth = tidev_config::AuthStore::default();
+        let provider = provider_dto(&config, &auth, "deepseek").unwrap();
+        assert_eq!(provider.source, "bundled");
+        assert!(!provider.can_delete);
     }
 }
