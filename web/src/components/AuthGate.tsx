@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuthStore } from "../stores/useAuthStore";
+import { Button, Input } from "./ui";
 
 export function AuthGate() {
   const { t } = useTranslation();
@@ -64,27 +65,28 @@ export function AuthGate() {
         {/* Password form */}
         <form onSubmit={handleSubmit}>
           <div className="mb-4">
-            <input
+            <Input
               ref={inputRef}
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder={t("Access token")}
               autoComplete="current-password"
-              className="w-full rounded-lg border border-neutral-300 bg-white px-4 py-2.5 text-base text-neutral-900 placeholder-neutral-400 outline-none transition-colors focus:border-neutral-500 focus:ring-1 focus:ring-neutral-500 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder-neutral-500 dark:focus:border-neutral-500"
               disabled={submitting}
             />
           </div>
 
           {error && <p className="mb-4 text-center text-sm text-red-500">{error}</p>}
 
-          <button
+          <Button
             type="submit"
             disabled={!password.trim() || submitting}
-            className="w-full rounded-lg bg-neutral-900 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
+            className="w-full"
+            variant="primary"
+            size="md"
           >
             {submitting ? t("Verifying...") : t("Unlock")}
-          </button>
+          </Button>
         </form>
       </div>
     </div>

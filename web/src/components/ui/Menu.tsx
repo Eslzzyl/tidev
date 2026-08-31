@@ -1,3 +1,4 @@
+import { createContext, useCallback, useContext, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import * as MenuPrimitive from "@radix-ui/react-dropdown-menu";
 
@@ -20,6 +21,7 @@ export function MenuContent({
   return (
     <MenuPrimitive.Portal>
       <MenuPrimitive.Content
+        data-ui-portal="true"
         className={cx("ui-menu-content", className)}
         sideOffset={sideOffset}
         {...props}
@@ -56,17 +58,87 @@ export function MenuSeparator({
   return <MenuPrimitive.Separator className={cx("ui-menu-separator", className)} {...props} />;
 }
 
-export function MenuSub(props: React.ComponentPropsWithoutRef<typeof MenuPrimitive.Sub>) {
-  return <MenuPrimitive.Sub {...props} />;
+type MenuSubProps = React.ComponentPropsWithoutRef<typeof MenuPrimitive.Sub> & {
+  instant?: boolean;
+};
+
+interface InstantMenuSubContextValue {
+  open: boolean;
+  openImmediately: () => void;
+}
+
+const InstantMenuSubContext = createContext<InstantMenuSubContextValue | null>(null);
+
+export function MenuSub({
+  instant = false,
+  open: openProp,
+  defaultOpen = false,
+  onOpenChange,
+  children,
+  ...props
+}: MenuSubProps) {
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen);
+  const isControlled = openProp !== undefined;
+  const open = isControlled ? openProp : uncontrolledOpen;
+  const handleOpenChange = useCallback(
+    (nextOpen: boolean) => {
+      if (!isControlled) setUncontrolledOpen(nextOpen);
+      onOpenChange?.(nextOpen);
+    },
+    [isControlled, onOpenChange],
+  );
+  const openImmediately = useCallback(() => {
+    if (!open) handleOpenChange(true);
+  }, [handleOpenChange, open]);
+
+  if (!instant) {
+    return (
+      <MenuPrimitive.Sub
+        {...props}
+        open={openProp}
+        defaultOpen={defaultOpen}
+        onOpenChange={onOpenChange}
+      >
+        {children}
+      </MenuPrimitive.Sub>
+    );
+  }
+
+  return (
+    <InstantMenuSubContext.Provider value={{ open, openImmediately }}>
+      <MenuPrimitive.Sub {...props} open={open} onOpenChange={handleOpenChange}>
+        {children}
+      </MenuPrimitive.Sub>
+    </InstantMenuSubContext.Provider>
+  );
 }
 
 export function MenuSubTrigger({
   className,
   children,
+  onPointerMove,
   ...props
 }: React.ComponentPropsWithoutRef<typeof MenuPrimitive.SubTrigger>) {
+  const instantSub = useContext(InstantMenuSubContext);
+
   return (
-    <MenuPrimitive.SubTrigger className={cx("ui-menu-item", className)} {...props}>
+    <MenuPrimitive.SubTrigger
+      className={cx("ui-menu-item", className)}
+      onPointerMove={(event) => {
+        onPointerMove?.(event);
+        if (
+          event.defaultPrevented ||
+          event.pointerType !== "mouse" ||
+          !instantSub ||
+          instantSub.open
+        ) {
+          return;
+        }
+        instantSub.openImmediately();
+        event.preventDefault();
+      }}
+      {...props}
+    >
       {children}
       <ChevronRight className="ui-menu-sub-indicator" size={14} aria-hidden="true" />
     </MenuPrimitive.SubTrigger>
@@ -81,6 +153,7 @@ export function MenuSubContent({
   return (
     <MenuPrimitive.Portal>
       <MenuPrimitive.SubContent
+        data-ui-portal="true"
         className={cx("ui-menu-content", className)}
         sideOffset={sideOffset}
         {...props}

@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { useWorkspace } from "../../hooks/workspaceQueries";
 import type { Session } from "../../types/api";
 import { formatDate, formatSessionActivity, shortPath } from "../../utils/chat";
+import { Button, IconButton, Input, Select } from "../ui";
 
 export interface SessionSidebarProps {
   loading: boolean;
@@ -128,23 +129,25 @@ export function SessionSidebar({
       <div className="sidebar-heading">
         <strong>{t("Conversations")}</strong>
         <div className="sidebar-actions">
-          <button
+          <IconButton
+            label={searchOpen ? t("Close search") : t("Search sessions")}
+            size="sm"
             className={searchOpen ? "icon-button active" : "icon-button"}
             onClick={handleSearchToggle}
             title={searchOpen ? t("Close search") : t("Search sessions")}
-            aria-label={searchOpen ? t("Close search") : t("Search sessions")}
             aria-expanded={searchOpen}
           >
             <Search size={16} />
-          </button>
-          <button
+          </IconButton>
+          <IconButton
+            label={t("New conversation")}
+            size="sm"
             className="icon-button"
             onClick={onCreate}
             title={t("New conversation")}
-            aria-label={t("New conversation")}
           >
             <Plus size={17} />
-          </button>
+          </IconButton>
         </div>
       </div>
       <div
@@ -152,7 +155,7 @@ export function SessionSidebar({
         aria-hidden={!searchOpen}
       >
         <Search size={14} />
-        <input
+        <Input
           ref={searchInputRef}
           value={search}
           onChange={(event) => onSearchChange(event.target.value)}
@@ -162,20 +165,22 @@ export function SessionSidebar({
           placeholder={t("Search sessions…")}
           aria-label={t("Search sessions")}
           tabIndex={searchOpen ? 0 : -1}
+          className="session-search-input"
         />
         {search ? (
-          <button
+          <IconButton
+            label={t("Clear search")}
+            size="sm"
             className="session-search-clear"
             onClick={() => {
               onSearchChange("");
               searchInputRef.current?.focus();
             }}
             title={t("Clear search")}
-            aria-label={t("Clear search")}
             tabIndex={searchOpen ? 0 : -1}
           >
             <X size={14} />
-          </button>
+          </IconButton>
         ) : null}
       </div>
       <div className="session-filter">
@@ -183,18 +188,21 @@ export function SessionSidebar({
           {t("Filter by directory")}
         </label>
         <Folder size={14} aria-hidden="true" />
-        <select
+        <Select
           id="session-workspace-filter"
           value={workspaceRootFilter ?? ""}
-          onChange={(event) => onWorkspaceRootFilterChange(event.target.value || null)}
-        >
-          <option value="">{t("All directories")}</option>
-          {workspaceRoots.map((root) => (
-            <option key={root} value={root}>
-              {shortPath(root) || t("Unknown directory")}
-            </option>
-          ))}
-        </select>
+          onValueChange={(value) => onWorkspaceRootFilterChange(value || null)}
+          ariaLabel={t("Filter by directory")}
+          className="session-filter-select"
+          triggerClassName="session-filter-control"
+          options={[
+            { value: "", label: t("All directories") },
+            ...workspaceRoots.map((root) => ({
+              value: root,
+              label: shortPath(root) || t("Unknown directory"),
+            })),
+          ]}
+        />
       </div>
       <div className="session-list">
         {loading && sessions.length === 0 ? (
@@ -218,8 +226,9 @@ export function SessionSidebar({
                 key={session.session_id}
               >
                 {renamingSessionId === session.session_id ? (
-                  <input
+                  <Input
                     className="session-rename-input"
+                    size="sm"
                     value={renameValue}
                     onChange={(event) => onRenameChange(event.target.value)}
                     onBlur={() => onRename(session.session_id)}
@@ -230,8 +239,11 @@ export function SessionSidebar({
                     autoFocus
                   />
                 ) : (
-                  <button
+                  <Button
+                    type="button"
                     className="session-select"
+                    variant="ghost"
+                    size="md"
                     onClick={() => onSelect(session.session_id)}
                     onDoubleClick={() => onStartRename(session)}
                   >
@@ -248,24 +260,28 @@ export function SessionSidebar({
                       </time>
                       {session.busy ? <span className="busy-indicator" /> : null}
                     </span>
-                  </button>
+                  </Button>
                 )}
                 {renamingSessionId !== session.session_id ? (
                   <div className="session-actions">
-                    <button
+                    <IconButton
+                      label={t("Rename conversation")}
+                      size="sm"
+                      className="session-action-button"
                       onClick={() => onStartRename(session)}
                       title={t("Rename conversation")}
-                      aria-label={t("Rename conversation")}
                     >
                       <Pencil size={13} />
-                    </button>
-                    <button
+                    </IconButton>
+                    <IconButton
+                      label={t("Delete conversation")}
+                      size="sm"
+                      className="session-action-button"
                       onClick={() => onDelete(session)}
                       title={t("Delete conversation")}
-                      aria-label={t("Delete conversation")}
                     >
                       <Trash2 size={13} />
-                    </button>
+                    </IconButton>
                   </div>
                 ) : null}
               </div>
@@ -273,9 +289,16 @@ export function SessionSidebar({
           </section>
         ))}
         {hasMore ? (
-          <button className="session-load-more" onClick={onLoadMore} disabled={loadingMore}>
+          <Button
+            type="button"
+            className="session-load-more"
+            variant="secondary"
+            size="sm"
+            onClick={onLoadMore}
+            loading={loadingMore}
+          >
             {loadingMore ? t("Loading more conversations…") : t("Load more")}
-          </button>
+          </Button>
         ) : null}
       </div>
       {workspaceDisplay ? (

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTerminalStore } from "../../stores/useTerminalStore";
 import { useTranslation } from "react-i18next";
+import { Button } from "../ui";
 
 interface TerminalTouchKeyboardProps {
   tabId: string;
@@ -110,23 +111,21 @@ export function TerminalTouchKeyboard({ tabId, sendInput, isDark }: TerminalTouc
             const isCtrl = key.ctrlToggle;
             const active = isCtrl && ctrlLatch;
             return (
-              <button
+              <Button
                 key={key.label}
                 type="button"
                 tabIndex={-1}
                 onClick={(e) => handleClick(e, key)}
-                className={`flex-1 cursor-pointer select-none rounded px-1 py-1.5 text-center text-xs font-medium leading-none transition-colors active:scale-95 ${
-                  active
-                    ? "bg-blue-600 text-white shadow-sm"
-                    : isDark
-                      ? "bg-neutral-800 text-neutral-200 hover:bg-neutral-700 active:bg-neutral-600"
-                      : "bg-neutral-100 text-neutral-700 hover:bg-neutral-200 active:bg-neutral-300"
-                }`}
+                className="terminal-touch-key-button"
+                variant="ghost"
+                size="sm"
+                data-active={active ? "true" : undefined}
+                data-dark={isDark ? "true" : undefined}
               >
                 {key.label === "Tab" || key.label === "Esc" || key.label === "Ctrl"
                   ? t(key.label)
                   : key.label}
-              </button>
+              </Button>
             );
           })}
         </div>

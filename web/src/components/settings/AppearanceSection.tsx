@@ -2,6 +2,7 @@ import { Sun, Moon, Monitor } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useUIStore, getEffectiveTheme, type Theme } from "../../stores/useUIStore";
 import type { LocalePreference } from "../../i18n";
+import { Button, Select } from "../ui";
 
 const themes: { value: Theme; label: string; icon: React.ReactNode }[] = [
   {
@@ -40,23 +41,25 @@ export function AppearanceSection() {
 
       <div className="grid grid-cols-3 gap-3">
         {themes.map((themeOption) => (
-          <button
+          <Button
+            type="button"
             key={themeOption.value}
             onClick={() => setTheme(themeOption.value)}
-            className={`flex flex-col items-center gap-2 rounded-lg border p-4 transition-all ${
-              themeOption.value === theme
-                ? "border-neutral-900 bg-neutral-50 dark:border-neutral-100 dark:bg-neutral-800"
-                : "border-neutral-200 hover:border-neutral-300 dark:border-neutral-700 dark:hover:border-neutral-600"
-            }`}
+            className="theme-option-button"
+            variant="secondary"
+            size="lg"
+            data-active={themeOption.value === theme ? "true" : undefined}
+            leadingIcon={themeOption.icon}
           >
-            {themeOption.icon}
-            <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
-              {t(themeOption.label)}
+            <span className="theme-option-copy">
+              <span className="text-sm font-medium">{t(themeOption.label)}</span>
+              {themeOption.value === theme && (
+                <span className="text-xs font-normal text-neutral-500 dark:text-neutral-400">
+                  {t("Active")}
+                </span>
+              )}
             </span>
-            {themeOption.value === theme && (
-              <span className="text-xs text-neutral-500 dark:text-neutral-400">{t("Active")}</span>
-            )}
-          </button>
+          </Button>
         ))}
       </div>
 
@@ -72,18 +75,20 @@ export function AppearanceSection() {
       </div>
 
       <div className="mt-4 rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
-        <label className="flex items-center justify-between gap-4">
+        <div className="flex items-center justify-between gap-4">
           <span className="text-sm text-neutral-600 dark:text-neutral-400">{t("Language")}</span>
-          <select
+          <Select
             value={locale}
-            onChange={(event) => setLocale(event.target.value as LocalePreference)}
-            className="rounded border border-neutral-300 bg-white px-2 py-1 text-sm text-neutral-700 outline-none dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-200"
-          >
-            <option value="system">{t("Use browser language")}</option>
-            <option value="en">{t("English")}</option>
-            <option value="zh-CN">{t("简体中文")}</option>
-          </select>
-        </label>
+            onValueChange={(value) => setLocale(value as LocalePreference)}
+            ariaLabel={t("Language")}
+            className="appearance-locale-select"
+            options={[
+              { value: "system", label: t("Use browser language") },
+              { value: "en", label: t("English") },
+              { value: "zh-CN", label: t("简体中文") },
+            ]}
+          />
+        </div>
       </div>
     </section>
   );

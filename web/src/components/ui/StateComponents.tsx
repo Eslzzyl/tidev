@@ -101,6 +101,10 @@ export function TabsTrigger({
   return <TabsPrimitive.Trigger className={cx("ui-tabs-trigger", className)} {...props} />;
 }
 
+export function TabsItem({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+  return <div className={cx("ui-tabs-item", className)} {...props} />;
+}
+
 export function TabsContent({
   className,
   ...props
@@ -111,6 +115,7 @@ export function TabsContent({
 export const Tabs = {
   Root: TabsPrimitive.Root,
   List: TabsList,
+  Item: TabsItem,
   Trigger: TabsTrigger,
   Content: TabsContent,
 };

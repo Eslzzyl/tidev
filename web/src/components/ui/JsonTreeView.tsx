@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ChevronRight, ChevronDown } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { Button } from "./Button";
 
 interface JsonTreeViewProps {
   data: unknown;
@@ -69,9 +70,12 @@ function TreeNode({ keyName, value, depth, maxDepth, embedded }: TreeNodeProps) 
 
     return (
       <div className="tool-json-node">
-        <button
+        <Button
+          type="button"
           onClick={() => setIsExpanded(!isExpanded)}
-          className="inline-flex items-center gap-0.5 rounded px-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+          className="tool-json-node-toggle"
+          variant="ghost"
+          size="sm"
         >
           {empty ? (
             <span className="w-3.5" />
@@ -90,7 +94,7 @@ function TreeNode({ keyName, value, depth, maxDepth, embedded }: TreeNodeProps) 
               ? ""
               : `${bracket[0]} ${entries.length} ${type === "object" ? t("keys") : t("items")} ${bracket[1]}`}
           </span>
-        </button>
+        </Button>
         {isExpanded && !empty && (
           <div
             className={
@@ -154,14 +158,17 @@ export function JsonTreeView({
     <div
       className={embedded ? "tool-json-tree" : "rounded bg-neutral-50 p-2 dark:bg-neutral-900/50"}
     >
-      <button
+      <Button
+        type="button"
         onClick={() => setIsExpanded(!isExpanded)}
         className="tool-json-toggle inline-flex items-center gap-1 rounded px-1 py-0.5 text-neutral-600 hover:bg-neutral-200/50 dark:text-neutral-400 dark:hover:bg-neutral-800"
+        variant="ghost"
+        size="sm"
       >
         {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
         {type === "object" ? t("JSON") : t("Array")} ({entries.length}{" "}
         {type === "object" ? t("keys") : t("items")})
-      </button>
+      </Button>
       {isExpanded && (
         <div className="tool-json-content mt-1">
           <span className="text-neutral-500">{bracket[0]}</span>

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Check, Copy } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { IconButton } from "./Button";
 
 interface CopyButtonProps {
   content: string;
@@ -21,14 +22,15 @@ export function CopyButton({ content }: CopyButtonProps) {
   }
 
   return (
-    <button
+    <IconButton
+      label={t("Copy to clipboard")}
+      size="sm"
       type="button"
       onClick={handleCopy}
       className="message-action"
       title={t("Copy to clipboard")}
-      aria-label={t("Copy to clipboard")}
     >
       {copied ? <Check size={17} /> : <Copy size={17} />}
-    </button>
+    </IconButton>
   );
 }

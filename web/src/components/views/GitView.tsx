@@ -28,6 +28,7 @@ import type {
   GitGraphResponse,
 } from "../../types/api";
 import { computeGraphLayout } from "../../lib/gitGraph";
+import { Button, IconButton, Tabs } from "../ui";
 import type { GraphRow } from "../../lib/gitGraph";
 import { ChangesPanel } from "./git/GitChangesPanel";
 import { GraphHistoryPanel, CommitDetailPanel } from "./git/GitHistoryPanels";
@@ -516,12 +517,9 @@ export function GitView() {
         <div className="text-center">
           <GitBranch className="mx-auto mb-2 h-8 w-8 text-neutral-400" />
           <p className="text-sm text-neutral-500">{error}</p>
-          <button
-            onClick={refreshStatus}
-            className="mt-3 rounded bg-neutral-200 px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-300 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"
-          >
+          <Button onClick={refreshStatus} className="mt-3" variant="secondary" size="sm">
             {t("Retry")}
-          </button>
+          </Button>
         </div>
       </div>
     );
@@ -545,10 +543,11 @@ export function GitView() {
         </div>
 
         <div className="flex items-center gap-1">
-          <button
+          <IconButton
+            label={t("Pull")}
+            size="sm"
             onClick={handlePull}
             disabled={pushPullLoading}
-            className="git-icon-button rounded p-1.5 text-neutral-500 hover:bg-neutral-200 dark:hover:bg-neutral-700"
             title={t("Pull")}
           >
             {pushPullLoading ? (
@@ -556,19 +555,21 @@ export function GitView() {
             ) : (
               <ArrowDownFromLine className="h-3.5 w-3.5" />
             )}
-          </button>
-          <button
+          </IconButton>
+          <IconButton
+            label={t("Push")}
+            size="sm"
             onClick={handlePush}
             disabled={pushPullLoading}
-            className="git-icon-button rounded p-1.5 text-neutral-500 hover:bg-neutral-200 dark:hover:bg-neutral-700"
             title={t("Push")}
           >
             <ArrowUpFromLine className="h-3.5 w-3.5" />
-          </button>
-          <button
+          </IconButton>
+          <IconButton
+            label={t("Stash")}
+            size="sm"
             onClick={handleStash}
             disabled={stashLoading}
-            className="git-icon-button rounded p-1.5 text-neutral-500 hover:bg-neutral-200 dark:hover:bg-neutral-700"
             title={t("Stash")}
           >
             {stashLoading ? (
@@ -576,35 +577,34 @@ export function GitView() {
             ) : (
               <Archive className="h-3.5 w-3.5" />
             )}
-          </button>
-          <button
+          </IconButton>
+          <IconButton
+            label={t("Refresh")}
+            size="sm"
             onClick={refreshStatus}
             disabled={loading}
-            className="git-icon-button rounded p-1.5 text-neutral-500 hover:bg-neutral-200 dark:hover:bg-neutral-700"
             title={t("Refresh")}
           >
             <RotateCcw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-          </button>
+          </IconButton>
         </div>
       </div>
 
       {/* Tab bar */}
-      <div className="flex border-b border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-950">
-        {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => navigate(routes.git(tab.id))}
-            className={`flex items-center gap-1.5 px-4 py-2 text-xs font-medium transition-colors ${
-              activeTab === tab.id
-                ? "border-b-2 border-neutral-900 text-neutral-900 dark:border-neutral-100 dark:text-neutral-100"
-                : "text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300"
-            }`}
-          >
-            {tab.icon}
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      <Tabs.Root
+        value={activeTab}
+        onValueChange={(value) => navigate(routes.git(value as GitTab))}
+        className="git-tabs-root"
+      >
+        <Tabs.List className="git-tabs-list">
+          {tabs.map((tab) => (
+            <Tabs.Trigger key={tab.id} value={tab.id} className="git-tab-trigger">
+              {tab.icon}
+              {tab.label}
+            </Tabs.Trigger>
+          ))}
+        </Tabs.List>
+      </Tabs.Root>
 
       {/* Result message */}
       {commitResult && (
@@ -618,9 +618,15 @@ export function GitView() {
           }`}
         >
           {commitResult}
-          <button onClick={() => setCommitResult(null)} className="ml-2 underline">
+          <Button
+            type="button"
+            onClick={() => setCommitResult(null)}
+            className="ml-2 px-0 underline"
+            variant="ghost"
+            size="sm"
+          >
             {t("Dismiss")}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -718,12 +724,15 @@ export function GitView() {
       {activeTab === "history" && (detailOpen || animateOut) && selectedCommit && (
         <>
           {/* Backdrop */}
-          <button
+          <Button
+            type="button"
             onClick={handleCloseMobile}
-            className={`fixed inset-0 z-40 bg-black/30 transition-opacity duration-300 md:hidden ${
+            className={`ui-backdrop-button fixed inset-0 z-40 bg-black/30 transition-opacity duration-300 md:hidden ${
               animateOut ? "opacity-0" : ""
             }`}
             aria-label={t("Close detail")}
+            variant="ghost"
+            size="sm"
           />
           {/* Full-screen overlay */}
           <div
@@ -733,12 +742,9 @@ export function GitView() {
           >
             {/* Fixed top bar */}
             <div className="flex items-center gap-3 border-b border-neutral-200 px-4 py-3 dark:border-neutral-800">
-              <button
-                onClick={handleCloseMobile}
-                className="rounded p-1 text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
-              >
+              <IconButton label={t("Close detail")} size="sm" onClick={handleCloseMobile}>
                 <ChevronDown className="h-5 w-5" />
-              </button>
+              </IconButton>
               <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
                 {t("Commit Detail")}
               </span>

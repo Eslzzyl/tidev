@@ -18,6 +18,7 @@ import { ContextMenu, type ContextMenuItem } from "../ui/ContextMenu";
 import { CreateItemDialog } from "../ui/CreateItemDialog";
 import { RenameDialog } from "../ui/RenameDialog";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
+import { Button } from "../ui";
 import { useTranslation } from "react-i18next";
 
 const fileIcons: Record<string, React.ReactNode> = {
@@ -228,9 +229,15 @@ export function FileTree() {
     return (
       <div className="px-3 py-4 text-center">
         <p className="text-xs text-red-500">{error}</p>
-        <button onClick={loadRoot} className="mt-2 text-xs text-blue-500 hover:underline">
+        <Button
+          type="button"
+          onClick={loadRoot}
+          className="file-tree-retry"
+          variant="ghost"
+          size="sm"
+        >
           {t("Retry")}
-        </button>
+        </Button>
       </div>
     );
   }
@@ -392,7 +399,8 @@ function TreeNodeItem({
 
   return (
     <div>
-      <button
+      <Button
+        type="button"
         onClick={() => onNodeClick(node)}
         onContextMenu={(e) => onContextMenu(e, node)}
         draggable={!node.isDirectory}
@@ -400,11 +408,11 @@ function TreeNodeItem({
         onDragOver={handleDragOver}
         onDragLeave={onDragLeave}
         onDrop={handleDrop}
-        className={`flex w-full items-center gap-1 px-2 py-1 text-left hover:bg-neutral-100 dark:hover:bg-neutral-800 ${
-          isSelected
-            ? "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
-            : "text-neutral-700 dark:text-neutral-300"
-        } ${isDragOver ? "bg-blue-100 dark:bg-blue-900/30" : ""}`}
+        className="file-tree-node-button"
+        variant="ghost"
+        size="sm"
+        data-selected={isSelected ? "true" : undefined}
+        data-drag-over={isDragOver ? "true" : undefined}
         style={{ paddingLeft: `${8 + depth * 16}px` }}
         title={node.path}
       >
@@ -433,7 +441,7 @@ function TreeNodeItem({
 
         {/* VS Code-style Git status dot */}
         <GitStatusDot status={gitDisplay} />
-      </button>
+      </Button>
 
       {/* Render children if expanded — smooth height transition */}
       {node.isDirectory && (

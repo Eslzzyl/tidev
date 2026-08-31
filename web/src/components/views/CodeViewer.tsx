@@ -9,6 +9,7 @@ import { FileTabs } from "./FileTabs";
 import { ImagePreview } from "./ImagePreview";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { useTranslation } from "react-i18next";
+import { IconButton } from "../ui";
 
 const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "svg", "webp", "ico", "bmp"]);
 const MARKDOWN_EXTS = new Set(["md", "markdown", "mdx"]);
@@ -217,65 +218,62 @@ export function CodeViewer() {
 
             {/* Preview / Edit toggle (for markdown and json) */}
             {showEditToggle && (
-              <button
+              <IconButton
+                label={isEditing ? t("Preview mode") : t("Edit mode")}
+                size="sm"
+                variant={isEditing ? "primary" : "ghost"}
                 onClick={toggleEdit}
-                className={`rounded p-1 ${
-                  isEditing
-                    ? "bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400"
-                    : "text-neutral-400 hover:bg-neutral-200 hover:text-neutral-600 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
-                }`}
-                aria-label={isEditing ? t("Preview mode") : t("Edit mode")}
                 title={isEditing ? t("Switch to preview") : t("Switch to edit source")}
               >
                 {isEditing ? <Eye className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}
-              </button>
+              </IconButton>
             )}
 
             {/* Edit / View toggle (for code files) */}
             {renderMode === "code" && (
-              <button
+              <IconButton
+                label={isEditing ? t("View mode") : t("Edit mode")}
+                size="sm"
+                variant={isEditing ? "primary" : "ghost"}
                 onClick={toggleEdit}
-                className={`rounded p-1 ${
-                  isEditing
-                    ? "bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400"
-                    : "text-neutral-400 hover:bg-neutral-200 hover:text-neutral-600 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
-                }`}
-                aria-label={isEditing ? t("View mode") : t("Edit mode")}
                 title={isEditing ? t("Switch to view mode") : t("Switch to edit mode")}
               >
                 {isEditing ? <Eye className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}
-              </button>
+              </IconButton>
             )}
 
             {/* Save button (only in edit mode and when dirty) */}
             {isEditing && activeFile.isDirty && (
-              <button
+              <IconButton
+                label={t("Save file")}
+                size="sm"
+                variant="primary"
                 onClick={handleSaveClick}
-                className="rounded p-1 text-green-600 hover:bg-green-100 dark:text-green-400 dark:hover:bg-green-900/30"
-                aria-label={t("Save file")}
                 title={t("Save (Ctrl+S)")}
               >
                 <Save className="h-3.5 w-3.5" />
-              </button>
+              </IconButton>
             )}
 
             {/* Copy only for code/markdown/json (text-based) */}
             {renderMode !== "image" && (
-              <button
+              <IconButton
+                label={t("Copy file content")}
+                size="sm"
+                variant={copied ? "primary" : "ghost"}
                 onClick={handleCopy}
-                className="rounded p-1 text-neutral-400 hover:bg-neutral-200 hover:text-neutral-600 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
-                aria-label={t("Copy file content")}
               >
                 {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-              </button>
+              </IconButton>
             )}
-            <button
+            <IconButton
+              label={t("Close file")}
+              size="sm"
+              variant="ghost"
               onClick={() => activeFilePath && closeFile(activeFilePath)}
-              className="rounded p-1 text-neutral-400 hover:bg-neutral-200 hover:text-neutral-600 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
-              aria-label={t("Close file")}
             >
               <X className="h-3.5 w-3.5" />
-            </button>
+            </IconButton>
           </div>
         </div>
       )}

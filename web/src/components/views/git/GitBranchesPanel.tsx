@@ -1,6 +1,7 @@
 import { GitBranch, Loader2, Plus, Trash2 } from "lucide-react";
 import type { GitBranchResponse } from "../../../types/api";
 import { useTranslation } from "react-i18next";
+import { Button, IconButton, Input, Switch } from "../../ui";
 
 export function BranchesPanel({
   branches,
@@ -41,47 +42,41 @@ export function BranchesPanel({
       {/* Create branch */}
       <div className="mb-4">
         <div className="flex gap-2">
-          <input
+          <Input
             type="text"
             value={newBranchName}
             onChange={(e) => onNewBranchNameChange(e.target.value)}
             placeholder={t("New branch name")}
-            className="flex-1 rounded border border-neutral-300 bg-white px-3 py-1.5 text-base text-neutral-900 placeholder-neutral-400 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder-neutral-500"
+            className="flex-1"
             onKeyDown={(e) => {
               if (e.key === "Enter" && newBranchName.trim() && !creatingBranch) onCreateBranch();
             }}
           />
-          <button
+          <Button
             onClick={onCreateBranch}
             disabled={!newBranchName.trim() || creatingBranch}
-            className="git-primary-button flex items-center gap-1 rounded px-3 py-1.5 text-xs font-medium transition-colors hover:bg-neutral-800 dark:hover:bg-neutral-200"
+            variant="primary"
+            size="sm"
+            leadingIcon={
+              creatingBranch ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Plus className="h-3.5 w-3.5" />
+              )
+            }
           >
-            {creatingBranch ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Plus className="h-3.5 w-3.5" />
-            )}
             {t("Create")}
-          </button>
+          </Button>
         </div>
       </div>
 
       {/* Submodule toggle */}
       <div className="mb-3 flex items-center gap-2">
-        <button
-          onClick={onToggleSubmodules}
+        <Switch
+          checked={showSubmodules}
+          onCheckedChange={onToggleSubmodules}
           aria-label={t("Show submodule branches")}
-          aria-pressed={showSubmodules}
-          className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${
-            showSubmodules ? "bg-neutral-500" : "bg-neutral-300 dark:bg-neutral-600"
-          }`}
-        >
-          <span
-            className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
-              showSubmodules ? "translate-x-3.5" : "translate-x-0.5"
-            }`}
-          />
-        </button>
+        />
         <span className="text-xs text-neutral-500">{t("Show submodule branches")}</span>
       </div>
 
@@ -99,13 +94,14 @@ export function BranchesPanel({
             {branch.current && <span className="text-xs text-neutral-400">{t("current")}</span>}
             {branch.remote && <span className="text-xs text-neutral-400">{branch.remote}</span>}
             {!branch.current && (
-              <button
+              <IconButton
+                label={t("Delete branch")}
+                size="sm"
                 onClick={() => onDeleteBranch(branch.name)}
-                className="rounded p-1 text-neutral-400 hover:bg-neutral-200 hover:text-red-600 dark:hover:bg-neutral-700 dark:hover:text-red-400"
                 title={t("Delete branch")}
               >
                 <Trash2 className="h-3 w-3" />
-              </button>
+              </IconButton>
             )}
           </div>
         ))}

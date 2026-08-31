@@ -24,6 +24,7 @@ import {
   useRefreshMcpServer,
 } from "../../hooks/workspaceQueries";
 import type { McpServerInfo, McpServerConfig, McpToolSummary } from "../../types/api";
+import { Button, IconButton, Input, Switch, Textarea } from "../ui";
 
 interface ServerDraft {
   name: string;
@@ -266,13 +267,14 @@ export function McpSection() {
             {t("Manage Model Context Protocol (MCP) server connections and tools")}
           </p>
         </div>
-        <button
+        <Button
           onClick={handleOpenAdd}
-          className="flex items-center gap-1.5 rounded-lg bg-neutral-900 px-3 py-1.5 text-xs font-medium !text-white transition hover:bg-neutral-800 dark:bg-neutral-100 dark:!text-neutral-900 dark:hover:bg-neutral-200"
+          variant="primary"
+          size="sm"
+          leadingIcon={<Plus className="h-3.5 w-3.5" />}
         >
-          <Plus className="h-3.5 w-3.5" />
-          <span>{t("Add Server")}</span>
-        </button>
+          {t("Add Server")}
+        </Button>
       </div>
 
       {/* Loading & Error States */}
@@ -294,13 +296,15 @@ export function McpSection() {
           <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1 max-w-sm">
             {t("Add stdio, HTTP, or SSE MCP servers to extend your assistant with custom tools.")}
           </p>
-          <button
+          <Button
             onClick={handleOpenAdd}
-            className="mt-4 flex items-center gap-1.5 rounded-lg bg-neutral-900 px-3 py-1.5 text-xs font-medium !text-white transition hover:bg-neutral-800 dark:bg-neutral-100 dark:!text-neutral-900 dark:hover:bg-neutral-200"
+            className="mt-4"
+            variant="primary"
+            size="sm"
+            leadingIcon={<Plus className="h-3.5 w-3.5" />}
           >
-            <Plus className="h-3.5 w-3.5" />
-            <span>{t("Add your first server")}</span>
-          </button>
+            {t("Add your first server")}
+          </Button>
         </div>
       ) : (
         /* Server List */
@@ -389,59 +393,64 @@ export function McpSection() {
                   {/* Action Buttons */}
                   <div className="flex items-center gap-1.5 shrink-0">
                     {/* Toggle Connect/Disconnect */}
-                    <button
+                    <IconButton
+                      label={isConnected ? t("Disconnect") : t("Connect")}
+                      size="sm"
+                      variant={isConnected ? "primary" : "secondary"}
                       onClick={() => handleToggleConnection(server)}
                       disabled={isBusy}
                       title={isConnected ? t("Disconnect") : t("Connect")}
-                      className={`p-1.5 rounded-lg border transition ${
-                        isConnected
-                          ? "border-emerald-200 text-emerald-600 hover:bg-emerald-50 dark:border-emerald-900/50 dark:text-emerald-400 dark:hover:bg-emerald-950/30"
-                          : "border-neutral-200 text-neutral-600 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800"
-                      }`}
                     >
                       <Power className={`h-4 w-4 ${isBusy ? "animate-spin" : ""}`} />
-                    </button>
+                    </IconButton>
 
                     {/* Refresh Tools */}
-                    <button
+                    <IconButton
+                      label={t("Refresh Tools")}
+                      size="sm"
+                      variant="secondary"
                       onClick={() => handleRefresh(server.name)}
                       disabled={isBusy}
                       title={t("Refresh Tools")}
-                      className="p-1.5 rounded-lg border border-neutral-200 text-neutral-600 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800 transition"
                     >
                       <RefreshCw className={`h-4 w-4 ${isBusy ? "animate-spin" : ""}`} />
-                    </button>
+                    </IconButton>
 
                     {/* Edit */}
-                    <button
+                    <IconButton
+                      label={t("Edit Server")}
+                      size="sm"
+                      variant="secondary"
                       onClick={() => handleOpenEdit(server)}
                       title={t("Edit Server")}
-                      className="p-1.5 rounded-lg border border-neutral-200 text-neutral-600 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800 transition"
                     >
                       <Edit2 className="h-4 w-4" />
-                    </button>
+                    </IconButton>
 
                     {/* Delete */}
-                    <button
+                    <IconButton
+                      label={t("Remove Server")}
+                      size="sm"
+                      variant="danger"
                       onClick={() => handleDelete(server.name)}
                       title={t("Remove Server")}
-                      className="p-1.5 rounded-lg border border-neutral-200 text-red-600 hover:bg-red-50 dark:border-neutral-700 dark:text-red-400 dark:hover:bg-red-950/30 transition"
                     >
                       <Trash2 className="h-4 w-4" />
-                    </button>
+                    </IconButton>
 
                     {/* Expand Tools Toggle */}
-                    <button
+                    <IconButton
+                      label={isExpanded ? t("Collapse tools") : t("Expand tools")}
+                      size="sm"
                       onClick={() => toggleExpand(server.name)}
                       title={isExpanded ? t("Collapse tools") : t("Expand tools")}
-                      className="p-1.5 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition"
                     >
                       {isExpanded ? (
                         <ChevronDown className="h-4 w-4" />
                       ) : (
                         <ChevronRight className="h-4 w-4" />
                       )}
-                    </button>
+                    </IconButton>
                   </div>
                 </div>
 
@@ -506,12 +515,9 @@ export function McpSection() {
               <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
                 {editingServerName ? t("Edit MCP Server") : t("Add MCP Server")}
               </h3>
-              <button
-                onClick={() => setModalOpen(false)}
-                className="rounded p-1 text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
-              >
+              <IconButton label={t("Close")} size="sm" onClick={() => setModalOpen(false)}>
                 <X className="h-4 w-4" />
-              </button>
+              </IconButton>
             </div>
 
             {/* Modal Form */}
@@ -527,12 +533,12 @@ export function McpSection() {
                 <label className="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">
                   {t("Server Name")}
                 </label>
-                <input
+                <Input
                   type="text"
                   value={draft.name}
                   onChange={(e) => setDraft({ ...draft, name: e.target.value })}
                   placeholder="e.g. blender, github, memory"
-                  className="w-full rounded-lg border border-neutral-300 px-3 py-1.5 text-xs text-neutral-900 focus:border-neutral-500 focus:outline-none dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
+                  size="sm"
                 />
               </div>
 
@@ -543,25 +549,25 @@ export function McpSection() {
                 </label>
                 <div className="grid grid-cols-3 gap-2">
                   {(["stdio", "http", "sse"] as const).map((type) => (
-                    <button
+                    <Button
                       key={type}
                       type="button"
                       onClick={() => setDraft({ ...draft, type })}
-                      className={`flex items-center justify-center gap-1.5 rounded-lg border py-2 text-xs font-medium transition ${
-                        draft.type === type
-                          ? "border-neutral-900 bg-neutral-900 !text-white dark:border-neutral-100 dark:bg-neutral-100 dark:!text-neutral-900"
-                          : "border-neutral-200 text-neutral-600 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800"
-                      }`}
+                      className="w-full"
+                      variant={draft.type === type ? "primary" : "secondary"}
+                      size="sm"
+                      leadingIcon={
+                        type === "stdio" ? (
+                          <Terminal className="h-3 w-3" />
+                        ) : type === "http" ? (
+                          <Globe className="h-3 w-3" />
+                        ) : (
+                          <Radio className="h-3 w-3" />
+                        )
+                      }
                     >
-                      {type === "stdio" ? (
-                        <Terminal className="h-3 w-3" />
-                      ) : type === "http" ? (
-                        <Globe className="h-3 w-3" />
-                      ) : (
-                        <Radio className="h-3 w-3" />
-                      )}
                       {type.toUpperCase()}
-                    </button>
+                    </Button>
                   ))}
                 </div>
               </div>
@@ -573,12 +579,13 @@ export function McpSection() {
                     <label className="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">
                       {t("Command")}
                     </label>
-                    <input
+                    <Input
                       type="text"
                       value={draft.command}
                       onChange={(e) => setDraft({ ...draft, command: e.target.value })}
                       placeholder="e.g. uvx, npx, python, /path/to/server"
-                      className="w-full rounded-lg border border-neutral-300 px-3 py-1.5 text-xs text-neutral-900 focus:border-neutral-500 focus:outline-none dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100 font-mono"
+                      size="sm"
+                      className="font-mono"
                     />
                   </div>
 
@@ -586,12 +593,13 @@ export function McpSection() {
                     <label className="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">
                       {t("Arguments (space separated)")}
                     </label>
-                    <input
+                    <Input
                       type="text"
                       value={draft.args}
                       onChange={(e) => setDraft({ ...draft, args: e.target.value })}
                       placeholder="e.g. blender-mcp or -y @modelcontextprotocol/server-filesystem"
-                      className="w-full rounded-lg border border-neutral-300 px-3 py-1.5 text-xs text-neutral-900 focus:border-neutral-500 focus:outline-none dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100 font-mono"
+                      size="sm"
+                      className="font-mono"
                     />
                   </div>
 
@@ -599,12 +607,12 @@ export function McpSection() {
                     <label className="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">
                       {t("Working Directory (optional)")}
                     </label>
-                    <input
+                    <Input
                       type="text"
                       value={draft.cwd}
                       onChange={(e) => setDraft({ ...draft, cwd: e.target.value })}
                       placeholder={t("Leave empty for workspace root")}
-                      className="w-full rounded-lg border border-neutral-300 px-3 py-1.5 text-xs text-neutral-900 focus:border-neutral-500 focus:outline-none dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
+                      size="sm"
                     />
                   </div>
 
@@ -612,12 +620,12 @@ export function McpSection() {
                     <label className="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">
                       {t("Environment Variables (KEY=VALUE per line)")}
                     </label>
-                    <textarea
+                    <Textarea
                       rows={3}
                       value={draft.env}
                       onChange={(e) => setDraft({ ...draft, env: e.target.value })}
                       placeholder="API_KEY=xyz&#10;DEBUG=1"
-                      className="w-full rounded-lg border border-neutral-300 px-3 py-1.5 text-xs text-neutral-900 focus:border-neutral-500 focus:outline-none dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100 font-mono"
+                      className="font-mono"
                     />
                   </div>
                 </>
@@ -628,12 +636,13 @@ export function McpSection() {
                     <label className="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">
                       {t("Endpoint URL")}
                     </label>
-                    <input
+                    <Input
                       type="text"
                       value={draft.url}
                       onChange={(e) => setDraft({ ...draft, url: e.target.value })}
                       placeholder="http://127.0.0.1:8000/mcp"
-                      className="w-full rounded-lg border border-neutral-300 px-3 py-1.5 text-xs text-neutral-900 focus:border-neutral-500 focus:outline-none dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100 font-mono"
+                      size="sm"
+                      className="font-mono"
                     />
                   </div>
 
@@ -641,12 +650,12 @@ export function McpSection() {
                     <label className="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">
                       {t("Headers (Header: Value per line)")}
                     </label>
-                    <textarea
+                    <Textarea
                       rows={3}
                       value={draft.headers}
                       onChange={(e) => setDraft({ ...draft, headers: e.target.value })}
                       placeholder="Authorization: Bearer token&#10;X-Custom-Header: value"
-                      className="w-full rounded-lg border border-neutral-300 px-3 py-1.5 text-xs text-neutral-900 focus:border-neutral-500 focus:outline-none dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100 font-mono"
+                      className="font-mono"
                     />
                   </div>
                 </>
@@ -662,33 +671,33 @@ export function McpSection() {
                     {t("Enable this server and connect on startup")}
                   </p>
                 </div>
-                <input
-                  type="checkbox"
+                <Switch
                   checked={!draft.disabled}
-                  onChange={(e) => setDraft({ ...draft, disabled: !e.target.checked })}
-                  className="h-4 w-4 rounded border-neutral-300 text-neutral-900 focus:ring-neutral-500 dark:border-neutral-700 dark:bg-neutral-800"
+                  onCheckedChange={(checked) => setDraft({ ...draft, disabled: !checked })}
                 />
               </div>
             </div>
 
             {/* Modal Footer */}
             <div className="flex items-center justify-end gap-2 border-t border-neutral-200 px-5 py-3 dark:border-neutral-800">
-              <button
+              <Button
                 type="button"
                 onClick={() => setModalOpen(false)}
-                className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+                variant="secondary"
+                size="sm"
               >
                 {t("Cancel")}
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 onClick={handleSaveModal}
                 disabled={isUpserting}
-                className="flex items-center gap-1.5 rounded-lg bg-neutral-900 px-4 py-1.5 text-xs font-medium !text-white transition hover:bg-neutral-800 disabled:opacity-50 dark:bg-neutral-100 dark:!text-neutral-900 dark:hover:bg-neutral-200"
+                variant="primary"
+                size="sm"
+                loading={isUpserting}
               >
-                {isUpserting ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : null}
-                <span>{t("Save Server")}</span>
-              </button>
+                {t("Save Server")}
+              </Button>
             </div>
           </div>
         </div>

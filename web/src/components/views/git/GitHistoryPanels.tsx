@@ -21,6 +21,7 @@ import { GitGraphSVG, getGraphWidth, GRAPH_ROW_HEIGHT } from "../GitGraph";
 import type { GraphRow } from "../../../lib/gitGraph";
 import { useTranslation } from "react-i18next";
 import i18n from "../../../i18n";
+import { Button } from "../../ui";
 
 export function buildCommitContextMenuItems(row: GraphRow): ContextMenuItem[] {
   const copy = (text: string) => {
@@ -177,12 +178,9 @@ export function GraphHistoryPanel({
       <div className="flex h-full items-center justify-center p-6">
         <div className="text-center">
           <p className="text-sm text-red-600 dark:text-red-400">{graphError}</p>
-          <button
-            onClick={onRetry}
-            className="mt-3 rounded bg-neutral-200 px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-300 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"
-          >
+          <Button type="button" onClick={onRetry} className="mt-3" variant="secondary" size="sm">
             {t("Retry")}
-          </button>
+          </Button>
         </div>
       </div>
     );
@@ -210,18 +208,18 @@ export function GraphHistoryPanel({
         {rows.map((row) => {
           const isSelected = row.commit.sha === selectedSha;
           return (
-            <button
+            <Button
+              type="button"
               key={row.commit.sha}
               onClick={() => handleClick(row.commit.sha)}
               onContextMenu={(e) => handleContextMenu(e, row)}
               onTouchStart={(e) => handleTouchStart(e, row)}
               onTouchMove={handleTouchMove}
               onTouchEnd={handleTouchEnd}
-              className={`w-full rounded-lg px-2 py-1.5 text-left transition-colors ${
-                isSelected
-                  ? "bg-neutral-100 dark:bg-neutral-800"
-                  : "hover:bg-neutral-50 dark:hover:bg-neutral-900"
-              }`}
+              className="git-commit-row"
+              variant="ghost"
+              size="sm"
+              data-selected={isSelected ? "true" : undefined}
               style={{ height: GRAPH_ROW_HEIGHT }}
             >
               {row.refLabels.length > 0 && (
@@ -250,7 +248,7 @@ export function GraphHistoryPanel({
                 <span>·</span>
                 <span>{formatGitDate(row.commit.date)}</span>
               </div>
-            </button>
+            </Button>
           );
         })}
       </div>
@@ -373,10 +371,13 @@ export function CommitDetailPanel({
             <h3 className="text-xs font-medium uppercase text-neutral-500">
               {t("Changed Files ({{count}})", { count: commit.files.length })}
             </h3>
-            <button
+            <Button
+              type="button"
               onClick={onToggleAllDiffs}
               disabled={loadingAllDiffs}
-              className="git-inline-button flex items-center gap-1 rounded px-2 py-1 text-[10px] text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+              className="git-inline-button"
+              variant="ghost"
+              size="sm"
             >
               {loadingAllDiffs ? (
                 <Loader2 className="h-3 w-3 animate-spin" />
@@ -386,14 +387,17 @@ export function CommitDetailPanel({
                 <ChevronDown className="h-3 w-3" />
               )}
               {t(allDiffsExpanded ? "Hide all diffs" : "Show all diffs")}
-            </button>
+            </Button>
           </div>
           <div className="space-y-1">
             {commit.files.map((file) => (
               <div key={file.path}>
-                <button
+                <Button
+                  type="button"
                   onClick={() => onLoadFileDiff(file.path)}
-                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                  className="git-file-row-button"
+                  variant="ghost"
+                  size="sm"
                 >
                   {statusIcon(file.status)}
                   <span className="flex-1 truncate text-left text-neutral-700 dark:text-neutral-300">
@@ -411,7 +415,7 @@ export function CommitDetailPanel({
                       expandedFiles.has(file.path) ? "rotate-90" : ""
                     }`}
                   />
-                </button>
+                </Button>
 
                 {/* Inline diff for this file — smooth height transition */}
                 <div

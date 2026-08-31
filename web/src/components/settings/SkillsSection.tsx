@@ -17,6 +17,7 @@ import {
 import { useSkillsQuery, useSkillFileQuery } from "../../hooks/workspaceQueries";
 import { useUIStore } from "../../stores/useUIStore";
 import { MarkdownRenderer } from "../renderers/MarkdownRenderer";
+import { Button, IconButton, Input, Tabs } from "../ui";
 import type { SkillInfo } from "../../types/api";
 
 type SkillFilter = "all" | "bundled" | "custom";
@@ -108,69 +109,57 @@ export function SkillsSection() {
           </p>
         </div>
 
-        <button
+        <IconButton
+          label={t("Refresh skills")}
+          size="sm"
           onClick={() => void refetch()}
           title={t("Refresh skills")}
-          className="p-1.5 rounded-lg border border-neutral-200 text-neutral-600 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800 transition"
         >
           <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? "animate-spin" : ""}`} />
-        </button>
+        </IconButton>
       </div>
 
       {/* Search & Filter Bar */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
         <div className="relative flex-1">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-neutral-400" />
-          <input
+          <Input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder={t("Search skills by name or description...")}
-            className="w-full rounded-lg border border-neutral-300 bg-white py-1.5 pl-8 pr-7 text-xs text-neutral-900 focus:border-neutral-500 focus:outline-none dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100 placeholder-neutral-400"
+            size="sm"
+            className="skills-search-input"
           />
           {searchQuery && (
-            <button
+            <IconButton
+              label={t("Clear search")}
+              size="sm"
               onClick={() => setSearchQuery("")}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200"
+              className="skills-search-clear"
             >
               <X className="h-3 w-3" />
-            </button>
+            </IconButton>
           )}
         </div>
 
         {/* Filter Pills */}
-        <div className="flex items-center gap-1 shrink-0 bg-neutral-100 dark:bg-neutral-800/80 p-0.5 rounded-lg border border-neutral-200 dark:border-neutral-700">
-          <button
-            onClick={() => setActiveFilter("all")}
-            className={`px-2.5 py-1 text-xs font-medium rounded-md transition ${
-              activeFilter === "all"
-                ? "bg-white text-neutral-900 shadow-sm dark:bg-neutral-700 dark:text-neutral-100"
-                : "text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-200"
-            }`}
-          >
-            {t("All")} ({skills.length})
-          </button>
-          <button
-            onClick={() => setActiveFilter("bundled")}
-            className={`px-2.5 py-1 text-xs font-medium rounded-md transition ${
-              activeFilter === "bundled"
-                ? "bg-white text-neutral-900 shadow-sm dark:bg-neutral-700 dark:text-neutral-100"
-                : "text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-200"
-            }`}
-          >
-            {t("Bundled")} ({bundledCount})
-          </button>
-          <button
-            onClick={() => setActiveFilter("custom")}
-            className={`px-2.5 py-1 text-xs font-medium rounded-md transition ${
-              activeFilter === "custom"
-                ? "bg-white text-neutral-900 shadow-sm dark:bg-neutral-700 dark:text-neutral-100"
-                : "text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-200"
-            }`}
-          >
-            {t("Custom")} ({customCount})
-          </button>
-        </div>
+        <Tabs.Root
+          value={activeFilter}
+          onValueChange={(value) => setActiveFilter(value as SkillFilter)}
+        >
+          <Tabs.List className="skills-filter-tabs" aria-label={t("Skill filter")}>
+            <Tabs.Trigger value="all">
+              {t("All")} ({skills.length})
+            </Tabs.Trigger>
+            <Tabs.Trigger value="bundled">
+              {t("Bundled")} ({bundledCount})
+            </Tabs.Trigger>
+            <Tabs.Trigger value="custom">
+              {t("Custom")} ({customCount})
+            </Tabs.Trigger>
+          </Tabs.List>
+        </Tabs.Root>
       </div>
 
       {/* Main Content: Split Master-Detail */}
@@ -203,17 +192,17 @@ export function SkillsSection() {
               const isSelected = selectedSkill?.name === skill.name;
 
               return (
-                <button
+                <Button
+                  type="button"
                   key={skill.name}
                   onClick={() => {
                     setSelectedSkillName(skill.name);
                     setSelectedCompanionPath(skill.companion_files[0] || null);
                   }}
-                  className={`flex flex-col text-left p-3 rounded-xl border transition-all duration-150 ${
-                    isSelected
-                      ? "border-neutral-900 bg-neutral-50 shadow-sm dark:border-neutral-100 dark:bg-neutral-800/80"
-                      : "border-neutral-200 bg-white hover:border-neutral-300 hover:bg-neutral-50/60 dark:border-neutral-800 dark:bg-neutral-900/60 dark:hover:border-neutral-700 dark:hover:bg-neutral-800/40"
-                  }`}
+                  className="skill-list-item"
+                  variant="secondary"
+                  size="md"
+                  data-selected={isSelected ? "true" : undefined}
                 >
                   <div className="flex items-center justify-between gap-2 w-full">
                     <div className="flex items-center gap-1.5 min-w-0">
@@ -253,7 +242,7 @@ export function SkillsSection() {
                       </span>
                     </div>
                   )}
-                </button>
+                </Button>
               );
             })}
           </div>
@@ -282,30 +271,35 @@ export function SkillsSection() {
 
                     {/* Action Buttons */}
                     <div className="flex items-center gap-1.5 shrink-0">
-                      <button
+                      <Button
                         type="button"
                         onClick={() => handleUseInChat(selectedSkill)}
-                        className="flex items-center gap-1 rounded-lg bg-neutral-900 px-2.5 py-1 text-xs font-medium !text-white hover:bg-neutral-800 dark:bg-neutral-100 dark:!text-neutral-900 dark:hover:bg-neutral-200 transition shadow-sm"
+                        variant="primary"
+                        size="sm"
+                        leadingIcon={<Send className="h-3 w-3" />}
                         title={t("Use this skill in chat composer")}
                       >
-                        <Send className="h-3 w-3" />
-                        <span>{t("Use in Chat")}</span>
-                      </button>
+                        {t("Use in Chat")}
+                      </Button>
 
-                      <button
+                      <IconButton
+                        label={t("Copy /skill command")}
+                        size="sm"
+                        variant={
+                          copiedKey === `cmd-${selectedSkill.name}` ? "primary" : "secondary"
+                        }
                         type="button"
                         onClick={() =>
                           handleCopy(`cmd-${selectedSkill.name}`, `/skill ${selectedSkill.name}`)
                         }
-                        className="p-1.5 rounded-lg border border-neutral-200 text-neutral-600 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800 transition"
                         title={t("Copy /skill command")}
                       >
                         {copiedKey === `cmd-${selectedSkill.name}` ? (
-                          <Check className="h-3.5 w-3.5 text-emerald-500" />
+                          <Check className="h-3.5 w-3.5" />
                         ) : (
                           <Copy className="h-3.5 w-3.5" />
                         )}
-                      </button>
+                      </IconButton>
                     </div>
                   </div>
 
@@ -315,40 +309,32 @@ export function SkillsSection() {
                   </div>
 
                   {/* Tab Switcher */}
-                  <div className="flex items-center gap-2 pt-1 border-t border-neutral-200/60 dark:border-neutral-700/60">
-                    <button
-                      onClick={() => setActiveTab("doc")}
-                      className={`flex items-center gap-1.5 text-xs font-medium pb-0.5 border-b-2 transition ${
-                        activeTab === "doc"
-                          ? "border-neutral-900 text-neutral-900 dark:border-neutral-100 dark:text-neutral-100"
-                          : "border-transparent text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200"
-                      }`}
-                    >
-                      <BookOpen className="h-3.5 w-3.5" />
-                      <span>SKILL.md</span>
-                    </button>
-
-                    {selectedSkill.companion_files && selectedSkill.companion_files.length > 0 && (
-                      <button
-                        onClick={() => {
-                          setActiveTab("companions");
-                          if (!selectedCompanionPath) {
-                            setSelectedCompanionPath(selectedSkill.companion_files[0] || null);
-                          }
-                        }}
-                        className={`flex items-center gap-1.5 text-xs font-medium pb-0.5 border-b-2 transition ${
-                          activeTab === "companions"
-                            ? "border-neutral-900 text-neutral-900 dark:border-neutral-100 dark:text-neutral-100"
-                            : "border-transparent text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200"
-                        }`}
-                      >
-                        <Files className="h-3.5 w-3.5" />
-                        <span>
-                          {t("Companion Files")} ({selectedSkill.companion_files.length})
-                        </span>
-                      </button>
-                    )}
-                  </div>
+                  <Tabs.Root
+                    value={activeTab}
+                    onValueChange={(value) => {
+                      const nextTab = value as "doc" | "companions";
+                      setActiveTab(nextTab);
+                      if (nextTab === "companions" && !selectedCompanionPath) {
+                        setSelectedCompanionPath(selectedSkill.companion_files[0] || null);
+                      }
+                    }}
+                  >
+                    <Tabs.List className="skills-detail-tabs" aria-label={t("Skill sections")}>
+                      <Tabs.Trigger value="doc">
+                        <BookOpen className="h-3.5 w-3.5" />
+                        <span>SKILL.md</span>
+                      </Tabs.Trigger>
+                      {selectedSkill.companion_files &&
+                        selectedSkill.companion_files.length > 0 && (
+                          <Tabs.Trigger value="companions">
+                            <Files className="h-3.5 w-3.5" />
+                            <span>
+                              {t("Companion Files")} ({selectedSkill.companion_files.length})
+                            </span>
+                          </Tabs.Trigger>
+                        )}
+                    </Tabs.List>
+                  </Tabs.Root>
                 </div>
 
                 {/* Detail Body */}
@@ -363,18 +349,17 @@ export function SkillsSection() {
                       {/* Companion File Selector */}
                       <div className="flex flex-wrap gap-1.5">
                         {selectedSkill.companion_files.map((path) => (
-                          <button
+                          <Button
+                            type="button"
+                            variant={selectedCompanionPath === path ? "primary" : "secondary"}
+                            size="sm"
                             key={path}
                             onClick={() => setSelectedCompanionPath(path)}
-                            className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 font-mono text-[11px] transition ${
-                              selectedCompanionPath === path
-                                ? "border-neutral-900 bg-neutral-900 !text-white dark:border-neutral-100 dark:bg-neutral-100 dark:!text-neutral-900"
-                                : "border-neutral-200 bg-neutral-50 text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-300 dark:hover:bg-neutral-800"
-                            }`}
+                            className="font-mono"
+                            leadingIcon={<FileCode className="h-3 w-3" />}
                           >
-                            <FileCode className="h-3 w-3" />
-                            <span>{path}</span>
-                          </button>
+                            {path}
+                          </Button>
                         ))}
                       </div>
 
@@ -383,23 +368,26 @@ export function SkillsSection() {
                         <div className="flex items-center justify-between pb-2 mb-2 border-b border-neutral-200 dark:border-neutral-800 text-xs font-mono text-neutral-500">
                           <span>{selectedCompanionPath}</span>
                           {companionFileData?.content && (
-                            <button
+                            <Button
                               type="button"
+                              variant="ghost"
+                              size="sm"
+                              leadingIcon={
+                                copiedKey === `file-${selectedCompanionPath}` ? (
+                                  <Check className="h-3 w-3" />
+                                ) : (
+                                  <Copy className="h-3 w-3" />
+                                )
+                              }
                               onClick={() =>
                                 handleCopy(
                                   `file-${selectedCompanionPath}`,
                                   companionFileData.content,
                                 )
                               }
-                              className="flex items-center gap-1 text-[11px] text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-200"
                             >
-                              {copiedKey === `file-${selectedCompanionPath}` ? (
-                                <Check className="h-3 w-3 text-emerald-500" />
-                              ) : (
-                                <Copy className="h-3 w-3" />
-                              )}
-                              <span>{t("Copy")}</span>
-                            </button>
+                              {t("Copy")}
+                            </Button>
                           )}
                         </div>
 

@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { X, CheckCircle, AlertCircle, Info, AlertTriangle } from "lucide-react";
 import { useToastStore, type Toast } from "../../stores/useToastStore";
+import { IconButton } from "./Button";
 
 export type { ToastType } from "../../stores/useToastStore";
 
@@ -79,12 +80,14 @@ export function ToastContainer() {
           >
             {iconMap[toast.type]}
             <span className="flex-1 text-xs font-medium">{toast.message}</span>
-            <button
+            <IconButton
+              label="Dismiss"
+              size="sm"
               onClick={() => removeToast(toast.id)}
-              className="ml-1 shrink-0 rounded p-0.5 opacity-60 hover:opacity-100"
+              className="toast-dismiss"
             >
               <X className="h-3 w-3" />
-            </button>
+            </IconButton>
           </div>
         );
       })}

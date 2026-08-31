@@ -7,6 +7,7 @@ import type { Message } from "../../types/api";
 import { parseInstructionMessage, type InstructionMessageDetails } from "../../utils/round";
 import { ExpandableBody } from "../ui/ExpandableBody";
 import { MarkdownRenderer } from "./MarkdownRenderer";
+import { Button } from "../ui";
 
 const COMPACTION_LABEL = "Compaction";
 
@@ -130,12 +131,14 @@ function InstructionMessageContent({
 
   return (
     <div className="tool-renderer instruction-renderer">
-      <button
+      <Button
         type="button"
         className="tool-renderer-header instruction-message"
         onClick={toggleExpanded}
         aria-expanded={expanded}
         aria-controls={bodyId}
+        variant="ghost"
+        size="sm"
       >
         <FileText size={14} />
         <span className="tool-renderer-title">
@@ -146,7 +149,7 @@ function InstructionMessageContent({
           </strong>
           <code>{details.sources}</code>
         </span>
-      </button>
+      </Button>
       <ExpandableBody expanded={expanded} className="tool-renderer-body-shell">
         <div id={bodyId} className="tool-renderer-body instruction-body">
           {resolvedContent !== null ? (

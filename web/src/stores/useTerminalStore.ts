@@ -49,6 +49,18 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
   },
 
   startSession: async (tabId, cols, rows) => {
+    const existingTab = get().tabs.find((t) => t.id === tabId);
+    if (!existingTab) return null;
+    if (existingTab.connection || existingTab.lifecycle === "connecting") {
+      return existingTab.sessionId;
+    }
+
+    // Mark the tab before awaiting the API so concurrent mount and click paths
+    // cannot create two server-side PTYs for the same tab.
+    set((state) => ({
+      tabs: state.tabs.map((t) => (t.id === tabId ? { ...t, lifecycle: "connecting" } : t)),
+    }));
+
     try {
       const { settings } = useUIStore.getState();
       const shell = settings.terminalShell || undefined;

@@ -6,6 +6,7 @@ import { ExpandableBody } from "../ui/ExpandableBody";
 import { ActivityRipple } from "./ActivityRipple";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { formatThinkingDuration } from "../../utils/format";
+import { Button } from "../ui";
 
 interface Props {
   content: string;
@@ -96,7 +97,14 @@ export const ThinkingBlock = memo(function ThinkingBlock({
   return (
     <div className="thinking-block">
       <div className="thinking-header">
-        <button className="thinking-toggle" onClick={toggleExpanded} aria-expanded={expanded}>
+        <Button
+          type="button"
+          className="thinking-toggle"
+          onClick={toggleExpanded}
+          aria-expanded={expanded}
+          variant="ghost"
+          size="sm"
+        >
           <ActivityRipple active={active} row label={t("Thinking")}>
             <Lightbulb size={14} />
             <span className="thinking-label">
@@ -110,7 +118,7 @@ export const ThinkingBlock = memo(function ThinkingBlock({
                 : ""}
             </span>
           </ActivityRipple>
-        </button>
+        </Button>
       </div>
       <ExpandableBody expanded={expanded} className="thinking-body">
         <div className="thinking-markdown">

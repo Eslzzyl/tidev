@@ -67,7 +67,6 @@ export function Select({
 }: SelectProps) {
   const generatedId = useId();
   const triggerId = id ?? `tidev-select-${generatedId.replace(/:/g, "")}`;
-  const allOptions = groups.length > 0 ? groups.flatMap((group) => group.options) : options;
   const normalizedValue = encodeValue(value);
   const normalizedDefaultValue = encodeValue(defaultValue);
 
@@ -101,25 +100,29 @@ export function Select({
           </SelectPrimitive.Icon>
         </SelectPrimitive.Trigger>
         <SelectPrimitive.Portal>
-          <SelectPrimitive.Content className="ui-select-content" position="popper" sideOffset={4}>
+          <SelectPrimitive.Content
+            data-ui-portal="true"
+            className="ui-select-content"
+            position="popper"
+            sideOffset={4}
+          >
             <SelectPrimitive.ScrollUpButton className="ui-select-scroll-button">
               <ChevronUp size={14} aria-hidden="true" />
             </SelectPrimitive.ScrollUpButton>
             <SelectPrimitive.Viewport className="ui-select-viewport">
-              {groups.length > 0
-                ? groups.map((group) => (
-                    <SelectPrimitive.Group key={String(group.label)}>
-                      <SelectPrimitive.Label className="ui-select-group-label">
-                        {group.label}
-                      </SelectPrimitive.Label>
-                      {group.options.map((option) => (
-                        <SelectOptionItem key={option.value} option={option} />
-                      ))}
-                    </SelectPrimitive.Group>
-                  ))
-                : allOptions.map((option) => (
+              {options.map((option) => (
+                <SelectOptionItem key={option.value} option={option} />
+              ))}
+              {groups.map((group) => (
+                <SelectPrimitive.Group key={String(group.label)}>
+                  <SelectPrimitive.Label className="ui-select-group-label">
+                    {group.label}
+                  </SelectPrimitive.Label>
+                  {group.options.map((option) => (
                     <SelectOptionItem key={option.value} option={option} />
                   ))}
+                </SelectPrimitive.Group>
+              ))}
             </SelectPrimitive.Viewport>
             <SelectPrimitive.ScrollDownButton className="ui-select-scroll-button">
               <ChevronDown size={14} aria-hidden="true" />

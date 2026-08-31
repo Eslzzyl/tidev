@@ -8,6 +8,7 @@ import type { ToolCallEntry } from "../../utils/round";
 import { ExpandableBody } from "../ui/ExpandableBody";
 import { ActivityRipple } from "./ActivityRipple";
 import { MarkdownRenderer } from "./MarkdownRenderer";
+import { Button } from "../ui";
 
 function parseTaskArgs(entry: ToolCallEntry): {
   agent: string;
@@ -97,7 +98,8 @@ export function SubagentCard({
 
   return (
     <div className="tool-renderer subagent-renderer">
-      <button
+      <Button
+        type="button"
         className="tool-renderer-header"
         onClick={() => {
           const next = !expanded;
@@ -105,6 +107,8 @@ export function SubagentCard({
           onExpandedChange?.(next);
         }}
         aria-expanded={expanded}
+        variant="ghost"
+        size="sm"
       >
         <ActivityRipple active={running} row label={t("Subagent is running")}>
           <Icon size={14} />
@@ -113,7 +117,7 @@ export function SubagentCard({
             <span>{displayedStatus || description || t("Delegated task")}</span>
           </span>
         </ActivityRipple>
-      </button>
+      </Button>
       <ExpandableBody expanded={expanded} className="tool-renderer-body-shell">
         <div className="tool-renderer-body">
           {prompt ? (

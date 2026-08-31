@@ -101,17 +101,19 @@ export function ComponentShowcase() {
         <ShowcaseSection title="Color themes" description="Choose a color theme for the interface.">
           <div className="ui-palette-grid">
             {paletteOptions.map((option) => (
-              <button
+              <Button
                 key={option.value}
                 type="button"
                 className="ui-palette-option"
                 data-selected={palette === option.value || undefined}
                 aria-pressed={palette === option.value}
                 onClick={() => setPalette(option.value)}
+                variant="secondary"
+                size="sm"
               >
                 <span className="ui-palette-swatch" style={{ background: option.color }} />
-                <span>{option.label}</span>
-              </button>
+                {option.label}
+              </Button>
             ))}
           </div>
         </ShowcaseSection>

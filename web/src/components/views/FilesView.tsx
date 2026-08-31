@@ -7,6 +7,7 @@ import { useGitFileStore } from "../../stores/useGitFileStore";
 import { api } from "../../api/client";
 import { queryClient } from "../../lib/queryClient";
 import { CreateItemDialog } from "../ui/CreateItemDialog";
+import { Button, IconButton, Input } from "../ui";
 import { useTranslation } from "react-i18next";
 
 import { useLocation } from "wouter";
@@ -212,18 +213,19 @@ export function FilesView() {
     <div className="flex h-full">
       {/* Collapsed strip, always visible when the file tree is closed */}
       {!fileTreeOpen && (
-        <button
+        <IconButton
+          label={t("Open file browser")}
+          size="sm"
           onClick={toggleFileTree}
-          className="flex items-center justify-center border-r border-neutral-200 bg-white hover:bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-950 dark:hover:bg-neutral-900"
+          className="files-collapsed-button"
           style={{
             width: COLLAPSED_STRIP_WIDTH,
             minWidth: COLLAPSED_STRIP_WIDTH,
           }}
-          aria-label={t("Open file browser")}
           title={t("Open file browser")}
         >
           <PanelLeft className="h-4 w-4 text-neutral-400" />
-        </button>
+        </IconButton>
       )}
 
       {/* File tree panel */}
@@ -244,41 +246,42 @@ export function FilesView() {
           </span>
           <div className="flex items-center gap-1">
             {/* New file button */}
-            <button
+            <IconButton
+              label={t("New file")}
+              size="sm"
               onClick={() => setCreateType("file")}
-              className="rounded p-1 text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
-              aria-label={t("New file")}
               title={t("New file")}
             >
               <File className="h-3.5 w-3.5" />
-            </button>
+            </IconButton>
             {/* New directory button */}
-            <button
+            <IconButton
+              label={t("New directory")}
+              size="sm"
               onClick={() => setCreateType("directory")}
-              className="rounded p-1 text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
-              aria-label={t("New directory")}
               title={t("New directory")}
             >
               <Folder className="h-3.5 w-3.5" />
-            </button>
+            </IconButton>
             {/* Refresh */}
-            <button
+            <IconButton
+              label={t("Refresh file tree")}
+              size="sm"
               onClick={handleRefresh}
-              className="rounded p-1 text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
-              aria-label={t("Refresh file tree")}
               title={t("Refresh")}
             >
               <RotateCw className="h-3.5 w-3.5" />
-            </button>
+            </IconButton>
             {/* Collapse button - visible on md+ */}
-            <button
+            <IconButton
+              label={t("Close file browser")}
+              size="sm"
               onClick={toggleFileTree}
-              className="ml-1 rounded p-1 text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
-              aria-label={t("Close file browser")}
+              className="ml-1"
               title={t("Close")}
             >
               <ChevronLeft className="h-3.5 w-3.5" />
-            </button>
+            </IconButton>
           </div>
         </div>
 
@@ -286,12 +289,13 @@ export function FilesView() {
         <div className="border-b border-neutral-200 p-2 dark:border-neutral-800">
           <div className="relative">
             <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-neutral-400" />
-            <input
+            <Input
               type="text"
               placeholder={t("Search files...")}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full rounded border border-neutral-200 bg-white py-1 pl-7 pr-2 text-base outline-none focus:border-neutral-400 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:focus:border-neutral-500"
+              className="file-search-input"
+              size="sm"
             />
           </div>
         </div>
@@ -330,9 +334,12 @@ export function FilesView() {
 
       {/* Mobile overlay backdrop */}
       {fileTreeOpen && isMobile && (
-        <button
+        <Button
+          type="button"
           onClick={toggleFileTree}
-          className="fixed inset-0 z-40 bg-black/50"
+          className="ui-backdrop-button fixed inset-0 z-40 bg-black/50"
+          variant="ghost"
+          size="sm"
           aria-label={t("Close file browser")}
         />
       )}
@@ -372,11 +379,14 @@ function SearchResultItem({ item }: { item: { path: string; display: string } })
   const openFile = useFileStore((s) => s.openFile);
 
   return (
-    <button
+    <Button
+      type="button"
       onClick={() => openFile(item.path)}
-      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800"
+      className="file-search-result-button"
+      variant="ghost"
+      size="sm"
     >
       <span className="truncate text-neutral-700 dark:text-neutral-300">{item.display}</span>
-    </button>
+    </Button>
   );
 }

@@ -5,9 +5,16 @@ export function useClickOutside(handler: () => void): React.RefObject<HTMLDivEle
 
   useEffect(() => {
     const handleClick = (event: MouseEvent) => {
-      if (ref.current && !ref.current.contains(event.target as Node) && !event.defaultPrevented) {
-        handler();
+      const target = event.target;
+      if (!(target instanceof Node) || !ref.current || ref.current.contains(target)) return;
+      if (
+        event
+          .composedPath()
+          .some((node) => node instanceof Element && node.hasAttribute("data-ui-portal"))
+      ) {
+        return;
       }
+      if (!event.defaultPrevented) handler();
     };
 
     document.addEventListener("click", handleClick, true);

@@ -7,6 +7,7 @@ import "katex/dist/katex.min.css";
 import { Check, Code2, Copy, Maximize2, Minimize2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { HLJSApi } from "highlight.js";
+import { Button, IconButton } from "../ui";
 
 let hljsInstance: HLJSApi | null = null;
 let hljsPromise: Promise<HLJSApi> | null = null;
@@ -87,9 +88,12 @@ function CustomImage(props: React.ComponentPropsWithoutRef<"img">) {
 
   return (
     <span className="relative inline-block max-w-full">
-      <button
+      <Button
+        type="button"
         onClick={() => setExpanded(!expanded)}
-        className="group relative block"
+        className="markdown-image-toggle"
+        variant="ghost"
+        size="sm"
         title={expanded ? t("Collapse") : t("Expand image")}
       >
         <img
@@ -102,7 +106,7 @@ function CustomImage(props: React.ComponentPropsWithoutRef<"img">) {
         <span className="absolute right-1 top-1 rounded bg-black/50 p-1 text-white opacity-0 transition-opacity group-hover:opacity-100">
           {expanded ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
         </span>
-      </button>
+      </Button>
     </span>
   );
 }
@@ -150,19 +154,16 @@ function CodeBlock({ language, children }: { language: string; children: string 
           </span>
         </div>
         <div className="flex items-center gap-1">
-          <button
+          <IconButton
+            label={copied ? t("Copied!") : t("Copy code")}
+            size="sm"
+            variant={copied ? "primary" : "ghost"}
             type="button"
             onClick={handleCopy}
-            className="inline-flex h-6 w-6 items-center justify-center rounded-md text-neutral-400 transition-colors hover:bg-neutral-200/60 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
             title={copied ? t("Copied!") : t("Copy code")}
-            aria-label={copied ? t("Copied!") : t("Copy code")}
           >
-            {copied ? (
-              <Check className="h-3.5 w-3.5 text-emerald-500" />
-            ) : (
-              <Copy className="h-3.5 w-3.5" />
-            )}
-          </button>
+            {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+          </IconButton>
         </div>
       </div>
 
@@ -220,12 +221,15 @@ function Mermaid({ chart }: { chart: string }) {
           {t("Diagram rendering failed")}
         </p>
         <pre className="markdown-error-source text-red-500 dark:text-red-300">{chart}</pre>
-        <button
+        <Button
+          type="button"
           onClick={() => setKey((k) => k + 1)}
-          className="markdown-error-retry mt-2 text-blue-500 hover:underline"
+          className="markdown-error-retry mt-2"
+          variant="ghost"
+          size="sm"
         >
           {t("Retry")}
-        </button>
+        </Button>
       </div>
     );
   }

@@ -10,6 +10,7 @@ import { ConfirmDialog } from "../ui/ConfirmDialog";
 import type { ContextMenuItem } from "../ui/ContextMenu";
 import { ContextMenu } from "../ui/ContextMenu";
 import { RenameDialog } from "../ui/RenameDialog";
+import { IconButton, Tabs } from "../ui";
 import { useTranslation } from "react-i18next";
 
 import { useRoute, useLocation } from "wouter";
@@ -110,6 +111,7 @@ export function TerminalView() {
   const closeTabs = useTerminalStore((s) => s.closeTabs);
   const renameTab = useTerminalStore((s) => s.renameTab);
   const setActiveTab = useTerminalStore((s) => s.setActiveTab);
+  const startSession = useTerminalStore((s) => s.startSession);
   const restoreRunningSessions = useTerminalStore((s) => s.restoreRunningSessions);
   const theme = useUIStore((s) => s.theme);
   const isDark = getEffectiveTheme(theme) === "dark";
@@ -133,8 +135,9 @@ export function TerminalView() {
 
   const handleCreateTab = useCallback(() => {
     const newId = createTab();
+    void startSession(newId, 80, 24);
     navigate(routes.terminal(newId));
-  }, [createTab, navigate]);
+  }, [createTab, navigate, startSession]);
 
   const handleCloseTab = useCallback(
     async (tabId: string) => {
@@ -207,59 +210,56 @@ export function TerminalView() {
       const state = useTerminalStore.getState();
       if (state.tabs.length === 0) {
         const id = createTab();
+        void startSession(id, 80, 24);
         navigate(routes.terminal(id), { replace: true });
       }
     });
-  }, [createTab, navigate, restoreRunningSessions, tabs.length]);
+  }, [createTab, navigate, restoreRunningSessions, startSession, tabs.length]);
 
   return (
     <div className={`flex h-full flex-col ${isDark ? "bg-black" : "bg-white"}`}>
       {/* Tab bar */}
-      <div
-        className={`flex items-center border-b ${isDark ? "border-neutral-800 bg-neutral-950" : "border-neutral-200 bg-neutral-100"}`}
+      <Tabs.Root
+        value={activeTabId ?? undefined}
+        onValueChange={handleSelectTab}
+        className={isDark ? "terminal-tabs-root is-dark" : "terminal-tabs-root"}
       >
-        <div className="flex flex-1 overflow-x-auto">
+        <Tabs.List className="terminal-tabs-list">
           {tabs.map((tab) => (
-            <button
+            <Tabs.Item
               key={tab.id}
-              onClick={() => handleSelectTab(tab.id)}
-              onContextMenu={(e) => handleContextMenu(e, tab.id)}
-              className={`flex items-center gap-1 px-3 py-1.5 text-xs font-medium transition-colors ${
-                tab.id === activeTabId
-                  ? isDark
-                    ? "border-b-2 border-blue-500 bg-neutral-900 text-white"
-                    : "border-b-2 border-blue-500 bg-white text-black"
-                  : isDark
-                    ? "text-neutral-400 hover:text-white"
-                    : "text-neutral-500 hover:text-black"
-              }`}
+              className={tab.id === activeTabId ? "terminal-tab-item active" : "terminal-tab-item"}
             >
-              <span>{tab.label}</span>
-              <X
-                size={12}
-                className="cursor-pointer opacity-50 hover:opacity-100"
-                aria-label={t("Close terminal")}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void handleCloseTab(tab.id);
-                }}
-              />
-            </button>
+              <div className="terminal-tab-surface">
+                <Tabs.Trigger
+                  value={tab.id}
+                  onContextMenu={(e) => handleContextMenu(e, tab.id)}
+                  className="terminal-tab-trigger"
+                >
+                  <span>{tab.label}</span>
+                </Tabs.Trigger>
+                <IconButton
+                  label={t("Close terminal")}
+                  size="sm"
+                  className="terminal-tab-close"
+                  onClick={() => void handleCloseTab(tab.id)}
+                >
+                  <X size={12} />
+                </IconButton>
+              </div>
+            </Tabs.Item>
           ))}
-        </div>
-        <button
+        </Tabs.List>
+        <IconButton
+          label={t("New terminal tab")}
+          size="sm"
           onClick={handleCreateTab}
-          className={`mr-1 rounded p-1 transition-colors ${
-            isDark
-              ? "text-neutral-400 hover:bg-neutral-800 hover:text-white"
-              : "text-neutral-500 hover:bg-neutral-200 hover:text-black"
-          }`}
-          aria-label={t("New terminal tab")}
+          className="terminal-new-tab-button"
           title={t("New terminal tab")}
         >
           <Plus size={14} />
-        </button>
-      </div>
+        </IconButton>
+      </Tabs.Root>
 
       {/* Terminal viewport */}
       <div className="flex-1 overflow-hidden">
@@ -330,6 +330,7 @@ interface TerminalViewportProps {
   tab: {
     id: string;
     connection: TerminalConnection | null;
+    lifecycle: "idle" | "connecting" | "running" | "exited";
   };
   isDark: boolean;
   isActive: boolean;
@@ -345,11 +346,11 @@ function TerminalViewport({ tab, isDark, isActive }: TerminalViewportProps) {
 
   // Create the server-side PTY before mounting its restty transport.
   useEffect(() => {
-    if (!tab.connection && !httpStartedRef.current) {
+    if (tab.lifecycle === "idle" && !tab.connection && !httpStartedRef.current) {
       httpStartedRef.current = true;
       startSession(tab.id, 80, 24);
     }
-  }, [startSession, tab.connection, tab.id]);
+  }, [startSession, tab.connection, tab.id, tab.lifecycle]);
 
   // Mount one native restty surface for this tab and let it own sizing,
   // keyboard input, IME handling, selection, and terminal rendering.

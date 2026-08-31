@@ -15,6 +15,7 @@ import { ChatComposer } from "./ChatComposer";
 import type { PendingImage } from "../../utils/imageAttachments";
 import { ApprovalCard, MessageList } from "./MessageList";
 import { SessionSidebar } from "./SessionSidebar";
+import { Button } from "../ui";
 import { shortPath } from "../../utils/chat";
 
 export interface ChatPanelProps {
@@ -157,12 +158,17 @@ export function ChatPanel({
 
   return (
     <>
-      <button
+      <Button
+        type="button"
         className={
-          mobileSidebarOpen ? "mobile-sidebar-backdrop visible" : "mobile-sidebar-backdrop"
+          mobileSidebarOpen
+            ? "mobile-sidebar-backdrop visible ui-backdrop-button"
+            : "mobile-sidebar-backdrop ui-backdrop-button"
         }
         onClick={onMobileSidebarClose}
         aria-label={t("Close conversations")}
+        variant="ghost"
+        size="sm"
       />
       <SessionSidebar
         loading={loading}

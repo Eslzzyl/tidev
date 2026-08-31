@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuthStore } from "../../stores/useAuthStore";
+import { Button, Input } from "../ui";
 
 export function SecuritySection() {
   const { t } = useTranslation();
@@ -93,11 +94,10 @@ export function SecuritySection() {
               <label className="mb-1 block text-xs font-medium text-neutral-600 dark:text-neutral-400">
                 {t("Current Password")}
               </label>
-              <input
+              <Input
                 type="password"
                 value={currentPassword}
                 onChange={(e) => setCurrentPassword(e.target.value)}
-                className="w-full rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-base text-neutral-900 placeholder-neutral-400 outline-none focus:border-neutral-500 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder-neutral-500"
                 placeholder={t("Enter current password")}
               />
             </div>
@@ -105,11 +105,10 @@ export function SecuritySection() {
               <label className="mb-1 block text-xs font-medium text-neutral-600 dark:text-neutral-400">
                 {t("New Password")}
               </label>
-              <input
+              <Input
                 type="password"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
-                className="w-full rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-base text-neutral-900 placeholder-neutral-400 outline-none focus:border-neutral-500 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder-neutral-500"
                 placeholder={t("Enter new password")}
               />
             </div>
@@ -117,11 +116,10 @@ export function SecuritySection() {
               <label className="mb-1 block text-xs font-medium text-neutral-600 dark:text-neutral-400">
                 {t("Confirm New Password")}
               </label>
-              <input
+              <Input
                 type="password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
-                className="w-full rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-base text-neutral-900 placeholder-neutral-400 outline-none focus:border-neutral-500 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder-neutral-500"
                 placeholder={t("Confirm new password")}
               />
             </div>
@@ -132,7 +130,7 @@ export function SecuritySection() {
             )}
 
             <div className="flex gap-2">
-              <button
+              <Button
                 type="submit"
                 disabled={
                   !currentPassword.trim() ||
@@ -140,18 +138,20 @@ export function SecuritySection() {
                   newPassword !== confirmPassword ||
                   submitting
                 }
-                className="rounded-md bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
+                variant="primary"
+                size="sm"
               >
                 {submitting ? t("Saving...") : t("Change Password")}
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 onClick={handleRemovePassword}
                 disabled={!currentPassword.trim() || submitting}
-                className="rounded-md border border-red-300 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
+                variant="danger"
+                size="sm"
               >
                 {t("Remove Password")}
-              </button>
+              </Button>
             </div>
           </form>
         ) : (
@@ -160,11 +160,10 @@ export function SecuritySection() {
               <label className="mb-1 block text-xs font-medium text-neutral-600 dark:text-neutral-400">
                 {t("New Password")}
               </label>
-              <input
+              <Input
                 type="password"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
-                className="w-full rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-base text-neutral-900 placeholder-neutral-400 outline-none focus:border-neutral-500 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder-neutral-500"
                 placeholder={t("Enter password")}
               />
             </div>
@@ -172,11 +171,10 @@ export function SecuritySection() {
               <label className="mb-1 block text-xs font-medium text-neutral-600 dark:text-neutral-400">
                 {t("Confirm Password")}
               </label>
-              <input
+              <Input
                 type="password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
-                className="w-full rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-base text-neutral-900 placeholder-neutral-400 outline-none focus:border-neutral-500 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder-neutral-500"
                 placeholder={t("Confirm password")}
               />
             </div>
@@ -186,13 +184,14 @@ export function SecuritySection() {
               <p className="text-base text-green-500">{t("Password set successfully")}</p>
             )}
 
-            <button
+            <Button
               type="submit"
               disabled={!newPassword.trim() || newPassword !== confirmPassword || submitting}
-              className="rounded-md bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
+              variant="primary"
+              size="sm"
             >
               {submitting ? t("Saving...") : t("Set Password")}
-            </button>
+            </Button>
           </form>
         )}
       </div>

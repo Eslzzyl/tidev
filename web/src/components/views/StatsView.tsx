@@ -33,6 +33,7 @@ import { useTranslation } from "react-i18next";
 import { useLocation } from "wouter";
 import { routes } from "../../lib/routes";
 import i18n from "../../i18n";
+import { Button, IconButton, Tabs } from "../ui";
 
 // ── Color palettes ───────────────────────────────────────────────────────
 
@@ -331,12 +332,14 @@ export function StatsView() {
         <div className="flex flex-col items-center gap-3 text-center">
           <AlertCircle className="h-8 w-8 text-red-500" />
           <p className="text-sm text-red-600 dark:text-red-400">{errorMessage}</p>
-          <button
+          <Button
+            type="button"
             onClick={() => queryClient.invalidateQueries({ queryKey: ["stats"] })}
-            className="rounded-lg bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-200 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"
+            variant="secondary"
+            size="md"
           >
             {t("Retry")}
-          </button>
+          </Button>
         </div>
       </div>
     );
@@ -357,41 +360,44 @@ export function StatsView() {
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
             {/* Date range selector */}
-            <div className="stats-control-group" aria-label={t("Statistics range")}>
-              {RANGE_OPTIONS.map((option) => (
-                <button
-                  key={option.value}
-                  onClick={() => handleRangeChange(option.value)}
-                  className={`stats-range-button ${range === option.value ? "is-active" : ""}`}
-                >
-                  {option.value === "all" ? t("All") : option.label}
-                </button>
-              ))}
-            </div>
+            <Tabs.Root
+              value={range}
+              onValueChange={(value) => handleRangeChange(value as StatsRange)}
+            >
+              <Tabs.List className="stats-tabs-list" aria-label={t("Statistics range")}>
+                {RANGE_OPTIONS.map((option) => (
+                  <Tabs.Trigger
+                    key={option.value}
+                    value={option.value}
+                    className="stats-tab-trigger"
+                  >
+                    {option.value === "all" ? t("All") : option.label}
+                  </Tabs.Trigger>
+                ))}
+              </Tabs.List>
+            </Tabs.Root>
             {/* Granularity selector */}
-            <div className="stats-control-group" aria-label={t("Statistics granularity")}>
-              {(["hour", "day", "week", "month"] as Granularity[]).map((g) => (
-                <button
-                  key={g}
-                  onClick={() => handleGranularityChange(g)}
-                  className={`stats-granularity-button px-3 py-1.5 text-xs font-medium transition-colors ${
-                    granularity === g
-                      ? "is-active bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900"
-                      : "bg-white text-neutral-600 hover:bg-neutral-50 dark:bg-neutral-950 dark:text-neutral-400 dark:hover:bg-neutral-900"
-                  }`}
-                >
-                  {t(g.charAt(0).toUpperCase() + g.slice(1))}
-                </button>
-              ))}
-            </div>
+            <Tabs.Root
+              value={granularity}
+              onValueChange={(value) => handleGranularityChange(value as Granularity)}
+            >
+              <Tabs.List className="stats-tabs-list" aria-label={t("Statistics granularity")}>
+                {(["hour", "day", "week", "month"] as Granularity[]).map((g) => (
+                  <Tabs.Trigger key={g} value={g} className="stats-tab-trigger">
+                    {t(g.charAt(0).toUpperCase() + g.slice(1))}
+                  </Tabs.Trigger>
+                ))}
+              </Tabs.List>
+            </Tabs.Root>
             {/* Refresh button */}
-            <button
+            <IconButton
+              label={t("Refresh")}
+              size="sm"
               onClick={() => queryClient.invalidateQueries({ queryKey: ["stats"] })}
-              className="rounded-lg p-1.5 text-neutral-500 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
               title={t("Refresh")}
             >
               <RefreshCw className="h-4 w-4" />
-            </button>
+            </IconButton>
           </div>
         </div>
 

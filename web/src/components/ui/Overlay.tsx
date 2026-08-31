@@ -21,6 +21,7 @@ export function PopoverContent({
   return (
     <PopoverPrimitive.Portal>
       <PopoverPrimitive.Content
+        data-ui-portal="true"
         className={cx("ui-popover-content", className)}
         sideOffset={sideOffset}
         {...props}
@@ -54,8 +55,12 @@ export function DialogContent({
 }: React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & { showClose?: boolean }) {
   return (
     <DialogPrimitive.Portal>
-      <DialogPrimitive.Overlay className="ui-dialog-overlay" />
-      <DialogPrimitive.Content className={cx("ui-dialog-content", className)} {...props}>
+      <DialogPrimitive.Overlay data-ui-portal="true" className="ui-dialog-overlay" />
+      <DialogPrimitive.Content
+        data-ui-portal="true"
+        className={cx("ui-dialog-content", className)}
+        {...props}
+      >
         {children}
         {showClose ? (
           <DialogPrimitive.Close className="ui-dialog-close" aria-label="Close">

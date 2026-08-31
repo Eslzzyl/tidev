@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { api, waitForServerRestart } from "../../api/client";
 import { useUIStore } from "../../stores/useUIStore";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
+import { Button } from "../ui";
 
 function ConnectionStatus() {
   const { t } = useTranslation();
@@ -74,14 +75,16 @@ export function AboutSection() {
         </div>
 
         <div className="border-t border-neutral-200 pt-4 dark:border-neutral-700">
-          <button
+          <Button
             type="button"
             disabled={restarting}
             onClick={() => setShowConfirm(true)}
-            className="w-full rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+            className="w-full"
+            variant="danger"
+            size="md"
           >
             {restarting ? t("Restarting...") : t("Restart Service")}
-          </button>
+          </Button>
           <p className="mt-1.5 text-xs text-neutral-400 dark:text-neutral-500">
             {t("Auto-reconnects after restart. Refresh manually if it does not recover.")}
           </p>

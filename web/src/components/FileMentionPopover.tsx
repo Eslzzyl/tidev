@@ -17,6 +17,7 @@ import { useTranslation } from "react-i18next";
 
 import { api } from "../api/client";
 import type { FileSuggestion } from "../types/api";
+import { Button } from "./ui";
 
 interface Props {
   query: string;
@@ -87,9 +88,15 @@ export function FileMentionPopover({
     return (
       <div className="composer-popover file-mention-popover">
         <div className="file-mention-empty">{t("No files found")}</div>
-        <button className="composer-option" onClick={onClose}>
+        <Button
+          type="button"
+          className="composer-option"
+          onClick={onClose}
+          variant="ghost"
+          size="sm"
+        >
           {t("Close")}
-        </button>
+        </Button>
       </div>
     );
   }
@@ -97,17 +104,19 @@ export function FileMentionPopover({
   return (
     <div className="composer-popover file-mention-popover">
       {suggestions.map((item, idx) => (
-        <button
+        <Button
           key={item.path}
           className={idx === selectedIndex ? "composer-option selected" : "composer-option"}
           onMouseEnter={() => onSelectedIndexChange(idx)}
           onClick={() => onSelect(item.path)}
+          variant="ghost"
+          size="sm"
         >
           <span className="file-mention-path">
             {highlightMatches(item.display || item.path, item.matched_indices)}
           </span>
           <FileMentionIcon suggestion={item} />
-        </button>
+        </Button>
       ))}
     </div>
   );

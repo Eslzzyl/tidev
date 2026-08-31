@@ -1,4 +1,5 @@
 import type { CommandSuggestion } from "../commands";
+import { Button } from "./ui";
 
 interface CommandPopoverProps {
   suggestions: CommandSuggestion[];
@@ -18,7 +19,7 @@ export function CommandPopover({
   return (
     <div className="composer-popover command-popover" role="listbox">
       {suggestions.map((suggestion, index) => (
-        <button
+        <Button
           key={suggestion.spec.name}
           type="button"
           className={
@@ -31,13 +32,15 @@ export function CommandPopover({
           onMouseDown={(event) => event.preventDefault()}
           onMouseEnter={() => onSelectedIndexChange(index)}
           onClick={() => onSelect(suggestion)}
+          variant="ghost"
+          size="sm"
         >
           <span className="command-option-main">
             <strong>/{suggestion.spec.name}</strong>
             <small>{suggestion.spec.description}</small>
           </span>
           <small className="command-option-usage">{suggestion.spec.usage}</small>
-        </button>
+        </Button>
       ))}
     </div>
   );

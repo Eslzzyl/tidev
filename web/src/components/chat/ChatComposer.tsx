@@ -9,6 +9,7 @@ import { FileMentionPopover } from "../FileMentionPopover";
 import { ModelPicker } from "../ModelPicker";
 import { ImageAttachmentStrip } from "./ImageAttachments";
 import { pastedImageFiles, type PendingImage } from "../../utils/imageAttachments";
+import { Button, IconButton, Textarea } from "../ui";
 
 function isTodoCompleted(todo: TodoItem) {
   return todo.status === "completed";
@@ -288,7 +289,7 @@ export function ChatComposer({
             onRemove={onRemoveImage}
             disabled={sending || canceling}
           />
-          <textarea
+          <Textarea
             ref={textareaRef}
             value={draft}
             onPaste={handlePaste}
@@ -389,12 +390,14 @@ export function ChatComposer({
         </div>
         <div className="welcome-composer-footer">
           <div className="welcome-controls">
-            <button
-              className={mode === "plan" ? "composer-control plan" : "composer-control build"}
+            <Button
+              className={`composer-control ${mode === "plan" ? "plan" : "build"}`}
               onClick={() => onModeChange(mode === "plan" ? "build" : "plan")}
+              variant="ghost"
+              size="sm"
             >
               {mode === "plan" ? t("Plan") : t("Build")}
-            </button>
+            </Button>
             <ModelPicker
               models={models}
               activeModel={activeModel}
@@ -407,7 +410,10 @@ export function ChatComposer({
               }}
             />
           </div>
-          <button
+          <IconButton
+            label={isBusy ? t("Stop current turn") : t("Send prompt")}
+            size="md"
+            variant={isBusy ? "danger" : "primary"}
             className={isBusy ? "send-button stop" : "send-button"}
             disabled={
               sending ||
@@ -425,7 +431,7 @@ export function ChatComposer({
             ) : (
               <Send size={17} />
             )}
-          </button>
+          </IconButton>
         </div>
       </div>
     </div>

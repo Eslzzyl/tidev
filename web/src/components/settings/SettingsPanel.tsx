@@ -15,7 +15,6 @@ import { useTranslation } from "react-i18next";
 import { useRoute, useLocation } from "wouter";
 import { routes } from "../../lib/routes";
 import { useUIStore } from "../../stores/useUIStore";
-import { useClickOutside } from "../../hooks/useClickOutside";
 import { AppearanceSection } from "./AppearanceSection";
 import { EditorSection } from "./EditorSection";
 import { InteractionSection } from "./InteractionSection";
@@ -25,6 +24,7 @@ import { McpSection } from "./McpSection";
 import { SkillsSection } from "./SkillsSection";
 import { AgentsSection } from "./AgentsSection";
 import { AboutSection } from "./AboutSection";
+import { Button, IconButton } from "../ui";
 
 type CategoryId =
   | "appearance"
@@ -104,7 +104,6 @@ export function SettingsPanel() {
     }
   };
 
-  const panelRef = useClickOutside(closeSettings);
   const navRef = useRef<HTMLDivElement>(null);
   const [activeRect, setActiveRect] = useState<{
     top: number;
@@ -153,23 +152,21 @@ export function SettingsPanel() {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-60 flex items-center justify-center motion-safe:animate-fade-in bg-black/50 p-4">
-      <div
-        ref={panelRef}
-        className="motion-safe:animate-scale-fade flex h-[70vh] max-h-[720px] w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl dark:bg-neutral-900"
-      >
+    <div
+      className="fixed inset-0 z-60 flex items-center justify-center motion-safe:animate-fade-in bg-black/50 p-4"
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) closeSettings();
+      }}
+    >
+      <div className="motion-safe:animate-scale-fade flex h-[70vh] max-h-[720px] w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl dark:bg-neutral-900">
         {/* Header */}
         <div className="flex shrink-0 items-center justify-between border-b border-neutral-200 px-5 py-3 dark:border-neutral-800">
           <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
             {t("Settings")}
           </h2>
-          <button
-            onClick={closeSettings}
-            className="rounded p-1 text-neutral-500 transition-colors duration-150 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
-            aria-label={t("Close settings")}
-          >
+          <IconButton type="button" size="sm" label={t("Close settings")} onClick={closeSettings}>
             <X className="h-5 w-5" />
-          </button>
+          </IconButton>
         </div>
 
         {/* Body: sidebar + content */}
@@ -182,24 +179,24 @@ export function SettingsPanel() {
             {/* Sliding highlight indicator */}
             {activeRect && (
               <div
-                className="absolute left-2 right-2 rounded-md bg-neutral-100 transition-all duration-200 dark:bg-neutral-800"
+                className="ui-settings-nav-indicator"
                 style={{ top: activeRect.top, height: activeRect.height }}
               />
             )}
             {categories.map((cat) => (
-              <button
+              <Button
+                type="button"
                 key={cat.id}
                 data-cat-id={cat.id}
+                data-active={activeCategory === cat.id ? "true" : undefined}
                 onClick={() => handleSelectCategory(cat.id)}
-                className={`relative flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-all duration-150 active:scale-[0.97] ${
-                  activeCategory === cat.id
-                    ? "font-medium text-neutral-900 dark:text-neutral-100"
-                    : "text-neutral-500 hover:bg-neutral-50 hover:text-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800/50 dark:hover:text-neutral-300"
-                }`}
+                className="ui-settings-nav-button"
+                variant="ghost"
+                size="sm"
+                leadingIcon={cat.icon}
               >
-                {cat.icon}
-                <span>{t(cat.label)}</span>
-              </button>
+                {t(cat.label)}
+              </Button>
             ))}
           </nav>
 

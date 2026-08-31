@@ -11,6 +11,7 @@ import { FileMentionPopover } from "../FileMentionPopover";
 import { ModelPicker } from "../ModelPicker";
 import { ImageAttachmentStrip } from "./ImageAttachments";
 import { pastedImageFiles, type PendingImage } from "../../utils/imageAttachments";
+import { Button, IconButton, Input, Textarea } from "../ui";
 
 export interface WelcomePageProps {
   draft: string;
@@ -320,18 +321,20 @@ export function WelcomePage({
       </div>
       <div ref={composerRef} className="welcome-composer-shell">
         <div ref={workspacePickerRef} className="welcome-workspace-context">
-          <button
+          <Button
             className="welcome-workspace-button"
             type="button"
             aria-expanded={workspacePickerOpen}
             aria-haspopup="dialog"
             title={activeWorkspaceRoot}
             onClick={openWorkspacePicker}
+            variant="secondary"
+            size="sm"
+            leadingIcon={<Folder size={15} strokeWidth={1.8} />}
+            trailingIcon={<ChevronDown size={13} strokeWidth={1.8} />}
           >
-            <Folder size={15} strokeWidth={1.8} />
-            <span>{workspaceLabel}</span>
-            <ChevronDown size={13} strokeWidth={1.8} />
-          </button>
+            {workspaceLabel}
+          </Button>
           {activeWorkspaceContext?.git_branch ? (
             <span className="welcome-workspace-branch" title={activeWorkspaceContext.git_branch}>
               <GitBranch size={15} strokeWidth={1.8} />
@@ -352,7 +355,7 @@ export function WelcomePage({
                   void selectWorkspace(selected ?? workspacePath);
                 }}
               >
-                <input
+                <Input
                   ref={workspacePathInputRef}
                   value={workspacePath}
                   onChange={(event) => {
@@ -393,20 +396,23 @@ export function WelcomePage({
                   placeholder={t("Enter a path")}
                   spellCheck={false}
                 />
-                <button type="submit" disabled={workspaceLoading || !workspacePath.trim()}>
-                  {workspaceLoading ? (
-                    <LoaderCircle className="spin" size={15} />
-                  ) : (
-                    t("Use directory")
-                  )}
-                </button>
+                <Button
+                  type="submit"
+                  variant="primary"
+                  size="sm"
+                  loading={workspaceLoading}
+                  disabled={!workspacePath.trim()}
+                  className="welcome-workspace-submit"
+                >
+                  {t("Use directory")}
+                </Button>
               </form>
               {workspacePickerError ? (
                 <p className="welcome-workspace-error">{workspacePickerError}</p>
               ) : null}
               {workspaceParent ? (
                 <div className="welcome-workspace-options">
-                  <button
+                  <Button
                     type="button"
                     className="welcome-workspace-option"
                     title={workspaceParent}
@@ -416,16 +422,18 @@ export function WelcomePage({
                       );
                       setWorkspaceCompletionIndex(-1);
                     }}
+                    variant="ghost"
+                    size="sm"
+                    leadingIcon={<Folder size={15} strokeWidth={1.8} />}
                   >
-                    <Folder size={15} strokeWidth={1.8} />
-                    <span>..</span>
-                  </button>
+                    ..
+                  </Button>
                 </div>
               ) : null}
               {workspaceCompletions.length > 0 ? (
                 <div className="welcome-workspace-options" role="listbox">
                   {workspaceCompletions.map((directory, index) => (
-                    <button
+                    <Button
                       key={directory}
                       type="button"
                       className={
@@ -437,10 +445,12 @@ export function WelcomePage({
                       aria-selected={index === workspaceCompletionIndex}
                       onMouseEnter={() => setWorkspaceCompletionIndex(index)}
                       onClick={() => void selectWorkspace(directory)}
+                      variant="ghost"
+                      size="sm"
+                      leadingIcon={<Folder size={15} strokeWidth={1.8} />}
                     >
-                      <Folder size={15} strokeWidth={1.8} />
-                      <span>{directory}</span>
-                    </button>
+                      {directory}
+                    </Button>
                   ))}
                 </div>
               ) : workspacePathIsCompletable && !workspaceParent ? (
@@ -451,15 +461,17 @@ export function WelcomePage({
                   <p>{t("Recent directories")}</p>
                   <div className="welcome-workspace-options">
                     {recentDirectories.map((directory) => (
-                      <button
+                      <Button
                         key={directory}
                         type="button"
                         className="welcome-workspace-option"
                         onClick={() => void selectWorkspace(directory)}
+                        variant="ghost"
+                        size="sm"
+                        leadingIcon={<Folder size={15} strokeWidth={1.8} />}
                       >
-                        <Folder size={15} strokeWidth={1.8} />
-                        <span>{directory}</span>
-                      </button>
+                        {directory}
+                      </Button>
                     ))}
                   </div>
                 </div>
@@ -501,7 +513,7 @@ export function WelcomePage({
               onRemove={onRemoveImage}
               disabled={loading || sending}
             />
-            <textarea
+            <Textarea
               ref={textareaRef}
               value={draft}
               onPaste={handlePaste}
@@ -604,12 +616,14 @@ export function WelcomePage({
           </div>
           <div className="welcome-composer-footer">
             <div className="welcome-controls">
-              <button
-                className={mode === "plan" ? "composer-control plan" : "composer-control build"}
+              <Button
+                className={`composer-control ${mode === "plan" ? "plan" : "build"}`}
                 onClick={() => onModeChange(mode === "plan" ? "build" : "plan")}
+                variant="ghost"
+                size="sm"
               >
                 {mode === "plan" ? t("Plan") : t("Build")}
-              </button>
+              </Button>
               <ModelPicker
                 models={models}
                 activeModel={activeModel}
@@ -622,7 +636,10 @@ export function WelcomePage({
                 }}
               />
             </div>
-            <button
+            <IconButton
+              label={t("Start conversation")}
+              size="md"
+              variant="primary"
               className="send-button"
               disabled={
                 (!draft.trim() && pendingImages.length === 0) ||
@@ -634,7 +651,7 @@ export function WelcomePage({
               title={t("Start conversation")}
             >
               {sending ? <LoaderCircle className="spin" size={17} /> : <Send size={17} />}
-            </button>
+            </IconButton>
           </div>
         </div>
       </div>

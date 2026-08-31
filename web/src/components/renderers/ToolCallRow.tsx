@@ -18,6 +18,7 @@ import { useTranslation } from "react-i18next";
 
 import type { MessageAttachment, ToolExecutionResult } from "../../types/api";
 import type { ToolCallEntry } from "../../utils/round";
+import { Button } from "../ui";
 import { ExpandableBody } from "../ui/ExpandableBody";
 import { JsonTreeView } from "../ui/JsonTreeView";
 import { ActivityRipple } from "./ActivityRipple";
@@ -833,7 +834,7 @@ export const ToolCallRow = memo(function ToolCallRow({
 
   return (
     <div className={`tool-renderer tool-tone-${tone}`}>
-      <button
+      <Button
         type="button"
         className="tool-renderer-header"
         onClick={() => {
@@ -842,6 +843,8 @@ export const ToolCallRow = memo(function ToolCallRow({
           onExpandedChange?.(next);
         }}
         aria-expanded={expanded}
+        variant="ghost"
+        size="sm"
       >
         <ActivityRipple
           active={active}
@@ -873,7 +876,7 @@ export const ToolCallRow = memo(function ToolCallRow({
             ) : null}
           </span>
         </ActivityRipple>
-      </button>
+      </Button>
       <ExpandableBody expanded={expanded} className="tool-renderer-body-shell">
         <ToolCallBody
           entry={entry}

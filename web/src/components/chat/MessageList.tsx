@@ -44,6 +44,7 @@ import { ThinkingBlock } from "../renderers/ThinkingBlock";
 import { ToolCallRow } from "../renderers/ToolCallRow";
 import { MarkdownRenderer } from "../renderers/MarkdownRenderer";
 import { ActivityRipple } from "../renderers/ActivityRipple";
+import { Button, IconButton } from "../ui";
 import {
   buildRounds,
   isRoundCollapsible,
@@ -713,24 +714,26 @@ function UserMessageItem({
           <CopyButton content={content} />
           <span className="user-message-actions">
             {onRevert ? (
-              <button
+              <IconButton
+                label={t("Revert to this message (undo later messages)")}
+                size="sm"
                 className="message-action"
                 onClick={() => onRevert(round.userMessage.id)}
                 title={t("Revert to this message (undo later messages)")}
-                aria-label={t("Revert to this message (undo later messages)")}
               >
                 <Undo2 size={16} />
-              </button>
+              </IconButton>
             ) : null}
             {onFork ? (
-              <button
+              <IconButton
+                label={t("Fork conversation from this message")}
+                size="sm"
                 className="message-action"
                 onClick={() => onFork(round.userMessage.id)}
                 title={t("Fork conversation from this message")}
-                aria-label={t("Fork conversation from this message")}
               >
                 <GitFork size={16} />
-              </button>
+              </IconButton>
             ) : null}
           </span>
         </div>
@@ -834,16 +837,18 @@ function AssistantMetaItem({
     <article className="chat-message assistant-message assistant-meta-row">
       <div className="assistant-message-inner">
         {collapsible ? (
-          <button
+          <Button
             type="button"
             className="assistant-turn-meta is-collapsible"
             onClick={onToggle}
             aria-expanded={expanded}
             aria-controls={turnContentId(turnId)}
             aria-label={expanded ? t("Collapse previous messages") : t("Expand previous messages")}
+            variant="ghost"
+            size="sm"
           >
             {content}
-          </button>
+          </Button>
         ) : (
           <div className="assistant-turn-meta">{content}</div>
         )}
@@ -1199,15 +1204,16 @@ function ProviderErrorCard({
           ) : null}
         </div>
         {canRetry ? (
-          <button
+          <Button
             type="button"
             className="provider-error-retry"
             onClick={() => onRetry?.(messageId)}
-            aria-label={t("Retry provider request")}
+            variant="secondary"
+            size="sm"
+            leadingIcon={<RefreshCw size={15} />}
           >
-            <RefreshCw size={15} />
             {t("Retry")}
-          </button>
+          </Button>
         ) : null}
       </div>
     </article>
@@ -1272,20 +1278,24 @@ export function ApprovalCard({
         ))}
       </div>
       <div className="approval-actions">
-        <button
-          className="secondary-button"
+        <Button
+          type="button"
           onClick={() => onRespond(tools.map((item) => makeRejectedTool(item.tool_call)))}
+          variant="secondary"
+          size="sm"
+          leadingIcon={<X size={15} />}
         >
-          <X size={15} />
           {t("Reject")}
-        </button>
-        <button
-          className="primary-button"
+        </Button>
+        <Button
+          type="button"
           onClick={() => onRespond(tools.map((item) => makeApprovedTool(item.tool_call)))}
+          variant="primary"
+          size="sm"
+          leadingIcon={<Check size={15} />}
         >
-          <Check size={15} />
           {t("Allow")}
-        </button>
+        </Button>
       </div>
     </div>
   );

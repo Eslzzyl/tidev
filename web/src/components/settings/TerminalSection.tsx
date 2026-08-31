@@ -6,6 +6,7 @@ import {
   useTerminalShellConfig,
   useSetTerminalShellConfig,
 } from "../../hooks/useQueries";
+import { Input, Select } from "../ui";
 
 type Mode = "default" | "selected" | "custom";
 
@@ -110,19 +111,20 @@ export function TerminalSection() {
               {error?.message ?? t("Failed to load shells")}
             </span>
           ) : (
-            <select
+            <Select
               value={selectValue}
-              onChange={(e) => handleSelectChange(e.target.value)}
-              className="w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-base text-neutral-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100 dark:focus:border-blue-400"
-            >
-              <option value="__default__">{defaultShellLabel}</option>
-              {(shellsData?.shells ?? []).map((s) => (
-                <option key={s.path} value={s.path}>
-                  {s.name} ({s.path})
-                </option>
-              ))}
-              <option value="__custom__">{t("Custom...")}</option>
-            </select>
+              onValueChange={handleSelectChange}
+              ariaLabel={t("Shell")}
+              className="terminal-shell-select"
+              options={[
+                { value: "__default__", label: defaultShellLabel },
+                ...(shellsData?.shells ?? []).map((shell) => ({
+                  value: shell.path,
+                  label: `${shell.name} (${shell.path})`,
+                })),
+                { value: "__custom__", label: t("Custom...") },
+              ]}
+            />
           )}
         </label>
 
@@ -132,7 +134,7 @@ export function TerminalSection() {
             <label className="mb-1 block text-xs text-neutral-500 dark:text-neutral-400">
               {t("Shell path or command")}
             </label>
-            <input
+            <Input
               type="text"
               value={customPath}
               onChange={(e) => handleCustomChange(e.target.value)}

@@ -18,6 +18,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
     variant = "secondary",
     size = "md",
     loading = false,
+    type = "button",
     leadingIcon,
     trailingIcon,
     className,
@@ -35,10 +36,11 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       data-variant={variant}
       disabled={disabled || loading}
       aria-busy={loading || undefined}
+      type={type}
       {...props}
     >
       {loading ? <span className="ui-spinner ui-spinner-inline" aria-hidden="true" /> : leadingIcon}
-      <span>{children}</span>
+      <span className="ui-button-label">{children}</span>
       {!loading ? trailingIcon : null}
     </button>
   );

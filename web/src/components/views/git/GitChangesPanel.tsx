@@ -3,6 +3,7 @@ import { useRef } from "react";
 import type { GitFileDiffResponse, GitStatusResponse } from "../../../types/api";
 import { DiffRenderer, DiffScrollProvider } from "../../renderers/DiffRenderer";
 import { useTranslation } from "react-i18next";
+import { Button, Textarea } from "../../ui";
 
 export function ChangesPanel({
   status,
@@ -73,12 +74,12 @@ export function ChangesPanel({
         <div ref={contentRef}>
           {/* Commit input */}
           <div className="mb-4">
-            <textarea
+            <Textarea
               value={commitMsg}
               onChange={(e) => onCommitMsgChange(e.target.value)}
               placeholder={t("Commit message")}
               rows={2}
-              className="w-full rounded border border-neutral-300 bg-white px-3 py-2 text-base text-neutral-900 placeholder-neutral-400 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder-neutral-500"
+              className="git-commit-textarea"
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
@@ -86,19 +87,23 @@ export function ChangesPanel({
                 }
               }}
             />
-            <button
+            <Button
               onClick={onCommit}
               disabled={!commitMsg.trim() || committing}
-              className="git-primary-button mt-2 flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors hover:bg-neutral-800 dark:hover:bg-neutral-200"
+              className="mt-2"
+              variant="primary"
+              size="sm"
+              leadingIcon={
+                committing ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Check className="h-3.5 w-3.5" />
+                )
+              }
             >
-              {committing ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Check className="h-3.5 w-3.5" />
-              )}
               {t("Commit")}
               {staged.length > 0 ? ` ${t("({{count}} files)", { count: staged.length })}` : ""}
-            </button>
+            </Button>
           </div>
 
           {/* File lists */}
@@ -175,9 +180,12 @@ export function ChangeFileRow({
   const { t } = useTranslation();
   return (
     <div>
-      <button
+      <Button
+        type="button"
         onClick={onToggle}
-        className="flex w-full items-center gap-2 rounded px-2 py-1 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        className="git-file-row-button"
+        variant="ghost"
+        size="sm"
       >
         {icon}
         <span className="flex-1 truncate text-left text-neutral-700 dark:text-neutral-300">
@@ -190,7 +198,7 @@ export function ChangeFileRow({
             isExpanded ? "rotate-90" : ""
           }`}
         />
-      </button>
+      </Button>
       {/* Diff content — smooth height transition */}
       <div
         className="motion-safe:transition-all motion-safe:duration-300 motion-safe:ease-smooth grid"

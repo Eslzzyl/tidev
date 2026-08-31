@@ -20,6 +20,7 @@ export function TooltipContent({
   return (
     <TooltipPrimitive.Portal>
       <TooltipPrimitive.Content
+        data-ui-portal="true"
         className={cx("ui-tooltip-content", className)}
         sideOffset={sideOffset}
         {...props}

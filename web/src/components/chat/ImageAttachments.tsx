@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 
 import type { MessageAttachment } from "../../types/api";
 import type { PendingImage } from "../../utils/imageAttachments";
+import { Button, IconButton } from "../ui";
 
 function ImagePreviewOverlay({
   url,
@@ -39,15 +40,16 @@ function ImagePreviewOverlay({
       aria-label={t("Expand image")}
       onClick={onClose}
     >
-      <button
+      <IconButton
+        label={t("Close")}
+        size="sm"
         type="button"
         className="image-preview-close"
         onClick={onClose}
         title={t("Close")}
-        aria-label={t("Close")}
       >
         <X size={22} />
-      </button>
+      </IconButton>
       <img src={url} alt={alt} onClick={(event) => event.stopPropagation()} />
     </div>,
     document.body,
@@ -73,16 +75,19 @@ export function ImageAttachmentStrip({
       <div className="composer-image-attachments" aria-label={t("Pasted images")}>
         {images.map((image) => (
           <div className="composer-image-attachment" key={image.id}>
-            <button
+            <Button
               type="button"
               className="composer-image-attachment-preview"
               onClick={() => setPreviewId(image.id)}
               title={t("Expand image")}
-              aria-label={t("Expand image")}
+              variant="ghost"
+              size="sm"
             >
               <img src={image.previewUrl} alt={image.filename} />
-            </button>
-            <button
+            </Button>
+            <IconButton
+              label={t("Remove image")}
+              size="sm"
               type="button"
               className="composer-image-attachment-remove"
               disabled={disabled}
@@ -91,10 +96,9 @@ export function ImageAttachmentStrip({
                 onRemove(image.id);
               }}
               title={t("Remove image")}
-              aria-label={t("Remove image")}
             >
               <X size={18} />
-            </button>
+            </IconButton>
           </div>
         ))}
       </div>
@@ -142,16 +146,17 @@ export function MessageImageGallery({ attachments }: { attachments: MessageAttac
     <>
       <div className="message-image-gallery">
         {previews.map(({ image, url }, index) => (
-          <button
+          <Button
             type="button"
             className="message-image-link"
             key={`${image.filename}:${image.file_size}:${index}`}
             onClick={() => setPreviewIndex(index)}
             title={t("Expand image")}
-            aria-label={t("Expand image")}
+            variant="ghost"
+            size="sm"
           >
             <img src={url} alt={image.filename} />
-          </button>
+          </Button>
         ))}
       </div>
       {preview ? (
