@@ -27,6 +27,12 @@ export function shortPath(value: string): string {
   return parts.length > 2 ? `…/${parts.slice(-2).join("/")}` : value;
 }
 
+export function formatWorkspaceDisplay(displayPath: string, nativePath: string): string {
+  if (!displayPath) return "";
+  const separator = nativePath.includes("\\") ? "\\" : "/";
+  return displayPath.replace(/[\\/]/g, separator);
+}
+
 const THINKING_LEVEL_LABELS_ZH: Record<string, string> = {
   off: "关",
   minimal: "最低",

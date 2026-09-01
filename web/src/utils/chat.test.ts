@@ -1,6 +1,20 @@
 import { describe, expect, it } from "vitest";
 
-import { formatThinkingLevel, isThinkingLevelEnabled } from "./chat";
+import { formatThinkingLevel, formatWorkspaceDisplay, isThinkingLevelEnabled } from "./chat";
+
+describe("formatWorkspaceDisplay", () => {
+  it("uses Windows separators when the native workspace path does", () => {
+    expect(formatWorkspaceDisplay("D:/WorkSpace/Rust/tidev", "D:\\WorkSpace\\Rust\\tidev")).toBe(
+      "D:\\WorkSpace\\Rust\\tidev",
+    );
+  });
+
+  it("preserves the display separator on Unix paths", () => {
+    expect(formatWorkspaceDisplay("~/workspace/tidev", "/home/user/workspace/tidev")).toBe(
+      "~/workspace/tidev",
+    );
+  });
+});
 
 describe("formatThinkingLevel", () => {
   it("uses the existing friendly Chinese labels for serialized levels", () => {

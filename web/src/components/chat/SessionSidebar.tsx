@@ -4,7 +4,12 @@ import { useTranslation } from "react-i18next";
 
 import { useWorkspace } from "../../hooks/workspaceQueries";
 import type { Session } from "../../types/api";
-import { formatDate, formatSessionActivity, shortPath } from "../../utils/chat";
+import {
+  formatDate,
+  formatSessionActivity,
+  formatWorkspaceDisplay,
+  shortPath,
+} from "../../utils/chat";
 import { Button, IconButton, Input, Select } from "../ui";
 
 export interface SessionSidebarProps {
@@ -121,8 +126,11 @@ export function SessionSidebar({
   };
 
   const hasFilters = search.trim().length > 0 || workspaceRootFilter !== null;
-  const workspaceDisplay = workspaceInfo?.workspace_display ?? "";
   const workspaceRoot = workspaceInfo?.workspace_root ?? "";
+  const workspaceDisplay = formatWorkspaceDisplay(
+    workspaceInfo?.workspace_display ?? "",
+    workspaceRoot,
+  );
 
   return (
     <aside className={mobileOpen ? "session-sidebar mobile-open" : "session-sidebar"}>
