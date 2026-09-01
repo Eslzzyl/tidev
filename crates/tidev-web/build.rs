@@ -62,11 +62,19 @@ fn reset_directory(path: &Path) -> std::io::Result<()> {
 }
 
 fn run_pnpm(web_dir: &Path, args: &[&str]) -> Result<(), String> {
-    let status = Command::new("pnpm")
-        .arg("--dir")
-        .arg(web_dir)
-        .args(args)
-        .status()
+    #[cfg(windows)]
+    let status = run_pnpm_command("pnpm.cmd", web_dir, args).or_else(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            run_pnpm_command("pnpm", web_dir, args)
+        } else {
+            Err(error)
+        }
+    });
+
+    #[cfg(not(windows))]
+    let status = run_pnpm_command("pnpm", web_dir, args);
+
+    let status = status
         .map_err(|error| {
             format!(
                 "failed to execute pnpm for the web frontend: {error}; the release binary will serve the compatibility fallback page"
@@ -81,6 +89,18 @@ fn run_pnpm(web_dir: &Path, args: &[&str]) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+fn run_pnpm_command(
+    command: &str,
+    web_dir: &Path,
+    args: &[&str],
+) -> std::io::Result<std::process::ExitStatus> {
+    Command::new(command)
+        .arg("--dir")
+        .arg(web_dir)
+        .args(args)
+        .status()
 }
 
 fn copy_directory(source: &Path, destination: &Path) -> std::io::Result<()> {
