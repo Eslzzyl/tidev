@@ -419,8 +419,48 @@ fn is_boundary_char(b: u8) -> bool {
 // Main dispatch
 // ---------------------------------------------------------------------------
 
+/// Return whether a command is a PowerShell web request cmdlet or alias.
+fn is_powershell_web_command(cmd: &str) -> bool {
+    cmd.eq_ignore_ascii_case("Invoke-WebRequest")
+        || cmd.eq_ignore_ascii_case("Invoke-RestMethod")
+        || cmd.eq_ignore_ascii_case("iwr")
+        || cmd.eq_ignore_ascii_case("irm")
+}
+
+/// Classify PowerShell web requests based on local file output.
+///
+/// Without `-OutFile`, the response is emitted to the command pipeline. The
+/// request may still have external effects, but those are outside the local
+/// file-write policy represented by `Safety::WriteOperation`.
+fn classify_powershell_web(args: &[&str]) -> Safety {
+    if args.iter().any(|arg| is_powershell_out_file_arg(arg)) {
+        Safety::WriteOperation
+    } else {
+        Safety::Unknown
+    }
+}
+
+/// Detect the canonical `-OutFile` parameter and its unambiguous abbreviations.
+fn is_powershell_out_file_arg(arg: &str) -> bool {
+    let Some(arg) = arg.strip_prefix('-') else {
+        return false;
+    };
+
+    let name = arg
+        .split_once(':')
+        .or_else(|| arg.split_once('='))
+        .map_or(arg, |(name, _)| name);
+    let name = name.to_ascii_lowercase();
+
+    name == "outfile" || (name.len() >= 4 && "outfile".starts_with(&name))
+}
+
 /// Classify a single command (no redirects, no compound, no wrapper stripping).
 fn classify_command(cmd: &str, args: &[&str]) -> Safety {
+    if is_powershell_web_command(cmd) {
+        return classify_powershell_web(args);
+    }
+
     match cmd {
         // ── Version control ──────────────────────────────────────────
         "git" => classify_git(args),
@@ -555,13 +595,11 @@ fn classify_command(cmd: &str, args: &[&str]) -> Safety {
 
         // ── Windows / PowerShell ─────────────────────────────────────
         "ri" | "rni" | "ni"                                    // PowerShell aliases
-        | "iwr" | "irm"                                           // Invoke-WebRequest/RestMethod
         | "ac"                                                    // Add-Content
         => Safety::WriteOperation,
         "Copy-Item" | "Move-Item" | "Remove-Item" | "Rename-Item" | "New-Item"
         | "Set-Content" | "Add-Content" | "Clear-Content"
         | "Out-File"
-        | "Invoke-WebRequest" | "Invoke-RestMethod"
         => Safety::WriteOperation,
         "sc" | "schtasks" | "reg" | "regedit" => Safety::WriteOperation, // Windows system
 
@@ -761,6 +799,19 @@ mod tests {
             cl.classify("wget https://example.com/file"),
             Safety::Unknown
         );
+        // PowerShell web requests emit the response to the pipeline unless
+        // `-OutFile` is present, matching the curl/wget policy above.
+        assert_eq!(
+            cl.classify(
+                "Invoke-WebRequest -Uri 'http://localhost:8791/health' -UseBasicParsing | Select-Object -ExpandProperty Content"
+            ),
+            Safety::Unknown
+        );
+        assert_eq!(cl.classify("iwr https://example.com"), Safety::Unknown);
+        assert_eq!(
+            cl.classify("Invoke-RestMethod https://example.com/api"),
+            Safety::Unknown
+        );
         // -d/--data sends HTTP request body, not a local file write
         assert_eq!(
             cl.classify("curl -d '{\"key\":\"value\"}' https://example.com/api"),
@@ -782,6 +833,18 @@ mod tests {
         );
         assert_eq!(
             cl.classify("wget -O output.html https://example.com"),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            cl.classify("Invoke-WebRequest https://example.com -OutFile response.json"),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            cl.classify("iwr https://example.com -OutFile:response.json"),
+            Safety::WriteOperation
+        );
+        assert_eq!(
+            cl.classify("IRM https://example.com -OutF=response.json"),
             Safety::WriteOperation
         );
         // scp/rsync always transfer files
@@ -898,10 +961,8 @@ mod tests {
         assert_eq!(cl.classify("Set-Content file text"), Safety::WriteOperation);
         assert_eq!(cl.classify("Add-Content file text"), Safety::WriteOperation);
         assert_eq!(cl.classify("Out-File file"), Safety::WriteOperation);
-        assert_eq!(cl.classify("Invoke-WebRequest url"), Safety::WriteOperation);
         assert_eq!(cl.classify("ri file"), Safety::WriteOperation);
         assert_eq!(cl.classify("ni file"), Safety::WriteOperation);
-        assert_eq!(cl.classify("iwr url"), Safety::WriteOperation);
     }
 
     #[test]
