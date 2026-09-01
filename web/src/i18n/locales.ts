@@ -361,6 +361,20 @@ const en = {
   "Uses the server's $SHELL environment variable (or /bin/bash as fallback).":
     "Uses the server's $SHELL environment variable (or /bin/bash as fallback).",
   "New terminal tabs will use {{shell}}.": "New terminal tabs will use {{shell}}.",
+  "Terminal Font": "Terminal Font",
+  "Primary terminal font": "Primary terminal font",
+  "The selected font is used first, with Unicode fallback fonts preserved.":
+    "The selected font is used first, with Unicode fallback fonts preserved.",
+  "Detect system fonts": "Detect system fonts",
+  "Detecting fonts...": "Detecting fonts...",
+  "Detect fonts to populate the list from this browser device.":
+    "Detect fonts to populate the list from this browser device.",
+  "This browser cannot detect installed fonts. System default remains available.":
+    "This browser cannot detect installed fonts. System default remains available.",
+  "Font access was denied. Allow access and try again.":
+    "Font access was denied. Allow access and try again.",
+  "Unable to detect installed fonts.": "Unable to detect installed fonts.",
+  "No installed monospace fonts were found.": "No installed monospace fonts were found.",
   "Change Password": "Change Password",
   "Set Password": "Set Password",
   "Saving...": "Saving...",
@@ -1064,6 +1078,19 @@ const zhCN: Record<keyof typeof en, string> = {
   "Uses the server's $SHELL environment variable (or /bin/bash as fallback).":
     "使用服务端的 $SHELL 环境变量（否则回退到 /bin/bash）。",
   "New terminal tabs will use {{shell}}.": "新终端标签页将使用 {{shell}}。",
+  "Terminal Font": "终端字体",
+  "Primary terminal font": "终端主字体",
+  "The selected font is used first, with Unicode fallback fonts preserved.":
+    "优先使用所选字体，并保留 Unicode 回退字体。",
+  "Detect system fonts": "检测系统字体",
+  "Detecting fonts...": "正在检测字体…",
+  "Detect fonts to populate the list from this browser device.":
+    "检测当前浏览器设备上的字体以填充列表。",
+  "This browser cannot detect installed fonts. System default remains available.":
+    "当前浏览器无法检测已安装字体，仍可使用系统默认字体。",
+  "Font access was denied. Allow access and try again.": "字体访问被拒绝，请允许访问后重试。",
+  "Unable to detect installed fonts.": "无法检测已安装字体。",
+  "No installed monospace fonts were found.": "未找到已安装的等宽字体。",
   "Change Password": "修改密码",
   "Set Password": "设置密码",
   "Saving...": "保存中…",

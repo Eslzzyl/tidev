@@ -10,6 +10,7 @@ export interface SettingsState {
   diffLayout: "inline" | "side-by-side";
   enterToSend: boolean;
   terminalShell: string;
+  terminalFontFamily: string;
 }
 
 export interface UIState {
@@ -28,6 +29,7 @@ export interface UIState {
   locale: LocalePreference;
   leftSidebarWidth: number;
   rightSidebarWidth: number;
+  terminalFontRevision: number;
   settings: SettingsState;
 }
 
@@ -54,6 +56,7 @@ export interface UIActions {
   setStreaming: (isStreaming: boolean) => void;
   setConnectionStatus: (status: UIState["connectionStatus"]) => void;
   updateSettings: (partial: Partial<SettingsState>) => void;
+  refreshTerminalFont: () => void;
 }
 
 const DEFAULT_LEFT_SIDEBAR_WIDTH = 256;
@@ -68,6 +71,7 @@ const defaultSettings: SettingsState = {
   diffLayout: "side-by-side",
   enterToSend: true,
   terminalShell: "",
+  terminalFontFamily: "",
 };
 
 function loadLegacyPreferences(): { theme?: Theme; settings: Partial<SettingsState> } {
@@ -104,6 +108,7 @@ const initialState: UIState = {
   connectionStatus: "disconnected",
   leftSidebarWidth: DEFAULT_LEFT_SIDEBAR_WIDTH,
   rightSidebarWidth: DEFAULT_RIGHT_SIDEBAR_WIDTH,
+  terminalFontRevision: 0,
   settings: { ...defaultSettings, ...legacyPreferences.settings },
 };
 
@@ -174,6 +179,9 @@ export const useUIStore = create<UIState & UIActions>()(
       setStreaming: (isStreaming) => set({ isStreaming }),
       setConnectionStatus: (status) => set({ connectionStatus: status }),
 
+      refreshTerminalFont: () =>
+        set((state) => ({ terminalFontRevision: state.terminalFontRevision + 1 })),
+
       updateSettings: (partial) =>
         set((state) => {
           const settings = { ...state.settings, ...partial };
@@ -193,6 +201,14 @@ export const useUIStore = create<UIState & UIActions>()(
         rightSidebarOpen: state.rightSidebarOpen,
         settings: state.settings,
       }),
+      merge: (persistedState, currentState) => {
+        const persisted = persistedState as Partial<UIState> | undefined;
+        return {
+          ...currentState,
+          ...persisted,
+          settings: { ...currentState.settings, ...persisted?.settings },
+        };
+      },
       onRehydrateStorage: () => (state) => {
         if (state) applyVisualSettings(state.theme, state.settings);
       },

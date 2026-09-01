@@ -4,6 +4,7 @@ import { Restty, parseGhosttyTheme } from "restty";
 import { useTerminalStore } from "../../stores/useTerminalStore";
 import { getEffectiveTheme, useUIStore } from "../../stores/useUIStore";
 import type { TerminalConnection } from "../../terminal/connection";
+import { createTerminalFontInputs } from "../../terminal/fonts";
 import { createResttyTransport } from "../../terminal/resttyTransport";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import type { ContextMenuItem } from "../ui/ContextMenu";
@@ -113,6 +114,8 @@ export function TerminalView() {
   const startSession = useTerminalStore((s) => s.startSession);
   const restoreRunningSessions = useTerminalStore((s) => s.restoreRunningSessions);
   const theme = useUIStore((s) => s.theme);
+  const terminalFontFamily = useUIStore((s) => s.settings.terminalFontFamily);
+  const terminalFontRevision = useUIStore((s) => s.terminalFontRevision);
   const isDark = getEffectiveTheme(theme) === "dark";
 
   // Sync route tabId -> activeTabId
@@ -264,7 +267,13 @@ export function TerminalView() {
       <div className="flex-1 overflow-hidden">
         {tabs.map((tab) => (
           <div key={tab.id} className={tab.id === activeTabId ? "block h-full flex-1" : "hidden"}>
-            <TerminalViewport tab={tab} isDark={isDark} isActive={tab.id === activeTabId} />
+            <TerminalViewport
+              tab={tab}
+              isDark={isDark}
+              isActive={tab.id === activeTabId}
+              terminalFontFamily={terminalFontFamily}
+              terminalFontRevision={terminalFontRevision}
+            />
           </div>
         ))}
       </div>
@@ -333,13 +342,32 @@ interface TerminalViewportProps {
   };
   isDark: boolean;
   isActive: boolean;
+  terminalFontFamily: string;
+  terminalFontRevision: number;
 }
 
-function TerminalViewport({ tab, isDark, isActive }: TerminalViewportProps) {
+function TerminalViewport({
+  tab,
+  isDark,
+  isActive,
+  terminalFontFamily,
+  terminalFontRevision,
+}: TerminalViewportProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
   const resttyRef = useRef<Restty | null>(null);
+  const appliedTerminalFontRef = useRef<{
+    restty: Restty;
+    family: string;
+    revision: number;
+  } | null>(null);
   /** Guards against duplicate HTTP starts during StrictMode mount replay. */
   const httpStartedRef = useRef(false);
+
+  // Keep the connection-mounting effect independent from the selected font.
+  const terminalFontFamilyRef = useRef(terminalFontFamily);
+  const terminalFontRevisionRef = useRef(terminalFontRevision);
+  terminalFontFamilyRef.current = terminalFontFamily;
+  terminalFontRevisionRef.current = terminalFontRevision;
 
   const startSession = useTerminalStore((s) => s.startSession);
 
@@ -357,13 +385,15 @@ function TerminalViewport({ tab, isDark, isActive }: TerminalViewportProps) {
     if (!terminalRef.current || !tab.connection || resttyRef.current) return;
 
     const theme = isDark ? DARK_THEME : LIGHT_THEME;
+    const initialFontFamily = terminalFontFamilyRef.current;
+    const initialFontRevision = terminalFontRevisionRef.current;
     const restty = new Restty({
       root: terminalRef.current,
       terminal: {
         renderer: "auto",
         fontSize: TERMINAL_FONT_SIZE,
         fontSizeMode: "em",
-        // Preserve Restty's built-in local-first fallback chain for Unicode text.
+        fonts: createTerminalFontInputs(initialFontFamily),
         theme: createResttyTheme(theme),
         autoResize: true,
         showResizeOverlay: false,
@@ -385,6 +415,11 @@ function TerminalViewport({ tab, isDark, isActive }: TerminalViewportProps) {
     });
 
     resttyRef.current = restty;
+    appliedTerminalFontRef.current = {
+      restty,
+      family: initialFontFamily,
+      revision: initialFontRevision,
+    };
     restty.setPaused(!isActive);
     restty.connectPty();
     restty.setFontSize(TERMINAL_FONT_SIZE);
@@ -393,8 +428,35 @@ function TerminalViewport({ tab, isDark, isActive }: TerminalViewportProps) {
     return () => {
       restty.destroy();
       resttyRef.current = null;
+      if (appliedTerminalFontRef.current?.restty === restty) {
+        appliedTerminalFontRef.current = null;
+      }
     };
   }, [tab.connection]);
+
+  useEffect(() => {
+    const restty = resttyRef.current;
+    if (!restty) return;
+
+    const applied = appliedTerminalFontRef.current;
+    if (
+      applied?.restty === restty &&
+      applied.family === terminalFontFamily &&
+      applied.revision === terminalFontRevision
+    ) {
+      return;
+    }
+
+    const next = { restty, family: terminalFontFamily, revision: terminalFontRevision };
+    appliedTerminalFontRef.current = next;
+
+    void restty.setFonts(createTerminalFontInputs(terminalFontFamily)).catch((error: unknown) => {
+      if (appliedTerminalFontRef.current === next) {
+        appliedTerminalFontRef.current = null;
+      }
+      console.warn("Failed to apply terminal font:", error);
+    });
+  }, [tab.connection, terminalFontFamily, terminalFontRevision]);
 
   useEffect(() => {
     const restty = resttyRef.current;
