@@ -61,6 +61,7 @@ import {
   stripSystemReminderTags,
 } from "../../utils/format";
 import { formatThinkingLevel, isThinkingLevelEnabled } from "../../utils/chat";
+import { latestLiveStream, segmentReasoningTiming } from "../../utils/stream";
 
 export interface MessageListProps {
   messages: MessageRecord[];
@@ -253,12 +254,15 @@ function makeSegmentItems(
     if (segment.type === "tool_call" && !entry) return;
 
     const isLiveSegment = index >= activeFromIndex;
-    const segmentStartedAt = isLiveSegment
-      ? (activeReasoningStartedAt ?? reasoningStartedAt)
-      : reasoningStartedAt;
-    const segmentCompletedAt = isLiveSegment
-      ? (activeReasoningCompletedAt ?? reasoningCompletedAt)
-      : reasoningCompletedAt;
+    const { startedAt: segmentStartedAt, completedAt: segmentCompletedAt } = segmentReasoningTiming(
+      {
+        isLiveSegment,
+        reasoningStartedAt,
+        reasoningCompletedAt,
+        activeReasoningStartedAt,
+        activeReasoningCompletedAt,
+      },
+    );
     const segmentActive =
       active &&
       isLiveSegment &&
@@ -401,9 +405,12 @@ function buildChatItems(
       ...round.leadingInstructions.map((message) => ({ type: "instruction" as const, message })),
       ...round.segments,
     ];
-    const liveStream = streams.find(
-      (stream) => stream.status === "streaming" && stream.userMessageId === turnId,
-    );
+    const liveStream = latestLiveStream(streams, turnId);
+    for (const stream of streams) {
+      if (stream.status === "streaming" && stream.userMessageId === turnId) {
+        mergedStreamKeys.add(stream.key);
+      }
+    }
     const liveStreamHasToolCall = liveStream?.segments.some(
       (segment) => segment.type === "tool_call",
     );
@@ -434,7 +441,6 @@ function buildChatItems(
 
     if (!assistant) continue;
 
-    if (liveStream) mergedStreamKeys.add(liveStream.key);
     const insertInstructionBeforeLive = Boolean(liveStream && pendingInstructions.length > 0);
     let mergedSegments = liveStream
       ? [...persistedSegments, ...liveStream.segments]
