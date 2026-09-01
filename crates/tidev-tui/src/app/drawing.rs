@@ -3,7 +3,7 @@ use super::*;
 use std::time::Instant;
 
 use crate::component::Component;
-use crate::components::chat::render::wrap_text_lines;
+use crate::components::chat::render::{display_text_with_image_badges, wrap_text_lines};
 use crate::components::selection::copy_to_clipboard;
 use crate::context::DrawContext;
 use ratatui::layout::{Alignment, Constraint, Layout, Margin, Rect};
@@ -435,8 +435,11 @@ impl App {
                 let mut inner: usize = 0;
                 for (i, q) in self.pending_inputs.iter().take(visible).enumerate() {
                     // +1 for mode header line
+                    let display_text = crate::utils::strip_system_reminder_tags(&q.message.content);
+                    let display_text =
+                        display_text_with_image_badges(&display_text, &q.message.attachments);
                     let wrapped =
-                        wrap_text_lines(&q.message.content, text_width, MAX_QUEUED_PROMPT_LINES);
+                        wrap_text_lines(&display_text, text_width, MAX_QUEUED_PROMPT_LINES);
                     inner += 1 + wrapped.len();
                     // Separator between items (not after last)
                     if i + 1 < visible {
@@ -935,6 +938,8 @@ impl App {
 
             // Strip system-reminder tags from steering messages for display.
             let display_text = crate::utils::strip_system_reminder_tags(&pending.message.content);
+            let display_text =
+                display_text_with_image_badges(&display_text, &pending.message.attachments);
             // Word-wrap the prompt into up to MAX_QUEUED_PROMPT_LINES lines
             let wrapped_lines = wrap_text_lines(&display_text, width, MAX_QUEUED_PROMPT_LINES);
             // +1 for mode header line

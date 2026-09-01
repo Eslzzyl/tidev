@@ -4,7 +4,7 @@ use chrono::Local;
 use ratatui::prelude::{Modifier, Style};
 use ratatui::style::Color;
 use ratatui::text::{Line, Span};
-use tidev_llm::message::{COMPACTION_MESSAGE_LABEL, Message, MessageRole};
+use tidev_llm::message::{COMPACTION_MESSAGE_LABEL, Message, MessageAttachment, MessageRole};
 use unicode_width::UnicodeWidthStr;
 
 use crate::diff_render::render_unified_diff_text;
@@ -14,7 +14,9 @@ use crate::markdown::markdown_to_hyperlink_lines;
 use crate::markdown::{WrapOptions, word_wrap_line};
 
 use super::thinking::{is_reasoning_collapsed, render_reasoning_lines, thinking_duration_str};
-use super::utils::{apply_badge_styling, render_compaction_divider_line, wrap_text_lines};
+use super::utils::{
+    apply_badge_styling, image_badge_labels, render_compaction_divider_line, wrap_text_lines,
+};
 
 /// Render assistant message cards with reasoning, content (diff or markdown),
 /// and a metadata footer at round end.  No title bar — the body lines begin
@@ -198,8 +200,25 @@ fn render_user_card(
     let palette = ctx.palette;
 
     let display_content = strip_system_reminder_tags(&message.content);
-    let mut content_lines =
-        render_text_body_lines(ctx, &display_content, content_width.saturating_sub(2)); // 2 for ┃ prefix
+    let has_image_attachments = message
+        .attachments
+        .iter()
+        .any(|attachment| matches!(attachment, MessageAttachment::Image { .. }));
+    let mut content_lines = if display_content.trim().is_empty() && has_image_attachments {
+        Vec::new()
+    } else {
+        render_text_body_lines(ctx, &display_content, content_width.saturating_sub(2))
+    }; // 2 for ┃ prefix
+
+    let image_labels = image_badge_labels(&display_content, &message.attachments);
+    if !image_labels.is_empty() {
+        if !content_lines.is_empty() {
+            content_lines.push(HyperlinkLine::new(Line::from("")));
+        }
+        content_lines.push(HyperlinkLine::new(Line::from(Span::raw(
+            image_labels.join(" "),
+        ))));
+    }
     apply_badge_styling(&mut content_lines, palette);
 
     let mode_color = ctx

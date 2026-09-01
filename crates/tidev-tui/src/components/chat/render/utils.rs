@@ -10,6 +10,7 @@ use fancy_regex::Regex;
 use ratatui::prelude::{Modifier, Style};
 use ratatui::style::Color;
 use ratatui::text::{Line, Span};
+use tidev_llm::message::MessageAttachment;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use uuid::Uuid;
 
@@ -42,16 +43,83 @@ pub(crate) struct ImageBadgeInfo {
 static AT_REF_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?<![\w`])@(\.?[^\s`.,]*(?:\.[^\s`.,]+)*)").unwrap());
 
-/// Regex for image badge patterns like `[100.0 KB PNG]` produced by
-/// `format_image_badge()`. The type label is uppercase (PNG, JPEG, etc.).
-pub(super) static IMAGE_BADGE_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\[\d[\d.]*\s+(?:B|KB|MB|GB)\s+[A-Z][A-Z0-9]*\]").unwrap());
+/// Regex for image badge patterns rendered in user messages.
+///
+/// The size/type form is kept for compatibility with older TUI messages;
+/// `[Image: filename]` is the current composer and cross-frontend form.
+pub(super) static IMAGE_BADGE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?:\[\d[\d.]*\s+(?:B|KB|MB|GB)\s+[A-Z][A-Z0-9]*\]|\[Image(?:\s*:\s*[^\]\r\n]*)?\])",
+    )
+    .unwrap()
+});
 
 /// Kind of inline badge detected in user message content.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum MessageBadgeKind {
     AtReference,
     Image,
+}
+
+/// Return display labels for image attachments that do not already have a
+/// corresponding image badge in the message content.
+pub(super) fn image_badge_labels(content: &str, attachments: &[MessageAttachment]) -> Vec<String> {
+    let existing_count = count_image_badges(content);
+    attachments
+        .iter()
+        .filter_map(image_badge_label)
+        .skip(existing_count)
+        .collect()
+}
+
+/// Build a plain-text preview for pending messages, deriving image labels from
+/// attachments without changing the underlying message content.
+pub(crate) fn display_text_with_image_badges(
+    content: &str,
+    attachments: &[MessageAttachment],
+) -> String {
+    let labels = image_badge_labels(content, attachments);
+    if labels.is_empty() {
+        return content.to_string();
+    }
+
+    let badges = labels.join(" ");
+    if content.trim().is_empty() {
+        badges
+    } else {
+        format!("{content}\n\n{badges}")
+    }
+}
+
+fn count_image_badges(text: &str) -> usize {
+    let mut count = 0;
+    let mut search_start = 0;
+    while let Ok(Some(m)) = IMAGE_BADGE_RE.find(&text[search_start..]) {
+        count += 1;
+        search_start += m.end();
+    }
+    count
+}
+
+fn image_badge_label(attachment: &MessageAttachment) -> Option<String> {
+    let MessageAttachment::Image { filename, .. } = attachment else {
+        return None;
+    };
+
+    // Keep filenames from breaking the badge syntax or adding extra lines.
+    let safe_filename: String = filename
+        .chars()
+        .map(|ch| match ch {
+            '[' | ']' | '\r' | '\n' => ' ',
+            _ => ch,
+        })
+        .collect();
+    let safe_filename = safe_filename.trim();
+    if safe_filename.is_empty() {
+        Some("[Image]".to_string())
+    } else {
+        Some(format!("[Image: {safe_filename}]"))
+    }
 }
 
 pub(super) fn decorate_card_lines(
@@ -262,7 +330,7 @@ pub fn wrap_text_lines(text: &str, max_width: usize, max_lines: usize) -> Vec<St
 /// for Image badges. Hyperlink ranges are unaffected (spans are only split).
 pub(super) fn apply_badge_styling(lines: &mut [HyperlinkLine], palette: ThemePalette) {
     for line in lines.iter_mut() {
-        let old_spans: Vec<Span<'static>> = line.line.spans.drain(..).collect();
+        let old_spans: Vec<Span<'static>> = std::mem::take(&mut line.line.spans);
         for span in old_spans {
             let text = span.content.to_string();
             let mut parts: Vec<(String, Style)> = Vec::new();

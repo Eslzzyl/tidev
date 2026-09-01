@@ -182,7 +182,7 @@ fn compute_and_cache_block(
 
 /// Scan card lines for image badge patterns and record their positions
 /// along with the associated message attachment index.
-fn scan_image_badges(
+pub(super) fn scan_image_badges(
     card_lines: &[HyperlinkLine],
     msg: &Message,
     card_start_line: usize,

@@ -32,6 +32,7 @@ use cards::{render_assistant_cards, render_single_card, render_tool_card};
 pub use layout::{CardGeom, LEFT_MARGIN, SCROLLBAR_WIDTH};
 use layout::{compute_content_layout, render_scrollbar};
 pub use subagent::{InlineRunningCardRange, RunningSubagentInfo};
+pub(crate) use utils::display_text_with_image_badges;
 pub use utils::wrap_text_lines;
 use utils::{ImageBadgeInfo, loading_spinner};
 
@@ -218,7 +219,7 @@ mod tests {
     use ratatui::prelude::Widget;
     use ratatui::style::Color;
     use std::path::Path;
-    use tidev_llm::message::{Message, MessageRole};
+    use tidev_llm::message::{Message, MessageAttachment, MessageRole};
     use tidev_llm::reasoning::ThinkingLevelType;
 
     static EMPTY_REASONING_DISPLAYS: std::sync::LazyLock<HashMap<Uuid, ReasoningDisplay>> =
@@ -228,6 +229,15 @@ mod tests {
         let mut msg = Message::new(MessageRole::User, content);
         msg.id = Uuid::from_u128(id);
         msg
+    }
+
+    fn image_attachment(filename: &str) -> MessageAttachment {
+        MessageAttachment::Image {
+            filename: filename.to_string(),
+            mime: "image/png".to_string(),
+            data: vec![137, 80, 78, 71],
+            file_size: 4,
+        }
     }
 
     fn assistant_msg(reasoning: &str, content: &str, id: u128) -> Message {
@@ -428,6 +438,61 @@ mod tests {
             }
         }
         assert!(found, "expected a hyperlink in the user card");
+    }
+
+    #[test]
+    fn user_card_renders_image_badge_for_attachment_only_message() {
+        let palette = test_palette();
+        let expanded = HashSet::new();
+        let subagents = Vec::new();
+        let collapsed = HashSet::new();
+        let ctx = test_render_ctx(&palette, &expanded, &subagents, &collapsed);
+        let mut message = user_msg("", 1);
+        message.attachments.push(image_attachment("capture.png"));
+
+        let cards = cards::render_single_card(&ctx, &message, 80, false);
+        let text: String = cards[0]
+            .1
+            .iter()
+            .flat_map(|line| line.line.spans.iter())
+            .map(|span| span.content.as_ref())
+            .collect();
+
+        assert!(text.contains("[Image: capture.png]"));
+        assert!(!text.contains("(empty)"));
+    }
+
+    #[test]
+    fn existing_image_badge_is_not_duplicated_and_remains_clickable() {
+        let palette = test_palette();
+        let expanded = HashSet::new();
+        let subagents = Vec::new();
+        let collapsed = HashSet::new();
+        let ctx = test_render_ctx(&palette, &expanded, &subagents, &collapsed);
+        let mut message = user_msg("[Image: capture.png]", 1);
+        message.attachments.push(image_attachment("capture.png"));
+
+        let cards = cards::render_single_card(&ctx, &message, 80, false);
+        let text: String = cards[0]
+            .1
+            .iter()
+            .flat_map(|line| line.line.spans.iter())
+            .map(|span| span.content.as_ref())
+            .collect();
+        assert_eq!(text.matches("[Image: capture.png]").count(), 1);
+
+        let badge_infos = blocks::scan_image_badges(&cards[0].1, &message, 0);
+        assert_eq!(badge_infos.len(), 1);
+        assert_eq!(badge_infos[0].attachment_index, 0);
+    }
+
+    #[test]
+    fn pending_image_preview_derives_badge_without_mutating_content() {
+        let attachment = image_attachment("capture.png");
+        let content = display_text_with_image_badges("", std::slice::from_ref(&attachment));
+
+        assert_eq!(content, "[Image: capture.png]");
+        assert!(attachment.is_image());
     }
 
     #[test]
