@@ -1,4 +1,3 @@
-import jetBrainsMonoRegularUrl from "@fontsource/jetbrains-mono/files/jetbrains-mono-latin-400-normal.woff2?url";
 import { Edit3, Plus, X, XCircle, XSquare } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Restty, parseGhosttyTheme } from "restty";
@@ -364,7 +363,7 @@ function TerminalViewport({ tab, isDark, isActive }: TerminalViewportProps) {
         renderer: "auto",
         fontSize: TERMINAL_FONT_SIZE,
         fontSizeMode: "em",
-        fonts: [jetBrainsMonoRegularUrl],
+        // Preserve Restty's built-in local-first fallback chain for Unicode text.
         theme: createResttyTheme(theme),
         autoResize: true,
         showResizeOverlay: false,
