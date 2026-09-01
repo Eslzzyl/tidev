@@ -63,6 +63,16 @@ import i18n from "../i18n";
 
 const API_BASE = "/api";
 
+export class ApiError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 function getAuthHeaders(): Record<string, string> {
   const token = getAuthToken();
   if (token) {
@@ -101,7 +111,7 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: i18n.t("Unknown error") }));
-      throw new Error(error.error || `HTTP ${response.status}`);
+      throw new ApiError(response.status, error.error || `HTTP ${response.status}`);
     }
 
     return await response.json();

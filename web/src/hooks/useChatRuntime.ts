@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { api } from "../api/client";
+import { ApiError, api } from "../api/client";
 import { openBackendEvents, openFrontendRequests } from "../api/events";
 import { useAuthStore } from "../stores/useAuthStore";
 import { useUIStore } from "../stores/useUIStore";
@@ -30,6 +30,12 @@ import { toolCallEntry, toolResultStatus, type ToolCallEntry } from "../utils/ro
 import i18n from "../i18n";
 
 const SESSION_PAGE_SIZE = 50;
+
+type SessionStatus = "idle" | "loading" | "ready" | "missing" | "error";
+
+function isSessionNotFound(reason: unknown): boolean {
+  return reason instanceof ApiError && reason.status === 404;
+}
 
 function mergeSessions(current: Session[], incoming: Session[]): Session[] {
   const seen = new Set<string>();
@@ -245,6 +251,7 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [selectedSession, setSelectedSession] = useState<Session | undefined>();
+  const [sessionStatus, setSessionStatus] = useState<SessionStatus>("idle");
   const [sessionWorkspaceRoots, setSessionWorkspaceRoots] = useState<string[]>([]);
   const [sessionWorkspaceRoot, setSessionWorkspaceRoot] = useState<string | null>(null);
   const [nextSessionCursor, setNextSessionCursor] = useState<SessionListCursor | null>(null);
@@ -456,62 +463,80 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
     instructionToolSessionsRef.current.clear();
   }, [clearPendingInstructionNotices]);
 
-  const loadMessages = useCallback(async (sessionId: string) => {
-    if (!sessionId?.trim()) return false;
-    try {
-      const response = await api.listMessages(sessionId);
-      if (selectedSessionRef.current === sessionId) {
-        const loadedIds = new Set(response.messages.map((record) => record.message.id));
-        for (const [messageId, messageSessionId] of pendingBackendMessageSessionsRef.current) {
-          if (messageSessionId === sessionId && loadedIds.has(messageId)) {
-            pendingBackendMessageSessionsRef.current.delete(messageId);
-          }
-        }
-        setMessages((current) => [
-          ...response.messages,
-          ...current.filter(
-            (record) =>
-              pendingBackendMessageSessionsRef.current.get(record.message.id) === sessionId,
-          ),
-        ]);
-      }
-      return true;
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : i18n.t("Failed to load messages"));
-      return false;
-    }
-  }, []);
+  const markSessionMissing = useCallback(
+    (sessionId: string) => {
+      if (selectedSessionRef.current !== sessionId) return;
+      setSessionStatus("missing");
+      setSelectedSession(undefined);
+      setMessages([]);
+      setTodos([]);
+      clearPendingStreamUpdates();
+      resetInstructionState();
+      setStreams({});
+      clearPendingImages();
+      setError(null);
+      setFileMention(null);
+    },
+    [clearPendingImages, clearPendingStreamUpdates, resetInstructionState],
+  );
 
-  const loadTodos = useCallback(async (sessionId: string) => {
-    if (!sessionId?.trim()) return;
-    try {
-      const response = await api.getTodos(sessionId);
-      if (selectedSessionRef.current === sessionId) setTodos(response.todos);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : i18n.t("Failed to load to-do list"));
-    }
-  }, []);
+  const loadMessages = useCallback(
+    async (sessionId: string) => {
+      if (!sessionId?.trim()) return false;
+      try {
+        const response = await api.listMessages(sessionId);
+        if (selectedSessionRef.current === sessionId) {
+          const loadedIds = new Set(response.messages.map((record) => record.message.id));
+          for (const [messageId, messageSessionId] of pendingBackendMessageSessionsRef.current) {
+            if (messageSessionId === sessionId && loadedIds.has(messageId)) {
+              pendingBackendMessageSessionsRef.current.delete(messageId);
+            }
+          }
+          setMessages((current) => [
+            ...response.messages,
+            ...current.filter(
+              (record) =>
+                pendingBackendMessageSessionsRef.current.get(record.message.id) === sessionId,
+            ),
+          ]);
+        }
+        return true;
+      } catch (reason) {
+        if (reason instanceof ApiError && reason.status === 404) {
+          markSessionMissing(sessionId);
+        } else {
+          setError(reason instanceof Error ? reason.message : i18n.t("Failed to load messages"));
+        }
+        return false;
+      }
+    },
+    [markSessionMissing],
+  );
+
+  const loadTodos = useCallback(
+    async (sessionId: string) => {
+      if (!sessionId?.trim()) return;
+      try {
+        const response = await api.getTodos(sessionId);
+        if (selectedSessionRef.current === sessionId) setTodos(response.todos);
+      } catch (reason) {
+        if (reason instanceof ApiError && reason.status === 404) {
+          markSessionMissing(sessionId);
+        } else {
+          setError(reason instanceof Error ? reason.message : i18n.t("Failed to load to-do list"));
+        }
+      }
+    },
+    [markSessionMissing],
+  );
 
   const selectSession = useCallback(
     (sessionId: string, session?: Session, triggerRoute = true) => {
       selectedSessionRef.current = sessionId;
       setSelectedSessionId(sessionId);
+      setSessionStatus("loading");
       const summary = session ?? sessionsRef.current.find((item) => item.session_id === sessionId);
-      if (summary) {
-        setSelectedSession(summary);
-      } else {
-        setSelectedSession(undefined);
-        void api
-          .getSession(sessionId)
-          .then((loaded) => {
-            if (selectedSessionRef.current === sessionId) setSelectedSession(loaded);
-          })
-          .catch((reason) => {
-            if (selectedSessionRef.current === sessionId) {
-              setError(reason instanceof Error ? reason.message : i18n.t("Failed to load session"));
-            }
-          });
-      }
+
       if (triggerRoute) {
         onSelectSessionRoute?.(sessionId);
       }
@@ -521,13 +546,43 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
       setTodos([]);
       setError(null);
       setFileMention(null);
-      void loadMessages(sessionId);
-      void loadTodos(sessionId);
+
+      if (summary) {
+        setSelectedSession(summary);
+        setSessionStatus("ready");
+        void loadMessages(sessionId);
+        void loadTodos(sessionId);
+      } else {
+        setSelectedSession(undefined);
+        void api
+          .getSession(sessionId)
+          .then((loaded) => {
+            if (selectedSessionRef.current === sessionId) {
+              setSelectedSession(loaded);
+              setSessionStatus("ready");
+              void loadMessages(sessionId);
+              void loadTodos(sessionId);
+            }
+          })
+          .catch((reason) => {
+            if (selectedSessionRef.current === sessionId) {
+              if (reason instanceof ApiError && reason.status === 404) {
+                markSessionMissing(sessionId);
+              } else {
+                setSessionStatus("error");
+                setError(
+                  reason instanceof Error ? reason.message : i18n.t("Failed to load session"),
+                );
+              }
+            }
+          });
+      }
     },
     [
       clearPendingStreamUpdates,
       loadMessages,
       loadTodos,
+      markSessionMissing,
       onSelectSessionRoute,
       resetInstructionState,
     ],
@@ -538,6 +593,7 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
       selectedSessionRef.current = null;
       setSelectedSessionId(null);
       setSelectedSession(undefined);
+      setSessionStatus("idle");
       if (triggerRoute) {
         onSelectSessionRoute?.(null);
       }
@@ -1081,7 +1137,11 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
       );
       setSelectedSession((current) => (current?.session_id === sessionId ? updated : current));
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : i18n.t("Failed to rename session"));
+      if (isSessionNotFound(reason)) {
+        markSessionMissing(sessionId);
+      } else {
+        setError(reason instanceof Error ? reason.message : i18n.t("Failed to rename session"));
+      }
     } finally {
       setRenamingSessionId(null);
     }
@@ -1096,7 +1156,11 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
       );
       if (selectedSessionRef.current === session.session_id) createSession();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : i18n.t("Failed to delete session"));
+      if (isSessionNotFound(reason)) {
+        markSessionMissing(session.session_id);
+      } else {
+        setError(reason instanceof Error ? reason.message : i18n.t("Failed to delete session"));
+      }
     }
   };
 
@@ -1162,10 +1226,14 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
         await loadMessages(sessionId);
         await loadTodos(sessionId);
       } catch (reason) {
-        setError(reason instanceof Error ? reason.message : i18n.t("Failed to revert"));
+        if (isSessionNotFound(reason)) {
+          markSessionMissing(sessionId);
+        } else {
+          setError(reason instanceof Error ? reason.message : i18n.t("Failed to revert"));
+        }
       }
     },
-    [loadMessages, loadTodos],
+    [loadMessages, loadTodos, markSessionMissing],
   );
 
   const handleRetryProviderError = useCallback(
@@ -1191,14 +1259,18 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
         await api.retrySession(sessionId, messageId);
         await loadMessages(sessionId);
       } catch (reason) {
-        setError(
-          reason instanceof Error ? reason.message : i18n.t("Failed to retry provider request"),
-        );
+        if (isSessionNotFound(reason)) {
+          markSessionMissing(sessionId);
+        } else {
+          setError(
+            reason instanceof Error ? reason.message : i18n.t("Failed to retry provider request"),
+          );
+        }
       } finally {
         setSending(false);
       }
     },
-    [clearPendingStreamUpdates, loadMessages, sending],
+    [clearPendingStreamUpdates, loadMessages, markSessionMissing, sending],
   );
 
   const handleRedo = useCallback(async () => {
@@ -1209,9 +1281,13 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
       await loadMessages(sessionId);
       await loadTodos(sessionId);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : i18n.t("Failed to redo"));
+      if (isSessionNotFound(reason)) {
+        markSessionMissing(sessionId);
+      } else {
+        setError(reason instanceof Error ? reason.message : i18n.t("Failed to redo"));
+      }
     }
-  }, [loadMessages, loadTodos]);
+  }, [loadMessages, loadTodos, markSessionMissing]);
 
   const handleFork = useCallback(
     async (messageId: string) => {
@@ -1225,10 +1301,14 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
         );
         selectSession(forked.session_id, forked);
       } catch (reason) {
-        setError(reason instanceof Error ? reason.message : i18n.t("Failed to fork"));
+        if (isSessionNotFound(reason)) {
+          markSessionMissing(sessionId);
+        } else {
+          setError(reason instanceof Error ? reason.message : i18n.t("Failed to fork"));
+        }
       }
     },
-    [selectSession],
+    [markSessionMissing, selectSession],
   );
 
   const handleCompact = useCallback(async () => {
@@ -1238,9 +1318,13 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
       await api.compactSession(sessionId);
       setError(null);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : i18n.t("Failed to compact"));
+      if (isSessionNotFound(reason)) {
+        markSessionMissing(sessionId);
+      } else {
+        setError(reason instanceof Error ? reason.message : i18n.t("Failed to compact"));
+      }
     }
-  }, []);
+  }, [markSessionMissing]);
 
   const handleSlashCommand = useCallback(
     async (raw: string): Promise<boolean> => {
@@ -1277,7 +1361,11 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
             );
             setSelectedSession((current) => (current?.session_id === sid ? updated : current));
           } catch (reason) {
-            setError(reason instanceof Error ? reason.message : i18n.t("Failed to rename"));
+            if (isSessionNotFound(reason)) {
+              markSessionMissing(sid);
+            } else {
+              setError(reason instanceof Error ? reason.message : i18n.t("Failed to rename"));
+            }
           }
         }
         return true;
@@ -1296,7 +1384,15 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
       }
       return false;
     },
-    [messages, handleRevert, handleRedo, handleFork, handleCompact, createSession],
+    [
+      messages,
+      handleRevert,
+      handleRedo,
+      handleFork,
+      handleCompact,
+      createSession,
+      markSessionMissing,
+    ],
   );
 
   const submit = async () => {
@@ -1331,7 +1427,11 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
       }
       releasePendingImages(submittedImages);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : i18n.t("Failed to send prompt"));
+      if (isSessionNotFound(reason)) {
+        markSessionMissing(sessionId);
+      } else {
+        setError(reason instanceof Error ? reason.message : i18n.t("Failed to send prompt"));
+      }
       setDraft(content);
       setPendingImages((current) => [...submittedImages, ...current]);
     } finally {
@@ -1380,17 +1480,24 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
     }
   }, []);
 
-  const cancelSession = useCallback(async (sessionId: string) => {
-    if (!sessionId?.trim()) return;
-    setCanceling(true);
-    try {
-      await api.abortRequest(sessionId, { request_id: 0 });
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : i18n.t("Failed to cancel"));
-    } finally {
-      setCanceling(false);
-    }
-  }, []);
+  const cancelSession = useCallback(
+    async (sessionId: string) => {
+      if (!sessionId?.trim()) return;
+      setCanceling(true);
+      try {
+        await api.abortRequest(sessionId, { request_id: 0 });
+      } catch (reason) {
+        if (isSessionNotFound(reason)) {
+          markSessionMissing(sessionId);
+        } else {
+          setError(reason instanceof Error ? reason.message : i18n.t("Failed to cancel"));
+        }
+      } finally {
+        setCanceling(false);
+      }
+    },
+    [markSessionMissing],
+  );
 
   const visibleStreams = useMemo(
     () => Object.values(streams).filter((item) => item.key.startsWith(`${selectedSessionId}:`)),
@@ -1410,6 +1517,7 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
     loadingMoreSessions,
     selectedSessionId,
     selectedSession,
+    sessionStatus,
     activeModel,
     messages,
     visibleStreams,

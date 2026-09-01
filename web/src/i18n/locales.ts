@@ -44,6 +44,11 @@ const en = {
   "Session directory": "Session directory",
   "Current tool directory": "Current tool directory",
   "Failed to load session": "Failed to load session",
+  "Conversation not found": "Conversation not found",
+  "This conversation may have been deleted or the link may have expired.":
+    "This conversation may have been deleted or the link may have expired.",
+  "Start a new conversation": "Start a new conversation",
+  "Loading conversation…": "Loading conversation…",
   "Rename conversation": "Rename conversation",
   "Delete conversation": "Delete conversation",
   "{{count}} conversations": "{{count}} conversations",
@@ -769,6 +774,11 @@ const zhCN: Record<keyof typeof en, string> = {
   "Session directory": "会话目录",
   "Current tool directory": "当前工具目录",
   "Failed to load session": "加载会话失败",
+  "Conversation not found": "对话不存在",
+  "This conversation may have been deleted or the link may have expired.":
+    "该对话可能已被删除，或链接已经失效。",
+  "Start a new conversation": "开始新对话",
+  "Loading conversation…": "正在加载对话…",
   "Rename conversation": "重命名对话",
   "Delete conversation": "删除对话",
   "{{count}} conversations": "{{count}} 个对话",

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Folder } from "lucide-react";
+import { AlertCircle, Folder, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import type {
@@ -27,6 +27,7 @@ export interface ChatPanelProps {
   workspaceRootFilter: string | null;
   selectedSessionId: string | null;
   selectedSession: Session | undefined;
+  sessionStatus: "idle" | "loading" | "ready" | "missing" | "error";
   activeModel: Model | undefined;
   messages: MessageRecord[];
   streams: StreamMessage[];
@@ -81,6 +82,50 @@ export interface ChatPanelProps {
   scrollToBottomRequest?: number;
 }
 
+function MissingSessionState({ onCreate }: { onCreate: () => void }) {
+  const { t } = useTranslation();
+
+  return (
+    <div className="session-missing-state" role="alert">
+      <div className="session-missing-icon">
+        <AlertCircle size={22} />
+      </div>
+      <h2>{t("Conversation not found")}</h2>
+      <p>{t("This conversation may have been deleted or the link may have expired.")}</p>
+      <div className="session-missing-actions">
+        <Button variant="primary" leadingIcon={<Plus size={15} />} onClick={onCreate}>
+          {t("Start a new conversation")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function LoadingSessionState() {
+  const { t } = useTranslation();
+
+  return (
+    <div className="session-loading-state" role="status">
+      <span className="ui-spinner" aria-hidden="true" />
+      <span>{t("Loading conversation…")}</span>
+    </div>
+  );
+}
+
+function SessionErrorState({ error }: { error: string | null }) {
+  const { t } = useTranslation();
+
+  return (
+    <div className="session-error-state" role="alert">
+      <div className="session-missing-icon">
+        <AlertCircle size={22} />
+      </div>
+      <h2>{t("Failed to load session")}</h2>
+      <p>{error ?? t("Failed to load session")}</p>
+    </div>
+  );
+}
+
 export function ChatPanel({
   loading,
   loadingMoreSessions,
@@ -90,6 +135,7 @@ export function ChatPanel({
   workspaceRootFilter,
   selectedSessionId,
   selectedSession,
+  sessionStatus,
   activeModel,
   messages,
   streams,
@@ -204,6 +250,12 @@ export function ChatPanel({
       <section className="chat-panel">
         {selectedSessionId === null ? (
           welcome
+        ) : sessionStatus === "missing" ? (
+          <MissingSessionState onCreate={onCreateSession} />
+        ) : sessionStatus === "error" ? (
+          <SessionErrorState error={error} />
+        ) : sessionStatus !== "ready" ? (
+          <LoadingSessionState />
         ) : (
           <>
             {selectedSession ? (

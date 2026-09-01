@@ -1259,6 +1259,56 @@ body {
   padding: 30px;
   text-align: center;
 }
+.session-missing-state,
+.session-loading-state,
+.session-error-state {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  min-height: 100%;
+  padding: 30px;
+  text-align: center;
+}
+.session-missing-icon {
+  display: grid;
+  place-items: center;
+  width: 47px;
+  height: 47px;
+  margin-bottom: 17px;
+  border: 1px solid var(--error-line);
+  border-radius: 11px;
+  color: var(--danger);
+  background: var(--error-bg);
+}
+.session-missing-state h2,
+.session-error-state h2 {
+  margin: 0 0 8px;
+  color: var(--text);
+  font-size: 21px;
+  font-weight: 620;
+  letter-spacing: -0.03em;
+}
+.session-missing-state p,
+.session-error-state p {
+  max-width: 450px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.session-missing-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 20px;
+}
+.session-loading-state {
+  display: flex;
+  gap: 9px;
+  color: var(--muted);
+  font-size: 13px;
+}
 .welcome-page {
   display: flex;
   flex: 1;

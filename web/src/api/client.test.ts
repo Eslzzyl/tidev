@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "./client";
+import { ApiError, api } from "./client";
 
 describe("prompt API contract", () => {
   afterEach(() => {
@@ -94,5 +94,24 @@ describe("prompt API contract", () => {
     await expect(api.deleteProvider("deepseek")).rejects.toThrow(
       "bundled provider cannot be deleted",
     );
+  });
+
+  it("preserves the HTTP status for API errors", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        json: async () => ({ error: "session not found" }),
+      }),
+    );
+
+    const request = api.getSession("session-1");
+    await expect(request).rejects.toBeInstanceOf(ApiError);
+    await expect(request).rejects.toMatchObject({
+      name: "ApiError",
+      status: 404,
+      message: "session not found",
+    });
   });
 });

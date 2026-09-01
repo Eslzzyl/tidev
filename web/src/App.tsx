@@ -102,6 +102,7 @@ export default function App() {
     loadingMoreSessions,
     selectedSessionId,
     selectedSession,
+    sessionStatus,
     activeModel,
     messages,
     visibleStreams,
@@ -187,6 +188,7 @@ export default function App() {
       workspaceRootFilter={sessionWorkspaceRoot}
       selectedSessionId={selectedSessionId}
       selectedSession={selectedSession}
+      sessionStatus={sessionStatus}
       activeModel={activeModel}
       messages={messages}
       streams={visibleStreams}
