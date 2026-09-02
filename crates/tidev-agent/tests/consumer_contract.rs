@@ -70,11 +70,19 @@ impl Tool for EchoTool {
 }
 
 fn provider_config(base_url: String) -> LlmProviderConfig {
+    provider_config_with_user_agent(base_url, None)
+}
+
+fn provider_config_with_user_agent(
+    base_url: String,
+    user_agent: Option<&str>,
+) -> LlmProviderConfig {
     LlmProviderConfig {
         provider_id: "scripted".into(),
         api_type: ApiType::OpenAiChatCompletions,
         api_key: Some("local-test-key".into()),
         base_url,
+        user_agent: user_agent.map(str::to_owned),
         model_id: "scripted-model".into(),
         request_model_id: None,
         system_prompt: None,
@@ -227,7 +235,9 @@ async fn scripted_provider(listener: TcpListener) -> Result<Vec<Vec<u8>>> {
         final_response(),
     ] {
         let (mut stream, _) = listener.accept().await?;
-        let body = read_http_request(&mut stream).await?;
+        let (headers, body) = read_http_request_parts(&mut stream).await?;
+        let expected_user_agent = format!("tidev/{}", env!("CARGO_PKG_VERSION"));
+        assert!(has_header(&headers, "user-agent", &expected_user_agent));
         requests.push(body);
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -237,6 +247,44 @@ async fn scripted_provider(listener: TcpListener) -> Result<Vec<Vec<u8>>> {
         stream.write_all(response.as_bytes()).await?;
     }
     Ok(requests)
+}
+
+async fn complete_provider(listener: TcpListener) -> Result<String> {
+    let (mut stream, _) = listener.accept().await?;
+    let (headers, _body) = read_http_request_parts(&mut stream).await?;
+    let response = serde_json::json!({
+        "id": "complete-1",
+        "choices": [{"message": {"content": "complete response"}}]
+    })
+    .to_string();
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        response.len(),
+        response
+    );
+    stream.write_all(response.as_bytes()).await?;
+    Ok(headers)
+}
+
+#[tokio::test]
+async fn custom_user_agent_overrides_default_for_completion() -> Result<()> {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
+    let base_url = format!("http://{}/v1", listener.local_addr()?);
+    let provider = tokio::spawn(complete_provider(listener));
+
+    let response = LlmClient::new(false, 0, false, 0)?
+        .complete_with_messages(
+            provider_config_with_user_agent(base_url, Some("gateway-client/1.0")),
+            vec![Message::new(MessageRole::User, "Hello")],
+            vec![],
+            None,
+        )
+        .await?;
+
+    assert_eq!(response, "complete response");
+    let headers = provider.await??;
+    assert!(has_header(&headers, "user-agent", "gateway-client/1.0"));
+    Ok(())
 }
 
 async fn compaction_provider(listener: TcpListener) -> Result<Vec<u8>> {

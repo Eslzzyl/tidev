@@ -599,6 +599,9 @@ const en = {
   "API key": "API key",
   "Use the provider base URL; tidev adds the protocol-specific path.":
     "Use the provider base URL; tidev adds the protocol-specific path.",
+  "User-Agent": "User-Agent",
+  "Optional HTTP User-Agent override; defaults to tidev/<version>":
+    "Optional HTTP User-Agent override; defaults to tidev/<version>",
   "API type": "API type",
   Models: "Models",
   "Define the models exposed by this provider.": "Define the models exposed by this provider.",
@@ -1311,6 +1314,9 @@ const zhCN: Record<keyof typeof en, string> = {
   "Display name": "显示名称",
   "Base URL": "基础 URL",
   "API key": "API 密钥",
+  "User-Agent": "User-Agent",
+  "Optional HTTP User-Agent override; defaults to tidev/<version>":
+    "可选的 HTTP User-Agent 覆盖值，默认为 tidev/<version>",
   "API type": "API 类型",
   Models: "模型配置",
   "Define the models exposed by this provider.": "定义此模型供应商提供的模型。",

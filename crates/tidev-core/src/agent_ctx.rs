@@ -167,6 +167,7 @@ pub fn to_llm_provider_config(model: &ActiveModel) -> LlmProviderConfig {
         api_type: model.api_type,
         api_key: model.api_key.clone(),
         base_url: model.base_url.clone(),
+        user_agent: model.user_agent.clone(),
         model_id: model.model_id.clone(),
         request_model_id: Some(model.request_model_id.clone()),
         system_prompt: Some(model.system_prompt.clone()),

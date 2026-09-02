@@ -324,6 +324,7 @@ mod tests {
             provider_id: "test".into(),
             provider_display_name: "Test".into(),
             base_url: String::new(),
+            user_agent: None,
             api_type: tidev_config::types::ApiType::OpenAiChatCompletions,
             model_id: "test-model".into(),
             request_model_id: String::new(),

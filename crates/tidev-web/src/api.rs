@@ -181,6 +181,8 @@ struct CreateProviderRequest {
     base_url: String,
     #[serde(default)]
     api_type: Option<String>,
+    #[serde(default)]
+    user_agent: Option<String>,
     api_key: String,
     models: Vec<CreateModelRequest>,
 }
@@ -349,6 +351,7 @@ struct ProviderDto {
     connected: bool,
     base_url: String,
     api_type: Option<String>,
+    user_agent: Option<String>,
     models: Vec<ProviderModelDto>,
 }
 
@@ -2288,6 +2291,10 @@ fn build_provider_config(
     let display_name = required_provider_field(&request.display_name, "display_name")?;
     let base_url = required_provider_field(&request.base_url, "base_url")?;
     let api_type = normalized_api_type(request.api_type.as_deref())?;
+    if let Some(user_agent) = request.user_agent.as_deref() {
+        tidev_config::provider::validate_user_agent(user_agent)
+            .map_err(|error| ApiError::bad_request(format!("invalid user_agent: {error}")))?;
+    }
     let api_key = required_provider_field(&request.api_key, "api_key")?;
 
     if request.models.is_empty() {
@@ -2361,6 +2368,7 @@ fn build_provider_config(
             display_name,
             base_url,
             api_type,
+            user_agent: request.user_agent.clone(),
             models,
         },
     ))
@@ -2397,6 +2405,7 @@ fn provider_dto(
         connected: auth.api_key(provider_id).is_some(),
         base_url: provider.base_url.clone(),
         api_type: provider.api_type.clone(),
+        user_agent: provider.user_agent.clone(),
         models: provider
             .models
             .iter()
@@ -3501,6 +3510,7 @@ mod tests {
             "display_name": "Custom",
             "base_url": "https://example.com/v1",
             "api_type": "openai",
+            "user_agent": "gateway-client/1.0",
             "api_key": "secret",
             "models": [{
                 "model_id": "model",
@@ -3519,6 +3529,7 @@ mod tests {
             provider.api_type.as_deref(),
             Some("openai_chat_completions")
         );
+        assert_eq!(provider.user_agent.as_deref(), Some("gateway-client/1.0"));
         assert!(provider.models["model"].supports_streaming);
         assert!(provider.models["model"].supports_parallel_tool_calls);
     }

@@ -43,6 +43,7 @@ interface ProviderDraft {
   display_name: string;
   base_url: string;
   api_type: string;
+  user_agent: string;
   api_key: string;
   models: ModelDraft[];
 }
@@ -62,6 +63,7 @@ const EMPTY_PROVIDER: ProviderDraft = {
   display_name: "",
   base_url: "",
   api_type: "openai_chat_completions",
+  user_agent: "",
   api_key: "",
   models: [{ ...EMPTY_MODEL }],
 };
@@ -235,6 +237,7 @@ function providerDraftToRequest(draft: ProviderDraft): CreateProviderRequest {
     display_name: draft.display_name.trim(),
     base_url: draft.base_url.trim(),
     api_type: draft.api_type,
+    user_agent: draft.user_agent.trim() || undefined,
     api_key: draft.api_key,
     models: draft.models.map((model): CreateModelRequest => {
       const request: CreateModelRequest = {
@@ -356,6 +359,7 @@ export function ProvidersSection() {
       display_name: template.display_name,
       base_url: template.base_url,
       api_type: template.api_type,
+      user_agent: current.user_agent,
       api_key: current.api_key,
       models: template.models.map((m) => ({ ...m })),
     }));
@@ -785,6 +789,24 @@ export function ProvidersSection() {
                         setDraft((current) => ({ ...current, base_url: event.target.value }))
                       }
                       placeholder="https://api.example.com/v1"
+                      className="font-mono"
+                    />
+                  </Field>
+
+                  <Field
+                    label={t("User-Agent")}
+                    description={t(
+                      "Optional HTTP User-Agent override; defaults to tidev/<version>",
+                    )}
+                    htmlFor="provider-user-agent"
+                  >
+                    <Input
+                      id="provider-user-agent"
+                      value={draft.user_agent}
+                      onChange={(event) =>
+                        setDraft((current) => ({ ...current, user_agent: event.target.value }))
+                      }
+                      placeholder="my-gateway-client/1.0"
                       className="font-mono"
                     />
                   </Field>

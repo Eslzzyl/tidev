@@ -484,6 +484,8 @@ struct ProviderConfigOverride {
     base_url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     api_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    user_agent: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     models: BTreeMap<String, crate::provider::ModelConfig>,
 }
@@ -494,6 +496,7 @@ impl ProviderConfigOverride {
             display_name: self.display_name.unwrap_or_default(),
             base_url: self.base_url.unwrap_or_default(),
             api_type: self.api_type,
+            user_agent: self.user_agent,
             models: self.models,
         }
     }
@@ -504,6 +507,7 @@ impl ProviderConfigOverride {
                 .then(|| provider.display_name.clone()),
             base_url: (!provider.base_url.is_empty()).then(|| provider.base_url.clone()),
             api_type: provider.api_type.clone(),
+            user_agent: provider.user_agent.clone(),
             models: provider.models.clone(),
         }
     }
@@ -904,6 +908,7 @@ impl AppConfig {
             provider_id: provider_id.to_string(),
             provider_display_name: provider.display_name.clone(),
             base_url,
+            user_agent: provider.user_agent.clone(),
             api_type,
             model_id: model_id.to_string(),
             request_model_id,
@@ -1040,6 +1045,7 @@ fn empty_provider_config() -> ProviderConfig {
         display_name: String::new(),
         base_url: String::new(),
         api_type: None,
+        user_agent: None,
         models: BTreeMap::new(),
     }
 }
@@ -1054,6 +1060,9 @@ fn apply_provider_override(base: &mut ProviderConfig, override_config: &Provider
     }
     if override_config.api_type.is_some() {
         base.api_type.clone_from(&override_config.api_type);
+    }
+    if override_config.user_agent.is_some() {
+        base.user_agent.clone_from(&override_config.user_agent);
     }
     base.models.extend(override_config.models.clone());
 }
@@ -1086,6 +1095,11 @@ fn merge_provider_config(
         bail!("provider '{provider_id}' requires 'base_url'");
     }
 
+    if let Some(user_agent) = user.user_agent.as_deref() {
+        crate::provider::validate_user_agent(user_agent)
+            .with_context(|| format!("invalid user_agent for provider '{provider_id}'"))?;
+    }
+
     let mut models = bundled
         .map(|provider| provider.models.clone())
         .unwrap_or_default();
@@ -1098,6 +1112,10 @@ fn merge_provider_config(
             .api_type
             .clone()
             .or_else(|| bundled.and_then(|provider| provider.api_type.clone())),
+        user_agent: user
+            .user_agent
+            .clone()
+            .or_else(|| bundled.and_then(|provider| provider.user_agent.clone())),
         models,
     })
 }
@@ -1293,6 +1311,7 @@ max_output_tokens = 100000
 [providers.deepseek]
 display_name = "DeepSeek Mirror"
 base_url = "https://mirror.example.com/v1"
+user_agent = "mirror-client/1.0"
 "#,
         )
         .expect("provider override should parse");
@@ -1304,7 +1323,37 @@ base_url = "https://mirror.example.com/v1"
         let provider = config.provider("deepseek").expect("provider should exist");
         assert_eq!(provider.display_name, "DeepSeek Mirror");
         assert_eq!(provider.base_url, "https://mirror.example.com/v1");
+        assert_eq!(provider.user_agent.as_deref(), Some("mirror-client/1.0"));
         assert!(provider.models.contains_key("deepseek-v4-pro"));
+
+        let model = config
+            .resolve_model_by_ids(&AuthStore::default(), "deepseek", "deepseek-v4-flash")
+            .expect("overridden provider model should resolve");
+        assert_eq!(model.user_agent.as_deref(), Some("mirror-client/1.0"));
+    }
+
+    #[test]
+    fn invalid_provider_user_agent_is_rejected() {
+        let mut config: AppConfig = toml::from_str(
+            r#"
+[providers.custom]
+display_name = "Custom"
+base_url = "https://example.com/v1"
+user_agent = "invalid\nuser-agent"
+
+[providers.custom.models.model]
+display_name = "Model"
+context_window = 100000
+max_output_tokens = 10000
+"#,
+        )
+        .expect("provider override should parse");
+        config.bundled_providers = bundled_provider_catalog().expect("bundled catalog");
+
+        let error = config
+            .rebuild_effective_providers()
+            .expect_err("invalid provider User-Agent should be rejected");
+        assert!(error.to_string().contains("invalid user_agent"));
     }
 
     #[test]
@@ -1393,6 +1442,7 @@ max_output_tokens = 10000
             display_name: "Custom".to_owned(),
             base_url: "https://custom.example.com/v1".to_owned(),
             api_type: None,
+            user_agent: None,
             models: BTreeMap::from([(
                 "custom-model".to_owned(),
                 crate::provider::ModelConfig {

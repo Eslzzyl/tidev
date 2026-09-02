@@ -13,7 +13,7 @@ use crate::error::{NetworkError, classify_response_status};
 use crate::event::LlmEvent;
 use crate::message::{Message, ToolCall};
 use crate::think_parser::strip_think_tags;
-use crate::{types::LlmProviderConfig, types::ToolDefinition};
+use crate::{apply_user_agent, types::LlmProviderConfig, types::ToolDefinition};
 
 use log::{debug as log_debug, error as log_error};
 
@@ -59,8 +59,7 @@ pub(crate) async fn stream_responses(
         RESPONSES_ENDPOINT
     );
 
-    let send_result = http
-        .post(&endpoint)
+    let send_result = apply_user_agent(http.post(&endpoint), &model)?
         .bearer_auth(api_key)
         .json(&request)
         .send()
@@ -619,8 +618,7 @@ pub(crate) async fn complete_responses(
         RESPONSES_ENDPOINT
     );
 
-    let send_result = http
-        .post(&endpoint)
+    let send_result = apply_user_agent(http.post(&endpoint), &model)?
         .bearer_auth(api_key)
         .json(&request)
         .send()

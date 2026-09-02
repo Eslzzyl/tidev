@@ -15,6 +15,7 @@ provider identifier used when selecting the provider at runtime.
 display_name = "My Custom Provider"
 base_url = "https://api.example.com/v1"
 api_type = "openai_chat_completions"
+user_agent = "my-gateway-client/1.0" # Optional HTTP User-Agent override
 ```
 
 | Key | Required | Description |
@@ -22,6 +23,35 @@ api_type = "openai_chat_completions"
 | `display_name` | Yes for new providers | Human-readable name shown in the UI. When overriding a bundled provider, omitted values inherit from the preset |
 | `base_url` | Yes for new providers | Base URL of the API endpoint. When overriding a bundled provider, omitted values inherit from the preset |
 | `api_type` | No | Default API protocol for all models under this provider (see below). Can be overridden per-model |
+| `user_agent` | No | HTTP User-Agent sent to this provider. Defaults to `tidev/<version>` |
+
+### Provider User-Agent override
+
+`user_agent` is a provider-level setting. When it is omitted, tidev sends a
+versioned default value in the HTTP `User-Agent` header:
+
+```
+tidev/<version>
+```
+
+The version is taken from the tidev build, so the default is updated with each
+release. To identify a gateway, proxy, or organization-specific client, set a
+custom value on the provider:
+
+```
+[providers.my-gateway]
+display_name = "My LLM Gateway"
+base_url = "https://gateway.example.com/v1"
+api_type = "openai_chat_completions"
+user_agent = "my-gateway-client/1.0"
+```
+
+The provider-level value is used by all models under that provider and for both
+streaming and non-streaming LLM requests across the supported API types. It
+only changes the HTTP request header; the request body is unchanged. tidev
+currently accepts ASCII values without control characters; values must not
+contain newlines. If different models require different User-Agent values,
+configure them as separate providers.
 
 ### api_type values
 
@@ -295,10 +325,10 @@ base_url = "https://my-mirror.example.com"
 
 Model entries in the user config are merged with bundled ones. If a user model
 has the same key as a bundled model, the user model replaces it entirely.
-Provider-level `display_name`, `base_url`, and `api_type` values follow the same
-override rule: values present in the user config replace the bundled values,
-while omitted values are inherited. This also applies to project-level
-`.tidev/config.toml` overlays.
+Provider-level `display_name`, `base_url`, `api_type`, and `user_agent` values
+follow the same override rule: values present in the user config replace the
+bundled values, while omitted values are inherited. This also applies to
+project-level `.tidev/config.toml` overlays.
 
 ## Connecting to custom providers
 

@@ -128,6 +128,8 @@ pub struct ActiveModel {
     pub provider_id: String,
     pub provider_display_name: String,
     pub base_url: String,
+    /// Optional provider-specific HTTP User-Agent override.
+    pub user_agent: Option<String>,
     pub api_type: ApiType,
     pub model_id: String,
     pub request_model_id: String,
@@ -263,6 +265,7 @@ mod tests {
             provider_id: "test".into(),
             provider_display_name: "Test".into(),
             base_url: "https://test.com".into(),
+            user_agent: None,
             api_type: ApiType::OpenAiChatCompletions,
             model_id: model_id.into(),
             request_model_id: model_id.into(),

@@ -8,7 +8,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use crate::event::LlmEvent;
 use crate::message::{Message, MessageAttachment, MessageRole, ToolCall};
 use crate::reasoning::ThinkingLevelType;
-use crate::{types::LlmProviderConfig, types::ToolDefinition};
+use crate::{apply_user_agent, types::LlmProviderConfig, types::ToolDefinition};
 
 use log::{debug as log_debug, error as log_error};
 
@@ -45,8 +45,7 @@ pub(crate) async fn stream_openai(
     let request_body_size = request_body.len();
     save_request_for_debugging(&request_body, save_request_body, max_request_files);
 
-    let send_result = http
-        .post(model.endpoint())
+    let send_result = apply_user_agent(http.post(model.endpoint()), &model)?
         .bearer_auth(api_key)
         .json(&request)
         .send()
@@ -336,8 +335,7 @@ pub(crate) async fn complete_openai(
     let request_body_size = request_body.len();
     save_request_for_debugging(&request_body, save_request_body, max_request_files);
 
-    let send_result = http
-        .post(model.endpoint())
+    let send_result = apply_user_agent(http.post(model.endpoint()), &model)?
         .bearer_auth(api_key)
         .json(&request)
         .send()
@@ -901,6 +899,7 @@ mod tests {
         let model = LlmProviderConfig {
             provider_id: "openai".to_string(),
             base_url: "https://api.openai.com".to_string(),
+            user_agent: None,
             api_type: ApiType::OpenAiChatCompletions,
             model_id: "gpt-4".to_string(),
             request_model_id: Some("gpt-4".to_string()),
@@ -951,6 +950,7 @@ mod tests {
         let model = LlmProviderConfig {
             provider_id: "openai".to_string(),
             base_url: "https://api.openai.com".to_string(),
+            user_agent: None,
             api_type: ApiType::OpenAiChatCompletions,
             model_id: "gpt-4".to_string(),
             request_model_id: Some("gpt-4".to_string()),
@@ -992,6 +992,7 @@ mod tests {
         LlmProviderConfig {
             provider_id: "test".to_string(),
             base_url: "https://api.test.com".to_string(),
+            user_agent: None,
             api_type: ApiType::OpenAiChatCompletions,
             model_id: "test-model".to_string(),
             request_model_id: Some("test-model".to_string()),

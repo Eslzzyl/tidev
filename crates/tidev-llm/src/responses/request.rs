@@ -326,6 +326,7 @@ mod tests {
         let model = LlmProviderConfig {
             provider_id: "openai-responses".to_string(),
             base_url: "https://api.openai.com".to_string(),
+            user_agent: None,
             api_type: ApiType::OpenAiResponses,
             model_id: "gpt-4.5".to_string(),
             request_model_id: Some("gpt-4.5".to_string()),
@@ -361,6 +362,7 @@ mod tests {
         let model = LlmProviderConfig {
             provider_id: "test".to_string(),
             base_url: "https://api.openai.com".to_string(),
+            user_agent: None,
             api_type: ApiType::OpenAiResponses,
             model_id: "gpt-4.5".to_string(),
             request_model_id: Some("gpt-4.5".to_string()),
@@ -397,6 +399,7 @@ mod tests {
         let model = LlmProviderConfig {
             provider_id: "test".to_string(),
             base_url: "https://api.openai.com".to_string(),
+            user_agent: None,
             api_type: ApiType::OpenAiResponses,
             model_id: "gpt-4.5".to_string(),
             request_model_id: Some("gpt-4.5".to_string()),
@@ -441,6 +444,7 @@ mod tests {
         let model = LlmProviderConfig {
             provider_id: "test".to_string(),
             base_url: "https://api.openai.com".to_string(),
+            user_agent: None,
             api_type: ApiType::OpenAiResponses,
             model_id: "gpt-4.5".to_string(),
             request_model_id: Some("gpt-4.5".to_string()),
@@ -513,6 +517,7 @@ mod tests {
         let model = LlmProviderConfig {
             provider_id: "test".to_string(),
             base_url: "https://api.openai.com".to_string(),
+            user_agent: None,
             api_type: ApiType::OpenAiResponses,
             model_id: "gpt-4.5".to_string(),
             request_model_id: Some("gpt-4.5".to_string()),
@@ -572,6 +577,7 @@ mod tests {
         let model = LlmProviderConfig {
             provider_id: "test".to_string(),
             base_url: "https://api.openai.com".to_string(),
+            user_agent: None,
             api_type: ApiType::OpenAiResponses,
             model_id: "gpt-4.5".to_string(),
             request_model_id: Some("gpt-4.5".to_string()),
@@ -640,6 +646,7 @@ mod tests {
         let model = LlmProviderConfig {
             provider_id: "test".to_string(),
             base_url: "https://api.openai.com".to_string(),
+            user_agent: None,
             api_type: ApiType::OpenAiResponses,
             model_id: "gpt-4.5".to_string(),
             request_model_id: Some("gpt-4.5".to_string()),
@@ -703,6 +710,7 @@ mod tests {
         let model = LlmProviderConfig {
             provider_id: "test".to_string(),
             base_url: "https://api.openai.com/v1".to_string(),
+            user_agent: None,
             api_type: ApiType::OpenAiResponses,
             model_id: "gpt-5".to_string(),
             request_model_id: Some("gpt-5".to_string()),
@@ -753,6 +761,7 @@ mod tests {
         let model = LlmProviderConfig {
             provider_id: "test".to_string(),
             base_url: "https://api.openai.com/v1".to_string(),
+            user_agent: None,
             api_type: ApiType::OpenAiResponses,
             model_id: "gpt-5".to_string(),
             request_model_id: Some("gpt-5".to_string()),
@@ -810,6 +819,7 @@ mod tests {
         let model = LlmProviderConfig {
             provider_id: "test".to_string(),
             base_url: "https://api.openai.com/v1".to_string(),
+            user_agent: None,
             api_type: ApiType::OpenAiResponses,
             model_id: "gpt-5".to_string(),
             request_model_id: Some("gpt-5".to_string()),

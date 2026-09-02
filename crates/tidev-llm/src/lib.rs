@@ -24,7 +24,10 @@ pub use event::LlmEvent;
 pub use types::{ApiType, LlmProviderConfig, ToolDefinition};
 
 use anyhow::{Context, Result};
-use reqwest::Client;
+use reqwest::{
+    Client, RequestBuilder,
+    header::{HeaderValue, USER_AGENT},
+};
 use std::{
     sync::{Arc, RwLock},
     time::Duration,
@@ -43,6 +46,33 @@ use crate::message::Message;
 
 use error::{MAX_RETRIES, backoff_delay, backoff_sleep, classify_anyhow_error};
 
+pub(crate) const DEFAULT_USER_AGENT: &str = concat!("tidev/", env!("CARGO_PKG_VERSION"));
+
+/// Apply a provider-specific User-Agent override while retaining the client default otherwise.
+pub(crate) fn apply_user_agent(
+    request: RequestBuilder,
+    model: &LlmProviderConfig,
+) -> Result<RequestBuilder> {
+    let Some(user_agent) = model.user_agent.as_deref() else {
+        return Ok(request);
+    };
+
+    if user_agent.trim().is_empty() {
+        anyhow::bail!(
+            "user_agent for provider '{}' cannot be empty",
+            model.provider_id
+        );
+    }
+
+    let value = HeaderValue::from_str(user_agent).with_context(|| {
+        format!(
+            "invalid user_agent for provider '{}': contains invalid header characters",
+            model.provider_id
+        )
+    })?;
+    Ok(request.header(USER_AGENT, value))
+}
+
 /// Streaming LLM client.
 ///
 /// Create via [`LlmClient::new`], then call [`stream_chat`](LlmClient::stream_chat)
@@ -55,7 +85,15 @@ pub struct LlmClient {
 
 #[cfg(test)]
 mod tests {
-    use super::{LlmClient, LlmDebugConfig};
+    use super::{DEFAULT_USER_AGENT, LlmClient, LlmDebugConfig};
+
+    #[test]
+    fn default_user_agent_uses_package_version() {
+        assert_eq!(
+            DEFAULT_USER_AGENT,
+            concat!("tidev/", env!("CARGO_PKG_VERSION"))
+        );
+    }
 
     #[test]
     fn cloned_clients_share_debug_configuration() {
@@ -87,7 +125,7 @@ impl LlmClient {
         max_response_files: usize,
     ) -> Result<Self> {
         let http = Client::builder()
-            .user_agent("tidev/0.1")
+            .user_agent(DEFAULT_USER_AGENT)
             .timeout(Duration::from_secs(1800))
             .connect_timeout(Duration::from_secs(15))
             .build()

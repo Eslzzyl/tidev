@@ -3,6 +3,17 @@ use std::collections::BTreeMap;
 
 use crate::types::ApiType;
 
+/// Validate a provider-specific HTTP User-Agent value.
+pub fn validate_user_agent(value: &str) -> anyhow::Result<()> {
+    if value.trim().is_empty() {
+        anyhow::bail!("user_agent cannot be empty");
+    }
+    if !value.is_ascii() || value.bytes().any(|byte| byte < 0x20 || byte == 0x7f) {
+        anyhow::bail!("user_agent must contain only visible ASCII characters");
+    }
+    Ok(())
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProviderSource {
     User,
@@ -15,6 +26,9 @@ pub struct ProviderConfig {
     pub base_url: String,
     #[serde(default)]
     pub api_type: Option<String>,
+    /// Optional HTTP User-Agent override for all models under this provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_agent: Option<String>,
     #[serde(default)]
     pub models: BTreeMap<String, ModelConfig>,
 }
@@ -104,6 +118,7 @@ mod tests {
             display_name: "Test".into(),
             base_url,
             api_type,
+            user_agent: None,
             models: BTreeMap::new(),
         }
     }

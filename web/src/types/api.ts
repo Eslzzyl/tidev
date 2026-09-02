@@ -393,6 +393,7 @@ export interface ProviderInfo {
   connected: boolean;
   base_url: string;
   api_type: string | null;
+  user_agent: string | null;
   models: ProviderModelInfo[];
 }
 
@@ -424,6 +425,7 @@ export interface CreateProviderRequest {
   display_name: string;
   base_url: string;
   api_type?: string;
+  user_agent?: string;
   api_key: string;
   models: CreateModelRequest[];
 }

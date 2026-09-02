@@ -424,6 +424,7 @@ mod tests {
             api_type: tidev_llm::ApiType::OpenAiChatCompletions,
             api_key: None,
             base_url: "http://127.0.0.1:1".into(),
+            user_agent: None,
             model_id: "test".into(),
             request_model_id: None,
             system_prompt: None,
