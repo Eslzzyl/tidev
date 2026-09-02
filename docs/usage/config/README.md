@@ -9,13 +9,12 @@ config with the following rules:
   precedence over the global ones.
 - Map fields such as `providers` and `mcp.servers` are overlaid: entries from the
   project config replace those from the global config at the same key.
-- List fields such as `instructions`, `skills`, and `hooks.post_tool_use` are
+- List fields such as `instructions` and `skills` are
   appended. Both the global and project entries are active, with project entries
   running or appearing after the global ones.
 - Sub-config sections like `[ui]`, `[logging]`, and `[sandbox]` are replaced
   entirely when the project config explicitly contains that section. If the
   project config does not mention a section, the global value is preserved.
-- `hooks.disable_all_hooks` from the project config wins.
 
 The first invocation of tidev creates the default config file at the global path
 with sensible defaults. Bundled provider presets ship with the binary and are
@@ -508,8 +507,3 @@ the retain budget from the prune threshold.
 
 Provider and model configuration has its own dedicated section. See
 `providers.md` in this directory.
-
-## Hook configuration
-
-Post-tool-use hooks have their own dedicated section. See `hooks.md` in this
-directory.
