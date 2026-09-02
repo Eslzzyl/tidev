@@ -1,7 +1,7 @@
 # tidev 当前目标架构
 
-**状态**：P1-P5 已落地，最终验收完成
-**更新**：2026-08-04
+**状态**：重写已于 2026-08 验收完成，本文档持续更新
+**更新**：2026-09-02
 
 本文档描述当前重写代码的实际边界。本文档不再保留旧 tidev-types 架构的
 兼容描述。
@@ -230,24 +230,7 @@ spawn 外层循环（一轮结束后持久化排队条目并继续）。TUI 只�
 reminder 的前缀注入（inject_mode_reminder_impl）互不干扰；TUI 渲染
 时经 strip_system_reminder_tags 剥离。
 
-## 实施状态和验收
+## 当前不做
 
-已完成：
-
-- P1 事件三层拆分和 ShellOutput 顺序桥接。
-- P1.5 协议字段与应用数据拆分、storage v40、mode 迁移。
-- P2 七方法 AgentContext、宿主审批、注入迁移和循环净化。
-- P3 MessageBuffer、ContextManager、Tool、ToolRegistry、MCP 迁移。
-- P4 AgentRuntime、MessageStore、消费方示例和 core 工具适配。
-- CoreContext 工具结果按原始调用顺序返回的回归测试。
-
-最终验收：
-
-- 清理旧设计文档和遗留临时说明。
-- cargo tree、全仓 grep、cargo check --workspace 和
-  cargo test --workspace --all-targets 已完成。
-
-本轮明确不做：
-
-  - P0 请求字节捕获 harness。
-  - 将 tidev 的审批、SQLite session 或子代理策略抽象进 tidev-agent。
+- P0 请求字节捕获 harness。
+- 将 tidev 的审批、SQLite session 或子代理策略抽象进 tidev-agent。

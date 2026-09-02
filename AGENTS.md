@@ -2,8 +2,8 @@
 
 tidev 是一个用纯 Rust 编写的 AI coding agent（TUI + ACP + Web）。工作区是 Cargo
 workspace，由 `crates/` 下的 14 个 crate 组成；`web/` 下是独立的 Web 前端项目。
-当前架构边界与设计约束见 `rewrite-plan/architecture.md`，架构决策记录见
-`rewrite-plan/decisions/`，Web 前端约定见 `web/AGENTS.md`。
+当前架构边界与设计约束见 `docs/dev/tidev/architecture.md`，架构决策记录见
+`docs/dev/tidev/decisions/`，Web 前端约定见 `web/AGENTS.md`。
 
 ## 铁律
 
@@ -64,8 +64,8 @@ workspace，由 `crates/` 下的 14 个 crate 组成；`web/` 下是独立的 We
 
 ## 文档索引
 
-- `rewrite-plan/architecture.md`：当前目标架构与实际边界（含字节不变性设计约束）。
-- `rewrite-plan/decisions/`：架构决策记录（ADR）。
-- `rewrite-plan/todo.md`：待补充的功能清单。
+- `docs/dev/tidev/architecture.md`：当前目标架构与实际边界（含字节不变性设计约束）。
+- `docs/dev/tidev/decisions/`：架构决策记录（ADR）。
+- `docs/dev/tidev/todo.md`：待补充的功能清单。
 - `docs/dev/tidev/`：具体模块设计文档。
 - `web/AGENTS.md`：Web 前端的项目指导。

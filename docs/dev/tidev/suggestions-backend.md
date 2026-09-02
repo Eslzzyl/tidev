@@ -1,5 +1,7 @@
 # Suggestion Backend Architecture
 
+> 状态：未实施，优先级低（2026-09-02 确认）。当前 command palette 与 snippet 的匹配逻辑仍在 TUI 侧。
+
 ## 现状
 
 三个弹窗（command palette / @-mention / snippet）的匹配排序逻辑所处位置不一致：

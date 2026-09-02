@@ -14,4 +14,8 @@ presets.toml 拆分
 
 根据不同的模型插入可选的优化提示词
 
+建立 CI 测试流水线：`.github/workflows/ci.yml` 运行 `cargo test --workspace` 与 clippy（原 test-coverage.md 中唯一未完成项）
+
+## 历史
+
 已实现：忙时发送模式（`send_while_busy`，排队/引导）——见 `architecture.md` 的"忙时消息调度"一节。
