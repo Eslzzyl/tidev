@@ -63,13 +63,33 @@ function collectTokenUsage(messages: MessageRecord[]): TokenUsageTotals | null {
   return hasUsage ? usage : null;
 }
 
+/**
+ * Returns the input token count of the most recent assistant message, which
+ * represents the actual context size sent in the last API call. Used for the
+ * context-usage ring and percentage, mirroring the backend's compaction check
+ * (`context_manager.rs`: last message's `input_tokens.or(total_tokens)`).
+ */
+function collectLastInputTokens(messages: MessageRecord[]): number | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i].message;
+    if (message.role !== "assistant") continue;
+    const tokens = message.input_tokens ?? message.total_tokens;
+    if (tokens !== null && tokens !== undefined) return tokens;
+  }
+  return null;
+}
+
 export function TokenUsageIndicator({ messages, contextWindow }: TokenUsageIndicatorProps) {
   const { t } = useTranslation();
   const usage = useMemo(() => collectTokenUsage(messages), [messages]);
+  const lastInputTokens = useMemo(() => collectLastInputTokens(messages), [messages]);
   const contextLimit = contextWindow && contextWindow > 0 ? contextWindow : null;
   if (!usage || !contextLimit) return null;
 
-  const usedPercent = Math.min((usage.totalTokens / contextLimit) * 100, 100);
+  // The ring reflects the current context-window usage, which is the input
+  // tokens of the last assistant turn (not the cumulative sum across turns).
+  const contextTokens = lastInputTokens ?? 0;
+  const usedPercent = Math.min((contextTokens / contextLimit) * 100, 100);
   const cachedPercent =
     usage.inputTokens > 0 ? Math.min((usage.cacheReadTokens / usage.inputTokens) * 100, 100) : 0;
 
@@ -102,7 +122,7 @@ export function TokenUsageIndicator({ messages, contextWindow }: TokenUsageIndic
         <div className="token-usage-popover-heading">
           <strong>{t("Token Usage")}</strong>
           <span>
-            {formatTokenCount(usage.totalTokens)} / {formatTokenCount(contextLimit)} (
+            {formatTokenCount(contextTokens)} / {formatTokenCount(contextLimit)} (
             {Math.round(usedPercent)}% {t("Used")})
           </span>
         </div>
