@@ -61,7 +61,7 @@ pub struct LlmProviderConfig {
     pub api_type: ApiType,
     pub api_key: Option<String>,
     pub base_url: String,
-    /// Optional HTTP User-Agent override. `None` uses the tidev default.
+    /// Optional HTTP User-Agent override. `None` keeps the client's default.
     pub user_agent: Option<String>,
     pub model_id: String,
     pub request_model_id: Option<String>,

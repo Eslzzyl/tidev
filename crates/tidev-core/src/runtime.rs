@@ -52,6 +52,8 @@ use crate::session::SessionManager;
 use crate::tool_def::to_llm_tool_def;
 use crate::workspace::Workspace;
 
+const TIDEV_USER_AGENT: &str = concat!("tidev/", env!("CARGO_PKG_VERSION"));
+
 // ---------------------------------------------------------------------------
 // TodoPersistence impl — bridges tidev-tools to tidev-storage.
 // ---------------------------------------------------------------------------
@@ -2000,11 +2002,12 @@ impl RuntimeBuilder {
         let _t_llm = Instant::now();
         let active_model = Self::resolve_fallback_model(&config, &auth)
             .context("no models are configured — set up a provider API key first")?;
-        let llm = tidev_llm::LlmClient::new(
+        let llm = tidev_llm::LlmClient::new_with_user_agent(
             config.logging.save_request_body,
             config.logging.max_request_files,
             config.logging.save_response_body,
             config.logging.max_response_files,
+            Some(TIDEV_USER_AGENT),
         )?;
         log::info!("startup: LLM client ready in {:?}", _t_llm.elapsed());
 

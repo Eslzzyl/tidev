@@ -17,6 +17,8 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+const TEST_CLIENT_USER_AGENT: &str = concat!("tidev-agent-test/", env!("CARGO_PKG_VERSION"));
+
 struct RecordingStore {
     messages: Mutex<Vec<Message>>,
     saves: Mutex<Vec<Vec<Message>>>,
@@ -236,8 +238,7 @@ async fn scripted_provider(listener: TcpListener) -> Result<Vec<Vec<u8>>> {
     ] {
         let (mut stream, _) = listener.accept().await?;
         let (headers, body) = read_http_request_parts(&mut stream).await?;
-        let expected_user_agent = format!("tidev/{}", env!("CARGO_PKG_VERSION"));
-        assert!(has_header(&headers, "user-agent", &expected_user_agent));
+        assert!(has_header(&headers, "user-agent", TEST_CLIENT_USER_AGENT));
         requests.push(body);
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -321,7 +322,7 @@ async fn independent_consumer_runs_full_loop_against_scripted_provider() -> Resu
     let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
     let runtime = AgentRuntime::new(
         session_id,
-        LlmClient::new(false, 0, false, 0)?,
+        LlmClient::new_with_user_agent(false, 0, false, 0, Some(TEST_CLIENT_USER_AGENT))?,
         provider_config(base_url.clone()),
         registry.clone(),
         ContextManager::new(),
@@ -372,7 +373,7 @@ async fn independent_consumer_runs_full_loop_against_scripted_provider() -> Resu
 
     let (reload_event_tx, _reload_event_rx) = tokio::sync::mpsc::unbounded_channel();
     let reloaded = AgentRuntime::from_store(
-        LlmClient::new(false, 0, false, 0)?,
+        LlmClient::new_with_user_agent(false, 0, false, 0, Some(TEST_CLIENT_USER_AGENT))?,
         provider_config(base_url),
         registry,
         ContextManager::new(),

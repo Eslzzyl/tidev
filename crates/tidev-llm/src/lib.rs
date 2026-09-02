@@ -46,8 +46,6 @@ use crate::message::Message;
 
 use error::{MAX_RETRIES, backoff_delay, backoff_sleep, classify_anyhow_error};
 
-pub(crate) const DEFAULT_USER_AGENT: &str = concat!("tidev/", env!("CARGO_PKG_VERSION"));
-
 /// Apply a provider-specific User-Agent override while retaining the client default otherwise.
 pub(crate) fn apply_user_agent(
     request: RequestBuilder,
@@ -75,8 +73,9 @@ pub(crate) fn apply_user_agent(
 
 /// Streaming LLM client.
 ///
-/// Create via [`LlmClient::new`], then call [`stream_chat`](LlmClient::stream_chat)
-/// or [`complete_with_messages`](LlmClient::complete_with_messages).
+/// Create via [`LlmClient::new`] or [`LlmClient::new_with_user_agent`], then call
+/// [`stream_chat`](LlmClient::stream_chat) or
+/// [`complete_with_messages`](LlmClient::complete_with_messages).
 #[derive(Clone, Debug)]
 pub struct LlmClient {
     http: Client,
@@ -85,15 +84,7 @@ pub struct LlmClient {
 
 #[cfg(test)]
 mod tests {
-    use super::{DEFAULT_USER_AGENT, LlmClient, LlmDebugConfig};
-
-    #[test]
-    fn default_user_agent_uses_package_version() {
-        assert_eq!(
-            DEFAULT_USER_AGENT,
-            concat!("tidev/", env!("CARGO_PKG_VERSION"))
-        );
-    }
+    use super::{LlmClient, LlmDebugConfig};
 
     #[test]
     fn cloned_clients_share_debug_configuration() {
@@ -116,16 +107,42 @@ mod tests {
 }
 
 impl LlmClient {
-    /// Build a new client.  Only the debug knobs are needed — all other
-    /// configuration comes per-request via [`LlmProviderConfig`].
+    /// Build a new client without an application-specific default User-Agent.
+    ///
+    /// Applications that identify themselves in outbound requests should use
+    /// [`LlmClient::new_with_user_agent`]. Provider-specific overrides from
+    /// [`LlmProviderConfig`] still apply per request.
     pub fn new(
         save_request_body: bool,
         max_request_files: usize,
         save_response_body: bool,
         max_response_files: usize,
     ) -> Result<Self> {
-        let http = Client::builder()
-            .user_agent(DEFAULT_USER_AGENT)
+        Self::new_with_user_agent(
+            save_request_body,
+            max_request_files,
+            save_response_body,
+            max_response_files,
+            None,
+        )
+    }
+
+    /// Build a client with an application-specific default User-Agent.
+    ///
+    /// A provider-level `user_agent` in [`LlmProviderConfig`] overrides this
+    /// value for the individual request.
+    pub fn new_with_user_agent(
+        save_request_body: bool,
+        max_request_files: usize,
+        save_response_body: bool,
+        max_response_files: usize,
+        user_agent: Option<&str>,
+    ) -> Result<Self> {
+        let mut builder = Client::builder();
+        if let Some(user_agent) = user_agent {
+            builder = builder.user_agent(user_agent);
+        }
+        let http = builder
             .timeout(Duration::from_secs(1800))
             .connect_timeout(Duration::from_secs(15))
             .build()
