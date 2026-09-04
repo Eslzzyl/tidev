@@ -630,6 +630,27 @@ impl MessageList {
             _ => {}
         }
 
+        if matches!(
+            event,
+            BackendEvent::StreamEnd {
+                status: tidev_core::StreamEndStatus::Cancelled,
+                ..
+            }
+        ) && self.active_session_id == Some(session_id)
+            && !self.cancelled
+            && (self.streaming_buffer.is_streaming
+                || self.chat_contexts.get(&session_id).is_some_and(|context| {
+                    context.messages.iter().any(|message| {
+                        message.streaming
+                            && message.role == tidev_llm::message::MessageRole::Assistant
+                    })
+                }))
+        {
+            // A cancellation can originate from another frontend. Mirror the
+            // local double-Esc terminal state before rendering StreamEnd.
+            self.append_interrupted_message();
+        }
+
         // ── 2. Route to chat_context ───────────────────────────────────
         let chat_context = match self.chat_contexts.get_mut(&session_id) {
             Some(ctx) => ctx,
@@ -640,18 +661,23 @@ impl MessageList {
         };
 
         match event {
-            BackendEvent::TurnStarting { .. } => {
+            BackendEvent::TurnStarting {
+                assistant_message_id,
+                ..
+            } => {
                 self.cancelled = false;
+                let message_id = assistant_message_id.unwrap_or_else(Uuid::new_v4);
                 if self.active_session_id == Some(session_id) {
                     self.streaming_buffer
-                        .begin_streaming(&mut chat_context.messages);
+                        .begin_streaming_with_id(&mut chat_context.messages, message_id);
                 } else {
                     // Background session: just push a streaming placeholder.
                     // The streaming_buffer is reserved for the active session.
-                    let msg = Message::streaming(
+                    let mut msg = Message::streaming(
                         tidev_llm::message::MessageRole::Assistant,
                         String::new(),
                     );
+                    msg.id = message_id;
                     chat_context.messages.push(msg);
                 }
                 self.dirty = true;
@@ -1990,6 +2016,7 @@ mod tests {
             request_id: 1,
             reasoning_started_at: None,
             reasoning_completed_at: None,
+            status: tidev_core::StreamEndStatus::Completed,
         });
 
         let message = list
@@ -2003,5 +2030,45 @@ mod tests {
         assert_eq!(message.reasoning_started_at, Some(started_at));
         assert!(message.completed_at.is_some());
         assert_eq!(message.reasoning_completed_at, message.completed_at);
+    }
+
+    #[test]
+    fn remote_cancellation_uses_the_same_terminal_state_as_double_escape() {
+        let session_id = Uuid::from_u128(202);
+        let mut assistant = Message::streaming(
+            tidev_llm::message::MessageRole::Assistant,
+            "partial response",
+        );
+        let assistant_id = assistant.id;
+        assistant.reasoning = "partial reasoning".to_string();
+
+        let mut list = MessageList::new();
+        list.set_chat_context(ChatContext::new(
+            session_id,
+            "test".into(),
+            vec![user_msg(1), assistant],
+            None,
+            "model".into(),
+            "provider".into(),
+        ));
+
+        list.handle_backend_event(&BackendEvent::StreamEnd {
+            session_id,
+            request_id: 1,
+            reasoning_started_at: None,
+            reasoning_completed_at: None,
+            status: tidev_core::StreamEndStatus::Cancelled,
+        });
+
+        let messages = &list.active_chat_context().unwrap().messages;
+        assert!(messages.iter().any(|message| {
+            message.id == assistant_id
+                && !message.streaming
+                && message.content == "partial response"
+        }));
+        assert!(messages.iter().any(|message| {
+            message.role == tidev_llm::message::MessageRole::Error
+                && message.content == "Request interrupted by user"
+        }));
     }
 }

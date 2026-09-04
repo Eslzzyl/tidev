@@ -33,17 +33,18 @@ export function segmentReasoningTiming({
 }
 
 /**
- * Select the newest active request for a user turn. Request IDs are monotonic
- * within a session, so this remains correct when stale stream state survives a
- * reconnect or resync.
+ * Select the newest request associated with a user turn. Request IDs are
+ * monotonic within a session, so this remains correct when stale stream state
+ * survives a reconnect or resync. Terminal streams remain associated until
+ * their already-received content has been rendered with the originating turn.
  */
-export function latestLiveStream(
+export function latestTurnStream(
   streams: readonly StreamMessage[],
   userMessageId: string,
 ): StreamMessage | undefined {
   let latest: StreamMessage | undefined;
   for (const stream of streams) {
-    if (stream.status !== "streaming" || stream.userMessageId !== userMessageId) continue;
+    if (stream.userMessageId !== userMessageId) continue;
     if (!latest || stream.requestId >= latest.requestId) latest = stream;
   }
   return latest;

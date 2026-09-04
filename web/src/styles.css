@@ -1005,8 +1005,23 @@ body {
   outline-offset: 3px;
 }
 
-.assistant-turn-status.interrupted {
+.assistant-turn-status.failed {
   color: var(--danger);
+}
+
+.assistant-interruption-notice {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 22px;
+  color: var(--muted);
+  font-size: var(--chat-detail-size);
+  font-weight: 400;
+  line-height: var(--chat-detail-line-height);
+}
+
+.assistant-interruption-icon {
+  flex: 0 0 auto;
 }
 
 .assistant-turn-chevron {
@@ -3728,6 +3743,10 @@ pre.markdown-code-block code {
 
 .assistant-segment-row.is-collapsed {
   padding-block: 0;
+}
+
+.assistant-interruption-row {
+  margin-top: 10px;
 }
 
 .assistant-segment-row .assistant-message-content,

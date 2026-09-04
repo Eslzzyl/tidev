@@ -122,6 +122,29 @@ pub struct MessageAppData {
     pub reasoning_started_at: Option<DateTime<Utc>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_completed_at: Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interruption: Option<InterruptionData>,
+}
+
+/// Durable application state for an assistant stream that cannot continue.
+///
+/// It stays outside the protocol message payload. A corresponding assistant
+/// message remains marked `streaming`, so context construction excludes it
+/// from every later provider request.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InterruptionData {
+    pub reason: InterruptionReason,
+    pub request_id: u64,
+    pub user_message_id: Option<Uuid>,
+}
+
+/// Why a streamed assistant message was terminally interrupted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InterruptionReason {
+    UserCancelled,
+    ProviderFailed,
+    RuntimeRestarted,
 }
 
 /// Application-owned details for a provider failure shown in the chat.
@@ -1467,6 +1490,129 @@ impl SessionStore {
             params![Utc::now().to_rfc3339(), session_id.to_string()],
         )?;
         Ok(())
+    }
+
+    /// Atomically replace a message while retaining its position in the
+    /// conversation timeline. This is used to turn a durable streaming draft
+    /// into its completed protocol message without a delete/append crash gap.
+    pub fn replace_message_with_app_data(
+        &self,
+        session_id: Uuid,
+        previous_id: Uuid,
+        message: &Message,
+        app_data: &MessageAppData,
+    ) -> Result<()> {
+        let mut conn = self.write_conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        tx.execute(
+            "DELETE FROM messages WHERE session_id = ?1 AND id = ?2",
+            params![session_id.to_string(), previous_id.to_string()],
+        )?;
+        Self::insert_message_with_app_data(&tx, session_id, message, app_data)?;
+        tx.execute(
+            "UPDATE sessions SET updated_at = ?1 WHERE id = ?2",
+            params![Utc::now().to_rfc3339(), session_id.to_string()],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Finalise an interrupted stream and append its durable notice in one
+    /// transaction. Empty drafts are omitted, matching the live UI contract.
+    pub fn finalize_interrupted_stream(
+        &self,
+        session_id: Uuid,
+        draft: &Message,
+        draft_app_data: &MessageAppData,
+        notice: &Message,
+        notice_app_data: &MessageAppData,
+    ) -> Result<bool> {
+        let keep_draft = !draft.content.is_empty()
+            || !draft.reasoning.trim().is_empty()
+            || !draft.tool_calls.is_empty();
+        let mut conn = self.write_conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        tx.execute(
+            "DELETE FROM messages WHERE session_id = ?1 AND id = ?2",
+            params![session_id.to_string(), draft.id.to_string()],
+        )?;
+        if keep_draft {
+            Self::insert_message_with_app_data(&tx, session_id, draft, draft_app_data)?;
+        }
+        Self::insert_message_with_app_data(&tx, session_id, notice, notice_app_data)?;
+        tx.execute(
+            "UPDATE sessions SET updated_at = ?1 WHERE id = ?2",
+            params![Utc::now().to_rfc3339(), session_id.to_string()],
+        )?;
+        tx.commit()?;
+        Ok(keep_draft)
+    }
+
+    /// Mark drafts left behind by a prior process as terminal interruptions.
+    /// They intentionally remain `streaming` protocol messages so future LLM
+    /// requests continue to exclude their partial content.
+    pub fn recover_interrupted_streams(&self) -> Result<usize> {
+        let mut conn = self.write_conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let rows = {
+            let mut stmt = tx.prepare(
+                "SELECT id, session_id, app_data FROM messages \
+                 WHERE role = 'assistant' AND streaming = 1",
+            )?;
+            let mapped = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Vec<u8>>(2)?,
+                ))
+            })?;
+            mapped.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        let mut recovered = 0;
+        for (message_id, session_id, blob) in rows {
+            let mut app_data = if blob.is_empty() {
+                MessageAppData::default()
+            } else {
+                serde_json::from_str(&decompress_text(&blob)).unwrap_or_default()
+            };
+            if app_data.interruption.is_some() {
+                continue;
+            }
+            app_data.interruption = Some(InterruptionData {
+                reason: InterruptionReason::RuntimeRestarted,
+                request_id: 0,
+                user_message_id: None,
+            });
+            let app_data_blob = compress_text(&serde_json::to_string(&app_data)?);
+            let now = Utc::now();
+            tx.execute(
+                "UPDATE messages SET completed_at = COALESCE(completed_at, ?1), app_data = ?2 \
+                 WHERE id = ?3 AND session_id = ?4",
+                params![now.to_rfc3339(), app_data_blob, message_id, session_id],
+            )?;
+
+            let mut notice = Message::new(
+                MessageRole::Error,
+                "Request interrupted because Tidev restarted",
+            );
+            notice.completed_at = Some(now);
+            let notice_data = MessageAppData {
+                interruption: app_data.interruption.clone(),
+                ..MessageAppData::default()
+            };
+            let parsed_session_id = Uuid::parse_str(&session_id)?;
+            Self::insert_message_with_app_data(&tx, parsed_session_id, &notice, &notice_data)?;
+            recovered += 1;
+        }
+        if recovered > 0 {
+            tx.execute(
+                "UPDATE sessions SET updated_at = ?1 WHERE id IN \
+                 (SELECT DISTINCT session_id FROM messages WHERE streaming = 1)",
+                params![Utc::now().to_rfc3339()],
+            )?;
+        }
+        tx.commit()?;
+        Ok(recovered)
     }
 
     /// Delete specific messages from a session.
@@ -3118,6 +3264,48 @@ mod tests {
         assert!(serialized.get("patch_files").is_none());
         assert!(serialized.get("file_diffs").is_none());
         assert!(serialized.get("mode").is_none());
+    }
+
+    #[test]
+    fn interrupted_stream_recovery_is_durable_and_idempotent() {
+        let (store, _tmp) = test_store();
+        let sid = create_test_session(&store, "/workspace", "interrupted stream");
+        let mut draft = Message::streaming(MessageRole::Assistant, "partial response");
+        draft.reasoning = "partial reasoning".into();
+        store.append_message(sid, &draft).unwrap();
+
+        assert_eq!(store.recover_interrupted_streams().unwrap(), 1);
+        assert_eq!(store.recover_interrupted_streams().unwrap(), 0);
+
+        let messages = store.load_messages(sid).unwrap();
+        let recovered = messages
+            .iter()
+            .find(|message| message.id == draft.id)
+            .unwrap();
+        assert!(recovered.streaming);
+        assert_eq!(recovered.content, "partial response");
+        assert_eq!(recovered.reasoning, "partial reasoning");
+        assert!(recovered.completed_at.is_some());
+
+        let app_data = store.load_message_app_data(sid).unwrap();
+        assert_eq!(
+            app_data[&draft.id]
+                .interruption
+                .as_ref()
+                .map(|data| data.reason),
+            Some(InterruptionReason::RuntimeRestarted)
+        );
+        let notice = messages
+            .iter()
+            .find(|message| message.role == MessageRole::Error)
+            .unwrap();
+        assert_eq!(
+            app_data[&notice.id]
+                .interruption
+                .as_ref()
+                .map(|data| data.reason),
+            Some(InterruptionReason::RuntimeRestarted)
+        );
     }
 
     #[test]

@@ -1996,6 +1996,14 @@ impl RuntimeBuilder {
         let database = tidev_storage::database::Database::open(&paths.database_file)
             .context("failed to open database")?;
         let store = database.create_store()?;
+        let recovered_streams = store
+            .recover_interrupted_streams()
+            .context("failed to recover interrupted assistant streams")?;
+        if recovered_streams > 0 {
+            log::warn!(
+                "recovered {recovered_streams} interrupted assistant stream(s) from a prior process"
+            );
+        }
         log::info!("startup: database opened in {:?}", _t_db.elapsed());
 
         // Clear expired tool outputs on startup (best-effort).

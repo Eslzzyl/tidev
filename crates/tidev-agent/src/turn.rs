@@ -9,15 +9,8 @@ use tidev_llm::message::{AssistantTurn, Message, ToolCall};
 use tidev_llm::reasoning::ThinkingLevelType;
 use tidev_llm::{LlmClient, LlmProviderConfig, ToolDefinition};
 
-use crate::event::{AgentEvent, AgentEventSender, llm_event_to_agent_event};
-
-/// Options controlling host-visible behavior while a turn is cancelled.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct StreamTurnOptions {
-    /// Emit a synthetic `StreamEnd` event before returning the cancellation
-    /// error. Hosts that already emit this event in their loop can disable it.
-    pub emit_stream_end_on_cancel: bool,
-}
+use crate::context::AgentContext;
+use crate::event::{AgentEvent, llm_event_to_agent_event};
 
 /// Stream one LLM turn and aggregate provider events into an [`AssistantTurn`].
 ///
@@ -25,7 +18,6 @@ pub struct StreamTurnOptions {
 /// so product hosts do not need to duplicate protocol handling. The returned
 /// turn contains the same fields that were accumulated from the provider
 /// stream, including opaque Responses API output items.
-#[allow(clippy::too_many_arguments)]
 pub async fn stream_turn(
     llm: &LlmClient,
     mut model: LlmProviderConfig,
@@ -34,9 +26,8 @@ pub async fn stream_turn(
     system_prompt: &str,
     thinking_level: &ThinkingLevelType,
     request_id: u64,
-    event_tx: &AgentEventSender,
+    event_context: &dyn AgentContext,
     cancel: &CancellationToken,
-    options: StreamTurnOptions,
 ) -> Result<AssistantTurn> {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let llm = llm.clone();
@@ -63,19 +54,12 @@ pub async fn stream_turn(
         tokio::select! {
             _ = cancel.cancelled() => {
                 handle.abort();
-                if options.emit_stream_end_on_cancel {
-                    let _ = event_tx.send(AgentEvent::StreamEnd {
-                        request_id,
-                        reasoning_started_at: None,
-                        reasoning_completed_at: None,
-                    });
-                }
                 return Err(anyhow::anyhow!("Stream cancelled by user"));
             }
             event = rx.recv() => {
                 let Some(event) = event else { break };
                 let event = llm_event_to_agent_event(event, request_id);
-                let _ = event_tx.send(event.clone());
+                event_context.emit_stream_event(event.clone()).await?;
                 match event {
                     AgentEvent::Delta { content, .. } => {
                         turn.content.push_str(&content);

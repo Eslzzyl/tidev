@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { StreamMessage } from "../types/chat";
-import { latestLiveStream, segmentReasoningTiming } from "./stream";
+import { latestTurnStream, segmentReasoningTiming } from "./stream";
 
 function stream(requestId: number, status: StreamMessage["status"] = "streaming"): StreamMessage {
   return {
@@ -48,12 +48,12 @@ describe("stream helpers", () => {
     });
   });
 
-  it("selects the newest active request and ignores non-streaming entries", () => {
+  it("selects the newest request even after that request has terminated", () => {
     const older = stream(2);
     const newest = stream(5);
-    const failed = stream(8, "failed");
+    const interrupted = stream(8, "interrupted");
 
-    expect(latestLiveStream([newest, older, failed], "user-1")).toBe(newest);
-    expect(latestLiveStream([stream(1)], "other-user")).toBeUndefined();
+    expect(latestTurnStream([newest, older, interrupted], "user-1")).toBe(interrupted);
+    expect(latestTurnStream([stream(1)], "other-user")).toBeUndefined();
   });
 });

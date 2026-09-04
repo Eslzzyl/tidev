@@ -15,7 +15,7 @@ use tidev_llm::ToolDefinition;
 use tidev_llm::message::{AssistantTurn, Message, ToolCall, ToolExecutionResult};
 use tidev_llm::reasoning::ThinkingLevelType;
 
-use crate::event::AgentEventSender;
+use crate::event::{AgentEvent, AgentEventSender};
 
 // ---------------------------------------------------------------------------
 // AgentLoopConfig
@@ -60,11 +60,23 @@ pub trait AgentContext: Send + Sync {
     /// Return the event channel for sending real-time events to the frontend.
     fn event_tx(&self) -> AgentEventSender;
 
+    /// Persist or transform a stream event before exposing it to a frontend.
+    ///
+    /// The default remains suitable for generic hosts. Product hosts that
+    /// support recovery can override this to durably journal each delta before
+    /// the corresponding UI event is sent.
+    async fn emit_stream_event(&self, event: AgentEvent) -> Result<()> {
+        // A disconnected UI must not abort the provider request. Durable hosts
+        // have already recorded the event before this best-effort delivery.
+        let _ = self.event_tx().send(event);
+        Ok(())
+    }
+
     /// Stream a single LLM turn and return the completed [`AssistantTurn`].
     ///
     /// The implementation should forward streaming [`AgentEvent`]s (deltas,
-    /// tool call updates, usage stats, etc.) through [`Self::event_tx`] in
-    /// real time.
+    /// tool call updates, usage stats, etc.) through
+    /// [`Self::emit_stream_event`] in real time.
     ///
     /// `request_id` is the per-turn sequence number from the agent loop,
     /// embedded in forwarded events so the frontend can reject stale events

@@ -83,7 +83,15 @@ export function SubagentCard({
   const expanded = controlledExpanded ?? localExpanded;
   const Icon = agentIcon(agent);
   const running = entry.status === "pending" || entry.status === "running";
-  const displayedStatus = statusLabel(entry.subagentStatus, t);
+  const displayedStatus =
+    statusLabel(entry.subagentStatus, t) ||
+    (entry.status === "cancelled" ? t("Cancelled") : "");
+  const activityLabel =
+    entry.status === "cancelled"
+      ? t("Subagent was cancelled")
+      : running
+        ? t("Subagent is running")
+        : t("Subagent completed");
 
   useEffect(() => {
     const childSessionId = entry.childSessionId?.trim();
@@ -110,7 +118,7 @@ export function SubagentCard({
         variant="ghost"
         size="sm"
       >
-        <ActivityRipple active={running} row label={t("Subagent is running")}>
+        <ActivityRipple active={running} row label={activityLabel}>
           <Icon size={14} />
           <span className="tool-renderer-title">
             <strong>{agentLabel(agent, t)}</strong>

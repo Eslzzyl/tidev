@@ -31,7 +31,22 @@ impl StreamingBuffer {
     /// Start a new streaming turn. Creates a placeholder Assistant message
     /// in the messages list and returns the message ID.
     pub fn begin_streaming(&mut self, messages: &mut Vec<Message>) -> Uuid {
-        let message_id = Uuid::new_v4();
+        self.begin_streaming_with_id(messages, Uuid::new_v4())
+    }
+
+    /// Start a streaming turn using the durable message identifier allocated
+    /// by Core before the frontend receives `TurnStarting`.
+    pub fn begin_streaming_with_id(
+        &mut self,
+        messages: &mut Vec<Message>,
+        message_id: Uuid,
+    ) -> Uuid {
+        if let Some(index) = messages.iter().position(|message| message.id == message_id) {
+            self.current_message_id = Some(message_id);
+            self.current_message_idx = Some(index);
+            self.is_streaming = true;
+            return message_id;
+        }
         let mut msg = Message::streaming(MessageRole::Assistant, String::new());
         msg.id = message_id;
         messages.push(msg);

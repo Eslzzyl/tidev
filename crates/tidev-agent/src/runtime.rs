@@ -21,7 +21,7 @@ use crate::message_buf::MessageBuffer;
 use crate::registry::ToolRegistry;
 use crate::scheduler::{ToolCallExecutor, execute_tool_calls};
 use crate::tool::ToolContext;
-use crate::turn::{StreamTurnOptions, stream_turn};
+use crate::turn::stream_turn;
 
 /// Persistence boundary for a generic agent runtime.
 #[async_trait]
@@ -262,9 +262,8 @@ impl AgentContext for AgentRuntime {
             system_prompt,
             thinking_level,
             request_id,
-            &self.event_tx,
+            self,
             &self.cancel,
-            StreamTurnOptions::default(),
         )
         .await
     }

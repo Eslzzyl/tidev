@@ -413,6 +413,7 @@ const ToolCallBody = memo(function ToolCallBody({
 
 function statusSuffix(entry: ToolCallEntry, t: TFunction) {
   if (entry.status === "failed") return t(", failed");
+  if (entry.status === "cancelled") return t(", cancelled");
   if (entry.status === "pending") return t(", waiting");
   if (entry.status === "running") return t(", running");
   return t(", completed");
@@ -772,6 +773,14 @@ export const ToolCallRow = memo(function ToolCallRow({
   const output = entry.result?.output?.trim() || "";
   const active = entry.status === "pending" || entry.status === "running";
   const running = entry.status === "running";
+  const activityLabel =
+    entry.status === "pending"
+      ? t("Tool is waiting")
+      : entry.status === "running"
+        ? t("Tool is running")
+        : entry.status === "cancelled"
+          ? t("Tool was cancelled")
+          : t("Tool completed");
   const metadata = entry.result?.metadata;
   const Icon = toolIcon(entry.name);
   const args = useMemo(() => parseArguments(entry), [entry.arguments]);
@@ -839,7 +848,7 @@ export const ToolCallRow = memo(function ToolCallRow({
         <ActivityRipple
           active={active}
           row
-          label={t(entry.status === "pending" ? "Tool is waiting" : "Tool is running")}
+          label={activityLabel}
         >
           <Icon size={14} />
           <span className="tool-renderer-title">

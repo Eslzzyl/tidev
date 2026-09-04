@@ -20,8 +20,8 @@ use uuid::Uuid;
 use crate::agent_type::AgentType;
 use crate::backend_event::{BackendEvent, CoreEventBus};
 use tidev_agent::{
-    AgentContext, AgentDefinition, AgentEventSender, AgentLoopConfig, ContextManager,
-    StreamTurnOptions, SubagentEventSink, SubagentExecution, SubagentExecutor, ToolCallExecutor,
+    AgentContext, AgentDefinition, AgentEvent, AgentEventSender, AgentLoopConfig, ContextManager,
+    StreamEndStatus, SubagentEventSink, SubagentExecution, SubagentExecutor, ToolCallExecutor,
     execute_subagent_calls, execute_tool_calls, order_tool_results, stream_turn,
 };
 use tidev_config::auth::ActiveModel;
@@ -36,7 +36,7 @@ use tidev_utils::path::{
 use tidev_llm::error::{ProviderError, classify_anyhow_error};
 use tidev_llm::{LlmClient, LlmProviderConfig};
 use tidev_snapshot::SnapshotService;
-use tidev_storage::{MessageAppData, ProviderErrorData};
+use tidev_storage::{InterruptionData, InterruptionReason, MessageAppData, ProviderErrorData};
 
 use crate::approval::{
     ApprovalBroker, ApprovedTool, FrontendRequestKind, FrontendResponse, ToolCallWithViolations,
@@ -271,6 +271,319 @@ impl Drop for CancelPersistGuard {
 // CoreContext
 // ---------------------------------------------------------------------------
 
+#[derive(Clone)]
+struct StreamDraft {
+    request_id: u64,
+    user_message_id: Option<Uuid>,
+    message: Message,
+    assistant_completed: bool,
+}
+
+/// Serialises the durable lifecycle of the assistant message currently being
+/// streamed by one CoreContext. The draft is marked `streaming`, which keeps
+/// it out of all future provider requests while still making it recoverable by
+/// every frontend.
+struct StreamRecorder {
+    session_id: Uuid,
+    session_manager: SessionManager,
+    buffer: Arc<RwLock<CoreMessageBuffer>>,
+    active: Mutex<Option<StreamDraft>>,
+}
+
+impl StreamRecorder {
+    fn new(
+        session_id: Uuid,
+        session_manager: SessionManager,
+        buffer: Arc<RwLock<CoreMessageBuffer>>,
+    ) -> Self {
+        Self {
+            session_id,
+            session_manager,
+            buffer,
+            active: Mutex::new(None),
+        }
+    }
+
+    fn app_data(draft: &StreamDraft, reason: Option<InterruptionReason>) -> MessageAppData {
+        MessageAppData {
+            reasoning_started_at: draft.message.reasoning_started_at,
+            reasoning_completed_at: draft.message.reasoning_completed_at,
+            interruption: reason.map(|reason| InterruptionData {
+                reason,
+                request_id: draft.request_id,
+                user_message_id: draft.user_message_id,
+            }),
+            ..MessageAppData::default()
+        }
+    }
+
+    async fn append_draft(&self, draft: &StreamDraft) -> Result<()> {
+        let app_data = Self::app_data(draft, None);
+        let app_data_by_id = [(draft.message.id, app_data.clone())].into_iter().collect();
+        self.session_manager.append_messages_with_app_data(
+            self.session_id,
+            std::slice::from_ref(&draft.message),
+            &app_data_by_id,
+        )?;
+        self.buffer
+            .write()
+            .await
+            .append_with_app_data(draft.message.clone(), app_data);
+        Ok(())
+    }
+
+    async fn persist_draft(
+        &self,
+        draft: &StreamDraft,
+        interruption: Option<InterruptionReason>,
+    ) -> Result<()> {
+        let app_data = Self::app_data(draft, interruption);
+        self.session_manager.store().replace_message_with_app_data(
+            self.session_id,
+            draft.message.id,
+            &draft.message,
+            &app_data,
+        )?;
+        let replaced = self.buffer.write().await.replace_with_app_data(
+            draft.message.id,
+            draft.message.clone(),
+            app_data,
+        );
+        if !replaced {
+            anyhow::bail!("streaming draft missing from the core message buffer")
+        }
+        Ok(())
+    }
+
+    async fn record(&self, mut event: AgentEvent) -> Result<AgentEvent> {
+        match &mut event {
+            AgentEvent::TurnStarting {
+                request_id,
+                user_message_id,
+                assistant_message_id,
+            } => {
+                let mut active = self.active.lock().await;
+                if active.is_some() {
+                    anyhow::bail!("attempted to start a stream before the prior draft was terminal")
+                }
+                let message = Message::streaming(MessageRole::Assistant, String::new());
+                let draft = StreamDraft {
+                    request_id: *request_id,
+                    user_message_id: *user_message_id,
+                    message,
+                    assistant_completed: false,
+                };
+                self.append_draft(&draft).await?;
+                *assistant_message_id = Some(draft.message.id);
+                *active = Some(draft);
+            }
+            AgentEvent::Delta {
+                request_id,
+                content,
+                ..
+            } => {
+                let mut active = self.active.lock().await;
+                let Some(draft) = active
+                    .as_mut()
+                    .filter(|draft| draft.request_id == *request_id)
+                else {
+                    return Ok(event);
+                };
+                draft.message.content.push_str(content);
+                if draft.message.reasoning_started_at.is_some()
+                    && draft.message.reasoning_completed_at.is_none()
+                {
+                    draft.message.reasoning_completed_at = Some(Utc::now());
+                }
+                self.persist_draft(draft, None).await?;
+            }
+            AgentEvent::ReasoningDelta {
+                request_id,
+                content,
+                ..
+            }
+            | AgentEvent::ReasoningSummaryDelta {
+                request_id,
+                content,
+                ..
+            } => {
+                let mut active = self.active.lock().await;
+                let Some(draft) = active
+                    .as_mut()
+                    .filter(|draft| draft.request_id == *request_id)
+                else {
+                    return Ok(event);
+                };
+                draft.message.reasoning.push_str(content);
+                if draft.message.reasoning_started_at.is_none() {
+                    draft.message.reasoning_started_at = Some(Utc::now());
+                }
+                self.persist_draft(draft, None).await?;
+            }
+            AgentEvent::ToolCallUpdated {
+                request_id,
+                tool_call,
+            } => {
+                let mut active = self.active.lock().await;
+                let Some(draft) = active
+                    .as_mut()
+                    .filter(|draft| draft.request_id == *request_id)
+                else {
+                    return Ok(event);
+                };
+                if let Some(existing) = draft
+                    .message
+                    .tool_calls
+                    .iter_mut()
+                    .find(|existing| existing.id == tool_call.id)
+                {
+                    *existing = tool_call.clone();
+                } else {
+                    draft.message.tool_calls.push(tool_call.clone());
+                }
+                if draft.message.reasoning_started_at.is_some()
+                    && draft.message.reasoning_completed_at.is_none()
+                {
+                    draft.message.reasoning_completed_at = Some(Utc::now());
+                }
+                self.persist_draft(draft, None).await?;
+            }
+            AgentEvent::UsageStats {
+                request_id,
+                input_tokens,
+                output_tokens,
+                total_tokens,
+                cache_read_tokens,
+                cache_write_tokens,
+                model_id,
+                duration_ms,
+            } => {
+                let mut active = self.active.lock().await;
+                let Some(draft) = active
+                    .as_mut()
+                    .filter(|draft| draft.request_id == *request_id)
+                else {
+                    return Ok(event);
+                };
+                draft.message.input_tokens = Some(*input_tokens);
+                draft.message.output_tokens = Some(*output_tokens);
+                draft.message.total_tokens = Some(*total_tokens);
+                draft.message.cache_read_tokens = Some(*cache_read_tokens);
+                draft.message.cache_write_tokens = Some(*cache_write_tokens);
+                draft.message.model_id = Some(model_id.clone());
+                draft.message.tokens_per_second = duration_ms
+                    .filter(|duration| *duration > 0)
+                    .map(|duration| *output_tokens as f32 / (duration as f32 / 1000.0));
+                self.persist_draft(draft, None).await?;
+            }
+            AgentEvent::StreamEnd {
+                request_id, status, ..
+            } => {
+                let mut active = self.active.lock().await;
+                let Some(draft) = active
+                    .as_mut()
+                    .filter(|draft| draft.request_id == *request_id)
+                else {
+                    return Ok(event);
+                };
+                if *status == StreamEndStatus::Completed {
+                    active.take();
+                    return Ok(event);
+                }
+                let now = Utc::now();
+                draft.message.completed_at.get_or_insert(now);
+                if draft.message.reasoning_started_at.is_some() {
+                    draft.message.reasoning_completed_at.get_or_insert(now);
+                }
+                let reason = match status {
+                    StreamEndStatus::Cancelled => InterruptionReason::UserCancelled,
+                    StreamEndStatus::Failed => InterruptionReason::ProviderFailed,
+                    StreamEndStatus::Completed => unreachable!("guarded above"),
+                };
+                if reason == InterruptionReason::UserCancelled {
+                    let mut notice =
+                        Message::new(MessageRole::Error, "Request interrupted by user");
+                    notice.completed_at = Some(now);
+                    let interruption = Self::app_data(&draft, Some(reason));
+                    let notice_data = interruption.clone();
+                    if draft.assistant_completed {
+                        let app_data_by_id =
+                            [(notice.id, notice_data.clone())].into_iter().collect();
+                        self.session_manager.append_messages_with_app_data(
+                            self.session_id,
+                            std::slice::from_ref(&notice),
+                            &app_data_by_id,
+                        )?;
+                        self.buffer
+                            .write()
+                            .await
+                            .append_with_app_data(notice, notice_data);
+                    } else {
+                        let keep_draft = self.session_manager.store().finalize_interrupted_stream(
+                            self.session_id,
+                            &draft.message,
+                            &interruption,
+                            &notice,
+                            &notice_data,
+                        )?;
+                        let mut buffer = self.buffer.write().await;
+                        if keep_draft {
+                            buffer.replace_with_app_data(
+                                draft.message.id,
+                                draft.message.clone(),
+                                interruption,
+                            );
+                        } else {
+                            buffer.remove(draft.message.id);
+                        }
+                        buffer.append_with_app_data(notice, notice_data);
+                    }
+                } else {
+                    if !draft.assistant_completed {
+                        self.persist_draft(draft, Some(reason)).await?;
+                    }
+                }
+                active.take();
+            }
+            _ => {}
+        }
+        Ok(event)
+    }
+
+    async fn complete_assistant(&self, messages: &[Message]) -> Result<Option<Uuid>> {
+        let Some(assistant) = messages
+            .iter()
+            .find(|message| message.role == MessageRole::Assistant)
+        else {
+            return Ok(None);
+        };
+        let mut active = self.active.lock().await;
+        let Some(draft) = active.as_mut() else {
+            return Ok(None);
+        };
+        if draft.assistant_completed {
+            return Ok(None);
+        }
+        self.session_manager.store().replace_message_with_app_data(
+            self.session_id,
+            draft.message.id,
+            assistant,
+            &MessageAppData::default(),
+        )?;
+        let replaced = self.buffer.write().await.replace_with_app_data(
+            draft.message.id,
+            assistant.clone(),
+            MessageAppData::default(),
+        );
+        if !replaced {
+            anyhow::bail!("completed stream draft missing from the core message buffer")
+        }
+        draft.message = assistant.clone();
+        draft.assistant_completed = true;
+        Ok(Some(assistant.id))
+    }
+}
+
 /// The concrete implementation of [`AgentContext`] for tidev.
 pub struct CoreContext {
     /// LLM client for streaming chat turns.
@@ -326,6 +639,8 @@ pub struct CoreContext {
     /// persisted immediately, while the replay notification is appended after
     /// the corresponding tool results to preserve message order.
     pending_instruction_sources: Arc<Mutex<Vec<String>>>,
+    /// Durable draft recorder for this context's streamed assistant messages.
+    stream_recorder: StreamRecorder,
 }
 
 /// Executes already-approved, non-task calls through tidev's host registry.
@@ -464,6 +779,8 @@ impl CoreContext {
         session_start_hash: Option<String>,
         config_dir: PathBuf,
     ) -> Self {
+        let stream_recorder =
+            StreamRecorder::new(session_id, session_manager.clone(), buffer.clone());
         Self {
             llm,
             session_manager,
@@ -488,6 +805,7 @@ impl CoreContext {
             instruction_content_cache: Arc::new(Mutex::new(HashMap::new())),
             config_dir,
             pending_instruction_sources: Arc::new(Mutex::new(Vec::new())),
+            stream_recorder,
         }
     }
 
@@ -943,6 +1261,14 @@ impl AgentContext for CoreContext {
         self.event_bus.agent_sender()
     }
 
+    async fn emit_stream_event(&self, event: AgentEvent) -> Result<()> {
+        let event = self.stream_recorder.record(event).await?;
+        // The durable write above is authoritative. Frontends may reconnect
+        // and reload it, so event delivery remains best-effort.
+        let _ = self.event_bus.agent_sender().send(event);
+        Ok(())
+    }
+
     fn workspace_root(&self) -> &std::path::Path {
         &self.workspace_root
     }
@@ -963,11 +1289,8 @@ impl AgentContext for CoreContext {
             system_prompt,
             thinking_level,
             request_id,
-            &self.event_bus.agent_sender(),
+            self,
             &self.cancel,
-            StreamTurnOptions {
-                emit_stream_end_on_cancel: true,
-            },
         )
         .await;
 
@@ -1269,15 +1592,27 @@ impl AgentContext for CoreContext {
         }
 
         // ── Phase 2: Write to buffer + DB ───────────────────────────────
+        let completed_stream_message_id =
+            self.stream_recorder.complete_assistant(&enriched).await?;
+        let new_messages: Vec<Message> = enriched
+            .iter()
+            .filter(|message| Some(message.id) != completed_stream_message_id)
+            .cloned()
+            .collect();
         {
             let mut buf = self.buffer.write().await;
-            for msg in &enriched {
+            for msg in &new_messages {
                 let data = app_data.get(&msg.id).cloned().unwrap_or_default();
                 buf.append_with_app_data(msg.clone(), data);
             }
         }
-        self.session_manager
-            .append_messages_with_app_data(session_id, &enriched, &app_data)?;
+        if !new_messages.is_empty() {
+            self.session_manager.append_messages_with_app_data(
+                session_id,
+                &new_messages,
+                &app_data,
+            )?;
+        }
         if has_tool_results {
             self.append_pending_instruction_message(session_id).await?;
         }

@@ -28,7 +28,9 @@ pub(crate) fn ensure_rustls_crypto_provider() {
 // Re-export types from tidev-llm (defined there as shared protocol types).
 pub use context::{AgentContext, AgentLoopConfig};
 pub use context_manager::{CompactionResult, ContextManager, ContextPreparation};
-pub use event::{AgentEvent, AgentEventSender, AgentEventSink, llm_event_to_agent_event};
+pub use event::{
+    AgentEvent, AgentEventSender, AgentEventSink, StreamEndStatus, llm_event_to_agent_event,
+};
 pub use loop_::run_agent_loop;
 pub use mcp::{McpConnectionStatus, McpRegistry, McpServerSpec, McpServerSummary, McpToolInfo};
 pub use message_buf::MessageBuffer;
@@ -41,4 +43,4 @@ pub use subagent::{
 };
 pub use tidev_llm;
 pub use tool::{Tool, ToolContext};
-pub use turn::{StreamTurnOptions, order_tool_results, stream_turn};
+pub use turn::{order_tool_results, stream_turn};

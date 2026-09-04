@@ -148,7 +148,14 @@ export interface MessageRecord {
     patch_files?: string | null;
     file_diffs?: string | null;
     provider_error?: ProviderErrorData | null;
+    interruption?: InterruptionData | null;
   };
+}
+
+export interface InterruptionData {
+  reason: "user_cancelled" | "provider_failed" | "runtime_restarted";
+  request_id: number;
+  user_message_id: string | null;
 }
 
 export interface ProviderErrorData {

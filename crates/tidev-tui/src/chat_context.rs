@@ -80,7 +80,14 @@ impl ChatContext {
         let mut message_app_data = HashMap::with_capacity(session_messages.len());
         for session_message in session_messages {
             let id = session_message.message.id;
-            messages.push(session_message.message);
+            let mut message = session_message.message;
+            // A durable interrupted draft stays `streaming` in storage so
+            // Core excludes it from future provider requests. The TUI is a
+            // read-only projection of that state and must render it as final.
+            if message.streaming && session_message.app_data.interruption.is_some() {
+                message.streaming = false;
+            }
+            messages.push(message);
             message_app_data.insert(id, session_message.app_data);
         }
         Self {
@@ -221,5 +228,32 @@ mod tests {
         assert_eq!(context.messages[0].id, message.id);
         assert_eq!(context.messages[0].content, "output");
         assert_eq!(context.session_messages()[0].app_data, app_data);
+    }
+
+    #[test]
+    fn durable_interrupted_draft_is_not_rendered_as_live_streaming() {
+        let mut draft = Message::streaming(MessageRole::Assistant, "partial response");
+        let draft_id = Uuid::from_u128(11);
+        draft.id = draft_id;
+        let app_data = MessageAppData {
+            interruption: Some(tidev_core::InterruptionData {
+                reason: tidev_core::InterruptionReason::RuntimeRestarted,
+                request_id: 3,
+                user_message_id: Some(Uuid::from_u128(12)),
+            }),
+            ..Default::default()
+        };
+
+        let context = ChatContext::from_session_messages(
+            Uuid::from_u128(13),
+            "title".into(),
+            vec![SessionMessage::new(draft, app_data.clone())],
+            None,
+            "model".into(),
+            "provider".into(),
+        );
+
+        assert!(!context.messages[0].streaming);
+        assert_eq!(context.app_data(draft_id), Some(&app_data));
     }
 }

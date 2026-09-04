@@ -2,7 +2,7 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use tidev_agent::{AgentEvent, AgentEventSender, AgentEventSink};
+use tidev_agent::{AgentEvent, AgentEventSender, AgentEventSink, StreamEndStatus};
 use tidev_llm::message::{AssistantTurn, Message, ToolCall, ToolExecutionResult};
 use tidev_storage::MessageAppData;
 use tokio::sync::mpsc::UnboundedSender;
@@ -139,12 +139,14 @@ pub enum BackendEvent {
         session_id: Uuid,
         request_id: u64,
         user_message_id: Option<Uuid>,
+        assistant_message_id: Option<Uuid>,
     },
     StreamEnd {
         session_id: Uuid,
         request_id: u64,
         reasoning_started_at: Option<DateTime<Utc>>,
         reasoning_completed_at: Option<DateTime<Utc>>,
+        status: StreamEndStatus,
     },
     MessagesTruncated {
         session_id: Uuid,
@@ -295,20 +297,24 @@ pub fn agent_event_to_backend_event(event: AgentEvent, session_id: Uuid) -> Back
         AgentEvent::TurnStarting {
             request_id,
             user_message_id,
+            assistant_message_id,
         } => BackendEvent::TurnStarting {
             session_id,
             request_id,
             user_message_id,
+            assistant_message_id,
         },
         AgentEvent::StreamEnd {
             request_id,
             reasoning_started_at,
             reasoning_completed_at,
+            status,
         } => BackendEvent::StreamEnd {
             session_id,
             request_id,
             reasoning_started_at,
             reasoning_completed_at,
+            status,
         },
         AgentEvent::ToolStarting {
             request_id,
@@ -547,11 +553,13 @@ mod tests {
             AgentEvent::TurnStarting {
                 request_id: 1,
                 user_message_id: None,
+                assistant_message_id: None,
             },
             AgentEvent::StreamEnd {
                 request_id: 1,
                 reasoning_started_at: None,
                 reasoning_completed_at: None,
+                status: StreamEndStatus::Completed,
             },
             AgentEvent::ToolStarting {
                 request_id: 1,
@@ -767,6 +775,7 @@ mod tests {
             AgentEvent::TurnStarting {
                 request_id,
                 user_message_id: None,
+                assistant_message_id: None,
             },
             session_id,
         ) {
@@ -774,6 +783,7 @@ mod tests {
                 session_id: received_session_id,
                 request_id: received_request_id,
                 user_message_id,
+                ..
             } => {
                 assert_eq!(received_session_id, session_id);
                 assert_eq!(received_request_id, request_id);
@@ -787,6 +797,7 @@ mod tests {
                 request_id,
                 reasoning_started_at,
                 reasoning_completed_at,
+                status: StreamEndStatus::Completed,
             },
             session_id,
         ) {
@@ -795,6 +806,7 @@ mod tests {
                 request_id: received_request_id,
                 reasoning_started_at: received_started_at,
                 reasoning_completed_at: received_completed_at,
+                ..
             } => {
                 assert_eq!(received_session_id, session_id);
                 assert_eq!(received_request_id, request_id);
@@ -917,12 +929,14 @@ mod tests {
         bus.agent_sender().send(AgentEvent::TurnStarting {
             request_id: 7,
             user_message_id: None,
+            assistant_message_id: None,
         });
         bus.send_backend(BackendEvent::StreamEnd {
             session_id,
             request_id: 7,
             reasoning_started_at: None,
             reasoning_completed_at: None,
+            status: StreamEndStatus::Completed,
         });
         bus.agent_sender().send(AgentEvent::Delta {
             request_id: 7,
@@ -935,6 +949,7 @@ mod tests {
                 session_id: received_session_id,
                 request_id: 7,
                 user_message_id: None,
+                ..
             }) if received_session_id == session_id
         ));
         assert!(matches!(

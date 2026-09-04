@@ -74,7 +74,7 @@ describe("round preview state", () => {
     expect(isRoundCollapsible(round())).toBe(true);
   });
 
-  it("keeps the last user-facing text for an interrupted round", () => {
+  it("keeps a fold control for an interrupted round", () => {
     const interrupted = round({
       interrupted: true,
       interruptionKind: "interrupted",
@@ -89,7 +89,7 @@ describe("round preview state", () => {
     expect(isRoundCollapsible(interrupted)).toBe(true);
   });
 
-  it("uses a status-only preview when interruption produced no text", () => {
+  it("does not collapse an interruption with no user-facing text", () => {
     const interrupted = round({
       interrupted: true,
       interruptionKind: "cancelled",
@@ -97,7 +97,7 @@ describe("round preview state", () => {
     });
 
     expect(getRoundPreviewIndex(interrupted)).toBeNull();
-    expect(isRoundCollapsible(interrupted)).toBe(true);
+    expect(isRoundCollapsible(interrupted)).toBe(false);
   });
 
   it("marks persisted cancellation as an interrupted round", () => {
@@ -112,9 +112,61 @@ describe("round preview state", () => {
       record(message("prompt", "user")),
       record(assistant),
       record(cancelled),
-    ]);
+    ]) as [Round];
 
     expect(built).toMatchObject({ interrupted: true, interruptionKind: "cancelled" });
+    expect(built.toolCallMap["call-1"]?.status).toBe("cancelled");
+  });
+
+  it("restores a durable interrupted streaming draft as a terminal round", () => {
+    const assistant = message("partial reply", "assistant");
+    assistant.streaming = true;
+    assistant.completed_at = "2026-08-22T00:01:00Z";
+
+    const [built] = buildRounds([
+      record(message("prompt", "user")),
+      {
+        message: assistant,
+        app_data: {
+          interruption: {
+            reason: "user_cancelled",
+            request_id: 4,
+            user_message_id: "user-1",
+          },
+        },
+      },
+    ]) as [Round];
+
+    expect(built).toMatchObject({
+      status: "complete",
+      interrupted: true,
+      interruptionKind: "cancelled",
+      completedAt: assistant.completed_at,
+    });
+    expect(built.segments).toContainEqual({ type: "text", content: "partial reply" });
+  });
+
+  it("marks unresolved tools as cancelled when the persisted round was cancelled", () => {
+    const assistant = message("partial reply", "assistant");
+    assistant.streaming = true;
+    assistant.completed_at = "2026-08-22T00:01:00Z";
+    assistant.tool_calls = [{ id: "call-1", name: "read", arguments: "{}" }];
+
+    const [built] = buildRounds([
+      record(message("prompt", "user")),
+      {
+        message: assistant,
+        app_data: {
+          interruption: {
+            reason: "user_cancelled",
+            request_id: 4,
+            user_message_id: "user-1",
+          },
+        },
+      },
+    ]) as [Round];
+
+    expect(built.toolCallMap["call-1"]?.status).toBe("cancelled");
   });
 
   it("freezes a reasoning segment at the assistant completion time when needed", () => {

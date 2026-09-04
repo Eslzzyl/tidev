@@ -15,6 +15,7 @@ import {
   Check,
   ChevronRight,
   CircleAlert,
+  CircleStop,
   GitFork,
   LoaderCircle,
   Pencil,
@@ -71,7 +72,7 @@ import {
   stripSystemReminderTags,
 } from "../../utils/format";
 import { formatThinkingLevel, isThinkingLevelEnabled } from "../../utils/chat";
-import { latestLiveStream, segmentReasoningTiming } from "../../utils/stream";
+import { latestTurnStream, segmentReasoningTiming } from "../../utils/stream";
 
 export interface MessageListProps {
   messages: MessageRecord[];
@@ -116,6 +117,13 @@ type ChatItem =
     }
   | { kind: "assistant-segment"; item: SegmentItem }
   | { kind: "round-footer"; key: string; footerParts: string[]; content: string }
+  | {
+      kind: "interruption-notice";
+      key: string;
+      status: "cancelled" | "interrupted";
+      startedAt?: string;
+      completedAt?: string;
+    }
   | { kind: "system"; key: string; block: SystemMessageBlockData }
   | { kind: "stream-empty"; key: string }
   | { kind: "stream-error"; key: string; message: string }
@@ -377,7 +385,7 @@ function buildRoundFooterParts(
   return parts;
 }
 
-function buildChatItems(
+export function buildChatItems(
   rounds: (Round | SystemMessageBlockData)[],
   streams: StreamMessage[],
   expandedTurns: Record<string, boolean>,
@@ -415,13 +423,13 @@ function buildChatItems(
       ...round.leadingInstructions.map((message) => ({ type: "instruction" as const, message })),
       ...round.segments,
     ];
-    const liveStream = latestLiveStream(streams, turnId);
+    const turnStream = latestTurnStream(streams, turnId);
     for (const stream of streams) {
-      if (stream.status === "streaming" && stream.userMessageId === turnId) {
+      if (stream.userMessageId === turnId) {
         mergedStreamKeys.add(stream.key);
       }
     }
-    const liveStreamHasToolCall = liveStream?.segments.some(
+    const turnStreamHasToolCall = turnStream?.segments.some(
       (segment) => segment.type === "tool_call",
     );
     const pendingInstructions =
@@ -438,22 +446,22 @@ function buildChatItems(
             }))
             .filter(
               ({ message, deferred }) =>
-                (!deferred || !liveStream || !liveStreamHasToolCall) &&
+                (!deferred || !turnStream || !turnStreamHasToolCall) &&
                 !persistedSegments.some(
                   (segment) =>
                     segment.type === "instruction" && segment.message.content === message.content,
                 ),
             )
         : [];
-    const assistant = hasAssistant(round) || Boolean(liveStream) || pendingInstructions.length > 0;
+    const assistant = hasAssistant(round) || Boolean(turnStream) || pendingInstructions.length > 0;
 
     items.push({ kind: "user", key: `${turnId}:user`, round });
 
     if (!assistant) continue;
 
-    const insertInstructionBeforeLive = Boolean(liveStream && pendingInstructions.length > 0);
-    let mergedSegments = liveStream
-      ? [...persistedSegments, ...liveStream.segments]
+    const insertInstructionBeforeStream = Boolean(turnStream && pendingInstructions.length > 0);
+    let mergedSegments = turnStream
+      ? [...persistedSegments, ...turnStream.segments]
       : persistedSegments;
     let activeFromIndex = persistedSegments.length;
     if (pendingInstructions.length > 0) {
@@ -461,19 +469,19 @@ function buildChatItems(
         type: "instruction" as const,
         message,
       }));
-      if (insertInstructionBeforeLive) {
+      if (insertInstructionBeforeStream) {
         mergedSegments = [
           ...persistedSegments,
           ...instructionSegments,
-          ...(liveStream?.segments ?? []),
+          ...(turnStream?.segments ?? []),
         ];
         activeFromIndex += instructionSegments.length;
       } else {
         mergedSegments = [...mergedSegments, ...instructionSegments];
       }
     }
-    const mergedToolCallMap = liveStream
-      ? { ...round.toolCallMap, ...liveStream.toolCallMap }
+    const mergedToolCallMap = turnStream
+      ? { ...round.toolCallMap, ...turnStream.toolCallMap }
       : round.toolCallMap;
     const instructionContents = [
       round.userMessage.content,
@@ -495,18 +503,26 @@ function buildChatItems(
       );
     }
     const hasPendingInstructions = pendingInstructions.length > 0;
-    const hasLiveContinuation = Boolean(liveStream);
+    const hasStreamContinuation = Boolean(turnStream);
+    const isTurnStreamActive = turnStream?.status === "streaming";
+    const terminalInterruption =
+      !isTurnStreamActive &&
+      (round.interrupted || turnStream?.status === "cancelled" || turnStream?.status === "interrupted");
     const renderableSegmentCount = mergedSegments.filter(
       (segment) => segment.type !== "tool_call" || Boolean(mergedToolCallMap[segment.toolCallId]),
     ).length;
     const collapsible =
-      isRoundCollapsible(round) ||
-      (renderableSegmentCount > 1 &&
-        (hasLiveContinuation || round.status === "complete" || Boolean(round.completedAt)));
-    const expanded = expandedTurns[turnId] ?? (hasLiveContinuation || !collapsible);
+      (isRoundCollapsible(round) ||
+        (renderableSegmentCount > 1 &&
+          (hasStreamContinuation ||
+            round.status === "complete" ||
+            Boolean(round.completedAt) ||
+            terminalInterruption)));
+    const expanded =
+      expandedTurns[turnId] ?? (isTurnStreamActive || terminalInterruption || !collapsible);
     const previewIndex = getTextPreviewIndex(mergedSegments);
     const hasFinalAnswer = previewIndex >= 0 && previewIndex === mergedSegments.length - 1;
-    const active = liveStream?.status === "streaming" || pendingInstructions.length > 0;
+    const active = isTurnStreamActive || pendingInstructions.length > 0;
 
     const interruptionLabel = round.interrupted
       ? round.interruptionKind === "cancelled"
@@ -519,28 +535,32 @@ function buildChatItems(
       ? getDuration(round.userMessage.created_at ?? "", round.completedAt)
       : null;
     const showTurnMeta =
-      hasLiveContinuation ||
+      hasStreamContinuation ||
       hasPendingInstructions ||
       ((hasFinalAnswer || round.interrupted) &&
         (Boolean(duration) ||
           collapsible ||
           (interruptionLabel !== null && round.providerErrors.length === 0)));
-
-    if (showTurnMeta) {
+    const assistantStatus =
+      turnStream?.status ??
+      (pendingInstructions.length > 0 ? "streaming" : roundAssistantStatus(round));
+    const appendTurnMeta = () => {
       items.push({
         kind: "assistant-meta",
         key: `${turnId}:meta`,
         turnId,
-        status:
-          liveStream?.status ??
-          (pendingInstructions.length > 0 ? "streaming" : roundAssistantStatus(round)),
+        status: assistantStatus,
         active,
         startedAt: round.userMessage.created_at,
-        completedAt: hasLiveContinuation ? undefined : round.completedAt,
+        completedAt: isTurnStreamActive
+          ? undefined
+          : (turnStream?.completedAt ?? round.completedAt),
         expanded,
         collapsible,
       });
-    }
+    };
+
+    if (showTurnMeta) appendTurnMeta();
 
     const segments = makeSegmentItems(
       mergedSegments,
@@ -553,8 +573,8 @@ function buildChatItems(
       `${turnId}:segment`,
       turnContentId(turnId),
       activeFromIndex,
-      liveStream?.reasoningStartedAt,
-      liveStream?.reasoningCompletedAt,
+      turnStream?.reasoningStartedAt,
+      turnStream?.reasoningCompletedAt,
       instructionContentByMessageId,
     );
     for (const segment of segments) {
@@ -572,14 +592,14 @@ function buildChatItems(
       });
     }
 
-    const liveProviderError = liveStream ? streamProviderError(liveStream) : null;
-    if (liveStream && liveProviderError) {
+    const turnProviderError = turnStream ? streamProviderError(turnStream) : null;
+    if (turnStream && turnProviderError) {
       items.push({
         kind: "provider-error",
         key: `${turnId}:provider-error`,
-        error: liveProviderError,
-        messageId: liveProviderError.user_message_id ?? liveStream.userMessageId ?? "",
-        retrying: liveStream.retrying,
+        error: turnProviderError,
+        messageId: turnProviderError.user_message_id ?? turnStream.userMessageId ?? "",
+        retrying: turnStream.retrying,
       });
     }
 
@@ -589,7 +609,7 @@ function buildChatItems(
         ? stripSystemReminderTags(mergedSegments[previewIndex].content)
         : "";
     if (
-      !hasLiveContinuation &&
+      !hasStreamContinuation &&
       round.status === "complete" &&
       !round.interrupted &&
       hasFinalAnswer &&
@@ -602,33 +622,46 @@ function buildChatItems(
         content: finalReplyContent,
       });
     }
+    if (terminalInterruption && assistantStatus !== "failed") {
+      items.push({
+        kind: "interruption-notice",
+        key: `${turnId}:interruption`,
+        status: assistantStatus === "cancelled" ? "cancelled" : "interrupted",
+        startedAt: round.userMessage.created_at,
+        completedAt: turnStream?.completedAt ?? round.completedAt,
+      });
+    }
   }
 
   for (const stream of streams) {
     if (mergedStreamKeys.has(stream.key)) continue;
     const isStreaming = stream.status === "streaming";
-    const turnId = stream.userMessageId ?? stream.key;
+    const terminalInterruption = stream.status === "cancelled" || stream.status === "interrupted";
+    const fallbackStreamId = `unmatched-stream-${stream.key}`;
     const previewIndex = getTextPreviewIndex(stream.segments);
     const collapsible = stream.segments.length > 1 && previewIndex > 0;
-    const expanded = expandedTurns[turnId] ?? (isStreaming || !collapsible);
+    const expanded =
+      expandedTurns[fallbackStreamId] ?? (isStreaming || terminalInterruption || !collapsible);
     const providerError = streamProviderError(stream);
-
-    if (!providerError) {
+    const appendFallbackMeta = () => {
       const startedAt =
         (stream.userMessageId ? userMessageTimestampMap.get(stream.userMessageId) : undefined) ??
         stream.reasoningStartedAt ??
         undefined;
       items.push({
         kind: "assistant-meta",
-        key: `${turnId}:meta`,
-        turnId,
+        key: `${fallbackStreamId}:meta`,
+        turnId: fallbackStreamId,
         status: stream.status,
         active: isStreaming,
         startedAt,
+        completedAt: stream.completedAt ?? undefined,
         expanded,
         collapsible,
       });
-    }
+    };
+
+    if (!providerError) appendFallbackMeta();
 
     const segments = makeSegmentItems(
       stream.segments,
@@ -638,8 +671,8 @@ function buildChatItems(
       isStreaming,
       stream.reasoningStartedAt,
       stream.reasoningCompletedAt,
-      `${turnId}:segment`,
-      turnContentId(turnId),
+      `${fallbackStreamId}:segment`,
+      turnContentId(fallbackStreamId),
     );
     for (const segment of segments) {
       items.push({ kind: "assistant-segment", item: segment });
@@ -648,18 +681,30 @@ function buildChatItems(
     if (providerError) {
       items.push({
         kind: "provider-error",
-        key: `${turnId}:provider-error`,
+        key: `${fallbackStreamId}:provider-error`,
         error: providerError,
         messageId: providerError.user_message_id ?? stream.userMessageId ?? "",
         retrying: stream.retrying,
       });
     } else if (isStreaming && stream.segments.length === 0) {
-      items.push({ kind: "stream-empty", key: `${turnId}:empty` });
-    } else if (!isStreaming) {
+      items.push({ kind: "stream-empty", key: `${fallbackStreamId}:empty` });
+    } else if (!isStreaming && !terminalInterruption) {
       items.push({
         kind: "stream-error",
-        key: `${turnId}:error`,
+        key: `${fallbackStreamId}:error`,
         message: stream.error ?? "Response failed",
+      });
+    }
+    if (!providerError && terminalInterruption) {
+      items.push({
+        kind: "interruption-notice",
+        key: `${fallbackStreamId}:interruption`,
+        status: stream.status === "cancelled" ? "cancelled" : "interrupted",
+        startedAt:
+          (stream.userMessageId ? userMessageTimestampMap.get(stream.userMessageId) : undefined) ??
+          stream.reasoningStartedAt ??
+          undefined,
+        completedAt: stream.completedAt ?? undefined,
       });
     }
   }
@@ -689,6 +734,8 @@ function estimateChatItemSize(item: ChatItem | undefined) {
       break;
     case "round-footer":
       return 28;
+    case "interruption-notice":
+      return 30;
     case "system":
       return 80;
     case "stream-empty":
@@ -799,6 +846,23 @@ function WorkDuration({
   return <span>{t("Worked for {{duration}}", { duration })}</span>;
 }
 
+function InterruptionDuration({
+  startedAt,
+  completedAt,
+}: {
+  startedAt?: string;
+  completedAt?: string;
+}) {
+  const { t } = useTranslation();
+  const start = startedAt ? Date.parse(startedAt) : Number.NaN;
+  const completed = completedAt ? Date.parse(completedAt) : Number.NaN;
+  if (Number.isNaN(start) || Number.isNaN(completed)) {
+    return <span>{t("You interrupted the response.")}</span>;
+  }
+  const duration = formatDurationHuman(Math.max(0, completed - start), t, true);
+  return <span>{t("You interrupted after {{duration}}", { duration })}</span>;
+}
+
 function AssistantMetaItem({
   turnId,
   status,
@@ -819,20 +883,14 @@ function AssistantMetaItem({
   onToggle: () => void;
 }) {
   const { t } = useTranslation();
-  const interruptionLabel =
-    status === "cancelled"
-      ? t("Stopped")
-      : status === "failed"
-        ? t("Response failed")
-        : status === "interrupted"
-          ? t("Response interrupted")
-          : null;
+  const interruptionContent = status === "failed" ? t("Response failed") : null;
+  const hasFailure = status === "failed";
 
   const content = (
     <>
-      <span className={interruptionLabel ? "assistant-turn-status interrupted" : undefined}>
-        {interruptionLabel ? (
-          interruptionLabel
+      <span className={hasFailure ? "assistant-turn-status failed" : undefined}>
+        {interruptionContent ? (
+          interruptionContent
         ) : (
           <ActivityRipple active={active}>
             <WorkDuration startedAt={startedAt} completedAt={completedAt} active={active} />
@@ -868,6 +926,35 @@ function AssistantMetaItem({
         ) : (
           <div className="assistant-turn-meta">{content}</div>
         )}
+      </div>
+    </article>
+  );
+}
+
+function InterruptionNotice({
+  status,
+  startedAt,
+  completedAt,
+}: {
+  status: "cancelled" | "interrupted";
+  startedAt?: string;
+  completedAt?: string;
+}) {
+  const { t } = useTranslation();
+  const content =
+    status === "cancelled" ? (
+      <InterruptionDuration startedAt={startedAt} completedAt={completedAt} />
+    ) : (
+      t("Response interrupted")
+    );
+
+  return (
+    <article className="chat-message assistant-message assistant-segment-row assistant-interruption-row">
+      <div className="assistant-message-inner">
+        <div className="assistant-interruption-notice">
+          <CircleStop className="assistant-interruption-icon" size={14} aria-hidden="true" />
+          <span>{content}</span>
+        </div>
       </div>
     </article>
   );
@@ -1109,6 +1196,14 @@ export const MessageList = memo(function MessageList({
               </div>
             </div>
           </article>
+        );
+      case "interruption-notice":
+        return (
+          <InterruptionNotice
+            status={item.status}
+            startedAt={item.startedAt}
+            completedAt={item.completedAt}
+          />
         );
       case "system":
         return <SystemMessageBlock message={item.block.message} sessionId={sessionId} />;

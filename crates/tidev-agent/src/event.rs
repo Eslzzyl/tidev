@@ -7,6 +7,19 @@ use tidev_llm::event::LlmEvent;
 use tidev_llm::message::{AssistantTurn, ToolCall, ToolExecutionResult};
 use tokio::sync::mpsc::UnboundedSender;
 
+/// The durable terminal state of one streamed assistant request.
+///
+/// A completed request becomes a normal protocol message. Interrupted and
+/// failed requests remain application-visible streaming drafts so they can be
+/// rendered after restart without entering a later provider request.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StreamEndStatus {
+    Completed,
+    Cancelled,
+    Failed,
+}
+
 /// Events produced by the agent loop and its runtime components.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum AgentEvent {
@@ -56,11 +69,15 @@ pub enum AgentEvent {
     TurnStarting {
         request_id: u64,
         user_message_id: Option<uuid::Uuid>,
+        /// Product hosts may allocate a durable placeholder before exposing
+        /// the event. Generic hosts leave this unset.
+        assistant_message_id: Option<uuid::Uuid>,
     },
     StreamEnd {
         request_id: u64,
         reasoning_started_at: Option<DateTime<Utc>>,
         reasoning_completed_at: Option<DateTime<Utc>>,
+        status: StreamEndStatus,
     },
     ToolStarting {
         request_id: u64,

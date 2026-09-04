@@ -13,10 +13,11 @@ export interface StreamMessage {
   requestId: number;
   segments: RoundSegment[];
   toolCallMap: Record<string, ToolCallEntry>;
-  status: "streaming" | "failed" | "interrupted";
+  status: "streaming" | "cancelled" | "failed" | "interrupted";
   providerFinished: boolean;
   reasoningStartedAt: string | null;
   reasoningCompletedAt: string | null;
+  completedAt?: string | null;
   error?: string;
   providerError?: ProviderErrorData;
   userMessageId?: string | null;

@@ -56,6 +56,7 @@ function createStream(key: string, requestId: number): StreamMessage {
     providerFinished: false,
     reasoningStartedAt: null,
     reasoningCompletedAt: null,
+    completedAt: null,
   };
 }
 
@@ -1026,28 +1027,49 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
         const requestId = Number(payload.request_id);
         if (!Number.isFinite(requestId)) return;
         const key = `${sessionId}:${requestId}`;
+        const endStatus = asString(payload.status);
         instructionToolSessionsRef.current.delete(sessionId);
         scheduleStreamUpdate((current) => {
           const stream = current[key];
           if (!stream) return current;
-          if (stream.providerFinished && stream.status !== "failed") {
+          if (endStatus === "completed" && stream.providerFinished && stream.status !== "failed") {
             const next = { ...current };
             delete next[key];
             return next;
           }
-          if (stream.status !== "streaming") return current;
+          if (stream.status !== "streaming" && endStatus !== "failed") return current;
+          const status =
+            endStatus === "cancelled"
+              ? "cancelled"
+              : endStatus === "failed"
+                ? "failed"
+                : "interrupted";
+          const terminalToolStatus = status === "failed" ? "failed" : "cancelled";
+          const toolCallMap = { ...stream.toolCallMap };
+          for (const [toolCallId, entry] of Object.entries(toolCallMap)) {
+            if (entry.status === "pending" || entry.status === "running") {
+              toolCallMap[toolCallId] = { ...entry, status: terminalToolStatus };
+            }
+          }
           return {
             ...current,
             [key]: {
               ...stream,
-              status: "interrupted",
+              status,
+              toolCallMap,
+              completedAt: new Date().toISOString(),
               reasoningStartedAt:
                 asString(payload.reasoning_started_at) || stream.reasoningStartedAt,
               reasoningCompletedAt:
                 asString(payload.reasoning_completed_at) ||
                 stream.reasoningCompletedAt ||
                 (stream.reasoningStartedAt ? new Date().toISOString() : null),
-              error: i18n.t("The turn was interrupted."),
+              error:
+                status === "cancelled"
+                  ? i18n.t("The turn was interrupted.")
+                  : status === "failed"
+                    ? stream.error ?? i18n.t("The turn was interrupted.")
+                    : i18n.t("The turn was interrupted."),
             },
           };
         });
@@ -1055,12 +1077,15 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
         if (selectedSessionRef.current === sessionId) {
           const instructionRevision = instructionNoticeRevisionRef.current;
           void loadMessages(sessionId).then((loaded) => {
-            if (
-              loaded &&
-              selectedSessionRef.current === sessionId &&
-              instructionNoticeRevisionRef.current === instructionRevision
-            ) {
-              clearPendingInstructionNotices();
+            if (loaded && selectedSessionRef.current === sessionId) {
+              scheduleStreamUpdate((current) => {
+                const next = { ...current };
+                delete next[key];
+                return next;
+              });
+              if (instructionNoticeRevisionRef.current === instructionRevision) {
+                clearPendingInstructionNotices();
+              }
             }
           });
           void loadTodos(sessionId);

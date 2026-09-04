@@ -118,6 +118,28 @@ impl CoreMessageBuffer {
         self.protocol.update_content(id, new_content)
     }
 
+    /// Replace one protocol message and its application-owned fields in place.
+    pub fn replace_with_app_data(
+        &mut self,
+        previous_id: uuid::Uuid,
+        message: Message,
+        app_data: MessageAppData,
+    ) -> bool {
+        if !self.protocol.replace(previous_id, message.clone()) {
+            return false;
+        }
+        self.app_data.remove(&previous_id);
+        self.app_data.insert(message.id, app_data);
+        true
+    }
+
+    /// Remove one protocol message and its application-owned fields.
+    pub fn remove(&mut self, id: uuid::Uuid) -> Option<Message> {
+        let message = self.protocol.remove(id)?;
+        self.app_data.remove(&id);
+        Some(message)
+    }
+
     /// Remove all messages from `index` onward.
     pub fn truncate(&mut self, index: usize) {
         self.protocol.truncate(index);

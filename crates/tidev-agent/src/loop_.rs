@@ -13,7 +13,7 @@ use chrono::Utc;
 use tidev_llm::message::{AssistantTurn, Message, MessageRole};
 
 use crate::context::{AgentContext, AgentLoopConfig};
-use crate::event::AgentEvent;
+use crate::event::{AgentEvent, StreamEndStatus};
 
 /// Run the full agent loop until the model produces a text-only response.
 ///
@@ -29,8 +29,6 @@ use crate::event::AgentEvent;
 /// ```
 pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> Result<()> {
     let session_id = config.session_id;
-    let event_tx = &config.event_tx;
-
     for request_id in 1_u64.. {
         // ─── 0. Cancellation check ──────────────────────────────────────
         if config.cancel.is_cancelled() {
@@ -49,10 +47,12 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
             .rev()
             .find(|message| message.role == MessageRole::User)
             .map(|message| message.id);
-        let _ = event_tx.send(AgentEvent::TurnStarting {
+        ctx.emit_stream_event(AgentEvent::TurnStarting {
             request_id,
             user_message_id,
-        });
+            assistant_message_id: None,
+        })
+        .await?;
 
         // ─── 5. Compose system prompt ─────────────────────────────────────
         let system_prompt = config.system_prompt.clone();
@@ -73,22 +73,23 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
         {
             Ok(turn) => turn,
             Err(_e) if config.cancel.is_cancelled() => {
-                // Cancellation is expected — exit cleanly.
-                // Already-streamed content was forwarded to the TUI via events;
-                // the TUI will mark the message as done and append a cancel note.
-                let _ = event_tx.send(AgentEvent::StreamEnd {
+                ctx.emit_stream_event(AgentEvent::StreamEnd {
                     request_id,
                     reasoning_started_at: None,
                     reasoning_completed_at: None,
-                });
+                    status: StreamEndStatus::Cancelled,
+                })
+                .await?;
                 return Ok(());
             }
             Err(e) => {
-                let _ = event_tx.send(AgentEvent::StreamEnd {
+                ctx.emit_stream_event(AgentEvent::StreamEnd {
                     request_id,
                     reasoning_started_at: None,
                     reasoning_completed_at: None,
-                });
+                    status: StreamEndStatus::Failed,
+                })
+                .await?;
                 return Err(e);
             }
         };
@@ -111,21 +112,25 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
                 .swap(false, std::sync::atomic::Ordering::SeqCst)
             {
                 // Finalise the current turn before starting a new one.
-                let _ = event_tx.send(AgentEvent::StreamEnd {
+                ctx.emit_stream_event(AgentEvent::StreamEnd {
                     request_id,
                     reasoning_started_at: turn.reasoning_started_at,
                     reasoning_completed_at: turn.reasoning_completed_at,
-                });
+                    status: StreamEndStatus::Completed,
+                })
+                .await?;
                 // TurnStarting for the next iteration is emitted by
                 // step 4 inside the loop body.
                 continue;
             }
 
-            let _ = event_tx.send(AgentEvent::StreamEnd {
+            ctx.emit_stream_event(AgentEvent::StreamEnd {
                 request_id,
                 reasoning_started_at: turn.reasoning_started_at,
                 reasoning_completed_at: turn.reasoning_completed_at,
-            });
+                status: StreamEndStatus::Completed,
+            })
+            .await?;
             return Ok(());
         }
 
@@ -152,11 +157,21 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
         }
 
         // ─── 12. Prepare for next turn ────────────────────────────────────
-        let _ = event_tx.send(AgentEvent::StreamEnd {
+        let status = if config.cancel.is_cancelled() {
+            StreamEndStatus::Cancelled
+        } else {
+            StreamEndStatus::Completed
+        };
+        ctx.emit_stream_event(AgentEvent::StreamEnd {
             request_id,
             reasoning_started_at: turn.reasoning_started_at,
             reasoning_completed_at: turn.reasoning_completed_at,
-        });
+            status,
+        })
+        .await?;
+        if status == StreamEndStatus::Cancelled {
+            return Ok(());
+        }
         // TurnStarting for the next iteration is emitted by
         // step 4 inside the loop body.
     }

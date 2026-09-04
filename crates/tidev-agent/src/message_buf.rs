@@ -43,6 +43,21 @@ impl MessageBuffer {
         None
     }
 
+    /// Replace one message in place while retaining its position.
+    pub fn replace(&mut self, id: uuid::Uuid, message: Message) -> bool {
+        let Some(index) = self.messages.iter().position(|current| current.id == id) else {
+            return false;
+        };
+        self.messages[index] = message;
+        true
+    }
+
+    /// Remove one message without disturbing the surrounding order.
+    pub fn remove(&mut self, id: uuid::Uuid) -> Option<Message> {
+        let index = self.messages.iter().position(|message| message.id == id)?;
+        Some(self.messages.remove(index))
+    }
+
     /// Remove all messages from `index` onward.
     pub fn truncate(&mut self, index: usize) {
         self.messages.truncate(index);

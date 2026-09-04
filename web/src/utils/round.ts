@@ -6,7 +6,7 @@ import type {
   ToolExecutionResult,
 } from "../types/api";
 
-export type ToolCallStatus = "pending" | "running" | "completed" | "failed";
+export type ToolCallStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
 
 export interface ToolCallEntry {
   id: string;
@@ -70,16 +70,11 @@ export function getRoundPreviewIndex(round: Round): number | null {
 }
 
 /**
- * Decide whether a terminal round should render in its compact preview state.
- * Interrupted rounds use the same compact treatment as successful rounds, but
- * keep a status-only preview when no user-facing text was produced.
+ * Decide whether a terminal round offers a compact preview. Interrupted rounds
+ * start expanded in the message list, but retain their normal fold control.
  */
 export function isRoundCollapsible(round: Round): boolean {
   if (round.status !== "complete" || !round.segments.length) return false;
-  if (round.interrupted) {
-    const previewIndex = getRoundPreviewIndex(round);
-    return round.segments.length > 1 || previewIndex === null;
-  }
 
   const previewIndex = getRoundPreviewIndex(round);
   return Boolean(round.completedAt && previewIndex !== null && previewIndex > 0);
@@ -88,6 +83,19 @@ export function isRoundCollapsible(round: Round): boolean {
 function markInterrupted(round: Round, kind: RoundInterruptionKind): void {
   round.interrupted = true;
   round.interruptionKind ??= kind;
+}
+
+function interruptionKind(record: MessageRecord): RoundInterruptionKind | undefined {
+  switch (record.app_data.interruption?.reason) {
+    case "user_cancelled":
+      return "cancelled";
+    case "provider_failed":
+      return "failed";
+    case "runtime_restarted":
+      return "interrupted";
+    default:
+      return undefined;
+  }
 }
 
 export interface SystemMessageBlock {
@@ -123,8 +131,10 @@ function applyToolResultMetadata(
 
 export function toolResultStatus(result: ToolExecutionResult): ToolCallStatus {
   const exitCode = result.metadata.exit_code;
+  const output = result.output.trim();
   if (exitCode !== null && exitCode !== 0) return "failed";
-  if (/^(Error:|User cancelled the request)/.test(result.output.trim())) return "failed";
+  if (output.startsWith("User cancelled the request")) return "cancelled";
+  if (output.startsWith("Error:")) return "failed";
   return "completed";
 }
 
@@ -204,7 +214,10 @@ export function buildRounds(records: MessageRecord[]): (Round | SystemMessageBlo
       }
     } else if (currentRound) {
       if (msg.role === "assistant") {
-        if (!msg.streaming && !msg.completed_at) {
+        const durableInterruption = interruptionKind(record);
+        if (durableInterruption) {
+          markInterrupted(currentRound, durableInterruption);
+        } else if (!msg.streaming && !msg.completed_at) {
           markInterrupted(currentRound, "interrupted");
         }
 
@@ -255,7 +268,7 @@ export function buildRounds(records: MessageRecord[]): (Round | SystemMessageBlo
         } else if (msg.reasoning && msg.completed_at) {
           currentRound.reasoningCompletedAt = msg.completed_at;
         }
-        currentRound.status = msg.streaming ? "streaming" : "complete";
+        currentRound.status = msg.streaming && !durableInterruption ? "streaming" : "complete";
         if (msg.model_id) {
           currentRound.modelId = msg.model_id;
         }
@@ -289,7 +302,7 @@ export function buildRounds(records: MessageRecord[]): (Round | SystemMessageBlo
           });
         }
       } else if (msg.role === "error") {
-        markInterrupted(currentRound, "failed");
+        markInterrupted(currentRound, interruptionKind(record) ?? "failed");
         const providerError = record.app_data.provider_error;
         if (providerError) {
           currentRound.providerErrors.push({
@@ -300,6 +313,17 @@ export function buildRounds(records: MessageRecord[]): (Round | SystemMessageBlo
             },
           });
         }
+      }
+    }
+  }
+
+  for (const item of rounds) {
+    if ("kind" in item || !item.interrupted) continue;
+    const terminalStatus: ToolCallStatus =
+      item.interruptionKind === "failed" ? "failed" : "cancelled";
+    for (const entry of Object.values(item.toolCallMap)) {
+      if (!entry.result && (entry.status === "pending" || entry.status === "running")) {
+        entry.status = terminalStatus;
       }
     }
   }
