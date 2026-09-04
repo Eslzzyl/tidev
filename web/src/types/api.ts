@@ -589,6 +589,61 @@ export interface StatsTimeSeries {
   summary: StatsSummary;
 }
 
+export interface StatsActivityCell {
+  date: string;
+  request_count: number;
+  total_tokens: number;
+  level: number;
+}
+
+export interface StatsActivity {
+  start_date: string;
+  end_date: string;
+  total_requests: number;
+  total_tokens: number;
+  cells: StatsActivityCell[];
+}
+
+export interface StatsActiveSessionPoint {
+  time_bucket: string;
+  active_sessions: number;
+}
+
+export interface StatsRhythmCell {
+  weekday: number;
+  hour: number;
+  request_count: number;
+  total_tokens: number;
+  level: number;
+}
+
+export interface StatsModelMixSeries {
+  key: string;
+  provider_display_name: string;
+  model_display_name: string;
+  is_other: boolean;
+}
+
+export interface StatsModelMixPoint {
+  time_bucket: string;
+  shares: Record<string, number>;
+}
+
+export interface StatsRequestSizeBucket {
+  lower_bound: number;
+  upper_bound: number | null;
+  request_count: number;
+  total_tokens: number;
+}
+
+export interface StatsInsights {
+  granularity: string;
+  active_sessions: StatsActiveSessionPoint[];
+  rhythm: { cells: StatsRhythmCell[] };
+  model_mix: { series: StatsModelMixSeries[]; points: StatsModelMixPoint[] };
+  request_size_distribution: StatsRequestSizeBucket[];
+}
+
 export interface StatsOverview {
   summary: StatsSummary;
   timeseries: StatsTimeSeries;

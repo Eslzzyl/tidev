@@ -74,6 +74,11 @@ CREATE INDEX IF NOT EXISTS idx_messages_session_created_at
 CREATE INDEX IF NOT EXISTS idx_messages_session_id
     ON messages(session_id);
 
+CREATE INDEX IF NOT EXISTS idx_messages_usage_created_at
+    ON messages(created_at)
+    WHERE role = 'assistant'
+      AND (total_tokens IS NOT NULL OR input_tokens IS NOT NULL OR output_tokens IS NOT NULL);
+
 CREATE TABLE IF NOT EXISTS tool_outputs (
     id TEXT PRIMARY KEY,
     session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,

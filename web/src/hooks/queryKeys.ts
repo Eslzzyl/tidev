@@ -52,6 +52,9 @@ export const queryKeys = {
   statsSummary: (start?: string, end?: string) => ["stats", "summary", start, end] as const,
   statsTimeSeries: (granularity?: string, start?: string, end?: string) =>
     ["stats", "timeseries", granularity, start, end] as const,
+  statsActivity: ["stats", "activity"] as const,
+  statsInsights: (granularity?: string, start?: string, end?: string) =>
+    ["stats", "insights", granularity, start, end] as const,
   statsModels: (start?: string, end?: string) => ["stats", "models", start, end] as const,
   statsProviders: (start?: string, end?: string) => ["stats", "providers", start, end] as const,
   statsSessions: (limit?: number, offset?: number, start?: string, end?: string) =>

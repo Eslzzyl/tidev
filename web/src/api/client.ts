@@ -49,6 +49,8 @@ import type {
   GitFileDiffResponse,
   StatsSummary,
   StatsTimeSeries,
+  StatsActivity,
+  StatsInsights,
   StatsOverview,
   ModelUsageEntry,
   ProviderUsageEntry,
@@ -566,6 +568,17 @@ export const api = {
     if (params?.end) searchParams.set("end", params.end);
     const qs = searchParams.toString();
     return fetchJson<StatsTimeSeries>(`${API_BASE}/stats/timeseries${qs ? `?${qs}` : ""}`);
+  },
+
+  getStatsActivity: () => fetchJson<StatsActivity>(`${API_BASE}/stats/activity`),
+
+  getStatsInsights: (params?: { granularity?: string; start?: string; end?: string }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.granularity) searchParams.set("granularity", params.granularity);
+    if (params?.start) searchParams.set("start", params.start);
+    if (params?.end) searchParams.set("end", params.end);
+    const qs = searchParams.toString();
+    return fetchJson<StatsInsights>(`${API_BASE}/stats/insights${qs ? `?${qs}` : ""}`);
   },
 
   getStatsModels: (params?: { start?: string; end?: string }) => {

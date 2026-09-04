@@ -43,4 +43,7 @@ pub use tidev_agent::{CompactionResult, ContextManager};
 // Re-export storage/snapshot types so tidev-tui can use them
 // without depending on tidev-storage / tidev-snapshot directly.
 pub use tidev_snapshot::FileDiff;
-pub use tidev_storage::{MessageAppData, ProviderErrorData, SessionRecord, UsageRecord};
+pub use tidev_storage::{
+    MessageAppData, ProviderErrorData, SessionRecord, UsageActiveSessionBucket, UsageActivityDay,
+    UsageModelMixBucket, UsageRecord, UsageRequestSizeBucket, UsageRhythmCell,
+};

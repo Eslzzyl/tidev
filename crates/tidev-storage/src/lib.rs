@@ -455,6 +455,96 @@ pub struct UsageRecord {
     pub total_tokens: u64,
 }
 
+/// Daily activity totals derived directly from assistant messages with usage.
+///
+/// This intentionally exposes no message content. The web statistics API uses
+/// it to render a fixed-size activity calendar without loading raw messages.
+#[derive(Debug, Clone)]
+pub struct UsageActivityDay {
+    pub date: String,
+    pub request_count: u64,
+    pub total_tokens: u64,
+}
+
+/// Distinct sessions with at least one token-bearing assistant response in a time bucket.
+#[derive(Debug, Clone)]
+pub struct UsageActiveSessionBucket {
+    pub time_bucket: String,
+    pub active_sessions: u64,
+}
+
+/// Aggregate response activity for one weekday and hour pair.
+#[derive(Debug, Clone)]
+pub struct UsageRhythmCell {
+    pub weekday: u8,
+    pub hour: u8,
+    pub request_count: u64,
+    pub total_tokens: u64,
+}
+
+/// Token usage for one model series in a time bucket.
+#[derive(Debug, Clone)]
+pub struct UsageModelMixBucket {
+    pub time_bucket: String,
+    pub provider_id: String,
+    pub provider_display_name: String,
+    pub model_id: String,
+    pub model_display_name: String,
+    pub is_other: bool,
+    pub total_tokens: u64,
+}
+
+/// Aggregate response counts for one total-token size range.
+#[derive(Debug, Clone)]
+pub struct UsageRequestSizeBucket {
+    pub lower_bound: u64,
+    pub upper_bound: Option<u64>,
+    pub request_count: u64,
+    pub total_tokens: u64,
+}
+
+const USAGE_MESSAGE_FILTER: &str = "m.role = 'assistant' AND (m.total_tokens IS NOT NULL OR m.input_tokens IS NOT NULL OR m.output_tokens IS NOT NULL)";
+const USAGE_REQUEST_SIZE_RANGES: [(u64, Option<u64>); 5] = [
+    (0, Some(2_048)),
+    (2_048, Some(8_192)),
+    (8_192, Some(32_768)),
+    (32_768, Some(131_072)),
+    (131_072, None),
+];
+
+fn usage_range_filter(
+    start: Option<DateTime<Utc>>,
+    end: Option<DateTime<Utc>>,
+) -> (String, Vec<Box<dyn ToSql>>) {
+    let mut clauses = Vec::new();
+    let mut values: Vec<Box<dyn ToSql>> = Vec::new();
+    if let Some(start) = start {
+        clauses.push("m.created_at >= ?".to_owned());
+        values.push(Box::new(start.to_rfc3339()));
+    }
+    if let Some(end) = end {
+        clauses.push("m.created_at < ?".to_owned());
+        values.push(Box::new(end.to_rfc3339()));
+    }
+    let filter = if clauses.is_empty() {
+        String::new()
+    } else {
+        format!(" AND {}", clauses.join(" AND "))
+    };
+    (filter, values)
+}
+
+fn usage_time_bucket_expression(granularity: &str, timestamp: &str) -> String {
+    match granularity {
+        "hour" => format!("strftime('%Y-%m-%dT%H:00:00Z', {timestamp})"),
+        "week" => format!(
+            "strftime('%Y-%m-%dT00:00:00Z', date({timestamp}, '-' || ((CAST(strftime('%w', {timestamp}) AS INTEGER) + 6) % 7) || ' days'))"
+        ),
+        "month" => format!("strftime('%Y-%m-01T00:00:00Z', {timestamp})"),
+        _ => format!("strftime('%Y-%m-%dT00:00:00Z', {timestamp})"),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Session CRUD
 // ---------------------------------------------------------------------------
@@ -1645,37 +1735,291 @@ impl SessionStore {
 
     /// Load token usage records without loading message content or metadata.
     pub fn load_usage_records(&self) -> Result<Vec<UsageRecord>> {
+        self.load_usage_records_in_range(None, None)
+    }
+
+    /// Load token usage records in an optional half-open UTC time range.
+    ///
+    /// Applying the range in SQLite avoids materializing unrelated message
+    /// metadata before the web layer aggregates statistics.
+    pub fn load_usage_records_in_range(
+        &self,
+        start: Option<DateTime<Utc>>,
+        end: Option<DateTime<Utc>>,
+    ) -> Result<Vec<UsageRecord>> {
         self.read(|conn| {
-            let mut stmt = conn.prepare(
+            let mut conditions = vec![String::from(
+                "m.role = 'assistant' AND (m.total_tokens IS NOT NULL OR m.input_tokens IS NOT NULL OR m.output_tokens IS NOT NULL)",
+            )];
+            let mut values: Vec<Box<dyn ToSql>> = Vec::new();
+            if let Some(start) = start {
+                conditions.push("m.created_at >= ?".to_owned());
+                values.push(Box::new(start.to_rfc3339()));
+            }
+            if let Some(end) = end {
+                conditions.push("m.created_at < ?".to_owned());
+                values.push(Box::new(end.to_rfc3339()));
+            }
+            let sql = format!(
                 "SELECT m.session_id, s.title, s.provider_id, s.provider_display_name, \
                  s.model_id, s.model_display_name, s.created_at, s.updated_at, m.created_at, \
                  COALESCE(m.input_tokens, 0), COALESCE(m.output_tokens, 0), \
                  COALESCE(m.cache_read_tokens, 0), COALESCE(m.cache_write_tokens, 0), \
                  COALESCE(m.total_tokens, COALESCE(m.input_tokens, 0) + COALESCE(m.output_tokens, 0)) \
                  FROM messages m INNER JOIN sessions s ON s.id = m.session_id \
+                 WHERE {} ORDER BY m.created_at ASC, m.rowid ASC",
+                conditions.join(" AND ")
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map(
+                params_from_iter(values.iter().map(|value| value.as_ref())),
+                |row| -> rusqlite::Result<UsageRecord> {
+                    Ok(UsageRecord {
+                        session_id: row.get(0)?,
+                        title: row.get(1)?,
+                        provider_id: row.get(2)?,
+                        provider_display_name: row.get(3)?,
+                        model_id: row.get(4)?,
+                        model_display_name: row.get(5)?,
+                        session_created_at: row.get(6)?,
+                        session_updated_at: row.get(7)?,
+                        created_at: row.get(8)?,
+                        input_tokens: row.get::<_, i64>(9)?.max(0) as u64,
+                        output_tokens: row.get::<_, i64>(10)?.max(0) as u64,
+                        cache_read_tokens: row.get::<_, i64>(11)?.max(0) as u64,
+                        cache_write_tokens: row.get::<_, i64>(12)?.max(0) as u64,
+                        total_tokens: row.get::<_, i64>(13)?.max(0) as u64,
+                    })
+                },
+            )?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+    }
+
+    /// Aggregate daily activity directly from assistant messages with usage.
+    ///
+    /// The caller supplies a half-open UTC range. SQLite performs filtering
+    /// and grouping so the response remains bounded by the requested days.
+    pub fn load_usage_activity_days(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<UsageActivityDay>> {
+        self.read(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT substr(m.created_at, 1, 10) AS activity_date, \
+                 COUNT(*) AS request_count, \
+                 COALESCE(SUM(COALESCE(m.total_tokens, COALESCE(m.input_tokens, 0) + COALESCE(m.output_tokens, 0))), 0) AS total_tokens \
+                 FROM messages m \
                  WHERE m.role = 'assistant' \
                    AND (m.total_tokens IS NOT NULL OR m.input_tokens IS NOT NULL OR m.output_tokens IS NOT NULL) \
-                 ORDER BY m.created_at ASC, m.rowid ASC",
+                   AND m.created_at >= ?1 \
+                   AND m.created_at < ?2 \
+                 GROUP BY activity_date \
+                 ORDER BY activity_date ASC",
             )?;
-            let rows = stmt.query_map([], |row| {
-                Ok(UsageRecord {
-                    session_id: row.get(0)?,
-                    title: row.get(1)?,
-                    provider_id: row.get(2)?,
-                    provider_display_name: row.get(3)?,
-                    model_id: row.get(4)?,
-                    model_display_name: row.get(5)?,
-                    session_created_at: row.get(6)?,
-                    session_updated_at: row.get(7)?,
-                    created_at: row.get(8)?,
-                    input_tokens: row.get::<_, i64>(9)?.max(0) as u64,
-                    output_tokens: row.get::<_, i64>(10)?.max(0) as u64,
-                    cache_read_tokens: row.get::<_, i64>(11)?.max(0) as u64,
-                    cache_write_tokens: row.get::<_, i64>(12)?.max(0) as u64,
-                    total_tokens: row.get::<_, i64>(13)?.max(0) as u64,
+            let rows = stmt.query_map(params![start.to_rfc3339(), end.to_rfc3339()], |row| {
+                Ok(UsageActivityDay {
+                    date: row.get(0)?,
+                    request_count: row.get::<_, i64>(1)?.max(0) as u64,
+                    total_tokens: row.get::<_, i64>(2)?.max(0) as u64,
                 })
             })?;
             Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+    }
+
+    /// Count distinct sessions with token-bearing assistant responses per UTC bucket.
+    pub fn load_usage_active_sessions(
+        &self,
+        start: Option<DateTime<Utc>>,
+        end: Option<DateTime<Utc>>,
+        granularity: &str,
+    ) -> Result<Vec<UsageActiveSessionBucket>> {
+        self.read(|conn| {
+            let bucket = usage_time_bucket_expression(granularity, "m.created_at");
+            let (range_filter, values) = usage_range_filter(start, end);
+            let sql = format!(
+                "SELECT {bucket} AS time_bucket, COUNT(DISTINCT m.session_id) AS active_sessions \
+                 FROM messages m \
+                 WHERE {USAGE_MESSAGE_FILTER}{range_filter} \
+                 GROUP BY time_bucket \
+                 ORDER BY time_bucket ASC"
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map(
+                params_from_iter(values.iter().map(|value| value.as_ref())),
+                |row| {
+                    Ok(UsageActiveSessionBucket {
+                        time_bucket: row.get(0)?,
+                        active_sessions: row.get::<_, i64>(1)?.max(0) as u64,
+                    })
+                },
+            )?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+    }
+
+    /// Aggregate response activity by weekday and hour in UTC.
+    pub fn load_usage_rhythm(
+        &self,
+        start: Option<DateTime<Utc>>,
+        end: Option<DateTime<Utc>>,
+    ) -> Result<Vec<UsageRhythmCell>> {
+        self.read(|conn| {
+            let (range_filter, values) = usage_range_filter(start, end);
+            let sql = format!(
+                "SELECT \
+                   ((CAST(strftime('%w', m.created_at) AS INTEGER) + 6) % 7) AS weekday, \
+                   CAST(strftime('%H', m.created_at) AS INTEGER) AS hour, \
+                   COUNT(*) AS request_count, \
+                   COALESCE(SUM(COALESCE(m.total_tokens, COALESCE(m.input_tokens, 0) + COALESCE(m.output_tokens, 0))), 0) AS total_tokens \
+                 FROM messages m \
+                 WHERE {USAGE_MESSAGE_FILTER}{range_filter} \
+                 GROUP BY weekday, hour \
+                 ORDER BY weekday ASC, hour ASC"
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map(
+                params_from_iter(values.iter().map(|value| value.as_ref())),
+                |row| {
+                    Ok(UsageRhythmCell {
+                        weekday: row.get::<_, i64>(0)?.clamp(0, 6) as u8,
+                        hour: row.get::<_, i64>(1)?.clamp(0, 23) as u8,
+                        request_count: row.get::<_, i64>(2)?.max(0) as u64,
+                        total_tokens: row.get::<_, i64>(3)?.max(0) as u64,
+                    })
+                },
+            )?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+    }
+
+    /// Aggregate the top models and one combined remainder series per UTC bucket.
+    pub fn load_usage_model_mix(
+        &self,
+        start: Option<DateTime<Utc>>,
+        end: Option<DateTime<Utc>>,
+        granularity: &str,
+        model_limit: u64,
+    ) -> Result<Vec<UsageModelMixBucket>> {
+        self.read(|conn| {
+            let bucket = usage_time_bucket_expression(granularity, "usage.created_at");
+            let (range_filter, mut values) = usage_range_filter(start, end);
+            values.push(Box::new(model_limit.clamp(1, 10) as i64));
+            let sql = format!(
+                "WITH usage AS ( \
+                   SELECT \
+                     m.created_at, \
+                     COALESCE(NULLIF(s.provider_id, ''), 'unknown') AS provider_id, \
+                     COALESCE(NULLIF(s.provider_display_name, ''), NULLIF(s.provider_id, ''), 'Unknown') AS provider_display_name, \
+                     COALESCE(NULLIF(m.model_id, ''), NULLIF(s.model_id, ''), 'unknown') AS model_id, \
+                     COALESCE(NULLIF(s.model_display_name, ''), NULLIF(m.model_id, ''), NULLIF(s.model_id, ''), 'Unknown') AS model_display_name, \
+                     COALESCE(m.total_tokens, COALESCE(m.input_tokens, 0) + COALESCE(m.output_tokens, 0)) AS total_tokens \
+                   FROM messages m \
+                   INNER JOIN sessions s ON s.id = m.session_id \
+                   WHERE {USAGE_MESSAGE_FILTER}{range_filter} \
+                 ), \
+                 top_models AS ( \
+                   SELECT provider_id, model_id \
+                   FROM usage \
+                   GROUP BY provider_id, model_id \
+                   ORDER BY SUM(total_tokens) DESC, provider_id ASC, model_id ASC \
+                   LIMIT ? \
+                 ), \
+                 bucketed AS ( \
+                   SELECT \
+                     {bucket} AS time_bucket, \
+                     CASE WHEN top_models.model_id IS NULL THEN 'other' ELSE usage.provider_id END AS provider_id, \
+                     CASE WHEN top_models.model_id IS NULL THEN 'Other' ELSE usage.provider_display_name END AS provider_display_name, \
+                     CASE WHEN top_models.model_id IS NULL THEN 'other' ELSE usage.model_id END AS model_id, \
+                     CASE WHEN top_models.model_id IS NULL THEN 'Other' ELSE usage.model_display_name END AS model_display_name, \
+                     CASE WHEN top_models.model_id IS NULL THEN 1 ELSE 0 END AS is_other, \
+                     usage.total_tokens \
+                   FROM usage \
+                   LEFT JOIN top_models \
+                     ON top_models.provider_id = usage.provider_id \
+                     AND top_models.model_id = usage.model_id \
+                 ) \
+                 SELECT \
+                   time_bucket, provider_id, MIN(provider_display_name), model_id, MIN(model_display_name), is_other, \
+                   COALESCE(SUM(total_tokens), 0) AS total_tokens \
+                 FROM bucketed \
+                 GROUP BY time_bucket, provider_id, model_id, is_other \
+                 ORDER BY time_bucket ASC, is_other ASC, total_tokens DESC"
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map(
+                params_from_iter(values.iter().map(|value| value.as_ref())),
+                |row| {
+                    Ok(UsageModelMixBucket {
+                        time_bucket: row.get(0)?,
+                        provider_id: row.get(1)?,
+                        provider_display_name: row.get(2)?,
+                        model_id: row.get(3)?,
+                        model_display_name: row.get(4)?,
+                        is_other: row.get::<_, i64>(5)? != 0,
+                        total_tokens: row.get::<_, i64>(6)?.max(0) as u64,
+                    })
+                },
+            )?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+    }
+
+    /// Aggregate response counts into a fixed set of total-token size ranges.
+    pub fn load_usage_request_size_distribution(
+        &self,
+        start: Option<DateTime<Utc>>,
+        end: Option<DateTime<Utc>>,
+    ) -> Result<Vec<UsageRequestSizeBucket>> {
+        self.read(|conn| {
+            let (range_filter, values) = usage_range_filter(start, end);
+            let total_tokens = "COALESCE(m.total_tokens, COALESCE(m.input_tokens, 0) + COALESCE(m.output_tokens, 0))";
+            let sql = format!(
+                "SELECT \
+                   CASE \
+                     WHEN {total_tokens} < 2048 THEN 0 \
+                     WHEN {total_tokens} < 8192 THEN 1 \
+                     WHEN {total_tokens} < 32768 THEN 2 \
+                     WHEN {total_tokens} < 131072 THEN 3 \
+                     ELSE 4 \
+                   END AS bucket_index, \
+                   COUNT(*) AS request_count, \
+                   COALESCE(SUM({total_tokens}), 0) AS total_tokens \
+                 FROM messages m \
+                 WHERE {USAGE_MESSAGE_FILTER}{range_filter} \
+                 GROUP BY bucket_index \
+                 ORDER BY bucket_index ASC"
+            );
+            let mut buckets = USAGE_REQUEST_SIZE_RANGES
+                .iter()
+                .map(|(lower_bound, upper_bound)| UsageRequestSizeBucket {
+                    lower_bound: *lower_bound,
+                    upper_bound: *upper_bound,
+                    request_count: 0,
+                    total_tokens: 0,
+                })
+                .collect::<Vec<_>>();
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map(
+                params_from_iter(values.iter().map(|value| value.as_ref())),
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, i64>(1)?.max(0) as u64,
+                        row.get::<_, i64>(2)?.max(0) as u64,
+                    ))
+                },
+            )?;
+            for row in rows {
+                let (bucket_index, request_count, total_tokens) = row?;
+                if let Some(bucket) = buckets.get_mut(bucket_index.max(0) as usize) {
+                    bucket.request_count = request_count;
+                    bucket.total_tokens = total_tokens;
+                }
+            }
+            Ok(buckets)
         })
     }
 
@@ -3091,6 +3435,125 @@ mod tests {
         let stats = store.get_session_token_stats(sid).unwrap();
         assert_eq!(stats.input_tokens, 10);
         assert_eq!(stats.output_tokens, 20);
+    }
+
+    #[test]
+    fn usage_activity_days_are_grouped_in_sql_and_scoped_to_the_range() {
+        let (store, _tmp) = test_store();
+        let sid = create_test_session(&store, "/workspace", "activity test");
+        let day_one = DateTime::parse_from_rfc3339("2026-01-02T10:00:00+00:00")
+            .unwrap()
+            .with_timezone(&Utc);
+        let day_two = DateTime::parse_from_rfc3339("2026-01-03T12:00:00+00:00")
+            .unwrap()
+            .with_timezone(&Utc);
+        let day_three = DateTime::parse_from_rfc3339("2026-01-04T08:00:00+00:00")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        for (created_at, total_tokens) in [(day_one, 10), (day_two, 20), (day_two, 30)] {
+            let mut message = Message::new(MessageRole::Assistant, "response");
+            message.created_at = created_at;
+            message.total_tokens = Some(total_tokens);
+            store.append_message(sid, &message).unwrap();
+        }
+
+        let mut out_of_range = Message::new(MessageRole::Assistant, "later response");
+        out_of_range.created_at = day_three;
+        out_of_range.total_tokens = Some(99);
+        store.append_message(sid, &out_of_range).unwrap();
+
+        let days = store.load_usage_activity_days(day_one, day_three).unwrap();
+
+        assert_eq!(days.len(), 2);
+        assert_eq!(days[0].date, "2026-01-02");
+        assert_eq!(days[0].request_count, 1);
+        assert_eq!(days[0].total_tokens, 10);
+        assert_eq!(days[1].date, "2026-01-03");
+        assert_eq!(days[1].request_count, 2);
+        assert_eq!(days[1].total_tokens, 50);
+    }
+
+    #[test]
+    fn usage_insight_aggregates_are_scoped_and_bounded() {
+        let (store, _tmp) = test_store();
+        let primary = create_test_session(&store, "/workspace", "primary model");
+        let secondary = Uuid::new_v4();
+        store
+            .create_session(
+                secondary,
+                "/workspace",
+                "openai",
+                "OpenAI",
+                "gpt-5",
+                "GPT-5",
+                "secondary model",
+                None,
+                None,
+            )
+            .unwrap();
+        let first = DateTime::parse_from_rfc3339("2026-01-05T10:00:00+00:00")
+            .unwrap()
+            .with_timezone(&Utc);
+        let second = DateTime::parse_from_rfc3339("2026-01-06T12:00:00+00:00")
+            .unwrap()
+            .with_timezone(&Utc);
+        let end = DateTime::parse_from_rfc3339("2026-01-07T00:00:00+00:00")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        for total_tokens in [500, 3_000] {
+            let mut message = Message::new(MessageRole::Assistant, "response");
+            message.created_at = first;
+            message.total_tokens = Some(total_tokens);
+            store.append_message(primary, &message).unwrap();
+        }
+        let mut secondary_message = Message::new(MessageRole::Assistant, "response");
+        secondary_message.created_at = second;
+        secondary_message.total_tokens = Some(20_000);
+        store.append_message(secondary, &secondary_message).unwrap();
+
+        let mut out_of_range = Message::new(MessageRole::Assistant, "later response");
+        out_of_range.created_at = end;
+        out_of_range.total_tokens = Some(200_000);
+        store.append_message(secondary, &out_of_range).unwrap();
+
+        let active_sessions = store
+            .load_usage_active_sessions(Some(first), Some(end), "day")
+            .unwrap();
+        assert_eq!(active_sessions.len(), 2);
+        assert_eq!(active_sessions[0].time_bucket, "2026-01-05T00:00:00Z");
+        assert_eq!(active_sessions[0].active_sessions, 1);
+        assert_eq!(active_sessions[1].active_sessions, 1);
+
+        let rhythm = store.load_usage_rhythm(Some(first), Some(end)).unwrap();
+        assert_eq!(rhythm.len(), 2);
+        assert_eq!(rhythm[0].weekday, 0);
+        assert_eq!(rhythm[0].hour, 10);
+        assert_eq!(rhythm[0].request_count, 2);
+        assert_eq!(rhythm[1].weekday, 1);
+        assert_eq!(rhythm[1].hour, 12);
+        assert_eq!(rhythm[1].total_tokens, 20_000);
+
+        let model_mix = store
+            .load_usage_model_mix(Some(first), Some(end), "day", 1)
+            .unwrap();
+        assert_eq!(model_mix.len(), 2);
+        assert!(model_mix.iter().any(|bucket| {
+            bucket.model_id == "gpt-5" && !bucket.is_other && bucket.total_tokens == 20_000
+        }));
+        assert!(model_mix.iter().any(|bucket| {
+            bucket.model_id == "other" && bucket.is_other && bucket.total_tokens == 3_500
+        }));
+
+        let distribution = store
+            .load_usage_request_size_distribution(Some(first), Some(end))
+            .unwrap();
+        assert_eq!(distribution.len(), 5);
+        assert_eq!(distribution[0].request_count, 1);
+        assert_eq!(distribution[1].request_count, 1);
+        assert_eq!(distribution[2].request_count, 1);
+        assert_eq!(distribution[4].request_count, 0);
     }
 
     #[test]

@@ -67,6 +67,80 @@ struct StatsQuery {
     offset: Option<i64>,
 }
 
+#[derive(Debug, Serialize)]
+struct StatsActivityCell {
+    date: String,
+    request_count: u64,
+    total_tokens: u64,
+    level: u8,
+}
+
+#[derive(Debug, Serialize)]
+struct StatsActivityResponse {
+    start_date: String,
+    end_date: String,
+    total_requests: u64,
+    total_tokens: u64,
+    cells: Vec<StatsActivityCell>,
+}
+
+#[derive(Debug, Serialize)]
+struct StatsActiveSessionPoint {
+    time_bucket: String,
+    active_sessions: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct StatsRhythmCell {
+    weekday: u8,
+    hour: u8,
+    request_count: u64,
+    total_tokens: u64,
+    level: u8,
+}
+
+#[derive(Debug, Serialize)]
+struct StatsRhythmResponse {
+    cells: Vec<StatsRhythmCell>,
+}
+
+#[derive(Debug, Serialize)]
+struct StatsModelMixSeries {
+    key: String,
+    provider_display_name: String,
+    model_display_name: String,
+    is_other: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct StatsModelMixPoint {
+    time_bucket: String,
+    shares: BTreeMap<String, f64>,
+}
+
+#[derive(Debug, Serialize)]
+struct StatsModelMixResponse {
+    series: Vec<StatsModelMixSeries>,
+    points: Vec<StatsModelMixPoint>,
+}
+
+#[derive(Debug, Serialize)]
+struct StatsRequestSizeBucket {
+    lower_bound: u64,
+    upper_bound: Option<u64>,
+    request_count: u64,
+    total_tokens: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct StatsInsightsResponse {
+    granularity: String,
+    active_sessions: Vec<StatsActiveSessionPoint>,
+    rhythm: StatsRhythmResponse,
+    model_mix: StatsModelMixResponse,
+    request_size_distribution: Vec<StatsRequestSizeBucket>,
+}
+
 #[derive(Debug, Deserialize)]
 struct CreateSessionRequest {
     title: Option<String>,
@@ -619,6 +693,8 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/stats/providers", get(stats_providers))
         .route("/stats/sessions", get(stats_sessions))
         .route("/stats/overview", get(stats_overview))
+        .route("/stats/activity", get(stats_activity))
+        .route("/stats/insights", get(stats_insights))
         .merge(crate::terminal_api::terminal_routes())
         .route("/system/restart", post(system_restart))
         .route("/requests/{request_id}/respond", post(respond_to_request))
@@ -2796,6 +2872,20 @@ fn filter_usage_records(
         .collect()
 }
 
+fn load_stats_records(
+    state: &AppState,
+    query: &StatsQuery,
+) -> Result<Vec<tidev_core::UsageRecord>, ApiError> {
+    let start = parse_stats_time(query.start.as_deref());
+    let end = parse_stats_time(query.end.as_deref());
+    let records = state
+        .runtime
+        .session_manager()
+        .store()
+        .load_usage_records_in_range(start, end)?;
+    Ok(filter_usage_records(records, query))
+}
+
 fn stats_summary_json(records: &[tidev_core::UsageRecord]) -> serde_json::Value {
     let mut totals = UsageTotals::default();
     for record in records {
@@ -2868,8 +2958,7 @@ async fn stats_summary(
     State(state): State<Arc<AppState>>,
     Query(query): Query<StatsQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let store = state.runtime.session_manager().store();
-    let records = filter_usage_records(store.load_usage_records()?, &query);
+    let records = load_stats_records(&state, &query)?;
     Ok(Json(stats_summary_json(&records)))
 }
 
@@ -2911,8 +3000,7 @@ async fn stats_timeseries(
     State(state): State<Arc<AppState>>,
     Query(query): Query<StatsQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let store = state.runtime.session_manager().store();
-    let records = filter_usage_records(store.load_usage_records()?, &query);
+    let records = load_stats_records(&state, &query)?;
     let granularity = valid_granularity(query.granularity.as_deref());
     Ok(Json(stats_timeseries_json(&records, &granularity)))
 }
@@ -2952,14 +3040,7 @@ async fn stats_models(
     State(state): State<Arc<AppState>>,
     Query(query): Query<StatsQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let records = filter_usage_records(
-        state
-            .runtime
-            .session_manager()
-            .store()
-            .load_usage_records()?,
-        &query,
-    );
+    let records = load_stats_records(&state, &query)?;
     Ok(Json(stats_models_json(&records)))
 }
 
@@ -2995,14 +3076,7 @@ async fn stats_providers(
     State(state): State<Arc<AppState>>,
     Query(query): Query<StatsQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let records = filter_usage_records(
-        state
-            .runtime
-            .session_manager()
-            .store()
-            .load_usage_records()?,
-        &query,
-    );
+    let records = load_stats_records(&state, &query)?;
     Ok(Json(stats_providers_json(&records)))
 }
 
@@ -3052,14 +3126,7 @@ async fn stats_sessions(
     State(state): State<Arc<AppState>>,
     Query(query): Query<StatsQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let records = filter_usage_records(
-        state
-            .runtime
-            .session_manager()
-            .store()
-            .load_usage_records()?,
-        &query,
-    );
+    let records = load_stats_records(&state, &query)?;
     Ok(Json(stats_sessions_json(
         &records,
         query.limit.unwrap_or(10),
@@ -3067,12 +3134,261 @@ async fn stats_sessions(
     )))
 }
 
+const STATS_ACTIVITY_DAY_COUNT: i64 = 365;
+
+fn stats_activity_level(value: u64, scale: u64) -> u8 {
+    if value == 0 || scale == 0 {
+        return 0;
+    }
+    let normalized = ((value as f64 + 1.0).ln() / (scale as f64 + 1.0).ln()).min(1.0);
+    (normalized * 4.0).ceil().clamp(1.0, 4.0) as u8
+}
+
+fn stats_activity_response(
+    days: Vec<tidev_core::UsageActivityDay>,
+    end_date: chrono::NaiveDate,
+) -> StatsActivityResponse {
+    let start_date = end_date - Duration::days(STATS_ACTIVITY_DAY_COUNT - 1);
+    let mut days_by_date = days
+        .into_iter()
+        .map(|day| (day.date.clone(), day))
+        .collect::<HashMap<_, _>>();
+    let mut values = days_by_date
+        .values()
+        .map(|day| day.request_count)
+        .filter(|value| *value > 0)
+        .collect::<Vec<_>>();
+    values.sort_unstable();
+    let scale = values
+        .get(((values.len() as f64 * 0.95).ceil() as usize).saturating_sub(1))
+        .copied()
+        .unwrap_or(0)
+        .max(1);
+
+    let mut total_requests = 0;
+    let mut total_tokens = 0;
+    let mut cells = Vec::with_capacity(STATS_ACTIVITY_DAY_COUNT as usize);
+    for offset in 0..STATS_ACTIVITY_DAY_COUNT {
+        let date = start_date + Duration::days(offset);
+        let date_key = date.format("%Y-%m-%d").to_string();
+        let day = days_by_date.remove(&date_key);
+        let request_count = day.as_ref().map_or(0, |day| day.request_count);
+        let token_count = day.as_ref().map_or(0, |day| day.total_tokens);
+        total_requests += request_count;
+        total_tokens += token_count;
+        cells.push(StatsActivityCell {
+            date: date_key,
+            request_count,
+            total_tokens: token_count,
+            level: stats_activity_level(request_count, scale),
+        });
+    }
+
+    StatsActivityResponse {
+        start_date: start_date.format("%Y-%m-%d").to_string(),
+        end_date: end_date.format("%Y-%m-%d").to_string(),
+        total_requests,
+        total_tokens,
+        cells,
+    }
+}
+
+async fn stats_activity(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<StatsActivityResponse>, ApiError> {
+    let end_date = Utc::now().date_naive();
+    let start_date = end_date - Duration::days(STATS_ACTIVITY_DAY_COUNT - 1);
+    let start = Utc.from_utc_datetime(
+        &start_date
+            .and_hms_opt(0, 0, 0)
+            .expect("midnight is always valid"),
+    );
+    let end = Utc.from_utc_datetime(
+        &(end_date + Duration::days(1))
+            .and_hms_opt(0, 0, 0)
+            .expect("midnight is always valid"),
+    );
+    let days = state
+        .runtime
+        .session_manager()
+        .store()
+        .load_usage_activity_days(start, end)?;
+    Ok(Json(stats_activity_response(days, end_date)))
+}
+
+const STATS_MODEL_MIX_LIMIT: u64 = 5;
+
+fn stats_insight_granularity(query: &StatsQuery) -> String {
+    let granularity = valid_granularity(query.granularity.as_deref());
+    let start = parse_stats_time(query.start.as_deref());
+    let end = parse_stats_time(query.end.as_deref());
+    let range_exceeds_31_days = start
+        .zip(end)
+        .is_some_and(|(start, end)| end - start > Duration::days(31));
+    if granularity == "hour" && (start.is_none() || end.is_none() || range_exceeds_31_days) {
+        "day".to_owned()
+    } else {
+        granularity
+    }
+}
+
+fn stats_rhythm_response(cells: Vec<tidev_core::UsageRhythmCell>) -> StatsRhythmResponse {
+    let mut cells_by_time = cells
+        .into_iter()
+        .map(|cell| ((cell.weekday, cell.hour), cell))
+        .collect::<HashMap<_, _>>();
+    let mut values = cells_by_time
+        .values()
+        .map(|cell| cell.request_count)
+        .filter(|value| *value > 0)
+        .collect::<Vec<_>>();
+    values.sort_unstable();
+    let scale = values
+        .get(((values.len() as f64 * 0.95).ceil() as usize).saturating_sub(1))
+        .copied()
+        .unwrap_or(0)
+        .max(1);
+
+    let mut response_cells = Vec::with_capacity(7 * 24);
+    for weekday in 0..7 {
+        for hour in 0..24 {
+            let cell = cells_by_time.remove(&(weekday, hour));
+            let request_count = cell.as_ref().map_or(0, |cell| cell.request_count);
+            response_cells.push(StatsRhythmCell {
+                weekday,
+                hour,
+                request_count,
+                total_tokens: cell.as_ref().map_or(0, |cell| cell.total_tokens),
+                level: stats_activity_level(request_count, scale),
+            });
+        }
+    }
+    StatsRhythmResponse {
+        cells: response_cells,
+    }
+}
+
+fn stats_model_mix_response(
+    buckets: Vec<tidev_core::UsageModelMixBucket>,
+) -> StatsModelMixResponse {
+    #[derive(Debug)]
+    struct SeriesMeta {
+        provider_display_name: String,
+        model_display_name: String,
+        is_other: bool,
+        total_tokens: u64,
+    }
+
+    let mut series_by_key = BTreeMap::<String, SeriesMeta>::new();
+    let mut shares_by_time = BTreeMap::<String, BTreeMap<String, u64>>::new();
+    for bucket in buckets {
+        let key = if bucket.is_other {
+            "other".to_owned()
+        } else {
+            format!("{}:{}", bucket.provider_id, bucket.model_id)
+        };
+        let series = series_by_key.entry(key.clone()).or_insert(SeriesMeta {
+            provider_display_name: bucket.provider_display_name.clone(),
+            model_display_name: bucket.model_display_name.clone(),
+            is_other: bucket.is_other,
+            total_tokens: 0,
+        });
+        series.total_tokens += bucket.total_tokens;
+        *shares_by_time
+            .entry(bucket.time_bucket)
+            .or_default()
+            .entry(key)
+            .or_default() += bucket.total_tokens;
+    }
+
+    let mut series = series_by_key.into_iter().collect::<Vec<_>>();
+    series.sort_by(|(left_key, left), (right_key, right)| {
+        left.is_other
+            .cmp(&right.is_other)
+            .then_with(|| right.total_tokens.cmp(&left.total_tokens))
+            .then_with(|| left_key.cmp(right_key))
+    });
+    let series = series
+        .into_iter()
+        .map(|(key, series)| StatsModelMixSeries {
+            key,
+            provider_display_name: series.provider_display_name,
+            model_display_name: series.model_display_name,
+            is_other: series.is_other,
+        })
+        .collect::<Vec<_>>();
+    let points = shares_by_time
+        .into_iter()
+        .map(|(time_bucket, totals)| {
+            let total_tokens = totals.values().sum::<u64>();
+            let shares = totals
+                .into_iter()
+                .map(|(key, value)| {
+                    let share = if total_tokens == 0 {
+                        0.0
+                    } else {
+                        value as f64 / total_tokens as f64 * 100.0
+                    };
+                    (key, share)
+                })
+                .collect();
+            StatsModelMixPoint {
+                time_bucket,
+                shares,
+            }
+        })
+        .collect();
+    StatsModelMixResponse { series, points }
+}
+
+async fn stats_insights(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<StatsQuery>,
+) -> Result<Json<StatsInsightsResponse>, ApiError> {
+    let start = parse_stats_time(query.start.as_deref());
+    let end = parse_stats_time(query.end.as_deref());
+    let granularity = stats_insight_granularity(&query);
+    let store = state.runtime.session_manager().store();
+    let active_sessions = store
+        .load_usage_active_sessions(start, end, &granularity)?
+        .into_iter()
+        .map(|entry| StatsActiveSessionPoint {
+            time_bucket: entry.time_bucket,
+            active_sessions: entry.active_sessions,
+        })
+        .collect();
+    let rhythm = stats_rhythm_response(store.load_usage_rhythm(start, end)?);
+    let model_mix = stats_model_mix_response(store.load_usage_model_mix(
+        start,
+        end,
+        &granularity,
+        STATS_MODEL_MIX_LIMIT,
+    )?);
+    let request_size_distribution = store
+        .load_usage_request_size_distribution(start, end)?
+        .into_iter()
+        .map(|bucket| StatsRequestSizeBucket {
+            lower_bound: bucket.lower_bound,
+            upper_bound: bucket.upper_bound,
+            request_count: bucket.request_count,
+            total_tokens: bucket.total_tokens,
+        })
+        .collect();
+
+    Ok(Json(StatsInsightsResponse {
+        granularity,
+        active_sessions,
+        rhythm,
+        model_mix,
+        request_size_distribution,
+    }))
+}
+
 async fn stats_overview(
     State(state): State<Arc<AppState>>,
     Query(query): Query<StatsQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let store = state.runtime.session_manager().store();
-    let records = filter_usage_records(store.load_usage_records()?, &query);
+    let records = load_stats_records(&state, &query)?;
     let granularity = valid_granularity(query.granularity.as_deref());
     Ok(Json(serde_json::json!({
         "summary": stats_summary_json(&records),

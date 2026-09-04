@@ -35,6 +35,22 @@ export function useStatsTimeSeries(granularity?: string, params?: StatsQueryPara
   });
 }
 
+export function useStatsActivity() {
+  return useQuery({
+    queryKey: queryKeys.statsActivity,
+    queryFn: api.getStatsActivity,
+    staleTime: 60_000,
+  });
+}
+
+export function useStatsInsights(granularity?: string, params?: StatsQueryParams) {
+  return useQuery({
+    queryKey: queryKeys.statsInsights(granularity, params?.start, params?.end),
+    queryFn: () => api.getStatsInsights({ granularity, ...params }),
+    staleTime: 60_000,
+  });
+}
+
 export function useStatsModels(params?: StatsQueryParams) {
   return useQuery({
     queryKey: queryKeys.statsModels(params?.start, params?.end),
