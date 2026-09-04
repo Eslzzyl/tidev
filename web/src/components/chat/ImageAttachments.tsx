@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -120,24 +120,33 @@ function imageAttachments(attachments: MessageAttachment[]) {
   );
 }
 
+interface ImagePreview {
+  image: Extract<MessageAttachment, { type: "image" }>;
+  url: string;
+}
+
+function useImagePreviews(attachments: MessageAttachment[]): ImagePreview[] {
+  const [previews, setPreviews] = useState<ImagePreview[]>([]);
+
+  useEffect(() => {
+    const next = imageAttachments(attachments).map((image) => ({
+      image,
+      url: URL.createObjectURL(new Blob([Uint8Array.from(image.data)], { type: image.mime })),
+    }));
+    setPreviews(next);
+
+    return () => {
+      for (const preview of next) URL.revokeObjectURL(preview.url);
+    };
+  }, [attachments]);
+
+  return previews;
+}
+
 export function MessageImageGallery({ attachments }: { attachments: MessageAttachment[] }) {
   const { t } = useTranslation();
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
-  const previews = useMemo(
-    () =>
-      imageAttachments(attachments).map((image) => ({
-        image,
-        url: URL.createObjectURL(new Blob([Uint8Array.from(image.data)], { type: image.mime })),
-      })),
-    [attachments],
-  );
-
-  useEffect(
-    () => () => {
-      for (const preview of previews) URL.revokeObjectURL(preview.url);
-    },
-    [previews],
-  );
+  const previews = useImagePreviews(attachments);
 
   const preview = previewIndex === null ? undefined : previews[previewIndex];
   if (previews.length === 0) return null;

@@ -3303,6 +3303,55 @@ body {
 .message-content .tool-renderer-body .tool-code-lines [class*="hljs-"] {
   background: transparent;
 }
+.tool-read-result {
+  min-width: 0;
+}
+.tool-directory-list {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.tool-directory-entry {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  padding: 2px 0;
+  color: var(--text);
+  font-family: var(--ui-mono-font);
+  font-size: var(--chat-code-size);
+  line-height: var(--chat-code-line-height);
+}
+.tool-directory-entry > svg {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+.tool-directory-entry > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tool-directory-empty {
+  margin: 0;
+  color: var(--muted);
+  font-family: var(--ui-mono-font);
+  font-size: var(--chat-code-size);
+}
+.tool-read-image .message-image-gallery {
+  justify-content: flex-start;
+  margin: 0;
+}
+.tool-read-image .message-image-link {
+  width: min(360px, 100%);
+  height: auto;
+  aspect-ratio: 4 / 3;
+  background: var(--panel);
+}
+.tool-read-image .message-image-link img {
+  object-fit: contain;
+}
 .message-content .tool-renderer-body .tool-json-tree {
   padding: 0;
   background: transparent;

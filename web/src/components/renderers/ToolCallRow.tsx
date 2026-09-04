@@ -22,9 +22,9 @@ import { Button } from "../ui";
 import { ExpandableBody } from "../ui/ExpandableBody";
 import { JsonTreeView } from "../ui/JsonTreeView";
 import { ActivityRipple } from "./ActivityRipple";
-import { CodeLinesRenderer } from "./CodeLinesRenderer";
 import { DiffRenderer } from "./DiffRenderer";
 import { MarkdownRenderer } from "./MarkdownRenderer";
+import { formatFileSize, ReadResultRenderer } from "./ReadResultRenderer";
 import { SubagentCard } from "./SubagentCard";
 import { TodoRenderer } from "./TodoRenderer";
 
@@ -355,9 +355,10 @@ const ToolCallBody = memo(function ToolCallBody({
         </div>
       ) : null}
       {entry.result && entry.name === "read" ? (
-        <CodeLinesRenderer
+        <ReadResultRenderer
           output={entry.result.output}
           filepath={metadata?.filepath ?? undefined}
+          attachments={entry.result.attachments}
         />
       ) : null}
       {entry.result && entry.name === "todowrite" ? <TodoRenderer output={displayText} /> : null}
@@ -451,17 +452,6 @@ function readMetadata(output: string): {
 
 function isErrorOutput(output: string) {
   return /^(Error:|User cancelled the request)/.test(output.trim());
-}
-
-function formatFileSize(bytes: number) {
-  const units = ["B", "KB", "MB", "GB"];
-  let value = bytes;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit += 1;
-  }
-  return `${unit === 0 ? value : value.toFixed(1)} ${units[unit]}`;
 }
 
 function attachmentSummary(
