@@ -18,6 +18,13 @@ pub mod subagent;
 pub mod tool;
 pub mod turn;
 
+/// Ensures Reqwest can build Rustls clients with the Ring provider.
+pub(crate) fn ensure_rustls_crypto_provider() {
+    if rustls::crypto::CryptoProvider::get_default().is_none() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    }
+}
+
 // Re-export types from tidev-llm (defined there as shared protocol types).
 pub use context::{AgentContext, AgentLoopConfig};
 pub use context_manager::{CompactionResult, ContextManager, ContextPreparation};

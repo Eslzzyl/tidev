@@ -46,6 +46,13 @@ use crate::message::Message;
 
 use error::{MAX_RETRIES, backoff_delay, backoff_sleep, classify_anyhow_error};
 
+/// Ensures Reqwest can build Rustls clients with the Ring provider.
+fn ensure_rustls_crypto_provider() {
+    if rustls::crypto::CryptoProvider::get_default().is_none() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    }
+}
+
 /// Apply a provider-specific User-Agent override while retaining the client default otherwise.
 pub(crate) fn apply_user_agent(
     request: RequestBuilder,
@@ -138,6 +145,7 @@ impl LlmClient {
         max_response_files: usize,
         user_agent: Option<&str>,
     ) -> Result<Self> {
+        ensure_rustls_crypto_provider();
         let mut builder = Client::builder();
         if let Some(user_agent) = user_agent {
             builder = builder.user_agent(user_agent);

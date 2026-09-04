@@ -23,6 +23,13 @@ use std::time::Duration;
 
 use tidev_utils::path::canonicalize_display;
 
+/// Ensures Reqwest can build Rustls clients with the Ring provider.
+fn ensure_rustls_crypto_provider() {
+    if rustls::crypto::CryptoProvider::get_default().is_none() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    }
+}
+
 fn read_text_file(path: &Path) -> Result<String> {
     let bytes = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
     tidev_utils::encoding::decode_text(&bytes)
@@ -406,6 +413,7 @@ fn glob_absolute(pattern: &Path) -> Result<Vec<PathBuf>> {
 }
 
 fn fetch_remote(url: &str) -> Result<String> {
+    ensure_rustls_crypto_provider();
     let client = Client::builder()
         .timeout(Duration::from_secs(5))
         .build()

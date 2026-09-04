@@ -212,6 +212,7 @@ impl LegacySseTransport {
     async fn connect(url: &str, headers: HeaderMap) -> Result<Self> {
         let base_url =
             Url::parse(url).with_context(|| format!("invalid legacy SSE MCP URL '{url}'"))?;
+        crate::ensure_rustls_crypto_provider();
         let client = reqwest::Client::new();
         let mut get_headers = headers.clone();
         if !get_headers.contains_key(header::ACCEPT) {
@@ -739,6 +740,7 @@ impl McpRegistry {
             }
             McpServerSpec::Http { url, headers, .. } => {
                 let custom_headers = Self::to_http_headers(headers)?;
+                crate::ensure_rustls_crypto_provider();
                 let transport = StreamableHttpClientTransport::from_config(
                     rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig::with_uri(url.as_str())
                         .custom_headers(custom_headers),

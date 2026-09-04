@@ -44,6 +44,7 @@ pub async fn fetch(args: WebFetchArgs) -> Result<String> {
         .max(1);
     let duration = Duration::from_secs(timeout_secs as u64);
 
+    crate::ensure_rustls_crypto_provider();
     let http = Client::builder()
         .user_agent("tidev-webtools/0.1")
         .build()

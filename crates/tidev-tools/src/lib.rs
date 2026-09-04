@@ -19,6 +19,13 @@ pub mod types;
 
 mod bundled_skills;
 
+/// Ensures Reqwest can build Rustls clients with the Ring provider.
+pub(crate) fn ensure_rustls_crypto_provider() {
+    if rustls::crypto::CryptoProvider::get_default().is_none() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    }
+}
+
 // Re-export key public types.
 pub use builtin::definitions as tool_definitions;
 pub use builtin::execute_tool_call;

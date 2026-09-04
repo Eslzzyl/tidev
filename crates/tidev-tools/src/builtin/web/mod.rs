@@ -187,6 +187,7 @@ async fn execute_search(
 
     let provider_config = config.providers.get(provider.name());
 
+    crate::ensure_rustls_crypto_provider();
     let http = Client::builder()
         .user_agent("tidev-webtools/0.1")
         .build()

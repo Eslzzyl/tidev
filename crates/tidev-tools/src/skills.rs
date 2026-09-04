@@ -731,6 +731,7 @@ fn resolve_local_skill_source(workspace_root: &Path, raw_source: &str) -> Option
 }
 
 fn fetch_remote_skill(url: &str) -> Result<SkillInfo, ()> {
+    crate::ensure_rustls_crypto_provider();
     let client = Client::builder()
         .timeout(Duration::from_secs(5))
         .build()
