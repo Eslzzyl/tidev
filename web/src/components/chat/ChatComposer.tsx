@@ -8,6 +8,7 @@ import { CommandPopover } from "../CommandPopover";
 import { FileMentionPopover } from "../FileMentionPopover";
 import { ModelPicker } from "../ModelPicker";
 import { ImageAttachmentStrip } from "./ImageAttachments";
+import { SubagentStatusIndicator } from "./SubagentStatusIndicator";
 import { TokenUsageIndicator } from "./TokenUsageIndicator";
 import { pastedImageFiles, type PendingImage } from "../../utils/imageAttachments";
 import { Button, IconButton, Textarea } from "../ui";
@@ -414,6 +415,7 @@ export function ChatComposer({
                 onFileMentionClose();
               }}
             />
+            <SubagentStatusIndicator />
             <TokenUsageIndicator messages={messages} contextWindow={contextWindow} />
           </div>
           <IconButton

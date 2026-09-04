@@ -10,6 +10,7 @@ import { CommandPopover } from "../CommandPopover";
 import { FileMentionPopover } from "../FileMentionPopover";
 import { ModelPicker } from "../ModelPicker";
 import { ImageAttachmentStrip } from "./ImageAttachments";
+import { SubagentStatusIndicator } from "./SubagentStatusIndicator";
 import { pastedImageFiles, type PendingImage } from "../../utils/imageAttachments";
 import { Button, IconButton, Input, Textarea } from "../ui";
 
@@ -634,6 +635,7 @@ export function WelcomePage({
                   onFileMentionClose();
                 }}
               />
+              <SubagentStatusIndicator />
             </div>
             <IconButton
               label={t("Start conversation")}

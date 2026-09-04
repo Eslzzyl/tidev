@@ -1608,6 +1608,12 @@ body {
 .welcome-controls .composer-control {
   max-width: 220px;
 }
+.composer-subagent-disabled {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+}
 .welcome-error {
   width: min(100%, 650px);
   margin-top: 14px;
