@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { AlertCircle, Folder, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -190,7 +190,14 @@ export function ChatPanel({
   scrollToBottomRequest = 0,
 }: ChatPanelProps) {
   const { t } = useTranslation();
+  const [composerSelection, setComposerSelection] = useState<{
+    sessionId: string;
+    start: number;
+    end: number;
+    direction: "forward" | "backward" | "none";
+  } | null>(null);
   const pendingRequests = requests.filter((request) => request.session_id === selectedSessionId);
+  const backgroundRequests = requests.filter((request) => request.session_id !== selectedSessionId);
   const sessionModel = selectedSession
     ? models.find(
         (model) =>
@@ -199,6 +206,8 @@ export function ChatPanel({
       )
     : undefined;
   const contextWindow = sessionModel?.context_window ?? activeModel?.context_window;
+  const initialComposerSelection =
+    composerSelection?.sessionId === selectedSessionId ? composerSelection : undefined;
 
   const handleSelectSession = (sessionId: string) => {
     onMobileSidebarClose();
@@ -275,6 +284,22 @@ export function ChatPanel({
                 <span className="session-context-model">{selectedSession.model_display_name}</span>
               </header>
             ) : null}
+            {backgroundRequests.length > 0 ? (
+              <div className="approval-notice" role="status">
+                <span>
+                  {t("{{count}} conversations are waiting for your approval.", {
+                    count: backgroundRequests.length,
+                  })}
+                </span>
+                <Button
+                  onClick={() => handleSelectSession(backgroundRequests[0].session_id)}
+                  size="sm"
+                  variant="secondary"
+                >
+                  {t("Review approval")}
+                </Button>
+              </div>
+            ) : null}
             <div className="message-stage">
               <MessageList
                 messages={messages}
@@ -289,47 +314,67 @@ export function ChatPanel({
                 onRetryProviderError={onRetryProviderError}
                 scrollToBottomRequest={scrollToBottomRequest}
               />
-              {pendingRequests.map((request) => (
-                <ApprovalCard
-                  key={request.request_id}
-                  request={request}
-                  onRespond={(tools) => onRespond(request.request_id, tools)}
-                />
-              ))}
               {error ? <div className="error-banner">{error}</div> : null}
             </div>
-            <ChatComposer
-              draft={draft}
-              mode={mode}
-              messages={messages}
-              models={models}
-              activeModel={activeModel}
-              contextWindow={contextWindow}
-              thinkingLevel={thinkingLevel}
-              todos={todos}
-              enterToSend={enterToSend}
-              isBusy={selectedSession?.busy ?? false}
-              sending={sending}
-              canceling={canceling}
-              selectedSessionId={selectedSessionId}
-              fileMention={fileMention}
-              fileMentionIndex={fileMentionIndex}
-              pendingImages={pendingImages}
-              onDraftChange={onDraftChange}
-              onModeChange={onModeChange}
-              onSelectModel={onSelectModel}
-              onSelectThinkingLevel={onSelectThinkingLevel}
-              onSubmit={onSubmit}
-              onCancel={onCancel}
-              onFileMentionChange={onFileMentionChange}
-              onFileMentionIndexChange={onFileMentionIndexChange}
-              onFileSelect={onFileSelect}
-              onFileMentionClose={onFileMentionClose}
-              onImagesPasted={onImagesPasted}
-              onRemoveImage={onRemoveImage}
-              autoFocus={focusComposer}
-              onAutoFocus={onComposerFocus}
-            />
+            {pendingRequests.length > 0 ? (
+              <div className="composer-wrap approval-composer-wrap">
+                {pendingRequests.map((request) => (
+                  <ApprovalCard
+                    key={request.request_id}
+                    request={request}
+                    onRespond={(tools) => onRespond(request.request_id, tools)}
+                  />
+                ))}
+              </div>
+            ) : (
+              <ChatComposer
+                draft={draft}
+                mode={mode}
+                messages={messages}
+                models={models}
+                activeModel={activeModel}
+                contextWindow={contextWindow}
+                thinkingLevel={thinkingLevel}
+                todos={todos}
+                enterToSend={enterToSend}
+                isBusy={selectedSession?.busy ?? false}
+                sending={sending}
+                canceling={canceling}
+                selectedSessionId={selectedSessionId}
+                fileMention={fileMention}
+                fileMentionIndex={fileMentionIndex}
+                pendingImages={pendingImages}
+                onDraftChange={onDraftChange}
+                onModeChange={onModeChange}
+                onSelectModel={onSelectModel}
+                onSelectThinkingLevel={onSelectThinkingLevel}
+                onSubmit={onSubmit}
+                onCancel={onCancel}
+                onFileMentionChange={onFileMentionChange}
+                onFileMentionIndexChange={onFileMentionIndexChange}
+                onFileSelect={onFileSelect}
+                onFileMentionClose={onFileMentionClose}
+                onImagesPasted={onImagesPasted}
+                onRemoveImage={onRemoveImage}
+                initialSelection={initialComposerSelection}
+                onSelectionChange={(selection) => {
+                  if (!selectedSessionId) return;
+                  setComposerSelection((current) => {
+                    if (
+                      current?.sessionId === selectedSessionId &&
+                      current.start === selection.start &&
+                      current.end === selection.end &&
+                      current.direction === selection.direction
+                    ) {
+                      return current;
+                    }
+                    return { sessionId: selectedSessionId, ...selection };
+                  });
+                }}
+                autoFocus={focusComposer}
+                onAutoFocus={onComposerFocus}
+              />
+            )}
           </>
         )}
       </section>

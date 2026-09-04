@@ -308,6 +308,14 @@ impl Runtime {
         rx
     }
 
+    /// Snapshot approvals that are still waiting for a frontend response.
+    ///
+    /// This is paired with [`Runtime::request_rx`] so reconnecting frontends
+    /// can restore their pending approval UI before consuming new requests.
+    pub fn pending_frontend_requests(&self) -> Vec<FrontendRequest> {
+        self.approval_broker.pending_requests()
+    }
+
     /// Answer a frontend request, routing the response to the waiting agent
     /// loop. Multiple frontends may observe a request, but only the first
     /// response is accepted.

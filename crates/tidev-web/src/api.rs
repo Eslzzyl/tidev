@@ -803,7 +803,11 @@ async fn events(State(state): State<Arc<AppState>>, Query(query): Query<EventsQu
 
 async fn requests(State(state): State<Arc<AppState>>) -> Response {
     let receiver = state.runtime.request_rx().await;
-    Sse::new(request_stream(receiver, state.cancel.clone()))
+    // Subscribe before taking the snapshot. Requests emitted in the small
+    // interval are delivered by the receiver; the frontend de-duplicates by
+    // request ID if they are also present in the snapshot.
+    let pending = state.runtime.pending_frontend_requests();
+    Sse::new(request_stream(pending, receiver, state.cancel.clone()))
         .keep_alive(KeepAlive::default())
         .into_response()
 }
@@ -3724,10 +3728,15 @@ fn event_stream(
 }
 
 fn request_stream(
+    pending: Vec<FrontendRequest>,
     mut receiver: UnboundedReceiver<FrontendRequest>,
     cancel: tokio_util::sync::CancellationToken,
 ) -> impl futures_core::Stream<Item = Result<Event, Infallible>> {
     async_stream::stream! {
+        for request in pending {
+            let Ok(data) = serde_json::to_string(&request) else { continue };
+            yield Ok(Event::default().event("frontend_request").data(data));
+        }
         loop {
             tokio::select! {
                 _ = cancel.cancelled() => break,

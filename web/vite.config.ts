@@ -27,7 +27,7 @@ export default defineConfig({
         runtimeCaching: [
           {
             // API calls — Network First with 5s timeout, fall back to cache
-            urlPattern: /^\/api\/(?!events|terminal\/events)/,
+            urlPattern: /^\/api\/(?!events|requests|terminal\/events)/,
             handler: "NetworkFirst",
             options: {
               cacheName: "api-cache",

@@ -102,6 +102,12 @@ export interface ChatComposerProps {
   pendingImages: PendingImage[];
   onImagesPasted: (files: File[]) => void;
   onRemoveImage: (id: string) => void;
+  initialSelection?: { start: number; end: number; direction: "forward" | "backward" | "none" };
+  onSelectionChange?: (selection: {
+    start: number;
+    end: number;
+    direction: "forward" | "backward" | "none";
+  }) => void;
   autoFocus?: boolean;
   onAutoFocus?: () => void;
 }
@@ -135,13 +141,16 @@ export function ChatComposer({
   pendingImages,
   onImagesPasted,
   onRemoveImage,
+  initialSelection: initialSelectionProp,
+  onSelectionChange,
   autoFocus = false,
   onAutoFocus,
 }: ChatComposerProps) {
   const { t } = useTranslation();
+  const [initialSelection] = useState(() => initialSelectionProp);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(true);
   const [commandIndex, setCommandIndex] = useState(0);
-  const [cursorPosition, setCursorPosition] = useState(() => draft.length);
+  const [cursorPosition, setCursorPosition] = useState(() => initialSelection?.end ?? draft.length);
   const composerWrapRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const composingRef = useRef(false);
@@ -155,6 +164,16 @@ export function ChatComposer({
     textarea.focus();
     onAutoFocus?.();
   }, [autoFocus, onAutoFocus]);
+
+  useLayoutEffect(() => {
+    if (!initialSelection) return;
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    const start = Math.min(initialSelection.start, textarea.value.length);
+    const end = Math.min(Math.max(initialSelection.end, start), textarea.value.length);
+    textarea.setSelectionRange(start, end, initialSelection.direction);
+    setCursorPosition(end);
+  }, [initialSelection]);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -212,6 +231,15 @@ export function ChatComposer({
     return () => document.removeEventListener("pointerdown", handlePointerDown);
   }, [onFileMentionClose]);
 
+  const updateSelection = (
+    start: number,
+    end = start,
+    direction: "forward" | "backward" | "none" = "none",
+  ) => {
+    setCursorPosition(end);
+    onSelectionChange?.({ start, end, direction });
+  };
+
   const selectCommand = (suggestion: (typeof commandSuggestions)[number]) => {
     if (commandQuery === null) return;
 
@@ -222,7 +250,7 @@ export function ChatComposer({
     const nextDraft = `${draft.slice(0, commandStart)}${replacement}${draft.slice(commandEnd)}`;
     const nextCursor = commandStart + replacement.length;
 
-    setCursorPosition(nextCursor);
+    updateSelection(nextCursor);
     setCommandPaletteOpen(false);
     onDraftChange(nextDraft);
     onFileMentionChange(nextDraft, nextCursor);
@@ -246,7 +274,7 @@ export function ChatComposer({
       const end = textarea.selectionEnd ?? start;
       const nextDraft = `${draft.slice(0, start)}${pastedText}${draft.slice(end)}`;
       const nextCursor = start + pastedText.length;
-      setCursorPosition(nextCursor);
+      updateSelection(nextCursor);
       setCommandPaletteOpen(true);
       onDraftChange(nextDraft);
       onFileMentionChange(nextDraft, nextCursor);
@@ -275,7 +303,7 @@ export function ChatComposer({
                   if (!textarea) return;
                   textarea.focus();
                   if (cursor !== undefined) {
-                    setCursorPosition(cursor);
+                    updateSelection(cursor);
                     textarea.setSelectionRange(cursor, cursor);
                   }
                 });
@@ -301,25 +329,28 @@ export function ChatComposer({
             onPaste={handlePaste}
             onChange={(event) => {
               const value = event.target.value;
-              const cursor = event.target.selectionStart ?? value.length;
-              setCursorPosition(cursor);
+              const start = event.target.selectionStart ?? value.length;
+              const end = event.target.selectionEnd ?? start;
+              updateSelection(start, end, event.target.selectionDirection);
               setCommandPaletteOpen(true);
               onDraftChange(value);
-              onFileMentionChange(value, cursor);
+              onFileMentionChange(value, end);
             }}
             onSelect={(event) => {
               const textarea = event.target as HTMLTextAreaElement;
-              const cursor = textarea.selectionStart ?? textarea.value.length;
-              setCursorPosition(cursor);
+              const start = textarea.selectionStart ?? textarea.value.length;
+              const end = textarea.selectionEnd ?? start;
+              updateSelection(start, end, textarea.selectionDirection);
               setCommandPaletteOpen(true);
-              onFileMentionChange(textarea.value, cursor);
+              onFileMentionChange(textarea.value, end);
             }}
             onClick={(event) => {
               const textarea = event.target as HTMLTextAreaElement;
-              const cursor = textarea.selectionStart ?? textarea.value.length;
-              setCursorPosition(cursor);
+              const start = textarea.selectionStart ?? textarea.value.length;
+              const end = textarea.selectionEnd ?? start;
+              updateSelection(start, end, textarea.selectionDirection);
               setCommandPaletteOpen(true);
-              onFileMentionChange(textarea.value, cursor);
+              onFileMentionChange(textarea.value, end);
             }}
             onCompositionStart={() => {
               composingRef.current = true;

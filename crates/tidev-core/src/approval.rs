@@ -79,7 +79,12 @@ pub enum ApprovalError {
 #[derive(Clone)]
 pub struct ApprovalBroker {
     request_tx: UnboundedSender<FrontendRequest>,
-    pending: Arc<StdMutex<HashMap<uuid::Uuid, oneshot::Sender<FrontendResponse>>>>,
+    pending: Arc<StdMutex<HashMap<uuid::Uuid, PendingRequest>>>,
+}
+
+struct PendingRequest {
+    request: FrontendRequest,
+    response_tx: oneshot::Sender<FrontendResponse>,
 }
 
 impl ApprovalBroker {
@@ -99,16 +104,21 @@ impl ApprovalBroker {
     ) -> Result<FrontendResponse, ApprovalError> {
         let request_id = uuid::Uuid::new_v4();
         let (response_tx, response_rx) = oneshot::channel();
-        self.pending
-            .lock()
-            .expect("approval broker mutex poisoned")
-            .insert(request_id, response_tx);
-
         let request = FrontendRequest {
             request_id,
             session_id,
             kind,
         };
+        self.pending
+            .lock()
+            .expect("approval broker mutex poisoned")
+            .insert(
+                request_id,
+                PendingRequest {
+                    request: request.clone(),
+                    response_tx,
+                },
+            );
         if self.request_tx.send(request).is_err() {
             self.pending
                 .lock()
@@ -139,15 +149,32 @@ impl ApprovalBroker {
         request_id: uuid::Uuid,
         response: FrontendResponse,
     ) -> Result<(), ApprovalError> {
-        let sender = self
+        let pending = self
             .pending
             .lock()
             .expect("approval broker mutex poisoned")
             .remove(&request_id)
             .ok_or(ApprovalError::NotPending(request_id))?;
-        sender
+        pending
+            .response_tx
             .send(response)
             .map_err(|_| ApprovalError::ResponseClosed)
+    }
+
+    /// Return the approvals that still await a frontend response.
+    ///
+    /// Request subscribers use this snapshot after registering so a frontend
+    /// that reconnects can render requests that were already in flight.
+    pub fn pending_requests(&self) -> Vec<FrontendRequest> {
+        let mut requests: Vec<_> = self
+            .pending
+            .lock()
+            .expect("approval broker mutex poisoned")
+            .values()
+            .map(|pending| pending.request.clone())
+            .collect();
+        requests.sort_by_key(|request| request.request_id);
+        requests
     }
 
     /// Cancel a pending request without delivering a response.
@@ -182,6 +209,9 @@ mod tests {
                 .await
         });
         let request = rx.recv().await.expect("request should be published");
+        let pending = broker.pending_requests();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].request_id, request.request_id);
 
         broker
             .respond(
@@ -189,6 +219,7 @@ mod tests {
                 FrontendResponse::ToolApproval(Vec::new()),
             )
             .expect("first response should be accepted");
+        assert!(broker.pending_requests().is_empty());
         assert!(matches!(
             broker.respond(
                 request.request_id,

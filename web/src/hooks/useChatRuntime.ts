@@ -1476,6 +1476,10 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
       await api.respondToRequest(requestId, tools);
       setRequests((current) => current.filter((item) => item.request_id !== requestId));
     } catch (reason) {
+      if (reason instanceof ApiError && reason.status === 409) {
+        setRequests((current) => current.filter((item) => item.request_id !== requestId));
+        return;
+      }
       setError(reason instanceof Error ? reason.message : i18n.t("Failed to respond"));
     }
   }, []);
