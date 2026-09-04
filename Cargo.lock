@@ -4808,6 +4808,7 @@ dependencies = [
  "chrono",
  "futures-core",
  "futures-util",
+ "jobserver",
  "log",
  "mime_guess",
  "portable-pty",

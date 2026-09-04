@@ -7,6 +7,9 @@ license.workspace = true
 description = "Web frontend and HTTP adapter for tidev"
 build = "build.rs"
 
+[build-dependencies]
+jobserver = "0.1"
+
 [dependencies]
 anyhow = "1"
 axum = { version = "0.8", features = ["http1", "http2", "tokio", "ws"] }

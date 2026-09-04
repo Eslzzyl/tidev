@@ -4,6 +4,16 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn main() {
+    let is_release = env::var("PROFILE").as_deref() == Ok("release");
+    let builds_web = is_release && env::var_os("TIDEV_WEB_SKIP_BUILD").is_none();
+
+    // The Windows Vite process has reproducibly crashed with 0xc0000374 when its
+    // production build runs alongside Cargo's Rust compilation. Reserving Cargo's remaining
+    // jobserver tokens lets active Rust jobs finish before pnpm starts and prevents
+    // new ones from starting until the frontend build exits.
+    #[cfg(windows)]
+    let _cargo_job_tokens = builds_web.then(reserve_cargo_job_tokens);
+
     let manifest_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
     let web_dir = manifest_dir.join("../../web");
     let embedded_dir = manifest_dir.join("web-dist");
@@ -26,14 +36,14 @@ fn main() {
         }
     }
 
-    if env::var("PROFILE").as_deref() != Ok("release") {
+    if !is_release {
         return;
     }
 
     let dist_dir = web_dir.join("dist");
     reset_directory(&embedded_dir).expect("failed to prepare release web asset directory");
 
-    if env::var_os("TIDEV_WEB_SKIP_BUILD").is_none() {
+    if builds_web {
         if let Err(error) = run_pnpm(&web_dir, &["install", "--frozen-lockfile"]) {
             println!("cargo:warning={error}");
         } else if let Err(error) = run_pnpm(&web_dir, &["run", "build"]) {
@@ -52,6 +62,30 @@ fn main() {
 
     copy_directory(&dist_dir, &embedded_dir)
         .expect("failed to copy web assets into embedded web asset directory");
+}
+
+#[cfg(windows)]
+/// Reserves every Cargo jobserver token except the one held by this build script.
+///
+/// Keeping the returned guards alive for the pnpm invocation serializes only the
+/// Windows frontend build with the rest of Cargo's parallel work.
+fn reserve_cargo_job_tokens() -> Vec<jobserver::Acquired> {
+    let jobs = env::var("NUM_JOBS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(1);
+    // SAFETY: this runs before the build script opens files or starts child processes.
+    let Some(client) = (unsafe { jobserver::Client::from_env() }) else {
+        return Vec::new();
+    };
+
+    (1..jobs)
+        .map(|_| {
+            client
+                .acquire()
+                .expect("failed to reserve a Cargo jobserver token")
+        })
+        .collect()
 }
 
 fn reset_directory(path: &Path) -> std::io::Result<()> {
