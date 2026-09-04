@@ -353,7 +353,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 18px 16px 10px;
+  padding: 12px 14px 6px;
 }
 .sidebar-heading strong {
   display: block;
@@ -386,8 +386,8 @@ body {
   background: color-mix(in srgb, var(--text) 6%, var(--panel-strong));
 }
 .sidebar-heading .icon-button {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   border-color: transparent;
   border-radius: 8px;
 }
@@ -476,8 +476,8 @@ body {
   min-width: 0;
   align-items: center;
   gap: 7px;
-  margin: 0 12px 10px;
-  padding: 7px 9px;
+  margin: 0 12px 6px;
+  padding: 5px 9px;
   border-radius: 8px;
   color: var(--muted);
   background: color-mix(in srgb, var(--text) 4%, var(--panel-strong));
@@ -513,7 +513,7 @@ body {
   min-height: 0;
   flex: 1;
   overflow: auto;
-  padding: 2px 8px 8px;
+  padding: 0 8px 8px;
 }
 .session-group {
   margin: 0;
@@ -521,7 +521,7 @@ body {
   border: 0;
 }
 .session-group h2 {
-  margin: 12px 8px 5px;
+  margin: 9px 8px 4px;
   color: var(--muted);
   font-size: 10px;
   font-weight: 650;
