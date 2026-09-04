@@ -13,9 +13,9 @@ jobserver = "0.1"
 [dependencies]
 anyhow = "1"
 axum = { version = "0.8", features = ["http1", "http2", "tokio", "ws"] }
-axum-reverse-proxy = { version = "1.4", default-features = false }
+axum-reverse-proxy = { version = "2.2", default-features = false }
 async-stream = "0.3"
-base64 = "0.22"
+base64 = "0.23"
 bytes = "1"
 chrono = { version = "0.4", features = ["serde"] }
 futures-core = "0.3"
@@ -40,7 +40,7 @@ tokio = { version = "1", features = [
     "time",
 ] }
 tokio-util = "0.7"
-tower-http = { version = "0.6", features = [
+tower-http = { version = "0.7", features = [
     "compression-br",
     "compression-gzip",
     "compression-zstd",
