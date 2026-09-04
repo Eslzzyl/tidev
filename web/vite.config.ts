@@ -11,9 +11,19 @@ export default defineConfig({
     VitePWA({
       registerType: "autoUpdate",
       workbox: {
-        // restty embeds its terminal WASM runtime in the application chunk.
-        maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
-        globPatterns: ["**/*.{js,css,svg,png,woff2,ico}"],
+        // Precache only the shell required by index.html. Feature chunks stay
+        // lazy and are covered by the HTTP immutable cache after first use.
+        globPatterns: [
+          "index.html",
+          "manifest.webmanifest",
+          "registerSW.js",
+          "assets/index-*.js",
+          "assets/rolldown-runtime-*.js",
+          "assets/vendor-react-*.js",
+          "assets/vendor-codemirror-*.js",
+          "assets/index-*.css",
+          "assets/*.woff2",
+        ],
         runtimeCaching: [
           {
             // API calls — Network First with 5s timeout, fall back to cache
