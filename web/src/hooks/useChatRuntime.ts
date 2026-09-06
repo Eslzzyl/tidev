@@ -27,6 +27,7 @@ import {
   type PendingImage,
 } from "../utils/imageAttachments";
 import { toolCallEntry, toolResultStatus, type ToolCallEntry } from "../utils/round";
+import { emitDesktopNotification } from "../utils/notifications";
 import i18n from "../i18n";
 
 const SESSION_PAGE_SIZE = 50;
@@ -305,6 +306,7 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
   const instructionNoticeRevisionRef = useRef(0);
   const shownInstructionSourcesRef = useRef<Set<string>>(new Set());
   const instructionToolSessionsRef = useRef<Set<string>>(new Set());
+  const childSessionIdsRef = useRef<Set<string>>(new Set());
   const pendingBackendMessageSessionsRef = useRef(new Map<string, string>());
   const pendingImagesRef = useRef<PendingImage[]>([]);
   const cursorRef = useRef<number | null>(
@@ -589,6 +591,11 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
     ],
   );
 
+  const selectSessionRef = useRef(selectSession);
+  useEffect(() => {
+    selectSessionRef.current = selectSession;
+  }, [selectSession]);
+
   const createSession = useCallback(
     (triggerRoute = true) => {
       selectedSessionRef.current = null;
@@ -870,6 +877,9 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
         if (!Number.isFinite(requestId) || !toolCall || !result) return;
         const key = `${sessionId}:${requestId}`;
         const childSessionId = asString(payload.child_session_id);
+        if (childSessionId) {
+          childSessionIdsRef.current.add(childSessionId);
+        }
         scheduleStreamUpdate((current) => {
           const next = cloneStream(current[key] ?? createStream(key, requestId));
           const entry = ensureToolCall(next, toolCall);
@@ -888,6 +898,7 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
         const toolCallId = asString(payload.tool_call_id);
         const childSessionId = asString(payload.child_session_id);
         if (!Number.isFinite(requestId) || !toolCallId || !childSessionId) return;
+        childSessionIdsRef.current.add(childSessionId);
         const currentToolCall = toolCallFromPayload(payload.current_tool_call);
         const key = `${sessionId}:${requestId}`;
         scheduleStreamUpdate((current) => {
@@ -976,21 +987,42 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
         if (!Number.isFinite(requestId)) return;
         const key = `${sessionId}:${requestId}`;
         instructionToolSessionsRef.current.delete(sessionId);
+        const providerError = providerErrorFromPayload(
+          payload.error,
+          payload.retryable,
+          requestId,
+          null,
+        );
         scheduleStreamUpdate((current) => {
           const next = cloneStream(current[key] ?? createStream(key, requestId));
           next.status = "failed";
           next.retrying = undefined;
-          const providerError = providerErrorFromPayload(
+          const fullProviderError = providerErrorFromPayload(
             payload.error,
             payload.retryable,
             requestId,
             next.userMessageId ?? null,
           );
-          next.providerError = providerError;
-          next.error = providerError.message;
+          next.providerError = fullProviderError;
+          next.error = fullProviderError.message;
           return { ...current, [key]: next };
         });
         touchSession(sessionId, false);
+        if (
+          selectedSessionRef.current === sessionId &&
+          !childSessionIdsRef.current.has(sessionId)
+        ) {
+          emitDesktopNotification({
+            title: "tidev",
+            body: `Request failed: ${providerError.message}`,
+            tag: `tidev-failed-${sessionId}`,
+            onClick: () => {
+              if (selectedSessionRef.current !== sessionId) {
+                selectSessionRef.current(sessionId);
+              }
+            },
+          });
+        }
         return;
       }
       if (kind === "Finished") {
@@ -1021,6 +1053,23 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
           }
           return { ...current, [key]: next };
         });
+        const turnToolCalls = Array.isArray(turn.tool_calls) ? turn.tool_calls : [];
+        if (
+          turnToolCalls.length === 0 &&
+          selectedSessionRef.current === sessionId &&
+          !childSessionIdsRef.current.has(sessionId)
+        ) {
+          emitDesktopNotification({
+            title: "tidev",
+            body: "Response complete",
+            tag: `tidev-complete-${sessionId}`,
+            onClick: () => {
+              if (selectedSessionRef.current !== sessionId) {
+                selectSessionRef.current(sessionId);
+              }
+            },
+          });
+        }
         return;
       }
       if (kind === "StreamEnd") {
@@ -1129,6 +1178,18 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
           ...current.filter((item) => item.request_id !== request.request_id),
           request,
         ]);
+        if (request.kind?.ToolApproval && request.kind.ToolApproval.length > 0) {
+          emitDesktopNotification({
+            title: "tidev",
+            body: i18n.t("Tool approval required"),
+            tag: `tidev-approval-${request.request_id}`,
+            onClick: () => {
+              if (request.session_id && selectedSessionRef.current !== request.session_id) {
+                selectSessionRef.current(request.session_id);
+              }
+            },
+          });
+        }
       },
       () => undefined,
       () => {

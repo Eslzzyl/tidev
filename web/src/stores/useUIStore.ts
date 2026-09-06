@@ -11,6 +11,8 @@ export interface SettingsState {
   enterToSend: boolean;
   terminalShell: string;
   terminalFontFamily: string;
+  notificationEnabled: boolean;
+  notificationCondition: "unfocused" | "always";
 }
 
 export interface UIState {
@@ -72,6 +74,8 @@ const defaultSettings: SettingsState = {
   enterToSend: true,
   terminalShell: "",
   terminalFontFamily: "",
+  notificationEnabled: true,
+  notificationCondition: "unfocused",
 };
 
 function loadLegacyPreferences(): { theme?: Theme; settings: Partial<SettingsState> } {
@@ -221,7 +225,7 @@ export const useUIStore = create<UIState & UIActions>()(
  */
 export function getEffectiveTheme(theme: Theme): "light" | "dark" {
   if (theme === "system") {
-    if (typeof window !== "undefined") {
+    if (typeof window !== "undefined" && typeof window.matchMedia === "function") {
       return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
     }
     return "light";
