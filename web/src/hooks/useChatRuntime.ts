@@ -291,7 +291,6 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
   const [fileMention, setFileMention] = useState<{ query: string; atPos: number } | null>(null);
   const [fileMentionIndex, setFileMentionIndex] = useState(0);
   const [completedSessions, setCompletedSessions] = useState<Set<string>>(new Set());
-  const [openSessionIds, setOpenSessionIds] = useState<string[]>([]);
   const messagesCacheRef = useRef<Map<string, MessageRecord[]>>(new Map());
   const draftsMapRef = useRef<
     Map<
@@ -602,10 +601,6 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
       setSelectedSessionId(sessionId);
       setSessionStatus("loading");
 
-      setOpenSessionIds((current) =>
-        current.includes(sessionId) ? current : [...current, sessionId],
-      );
-
       setCompletedSessions((prev) => {
         if (!prev.has(sessionId)) return prev;
         const next = new Set(prev);
@@ -709,24 +704,6 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
       setError(null);
     },
     [onSelectSessionRoute, resetInstructionState],
-  );
-
-  const closeTab = useCallback(
-    (sessionId: string) => {
-      setOpenSessionIds((current) => {
-        const next = current.filter((id) => id !== sessionId);
-        if (selectedSessionRef.current === sessionId) {
-          const nextSelected = next[next.length - 1] ?? null;
-          if (nextSelected) {
-            selectSessionRef.current(nextSelected);
-          } else {
-            createSession(true);
-          }
-        }
-        return next;
-      });
-    },
-    [createSession],
   );
 
   useEffect(() => {
@@ -1878,8 +1855,6 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
     handleImagesPasted,
     removePendingImage,
     completedSessions,
-    openSessionIds,
-    closeTab,
     instructionNotices,
   };
 }

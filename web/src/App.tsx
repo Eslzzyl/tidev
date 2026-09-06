@@ -154,8 +154,6 @@ export default function App() {
     handleImagesPasted,
     removePendingImage,
     completedSessions,
-    openSessionIds,
-    closeTab,
   } = useChatRuntime({
     routeSessionId,
     onSelectSessionRoute,
@@ -184,8 +182,6 @@ export default function App() {
   const renderChat = () => (
     <ChatPanel
       completedSessions={completedSessions}
-      openSessionIds={openSessionIds}
-      onCloseTab={closeTab}
       loading={loading}
       loadingMoreSessions={loadingMoreSessions}
       hasMoreSessions={nextSessionCursor !== null}

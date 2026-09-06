@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { AlertCircle, Folder, Plus } from "lucide-react";
+import { AlertCircle, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import type {
@@ -15,14 +15,10 @@ import { ChatComposer } from "./ChatComposer";
 import type { PendingImage } from "../../utils/imageAttachments";
 import { ApprovalCard, MessageList } from "./MessageList";
 import { SessionSidebar } from "./SessionSidebar";
-import { SessionTabBar } from "./SessionTabBar";
 import { Button } from "../ui";
-import { shortPath } from "../../utils/chat";
 
 export interface ChatPanelProps {
   completedSessions?: Set<string>;
-  openSessionIds?: string[];
-  onCloseTab?: (sessionId: string) => void;
   loading: boolean;
   loadingMoreSessions: boolean;
   hasMoreSessions: boolean;
@@ -132,8 +128,6 @@ function SessionErrorState({ error }: { error: string | null }) {
 
 export function ChatPanel({
   completedSessions,
-  openSessionIds = [],
-  onCloseTab,
   loading,
   loadingMoreSessions,
   hasMoreSessions,
@@ -265,17 +259,6 @@ export function ChatPanel({
         onDelete={onDeleteSession}
       />
       <section className="chat-panel">
-        {openSessionIds.length > 0 ? (
-          <SessionTabBar
-            openSessionIds={openSessionIds}
-            sessions={sessions}
-            selectedSessionId={selectedSessionId}
-            completedSessions={completedSessions ?? new Set()}
-            onSelectSession={handleSelectSession}
-            onCloseTab={onCloseTab ?? (() => {})}
-            onCreateSession={handleCreateSession}
-          />
-        ) : null}
         {selectedSessionId === null ? (
           welcome
         ) : sessionStatus === "missing" ? (
@@ -286,23 +269,6 @@ export function ChatPanel({
           <LoadingSessionState />
         ) : (
           <>
-            {selectedSession ? (
-              <header className="session-context">
-                <div>
-                  <span className="session-context-title">
-                    {selectedSession.title || t("Untitled conversation")}
-                  </span>
-                  <span
-                    className="session-context-workspace"
-                    title={selectedSession.workspace_root}
-                  >
-                    <Folder size={13} aria-hidden="true" />
-                    {t("Session directory")}: {shortPath(selectedSession.workspace_root)}
-                  </span>
-                </div>
-                <span className="session-context-model">{selectedSession.model_display_name}</span>
-              </header>
-            ) : null}
             {backgroundRequests.length > 0 ? (
               <div className="approval-notice" role="status">
                 <span>
