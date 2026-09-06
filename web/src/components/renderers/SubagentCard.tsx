@@ -84,8 +84,7 @@ export function SubagentCard({
   const Icon = agentIcon(agent);
   const running = entry.status === "pending" || entry.status === "running";
   const displayedStatus =
-    statusLabel(entry.subagentStatus, t) ||
-    (entry.status === "cancelled" ? t("Cancelled") : "");
+    statusLabel(entry.subagentStatus, t) || (entry.status === "cancelled" ? t("Cancelled") : "");
   const activityLabel =
     entry.status === "cancelled"
       ? t("Subagent was cancelled")

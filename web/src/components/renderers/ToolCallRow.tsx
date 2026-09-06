@@ -845,11 +845,7 @@ export const ToolCallRow = memo(function ToolCallRow({
         variant="ghost"
         size="sm"
       >
-        <ActivityRipple
-          active={active}
-          row
-          label={activityLabel}
-        >
+        <ActivityRipple active={active} row label={activityLabel}>
           <Icon size={14} />
           <span className="tool-renderer-title">
             {label ? <strong>{label}</strong> : null}

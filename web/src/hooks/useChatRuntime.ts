@@ -1068,7 +1068,7 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
                 status === "cancelled"
                   ? i18n.t("The turn was interrupted.")
                   : status === "failed"
-                    ? stream.error ?? i18n.t("The turn was interrupted.")
+                    ? (stream.error ?? i18n.t("The turn was interrupted."))
                     : i18n.t("The turn was interrupted."),
             },
           };
