@@ -1099,6 +1099,11 @@ export const MessageList = memo(function MessageList({
     [rounds, streams, expandedTurns, instructionNotices, workspaceRoot, models, session, t],
   );
 
+  const followTailRef = useRef(true);
+  const scrollFrameRef = useRef<number | null>(null);
+  const previousSessionIdRef = useRef<string | null>(null);
+  const previousScrollToBottomRequestRef = useRef(scrollToBottomRequest);
+
   const virtualizer = useVirtualizer({
     count: items.length,
     getScrollElement: () => scrollRef.current,
@@ -1106,24 +1111,18 @@ export const MessageList = memo(function MessageList({
     overscan: 6,
     getItemKey: (index) => getChatItemKey(items[index], index),
     useFlushSync: false,
+    anchorTo: "end",
+    followOnAppend: true,
+    scrollEndThreshold: CHAT_SCROLL_BOTTOM_THRESHOLD,
   });
   virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) => {
-    // While following tail, our layout effect handles scrolling to the bottom.
+    // The end anchor handles size changes while following the tail.
     if (followTailRef.current) return false;
     // When the user is reading history above, only compensate for size changes
     // of elements strictly above the fold to keep the visible viewport steady.
     const offset = instance.scrollOffset ?? 0;
     return item.start + item.size <= offset;
   };
-  const totalSize = virtualizer.getTotalSize();
-  const followTailRef = useRef(true);
-  const scrollFrameRef = useRef<number | null>(null);
-  const previousScrollMetricsRef = useRef<{
-    sessionId?: string;
-    itemCount: number;
-    totalSize: number;
-  } | null>(null);
-  const previousScrollToBottomRequestRef = useRef(scrollToBottomRequest);
 
   const handleScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
     // Virtualizer corrections during measurement also dispatch scroll events.
@@ -1137,18 +1136,15 @@ export const MessageList = memo(function MessageList({
 
   useLayoutEffect(() => {
     const element = scrollRef.current;
-    const previous = previousScrollMetricsRef.current;
-    const sessionChanged = !previous || previous.sessionId !== sessionId;
+    if (!element) return;
+    const sessionChanged = previousSessionIdRef.current !== sessionId;
     const scrollWasRequested = previousScrollToBottomRequestRef.current !== scrollToBottomRequest;
+    previousSessionIdRef.current = sessionId;
     previousScrollToBottomRequestRef.current = scrollToBottomRequest;
-    previousScrollMetricsRef.current = { sessionId, itemCount: items.length, totalSize };
-    if (!element || (!followTailRef.current && !scrollWasRequested && !sessionChanged)) return;
+    if (!followTailRef.current && !scrollWasRequested && !sessionChanged) return;
 
     if (scrollWasRequested || sessionChanged) followTailRef.current = true;
-
-    const contentChanged =
-      sessionChanged || previous.itemCount !== items.length || previous.totalSize !== totalSize;
-    if (!contentChanged && !scrollWasRequested) return;
+    if (!followTailRef.current) return;
 
     if (scrollFrameRef.current !== null) {
       window.cancelAnimationFrame(scrollFrameRef.current);
@@ -1166,7 +1162,7 @@ export const MessageList = memo(function MessageList({
         scrollFrameRef.current = null;
       }
     };
-  }, [items.length, scrollToBottomRequest, sessionId, totalSize]);
+  }, [items, scrollToBottomRequest, sessionId]);
 
   function toggleTurn(turnId: string, expanded: boolean) {
     setExpandedTurns((current) => ({ ...current, [turnId]: !expanded }));
