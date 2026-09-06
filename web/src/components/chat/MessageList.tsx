@@ -1139,7 +1139,7 @@ export const MessageList = memo(function MessageList({
     if (!element) return;
     const sessionChanged = previousSessionIdRef.current !== sessionId;
     const scrollWasRequested = previousScrollToBottomRequestRef.current !== scrollToBottomRequest;
-    previousSessionIdRef.current = sessionId;
+    previousSessionIdRef.current = sessionId ?? null;
     previousScrollToBottomRequestRef.current = scrollToBottomRequest;
     if (!followTailRef.current && !scrollWasRequested && !sessionChanged) return;
 
