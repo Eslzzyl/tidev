@@ -783,6 +783,7 @@ body {
   min-height: 0;
   flex: 1;
   overflow: auto;
+  overflow-anchor: none;
   padding: 22px max(24px, calc((100% - 890px) / 2));
 }
 .message-virtual-canvas {
@@ -2762,6 +2763,7 @@ body {
 }
 
 .message-scroll {
+  overflow-anchor: none;
   padding: 24px max(24px, calc((100% - 1200px) / 2)) 28px;
   scrollbar-gutter: stable;
 }

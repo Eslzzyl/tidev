@@ -136,4 +136,72 @@ describe("interrupted stream rendering", () => {
     expect(new Set(keys).size).toBe(keys.length);
     expect(items.filter((item) => item.kind === "assistant-meta")).toHaveLength(1);
   });
+
+  it("maintains stable segment keys when instruction notices are inserted", () => {
+    const stream: StreamMessage = {
+      key: "stream-1",
+      requestId: 1,
+      segments: [
+        { type: "reasoning", content: "Thinking..." },
+        { type: "tool_call", toolCallId: "tool-abc-123" },
+        { type: "text", content: "Hello world" },
+      ],
+      toolCallMap: {
+        "tool-abc-123": {
+          id: "tool-abc-123",
+          name: "read",
+          arguments: '{"path":"file.txt"}',
+          status: "completed",
+        },
+      },
+      status: "streaming",
+      providerFinished: false,
+      reasoningStartedAt: "2026-09-04T00:00:00.000Z",
+      reasoningCompletedAt: null,
+      userMessageId: "user-1",
+    };
+
+    const itemsWithoutInstructions = buildChatItems(
+      [round()],
+      [stream],
+      {},
+      [],
+      "",
+      [],
+      undefined,
+      translate,
+    );
+
+    const itemsWithInstructions = buildChatItems(
+      [round()],
+      [stream],
+      {},
+      [{ sources: ["AGENTS.md"], deferred: false }],
+      "",
+      [],
+      undefined,
+      translate,
+    );
+
+    const segmentKeysWithout = itemsWithoutInstructions
+      .filter((item) => item.kind === "assistant-segment")
+      .map((item) => (item as { item: { key: string } }).item.key);
+
+    const segmentKeysWith = itemsWithInstructions
+      .filter((item) => item.kind === "assistant-segment")
+      .map((item) => (item as { item: { key: string } }).item.key);
+
+    expect(segmentKeysWithout).toEqual([
+      "user-1:segment-reasoning-0",
+      "user-1:segment-tool-tool-abc-123",
+      "user-1:segment-text-0",
+    ]);
+
+    expect(segmentKeysWith).toEqual([
+      "user-1:segment-instruction-live-instructions-0",
+      "user-1:segment-reasoning-0",
+      "user-1:segment-tool-tool-abc-123",
+      "user-1:segment-text-0",
+    ]);
+  });
 });

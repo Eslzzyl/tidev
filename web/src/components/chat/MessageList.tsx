@@ -266,6 +266,8 @@ function makeSegmentItems(
   instructionContentByMessageId?: ReadonlyMap<string, string | undefined>,
 ): SegmentItem[] {
   const visible: SegmentItem[] = [];
+  let textCounter = 0;
+  let reasoningCounter = 0;
 
   segments.forEach((segment, index) => {
     const entry = segment.type === "tool_call" ? toolCallMap[segment.toolCallId] : undefined;
@@ -288,8 +290,20 @@ function makeSegmentItems(
       index === segments.length - 1 &&
       !segment.completedAt &&
       !segmentCompletedAt;
+
+    let segmentSubKey: string;
+    if (segment.type === "tool_call") {
+      segmentSubKey = `tool-${segment.toolCallId}`;
+    } else if (segment.type === "instruction") {
+      segmentSubKey = `instruction-${segment.message.id}`;
+    } else if (segment.type === "reasoning") {
+      segmentSubKey = `reasoning-${reasoningCounter++}`;
+    } else {
+      segmentSubKey = `text-${textCounter++}`;
+    }
+
     visible.push({
-      key: `${keyPrefix}-${index}-${segment.type === "tool_call" ? segment.toolCallId : "content"}`,
+      key: `${keyPrefix}-${segmentSubKey}`,
       contentId: visible.length === 0 ? contentId : undefined,
       segment,
       entry,
@@ -507,17 +521,19 @@ export function buildChatItems(
     const isTurnStreamActive = turnStream?.status === "streaming";
     const terminalInterruption =
       !isTurnStreamActive &&
-      (round.interrupted || turnStream?.status === "cancelled" || turnStream?.status === "interrupted");
+      (round.interrupted ||
+        turnStream?.status === "cancelled" ||
+        turnStream?.status === "interrupted");
     const renderableSegmentCount = mergedSegments.filter(
       (segment) => segment.type !== "tool_call" || Boolean(mergedToolCallMap[segment.toolCallId]),
     ).length;
     const collapsible =
-      (isRoundCollapsible(round) ||
-        (renderableSegmentCount > 1 &&
-          (hasStreamContinuation ||
-            round.status === "complete" ||
-            Boolean(round.completedAt) ||
-            terminalInterruption)));
+      isRoundCollapsible(round) ||
+      (renderableSegmentCount > 1 &&
+        (hasStreamContinuation ||
+          round.status === "complete" ||
+          Boolean(round.completedAt) ||
+          terminalInterruption));
     const expanded =
       expandedTurns[turnId] ?? (isTurnStreamActive || terminalInterruption || !collapsible);
     const previewIndex = getTextPreviewIndex(mergedSegments);
@@ -1090,9 +1106,15 @@ export const MessageList = memo(function MessageList({
     overscan: 6,
     getItemKey: (index) => getChatItemKey(items[index], index),
     useFlushSync: false,
-    anchorTo: "end",
-    scrollEndThreshold: CHAT_SCROLL_BOTTOM_THRESHOLD,
   });
+  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) => {
+    // While following tail, our layout effect handles scrolling to the bottom.
+    if (followTailRef.current) return false;
+    // When the user is reading history above, only compensate for size changes
+    // of elements strictly above the fold to keep the visible viewport steady.
+    const offset = instance.scrollOffset ?? 0;
+    return item.start + item.size <= offset;
+  };
   const totalSize = virtualizer.getTotalSize();
   const followTailRef = useRef(true);
   const scrollFrameRef = useRef<number | null>(null);
@@ -1116,18 +1138,16 @@ export const MessageList = memo(function MessageList({
   useLayoutEffect(() => {
     const element = scrollRef.current;
     const previous = previousScrollMetricsRef.current;
+    const sessionChanged = !previous || previous.sessionId !== sessionId;
     const scrollWasRequested = previousScrollToBottomRequestRef.current !== scrollToBottomRequest;
     previousScrollToBottomRequestRef.current = scrollToBottomRequest;
     previousScrollMetricsRef.current = { sessionId, itemCount: items.length, totalSize };
-    if (!element || (!followTailRef.current && !scrollWasRequested)) return;
+    if (!element || (!followTailRef.current && !scrollWasRequested && !sessionChanged)) return;
 
-    if (scrollWasRequested) followTailRef.current = true;
+    if (scrollWasRequested || sessionChanged) followTailRef.current = true;
 
     const contentChanged =
-      !previous ||
-      previous.sessionId !== sessionId ||
-      previous.itemCount !== items.length ||
-      previous.totalSize !== totalSize;
+      sessionChanged || previous.itemCount !== items.length || previous.totalSize !== totalSize;
     if (!contentChanged && !scrollWasRequested) return;
 
     if (scrollFrameRef.current !== null) {
