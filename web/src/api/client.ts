@@ -198,6 +198,7 @@ export const api = {
     messageId: string,
     thinkingLevel?: string,
     attachments?: PromptImageAttachment[],
+    model?: { provider_id: string; model_id: string },
   ) => {
     const body: Record<string, unknown> = {
       content,
@@ -206,6 +207,10 @@ export const api = {
       thinking_level: thinkingLevel,
     };
     if (attachments && attachments.length > 0) body.attachments = attachments;
+    if (model) {
+      body.provider_id = model.provider_id;
+      body.model_id = model.model_id;
+    }
 
     return fetchJson<import("../types/api").PromptResponse>(sessionPath(sessionId, "prompts"), {
       method: "POST",
@@ -281,12 +286,22 @@ export const api = {
       method: "POST",
     }),
 
-  // Rename session
-  renameSession: (sessionId: string, title: string) =>
+  // Update session
+  updateSession: (
+    sessionId: string,
+    data: { title?: string; provider_id?: string; model_id?: string },
+  ) =>
     fetchJson<Session>(sessionPath(sessionId), {
       method: "PATCH",
-      body: JSON.stringify({ title }),
+      body: JSON.stringify(data),
     }),
+
+  // Rename session
+  renameSession: (sessionId: string, title: string) => api.updateSession(sessionId, { title }),
+
+  // Update session model
+  updateSessionModel: (sessionId: string, providerId: string, modelId: string) =>
+    api.updateSession(sessionId, { provider_id: providerId, model_id: modelId }),
 
   // Chat controls
   selectModel: (providerId: string, modelId: string) =>

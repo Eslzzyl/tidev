@@ -511,7 +511,7 @@ export function WelcomePage({
             <ImageAttachmentStrip
               images={pendingImages}
               onRemove={onRemoveImage}
-              disabled={loading || sending}
+              disabled={sending}
             />
             <Textarea
               ref={textareaRef}
@@ -609,7 +609,7 @@ export function WelcomePage({
                 }
               }}
               autoFocus
-              disabled={loading || sending}
+              disabled={sending}
               placeholder={t("What would you like to work on?")}
               rows={2}
             />

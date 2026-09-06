@@ -24,6 +24,7 @@ export interface SessionSidebarProps {
   search: string;
   renamingSessionId: string | null;
   renameValue: string;
+  completedSessions?: Set<string>;
   onSearchChange: (value: string) => void;
   onWorkspaceRootFilterChange: (workspaceRoot: string | null) => void;
   onLoadMore: () => void;
@@ -85,6 +86,7 @@ export function SessionSidebar({
   search,
   renamingSessionId,
   renameValue,
+  completedSessions,
   onSearchChange,
   onWorkspaceRootFilterChange,
   onLoadMore,
@@ -266,7 +268,11 @@ export function SessionSidebar({
                       <time className="session-date" title={formatDate(session.updated_at)}>
                         {formatSessionActivity(session.updated_at)}
                       </time>
-                      {session.busy ? <span className="busy-indicator" /> : null}
+                      {session.busy ? (
+                        <span className="session-busy-spinner" aria-label={t("Running")} />
+                      ) : completedSessions?.has(session.session_id) ? (
+                        <span className="session-completed-dot" aria-label={t("Completed")} />
+                      ) : null}
                     </span>
                   </Button>
                 )}

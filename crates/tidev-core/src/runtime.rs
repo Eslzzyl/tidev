@@ -1119,13 +1119,16 @@ impl Runtime {
         let event_bus = self.event_bus(session_id).await;
 
         // Compose or load the system prompt (mode-agnostic — see inject_mode_reminder).
-        let (system_prompt, session_start_hash, workspace) = {
+        let (system_prompt, session_start_hash, workspace, session_model) = {
             let session = self.session_manager.load_session(session_id)?;
             let ssh = session.as_ref().and_then(|s| s.snapshot_start_hash.clone());
             let workspace_path = session
                 .as_ref()
                 .map(|s| s.workspace_root.clone())
                 .unwrap_or_default();
+            let sm = session
+                .as_ref()
+                .map(|s| (s.provider_id.clone(), s.model_id.clone()));
             let workspace = if workspace_path.is_empty() {
                 Arc::clone(&self.default_workspace)
             } else {
@@ -1144,10 +1147,19 @@ impl Runtime {
                     sp
                 }
             };
-            (sp, ssh, workspace)
+            (sp, ssh, workspace, sm)
         };
 
-        let active_model = self.active_model.read().unwrap().clone();
+        let active_model = if let Some((ref provider_id, ref model_id)) = session_model
+            && let Ok(model) = self.config.read().unwrap().resolve_model_by_ids(
+                &self.auth.read().unwrap(),
+                provider_id,
+                model_id,
+            ) {
+            model
+        } else {
+            self.active_model.read().unwrap().clone()
+        };
         let llm_config = crate::agent_ctx::to_llm_provider_config(&active_model);
 
         // If any MCP server is still connecting (e.g. background startup discovery),

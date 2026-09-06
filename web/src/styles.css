@@ -685,6 +685,114 @@ body {
   border-radius: 50%;
   background: var(--accent);
 }
+.session-busy-spinner {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid var(--accent);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: session-spin 0.8s linear infinite;
+}
+@keyframes session-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+.session-completed-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.session-tab-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px 0;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--surface-subtle);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.session-tab-bar::-webkit-scrollbar {
+  display: none;
+}
+.session-tab-list {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.session-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 6px 6px 0 0;
+  border: 1px solid transparent;
+  border-bottom: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  max-width: 180px;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+  user-select: none;
+}
+.session-tab:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.session-tab.selected {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--line-soft);
+  box-shadow: 0 1px 0 var(--surface);
+  font-weight: 500;
+}
+.session-tab-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+}
+.session-tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0.7;
+  transition:
+    opacity 0.15s ease,
+    background 0.15s ease;
+}
+.session-tab-close:hover {
+  opacity: 1;
+  background: var(--hover);
+  color: var(--text);
+}
+.session-tab-new-button {
+  flex: 0 0 auto;
+  opacity: 0.7;
+}
+.session-tab-new-button:hover {
+  opacity: 1;
+}
 .session-load-more {
   width: 100%;
   margin: 10px 0 2px;

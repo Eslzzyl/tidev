@@ -290,14 +290,38 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
   const [error, setError] = useState<string | null>(null);
   const [fileMention, setFileMention] = useState<{ query: string; atPos: number } | null>(null);
   const [fileMentionIndex, setFileMentionIndex] = useState(0);
+  const [completedSessions, setCompletedSessions] = useState<Set<string>>(new Set());
+  const [openSessionIds, setOpenSessionIds] = useState<string[]>([]);
+  const messagesCacheRef = useRef<Map<string, MessageRecord[]>>(new Map());
+  const draftsMapRef = useRef<
+    Map<
+      string,
+      {
+        draft: string;
+        pendingImages: PendingImage[];
+        mode: "build" | "plan";
+        fileMention: { query: string; atPos: number } | null;
+      }
+    >
+  >(new Map());
+  const currentDraftStateRef = useRef({
+    draft: "",
+    pendingImages: [] as PendingImage[],
+    mode: "build" as "build" | "plan",
+    fileMention: null as { query: string; atPos: number } | null,
+  });
+  useEffect(() => {
+    currentDraftStateRef.current = { draft, pendingImages, mode, fileMention };
+  }, [draft, pendingImages, mode, fileMention]);
   const activeModel = useMemo(
     () =>
-      models.find((model) => model.active) ??
       models.find(
         (model) =>
           model.model_id === selectedSession?.model_id &&
           model.provider_id === selectedSession?.provider_id,
-      ),
+      ) ??
+      models.find((model) => model.active) ??
+      models[0],
     [models, selectedSession],
   );
   const selectedSessionRef = useRef<string | null>(null);
@@ -310,7 +334,14 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
   const pendingBackendMessageSessionsRef = useRef(new Map<string, string>());
   const pendingImagesRef = useRef<PendingImage[]>([]);
   const cursorRef = useRef<number | null>(
-    Number(localStorage.getItem("tidev:last-event-cursor")) || null,
+    (() => {
+      try {
+        const val = sessionStorage.getItem("tidev:last-event-cursor");
+        return val ? Number(val) || null : null;
+      } catch {
+        return null;
+      }
+    })(),
   );
   useEffect(() => {
     sessionsRef.current = sessions;
@@ -488,6 +519,7 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
       if (!sessionId?.trim()) return false;
       try {
         const response = await api.listMessages(sessionId);
+        messagesCacheRef.current.set(sessionId, response.messages);
         if (selectedSessionRef.current === sessionId) {
           const loadedIds = new Set(response.messages.map((record) => record.message.id));
           for (const [messageId, messageSessionId] of pendingBackendMessageSessionsRef.current) {
@@ -535,20 +567,62 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
 
   const selectSession = useCallback(
     (sessionId: string, session?: Session, triggerRoute = true) => {
+      const prevSessionId = selectedSessionRef.current;
+      if (prevSessionId !== sessionId) {
+        const currentKey = prevSessionId ?? "__welcome__";
+        if (
+          currentDraftStateRef.current.draft ||
+          currentDraftStateRef.current.pendingImages.length > 0
+        ) {
+          draftsMapRef.current.set(currentKey, currentDraftStateRef.current);
+        } else {
+          draftsMapRef.current.delete(currentKey);
+        }
+        const saved = draftsMapRef.current.get(sessionId);
+        if (saved) {
+          setDraft(saved.draft);
+          setPendingImages(saved.pendingImages);
+          setMode(saved.mode);
+          setFileMention(saved.fileMention);
+          currentDraftStateRef.current = { ...saved };
+        } else {
+          setDraft("");
+          setPendingImages([]);
+          setFileMention(null);
+          currentDraftStateRef.current = {
+            draft: "",
+            pendingImages: [],
+            mode: "build",
+            fileMention: null,
+          };
+        }
+      }
+
       selectedSessionRef.current = sessionId;
       setSelectedSessionId(sessionId);
       setSessionStatus("loading");
+
+      setOpenSessionIds((current) =>
+        current.includes(sessionId) ? current : [...current, sessionId],
+      );
+
+      setCompletedSessions((prev) => {
+        if (!prev.has(sessionId)) return prev;
+        const next = new Set(prev);
+        next.delete(sessionId);
+        return next;
+      });
+
       const summary = session ?? sessionsRef.current.find((item) => item.session_id === sessionId);
 
       if (triggerRoute) {
         onSelectSessionRoute?.(sessionId);
       }
-      clearPendingStreamUpdates();
       resetInstructionState();
-      setStreams({});
+      const cached = messagesCacheRef.current.get(sessionId);
+      setMessages(cached ?? []);
       setTodos([]);
       setError(null);
-      setFileMention(null);
 
       if (summary) {
         setSelectedSession(summary);
@@ -581,14 +655,7 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
           });
       }
     },
-    [
-      clearPendingStreamUpdates,
-      loadMessages,
-      loadTodos,
-      markSessionMissing,
-      onSelectSessionRoute,
-      resetInstructionState,
-    ],
+    [loadMessages, loadTodos, markSessionMissing, onSelectSessionRoute, resetInstructionState],
   );
 
   const selectSessionRef = useRef(selectSession);
@@ -598,6 +665,36 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
 
   const createSession = useCallback(
     (triggerRoute = true) => {
+      const prevSessionId = selectedSessionRef.current;
+      if (prevSessionId !== null) {
+        if (
+          currentDraftStateRef.current.draft ||
+          currentDraftStateRef.current.pendingImages.length > 0
+        ) {
+          draftsMapRef.current.set(prevSessionId, currentDraftStateRef.current);
+        } else {
+          draftsMapRef.current.delete(prevSessionId);
+        }
+      }
+      const saved = draftsMapRef.current.get("__welcome__");
+      if (saved && (saved.draft || saved.pendingImages.length > 0)) {
+        setDraft(saved.draft);
+        setPendingImages(saved.pendingImages);
+        setMode(saved.mode);
+        setFileMention(saved.fileMention);
+        currentDraftStateRef.current = { ...saved };
+      } else {
+        setDraft("");
+        setPendingImages([]);
+        setFileMention(null);
+        currentDraftStateRef.current = {
+          draft: "",
+          pendingImages: [],
+          mode: "build",
+          fileMention: null,
+        };
+      }
+
       selectedSessionRef.current = null;
       setSelectedSessionId(null);
       setSelectedSession(undefined);
@@ -608,15 +705,28 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
       setSessionSearch("");
       setSessionWorkspaceRoot(null);
       setMessages([]);
-      clearPendingStreamUpdates();
       resetInstructionState();
-      setStreams({});
-      setDraft("");
-      clearPendingImages();
-      setFileMention(null);
       setError(null);
     },
-    [clearPendingImages, clearPendingStreamUpdates, onSelectSessionRoute, resetInstructionState],
+    [onSelectSessionRoute, resetInstructionState],
+  );
+
+  const closeTab = useCallback(
+    (sessionId: string) => {
+      setOpenSessionIds((current) => {
+        const next = current.filter((id) => id !== sessionId);
+        if (selectedSessionRef.current === sessionId) {
+          const nextSelected = next[next.length - 1] ?? null;
+          if (nextSelected) {
+            selectSessionRef.current(nextSelected);
+          } else {
+            createSession(true);
+          }
+        }
+        return next;
+      });
+    },
+    [createSession],
   );
 
   useEffect(() => {
@@ -744,27 +854,39 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
   const applyEvent = useCallback(
     (envelope: EventEnvelope) => {
       cursorRef.current = envelope.cursor;
-      localStorage.setItem("tidev:last-event-cursor", String(envelope.cursor));
+      try {
+        sessionStorage.setItem("tidev:last-event-cursor", String(envelope.cursor));
+      } catch {
+        // Ignore storage error
+      }
       const [kind, payload] = eventPayload(envelope);
       const sessionId = asString(payload.session_id) || envelope.session_id;
       if (kind === "UserMessageCreated") {
         const message = payload.message as Message | undefined;
         const appData = payload.app_data as MessageRecord["app_data"] | undefined;
         touchSession(sessionId);
-        if (message && selectedSessionRef.current === sessionId) {
+        if (message) {
           if (payload.queued === true) {
             pendingBackendMessageSessionsRef.current.set(message.id, sessionId);
           } else {
             pendingBackendMessageSessionsRef.current.delete(message.id);
           }
-          setMessages((current) => {
-            const index = current.findIndex((item) => item.message.id === message.id);
-            const record = { message, app_data: appData ?? {} };
-            if (index < 0) return [...current, record];
-            const next = current.slice();
-            next[index] = record;
-            return next;
-          });
+          const cached = messagesCacheRef.current.get(sessionId) ?? [];
+          const record = { message, app_data: appData ?? {} };
+          const idx = cached.findIndex((item) => item.message.id === message.id);
+          const nextCached =
+            idx < 0 ? [...cached, record] : cached.map((item, i) => (i === idx ? record : item));
+          messagesCacheRef.current.set(sessionId, nextCached);
+
+          if (selectedSessionRef.current === sessionId) {
+            setMessages((current) => {
+              const index = current.findIndex((item) => item.message.id === message.id);
+              if (index < 0) return [...current, record];
+              const next = current.slice();
+              next[index] = record;
+              return next;
+            });
+          }
         }
         return;
       }
@@ -1008,13 +1130,16 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
           return { ...current, [key]: next };
         });
         touchSession(sessionId, false);
-        if (
-          selectedSessionRef.current === sessionId &&
-          !childSessionIdsRef.current.has(sessionId)
-        ) {
+        if (!childSessionIdsRef.current.has(sessionId)) {
+          const failedSession = sessionsRef.current.find((s) => s.session_id === sessionId);
+          const isBackground = selectedSessionRef.current !== sessionId;
           emitDesktopNotification({
             title: "tidev",
-            body: `Request failed: ${providerError.message}`,
+            body: isBackground
+              ? i18n.t("Request failed in conversation: {{title}}", {
+                  title: failedSession?.title || i18n.t("Untitled conversation"),
+                })
+              : `Request failed: ${providerError.message}`,
             tag: `tidev-failed-${sessionId}`,
             onClick: () => {
               if (selectedSessionRef.current !== sessionId) {
@@ -1054,14 +1179,16 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
           return { ...current, [key]: next };
         });
         const turnToolCalls = Array.isArray(turn.tool_calls) ? turn.tool_calls : [];
-        if (
-          turnToolCalls.length === 0 &&
-          selectedSessionRef.current === sessionId &&
-          !childSessionIdsRef.current.has(sessionId)
-        ) {
+        if (turnToolCalls.length === 0 && !childSessionIdsRef.current.has(sessionId)) {
+          const finishedSession = sessionsRef.current.find((s) => s.session_id === sessionId);
+          const isBackground = selectedSessionRef.current !== sessionId;
           emitDesktopNotification({
             title: "tidev",
-            body: "Response complete",
+            body: isBackground
+              ? i18n.t("Task completed in conversation: {{title}}", {
+                  title: finishedSession?.title || i18n.t("Untitled conversation"),
+                })
+              : i18n.t("Response complete"),
             tag: `tidev-complete-${sessionId}`,
             onClick: () => {
               if (selectedSessionRef.current !== sessionId) {
@@ -1138,6 +1265,18 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
             }
           });
           void loadTodos(sessionId);
+        } else {
+          if (!childSessionIdsRef.current.has(sessionId)) {
+            setCompletedSessions((prev) => new Set(prev).add(sessionId));
+            void api.listMessages(sessionId).then((response) => {
+              messagesCacheRef.current.set(sessionId, response.messages);
+              scheduleStreamUpdate((current) => {
+                const next = { ...current };
+                delete next[key];
+                return next;
+              });
+            });
+          }
         }
         return;
       }
@@ -1263,6 +1402,14 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
     setWelcomeSending(true);
     setError(null);
     setPendingImages([]);
+    draftsMapRef.current.delete("__welcome__");
+    currentDraftStateRef.current = {
+      draft: "",
+      pendingImages: [],
+      mode,
+      fileMention: null,
+    };
+    setDraft("");
     const messageId = crypto.randomUUID();
     try {
       const attachments = await pendingImagesToPromptAttachments(submittedImages);
@@ -1282,6 +1429,13 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
       setScrollToBottomRequest((current) => current + 1);
       selectSession(response.session.session_id, response.session);
       setDraft("");
+      draftsMapRef.current.delete(response.session.session_id);
+      currentDraftStateRef.current = {
+        draft: "",
+        pendingImages: [],
+        mode,
+        fileMention: null,
+      };
       await api.sendPrompt(
         response.session.session_id,
         content,
@@ -1298,6 +1452,12 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
       setError(reason instanceof Error ? reason.message : i18n.t("Failed to start conversation"));
       setDraft(content);
       setPendingImages((current) => [...submittedImages, ...current]);
+      currentDraftStateRef.current = {
+        draft: content,
+        pendingImages: [...submittedImages],
+        mode,
+        fileMention: null,
+      };
     } finally {
       setWelcomeSending(false);
     }
@@ -1497,6 +1657,13 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
       const handled = await handleSlashCommand(content);
       if (handled) {
         setDraft("");
+        draftsMapRef.current.delete(sessionId);
+        currentDraftStateRef.current = {
+          draft: "",
+          pendingImages: [],
+          mode,
+          fileMention: null,
+        };
         return;
       }
     }
@@ -1505,9 +1672,27 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
     setScrollToBottomRequest((current) => current + 1);
     setDraft("");
     setPendingImages([]);
+    draftsMapRef.current.delete(sessionId);
+    currentDraftStateRef.current = {
+      draft: "",
+      pendingImages: [],
+      mode,
+      fileMention: null,
+    };
     try {
       const attachments = await pendingImagesToPromptAttachments(submittedImages);
-      await api.sendPrompt(sessionId, content, mode, messageId, thinkingLevel, attachments);
+      const targetModel = activeModel
+        ? { provider_id: activeModel.provider_id, model_id: activeModel.model_id }
+        : undefined;
+      await api.sendPrompt(
+        sessionId,
+        content,
+        mode,
+        messageId,
+        thinkingLevel,
+        attachments,
+        targetModel,
+      );
       if (submittedImages.length > 0) {
         await loadMessages(sessionId);
       }
@@ -1520,6 +1705,12 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
       }
       setDraft(content);
       setPendingImages((current) => [...submittedImages, ...current]);
+      currentDraftStateRef.current = {
+        draft: content,
+        pendingImages: [...submittedImages],
+        mode,
+        fileMention: null,
+      };
     } finally {
       setSending(false);
     }
@@ -1527,6 +1718,33 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
 
   const chooseModel = async (model: Model) => {
     try {
+      if (selectedSessionId) {
+        await api.updateSessionModel(selectedSessionId, model.provider_id, model.model_id);
+        setSelectedSession((current) =>
+          current
+            ? {
+                ...current,
+                provider_id: model.provider_id,
+                provider_display_name: model.provider_display_name,
+                model_id: model.model_id,
+                model_display_name: model.model_display_name,
+              }
+            : current,
+        );
+        setSessions((current) =>
+          current.map((item) =>
+            item.session_id === selectedSessionId
+              ? {
+                  ...item,
+                  provider_id: model.provider_id,
+                  provider_display_name: model.provider_display_name,
+                  model_id: model.model_id,
+                  model_display_name: model.model_display_name,
+                }
+              : item,
+          ),
+        );
+      }
       const selected = await api.selectModel(model.provider_id, model.model_id);
       setModels((current) =>
         current.map((item) => ({
@@ -1659,6 +1877,9 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
     handleFileSelect,
     handleImagesPasted,
     removePendingImage,
+    completedSessions,
+    openSessionIds,
+    closeTab,
     instructionNotices,
   };
 }

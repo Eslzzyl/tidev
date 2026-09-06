@@ -15,10 +15,14 @@ import { ChatComposer } from "./ChatComposer";
 import type { PendingImage } from "../../utils/imageAttachments";
 import { ApprovalCard, MessageList } from "./MessageList";
 import { SessionSidebar } from "./SessionSidebar";
+import { SessionTabBar } from "./SessionTabBar";
 import { Button } from "../ui";
 import { shortPath } from "../../utils/chat";
 
 export interface ChatPanelProps {
+  completedSessions?: Set<string>;
+  openSessionIds?: string[];
+  onCloseTab?: (sessionId: string) => void;
   loading: boolean;
   loadingMoreSessions: boolean;
   hasMoreSessions: boolean;
@@ -127,6 +131,9 @@ function SessionErrorState({ error }: { error: string | null }) {
 }
 
 export function ChatPanel({
+  completedSessions,
+  openSessionIds = [],
+  onCloseTab,
   loading,
   loadingMoreSessions,
   hasMoreSessions,
@@ -245,6 +252,7 @@ export function ChatPanel({
         search={sessionSearch}
         renamingSessionId={renamingSessionId}
         renameValue={renameValue}
+        completedSessions={completedSessions}
         onSearchChange={onSessionSearchChange}
         onWorkspaceRootFilterChange={onWorkspaceRootFilterChange}
         onLoadMore={onLoadMoreSessions}
@@ -257,6 +265,17 @@ export function ChatPanel({
         onDelete={onDeleteSession}
       />
       <section className="chat-panel">
+        {openSessionIds.length > 0 ? (
+          <SessionTabBar
+            openSessionIds={openSessionIds}
+            sessions={sessions}
+            selectedSessionId={selectedSessionId}
+            completedSessions={completedSessions ?? new Set()}
+            onSelectSession={handleSelectSession}
+            onCloseTab={onCloseTab ?? (() => {})}
+            onCreateSession={handleCreateSession}
+          />
+        ) : null}
         {selectedSessionId === null ? (
           welcome
         ) : sessionStatus === "missing" ? (

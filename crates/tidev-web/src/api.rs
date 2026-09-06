@@ -145,6 +145,8 @@ struct StatsInsightsResponse {
 struct CreateSessionRequest {
     title: Option<String>,
     workspace_root: Option<String>,
+    provider_id: Option<String>,
+    model_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -154,7 +156,9 @@ struct WorkspacePathQuery {
 
 #[derive(Debug, Deserialize)]
 struct UpdateSessionRequest {
-    title: String,
+    title: Option<String>,
+    provider_id: Option<String>,
+    model_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -165,6 +169,8 @@ struct PromptRequest {
     thinking_level: Option<String>,
     #[serde(default)]
     attachments: Vec<PromptImageAttachmentRequest>,
+    provider_id: Option<String>,
+    model_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -959,6 +965,19 @@ async fn create_session(
         }
         _ => state.runtime.create_default_session(title)?,
     };
+    if let (Some(ref provider_id), Some(ref model_id)) = (request.provider_id, request.model_id) {
+        let config = state.runtime.config();
+        let auth = state.runtime.auth();
+        if let Ok(model) = config.resolve_model_by_ids(&auth, provider_id, model_id) {
+            let _ = state.runtime.session_manager().update_session_model(
+                session_id,
+                &model.provider_id,
+                &model.provider_display_name,
+                &model.model_id,
+                &model.display_name,
+            );
+        }
+    }
     let session = state
         .runtime
         .session_manager()
@@ -986,11 +1005,31 @@ async fn update_session(
     Path(session_id): Path<Uuid>,
     Json(request): Json<UpdateSessionRequest>,
 ) -> Result<Json<SessionDto>, ApiError> {
-    let title = request.title.trim();
-    if title.is_empty() {
-        return Err(ApiError::bad_request("session title cannot be empty"));
+    let mut updated = false;
+    if let Some(ref title) = request.title {
+        let trimmed = title.trim();
+        if trimmed.is_empty() {
+            return Err(ApiError::bad_request("session title cannot be empty"));
+        }
+        state.runtime.update_session_title(session_id, trimmed)?;
+        updated = true;
     }
-    state.runtime.update_session_title(session_id, title)?;
+    if let (Some(ref provider_id), Some(ref model_id)) = (request.provider_id, request.model_id) {
+        let config = state.runtime.config();
+        let auth = state.runtime.auth();
+        let model = config.resolve_model_by_ids(&auth, provider_id, model_id)?;
+        state.runtime.session_manager().update_session_model(
+            session_id,
+            &model.provider_id,
+            &model.provider_display_name,
+            &model.model_id,
+            &model.display_name,
+        )?;
+        updated = true;
+    }
+    if !updated {
+        return Err(ApiError::bad_request("no fields to update"));
+    }
     get_session(State(state), Path(session_id)).await
 }
 
@@ -1086,12 +1125,36 @@ async fn submit_prompt(
     {
         return Err(ApiError::not_found("session not found"));
     }
+    let target_model = if let (Some(pid), Some(mid)) = (&request.provider_id, &request.model_id) {
+        let config = state.runtime.config();
+        let auth = state.runtime.auth();
+        let model = config.resolve_model_by_ids(&auth, pid, mid)?;
+        state.runtime.session_manager().update_session_model(
+            session_id,
+            &model.provider_id,
+            &model.provider_display_name,
+            &model.model_id,
+            &model.display_name,
+        )?;
+        model
+    } else if let Ok(Some(session)) = state.runtime.session_manager().load_session(session_id)
+        && let Ok(model) = state.runtime.config().resolve_model_by_ids(
+            &state.runtime.auth(),
+            &session.provider_id,
+            &session.model_id,
+        )
+    {
+        model
+    } else {
+        state.runtime.active_model()
+    };
+
     let attachments = request
         .attachments
         .into_iter()
         .map(PromptImageAttachmentRequest::into_message_attachment)
         .collect::<Result<Vec<_>, _>>()?;
-    if !attachments.is_empty() && !state.runtime.active_model().supports_images {
+    if !attachments.is_empty() && !target_model.supports_images {
         return Err(ApiError::bad_request(
             "current model does not support image attachments",
         ));
