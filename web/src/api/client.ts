@@ -59,6 +59,7 @@ import type {
   UpsertMcpServerRequest,
   SessionListCursor,
   SessionListResponse,
+  SessionDiffsResponse,
 } from "../types/api";
 import { getAuthToken, useAuthStore } from "../stores/useAuthStore";
 import i18n from "../i18n";
@@ -259,6 +260,12 @@ export const api = {
 
   // Todos
   getTodos: (sessionId: string) => fetchJson<TodosResponse>(sessionPath(sessionId, "todos")),
+
+  // Agent workspace changes for a session
+  getSessionDiffs: (sessionId: string, toHash?: string) =>
+    fetchJson<SessionDiffsResponse>(
+      `${sessionPath(sessionId, "diffs")}${toHash ? `?to_hash=${encodeURIComponent(toHash)}` : ""}`,
+    ),
 
   // Revert / Undo
   revertToMessage: (sessionId: string, messageId: string) =>

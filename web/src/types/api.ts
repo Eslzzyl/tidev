@@ -41,6 +41,16 @@ export interface FileDiff {
   deletions: number;
 }
 
+export interface SessionFileDiff extends FileDiff {
+  diff: string;
+}
+
+export interface SessionDiffsResponse {
+  files: SessionFileDiff[];
+  total_additions: number;
+  total_deletions: number;
+}
+
 export interface TodoItem {
   content: string;
   status: string;

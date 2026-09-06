@@ -1,77 +1,18 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent } from "react";
-import { Check, CircleStop, LoaderCircle, Send } from "lucide-react";
+import { CircleStop, LoaderCircle, Send } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { commandFragment, getSuggestions } from "../../commands";
-import type { MessageRecord, Model, TodoItem } from "../../types/api";
+import type { FileDiff, MessageRecord, Model, TodoItem } from "../../types/api";
 import { CommandPopover } from "../CommandPopover";
 import { FileMentionPopover } from "../FileMentionPopover";
 import { ModelPicker } from "../ModelPicker";
 import { ImageAttachmentStrip } from "./ImageAttachments";
 import { SubagentStatusIndicator } from "./SubagentStatusIndicator";
 import { TokenUsageIndicator } from "./TokenUsageIndicator";
+import { ComposerStatusCapsule } from "./ComposerStatusCapsule";
 import { pastedImageFiles, type PendingImage } from "../../utils/imageAttachments";
 import { Button, IconButton, Textarea } from "../ui";
-
-function isTodoCompleted(todo: TodoItem) {
-  return todo.status === "completed";
-}
-
-function TodoProgressCard({ todos }: { todos: TodoItem[] }) {
-  const { t } = useTranslation();
-  if (todos.length === 0) return null;
-
-  const activeIndex = todos.findIndex((todo) => todo.status === "in_progress");
-  const currentIndex =
-    activeIndex >= 0 ? activeIndex : todos.findIndex((todo) => !isTodoCompleted(todo));
-  const displayedIndex = currentIndex >= 0 ? currentIndex : todos.length - 1;
-
-  return (
-    <div
-      className="composer-todo-progress"
-      tabIndex={0}
-      role="group"
-      aria-label={t("Step {{current}} / {{total}}", {
-        current: displayedIndex + 1,
-        total: todos.length,
-      })}
-    >
-      <div className="composer-todo-card">
-        <div className="composer-todo-list">
-          {todos.map((todo, index) => {
-            const completed = isTodoCompleted(todo);
-            const active = index === displayedIndex && !completed;
-            const className = [
-              "composer-todo-entry",
-              completed ? "is-completed" : "",
-              active ? "is-active" : "",
-            ]
-              .filter(Boolean)
-              .join(" ");
-
-            return (
-              <div className={className} key={`${todo.content}:${index}`}>
-                <span className="composer-todo-entry-check" aria-hidden="true">
-                  {completed ? <Check size={12} /> : null}
-                </span>
-                <span>{todo.content}</span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-      <div className="composer-todo-trigger">
-        <span className="composer-todo-trigger-dot" aria-hidden="true" />
-        <span>
-          {t("Step {{current}} / {{total}}", {
-            current: displayedIndex + 1,
-            total: todos.length,
-          })}
-        </span>
-      </div>
-    </div>
-  );
-}
 
 export interface ChatComposerProps {
   draft: string;
@@ -82,6 +23,8 @@ export interface ChatComposerProps {
   contextWindow?: number;
   thinkingLevel: string | undefined;
   todos: TodoItem[];
+  changedFiles: FileDiff[];
+  onOpenChangedFiles: () => void;
   enterToSend: boolean;
   isBusy: boolean;
   sending: boolean;
@@ -121,6 +64,8 @@ export function ChatComposer({
   contextWindow,
   thinkingLevel,
   todos,
+  changedFiles,
+  onOpenChangedFiles,
   enterToSend,
   isBusy,
   sending,
@@ -288,7 +233,11 @@ export function ChatComposer({
 
   return (
     <div ref={composerWrapRef} className="composer-wrap">
-      <TodoProgressCard todos={todos} />
+      <ComposerStatusCapsule
+        todos={todos}
+        changedFiles={changedFiles}
+        onOpenChangedFiles={onOpenChangedFiles}
+      />
       <div className="welcome-composer">
         <div className="welcome-input">
           {fileMention ? (

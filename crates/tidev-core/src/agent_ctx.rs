@@ -1583,6 +1583,7 @@ impl AgentContext for CoreContext {
                                 session_id,
                                 request_id: 0,
                                 tool_call_id: last.tool_call_id.clone().unwrap_or_default(),
+                                snapshot_hash: post_hash,
                                 file_diffs_json: diffs_json,
                             });
                         }

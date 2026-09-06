@@ -377,6 +377,27 @@ struct MessagesResponse {
     messages: Vec<MessageDto>,
 }
 
+#[derive(Debug, Deserialize, Default)]
+struct SessionDiffQuery {
+    to_hash: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct SessionFileDiffResponse {
+    path: String,
+    status: Option<String>,
+    additions: usize,
+    deletions: usize,
+    diff: String,
+}
+
+#[derive(Debug, Serialize)]
+struct SessionDiffsResponse {
+    files: Vec<SessionFileDiffResponse>,
+    total_additions: usize,
+    total_deletions: usize,
+}
+
 #[derive(Debug, Serialize)]
 struct SessionCreatedResponse {
     session: SessionDto,
@@ -630,6 +651,7 @@ pub fn router() -> Router<Arc<AppState>> {
         )
         .route("/sessions/{session_id}/todos", get(todos))
         .route("/sessions/{session_id}/messages", get(messages))
+        .route("/sessions/{session_id}/diffs", get(session_diffs))
         .route("/sessions/{session_id}/prompts", post(submit_prompt))
         .route("/sessions/{session_id}/retry", post(retry_session))
         .route("/sessions/{session_id}/cancel", post(cancel_session))
@@ -1081,6 +1103,78 @@ async fn messages(
         })
         .collect();
     Ok(Json(MessagesResponse { messages }))
+}
+
+async fn session_diffs(
+    State(state): State<Arc<AppState>>,
+    Path(session_id): Path<Uuid>,
+    Query(query): Query<SessionDiffQuery>,
+) -> Result<Json<SessionDiffsResponse>, ApiError> {
+    let session = state
+        .runtime
+        .session_manager()
+        .load_session(session_id)?
+        .ok_or_else(|| ApiError::not_found("session not found"))?;
+
+    let empty_response = || {
+        Json(SessionDiffsResponse {
+            files: Vec::new(),
+            total_additions: 0,
+            total_deletions: 0,
+        })
+    };
+
+    let Some(from_hash) = session.snapshot_start_hash.as_deref() else {
+        return Ok(empty_response());
+    };
+
+    let messages = state
+        .runtime
+        .session_manager()
+        .load_session_messages(session_id)?;
+    let persisted_to_hash = messages.iter().rev().find_map(|message| {
+        message
+            .app_data
+            .file_diffs
+            .as_deref()
+            .filter(|value| !value.is_empty())
+            .and(message.app_data.snapshot_hash.as_deref())
+    });
+    let to_hash = query
+        .to_hash
+        .as_deref()
+        .unwrap_or(persisted_to_hash.unwrap_or_default());
+    if to_hash.is_empty() {
+        return Ok(empty_response());
+    }
+    if to_hash.len() > 128 || !to_hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(ApiError::bad_request("invalid snapshot hash"));
+    }
+
+    let workspace = state.runtime.workspace_for(&session.workspace_root).await?;
+    let Some(snapshot) = workspace.snapshot() else {
+        return Ok(empty_response());
+    };
+
+    let diffs = snapshot.diff_full(from_hash, to_hash).await?;
+    let total_additions = diffs.iter().map(|file| file.additions).sum();
+    let total_deletions = diffs.iter().map(|file| file.deletions).sum();
+    let files = diffs
+        .into_iter()
+        .map(|file| SessionFileDiffResponse {
+            path: file.file,
+            status: file.status,
+            additions: file.additions,
+            deletions: file.deletions,
+            diff: file.patch,
+        })
+        .collect();
+
+    Ok(Json(SessionDiffsResponse {
+        files,
+        total_additions,
+        total_deletions,
+    }))
 }
 
 async fn todos(

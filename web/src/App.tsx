@@ -105,6 +105,13 @@ export default function App() {
     sessionStatus,
     activeModel,
     messages,
+    changedFiles,
+    changedFileDiffs,
+    changedFilesPanelOpen,
+    changedFilesLoading,
+    changedFilesError,
+    openChangedFilesPanel,
+    closeChangedFilesPanel,
     visibleStreams,
     instructionNotices,
     requests,
@@ -193,6 +200,11 @@ export default function App() {
       sessionStatus={sessionStatus}
       activeModel={activeModel}
       messages={messages}
+      changedFiles={changedFiles}
+      changedFileDiffs={changedFileDiffs}
+      changedFilesPanelOpen={changedFilesPanelOpen}
+      changedFilesLoading={changedFilesLoading}
+      changedFilesError={changedFilesError}
       streams={visibleStreams}
       instructionNotices={instructionNotices}
       requests={requests}
@@ -254,6 +266,8 @@ export default function App() {
       onDeleteSession={(session) => setSessionToDelete(session)}
       onRevert={handleRevert}
       onRetryProviderError={handleRetryProviderError}
+      onOpenChangedFiles={openChangedFilesPanel}
+      onCloseChangedFiles={closeChangedFilesPanel}
       onFork={handleFork}
       onRespond={(requestId, tools) => void respondToRequest(requestId, tools)}
       onMobileSidebarClose={() => setMobileSidebarOpen(false)}

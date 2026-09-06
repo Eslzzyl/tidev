@@ -4,14 +4,17 @@ import { useTranslation } from "react-i18next";
 
 import type {
   ApprovedTool,
+  FileDiff,
   FrontendRequest,
   Model,
   MessageRecord,
   Session,
+  SessionFileDiff,
   TodoItem,
 } from "../../types/api";
 import type { InstructionNotice, StreamMessage } from "../../types/chat";
 import { ChatComposer } from "./ChatComposer";
+import { ChangedFilesPanel } from "./ChangedFilesPanel";
 import type { PendingImage } from "../../utils/imageAttachments";
 import { ApprovalCard, MessageList } from "./MessageList";
 import { SessionSidebar } from "./SessionSidebar";
@@ -30,6 +33,11 @@ export interface ChatPanelProps {
   sessionStatus: "idle" | "loading" | "ready" | "missing" | "error";
   activeModel: Model | undefined;
   messages: MessageRecord[];
+  changedFiles: FileDiff[];
+  changedFileDiffs: SessionFileDiff[];
+  changedFilesPanelOpen: boolean;
+  changedFilesLoading: boolean;
+  changedFilesError: string | null;
   streams: StreamMessage[];
   instructionNotices: InstructionNotice[];
   requests: FrontendRequest[];
@@ -63,6 +71,8 @@ export interface ChatPanelProps {
   onRevert: (messageId: string) => void;
   onFork: (messageId: string) => void;
   onRetryProviderError: (messageId: string) => void;
+  onOpenChangedFiles: () => void;
+  onCloseChangedFiles: () => void;
   onRespond: (requestId: string, tools: ApprovedTool[]) => void;
   onMobileSidebarClose: () => void;
   onDraftChange: (value: string) => void;
@@ -139,6 +149,11 @@ export function ChatPanel({
   sessionStatus,
   activeModel,
   messages,
+  changedFiles,
+  changedFileDiffs,
+  changedFilesPanelOpen,
+  changedFilesLoading,
+  changedFilesError,
   streams,
   instructionNotices,
   requests,
@@ -172,6 +187,8 @@ export function ChatPanel({
   onRevert,
   onFork,
   onRetryProviderError,
+  onOpenChangedFiles,
+  onCloseChangedFiles,
   onRespond,
   onMobileSidebarClose,
   onDraftChange,
@@ -321,6 +338,8 @@ export function ChatPanel({
                 contextWindow={contextWindow}
                 thinkingLevel={thinkingLevel}
                 todos={todos}
+                changedFiles={changedFiles}
+                onOpenChangedFiles={onOpenChangedFiles}
                 enterToSend={enterToSend}
                 isBusy={selectedSession?.busy ?? false}
                 sending={sending}
@@ -363,6 +382,25 @@ export function ChatPanel({
           </>
         )}
       </section>
+      {changedFilesPanelOpen ? (
+        <>
+          <Button
+            type="button"
+            className="changed-files-panel-backdrop ui-backdrop-button"
+            variant="ghost"
+            size="sm"
+            onClick={onCloseChangedFiles}
+            aria-label={t("Close changed files")}
+          />
+          <ChangedFilesPanel
+            summaryFiles={changedFiles}
+            files={changedFileDiffs}
+            loading={changedFilesLoading}
+            error={changedFilesError}
+            onClose={onCloseChangedFiles}
+          />
+        </>
+      ) : null}
     </>
   );
 }

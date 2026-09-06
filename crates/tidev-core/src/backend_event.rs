@@ -126,6 +126,7 @@ pub enum BackendEvent {
         session_id: Uuid,
         request_id: u64,
         tool_call_id: String,
+        snapshot_hash: String,
         file_diffs_json: String,
     },
     ShellOutput {

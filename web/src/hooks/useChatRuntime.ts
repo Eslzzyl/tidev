@@ -7,12 +7,14 @@ import { useUIStore } from "../stores/useUIStore";
 import type {
   ApprovedTool,
   EventEnvelope,
+  FileDiff,
   FrontendRequest,
   Message,
   MessageRecord,
   Model,
   ProviderErrorData,
   Session,
+  SessionFileDiff,
   SessionListCursor,
   TodoItem,
   ToolCall,
@@ -21,6 +23,11 @@ import type {
 import type { InstructionNotice, StreamMessage } from "../types/chat";
 import { parseSlashCommand } from "../commands";
 import { asString, eventPayload } from "../utils/events";
+import {
+  latestChangedFileSnapshotHash,
+  latestChangedFiles,
+  parseChangedFileSummaries,
+} from "../utils/changedFiles";
 import {
   createPendingImages,
   pendingImagesToPromptAttachments,
@@ -259,6 +266,11 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
   const [nextSessionCursor, setNextSessionCursor] = useState<SessionListCursor | null>(null);
   const [loadingMoreSessions, setLoadingMoreSessions] = useState(false);
   const [messages, setMessages] = useState<MessageRecord[]>([]);
+  const [changedFiles, setChangedFiles] = useState<FileDiff[]>([]);
+  const [changedFileDiffs, setChangedFileDiffs] = useState<SessionFileDiff[]>([]);
+  const [changedFilesPanelOpen, setChangedFilesPanelOpen] = useState(false);
+  const [changedFilesLoading, setChangedFilesLoading] = useState(false);
+  const [changedFilesError, setChangedFilesError] = useState<string | null>(null);
   const [instructionNotices, setInstructionNotices] = useState<InstructionNotice[]>([]);
   const [streams, setStreams] = useState<Record<string, StreamMessage>>({});
   const [requests, setRequests] = useState<FrontendRequest[]>([]);
@@ -292,6 +304,9 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
   const [fileMentionIndex, setFileMentionIndex] = useState(0);
   const [completedSessions, setCompletedSessions] = useState<Set<string>>(new Set());
   const messagesCacheRef = useRef<Map<string, MessageRecord[]>>(new Map());
+  const changedFilesCacheRef = useRef<Map<string, FileDiff[]>>(new Map());
+  const changedFileDiffsCacheRef = useRef<Map<string, SessionFileDiff[]>>(new Map());
+  const changedFilesSnapshotHashCacheRef = useRef<Map<string, string>>(new Map());
   const draftsMapRef = useRef<
     Map<
       string,
@@ -502,6 +517,11 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
       setSessionStatus("missing");
       setSelectedSession(undefined);
       setMessages([]);
+      setChangedFiles([]);
+      setChangedFileDiffs([]);
+      setChangedFilesPanelOpen(false);
+      setChangedFilesLoading(false);
+      setChangedFilesError(null);
       setTodos([]);
       clearPendingStreamUpdates();
       resetInstructionState();
@@ -513,12 +533,84 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
     [clearPendingImages, clearPendingStreamUpdates, resetInstructionState],
   );
 
+  const applyChangedFileSummary = useCallback(
+    (sessionId: string, files: FileDiff[], snapshotHash?: string) => {
+      changedFilesCacheRef.current.set(sessionId, files);
+      changedFileDiffsCacheRef.current.delete(sessionId);
+      if (snapshotHash) {
+        changedFilesSnapshotHashCacheRef.current.set(sessionId, snapshotHash);
+      } else {
+        changedFilesSnapshotHashCacheRef.current.delete(sessionId);
+      }
+      if (selectedSessionRef.current === sessionId) {
+        setChangedFiles(files);
+        setChangedFileDiffs([]);
+        setChangedFilesError(null);
+      }
+    },
+    [],
+  );
+
+  const loadChangedFileDiffs = useCallback(async (sessionId: string, force = false) => {
+    if (!sessionId.trim()) return;
+    const cached = changedFileDiffsCacheRef.current.get(sessionId);
+    if (!force && cached) {
+      if (selectedSessionRef.current === sessionId) {
+        setChangedFileDiffs(cached);
+        setChangedFilesError(null);
+      }
+      return;
+    }
+
+    if (selectedSessionRef.current === sessionId) {
+      setChangedFilesLoading(true);
+      setChangedFilesError(null);
+    }
+    try {
+      const response = await api.getSessionDiffs(
+        sessionId,
+        changedFilesSnapshotHashCacheRef.current.get(sessionId),
+      );
+      changedFileDiffsCacheRef.current.set(sessionId, response.files);
+      if (selectedSessionRef.current === sessionId) {
+        setChangedFileDiffs(response.files);
+      }
+    } catch (reason) {
+      if (selectedSessionRef.current === sessionId) {
+        setChangedFilesError(
+          reason instanceof Error ? reason.message : i18n.t("Failed to load all diffs"),
+        );
+      }
+    } finally {
+      if (selectedSessionRef.current === sessionId) setChangedFilesLoading(false);
+    }
+  }, []);
+
+  const openChangedFilesPanel = useCallback(() => {
+    const sessionId = selectedSessionRef.current;
+    if (!sessionId || changedFiles.length === 0) return;
+    setChangedFilesPanelOpen(true);
+    void loadChangedFileDiffs(sessionId);
+  }, [changedFiles.length, loadChangedFileDiffs]);
+
+  const closeChangedFilesPanel = useCallback(() => {
+    setChangedFilesPanelOpen(false);
+  }, []);
+
   const loadMessages = useCallback(
     async (sessionId: string) => {
       if (!sessionId?.trim()) return false;
       try {
         const response = await api.listMessages(sessionId);
         messagesCacheRef.current.set(sessionId, response.messages);
+        applyChangedFileSummary(
+          sessionId,
+          latestChangedFiles(response.messages),
+          latestChangedFileSnapshotHash(response.messages),
+        );
+        if (selectedSessionRef.current === sessionId && changedFilesPanelOpen) {
+          void loadChangedFileDiffs(sessionId, true);
+        }
         if (selectedSessionRef.current === sessionId) {
           const loadedIds = new Set(response.messages.map((record) => record.message.id));
           for (const [messageId, messageSessionId] of pendingBackendMessageSessionsRef.current) {
@@ -544,7 +636,7 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
         return false;
       }
     },
-    [markSessionMissing],
+    [applyChangedFileSummary, changedFilesPanelOpen, loadChangedFileDiffs, markSessionMissing],
   );
 
   const loadTodos = useCallback(
@@ -616,6 +708,13 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
       resetInstructionState();
       const cached = messagesCacheRef.current.get(sessionId);
       setMessages(cached ?? []);
+      setChangedFiles(
+        changedFilesCacheRef.current.get(sessionId) ?? latestChangedFiles(cached ?? []),
+      );
+      setChangedFileDiffs(changedFileDiffsCacheRef.current.get(sessionId) ?? []);
+      setChangedFilesPanelOpen(false);
+      setChangedFilesLoading(false);
+      setChangedFilesError(null);
       setTodos([]);
       setError(null);
 
@@ -700,6 +799,11 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
       setSessionSearch("");
       setSessionWorkspaceRoot(null);
       setMessages([]);
+      setChangedFiles([]);
+      setChangedFileDiffs([]);
+      setChangedFilesPanelOpen(false);
+      setChangedFilesLoading(false);
+      setChangedFilesError(null);
       resetInstructionState();
       setError(null);
     },
@@ -864,6 +968,15 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
               return next;
             });
           }
+        }
+        return;
+      }
+      if (kind === "SidebarSnapshotReady") {
+        const files = parseChangedFileSummaries(asString(payload.file_diffs_json));
+        if (files === null) return;
+        applyChangedFileSummary(sessionId, files, asString(payload.snapshot_hash) || undefined);
+        if (selectedSessionRef.current === sessionId && changedFilesPanelOpen) {
+          void loadChangedFileDiffs(sessionId, true);
         }
         return;
       }
@@ -1247,6 +1360,11 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
             setCompletedSessions((prev) => new Set(prev).add(sessionId));
             void api.listMessages(sessionId).then((response) => {
               messagesCacheRef.current.set(sessionId, response.messages);
+              applyChangedFileSummary(
+                sessionId,
+                latestChangedFiles(response.messages),
+                latestChangedFileSnapshotHash(response.messages),
+              );
               scheduleStreamUpdate((current) => {
                 const next = { ...current };
                 delete next[key];
@@ -1261,7 +1379,16 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
         void loadMessages(sessionId);
       }
     },
-    [clearPendingInstructionNotices, loadMessages, loadTodos, scheduleStreamUpdate, touchSession],
+    [
+      applyChangedFileSummary,
+      changedFilesPanelOpen,
+      clearPendingInstructionNotices,
+      loadChangedFileDiffs,
+      loadMessages,
+      loadTodos,
+      scheduleStreamUpdate,
+      touchSession,
+    ],
   );
 
   useEffect(() => {
@@ -1805,6 +1932,13 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
     sessionStatus,
     activeModel,
     messages,
+    changedFiles,
+    changedFileDiffs,
+    changedFilesPanelOpen,
+    changedFilesLoading,
+    changedFilesError,
+    openChangedFilesPanel,
+    closeChangedFilesPanel,
     visibleStreams,
     requests,
     models,
