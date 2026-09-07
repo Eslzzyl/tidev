@@ -902,6 +902,13 @@ async fn select_model(
         thinking_levels,
         thinking_level: model.thinking_level.to_string(),
     };
+    let provider_id = model.provider_id.clone();
+    let model_id = model.model_id.clone();
+    state.runtime.update_config(|config| {
+        config.default_provider = provider_id;
+        config.default_model = model_id;
+    });
+    state.runtime.save_config()?;
     state.runtime.set_active_model(model);
     Ok(Json(response))
 }
@@ -2840,24 +2847,17 @@ async fn get_default_model(State(state): State<Arc<AppState>>) -> Json<serde_jso
 
 async fn set_default_model(
     State(state): State<Arc<AppState>>,
-    Json(body): Json<serde_json::Value>,
+    Json(request): Json<SelectModelRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    if let (Some(pid), Some(mid)) = (
-        body.get("provider_id").and_then(|v| v.as_str()),
-        body.get("model_id").and_then(|v| v.as_str()),
-    ) {
-        if let Ok(mut m) = state
-            .runtime
-            .config()
-            .resolve_active_model(&state.runtime.auth())
-        {
-            // Best-effort: update active model id
-            m.provider_id = pid.to_string();
-            m.model_id = mid.to_string();
-            state.runtime.set_active_model(m);
-        }
-    }
-    let model = state.runtime.active_model();
+    let config = state.runtime.config();
+    let auth = state.runtime.auth();
+    let model = config.resolve_model_by_ids(&auth, &request.provider_id, &request.model_id)?;
+    state.runtime.update_config(|config| {
+        config.default_provider = request.provider_id;
+        config.default_model = request.model_id;
+    });
+    state.runtime.save_config()?;
+    state.runtime.set_active_model(model.clone());
     Ok(Json(serde_json::json!({
         "success": true,
         "provider_id": model.provider_id,
