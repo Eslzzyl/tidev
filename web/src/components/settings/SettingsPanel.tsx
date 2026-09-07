@@ -11,6 +11,7 @@ import {
   Bot,
   Info,
   Server,
+  Search,
   ChevronRight,
   ChevronLeft,
 } from "lucide-react";
@@ -141,7 +142,7 @@ const allCategories = categoryGroups.flatMap((g) => g.categories);
 export function SettingsPanel() {
   const { t } = useTranslation();
   const [matchRoute, params] = useRoute<{ category?: string }>("/settings/:category?");
-  const [, navigate] = useLocation();
+  const [location, navigate] = useLocation();
 
   const [isMobile, setIsMobile] = useState(
     () => typeof window !== "undefined" && window.innerWidth < 768,
@@ -158,39 +159,59 @@ export function SettingsPanel() {
   const closeSettingsStore = useUIStore((s) => s.closeSettingsPanel);
   const [activeCategory, setActiveCategory] = useState<CategoryId>("appearance");
   const [mobileCategoryView, setMobileCategoryView] = useState<CategoryId | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const returnPathRef = useRef("/chat");
 
   const isOpen = settingsPanelOpen || matchRoute;
+
+  // Turn programmatic settings opens into route navigation while preserving the current page.
+  // The route remains the source of truth after navigation, which also keeps browser back working.
+  useEffect(() => {
+    if (settingsPanelOpen && !matchRoute) {
+      returnPathRef.current = location.startsWith("/settings") ? "/chat" : location;
+      const category = allCategories.some((item) => item.id === settingsInitialCategory)
+        ? settingsInitialCategory
+        : null;
+      navigate(routes.settings(category));
+    } else if (settingsPanelOpen && matchRoute) {
+      closeSettingsStore();
+    }
+  }, [
+    closeSettingsStore,
+    location,
+    matchRoute,
+    navigate,
+    settingsInitialCategory,
+    settingsPanelOpen,
+  ]);
 
   const closeSettings = useCallback(() => {
     closeSettingsStore();
     setMobileCategoryView(null);
-    if (matchRoute) {
-      navigate(routes.chat());
+    setSearchQuery("");
+    if (matchRoute || settingsPanelOpen) {
+      navigate(returnPathRef.current);
     }
-  }, [closeSettingsStore, matchRoute, navigate]);
+  }, [closeSettingsStore, matchRoute, navigate, settingsPanelOpen]);
 
   useEffect(() => {
     if (matchRoute && params?.category && allCategories.some((c) => c.id === params.category)) {
       const cat = params.category as CategoryId;
       setActiveCategory(cat);
-      if (typeof window !== "undefined" && window.innerWidth < 768) {
-        setMobileCategoryView(cat);
-      }
+      setMobileCategoryView(isMobile ? cat : null);
     } else if (
       settingsInitialCategory &&
       allCategories.some((c) => c.id === settingsInitialCategory)
     ) {
       const cat = settingsInitialCategory as CategoryId;
       setActiveCategory(cat);
-      if (typeof window !== "undefined" && window.innerWidth < 768) {
-        setMobileCategoryView(cat);
-      }
+      setMobileCategoryView(isMobile ? cat : null);
     } else {
       // Default to the first category of the first group ("appearance")
       setActiveCategory("appearance");
       setMobileCategoryView(null);
     }
-  }, [matchRoute, params?.category, settingsInitialCategory]);
+  }, [isMobile, matchRoute, params?.category, settingsInitialCategory]);
 
   const handleSelectCategory = (catId: CategoryId) => {
     setActiveCategory(catId);
@@ -221,16 +242,19 @@ export function SettingsPanel() {
       const activeEl = navRef.current.querySelector<HTMLElement>(
         `[data-cat-id="${activeCategory}"]`,
       );
-      if (activeEl) {
-        const navRect = navRef.current.getBoundingClientRect();
-        const btnRect = activeEl.getBoundingClientRect();
-        setActiveRect({
-          top: btnRect.top - navRect.top,
-          height: btnRect.height,
-        });
+      if (!activeEl) {
+        setActiveRect(null);
+        return;
       }
+
+      const navRect = navRef.current.getBoundingClientRect();
+      const btnRect = activeEl.getBoundingClientRect();
+      setActiveRect({
+        top: btnRect.top - navRect.top,
+        height: btnRect.height,
+      });
     }
-  }, [activeCategory]);
+  }, [activeCategory, searchQuery]);
 
   // Close on Escape
   const handleKeyDown = useCallback(
@@ -259,167 +283,148 @@ export function SettingsPanel() {
 
   if (!isOpen) return null;
 
+  const normalizedSearchQuery = searchQuery.trim().toLocaleLowerCase();
+  const visibleCategoryGroups = categoryGroups
+    .map((group) => ({
+      ...group,
+      categories: group.categories.filter((category) => {
+        if (!normalizedSearchQuery) return true;
+        return [category.label, category.description]
+          .map((value) => t(value).toLocaleLowerCase())
+          .some((value) => value.includes(normalizedSearchQuery));
+      }),
+    }))
+    .filter((group) => group.categories.length > 0);
+
   const currentCategoryMeta = allCategories.find(
     (c) => c.id === (isMobile ? mobileCategoryView || activeCategory : activeCategory),
   );
 
-  return (
-    <div
-      className="fixed inset-0 z-60 flex items-center justify-center bg-black/40 backdrop-blur-xs p-0 md:p-6 motion-safe:animate-fade-in"
-      onPointerDown={(event) => {
-        if (event.target === event.currentTarget) closeSettings();
-      }}
-    >
-      <div className="flex h-full w-full flex-col overflow-hidden bg-white shadow-2xl dark:bg-neutral-900 md:h-[64vh] md:max-h-[530px] md:max-w-[860px] md:rounded-2xl md:border md:border-neutral-200/80 md:dark:border-neutral-800/80">
-        {/* Header */}
-        <div className="flex shrink-0 items-center justify-between border-b border-neutral-200/80 px-4 py-2.5 dark:border-neutral-800/80 sm:px-6">
-          <div className="flex items-center gap-2 min-w-0">
-            {/* Mobile Back Button (ONLY visible when viewing category detail on mobile) */}
-            {isMobile && mobileCategoryView ? (
-              <IconButton
-                type="button"
-                size="sm"
-                variant="ghost"
-                label={t("Back to settings")}
-                onClick={handleBackToMenu}
-                className="-ml-1.5 shrink-0"
-              >
-                <ChevronLeft className="h-5 w-5" />
-              </IconButton>
-            ) : null}
-            <h2 className="truncate text-base font-semibold text-neutral-900 dark:text-neutral-100">
-              {isMobile && mobileCategoryView
-                ? t(currentCategoryMeta?.label || "Settings")
-                : t("Settings")}
-            </h2>
-          </div>
-          <IconButton type="button" size="sm" label={t("Close settings")} onClick={closeSettings}>
-            <X className="h-5 w-5" />
-          </IconButton>
-        </div>
+  const renderCategory = (category: CategoryId) => {
+    if (category === "appearance") return <AppearanceSection />;
+    if (category === "editor") return <EditorSection />;
+    if (category === "interaction") return <InteractionSection />;
+    if (category === "terminal") return <TerminalSection />;
+    if (category === "security") return <SecuritySection />;
+    if (category === "providers") return <ProvidersSection />;
+    if (category === "agents") return <AgentsSection />;
+    if (category === "mcp") return <McpSection />;
+    if (category === "skills") return <SkillsSection />;
+    return <AboutSection />;
+  };
 
-        {/* Body: Responsive Master-Detail */}
-        <div className="flex min-h-0 flex-1 overflow-hidden">
-          {/* Desktop Sidebar (visible on md+) */}
-          <nav
-            ref={navRef}
-            className="relative hidden w-52 shrink-0 flex-col overflow-y-auto border-r border-neutral-200/80 p-3 dark:border-neutral-800/80 md:flex"
-          >
-            {/* Sliding highlight indicator */}
-            {activeRect && (
+  const renderCategoryList = (mobile = false) => (
+    <>
+      {visibleCategoryGroups.map((group) => (
+        <div key={group.id} className="settings-page-nav-group">
+          <div className="settings-page-nav-group-title">{t(group.label)}</div>
+          {group.categories.map((cat) => {
+            const isActive = activeCategory === cat.id;
+            return (
+              <button
+                key={cat.id}
+                type="button"
+                data-cat-id={cat.id}
+                data-active={isActive ? "true" : undefined}
+                onClick={() => handleSelectCategory(cat.id)}
+                className={`settings-page-nav-item${isActive ? " active" : ""}`}
+              >
+                <span className="settings-page-nav-icon">{cat.icon}</span>
+                <span className="settings-page-nav-copy">
+                  <span>{t(cat.label)}</span>
+                  {mobile ? <small>{t(cat.description)}</small> : null}
+                </span>
+                {mobile ? <ChevronRight className="settings-page-nav-chevron" /> : null}
+              </button>
+            );
+          })}
+        </div>
+      ))}
+      {visibleCategoryGroups.length === 0 ? (
+        <p className="settings-page-empty">{t("No matching settings")}</p>
+      ) : null}
+    </>
+  );
+
+  return (
+    <div className="settings-page motion-safe:animate-fade-in">
+      <div className="settings-page-layout">
+        <aside className="settings-page-sidebar">
+          <button type="button" className="settings-page-back" onClick={closeSettings}>
+            <ChevronLeft className="h-4 w-4" />
+            <span>{t("Back to application")}</span>
+          </button>
+          <label className="settings-page-search">
+            <Search className="h-4 w-4" aria-hidden="true" />
+            <span className="sr-only">{t("Search settings...")}</span>
+            <input
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder={t("Search settings...")}
+              type="search"
+            />
+          </label>
+          <nav ref={navRef} className="settings-page-nav" aria-label={t("Settings")}>
+            {activeRect ? (
               <div
                 className="ui-settings-nav-indicator"
                 style={{ top: activeRect.top, height: activeRect.height }}
               />
-            )}
-            <div className="space-y-3.5">
-              {categoryGroups.map((group) => (
-                <div key={group.id} className="space-y-1">
-                  <div className="px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
-                    {t(group.label)}
-                  </div>
-                  {group.categories.map((cat) => {
-                    const isActive = activeCategory === cat.id;
-                    return (
-                      <button
-                        key={cat.id}
-                        type="button"
-                        data-cat-id={cat.id}
-                        data-active={isActive ? "true" : undefined}
-                        onClick={() => handleSelectCategory(cat.id)}
-                        className={`relative z-1 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-xs font-medium transition-colors ${
-                          isActive
-                            ? "text-neutral-900 font-semibold dark:text-neutral-100"
-                            : "text-neutral-600 hover:bg-neutral-100/60 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800/60 dark:hover:text-neutral-200"
-                        }`}
-                      >
-                        <span
-                          className={`shrink-0 ${
-                            isActive
-                              ? "text-neutral-900 dark:text-neutral-100"
-                              : "text-neutral-400 dark:text-neutral-500"
-                          }`}
-                        >
-                          {cat.icon}
-                        </span>
-                        <span className="truncate">{t(cat.label)}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              ))}
-            </div>
+            ) : null}
+            {renderCategoryList()}
           </nav>
+        </aside>
 
-          {/* Mobile Categories Menu View (when mobileCategoryView is null on small screens) */}
-          {isMobile ? (
-            mobileCategoryView ? (
-              /* Mobile Category Detail View */
-              <div className="flex-1 overflow-y-auto p-4">
-                {mobileCategoryView === "appearance" && <AppearanceSection />}
-                {mobileCategoryView === "editor" && <EditorSection />}
-                {mobileCategoryView === "interaction" && <InteractionSection />}
-                {mobileCategoryView === "terminal" && <TerminalSection />}
-                {mobileCategoryView === "security" && <SecuritySection />}
-                {mobileCategoryView === "providers" && <ProvidersSection />}
-                {mobileCategoryView === "agents" && <AgentsSection />}
-                {mobileCategoryView === "mcp" && <McpSection />}
-                {mobileCategoryView === "skills" && <SkillsSection />}
-                {mobileCategoryView === "about" && <AboutSection />}
+        <main className="settings-page-main">
+          <header className="settings-page-header">
+            <div className="settings-page-heading">
+              {isMobile && mobileCategoryView ? (
+                <IconButton
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  label={t("Back to settings")}
+                  onClick={handleBackToMenu}
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                </IconButton>
+              ) : null}
+              <div className="min-w-0">
+                <p className="settings-page-eyebrow">{t("Settings")}</p>
+                <h1>
+                  {isMobile && mobileCategoryView
+                    ? t(currentCategoryMeta?.label || "Settings")
+                    : t("Settings")}
+                </h1>
               </div>
-            ) : (
-              /* Mobile Categories Group List */
-              <div className="flex-1 overflow-y-auto p-4 space-y-5">
-                {categoryGroups.map((group) => (
-                  <div key={group.id} className="space-y-2">
-                    <h3 className="px-1 text-xs font-semibold uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
-                      {t(group.label)}
-                    </h3>
-                    <div className="overflow-hidden rounded-xl border border-neutral-200/80 bg-neutral-50/50 divide-y divide-neutral-200/60 dark:border-neutral-800/80 dark:bg-neutral-800/30 dark:divide-neutral-800/60">
-                      {group.categories.map((cat) => (
-                        <button
-                          key={cat.id}
-                          type="button"
-                          onClick={() => handleSelectCategory(cat.id)}
-                          className="flex w-full items-center justify-between gap-3 p-3 text-left transition-colors active:bg-neutral-100 dark:active:bg-neutral-800"
-                        >
-                          <div className="flex items-center gap-3 min-w-0">
-                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white shadow-xs text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300">
-                              {cat.icon}
-                            </span>
-                            <div className="min-w-0">
-                              <span className="block truncate text-sm font-semibold text-neutral-900 dark:text-neutral-100">
-                                {t(cat.label)}
-                              </span>
-                              <span className="block truncate text-xs text-neutral-500 dark:text-neutral-400">
-                                {t(cat.description)}
-                              </span>
-                            </div>
-                          </div>
-                          <ChevronRight className="h-4 w-4 shrink-0 text-neutral-400" />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )
+            </div>
+            <IconButton type="button" size="sm" label={t("Close settings")} onClick={closeSettings}>
+              <X className="h-5 w-5" />
+            </IconButton>
+          </header>
+
+          {isMobile && !mobileCategoryView ? (
+            <div className="settings-page-mobile-list">
+              <label className="settings-page-search settings-page-mobile-search">
+                <Search className="h-4 w-4" aria-hidden="true" />
+                <span className="sr-only">{t("Search settings...")}</span>
+                <input
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder={t("Search settings...")}
+                  type="search"
+                />
+              </label>
+              {renderCategoryList(true)}
+            </div>
           ) : (
-            /* Desktop Content View */
-            <div className="flex-1 overflow-y-auto p-5 md:p-6">
-              {activeCategory === "appearance" && <AppearanceSection />}
-              {activeCategory === "editor" && <EditorSection />}
-              {activeCategory === "interaction" && <InteractionSection />}
-              {activeCategory === "terminal" && <TerminalSection />}
-              {activeCategory === "security" && <SecuritySection />}
-              {activeCategory === "providers" && <ProvidersSection />}
-              {activeCategory === "agents" && <AgentsSection />}
-              {activeCategory === "mcp" && <McpSection />}
-              {activeCategory === "skills" && <SkillsSection />}
-              {activeCategory === "about" && <AboutSection />}
+            <div className="settings-page-content">
+              <div className="settings-page-content-inner">
+                {renderCategory(mobileCategoryView || activeCategory)}
+              </div>
             </div>
           )}
-        </div>
+        </main>
       </div>
     </div>
   );

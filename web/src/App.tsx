@@ -368,7 +368,9 @@ export default function App() {
             <Route path="/stats">
               <StatsView />
             </Route>
-            <Route path="/settings/:category?">{renderChat()}</Route>
+            <Route path="/settings/:category?">
+              <div className="settings-route-placeholder" aria-hidden="true" />
+            </Route>
             <Route path="/">
               <Redirect to="/chat" />
             </Route>
