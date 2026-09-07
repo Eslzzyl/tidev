@@ -20,7 +20,7 @@ import type {
   ToolCall,
   ToolExecutionResult,
 } from "../types/api";
-import type { InstructionNotice, StreamMessage } from "../types/chat";
+import type { CompactionNotice, InstructionNotice, StreamMessage } from "../types/chat";
 import { parseSlashCommand } from "../commands";
 import { asString, eventPayload } from "../utils/events";
 import {
@@ -272,6 +272,7 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
   const [changedFilesLoading, setChangedFilesLoading] = useState(false);
   const [changedFilesError, setChangedFilesError] = useState<string | null>(null);
   const [instructionNotices, setInstructionNotices] = useState<InstructionNotice[]>([]);
+  const [compactionNotice, setCompactionNotice] = useState<CompactionNotice | null>(null);
   const [streams, setStreams] = useState<Record<string, StreamMessage>>({});
   const [requests, setRequests] = useState<FrontendRequest[]>([]);
   const [models, setModels] = useState<Model[]>([]);
@@ -525,6 +526,7 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
       setTodos([]);
       clearPendingStreamUpdates();
       resetInstructionState();
+      setCompactionNotice(null);
       setStreams({});
       clearPendingImages();
       setError(null);
@@ -706,6 +708,7 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
         onSelectSessionRoute?.(sessionId);
       }
       resetInstructionState();
+      setCompactionNotice(null);
       const cached = messagesCacheRef.current.get(sessionId);
       setMessages(cached ?? []);
       setChangedFiles(
@@ -805,6 +808,7 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
       setChangedFilesLoading(false);
       setChangedFilesError(null);
       resetInstructionState();
+      setCompactionNotice(null);
       setError(null);
     },
     [onSelectSessionRoute, resetInstructionState],
@@ -1004,6 +1008,38 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
         instructionNoticesRef.current = merged;
         instructionNoticeRevisionRef.current += 1;
         setInstructionNotices(merged);
+        return;
+      }
+      if (kind === "ContextCompactionStarted") {
+        if (selectedSessionRef.current !== sessionId) return;
+        setCompactionNotice({
+          status: "running",
+          manual: payload.manual === true,
+          summary: null,
+          error: null,
+          modelId: asString(payload.model_id) || null,
+          completedAt: null,
+        });
+        if (payload.manual === true) touchSession(sessionId, true);
+        return;
+      }
+      if (kind === "ContextCompacted") {
+        if (selectedSessionRef.current !== sessionId) return;
+        const compacted = payload.compacted === true;
+        const error = asString(payload.error) || null;
+        let manual = payload.manual === true;
+        setCompactionNotice((current) => {
+          manual ||= current?.manual === true;
+          return {
+            status: compacted ? "complete" : "failed",
+            manual,
+            summary: asString(payload.summary) || current?.summary || null,
+            error,
+            modelId: asString(payload.model_id) || current?.modelId || null,
+            completedAt: asString(payload.completed_at) || new Date().toISOString(),
+          };
+        });
+        if (manual) touchSession(sessionId, false);
         return;
       }
       if (kind === "TurnStarting") {
@@ -1990,5 +2026,6 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
     removePendingImage,
     completedSessions,
     instructionNotices,
+    compactionNotice,
   };
 }

@@ -12,7 +12,7 @@ import type {
   SessionFileDiff,
   TodoItem,
 } from "../../types/api";
-import type { InstructionNotice, StreamMessage } from "../../types/chat";
+import type { CompactionNotice, InstructionNotice, StreamMessage } from "../../types/chat";
 import { ChatComposer } from "./ChatComposer";
 import { ChangedFilesPanel } from "./ChangedFilesPanel";
 import type { PendingImage } from "../../utils/imageAttachments";
@@ -40,6 +40,7 @@ export interface ChatPanelProps {
   changedFilesError: string | null;
   streams: StreamMessage[];
   instructionNotices: InstructionNotice[];
+  compactionNotice: CompactionNotice | null;
   requests: FrontendRequest[];
   todos: TodoItem[];
   error: string | null;
@@ -156,6 +157,7 @@ export function ChatPanel({
   changedFilesError,
   streams,
   instructionNotices,
+  compactionNotice,
   requests,
   todos,
   error,
@@ -307,6 +309,7 @@ export function ChatPanel({
                 messages={messages}
                 streams={streams}
                 instructionNotices={instructionNotices}
+                compactionNotice={compactionNotice}
                 sessionId={selectedSessionId}
                 session={selectedSession}
                 models={models}

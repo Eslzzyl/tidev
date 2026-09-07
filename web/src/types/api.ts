@@ -109,6 +109,7 @@ export interface ToolMetadata {
   exists: boolean | null;
   prior_summary: string | null;
   prior_retained_from: number | null;
+  compaction_manual?: boolean | null;
   file_changes: FileChangeInfo[];
   exit_code: number | null;
   duration_ms: number | null;

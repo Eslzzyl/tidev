@@ -617,10 +617,11 @@ impl App {
         // divider line and initial state are visible.
         if let Some(ref mut chat) = self.message_list {
             if let Some(ref mut ctx) = chat.active_chat_context_mut() {
-                let msg = Message::streaming(
+                let mut msg = Message::streaming(
                     tidev_llm::message::MessageRole::System,
                     format!("{}\n\n", COMPACTION_MESSAGE_LABEL),
                 );
+                msg.metadata.compaction_manual = Some(true);
                 ctx.push(msg);
             }
             chat.invalidate_layout();
@@ -629,7 +630,7 @@ impl App {
         self.compacting_sessions.insert(session_id);
         let rt = self.runtime.clone();
         tokio::spawn(async move {
-            if let Err(e) = rt.compact_session(session_id, None).await {
+            if let Err(e) = rt.compact_session(session_id, Some(0)).await {
                 log::error!("Compact failed: {e}");
             }
         });

@@ -355,6 +355,8 @@ impl EventTranslator {
                 )]
             }
 
+            BackendEvent::ContextCompactionStarted { .. } => vec![],
+
             BackendEvent::Failed {
                 session_id: _,
                 request_id: _,

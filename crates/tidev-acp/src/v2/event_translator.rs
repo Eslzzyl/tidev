@@ -246,6 +246,7 @@ impl EventTranslator {
                 }
                 updates
             }
+            BackendEvent::ContextCompactionStarted { .. } => Vec::new(),
             BackendEvent::Finished { turn, .. } => {
                 let reason = match turn.finish_reason.as_deref() {
                     Some("max_tokens") | Some("length") => acp::StopReason::MaxTokens,

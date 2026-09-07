@@ -374,9 +374,14 @@ pub(super) fn render_system_card(
             .map(|(_, s)| s)
             .unwrap_or("")
             .trim();
+        let label = if message.metadata.compaction_manual == Some(false) {
+            "Automatic compaction"
+        } else {
+            COMPACTION_MESSAGE_LABEL
+        };
         let mut lines = Vec::new();
         lines.push(render_compaction_divider_line(
-            COMPACTION_MESSAGE_LABEL,
+            label,
             content_width,
             palette,
         ));

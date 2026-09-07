@@ -1640,6 +1640,22 @@ impl AgentContext for CoreContext {
             let cm = self.context_manager.lock().await;
             (cm.summary.clone(), cm.retained_from)
         };
+        let should_compact = {
+            let buf = self.buffer.read().await;
+            let cm = self.context_manager.lock().await;
+            cm.needs_compaction(
+                buf.protocol(),
+                compact_model.context_window,
+                compact_model.max_output_tokens,
+            )
+        };
+        if should_compact {
+            self.emit(BackendEvent::ContextCompactionStarted {
+                session_id: self.session_id,
+                manual: false,
+                model_id: Some(self.active_model.model_id.clone()),
+            });
+        }
         let prepared = {
             let buf = self.buffer.read().await;
             let mut cm = self.context_manager.lock().await;

@@ -97,6 +97,11 @@ pub enum BackendEvent {
         model_id: String,
         duration_ms: Option<u64>,
     },
+    ContextCompactionStarted {
+        session_id: Uuid,
+        manual: bool,
+        model_id: Option<String>,
+    },
     ContextCompacted {
         session_id: Uuid,
         compacted: bool,
@@ -171,6 +176,7 @@ impl BackendEvent {
             | Self::SubagentCompleted { session_id, .. }
             | Self::UsageStats { session_id, .. }
             | Self::InstructionsLoaded { session_id, .. }
+            | Self::ContextCompactionStarted { session_id, .. }
             | Self::ContextCompacted { session_id, .. }
             | Self::UndoCompleted { session_id, .. }
             | Self::UserMessageCreated { session_id, .. }
@@ -200,6 +206,7 @@ impl BackendEvent {
             | Self::TurnStarting { request_id, .. }
             | Self::StreamEnd { request_id, .. } => Some(*request_id),
             Self::InstructionsLoaded { .. }
+            | Self::ContextCompactionStarted { .. }
             | Self::ContextCompacted { .. }
             | Self::UndoCompleted { .. }
             | Self::UserMessageCreated { .. }

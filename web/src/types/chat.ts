@@ -8,6 +8,15 @@ export interface InstructionNotice {
   deferred: boolean;
 }
 
+export interface CompactionNotice {
+  status: "running" | "complete" | "failed";
+  manual: boolean;
+  summary: string | null;
+  error: string | null;
+  modelId: string | null;
+  completedAt: string | null;
+}
+
 export interface StreamMessage {
   key: string;
   requestId: number;

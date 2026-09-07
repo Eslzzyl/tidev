@@ -1,4 +1,4 @@
-import { FileText } from "lucide-react";
+import { Check, ChevronRight, FileText } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -188,21 +188,60 @@ export function SystemMessageBlock({
 
   if (message.content.startsWith(COMPACTION_LABEL)) {
     const summary = message.content.split("\n\n").slice(1).join("\n\n").trim();
+    const title = message.metadata.compaction_manual
+      ? t("Context compacted")
+      : t("Context automatically compacted");
     return (
-      <article className="system-message-block">
-        <div className="system-divider">
-          <span />
-          <strong>{t(COMPACTION_LABEL)}</strong>
-          <span />
-        </div>
-        {summary ? <MarkdownRenderer content={summary} /> : null}
-      </article>
+      <PersistedCompactionMessage messageId={message.id} title={title} summary={summary} />
     );
   }
 
   return (
     <article className="system-message-block">
       <MarkdownRenderer content={message.content} />
+    </article>
+  );
+}
+
+function PersistedCompactionMessage({
+  messageId,
+  title,
+  summary,
+}: {
+  messageId: string;
+  title: string;
+  summary: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const bodyId = `compaction-summary-${messageId.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+
+  return (
+    <article className="system-message-block compaction-message">
+      <Button
+        type="button"
+        className="compaction-message-header"
+        onClick={() => summary && setExpanded((current) => !current)}
+        aria-expanded={summary ? expanded : undefined}
+        aria-controls={summary ? bodyId : undefined}
+        variant="ghost"
+        size="sm"
+        disabled={!summary}
+      >
+        <Check size={14} />
+        <strong>{title}</strong>
+        {summary ? (
+          <ChevronRight
+            className={`compaction-message-chevron${expanded ? " expanded" : ""}`}
+            size={16}
+            aria-hidden="true"
+          />
+        ) : null}
+      </Button>
+      <ExpandableBody expanded={expanded} className="compaction-message-body-shell">
+        <div id={bodyId} className="compaction-message-body">
+          {summary ? <MarkdownRenderer content={summary} /> : null}
+        </div>
+      </ExpandableBody>
     </article>
   );
 }

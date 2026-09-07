@@ -1128,6 +1128,7 @@ impl MessageList {
             }
             BackendEvent::ContextCompacted {
                 compacted,
+                manual,
                 summary,
                 model_id,
                 completed_at,
@@ -1147,11 +1148,13 @@ impl MessageList {
                             msg.streaming = false;
                             msg.model_id = model_id.clone();
                             msg.completed_at = *completed_at;
+                            msg.metadata.compaction_manual = Some(*manual);
                         } else {
-                            let mut compaction_msg = tidev_llm::message::Message::new(
-                                tidev_llm::message::MessageRole::System,
-                                format!("Compaction\n\n{}", summary),
-                            );
+                            let mut compaction_msg =
+                                tidev_llm::message::Message::compaction_with_manual(
+                                    summary.clone(),
+                                    *manual,
+                                );
                             compaction_msg.model_id = model_id.clone();
                             compaction_msg.completed_at = *completed_at;
                             chat_context.messages.push(compaction_msg);

@@ -147,6 +147,8 @@ pub struct ToolMetadata {
     #[serde(default)]
     pub prior_retained_from: Option<usize>,
     #[serde(default)]
+    pub compaction_manual: Option<bool>,
+    #[serde(default)]
     pub file_changes: Vec<FileChangeInfo>,
     #[serde(default)]
     pub exit_code: Option<i32>,
@@ -394,10 +396,16 @@ impl Message {
     }
 
     pub fn compaction(summary: impl Into<String>) -> Self {
-        Self::new(
+        Self::compaction_with_manual(summary, false)
+    }
+
+    pub fn compaction_with_manual(summary: impl Into<String>, manual: bool) -> Self {
+        let mut message = Self::new(
             MessageRole::System,
             format!("{COMPACTION_MESSAGE_LABEL}\n\n{}", summary.into()),
-        )
+        );
+        message.metadata.compaction_manual = Some(manual);
+        message
     }
 
     /// Create a streaming message (role + content, streaming = true).

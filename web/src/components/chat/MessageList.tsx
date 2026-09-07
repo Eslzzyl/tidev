@@ -36,7 +36,7 @@ import type {
   Session,
   ToolCall,
 } from "../../types/api";
-import type { InstructionNotice, StreamMessage } from "../../types/chat";
+import type { CompactionNotice, InstructionNotice, StreamMessage } from "../../types/chat";
 import {
   approvedPermissionTool,
   formatQuestionAnswers,
@@ -78,6 +78,7 @@ export interface MessageListProps {
   messages: MessageRecord[];
   streams: StreamMessage[];
   instructionNotices?: InstructionNotice[];
+  compactionNotice?: CompactionNotice | null;
   sessionId?: string;
   session?: Session;
   models?: Model[];
@@ -125,6 +126,7 @@ type ChatItem =
       completedAt?: string;
     }
   | { kind: "system"; key: string; block: SystemMessageBlockData }
+  | { kind: "compaction"; key: string; notice: CompactionNotice }
   | { kind: "stream-empty"; key: string }
   | { kind: "stream-error"; key: string; message: string }
   | {
@@ -408,6 +410,7 @@ export function buildChatItems(
   models: Model[],
   session: Session | undefined,
   t: TFunction,
+  compactionNotice: CompactionNotice | null = null,
 ): ChatItem[] {
   const items: ChatItem[] = [];
   const mergedStreamKeys = new Set<string>();
@@ -427,6 +430,11 @@ export function buildChatItems(
 
   for (const value of rounds) {
     if (isSystemBlock(value)) {
+      const isLiveCompletedCompaction =
+        compactionNotice?.status === "complete" &&
+        compactionNotice.summary &&
+        value.message.content === `Compaction\n\n${compactionNotice.summary}`;
+      if (isLiveCompletedCompaction) continue;
       items.push({ kind: "system", key: value.id, block: value });
       continue;
     }
@@ -725,6 +733,10 @@ export function buildChatItems(
     }
   }
 
+  if (compactionNotice) {
+    items.push({ kind: "compaction", key: "context-compaction", notice: compactionNotice });
+  }
+
   return items;
 }
 
@@ -754,6 +766,8 @@ function estimateChatItemSize(item: ChatItem | undefined) {
       return 30;
     case "system":
       return 80;
+    case "compaction":
+      return item.notice.status === "complete" && item.notice.summary ? 64 : 34;
     case "stream-empty":
       return 24;
     case "stream-error":
@@ -976,6 +990,62 @@ function InterruptionNotice({
   );
 }
 
+function CompactionMessage({ notice }: { notice: CompactionNotice }) {
+  const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(false);
+  const hasSummary = notice.status === "complete" && Boolean(notice.summary);
+  const title =
+    notice.status === "running"
+      ? notice.manual
+        ? t("Compacting context")
+        : t("Automatically compacting context")
+      : notice.status === "complete"
+        ? notice.manual
+          ? t("Context compacted")
+          : t("Context automatically compacted")
+        : t("Context compaction failed");
+  const bodyId = "context-compaction-summary";
+
+  return (
+    <article className="system-message-block compaction-message">
+      <Button
+        type="button"
+        className="compaction-message-header"
+        onClick={() => hasSummary && setExpanded((current) => !current)}
+        aria-expanded={hasSummary ? expanded : undefined}
+        aria-controls={hasSummary ? bodyId : undefined}
+        variant="ghost"
+        size="sm"
+        disabled={!hasSummary}
+      >
+        {notice.status === "running" ? (
+          <LoaderCircle className="spin" size={14} />
+        ) : notice.status === "complete" ? (
+          <Check size={14} />
+        ) : (
+          <CircleAlert size={14} />
+        )}
+        <strong>{title}</strong>
+        {hasSummary ? (
+          <ChevronRight
+            className={`compaction-message-chevron${expanded ? " expanded" : ""}`}
+            size={16}
+            aria-hidden="true"
+          />
+        ) : null}
+      </Button>
+      {notice.status === "failed" && notice.error ? (
+        <div className="compaction-message-error">{notice.error}</div>
+      ) : null}
+      <ExpandableBody expanded={expanded} className="compaction-message-body-shell">
+        <div id={bodyId} className="compaction-message-body">
+          {notice.summary ? <MarkdownRenderer content={notice.summary} /> : null}
+        </div>
+      </ExpandableBody>
+    </article>
+  );
+}
+
 function renderSegment(
   item: SegmentItem,
   workspaceRoot: string,
@@ -1068,6 +1138,7 @@ export const MessageList = memo(function MessageList({
   messages,
   streams,
   instructionNotices = [],
+  compactionNotice = null,
   sessionId,
   session,
   models = [],
@@ -1095,8 +1166,19 @@ export const MessageList = memo(function MessageList({
         models,
         session,
         t,
+        compactionNotice,
       ),
-    [rounds, streams, expandedTurns, instructionNotices, workspaceRoot, models, session, t],
+    [
+      rounds,
+      streams,
+      expandedTurns,
+      instructionNotices,
+      workspaceRoot,
+      models,
+      session,
+      t,
+      compactionNotice,
+    ],
   );
 
   const followTailRef = useRef(true);
@@ -1223,6 +1305,8 @@ export const MessageList = memo(function MessageList({
         );
       case "system":
         return <SystemMessageBlock message={item.block.message} sessionId={sessionId} />;
+      case "compaction":
+        return <CompactionMessage notice={item.notice} />;
       case "stream-empty":
         return (
           <article className="chat-message assistant-message assistant-segment-row">

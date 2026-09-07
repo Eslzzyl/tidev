@@ -4188,6 +4188,46 @@ pre.markdown-code-block code {
 .system-divider strong {
   font-weight: 400;
 }
+.compaction-message {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 4px;
+}
+.compaction-message-header {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: 7px;
+  min-height: 26px;
+  padding: 3px 0;
+  color: var(--muted);
+}
+.compaction-message-header:not(:disabled):hover {
+  color: var(--text);
+}
+.compaction-message-header:disabled {
+  opacity: 1;
+}
+.compaction-message-header strong {
+  font-weight: 400;
+}
+.compaction-message-chevron {
+  transition: transform 160ms ease;
+}
+.compaction-message-chevron.expanded {
+  transform: rotate(90deg);
+}
+.compaction-message-body-shell {
+  padding-left: 21px;
+}
+.compaction-message-body {
+  padding: 2px 0 8px;
+}
+.compaction-message-error {
+  padding-left: 21px;
+  color: var(--danger);
+}
 .subagent-prompt p {
   margin: 5px 0 0;
   color: var(--muted);

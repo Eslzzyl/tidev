@@ -164,19 +164,40 @@ impl App {
             }
             BackendEvent::ContextCompacted {
                 session_id,
+                manual,
                 error: Some(ref msg),
                 ..
             } => {
                 self.compacting_sessions.remove(&session_id);
-                self.set_notice(format!("Compaction failed: {msg}"));
+                let prefix = if manual {
+                    "Compaction failed"
+                } else {
+                    "Automatic compaction failed"
+                };
+                self.set_notice(format!("{prefix}: {msg}"));
             }
             BackendEvent::ContextCompacted {
                 session_id,
+                manual,
                 error: None,
                 ..
             } => {
                 self.compacting_sessions.remove(&session_id);
-                self.set_notice("Context compacted");
+                self.set_notice(if manual {
+                    "Context compacted"
+                } else {
+                    "Context automatically compacted"
+                });
+            }
+            BackendEvent::ContextCompactionStarted {
+                session_id, manual, ..
+            } => {
+                self.compacting_sessions.insert(session_id);
+                self.set_notice(if manual {
+                    "Compacting session context..."
+                } else {
+                    "Automatically compacting session context..."
+                });
             }
             BackendEvent::UserMessageCreated {
                 session_id,

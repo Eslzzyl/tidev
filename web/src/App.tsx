@@ -114,6 +114,7 @@ export default function App() {
     closeChangedFilesPanel,
     visibleStreams,
     instructionNotices,
+    compactionNotice,
     requests,
     models,
     todos,
@@ -207,6 +208,7 @@ export default function App() {
       changedFilesError={changedFilesError}
       streams={visibleStreams}
       instructionNotices={instructionNotices}
+      compactionNotice={compactionNotice}
       requests={requests}
       todos={todos}
       error={error}
