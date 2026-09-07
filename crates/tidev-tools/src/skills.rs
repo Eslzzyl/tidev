@@ -18,6 +18,11 @@ const SKILL_ROOTS: &[&str] = &[".opencode/skills", ".claude/skills", ".agents/sk
 /// regardless of configuration.
 const HOME_SKILL_ROOTS: &[&str] = &[".agents/skills", ".claude/skills"];
 const MAX_COMPANION_FILES: usize = 10;
+/// Default number of lines returned for one skill-file page.
+pub const DEFAULT_SKILL_FILE_PAGE_LINES: usize = 2000;
+const MAX_SKILL_FILE_BYTES: usize = 50 * 1024;
+const MAX_SKILL_LINE_LENGTH: usize = 2000;
+const MAX_SKILL_LINE_SUFFIX: &str = "... (line truncated to 2000 chars)";
 /// Default page size for listing skills through the `skill` tool.
 pub const DEFAULT_SKILL_PAGE_SIZE: usize = 20;
 /// Upper bound for a single skill listing page.
@@ -29,8 +34,9 @@ pub const MAX_SKILL_PAGE_SIZE: usize = 100;
 pub const SKILL_TOOL_DESCRIPTION: &str = "Load a reusable skill or read a file inside a skill's directory. Call with no arguments to \
      list available skills (optional offset/limit paginate the list). Call with `name` to load \
      the skill's main document (SKILL.md). Call with `name` and `path` (relative to the skill's \
-     directory) to read a companion file such as a doc or script. Paths are confined to the \
-     skill's own directory.";
+     directory) to read a companion file such as a doc or script. When `path` is set, optional \
+     offset/limit paginate the file by line (default 2000 lines and 50 KiB per page). Paths are \
+     confined to the skill's own directory.";
 
 #[derive(Clone, Debug)]
 pub struct SkillInfo {
@@ -324,6 +330,72 @@ impl SkillCatalog {
         Ok(text)
     }
 
+    /// Read one page of a file inside a skill's directory.
+    ///
+    /// The page uses the generic read tool's line and byte limits. `offset` is
+    /// 1-based and `limit` is the maximum number of file lines to include.
+    /// The returned text includes a continuation hint when more content is
+    /// available. Directory listings are returned without pagination.
+    pub fn read_skill_file_page(
+        &self,
+        name: &str,
+        relative_path: &str,
+        offset: i64,
+        limit: i64,
+    ) -> Result<String> {
+        if offset < 1 {
+            bail!("offset must be greater than or equal to 1");
+        }
+        if limit < 1 {
+            bail!("limit must be greater than or equal to 1");
+        }
+
+        let skill = self
+            .get(name)
+            .with_context(|| format!("unknown skill '{name}'"))?;
+        let normalized_path = normalize_skill_relative_path(relative_path)?;
+
+        if normalized_path == Path::new(SKILL_FILE_NAME) {
+            return paginate_skill_text(
+                relative_path,
+                &skill.document,
+                offset as usize,
+                limit as usize,
+            );
+        }
+
+        let resolved = resolve_skill_relative_path(&skill.directory, relative_path)?;
+
+        if resolved.is_dir() {
+            return list_skill_directory(relative_path, &resolved);
+        }
+
+        if !resolved.is_file() {
+            bail!(
+                "failed to read {} in skill '{}': file not found",
+                relative_path,
+                name
+            );
+        }
+
+        let bytes = fs::read(&resolved)
+            .with_context(|| format!("failed to read {} in skill '{name}'", relative_path))?;
+
+        // Mirror the generic read tool: reject binary content.
+        if bytes.iter().take(1024).any(|&byte| byte == 0) {
+            bail!("Cannot read binary file: {relative_path}");
+        }
+
+        let document = tidev_utils::encoding::decode_text(&bytes)
+            .with_context(|| format!("failed to decode {} in skill '{name}'", relative_path))?;
+        paginate_skill_text(
+            relative_path,
+            document.text(),
+            offset as usize,
+            limit as usize,
+        )
+    }
+
     pub fn render_skill(&self, name: &str) -> Result<String> {
         let skill = self
             .get(name)
@@ -432,6 +504,95 @@ fn list_skill_directory(relative_path: &str, resolved: &Path) -> Result<String> 
     }
     let header = relative_path.replace('\\', "/");
     Ok(format!("{header}/\n{}", entries.join("\n")))
+}
+
+fn truncate_skill_line(line: &str) -> String {
+    if line.chars().count() <= MAX_SKILL_LINE_LENGTH {
+        return line.to_string();
+    }
+    line.chars().take(MAX_SKILL_LINE_LENGTH).collect::<String>() + MAX_SKILL_LINE_SUFFIX
+}
+
+/// Render a skill-file page using the generic read tool's line and byte caps.
+fn paginate_skill_text(
+    relative_path: &str,
+    text: &str,
+    offset: usize,
+    limit: usize,
+) -> Result<String> {
+    let all_lines: Vec<&str> = if text.is_empty() {
+        Vec::new()
+    } else {
+        text.split_inclusive('\n').collect()
+    };
+
+    let mut lines = Vec::new();
+    let mut total_lines = 0;
+    let mut bytes = 0;
+    let mut cut = false;
+    let mut more = false;
+
+    for (index, raw_line) in all_lines.iter().enumerate() {
+        total_lines = index + 1;
+        if total_lines < offset {
+            continue;
+        }
+
+        if lines.len() >= limit {
+            more = true;
+            continue;
+        }
+
+        let trimmed = raw_line.trim_end_matches(&['\r', '\n'][..]);
+        let line = truncate_skill_line(trimmed);
+        let size = line.len() + if lines.is_empty() { 0 } else { 1 };
+        if bytes + size > MAX_SKILL_FILE_BYTES {
+            cut = true;
+            more = true;
+            break;
+        }
+
+        bytes += size;
+        lines.push(line);
+    }
+
+    if cut {
+        total_lines = all_lines.len();
+    }
+
+    if total_lines < offset && !(total_lines == 0 && offset == 1) {
+        bail!(
+            "Offset {} is out of range for {} ({} lines)",
+            offset,
+            relative_path,
+            total_lines,
+        );
+    }
+
+    let last = offset + lines.len().saturating_sub(1);
+    let next_offset = offset + lines.len();
+    let mut output = lines
+        .into_iter()
+        .enumerate()
+        .map(|(index, line)| format!("{}: {}", offset + index, line))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    if cut {
+        output.push_str(&format!(
+            "\n\n(Output capped at 50 KB. Showing lines {}-{}. Use offset={} to continue.)",
+            offset, last, next_offset
+        ));
+    } else if more {
+        output.push_str(&format!(
+            "\n\n(Showing lines {}-{} of {}. Use offset={} to continue.)",
+            offset, last, total_lines, next_offset
+        ));
+    } else {
+        output.push_str(&format!("\n\n(End of file - total {} lines)", total_lines));
+    }
+
+    Ok(output)
 }
 
 fn candidate_roots(
@@ -1026,6 +1187,51 @@ mod tests {
             .read_skill_file("git-workflow", ".", 1024 * 1024)
             .unwrap();
         assert_eq!(listing, "./\nSKILL.md");
+    }
+
+    #[test]
+    fn read_skill_file_page_reads_a_requested_line_range() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("demo");
+        fs::create_dir_all(dir.join("docs")).unwrap();
+        fs::write(
+            dir.join("docs").join("guide.md"),
+            "one\ntwo\nthree\nfour\nfive\n",
+        )
+        .unwrap();
+        let catalog = catalog_from_skills(vec![skill_info("demo", &dir)]);
+
+        let page = catalog
+            .read_skill_file_page("demo", "docs/guide.md", 2, 2)
+            .unwrap();
+
+        assert_eq!(
+            page,
+            "2: two\n3: three\n\n(Showing lines 2-3 of 5. Use offset=4 to continue.)"
+        );
+    }
+
+    #[test]
+    fn read_skill_file_page_applies_to_main_documents_and_size_caps() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("demo");
+        fs::create_dir_all(&dir).unwrap();
+        let document: String = (0..3000)
+            .map(|index| format!("line {index} {}\n", "x".repeat(32)))
+            .collect();
+        let skill = SkillInfo {
+            document,
+            ..skill_info("demo", &dir)
+        };
+        let catalog = catalog_from_skills(vec![skill]);
+
+        let page = catalog
+            .read_skill_file_page("demo", "SKILL.md", 1, 3000)
+            .unwrap();
+
+        assert!(page.starts_with("1: line 0 "), "page was: {page}");
+        assert!(page.contains("Output capped at 50 KB"), "page was: {page}");
+        assert!(page.contains("Use offset="), "page was: {page}");
     }
 
     #[test]

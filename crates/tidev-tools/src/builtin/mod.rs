@@ -284,7 +284,6 @@ pub async fn execute_tool_call(
                 }
             };
             let skills = ctx.skills.clone();
-            let max_output_bytes = ctx.max_output_bytes;
             let SkillArgs {
                 name,
                 path,
@@ -304,7 +303,12 @@ pub async fn execute_tool_call(
                     "skill: a path requires a skill name to read from"
                 )),
                 (Some(name), None) => skills.render_skill(name),
-                (Some(name), Some(path)) => skills.read_skill_file(name, path, max_output_bytes),
+                (Some(name), Some(path)) => skills.read_skill_file_page(
+                    name,
+                    path,
+                    offset.unwrap_or(1),
+                    limit.unwrap_or(crate::skills::DEFAULT_SKILL_FILE_PAGE_LINES as i64),
+                ),
             })
             .await
         }

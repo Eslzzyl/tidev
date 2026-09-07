@@ -487,8 +487,8 @@ tool_args! {
     pub struct SkillArgs {
         name: optional_string("Skill name to load (omit to list available skills)"),
         path: optional_string("Path relative to the skill directory to read (omit to load the skill's main document)"),
-        offset: optional_integer("1-based offset into the skill list for pagination (only used when listing)"),
-        limit: optional_integer("Maximum number of skills to list per page (default 20, max 100)"),
+        offset: optional_integer("For listing, the 1-based skill offset; when path is set, the 1-based file line offset"),
+        limit: optional_integer("For listing, the number of skills per page (default 20, max 100); when path is set, the number of file lines (default 2000)"),
     }
 }
 
