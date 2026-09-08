@@ -1963,6 +1963,7 @@ impl RuntimeBuilder {
         if let Some(ref d) = self.config_dir {
             paths.config_dir = d.clone();
             paths.config_file = d.join("config.toml");
+            paths.mcp_file = d.join("mcp.json");
         }
         if let Some(ref d) = self.data_dir {
             paths.data_dir = d.clone();

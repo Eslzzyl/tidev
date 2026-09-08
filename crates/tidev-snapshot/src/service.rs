@@ -533,6 +533,7 @@ mod tests {
             config_dir: data_dir.join("config"),
             data_dir: data_dir.to_path_buf(),
             config_file: data_dir.join("config/config.toml"),
+            mcp_file: data_dir.join("config/mcp.json"),
             auth_file: data_dir.join("auth.json"),
             database_file: data_dir.join("sessions.sqlite3"),
         }

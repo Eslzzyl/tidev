@@ -446,6 +446,7 @@ fn todo_args_to_plan(arguments: &str) -> Option<acp::Plan> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tidev_core::StreamEndStatus;
 
     const SESSION_ID: &str = "550e8400-e29b-41d4-a716-446655440000";
 
@@ -479,6 +480,7 @@ mod tests {
             session_id: sid(),
             request_id: 1,
             user_message_id: None,
+            assistant_message_id: None,
         });
         assert_eq!(notifs.len(), 1);
         assert_session_id(&notifs);
@@ -498,11 +500,13 @@ mod tests {
             session_id: sid(),
             request_id: 1,
             user_message_id: None,
+            assistant_message_id: None,
         });
         let n2 = tr.translate(&BackendEvent::TurnStarting {
             session_id: sid(),
             request_id: 2,
             user_message_id: None,
+            assistant_message_id: None,
         });
         // Second TurnStarting still produces a valid notification.
         assert_eq!(n2.len(), 1);
@@ -841,6 +845,7 @@ mod tests {
             request_id: 1,
             reasoning_started_at: None,
             reasoning_completed_at: None,
+            status: StreamEndStatus::Completed,
         });
         assert!(notifs.is_empty());
     }

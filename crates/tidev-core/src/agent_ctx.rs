@@ -506,7 +506,7 @@ impl StreamRecorder {
                     let mut notice =
                         Message::new(MessageRole::Error, "Request interrupted by user");
                     notice.completed_at = Some(now);
-                    let interruption = Self::app_data(&draft, Some(reason));
+                    let interruption = Self::app_data(draft, Some(reason));
                     let notice_data = interruption.clone();
                     if draft.assistant_completed {
                         let app_data_by_id =
