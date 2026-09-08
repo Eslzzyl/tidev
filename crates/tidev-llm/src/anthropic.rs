@@ -7,7 +7,7 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::event::LlmEvent;
 use crate::message::{Message, MessageAttachment, MessageRole};
-use crate::{apply_user_agent, types::LlmProviderConfig, types::ToolDefinition};
+use crate::{apply_request_headers, types::LlmProviderConfig, types::ToolDefinition};
 
 use log::{debug as log_debug, error as log_error};
 
@@ -42,7 +42,7 @@ pub(crate) async fn stream_anthropic(
     let request_body_size = request_body.len();
     save_request_for_debugging(&request_body, save_request_body, max_request_files);
 
-    let send_result = apply_user_agent(http.post(model.endpoint()), &model)?
+    let send_result = apply_request_headers(http.post(model.endpoint()), &model)?
         .header("x-api-key", &api_key)
         .header("anthropic-version", "2023-06-01")
         .header(
@@ -311,7 +311,7 @@ pub(crate) async fn complete_anthropic(
     let request_body_size = request_body.len();
     save_request_for_debugging(&request_body, save_request_body, max_request_files);
 
-    let send_result = apply_user_agent(http.post(model.endpoint()), &model)?
+    let send_result = apply_request_headers(http.post(model.endpoint()), &model)?
         .header("x-api-key", &api_key)
         .header("anthropic-version", "2023-06-01")
         .header(

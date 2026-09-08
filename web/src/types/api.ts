@@ -412,6 +412,7 @@ export interface ProviderInfo {
   base_url: string;
   api_type: string | null;
   user_agent: string | null;
+  session_header: string | null;
   models: ProviderModelInfo[];
 }
 
@@ -444,6 +445,8 @@ export interface CreateProviderRequest {
   base_url: string;
   api_type?: string;
   user_agent?: string;
+  headers?: Record<string, string>;
+  session_header?: string;
   api_key: string;
   models: CreateModelRequest[];
 }

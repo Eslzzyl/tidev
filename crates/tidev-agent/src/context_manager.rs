@@ -200,7 +200,7 @@ impl ContextManager {
         model: &LlmProviderConfig,
         tools: &[ToolDefinition],
         messages: &[Message],
-        _session_id: Uuid,
+        session_id: Uuid,
         event_tx: Option<crate::AgentEventSender>,
     ) -> Result<CompactionResult> {
         // 1. Build prefix (same logic as build_request_messages -> prefix cache hit).
@@ -225,11 +225,11 @@ impl ContextManager {
         // 5. Call the LLM (streaming or non-streaming).
         let summary = match &event_tx {
             Some(tx) => {
-                self.compact_streaming(llm, model, &llm_tools, compact_msgs, tx.clone())
+                self.compact_streaming(llm, model, &llm_tools, compact_msgs, session_id, tx.clone())
                     .await?
             }
             None => {
-                self.compact_non_streaming(llm, model, &llm_tools, compact_msgs)
+                self.compact_non_streaming(llm, model, &llm_tools, compact_msgs, session_id)
                     .await?
             }
         };
@@ -302,6 +302,7 @@ impl ContextManager {
     /// `compaction_messages` allows a host to apply protocol-only compatibility
     /// normalization before the generic compaction call. The host must keep the
     /// same message order and bytes used by its normal request pipeline.
+    #[allow(clippy::too_many_arguments)]
     pub async fn prepare_request_messages(
         &mut self,
         llm: &LlmClient,
@@ -309,6 +310,7 @@ impl ContextManager {
         tools: &[ToolDefinition],
         buffer: &MessageBuffer,
         compaction_messages: Option<&[Message]>,
+        session_id: Uuid,
         event_tx: Option<crate::AgentEventSender>,
     ) -> Result<ContextPreparation> {
         let mut compaction = None;
@@ -317,7 +319,7 @@ impl ContextManager {
                 .map(ToOwned::to_owned)
                 .unwrap_or_else(|| buffer.load().to_vec());
             let result = self
-                .compact(llm, model, tools, &messages, uuid::Uuid::nil(), event_tx)
+                .compact(llm, model, tools, &messages, session_id, event_tx)
                 .await?;
             self.apply_compaction(result.summary.clone(), result.retained_from);
             compaction = Some(result);
@@ -334,9 +336,18 @@ impl ContextManager {
         model: &LlmProviderConfig,
         tools: &[tidev_llm::ToolDefinition],
         messages: Vec<Message>,
+        session_id: Uuid,
     ) -> Result<String> {
-        llm.complete_with_messages(model.clone(), messages, tools.to_vec(), None)
-            .await
+        llm.complete_with_messages_with_context(
+            model.clone(),
+            messages,
+            tools.to_vec(),
+            None,
+            tidev_llm::LlmRequestContext {
+                session_id: Some(session_id),
+            },
+        )
+        .await
     }
 
     async fn compact_streaming(
@@ -345,6 +356,7 @@ impl ContextManager {
         model: &LlmProviderConfig,
         tools: &[tidev_llm::ToolDefinition],
         messages: Vec<Message>,
+        session_id: Uuid,
         event_tx: crate::AgentEventSender,
     ) -> Result<String> {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -354,12 +366,15 @@ impl ContextManager {
 
         let handle = tokio::spawn(async move {
             llm_clone
-                .stream_chat(
+                .stream_chat_with_context(
                     model,
                     messages,
                     tools,
                     tx,
                     tidev_llm::reasoning::ThinkingLevelType::None,
+                    tidev_llm::LlmRequestContext {
+                        session_id: Some(session_id),
+                    },
                 )
                 .await;
         });

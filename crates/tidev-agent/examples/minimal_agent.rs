@@ -114,6 +114,8 @@ fn provider_config() -> LlmProviderConfig {
         api_key: env::var("TIDEV_API_KEY").ok(),
         base_url: env::var("TIDEV_BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:8080/v1".into()),
         user_agent: None,
+        headers: std::collections::BTreeMap::new(),
+        session_header: None,
         model_id: env::var("TIDEV_MODEL").unwrap_or_else(|_| "example-model".into()),
         request_model_id: None,
         system_prompt: None,

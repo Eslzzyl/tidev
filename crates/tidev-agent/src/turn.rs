@@ -7,7 +7,8 @@ use tokio_util::sync::CancellationToken;
 use tidev_llm::error::ProviderError;
 use tidev_llm::message::{AssistantTurn, Message, ToolCall};
 use tidev_llm::reasoning::ThinkingLevelType;
-use tidev_llm::{LlmClient, LlmProviderConfig, ToolDefinition};
+use tidev_llm::{LlmClient, LlmProviderConfig, LlmRequestContext, ToolDefinition};
+use uuid::Uuid;
 
 use crate::context::AgentContext;
 use crate::event::{AgentEvent, llm_event_to_agent_event};
@@ -18,6 +19,7 @@ use crate::event::{AgentEvent, llm_event_to_agent_event};
 /// so product hosts do not need to duplicate protocol handling. The returned
 /// turn contains the same fields that were accumulated from the provider
 /// stream, including opaque Responses API output items.
+#[allow(clippy::too_many_arguments)]
 pub async fn stream_turn(
     llm: &LlmClient,
     mut model: LlmProviderConfig,
@@ -25,6 +27,7 @@ pub async fn stream_turn(
     tools: &[ToolDefinition],
     system_prompt: &str,
     thinking_level: &ThinkingLevelType,
+    session_id: Uuid,
     request_id: u64,
     event_context: &dyn AgentContext,
     cancel: &CancellationToken,
@@ -39,8 +42,17 @@ pub async fn stream_turn(
     let handle = {
         let thinking_level = thinking_level_owned.clone();
         tokio::spawn(async move {
-            llm.stream_chat(model, messages, tools, tx, thinking_level)
-                .await;
+            llm.stream_chat_with_context(
+                model,
+                messages,
+                tools,
+                tx,
+                thinking_level,
+                LlmRequestContext {
+                    session_id: Some(session_id),
+                },
+            )
+            .await;
         })
     };
 

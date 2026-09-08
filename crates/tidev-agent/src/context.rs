@@ -86,6 +86,7 @@ pub trait AgentContext: Send + Sync {
         messages: &[Message],
         system_prompt: &str,
         thinking_level: &ThinkingLevelType,
+        session_id: uuid::Uuid,
         request_id: u64,
     ) -> Result<AssistantTurn>;
 

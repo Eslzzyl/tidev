@@ -21,12 +21,12 @@ mod turn;
 mod types;
 
 pub use event::LlmEvent;
-pub use types::{ApiType, LlmProviderConfig, ToolDefinition};
+pub use types::{ApiType, LlmProviderConfig, LlmRequestContext, ToolDefinition};
 
 use anyhow::{Context, Result};
 use reqwest::{
     Client, RequestBuilder,
-    header::{HeaderValue, USER_AGENT},
+    header::{HeaderName, HeaderValue, USER_AGENT},
 };
 use std::{
     sync::{Arc, RwLock},
@@ -53,29 +53,71 @@ fn ensure_rustls_crypto_provider() {
     }
 }
 
-/// Apply a provider-specific User-Agent override while retaining the client default otherwise.
-pub(crate) fn apply_user_agent(
+/// Apply provider-specific request headers while retaining the client defaults otherwise.
+pub(crate) fn apply_request_headers(
     request: RequestBuilder,
     model: &LlmProviderConfig,
 ) -> Result<RequestBuilder> {
-    let Some(user_agent) = model.user_agent.as_deref() else {
-        return Ok(request);
+    let request = if let Some(user_agent) = model.user_agent.as_deref() {
+        if user_agent.trim().is_empty() {
+            anyhow::bail!(
+                "user_agent for provider '{}' cannot be empty",
+                model.provider_id
+            );
+        }
+
+        let value = HeaderValue::from_str(user_agent).with_context(|| {
+            format!(
+                "invalid user_agent for provider '{}': contains invalid header characters",
+                model.provider_id
+            )
+        })?;
+        request.header(USER_AGENT, value)
+    } else {
+        request
     };
 
-    if user_agent.trim().is_empty() {
-        anyhow::bail!(
-            "user_agent for provider '{}' cannot be empty",
-            model.provider_id
-        );
-    }
+    model
+        .headers
+        .iter()
+        .try_fold(request, |request, (name, value)| {
+            let header_name = HeaderName::from_bytes(name.as_bytes()).with_context(|| {
+                format!(
+                    "invalid header name '{name}' for provider '{}'",
+                    model.provider_id
+                )
+            })?;
+            let header_value = HeaderValue::from_str(value).with_context(|| {
+                format!(
+                    "invalid value for header '{name}' for provider '{}'",
+                    model.provider_id
+                )
+            })?;
+            Ok(request.header(header_name, header_value))
+        })
+}
 
-    let value = HeaderValue::from_str(user_agent).with_context(|| {
-        format!(
-            "invalid user_agent for provider '{}': contains invalid header characters",
-            model.provider_id
-        )
-    })?;
-    Ok(request.header(USER_AGENT, value))
+fn prepare_model_for_request(
+    mut model: LlmProviderConfig,
+    context: LlmRequestContext,
+) -> Result<LlmProviderConfig> {
+    let Some(session_header) = model.session_header.clone() else {
+        return Ok(model);
+    };
+    let session_id = context
+        .session_id
+        .with_context(|| {
+            format!(
+                "provider '{}' requires a session id for header '{session_header}'",
+                model.provider_id
+            )
+        })?
+        .to_string();
+    model
+        .headers
+        .retain(|name, _| !name.eq_ignore_ascii_case(&session_header));
+    model.headers.insert(session_header, session_id);
+    Ok(model)
 }
 
 /// Streaming LLM client.
@@ -200,9 +242,37 @@ impl LlmClient {
         tx: UnboundedSender<LlmEvent>,
         thinking_level: crate::reasoning::ThinkingLevelType,
     ) {
-        let result = self
-            .stream_chat_with_retry(model, messages, tools, tx.clone(), thinking_level)
-            .await;
+        self.stream_chat_with_context(
+            model,
+            messages,
+            tools,
+            tx,
+            thinking_level,
+            LlmRequestContext::default(),
+        )
+        .await;
+    }
+
+    /// Stream a chat completion with per-request context.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn stream_chat_with_context(
+        &self,
+        model: LlmProviderConfig,
+        messages: Vec<Message>,
+        tools: Vec<ToolDefinition>,
+        tx: UnboundedSender<LlmEvent>,
+        thinking_level: crate::reasoning::ThinkingLevelType,
+        context: LlmRequestContext,
+    ) {
+        let result = match prepare_model_for_request(model, context) {
+            Ok(model) => {
+                self.stream_chat_with_retry(model, messages, tools, tx.clone(), thinking_level)
+                    .await
+            }
+            Err(error) => Err(error::NetworkError::NonRetryable {
+                message: error.to_string(),
+            }),
+        };
 
         if let Err(error) = result {
             let _ = tx.send(LlmEvent::Failed {
@@ -220,6 +290,26 @@ impl LlmClient {
         tools: Vec<ToolDefinition>,
         tx: Option<UnboundedSender<LlmEvent>>,
     ) -> Result<String> {
+        self.complete_with_messages_with_context(
+            model,
+            messages,
+            tools,
+            tx,
+            LlmRequestContext::default(),
+        )
+        .await
+    }
+
+    /// Non-streaming completion with per-request context.
+    pub async fn complete_with_messages_with_context(
+        &self,
+        model: LlmProviderConfig,
+        messages: Vec<Message>,
+        tools: Vec<ToolDefinition>,
+        tx: Option<UnboundedSender<LlmEvent>>,
+        context: LlmRequestContext,
+    ) -> Result<String> {
+        let model = prepare_model_for_request(model, context)?;
         let result = self.complete_with_retry(model, messages, tools, tx).await;
         result.context("LLM completion failed after retries")
     }

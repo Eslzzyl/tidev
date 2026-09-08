@@ -130,6 +130,10 @@ pub struct ActiveModel {
     pub base_url: String,
     /// Optional provider-specific HTTP User-Agent override.
     pub user_agent: Option<String>,
+    /// Static HTTP headers applied to every request for this provider.
+    pub headers: std::collections::BTreeMap<String, String>,
+    /// Header name that receives the current conversation UUID on each request.
+    pub session_header: Option<String>,
     pub api_type: ApiType,
     pub model_id: String,
     pub request_model_id: String,
@@ -266,6 +270,8 @@ mod tests {
             provider_display_name: "Test".into(),
             base_url: "https://test.com".into(),
             user_agent: None,
+            headers: std::collections::BTreeMap::new(),
+            session_header: None,
             api_type: ApiType::OpenAiChatCompletions,
             model_id: model_id.into(),
             request_model_id: model_id.into(),

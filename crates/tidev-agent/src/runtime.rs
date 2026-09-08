@@ -252,6 +252,7 @@ impl AgentContext for AgentRuntime {
         messages: &[Message],
         system_prompt: &str,
         thinking_level: &ThinkingLevelType,
+        session_id: uuid::Uuid,
         request_id: u64,
     ) -> Result<AssistantTurn> {
         stream_turn(
@@ -261,6 +262,7 @@ impl AgentContext for AgentRuntime {
             &self.tools.definitions(),
             system_prompt,
             thinking_level,
+            session_id,
             request_id,
             self,
             &self.cancel,
@@ -328,6 +330,7 @@ impl AgentContext for AgentRuntime {
                 &self.tools.definitions(),
                 &buffer,
                 None,
+                session_id,
                 None,
             )
             .await?;
@@ -424,6 +427,8 @@ mod tests {
             api_key: None,
             base_url: "http://127.0.0.1:1".into(),
             user_agent: None,
+            headers: std::collections::BTreeMap::new(),
+            session_header: None,
             model_id: "test".into(),
             request_model_id: None,
             system_prompt: None,

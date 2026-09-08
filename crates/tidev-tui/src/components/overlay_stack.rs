@@ -454,6 +454,8 @@ mod tests {
             provider_display_name: "Test".into(),
             base_url: "https://test.com".into(),
             user_agent: None,
+            headers: std::collections::BTreeMap::new(),
+            session_header: None,
             api_type: ApiType::OpenAiChatCompletions,
             model_id: "test-model".into(),
             request_model_id: "test-model".into(),

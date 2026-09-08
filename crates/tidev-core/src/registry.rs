@@ -325,6 +325,8 @@ mod tests {
             provider_display_name: "Test".into(),
             base_url: String::new(),
             user_agent: None,
+            headers: std::collections::BTreeMap::new(),
+            session_header: None,
             api_type: tidev_config::types::ApiType::OpenAiChatCompletions,
             model_id: "test-model".into(),
             request_model_id: String::new(),

@@ -14,6 +14,83 @@ pub fn validate_user_agent(value: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Validate an HTTP header name using the RFC token character set.
+pub fn validate_header_name(name: &str) -> anyhow::Result<()> {
+    if name.is_empty() || name.trim() != name {
+        anyhow::bail!("header name cannot be empty or contain surrounding whitespace");
+    }
+    if !name.bytes().all(is_header_name_byte) {
+        anyhow::bail!("header name must contain only valid HTTP token characters");
+    }
+    Ok(())
+}
+
+/// Validate a provider-configured HTTP header value.
+pub fn validate_header_value(value: &str) -> anyhow::Result<()> {
+    if !value.is_ascii() || value.bytes().any(|byte| byte < 0x20 || byte == 0x7f) {
+        anyhow::bail!("header value must contain only visible ASCII characters");
+    }
+    Ok(())
+}
+
+/// Validate static and session-derived provider request headers.
+pub fn validate_headers(
+    headers: &BTreeMap<String, String>,
+    session_header: Option<&str>,
+) -> anyhow::Result<()> {
+    let mut names = Vec::with_capacity(headers.len());
+    for (name, value) in headers {
+        validate_header_name(name)
+            .map_err(|error| anyhow::anyhow!("invalid header name '{name}': {error}"))?;
+        validate_header_value(value)
+            .map_err(|error| anyhow::anyhow!("invalid value for header '{name}': {error}"))?;
+        if is_reserved_header_name(name) {
+            anyhow::bail!("header '{name}' is managed by the provider protocol");
+        }
+        if names
+            .iter()
+            .any(|existing: &String| existing.eq_ignore_ascii_case(name))
+        {
+            anyhow::bail!("duplicate header names are not allowed: '{name}'");
+        }
+        names.push(name.clone());
+    }
+
+    if let Some(name) = session_header {
+        validate_header_name(name)
+            .map_err(|error| anyhow::anyhow!("invalid session_header '{name}': {error}"))?;
+        if is_reserved_header_name(name) {
+            anyhow::bail!("session_header '{name}' is managed by the provider protocol");
+        }
+    }
+    Ok(())
+}
+
+fn is_header_name_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric()
+        || matches!(
+            byte,
+            b'!' | b'#'..=b'\'' | b'*' | b'+' | b'-' | b'.' | b'^' | b'_' | b'`' | b'|' | b'~'
+        )
+}
+
+fn is_reserved_header_name(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "authorization"
+            | "content-length"
+            | "content-type"
+            | "connection"
+            | "host"
+            | "transfer-encoding"
+            | "user-agent"
+            | "x-api-key"
+            | "x-goog-api-key"
+            | "anthropic-version"
+            | "anthropic-beta"
+    )
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProviderSource {
     User,
@@ -29,6 +106,12 @@ pub struct ProviderConfig {
     /// Optional HTTP User-Agent override for all models under this provider.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_agent: Option<String>,
+    /// Static HTTP headers applied to every request for this provider.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub headers: BTreeMap<String, String>,
+    /// Header name that receives the current conversation UUID on each request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_header: Option<String>,
     #[serde(default)]
     pub models: BTreeMap<String, ModelConfig>,
 }
@@ -119,6 +202,8 @@ mod tests {
             base_url,
             api_type,
             user_agent: None,
+            headers: BTreeMap::new(),
+            session_header: None,
             models: BTreeMap::new(),
         }
     }
@@ -163,5 +248,30 @@ mod tests {
         let provider = provider(None, "https://api.default.com".into());
         let model = model(None, None);
         assert_eq!(provider.resolve_base_url(&model), "https://api.default.com");
+    }
+
+    #[test]
+    fn validate_headers_accepts_custom_and_session_headers() {
+        let headers = BTreeMap::from([(String::from("x-tenant-id"), String::from("team-a"))]);
+        validate_headers(&headers, Some("x-opencode-session"))
+            .expect("custom provider headers should be accepted");
+    }
+
+    #[test]
+    fn validate_headers_rejects_protocol_owned_headers() {
+        let headers = BTreeMap::from([(String::from("Authorization"), String::from("secret"))]);
+        let error = validate_headers(&headers, None).expect_err("Authorization is provider-owned");
+        assert!(
+            error
+                .to_string()
+                .contains("managed by the provider protocol")
+        );
+    }
+
+    #[test]
+    fn validate_headers_rejects_invalid_session_header_name() {
+        let error = validate_headers(&BTreeMap::new(), Some("x invalid"))
+            .expect_err("invalid session header names should be rejected");
+        assert!(error.to_string().contains("invalid session_header"));
     }
 }

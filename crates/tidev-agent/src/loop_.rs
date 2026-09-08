@@ -68,7 +68,13 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
             .and_then(|m| m.thinking_level.clone())
             .unwrap_or_else(|| config.thinking_level.clone());
         let turn = match ctx
-            .stream_turn(&messages, &system_prompt, &thinking_level, request_id)
+            .stream_turn(
+                &messages,
+                &system_prompt,
+                &thinking_level,
+                session_id,
+                request_id,
+            )
             .await
         {
             Ok(turn) => turn,

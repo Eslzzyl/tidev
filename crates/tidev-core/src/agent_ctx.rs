@@ -168,6 +168,8 @@ pub fn to_llm_provider_config(model: &ActiveModel) -> LlmProviderConfig {
         api_key: model.api_key.clone(),
         base_url: model.base_url.clone(),
         user_agent: model.user_agent.clone(),
+        headers: model.headers.clone(),
+        session_header: model.session_header.clone(),
         model_id: model.model_id.clone(),
         request_model_id: Some(model.request_model_id.clone()),
         system_prompt: Some(model.system_prompt.clone()),
@@ -1279,6 +1281,7 @@ impl AgentContext for CoreContext {
         messages: &[Message],
         system_prompt: &str,
         thinking_level: &ThinkingLevelType,
+        session_id: Uuid,
         request_id: u64,
     ) -> Result<AssistantTurn> {
         let result = stream_turn(
@@ -1288,6 +1291,7 @@ impl AgentContext for CoreContext {
             &self.tools.iter().map(to_llm_tool_def).collect::<Vec<_>>(),
             system_prompt,
             thinking_level,
+            session_id,
             request_id,
             self,
             &self.cancel,
@@ -1665,6 +1669,7 @@ impl AgentContext for CoreContext {
                 &tools,
                 buf.protocol(),
                 Some(&compaction_messages),
+                session_id,
                 None,
             )
             .await?

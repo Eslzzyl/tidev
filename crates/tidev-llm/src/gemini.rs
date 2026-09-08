@@ -28,7 +28,7 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::event::LlmEvent;
 use crate::message::{Message, MessageAttachment, MessageRole, ToolCall};
-use crate::{apply_user_agent, types::LlmProviderConfig, types::ToolDefinition};
+use crate::{apply_request_headers, types::LlmProviderConfig, types::ToolDefinition};
 
 use log::{debug as log_debug, error as log_error};
 
@@ -70,7 +70,7 @@ pub(crate) async fn stream_gemini(
     let request_body_size = request_body.len();
     save_request_for_debugging(&request_body, save_request_body, max_request_files);
 
-    let send_result = apply_user_agent(http.post(&endpoint), &model)?
+    let send_result = apply_request_headers(http.post(&endpoint), &model)?
         .header("x-goog-api-key", &api_key)
         .json(&request)
         .send()
@@ -351,7 +351,7 @@ pub(crate) async fn complete_gemini(
     let request_body_size = request_body.len();
     save_request_for_debugging(&request_body, save_request_body, max_request_files);
 
-    let send_result = apply_user_agent(http.post(&endpoint), &model)?
+    let send_result = apply_request_headers(http.post(&endpoint), &model)?
         .header("x-goog-api-key", &api_key)
         .json(&request)
         .send()
@@ -894,6 +894,8 @@ mod tests {
             provider_id: "test".to_string(),
             base_url: "https://test.com".to_string(),
             user_agent: None,
+            headers: std::collections::BTreeMap::new(),
+            session_header: None,
             api_type: ApiType::GoogleGemini,
             model_id: "test-model".to_string(),
             request_model_id: Some("test-model".to_string()),

@@ -1,6 +1,7 @@
 [providers.opencode-go]
 display_name = "OpenCode Go"
 base_url = "https://opencode.ai/zen/go/v1"
+session_header = "x-opencode-session"
 
 [providers.opencode-go.models.grok-4-5]
 request_model_id = "grok-4.5"

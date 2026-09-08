@@ -7,7 +7,9 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use tidev_agent::tidev_llm::message::{Message, MessageRole, ToolCall, ToolExecutionResult};
 use tidev_agent::tidev_llm::reasoning::ThinkingLevelType;
-use tidev_agent::tidev_llm::{ApiType, LlmClient, LlmProviderConfig, ToolDefinition};
+use tidev_agent::tidev_llm::{
+    ApiType, LlmClient, LlmProviderConfig, LlmRequestContext, ToolDefinition,
+};
 use tidev_agent::{
     AgentContext, AgentEvent, AgentRuntime, ContextManager, McpConnectionStatus, McpRegistry,
     McpServerSpec, MessageStore, Tool, ToolContext, ToolRegistry,
@@ -85,6 +87,8 @@ fn provider_config_with_user_agent(
         api_key: Some("local-test-key".into()),
         base_url,
         user_agent: user_agent.map(str::to_owned),
+        headers: BTreeMap::new(),
+        session_header: None,
         model_id: "scripted-model".into(),
         request_model_id: None,
         system_prompt: None,
@@ -228,7 +232,10 @@ struct RawChatRequest<'a> {
     tools: &'a serde_json::value::RawValue,
 }
 
-async fn scripted_provider(listener: TcpListener) -> Result<Vec<Vec<u8>>> {
+async fn scripted_provider(
+    listener: TcpListener,
+    expected_session: Option<Uuid>,
+) -> Result<Vec<Vec<u8>>> {
     let mut requests = Vec::new();
     for response in [
         tool_call_response(),
@@ -239,6 +246,12 @@ async fn scripted_provider(listener: TcpListener) -> Result<Vec<Vec<u8>>> {
         let (mut stream, _) = listener.accept().await?;
         let (headers, body) = read_http_request_parts(&mut stream).await?;
         assert!(has_header(&headers, "user-agent", TEST_CLIENT_USER_AGENT));
+        if let Some(session_id) = expected_session {
+            assert!(
+                has_header(&headers, "x-conversation-id", &session_id.to_string()),
+                "request headers: {headers}"
+            );
+        }
         requests.push(body);
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -267,6 +280,108 @@ async fn complete_provider(listener: TcpListener) -> Result<String> {
     Ok(headers)
 }
 
+async fn header_capture_provider(listener: TcpListener) -> Result<Vec<(String, Vec<u8>)>> {
+    let mut requests = Vec::new();
+    for _ in 0..3 {
+        let (mut stream, _) = listener.accept().await?;
+        let (headers, body) = read_http_request_parts(&mut stream).await?;
+        let response = serde_json::json!({
+            "id": "complete-headers",
+            "choices": [{"message": {"content": "header response"}}]
+        })
+        .to_string();
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            response.len(),
+            response
+        );
+        stream.write_all(response.as_bytes()).await?;
+        requests.push((headers, body));
+    }
+    Ok(requests)
+}
+
+#[tokio::test]
+async fn custom_headers_keep_session_value_stable_without_changing_body() -> Result<()> {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
+    let base_url = format!("http://{}/v1", listener.local_addr()?);
+    let provider = tokio::spawn(header_capture_provider(listener));
+    let mut model = provider_config(base_url);
+    model.headers = BTreeMap::from([
+        ("x-tenant-id".into(), "team-a".into()),
+        ("X-Conversation-Id".into(), "static-value".into()),
+    ]);
+    model.session_header = Some("x-conversation-id".into());
+    let client = LlmClient::new(false, 0, false, 0)?;
+    let messages = vec![Message::new(MessageRole::User, "same request body")];
+    let session_a = Uuid::from_u128(0x21);
+    let session_b = Uuid::from_u128(0x22);
+
+    for session_id in [session_a, session_a, session_b] {
+        let response = client
+            .complete_with_messages_with_context(
+                model.clone(),
+                messages.clone(),
+                vec![],
+                None,
+                LlmRequestContext {
+                    session_id: Some(session_id),
+                },
+            )
+            .await?;
+        assert_eq!(response, "header response");
+    }
+
+    let requests = provider.await??;
+    assert_eq!(requests.len(), 3);
+    for (headers, _) in &requests {
+        assert!(has_header(headers, "x-tenant-id", "team-a"));
+    }
+    assert!(has_header(
+        &requests[0].0,
+        "x-conversation-id",
+        &session_a.to_string()
+    ));
+    assert!(has_header(
+        &requests[1].0,
+        "x-conversation-id",
+        &session_a.to_string()
+    ));
+    assert!(has_header(
+        &requests[2].0,
+        "x-conversation-id",
+        &session_b.to_string()
+    ));
+    assert!(!has_header(
+        &requests[0].0,
+        "x-conversation-id",
+        "static-value"
+    ));
+    assert_eq!(requests[0].1, requests[1].1);
+    assert_eq!(requests[1].1, requests[2].1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn session_header_requires_request_context() -> Result<()> {
+    let client = LlmClient::new(false, 0, false, 0)?;
+    let mut model = provider_config("http://127.0.0.1:1/v1".into());
+    model.session_header = Some("x-conversation-id".into());
+
+    let error = client
+        .complete_with_messages_with_context(
+            model,
+            vec![Message::new(MessageRole::User, "Hello")],
+            vec![],
+            None,
+            LlmRequestContext::default(),
+        )
+        .await
+        .expect_err("missing session context should fail before sending");
+    assert!(error.to_string().contains("requires a session id"));
+    Ok(())
+}
+
 #[tokio::test]
 async fn custom_user_agent_overrides_default_for_completion() -> Result<()> {
     let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
@@ -288,9 +403,9 @@ async fn custom_user_agent_overrides_default_for_completion() -> Result<()> {
     Ok(())
 }
 
-async fn compaction_provider(listener: TcpListener) -> Result<Vec<u8>> {
+async fn compaction_provider(listener: TcpListener) -> Result<(String, Vec<u8>)> {
     let (mut stream, _) = listener.accept().await?;
-    let body = read_http_request(&mut stream).await?;
+    let (headers, body) = read_http_request_parts(&mut stream).await?;
     let response = serde_json::json!({
         "id": "compaction-1",
         "choices": [{"message": {"content": "compacted conversation summary"}}]
@@ -302,16 +417,17 @@ async fn compaction_provider(listener: TcpListener) -> Result<Vec<u8>> {
         response
     );
     stream.write_all(response.as_bytes()).await?;
-    Ok(body)
+    Ok((headers, body))
 }
 
 #[tokio::test]
 async fn independent_consumer_runs_full_loop_against_scripted_provider() -> Result<()> {
     let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
     let base_url = format!("http://{}/v1", listener.local_addr()?);
-    let provider = tokio::spawn(scripted_provider(listener));
-
     let session_id = Uuid::from_u128(0x11);
+    let provider = tokio::spawn(scripted_provider(listener, Some(session_id)));
+    let mut model = provider_config(base_url.clone());
+    model.session_header = Some("x-conversation-id".into());
     let store = Arc::new(RecordingStore {
         messages: Mutex::new(vec![Message::new(MessageRole::User, "Please use echo.")]),
         saves: Mutex::new(Vec::new()),
@@ -323,7 +439,7 @@ async fn independent_consumer_runs_full_loop_against_scripted_provider() -> Resu
     let runtime = AgentRuntime::new(
         session_id,
         LlmClient::new_with_user_agent(false, 0, false, 0, Some(TEST_CLIENT_USER_AGENT))?,
-        provider_config(base_url.clone()),
+        model,
         registry.clone(),
         ContextManager::new(),
         store.messages.lock().unwrap().clone(),
@@ -372,9 +488,11 @@ async fn independent_consumer_runs_full_loop_against_scripted_provider() -> Resu
     );
 
     let (reload_event_tx, _reload_event_rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut reloaded_model = provider_config(base_url);
+    reloaded_model.session_header = Some("x-conversation-id".into());
     let reloaded = AgentRuntime::from_store(
         LlmClient::new_with_user_agent(false, 0, false, 0, Some(TEST_CLIENT_USER_AGENT))?,
-        provider_config(base_url),
+        reloaded_model,
         registry,
         ContextManager::new(),
         store.clone(),
@@ -484,6 +602,7 @@ async fn independent_consumer_sends_compaction_request_through_provider() -> Res
     let model = {
         let mut model = provider_config(base_url);
         model.context_window = 10_000;
+        model.session_header = Some("x-conversation-id".into());
         model
     };
     let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -509,7 +628,12 @@ async fn independent_consumer_sends_compaction_request_through_provider() -> Res
     );
     assert_eq!(runtime.stored_messages().len(), 2);
 
-    let body = provider.await??;
+    let (headers, body) = provider.await??;
+    assert!(has_header(
+        &headers,
+        "x-conversation-id",
+        &session_id.to_string()
+    ));
     let request: serde_json::Value = serde_json::from_slice(&body)?;
     let messages = request["messages"].as_array().unwrap();
     assert!(messages.iter().any(|message| {

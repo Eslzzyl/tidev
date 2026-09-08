@@ -3,6 +3,8 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeMap;
+use uuid::Uuid;
 
 /// Provider API protocol variant — used to dispatch to the correct
 /// provider implementation when streaming/completing.
@@ -63,6 +65,10 @@ pub struct LlmProviderConfig {
     pub base_url: String,
     /// Optional HTTP User-Agent override. `None` keeps the client's default.
     pub user_agent: Option<String>,
+    /// Static HTTP headers applied to every request for this provider.
+    pub headers: BTreeMap<String, String>,
+    /// Header name that receives the current conversation UUID on each request.
+    pub session_header: Option<String>,
     pub model_id: String,
     pub request_model_id: Option<String>,
     /// System prompt — `None` means no system prompt override.
@@ -75,6 +81,13 @@ pub struct LlmProviderConfig {
     pub supports_images: bool,
     /// Whether the model supports multiple tool calls in one response.
     pub supports_parallel_tool_calls: bool,
+}
+
+/// Per-request context that is kept separate from the provider configuration.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct LlmRequestContext {
+    /// Stable identifier for the conversation that owns this request.
+    pub session_id: Option<Uuid>,
 }
 
 impl LlmProviderConfig {

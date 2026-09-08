@@ -16,6 +16,8 @@ display_name = "My Custom Provider"
 base_url = "https://api.example.com/v1"
 api_type = "openai_chat_completions"
 user_agent = "my-gateway-client/1.0" # Optional HTTP User-Agent override
+headers = { "x-tenant-id" = "team-a" } # Optional static headers
+session_header = "x-opencode-session" # Optional per-conversation header name
 ```
 
 | Key | Required | Description |
@@ -24,6 +26,34 @@ user_agent = "my-gateway-client/1.0" # Optional HTTP User-Agent override
 | `base_url` | Yes for new providers | Base URL of the API endpoint. When overriding a bundled provider, omitted values inherit from the preset |
 | `api_type` | No | Default API protocol for all models under this provider (see below). Can be overridden per-model |
 | `user_agent` | No | HTTP User-Agent sent to this provider. Defaults to `tidev/<version>` |
+| `headers` | No | Static HTTP headers sent with every request for this provider |
+| `session_header` | No | Header name that receives the stable UUID of the current conversation |
+
+### Custom request headers
+
+Use `headers` for fixed provider or gateway metadata:
+
+```toml
+[providers.my-gateway]
+display_name = "My LLM Gateway"
+base_url = "https://gateway.example.com/v1"
+headers = { "x-tenant-id" = "team-a" }
+```
+
+Use `session_header` when the provider needs a conversation-scoped value. tidev
+uses the current session UUID and keeps it stable across turns, retries,
+resume, and context compaction:
+
+```toml
+[providers.opencode-go]
+session_header = "x-opencode-session"
+```
+
+When both fields contain the same header name, the session-derived value
+replaces the static value. Header names are case-insensitive. Protocol-owned
+headers such as `Authorization`, `Content-Type`, `User-Agent`, and provider
+API-key headers cannot be overridden. Header values must be visible ASCII
+without control characters. Request bodies are unchanged.
 
 ### Provider User-Agent override
 

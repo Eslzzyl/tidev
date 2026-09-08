@@ -263,6 +263,10 @@ struct CreateProviderRequest {
     api_type: Option<String>,
     #[serde(default)]
     user_agent: Option<String>,
+    #[serde(default)]
+    headers: BTreeMap<String, String>,
+    #[serde(default)]
+    session_header: Option<String>,
     api_key: String,
     models: Vec<CreateModelRequest>,
 }
@@ -453,6 +457,7 @@ struct ProviderDto {
     base_url: String,
     api_type: Option<String>,
     user_agent: Option<String>,
+    session_header: Option<String>,
     models: Vec<ProviderModelDto>,
 }
 
@@ -2539,6 +2544,8 @@ fn build_provider_config(
         tidev_config::provider::validate_user_agent(user_agent)
             .map_err(|error| ApiError::bad_request(format!("invalid user_agent: {error}")))?;
     }
+    tidev_config::provider::validate_headers(&request.headers, request.session_header.as_deref())
+        .map_err(|error| ApiError::bad_request(format!("invalid request headers: {error}")))?;
     let api_key = required_provider_field(&request.api_key, "api_key")?;
 
     if request.models.is_empty() {
@@ -2613,6 +2620,8 @@ fn build_provider_config(
             base_url,
             api_type,
             user_agent: request.user_agent.clone(),
+            headers: request.headers.clone(),
+            session_header: request.session_header.clone(),
             models,
         },
     ))
@@ -2650,6 +2659,7 @@ fn provider_dto(
         base_url: provider.base_url.clone(),
         api_type: provider.api_type.clone(),
         user_agent: provider.user_agent.clone(),
+        session_header: provider.session_header.clone(),
         models: provider
             .models
             .iter()
@@ -3993,6 +4003,8 @@ mod tests {
             "base_url": "https://example.com/v1",
             "api_type": "openai",
             "user_agent": "gateway-client/1.0",
+            "headers": {"x-tenant-id": "team-a"},
+            "session_header": "x-conversation-id",
             "api_key": "secret",
             "models": [{
                 "model_id": "model",
@@ -4012,6 +4024,14 @@ mod tests {
             Some("openai_chat_completions")
         );
         assert_eq!(provider.user_agent.as_deref(), Some("gateway-client/1.0"));
+        assert_eq!(
+            provider.headers.get("x-tenant-id").map(String::as_str),
+            Some("team-a")
+        );
+        assert_eq!(
+            provider.session_header.as_deref(),
+            Some("x-conversation-id")
+        );
         assert!(provider.models["model"].supports_streaming);
         assert!(provider.models["model"].supports_parallel_tool_calls);
     }
