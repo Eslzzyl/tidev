@@ -1260,7 +1260,7 @@ mod tests {
     fn resolve_model_returns_active_model() {
         let config = AppConfig::default();
         let auth = AuthStore::default();
-        let model = config.resolve_model_by_ids(&auth, "deepseek", "deepseek-v4-flash");
+        let model = config.resolve_model_by_ids(&auth, "deepseek", "deepseek-flash");
         assert!(
             model.is_ok(),
             "resolve_model should succeed: {:?}",
@@ -1268,7 +1268,7 @@ mod tests {
         );
         let model = model.unwrap();
         assert_eq!(model.provider_id, "deepseek");
-        assert_eq!(model.model_id, "deepseek-v4-flash");
+        assert_eq!(model.model_id, "deepseek-flash");
         assert_eq!(model.api_type, ApiType::OpenAiChatCompletions);
     }
 
@@ -1302,7 +1302,7 @@ max_output_tokens = 262144
 
         let provider = config.provider("deepseek").expect("provider should exist");
         assert!(provider.models.contains_key("custom-model"));
-        assert!(provider.models.contains_key("deepseek-v4-pro"));
+        assert!(provider.models.contains_key("deepseek-flash"));
         assert_eq!(
             provider.models["custom-model"].request_model_id.as_deref(),
             Some("deepseek-v4-custom")
@@ -1313,9 +1313,9 @@ max_output_tokens = 262144
     fn user_model_replaces_bundled_model_with_same_key() {
         let mut config: AppConfig = toml::from_str(
             r#"
-[providers.deepseek.models.deepseek-v4-pro]
-request_model_id = "deepseek-v4-pro-custom"
-display_name = "Custom DeepSeek V4 Pro"
+[providers.deepseek.models.deepseek-flash]
+request_model_id = "deepseek-flash-custom"
+display_name = "Custom DeepSeek Flash"
 context_window = 500000
 max_output_tokens = 100000
 "#,
@@ -1329,15 +1329,14 @@ max_output_tokens = 100000
         let provider = config.provider("deepseek").expect("provider should exist");
         let model = provider
             .models
-            .get("deepseek-v4-pro")
+            .get("deepseek-flash")
             .expect("overridden model should exist");
-        assert_eq!(model.display_name, "Custom DeepSeek V4 Pro");
+        assert_eq!(model.display_name, "Custom DeepSeek Flash");
         assert_eq!(model.context_window, 500000);
         assert_eq!(
             model.request_model_id.as_deref(),
-            Some("deepseek-v4-pro-custom")
+            Some("deepseek-flash-custom")
         );
-        assert!(provider.models.contains_key("deepseek-v4-flash"));
     }
 
     #[test]
@@ -1370,10 +1369,10 @@ session_header = "x-conversation-id"
             provider.session_header.as_deref(),
             Some("x-conversation-id")
         );
-        assert!(provider.models.contains_key("deepseek-v4-pro"));
+        assert!(provider.models.contains_key("deepseek-flash"));
 
         let model = config
-            .resolve_model_by_ids(&AuthStore::default(), "deepseek", "deepseek-v4-flash")
+            .resolve_model_by_ids(&AuthStore::default(), "deepseek", "deepseek-flash")
             .expect("overridden provider model should resolve");
         assert_eq!(model.user_agent.as_deref(), Some("mirror-client/1.0"));
         assert_eq!(
@@ -1445,7 +1444,7 @@ max_output_tokens = 262144
         .expect("partial provider override should parse");
         let serialized = toml::to_string(&config).expect("config should serialize");
         assert!(serialized.contains("custom-model"));
-        assert!(!serialized.contains("deepseek-v4-pro"));
+        assert!(!serialized.contains("deepseek-flash"));
 
         let reparsed: AppConfig = toml::from_str(&serialized).expect("config should round-trip");
         assert!(
@@ -1488,7 +1487,7 @@ max_output_tokens = 20000
         let provider = config.provider("deepseek").expect("provider should exist");
         assert!(provider.models.contains_key("global-model"));
         assert!(provider.models.contains_key("project-model"));
-        assert!(provider.models.contains_key("deepseek-v4-pro"));
+        assert!(provider.models.contains_key("deepseek-flash"));
     }
 
     #[test]

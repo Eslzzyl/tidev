@@ -22,7 +22,9 @@ impl ThinkingMatcher {
     pub fn match_for_model(model_id: &str) -> ThinkingLevelType {
         let model_lower = model_id.to_lowercase();
 
-        if model_lower.contains("deepseek") && model_lower.contains("4") {
+        if model_lower.contains("deepseek")
+            && (model_lower.contains("4") || model_lower.contains("flash"))
+        {
             ThinkingLevelType::DeepSeek(DeepSeekV4ThinkingLevel::High)
         } else if is_qwen38(&model_lower) {
             ThinkingLevelType::Qwen38(Qwen38ThinkingLevel::XHigh)
@@ -50,7 +52,7 @@ impl ThinkingMatcher {
     pub fn supported_levels(model_id: &str) -> Vec<ThinkingLevelType> {
         let id = model_id.to_ascii_lowercase();
 
-        if id.contains("deepseek") && id.contains("4") {
+        if id.contains("deepseek") && (id.contains("4") || id.contains("flash")) {
             vec![
                 ThinkingLevelType::DeepSeek(DeepSeekV4ThinkingLevel::Off),
                 ThinkingLevelType::DeepSeek(DeepSeekV4ThinkingLevel::High),
@@ -181,6 +183,12 @@ mod tests {
             result,
             ThinkingLevelType::DeepSeek(DeepSeekV4ThinkingLevel::High)
         );
+        // The current stable id is `deepseek-flash` (DeepSeek-V4.1-Flash).
+        let result = ThinkingMatcher::match_for_model("deepseek-flash");
+        assert_eq!(
+            result,
+            ThinkingLevelType::DeepSeek(DeepSeekV4ThinkingLevel::High)
+        );
     }
 
     #[test]
@@ -283,15 +291,17 @@ mod tests {
 
     #[test]
     fn deepseek_v4_levels() {
-        let opts = ThinkingMatcher::supported_levels("deepseek-v4-flash");
-        assert_eq!(
-            opts,
-            vec![
-                ThinkingLevelType::DeepSeek(DeepSeekV4ThinkingLevel::Off),
-                ThinkingLevelType::DeepSeek(DeepSeekV4ThinkingLevel::High),
-                ThinkingLevelType::DeepSeek(DeepSeekV4ThinkingLevel::Max),
-            ]
-        );
+        for model_id in ["deepseek-v4-flash", "deepseek-flash"] {
+            let opts = ThinkingMatcher::supported_levels(model_id);
+            assert_eq!(
+                opts,
+                vec![
+                    ThinkingLevelType::DeepSeek(DeepSeekV4ThinkingLevel::Off),
+                    ThinkingLevelType::DeepSeek(DeepSeekV4ThinkingLevel::High),
+                    ThinkingLevelType::DeepSeek(DeepSeekV4ThinkingLevel::Max),
+                ]
+            );
+        }
     }
 
     #[test]

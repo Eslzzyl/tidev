@@ -2213,8 +2213,7 @@ mod tests {
     async fn make_test_runtime() -> Runtime {
         let dir = std::env::temp_dir().join(format!("tidev-runtime-test-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&dir).expect("temp dir should be created");
-        let config_toml =
-            "default_provider = \"deepseek\"\ndefault_model = \"deepseek-v4-flash\"\n";
+        let config_toml = "default_provider = \"deepseek\"\ndefault_model = \"deepseek-flash\"\n";
         std::fs::write(dir.join("config.toml"), config_toml).expect("config should be written");
         Runtime::builder()
             .workspace_root(dir.clone())
@@ -2229,8 +2228,7 @@ mod tests {
     async fn console_logging_override_is_not_persisted() {
         let dir = std::env::temp_dir().join(format!("tidev-runtime-log-test-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&dir).expect("temp dir should be created");
-        let config_toml =
-            "default_provider = \"deepseek\"\ndefault_model = \"deepseek-v4-flash\"\n";
+        let config_toml = "default_provider = \"deepseek\"\ndefault_model = \"deepseek-flash\"\n";
         std::fs::write(dir.join("config.toml"), config_toml).expect("config should be written");
 
         let runtime = Runtime::builder()
