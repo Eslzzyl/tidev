@@ -123,11 +123,11 @@ impl Component for MessagePanel {
         }
 
         match key.code {
-            KeyCode::Up | KeyCode::Char('k') => {
+            KeyCode::Up => {
                 self.move_selection(-1);
                 None
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            KeyCode::Down => {
                 self.move_selection(1);
                 None
             }
@@ -148,7 +148,7 @@ impl Component for MessagePanel {
                     None
                 }
             }
-            KeyCode::Char('f') => {
+            KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 if let Some(message) = self.selected_message() {
                     let message_count = message.original_index + 1;
                     Some(Action::Overlay(OverlayAction::Open(
@@ -161,13 +161,15 @@ impl Component for MessagePanel {
                     None
                 }
             }
-            KeyCode::Char('u') => self.selected_message().map(|message| {
-                Action::Overlay(OverlayAction::Open(OverlayKind::UndoConfirmDialog {
-                    message_id: message.message_id,
-                    content: message.content.clone(),
-                }))
-            }),
-            KeyCode::Esc | KeyCode::Char('q') => {
+            KeyCode::Char('z') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.selected_message().map(|message| {
+                    Action::Overlay(OverlayAction::Open(OverlayKind::UndoConfirmDialog {
+                        message_id: message.message_id,
+                        content: message.content.clone(),
+                    }))
+                })
+            }
+            KeyCode::Esc => {
                 self.pending_scroll_id = None;
                 Some(Action::Overlay(OverlayAction::Close(
                     OverlayKind::MessagePanel,
@@ -396,9 +398,11 @@ impl Component for MessagePanel {
 
         // ── Footer ──
         frame.render_widget(
-            Paragraph::new("Enter: jump · Esc: close · Ctrl+P/N: nav")
-                .alignment(ratatui::layout::Alignment::Center)
-                .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
+            Paragraph::new(
+                "Enter: jump · Ctrl+G: fork · Ctrl+Z: undo · Esc: close · Ctrl+P/N: nav",
+            )
+            .alignment(ratatui::layout::Alignment::Center)
+            .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
             sections[4],
         );
     }

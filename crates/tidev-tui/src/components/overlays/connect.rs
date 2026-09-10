@@ -166,7 +166,7 @@ impl Component for ConnectDialog {
                     }
                     None
                 }
-                KeyCode::Up | KeyCode::Char('k') => {
+                KeyCode::Up => {
                     let count = self.visible_count();
                     if count > 0 {
                         let current = self.selected.min(count.saturating_sub(1));
@@ -178,7 +178,7 @@ impl Component for ConnectDialog {
                     }
                     None
                 }
-                KeyCode::Down | KeyCode::Char('j') => {
+                KeyCode::Down => {
                     let count = self.visible_count();
                     if count > 0 {
                         let current = self.selected.min(count.saturating_sub(1));

@@ -235,11 +235,11 @@ impl Component for ThemePanel {
             return None;
         }
         match key.code {
-            KeyCode::Up | KeyCode::Char('k') => {
+            KeyCode::Up => {
                 self.move_up();
                 None
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            KeyCode::Down => {
                 self.move_down();
                 None
             }
@@ -277,7 +277,7 @@ impl Component for ThemePanel {
                     OverlayKind::ThemePanel,
                 )))
             }
-            KeyCode::Esc | KeyCode::Char('q') => Some(Action::Overlay(OverlayAction::Close(
+            KeyCode::Esc => Some(Action::Overlay(OverlayAction::Close(
                 OverlayKind::ThemePanel,
             ))),
             _ => None,

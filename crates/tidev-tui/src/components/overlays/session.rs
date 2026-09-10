@@ -344,11 +344,11 @@ impl Component for SessionPanel {
 
         // ── Main panel key handling ──
         match key.code {
-            KeyCode::Up | KeyCode::Char('k') => {
+            KeyCode::Up => {
                 self.move_selection(-1);
                 None
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            KeyCode::Down => {
                 self.move_selection(1);
                 None
             }
@@ -373,10 +373,15 @@ impl Component for SessionPanel {
                 None
             }
             KeyCode::Char(' ') => {
-                self.toggle_selection();
+                if self.operation_mode == OperationMode::MultiSelect {
+                    self.toggle_selection();
+                } else {
+                    self.query.push(' ');
+                    self.reset_selection();
+                }
                 None
             }
-            KeyCode::Char('d') | KeyCode::Char('D') => {
+            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 let ids = self.get_selected_session_ids();
                 let titles = self.get_selected_session_titles();
                 if !ids.is_empty() {
@@ -387,7 +392,7 @@ impl Component for SessionPanel {
                 }
                 None
             }
-            KeyCode::Char('c') | KeyCode::Char('C') => {
+            KeyCode::Char('x') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 let preview = CleanupPreview::from_sessions(self.sessions.clone());
                 self.dialog = SessionPanelDialog::Cleanup {
                     preview,
@@ -396,7 +401,7 @@ impl Component for SessionPanel {
                 };
                 None
             }
-            KeyCode::Char('e') | KeyCode::Char('E') => {
+            KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 let ids = self.get_selected_session_ids();
                 let titles = self.get_selected_session_titles();
                 if !ids.is_empty() {
@@ -407,15 +412,6 @@ impl Component for SessionPanel {
                 }
                 None
             }
-            KeyCode::Char('w') | KeyCode::Char('W') => {
-                self.view_mode = if self.view_mode == SessionViewMode::CurrentWorkspace {
-                    SessionViewMode::AllSessions
-                } else {
-                    SessionViewMode::CurrentWorkspace
-                };
-                // Reload sessions via action broadcast
-                Some(Action::Session(SessionAction::Reload))
-            }
             KeyCode::Tab if key.modifiers.is_empty() => {
                 self.view_mode = if self.view_mode == SessionViewMode::CurrentWorkspace {
                     SessionViewMode::AllSessions
@@ -424,7 +420,7 @@ impl Component for SessionPanel {
                 };
                 Some(Action::Session(SessionAction::Reload))
             }
-            KeyCode::Esc | KeyCode::Char('q') => Some(Action::Overlay(OverlayAction::Close(
+            KeyCode::Esc => Some(Action::Overlay(OverlayAction::Close(
                 OverlayKind::SessionPanel,
             ))),
             KeyCode::Backspace => {
@@ -824,9 +820,9 @@ impl Component for SessionPanel {
 
         // Footer
         let help_text = if self.operation_mode == OperationMode::MultiSelect {
-            "Enter/D: switch/delete · Space: select · Ctrl+A: exit multi-select · Tab: switch view · C: cleanup · E: export"
+            "Enter: switch · Ctrl+D: delete · Space: select · Ctrl+A: exit multi-select · Tab: switch view · Ctrl+X: cleanup · Ctrl+E: export"
         } else {
-            "Enter: switch · D: delete · C: cleanup · Ctrl+A: multi-select · Tab: switch view · W: all sessions · E: export"
+            "Enter: switch · Ctrl+D: delete · Ctrl+X: cleanup · Ctrl+A: multi-select · Tab: switch view · Ctrl+E: export"
         };
         frame.render_widget(
             Paragraph::new(help_text)

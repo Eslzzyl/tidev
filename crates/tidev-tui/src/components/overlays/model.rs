@@ -313,11 +313,11 @@ impl Component for ModelPanel {
         }
 
         match key.code {
-            KeyCode::Up | KeyCode::Char('k') => {
+            KeyCode::Up => {
                 self.move_selection(-1);
                 None
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            KeyCode::Down => {
                 self.move_selection(1);
                 None
             }
@@ -375,7 +375,7 @@ impl Component for ModelPanel {
                     }
                 }
             }
-            KeyCode::Esc | KeyCode::Char('q') => {
+            KeyCode::Esc => {
                 // If thinking level is expanded, collapse first
                 if self
                     .tabs

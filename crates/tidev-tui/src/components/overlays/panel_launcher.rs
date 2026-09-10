@@ -148,7 +148,7 @@ impl Component for PanelLauncher {
             KeyCode::Esc => Some(Action::Overlay(OverlayAction::Close(
                 OverlayKind::PanelLauncher,
             ))),
-            KeyCode::Up | KeyCode::Char('k') => {
+            KeyCode::Up => {
                 if !self.filtered.is_empty() {
                     self.selected_index = self
                         .selected_index
@@ -157,7 +157,7 @@ impl Component for PanelLauncher {
                 }
                 None
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            KeyCode::Down => {
                 if !self.filtered.is_empty() {
                     self.selected_index = self
                         .selected_index
