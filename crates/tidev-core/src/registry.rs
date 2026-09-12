@@ -146,7 +146,7 @@ impl ToolRegistry {
 
     /// Return tool definitions filtered for the given model.
     ///
-    /// GPT models (gpt-4o, gpt-4o-mini, gpt-5, etc.) receive `apply_patch` but
+    /// GPT models (gpt-4o, gpt-4o-mini, gpt-5, gpt-6, etc.) receive `apply_patch` but
     /// not `write`/`edit`. All other models (Claude, DeepSeek, Gemini, GPT-4,
     /// any OSS model) receive `write`/`edit` but not `apply_patch`.
     ///

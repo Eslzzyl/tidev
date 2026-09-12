@@ -501,7 +501,7 @@ fn build_config_options(
     )
     .category(acp::SessionConfigOptionCategory::Model);
     let levels: Vec<acp::SessionConfigSelectOption> =
-        ThinkingMatcher::supported_levels(&active.model_id)
+        ThinkingMatcher::supported_levels(&active.request_model_id)
             .into_iter()
             .map(|level| {
                 acp::SessionConfigSelectOption::new(level.to_string(), level.display_name())

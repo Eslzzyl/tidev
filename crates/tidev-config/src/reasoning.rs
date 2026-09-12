@@ -17,6 +17,32 @@ fn is_qwen38(id: &str) -> bool {
     id.contains("qwen") && (id.contains("3.8") || id.contains("3-8"))
 }
 
+/// Return the GPT generation encoded in a model identifier.
+///
+/// This accepts the common dotted, dashed, spaced, and undelimited forms
+/// (`gpt-5.6`, `gpt-5-6`, `GPT 6`, and `gpt6`) while avoiding unrelated words
+/// that merely contain `gpt`.
+fn gpt_generation(id: &str) -> Option<u8> {
+    let id = id.to_ascii_lowercase();
+    id.match_indices("gpt").find_map(|(index, _)| {
+        if id[..index]
+            .chars()
+            .next_back()
+            .is_some_and(|character| character.is_ascii_alphanumeric())
+        {
+            return None;
+        }
+
+        let suffix = id[index + 3..]
+            .trim_start_matches(|character: char| !character.is_ascii_alphanumeric());
+        match suffix.as_bytes().first() {
+            Some(b'5') => Some(5),
+            Some(b'6') => Some(6),
+            _ => None,
+        }
+    })
+}
+
 impl ThinkingMatcher {
     /// Match a model ID to its default thinking level.
     pub fn match_for_model(model_id: &str) -> ThinkingLevelType {
@@ -32,7 +58,7 @@ impl ThinkingMatcher {
             ThinkingLevelType::Qwen(Qwen35ThinkingLevel::On)
         } else if model_lower.contains("glm") {
             ThinkingLevelType::Glm(GlmThinkingLevel::High)
-        } else if model_lower.contains("gpt") && model_lower.contains("5") {
+        } else if matches!(gpt_generation(&model_lower), Some(5 | 6)) {
             ThinkingLevelType::Gpt5(Gpt5ThinkingLevel::Medium)
         } else if model_lower.contains("minimax") && model_lower.contains("m3") {
             ThinkingLevelType::MiniMax(MiniMaxThinkingLevel::High)
@@ -76,7 +102,17 @@ impl ThinkingMatcher {
                 ThinkingLevelType::Glm(GlmThinkingLevel::High),
                 ThinkingLevelType::Glm(GlmThinkingLevel::Max),
             ]
-        } else if id.contains("gpt") && id.contains("5.6") {
+        } else if matches!(gpt_generation(&id), Some(6)) {
+            vec![
+                ThinkingLevelType::Gpt5(Gpt5ThinkingLevel::Low),
+                ThinkingLevelType::Gpt5(Gpt5ThinkingLevel::Medium),
+                ThinkingLevelType::Gpt5(Gpt5ThinkingLevel::High),
+                ThinkingLevelType::Gpt5(Gpt5ThinkingLevel::XHigh),
+                ThinkingLevelType::Gpt5(Gpt5ThinkingLevel::Max),
+            ]
+        } else if matches!(gpt_generation(&id), Some(5))
+            && (id.contains("5.6") || id.contains("5-6"))
+        {
             vec![
                 ThinkingLevelType::Gpt5(Gpt5ThinkingLevel::Off),
                 ThinkingLevelType::Gpt5(Gpt5ThinkingLevel::Low),
@@ -85,7 +121,7 @@ impl ThinkingMatcher {
                 ThinkingLevelType::Gpt5(Gpt5ThinkingLevel::XHigh),
                 ThinkingLevelType::Gpt5(Gpt5ThinkingLevel::Max),
             ]
-        } else if id.contains("gpt") && id.contains("5") {
+        } else if matches!(gpt_generation(&id), Some(5)) {
             vec![
                 ThinkingLevelType::Gpt5(Gpt5ThinkingLevel::Off),
                 ThinkingLevelType::Gpt5(Gpt5ThinkingLevel::Low),
@@ -130,7 +166,10 @@ impl ThinkingMatcher {
     pub fn coerce_saved(saved: &str, model_id: &str) -> ThinkingLevelType {
         let saved = ThinkingLevelType::from_string(saved);
         let default = Self::match_for_model(model_id);
-        if Self::family(&saved) == Self::family(&default) {
+        let supported = Self::supported_levels(model_id);
+        if Self::family(&saved) == Self::family(&default)
+            && (supported.is_empty() || supported.contains(&saved))
+        {
             saved
         } else {
             default
@@ -173,6 +212,12 @@ mod tests {
     fn match_gpt_5_with_dashes() {
         // TOML model_id keys use dashes instead of dots (e.g. "gpt-5-6-luna")
         let result = ThinkingMatcher::match_for_model("gpt-5-6-luna");
+        assert_eq!(result, ThinkingLevelType::Gpt5(Gpt5ThinkingLevel::Medium));
+    }
+
+    #[test]
+    fn match_gpt_6_astra() {
+        let result = ThinkingMatcher::match_for_model("gpt-6-astra");
         assert_eq!(result, ThinkingLevelType::Gpt5(Gpt5ThinkingLevel::Medium));
     }
 
@@ -360,6 +405,21 @@ mod tests {
     }
 
     #[test]
+    fn gpt_6_astra_levels_exclude_off() {
+        let opts = ThinkingMatcher::supported_levels("gpt-6-astra");
+        assert_eq!(
+            opts,
+            vec![
+                ThinkingLevelType::Gpt5(Gpt5ThinkingLevel::Low),
+                ThinkingLevelType::Gpt5(Gpt5ThinkingLevel::Medium),
+                ThinkingLevelType::Gpt5(Gpt5ThinkingLevel::High),
+                ThinkingLevelType::Gpt5(Gpt5ThinkingLevel::XHigh),
+                ThinkingLevelType::Gpt5(Gpt5ThinkingLevel::Max),
+            ]
+        );
+    }
+
+    #[test]
     fn gpt_5_5_levels_no_max() {
         let opts = ThinkingMatcher::supported_levels("gpt-5.5");
         assert_eq!(
@@ -444,5 +504,11 @@ mod tests {
     fn coerce_unparseable_to_model_default() {
         let level = ThinkingMatcher::coerce_saved("not-a-level", "qwen3.8-27b");
         assert_eq!(level, ThinkingLevelType::Qwen38(Qwen38ThinkingLevel::XHigh));
+    }
+
+    #[test]
+    fn coerce_gpt5_off_to_gpt6_default() {
+        let level = ThinkingMatcher::coerce_saved("gpt5:off", "gpt-6-astra");
+        assert_eq!(level, ThinkingLevelType::Gpt5(Gpt5ThinkingLevel::Medium));
     }
 }

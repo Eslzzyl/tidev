@@ -30,7 +30,7 @@ AI coding agent built in pure Rust. tidev reimplements the interaction model of 
   - Session management: task delegation, todo tracking, question prompts
   - Web integration: search (Exa and more) and page fetching (Markdown, HTML and plain text)
 
-> For GPT-5 series models, tidev will automatically enable the `apply_patch` tool and disable the `write/edit` tools to suit their tool calling style. The implementation of `apply_patch` is precisely aligned with the open-source implementation in OpenAI Codex. For other models, `write/edit` is used and `apply_patch` is disabled.
+> For GPT-5 and GPT-6 series models, tidev will automatically enable the `apply_patch` tool and disable the `write/edit` tools to suit their tool calling style. The implementation of `apply_patch` is precisely aligned with the open-source implementation in OpenAI Codex. For other models, `write/edit` is used and `apply_patch` is disabled.
 
 - **Model Context Protocol (MCP) Support**: MCP was supported in versions v0.6 and earlier, but I've never tested it. The rewritten tidev has temporarily removed MCP support.
 

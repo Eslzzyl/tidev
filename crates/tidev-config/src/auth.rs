@@ -212,10 +212,10 @@ impl ActiveModel {
 
     /// Determine whether this model should receive `apply_patch` instead of `write`/`edit`.
     ///
-    /// GPT models (gpt-4o, gpt-4o-mini, gpt-4.1, gpt-5, etc.) get `apply_patch`.
+    /// GPT models (gpt-4o, gpt-4o-mini, gpt-4.1, gpt-5, gpt-6, etc.) get `apply_patch`.
     /// All other models (Claude, DeepSeek, Gemini, GPT-4, any OSS model) get `write`/`edit`.
     pub fn use_apply_patch(&self) -> bool {
-        let id = self.model_id.to_ascii_lowercase();
+        let id = self.request_model_id.to_ascii_lowercase();
         if !id.starts_with("gpt-") || id.contains("oss") {
             return false;
         }
@@ -307,6 +307,16 @@ mod tests {
     fn oss_models_do_not_use_apply_patch() {
         assert!(!make_model("gpt-4o-oss").use_apply_patch());
         assert!(!make_model("gpt-4o-oss-instruct").use_apply_patch());
+    }
+
+    #[test]
+    fn request_model_id_controls_apply_patch_selection() {
+        let mut model = make_model("custom-astra");
+        model.request_model_id = "gpt-6-astra".into();
+        assert!(model.use_apply_patch());
+
+        model.request_model_id = "gpt-4".into();
+        assert!(!model.use_apply_patch());
     }
 
     #[test]

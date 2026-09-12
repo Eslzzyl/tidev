@@ -84,7 +84,7 @@ fn build_model_config_option(
 
 /// Build the "thought_level" config option based on the active model.
 fn build_thought_level_config_option(active: &ActiveModel) -> acp::SessionConfigOption {
-    let supported = ThinkingMatcher::supported_levels(&active.model_id);
+    let supported = ThinkingMatcher::supported_levels(&active.request_model_id);
 
     let options: Vec<acp::SessionConfigSelectOption> = supported
         .iter()
