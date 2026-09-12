@@ -2,10 +2,10 @@
 //!
 //! Each public function corresponds to a subcommand in [`crate::Command`].
 
-use super::SessionOutputFormat;
+use super::{SearchField, SearchOutputFormat, SearchRole, SessionOutputFormat};
 use anyhow::{Context, Result};
 use chrono::Duration;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tidev_storage::{SessionInspection, StoredMessageView};
 use uuid::Uuid;
 
@@ -305,6 +305,121 @@ pub fn session_show(
         }
     }
     Ok(())
+}
+
+/// Search textual session history without starting the TUI.
+#[allow(clippy::too_many_arguments)]
+pub fn session_search(
+    query: &str,
+    fields: &[SearchField],
+    roles: &[SearchRole],
+    session_id: Option<&str>,
+    workspace_root: Option<&Path>,
+    limit: u64,
+    offset: u64,
+    context_chars: u64,
+    case_sensitive: bool,
+    format: SearchOutputFormat,
+) -> Result<()> {
+    let limit = usize::try_from(limit).context("search limit is too large")?;
+    let offset = usize::try_from(offset).context("search offset is too large")?;
+    let context_chars = usize::try_from(context_chars).context("search context is too large")?;
+    let (_paths, store) = open_store()?;
+    let session_id = session_id
+        .map(|value| resolve_session_id(&store, value))
+        .transpose()?;
+
+    let search_fields = build_search_fields(fields);
+    let roles = roles.iter().map(|role| role.as_str().to_string()).collect();
+    let options = tidev_storage::SessionSearchOptions {
+        query: query.to_string(),
+        fields: search_fields,
+        session_id,
+        workspace_root: workspace_root.map(|path| path.to_string_lossy().into_owned()),
+        roles,
+        case_sensitive,
+        context_chars,
+        limit,
+        offset,
+    };
+    let hits = store.search_history(&options)?;
+
+    match format {
+        SearchOutputFormat::Text => print_session_search_text(&hits),
+        SearchOutputFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(&hits)?);
+        }
+        SearchOutputFormat::Jsonl => {
+            for hit in &hits {
+                println!("{}", serde_json::to_string(hit)?);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn build_search_fields(fields: &[SearchField]) -> tidev_storage::SessionSearchFields {
+    if fields.is_empty() {
+        return tidev_storage::SessionSearchFields::message();
+    }
+
+    let mut result = tidev_storage::SessionSearchFields::default();
+    for field in fields {
+        match field {
+            SearchField::All => return tidev_storage::SessionSearchFields::all(),
+            SearchField::Session => result.session = true,
+            SearchField::Message => {
+                let message = tidev_storage::SessionSearchFields::message();
+                result.content |= message.content;
+                result.reasoning |= message.reasoning;
+                result.tool_call |= message.tool_call;
+                result.metadata |= message.metadata;
+                result.app_data |= message.app_data;
+            }
+            SearchField::Content => result.content = true,
+            SearchField::Reasoning => result.reasoning = true,
+            SearchField::ToolCall => result.tool_call = true,
+            SearchField::Metadata => result.metadata = true,
+            SearchField::AppData => result.app_data = true,
+            SearchField::Attachment => result.attachment = true,
+            SearchField::ToolOutput => result.tool_output = true,
+        }
+    }
+    result
+}
+
+fn print_session_search_text(hits: &[tidev_storage::SessionSearchHit]) {
+    if hits.is_empty() {
+        println!("No matches found.");
+        return;
+    }
+
+    println!("KIND\tSESSION\tMESSAGE\tSEQUENCE\tROLE\tFIELD\tSNIPPET");
+    for hit in hits {
+        let kind = match hit.kind {
+            tidev_storage::SessionSearchHitKind::Session => "session",
+            tidev_storage::SessionSearchHitKind::Message => "message",
+            tidev_storage::SessionSearchHitKind::ToolOutput => "tool-output",
+        };
+        let message_id = hit
+            .message_id
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| "-".to_string());
+        let sequence = hit
+            .sequence
+            .map(|sequence| sequence.to_string())
+            .unwrap_or_else(|| "-".to_string());
+        let role = hit.role.as_deref().unwrap_or("-");
+        let snippet = hit
+            .snippet
+            .replace('\t', "\\t")
+            .replace('\r', "\\r")
+            .replace('\n', "\\n");
+        println!(
+            "{kind}\t{}\t{message_id}\t{sequence}\t{role}\t{}\t{snippet}",
+            hit.session_short_id, hit.field
+        );
+    }
 }
 
 fn parse_session_id(value: &str) -> Result<Uuid> {

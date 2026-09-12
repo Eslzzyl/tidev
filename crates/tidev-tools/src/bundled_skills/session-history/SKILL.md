@@ -9,6 +9,31 @@ Use tidev's read-only session commands when the current context summary does
 not contain a detail needed for the task. The commands read the stored
 session directly and do not start the TUI.
 
+## Search history
+
+Search the message fields in every session, including child sessions:
+
+```bash
+tidev session search "keyword" --format json
+```
+
+Use `--field all` to include session metadata, textual attachment fields, and
+retained tool output. Image bytes are not keyword-searchable and are skipped.
+Use a short or complete session ID to scope the search:
+
+```bash
+tidev session search "keyword" --field all --session a1b2c3d4e5f6 --format json
+```
+
+Each result contains `session_id`, `message_id`, `sequence`, `role`, `field`,
+and a context `snippet`. Search results can be filtered or sorted by the shell
+or by `jq`:
+
+```bash
+tidev session search "keyword" --field all --format json |
+  jq '.[] | select(.role == "assistant") | {session_id, message_id, field, snippet}'
+```
+
 ## Find sessions
 
 List recent sessions, including child sessions:
@@ -74,8 +99,24 @@ $view.messages |
     @{n='content';e={$_.message.content}}
 ```
 
+```powershell
+$hits = (tidev session search 'keyword' --field all --format json | Out-String) |
+  ConvertFrom-Json
+$hits |
+  Where-Object { $_.role -eq 'assistant' } |
+  Sort-Object created_at |
+  Select-Object session_id, message_id, field, snippet
+```
+
 ## Search other sessions
 
-Use the session list to identify a related session, then inspect that session
-with the same commands. Prefer the current workspace when looking for related
-work, and use the exact session ID or a unique prefix before reading messages.
+Omit `--session` to search the whole database. Add `--workspace` when related
+history should be limited to one workspace.
+
+```bash
+tidev session search "keyword" --field all --workspace "$PWD" --format json
+```
+
+After selecting a result, inspect the exact message with its full session ID
+and message ID. Use `tidev tool-output` with `tool_output_id` for retained full
+tool output.

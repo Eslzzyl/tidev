@@ -15,10 +15,10 @@ use rusqlite::{
     Connection, OptionalExtension, named_params, params, params_from_iter,
     types::{ToSql, Type},
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::IgnoredAny};
 use std::{
     collections::HashMap,
-    fs,
+    fmt, fs,
     io::Write,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
@@ -441,6 +441,377 @@ pub struct SessionInspection {
     pub messages: Vec<StoredMessageView>,
 }
 
+/// Textual fields that can be searched without materializing complete
+/// [`Message`] values.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SessionSearchFields {
+    pub session: bool,
+    pub content: bool,
+    pub reasoning: bool,
+    pub tool_call: bool,
+    pub metadata: bool,
+    pub app_data: bool,
+    pub attachment: bool,
+    pub tool_output: bool,
+}
+
+impl SessionSearchFields {
+    /// The message fields used by the default CLI search.
+    pub fn message() -> Self {
+        Self {
+            content: true,
+            reasoning: true,
+            tool_call: true,
+            metadata: true,
+            app_data: true,
+            ..Self::default()
+        }
+    }
+
+    /// All searchable textual fields. Binary image data is deliberately
+    /// excluded from this set.
+    pub fn all() -> Self {
+        Self {
+            session: true,
+            content: true,
+            reasoning: true,
+            tool_call: true,
+            metadata: true,
+            app_data: true,
+            attachment: true,
+            tool_output: true,
+        }
+    }
+
+    fn includes_message(&self) -> bool {
+        self.content
+            || self.reasoning
+            || self.tool_call
+            || self.metadata
+            || self.app_data
+            || self.attachment
+    }
+}
+
+/// Read-only options for searching stored session data.
+#[derive(Clone, Debug)]
+pub struct SessionSearchOptions {
+    pub query: String,
+    pub fields: SessionSearchFields,
+    pub session_id: Option<Uuid>,
+    pub workspace_root: Option<String>,
+    pub roles: Vec<String>,
+    pub case_sensitive: bool,
+    pub context_chars: usize,
+    pub limit: usize,
+    pub offset: usize,
+}
+
+/// Kind of record containing a search match.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionSearchHitKind {
+    Session,
+    Message,
+    ToolOutput,
+}
+
+/// A compact, pipe-friendly search result that identifies the exact stored
+/// record without returning the complete message payload.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SessionSearchHit {
+    pub kind: SessionSearchHitKind,
+    pub session_id: Uuid,
+    pub session_short_id: String,
+    pub title: String,
+    pub workspace_root: String,
+    pub message_id: Option<Uuid>,
+    pub sequence: Option<usize>,
+    pub role: Option<String>,
+    pub field: String,
+    pub match_count: usize,
+    pub snippet: String,
+    pub tool_output_id: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+struct SearchSessionRow {
+    session_id: Uuid,
+    parent_session_id: Option<Uuid>,
+    title: String,
+    workspace_root: String,
+    provider_id: String,
+    provider_display_name: String,
+    model_id: String,
+    model_display_name: String,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+    status: String,
+    snapshot_start_hash: Option<String>,
+    context_summary: Option<Vec<u8>>,
+    system_prompt: Option<Vec<u8>>,
+}
+
+struct SearchMessageRow {
+    message_id: Uuid,
+    session_id: Uuid,
+    title: String,
+    workspace_root: String,
+    role: String,
+    created_at: DateTime<Utc>,
+    content: Vec<u8>,
+    reasoning: Vec<u8>,
+    tool_calls: Vec<u8>,
+    tool_call_id: Option<String>,
+    tool_name: Option<String>,
+    metadata: Vec<u8>,
+    mode: Option<String>,
+    app_data: Vec<u8>,
+    sequence: usize,
+    attachments: Option<String>,
+}
+
+struct SearchableAttachment {
+    kind: String,
+    path: Option<String>,
+    content: Option<String>,
+    tool_output: Option<String>,
+    tree: Option<String>,
+    filename: Option<String>,
+    mime: Option<String>,
+}
+
+impl<'de> Deserialize<'de> for SearchableAttachment {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct AttachmentVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for AttachmentVisitor {
+            type Value = SearchableAttachment;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a message attachment object")
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                let mut attachment = SearchableAttachment {
+                    kind: String::new(),
+                    path: None,
+                    content: None,
+                    tool_output: None,
+                    tree: None,
+                    filename: None,
+                    mime: None,
+                };
+
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "type" => attachment.kind = map.next_value()?,
+                        "path" => attachment.path = map.next_value()?,
+                        "content" => attachment.content = map.next_value()?,
+                        "tool_output" => attachment.tool_output = map.next_value()?,
+                        "tree" => attachment.tree = map.next_value()?,
+                        "filename" => attachment.filename = map.next_value()?,
+                        "mime" => attachment.mime = map.next_value()?,
+                        // Image bytes and other fields are consumed without
+                        // allocating their values.
+                        _ => {
+                            map.next_value::<IgnoredAny>()?;
+                        }
+                    }
+                }
+
+                Ok(attachment)
+            }
+        }
+
+        deserializer.deserialize_map(AttachmentVisitor)
+    }
+}
+
+fn parse_search_datetime(value: &str) -> DateTime<Utc> {
+    DateTime::parse_from_rfc3339(value)
+        .map(|value| value.with_timezone(&Utc))
+        .unwrap_or_default()
+}
+
+fn parse_search_uuid(value: &str) -> Uuid {
+    Uuid::parse_str(value).unwrap_or_default()
+}
+
+fn short_session_id(session_id: Uuid) -> String {
+    session_id.simple().to_string()[..12].to_string()
+}
+
+fn make_search_snippet(
+    text: &str,
+    match_start: usize,
+    match_chars: usize,
+    context_chars: usize,
+) -> String {
+    let total_chars = text.chars().count();
+    let start = match_start.saturating_sub(context_chars);
+    let end = match_start
+        .saturating_add(match_chars)
+        .saturating_add(context_chars)
+        .min(total_chars);
+    let snippet: String = text.chars().skip(start).take(end - start).collect();
+    let mut result = String::with_capacity(snippet.len() + 6);
+    if start > 0 {
+        result.push('…');
+    }
+    result.push_str(&snippet);
+    if end < total_chars {
+        result.push('…');
+    }
+    result
+}
+
+fn find_search_match(
+    text: &str,
+    query: &str,
+    case_sensitive: bool,
+    context_chars: usize,
+) -> Option<(usize, String)> {
+    if query.is_empty() {
+        return None;
+    }
+
+    if case_sensitive {
+        let first_byte = text.find(query)?;
+        let match_chars = query.chars().count();
+        let match_start = text[..first_byte].chars().count();
+        let match_count = text.match_indices(query).count();
+        return Some((
+            match_count,
+            make_search_snippet(text, match_start, match_chars, context_chars),
+        ));
+    }
+
+    let lowered_text = text.to_lowercase();
+    let lowered_query = query.to_lowercase();
+    let first_byte = lowered_text.find(&lowered_query)?;
+    let match_start = lowered_text[..first_byte].chars().count();
+    let match_chars = lowered_query.chars().count();
+    let match_count = lowered_text.match_indices(&lowered_query).count();
+
+    Some((
+        match_count,
+        make_search_snippet(text, match_start, match_chars, context_chars),
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_search_hit(
+    hits: &mut Vec<SessionSearchHit>,
+    kind: SessionSearchHitKind,
+    session_id: Uuid,
+    title: &str,
+    workspace_root: &str,
+    message_id: Option<Uuid>,
+    sequence: Option<usize>,
+    role: Option<&str>,
+    field: &str,
+    text: &str,
+    tool_output_id: Option<&str>,
+    created_at: DateTime<Utc>,
+    options: &SessionSearchOptions,
+) {
+    let Some((match_count, snippet)) = find_search_match(
+        text,
+        &options.query,
+        options.case_sensitive,
+        options.context_chars,
+    ) else {
+        return;
+    };
+
+    hits.push(SessionSearchHit {
+        kind,
+        session_id,
+        session_short_id: short_session_id(session_id),
+        title: title.to_string(),
+        workspace_root: workspace_root.to_string(),
+        message_id,
+        sequence,
+        role: role.map(str::to_string),
+        field: field.to_string(),
+        match_count,
+        snippet,
+        tool_output_id: tool_output_id.map(str::to_string),
+        created_at,
+    });
+}
+
+fn push_attachment_search_hits(
+    hits: &mut Vec<SessionSearchHit>,
+    row: &SearchMessageRow,
+    raw_attachments: &str,
+    options: &SessionSearchOptions,
+) {
+    let Ok(attachments) = serde_json::from_str::<Vec<SearchableAttachment>>(raw_attachments) else {
+        return;
+    };
+
+    for attachment in attachments {
+        let mut fields = Vec::new();
+        match attachment.kind.as_str() {
+            "file_reference" => {
+                if let Some(value) = attachment.path {
+                    fields.push(("path", value));
+                }
+                if let Some(value) = attachment.content {
+                    fields.push(("content", value));
+                }
+                if let Some(value) = attachment.tool_output {
+                    fields.push(("tool_output", value));
+                }
+            }
+            "directory_reference" => {
+                if let Some(value) = attachment.path {
+                    fields.push(("path", value));
+                }
+                if let Some(value) = attachment.tree {
+                    fields.push(("tree", value));
+                }
+            }
+            "image" => {
+                if let Some(value) = attachment.filename {
+                    fields.push(("filename", value));
+                }
+                if let Some(value) = attachment.mime {
+                    fields.push(("mime", value));
+                }
+            }
+            _ => {}
+        }
+
+        for (field_name, value) in fields {
+            let field = format!("message.attachment.{field_name}");
+            push_search_hit(
+                hits,
+                SessionSearchHitKind::Message,
+                row.session_id,
+                &row.title,
+                &row.workspace_root,
+                Some(row.message_id),
+                Some(row.sequence),
+                Some(&row.role),
+                &field,
+                &value,
+                None,
+                row.created_at,
+                options,
+            );
+        }
+    }
+}
+
 #[derive(Serialize)]
 struct JsonlMessageRecord<'a> {
     session_id: Uuid,
@@ -689,6 +1060,530 @@ impl SessionStore {
             .collect();
 
         Ok(Some(SessionInspection { session, messages }))
+    }
+
+    /// Search textual session history without materializing complete messages.
+    ///
+    /// The query deliberately projects only the columns needed by the selected
+    /// fields. In particular, image attachment data is never deserialized as
+    /// part of a history search.
+    pub fn search_history(&self, options: &SessionSearchOptions) -> Result<Vec<SessionSearchHit>> {
+        let mut options = options.clone();
+        options.query = options.query.trim().to_string();
+        if options.query.is_empty() {
+            anyhow::bail!("search query must not be empty");
+        }
+
+        let fields = options.fields;
+        let mut hits = Vec::new();
+
+        self.read(|conn| {
+            let include_session_details = fields.session;
+            let session_details = if include_session_details {
+                ", s.context_summary, s.system_prompt"
+            } else {
+                ""
+            };
+            let mut session_conditions = vec![String::from("1 = 1")];
+            let mut session_values: Vec<Box<dyn ToSql>> = Vec::new();
+            if let Some(session_id) = options.session_id {
+                session_conditions.push("s.id = ?".to_string());
+                session_values.push(Box::new(session_id.to_string()));
+            }
+            if let Some(workspace_root) = options
+                .workspace_root
+                .as_deref()
+                .filter(|root| !root.is_empty())
+            {
+                session_conditions.push("s.workspace_root = ?".to_string());
+                session_values.push(Box::new(workspace_root.to_string()));
+            }
+
+            let session_sql = format!(
+                "SELECT s.id, s.parent_session_id, s.title, s.workspace_root, \
+                        s.provider_id, s.provider_display_name, s.model_id, \
+                        s.model_display_name, s.created_at, s.updated_at, s.status, \
+                        s.snapshot_start_hash{session_details} \
+                 FROM sessions s WHERE {} \
+                 ORDER BY s.updated_at DESC, s.id DESC",
+                session_conditions.join(" AND ")
+            );
+            let mut session_stmt = conn.prepare(&session_sql)?;
+            let session_rows = session_stmt.query_map(
+                params_from_iter(session_values.iter().map(|value| value.as_ref())),
+                |row| {
+                    let parent_session_id = row
+                        .get::<_, Option<String>>(1)?
+                        .and_then(|value| Uuid::parse_str(&value).ok());
+                    Ok(SearchSessionRow {
+                        session_id: parse_search_uuid(&row.get::<_, String>(0)?),
+                        parent_session_id,
+                        title: row.get(2)?,
+                        workspace_root: row.get(3)?,
+                        provider_id: row.get(4)?,
+                        provider_display_name: row.get(5)?,
+                        model_id: row.get(6)?,
+                        model_display_name: row.get(7)?,
+                        created_at: parse_search_datetime(&row.get::<_, String>(8)?),
+                        updated_at: parse_search_datetime(&row.get::<_, String>(9)?),
+                        status: row.get(10)?,
+                        snapshot_start_hash: row.get(11)?,
+                        context_summary: if include_session_details {
+                            row.get(12)?
+                        } else {
+                            None
+                        },
+                        system_prompt: if include_session_details {
+                            row.get(13)?
+                        } else {
+                            None
+                        },
+                    })
+                },
+            )?;
+            let mut sessions = Vec::new();
+            for row in session_rows {
+                sessions.push(row?);
+            }
+            drop(session_stmt);
+
+            if fields.session {
+                for session in &sessions {
+                    let parent_session_id = session.parent_session_id.map(|id| id.to_string());
+                    let scalar_fields = vec![
+                        ("session.id", session.session_id.to_string()),
+                        (
+                            "session.parent_session_id",
+                            parent_session_id.unwrap_or_default(),
+                        ),
+                        ("session.title", session.title.clone()),
+                        ("session.workspace_root", session.workspace_root.clone()),
+                        ("session.provider_id", session.provider_id.clone()),
+                        (
+                            "session.provider_display_name",
+                            session.provider_display_name.clone(),
+                        ),
+                        ("session.model_id", session.model_id.clone()),
+                        (
+                            "session.model_display_name",
+                            session.model_display_name.clone(),
+                        ),
+                        ("session.status", session.status.clone()),
+                        (
+                            "session.snapshot_start_hash",
+                            session.snapshot_start_hash.clone().unwrap_or_default(),
+                        ),
+                    ];
+                    for (field, text) in scalar_fields {
+                        push_search_hit(
+                            &mut hits,
+                            SessionSearchHitKind::Session,
+                            session.session_id,
+                            &session.title,
+                            &session.workspace_root,
+                            None,
+                            None,
+                            None,
+                            field,
+                            &text,
+                            None,
+                            session.created_at,
+                            &options,
+                        );
+                    }
+
+                    if let Some(context_summary) = &session.context_summary {
+                        let context_summary = decompress_text(context_summary);
+                        push_search_hit(
+                            &mut hits,
+                            SessionSearchHitKind::Session,
+                            session.session_id,
+                            &session.title,
+                            &session.workspace_root,
+                            None,
+                            None,
+                            None,
+                            "session.context_summary",
+                            &context_summary,
+                            None,
+                            session.created_at,
+                            &options,
+                        );
+                    }
+                    if let Some(system_prompt) = &session.system_prompt {
+                        let system_prompt = decompress_text(system_prompt);
+                        push_search_hit(
+                            &mut hits,
+                            SessionSearchHitKind::Session,
+                            session.session_id,
+                            &session.title,
+                            &session.workspace_root,
+                            None,
+                            None,
+                            None,
+                            "session.system_prompt",
+                            &system_prompt,
+                            None,
+                            session.updated_at,
+                            &options,
+                        );
+                    }
+                }
+            }
+
+            if fields.includes_message() {
+                let attachment_select = if fields.attachment {
+                    ", m.attachments"
+                } else {
+                    ""
+                };
+                let mut message_conditions = vec![String::from("1 = 1")];
+                let mut message_values: Vec<Box<dyn ToSql>> = Vec::new();
+                if let Some(session_id) = options.session_id {
+                    message_conditions.push("s.id = ?".to_string());
+                    message_values.push(Box::new(session_id.to_string()));
+                }
+                if let Some(workspace_root) = options
+                    .workspace_root
+                    .as_deref()
+                    .filter(|root| !root.is_empty())
+                {
+                    message_conditions.push("s.workspace_root = ?".to_string());
+                    message_values.push(Box::new(workspace_root.to_string()));
+                }
+                if !options.roles.is_empty() {
+                    let placeholders = std::iter::repeat_n("?", options.roles.len())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    message_conditions.push(format!("m.role IN ({placeholders})"));
+                    for role in &options.roles {
+                        message_values.push(Box::new(role.clone()));
+                    }
+                }
+
+                let message_sql = format!(
+                    "SELECT m.id, m.session_id, s.title, s.workspace_root, m.role, \
+                            m.created_at, m.content, m.reasoning, m.tool_calls, \
+                            m.tool_call_id, m.tool_name, m.metadata, m.mode, m.app_data, \
+                            ROW_NUMBER() OVER (PARTITION BY m.session_id \
+                                ORDER BY m.created_at ASC, m.rowid ASC) - 1 AS sequence\
+                            {attachment_select} \
+                     FROM messages m INNER JOIN sessions s ON s.id = m.session_id \
+                     WHERE {} ORDER BY m.created_at DESC, m.rowid DESC",
+                    message_conditions.join(" AND ")
+                );
+                let mut message_stmt = conn.prepare(&message_sql)?;
+                let include_attachments = fields.attachment;
+                let message_rows = message_stmt.query_map(
+                    params_from_iter(message_values.iter().map(|value| value.as_ref())),
+                    |row| {
+                        Ok(SearchMessageRow {
+                            message_id: parse_search_uuid(&row.get::<_, String>(0)?),
+                            session_id: parse_search_uuid(&row.get::<_, String>(1)?),
+                            title: row.get(2)?,
+                            workspace_root: row.get(3)?,
+                            role: row.get(4)?,
+                            created_at: parse_search_datetime(&row.get::<_, String>(5)?),
+                            content: row.get(6)?,
+                            reasoning: row.get::<_, Option<Vec<u8>>>(7)?.unwrap_or_default(),
+                            tool_calls: row.get(8)?,
+                            tool_call_id: row.get(9)?,
+                            tool_name: row.get(10)?,
+                            metadata: row.get(11)?,
+                            mode: row.get(12)?,
+                            app_data: row.get(13)?,
+                            sequence: row.get::<_, i64>(14)?.max(0) as usize,
+                            attachments: if include_attachments {
+                                Some(row.get(15)?)
+                            } else {
+                                None
+                            },
+                        })
+                    },
+                )?;
+
+                for row in message_rows {
+                    let row = row?;
+                    if fields.content {
+                        let content = decompress_text(&row.content);
+                        push_search_hit(
+                            &mut hits,
+                            SessionSearchHitKind::Message,
+                            row.session_id,
+                            &row.title,
+                            &row.workspace_root,
+                            Some(row.message_id),
+                            Some(row.sequence),
+                            Some(&row.role),
+                            "message.content",
+                            &content,
+                            None,
+                            row.created_at,
+                            &options,
+                        );
+                    }
+                    if fields.reasoning {
+                        let reasoning = decompress_text(&row.reasoning);
+                        push_search_hit(
+                            &mut hits,
+                            SessionSearchHitKind::Message,
+                            row.session_id,
+                            &row.title,
+                            &row.workspace_root,
+                            Some(row.message_id),
+                            Some(row.sequence),
+                            Some(&row.role),
+                            "message.reasoning",
+                            &reasoning,
+                            None,
+                            row.created_at,
+                            &options,
+                        );
+                    }
+                    if fields.tool_call {
+                        let tool_calls = decompress_text(&row.tool_calls);
+                        push_search_hit(
+                            &mut hits,
+                            SessionSearchHitKind::Message,
+                            row.session_id,
+                            &row.title,
+                            &row.workspace_root,
+                            Some(row.message_id),
+                            Some(row.sequence),
+                            Some(&row.role),
+                            "message.tool_calls",
+                            &tool_calls,
+                            None,
+                            row.created_at,
+                            &options,
+                        );
+                        if let Some(tool_call_id) = &row.tool_call_id {
+                            push_search_hit(
+                                &mut hits,
+                                SessionSearchHitKind::Message,
+                                row.session_id,
+                                &row.title,
+                                &row.workspace_root,
+                                Some(row.message_id),
+                                Some(row.sequence),
+                                Some(&row.role),
+                                "message.tool_call_id",
+                                tool_call_id,
+                                None,
+                                row.created_at,
+                                &options,
+                            );
+                        }
+                        if let Some(tool_name) = &row.tool_name {
+                            push_search_hit(
+                                &mut hits,
+                                SessionSearchHitKind::Message,
+                                row.session_id,
+                                &row.title,
+                                &row.workspace_root,
+                                Some(row.message_id),
+                                Some(row.sequence),
+                                Some(&row.role),
+                                "message.tool_name",
+                                tool_name,
+                                None,
+                                row.created_at,
+                                &options,
+                            );
+                        }
+                    }
+                    if fields.metadata {
+                        let metadata = decompress_text(&row.metadata);
+                        push_search_hit(
+                            &mut hits,
+                            SessionSearchHitKind::Message,
+                            row.session_id,
+                            &row.title,
+                            &row.workspace_root,
+                            Some(row.message_id),
+                            Some(row.sequence),
+                            Some(&row.role),
+                            "message.metadata",
+                            &metadata,
+                            None,
+                            row.created_at,
+                            &options,
+                        );
+                    }
+                    if fields.app_data {
+                        let app_data = decompress_text(&row.app_data);
+                        push_search_hit(
+                            &mut hits,
+                            SessionSearchHitKind::Message,
+                            row.session_id,
+                            &row.title,
+                            &row.workspace_root,
+                            Some(row.message_id),
+                            Some(row.sequence),
+                            Some(&row.role),
+                            "message.app_data",
+                            &app_data,
+                            None,
+                            row.created_at,
+                            &options,
+                        );
+                        if let Some(mode) = &row.mode {
+                            push_search_hit(
+                                &mut hits,
+                                SessionSearchHitKind::Message,
+                                row.session_id,
+                                &row.title,
+                                &row.workspace_root,
+                                Some(row.message_id),
+                                Some(row.sequence),
+                                Some(&row.role),
+                                "message.mode",
+                                mode,
+                                None,
+                                row.created_at,
+                                &options,
+                            );
+                        }
+                    }
+                    if fields.attachment
+                        && let Some(attachments) = &row.attachments
+                    {
+                        push_attachment_search_hits(&mut hits, &row, attachments, &options);
+                    }
+                }
+            }
+
+            if fields.tool_output {
+                let mut tool_output_conditions = vec![String::from("1 = 1")];
+                let mut tool_output_values: Vec<Box<dyn ToSql>> = Vec::new();
+                if let Some(session_id) = options.session_id {
+                    tool_output_conditions.push("s.id = ?".to_string());
+                    tool_output_values.push(Box::new(session_id.to_string()));
+                }
+                if let Some(workspace_root) = options
+                    .workspace_root
+                    .as_deref()
+                    .filter(|root| !root.is_empty())
+                {
+                    tool_output_conditions.push("s.workspace_root = ?".to_string());
+                    tool_output_values.push(Box::new(workspace_root.to_string()));
+                }
+                if !options.roles.is_empty() {
+                    let placeholders = std::iter::repeat_n("?", options.roles.len())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    tool_output_conditions.push(format!("m.role IN ({placeholders})"));
+                    for role in &options.roles {
+                        tool_output_values.push(Box::new(role.clone()));
+                    }
+                }
+
+                let tool_output_sql = format!(
+                    "SELECT t.id, t.session_id, t.message_id, t.tool_call_id, \
+                            t.tool_name, t.output, t.created_at, s.title, \
+                            s.workspace_root, m.role \
+                     FROM tool_outputs t INNER JOIN sessions s ON s.id = t.session_id \
+                     LEFT JOIN messages m ON m.id = t.message_id \
+                     WHERE {} ORDER BY t.created_at DESC, t.rowid DESC",
+                    tool_output_conditions.join(" AND ")
+                );
+                let mut tool_output_stmt = conn.prepare(&tool_output_sql)?;
+                let tool_output_rows = tool_output_stmt.query_map(
+                    params_from_iter(tool_output_values.iter().map(|value| value.as_ref())),
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            parse_search_uuid(&row.get::<_, String>(1)?),
+                            parse_search_uuid(&row.get::<_, String>(2)?),
+                            row.get::<_, String>(3)?,
+                            row.get::<_, String>(4)?,
+                            row.get::<_, Option<Vec<u8>>>(5)?,
+                            parse_search_datetime(&row.get::<_, String>(6)?),
+                            row.get::<_, String>(7)?,
+                            row.get::<_, String>(8)?,
+                            row.get::<_, Option<String>>(9)?,
+                        ))
+                    },
+                )?;
+                for row in tool_output_rows {
+                    let (
+                        output_id,
+                        session_id,
+                        message_id,
+                        tool_call_id,
+                        tool_name,
+                        output,
+                        created_at,
+                        title,
+                        workspace_root,
+                        role,
+                    ) = row?;
+                    if let Some(output) = output {
+                        let output = decompress_text(&output);
+                        push_search_hit(
+                            &mut hits,
+                            SessionSearchHitKind::ToolOutput,
+                            session_id,
+                            &title,
+                            &workspace_root,
+                            Some(message_id),
+                            None,
+                            role.as_deref(),
+                            "tool_output.content",
+                            &output,
+                            Some(&output_id),
+                            created_at,
+                            &options,
+                        );
+                    }
+                    push_search_hit(
+                        &mut hits,
+                        SessionSearchHitKind::ToolOutput,
+                        session_id,
+                        &title,
+                        &workspace_root,
+                        Some(message_id),
+                        None,
+                        role.as_deref(),
+                        "tool_output.tool_call_id",
+                        &tool_call_id,
+                        Some(&output_id),
+                        created_at,
+                        &options,
+                    );
+                    push_search_hit(
+                        &mut hits,
+                        SessionSearchHitKind::ToolOutput,
+                        session_id,
+                        &title,
+                        &workspace_root,
+                        Some(message_id),
+                        None,
+                        role.as_deref(),
+                        "tool_output.tool_name",
+                        &tool_name,
+                        Some(&output_id),
+                        created_at,
+                        &options,
+                    );
+                }
+            }
+
+            Ok(())
+        })?;
+
+        hits.sort_unstable_by(|left, right| {
+            right
+                .created_at
+                .cmp(&left.created_at)
+                .then_with(|| left.session_id.cmp(&right.session_id))
+                .then_with(|| left.message_id.cmp(&right.message_id))
+                .then_with(|| left.field.cmp(&right.field))
+        });
+
+        let start = options.offset.min(hits.len());
+        let end = start.saturating_add(options.limit).min(hits.len());
+        Ok(hits[start..end].to_vec())
     }
 
     /// List all sessions ordered by creation time (newest first).
@@ -3303,6 +4198,152 @@ mod tests {
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].role, MessageRole::User);
         assert_eq!(messages[0].content, "Hello, world!");
+    }
+
+    #[test]
+    fn history_search_matches_projected_message_fields() {
+        let (store, _tmp) = test_store();
+        let sid = create_test_session(&store, "/workspace", "search test");
+        let mut message = Message::new(MessageRole::Assistant, "Content needle");
+        message.reasoning = "Reasoning needle".into();
+        message.tool_calls = vec![tidev_llm::message::ToolCall {
+            id: "call-needle".into(),
+            name: "shell".into(),
+            arguments: r#"{"query":"needle"}"#.into(),
+            thought_signature: None,
+        }];
+        message.metadata.filepath = Some("src/needle.rs".into());
+        message.attachments = vec![tidev_llm::message::MessageAttachment::Image {
+            filename: "needle.png".into(),
+            mime: "image/png".into(),
+            data: b"needle in binary data".to_vec(),
+            file_size: 21,
+        }];
+        store.append_message(sid, &message).unwrap();
+
+        let hits = store
+            .search_history(&SessionSearchOptions {
+                query: "NEEDLE".into(),
+                fields: SessionSearchFields::message(),
+                session_id: Some(sid),
+                workspace_root: None,
+                roles: vec!["assistant".into()],
+                case_sensitive: false,
+                context_chars: 8,
+                limit: 50,
+                offset: 0,
+            })
+            .unwrap();
+        let fields: Vec<&str> = hits.iter().map(|hit| hit.field.as_str()).collect();
+        assert!(fields.contains(&"message.content"));
+        assert!(fields.contains(&"message.reasoning"));
+        assert!(fields.contains(&"message.tool_calls"));
+        assert!(fields.contains(&"message.metadata"));
+        assert!(
+            !fields
+                .iter()
+                .any(|field| field.starts_with("message.attachment"))
+        );
+        assert!(hits.iter().all(|hit| hit.message_id == Some(message.id)));
+
+        let all_hits = store
+            .search_history(&SessionSearchOptions {
+                query: "needle".into(),
+                fields: SessionSearchFields::all(),
+                session_id: Some(sid),
+                workspace_root: None,
+                roles: Vec::new(),
+                case_sensitive: false,
+                context_chars: 8,
+                limit: 50,
+                offset: 0,
+            })
+            .unwrap();
+        assert!(
+            all_hits
+                .iter()
+                .any(|hit| hit.field == "message.attachment.filename")
+        );
+        assert!(
+            !all_hits
+                .iter()
+                .any(|hit| hit.field == "message.attachment.data")
+        );
+    }
+
+    #[test]
+    fn history_search_matches_session_and_retained_tool_output() {
+        let (store, _tmp) = test_store();
+        let sid = create_test_session(&store, "/workspace", "session needle");
+        let message = Message::new(MessageRole::Tool, "tool result");
+        store.append_message(sid, &message).unwrap();
+        store
+            .save_tool_output(
+                "out-needle",
+                sid,
+                message.id,
+                "call-output",
+                "shell",
+                "retained needle output",
+            )
+            .unwrap();
+
+        let hits = store
+            .search_history(&SessionSearchOptions {
+                query: "needle".into(),
+                fields: SessionSearchFields::all(),
+                session_id: None,
+                workspace_root: Some("/workspace".into()),
+                roles: Vec::new(),
+                case_sensitive: false,
+                context_chars: 20,
+                limit: 50,
+                offset: 0,
+            })
+            .unwrap();
+        assert!(
+            hits.iter()
+                .any(|hit| hit.kind == SessionSearchHitKind::Session)
+        );
+        let tool_output_hit = hits
+            .iter()
+            .find(|hit| hit.field == "tool_output.content")
+            .expect("retained tool output should be searchable");
+        assert_eq!(
+            tool_output_hit.tool_output_id.as_deref(),
+            Some("out-needle")
+        );
+        assert_eq!(tool_output_hit.message_id, Some(message.id));
+    }
+
+    #[test]
+    fn history_search_applies_offset_limit_and_case_sensitivity() {
+        let (store, _tmp) = test_store();
+        let sid = create_test_session(&store, "/workspace", "case test");
+        for content in ["Needle one", "needle two", "NEEDLE three"] {
+            store
+                .append_message(sid, &Message::new(MessageRole::User, content))
+                .unwrap();
+        }
+
+        let hits = store
+            .search_history(&SessionSearchOptions {
+                query: "needle".into(),
+                fields: SessionSearchFields {
+                    content: true,
+                    ..SessionSearchFields::default()
+                },
+                session_id: Some(sid),
+                workspace_root: None,
+                roles: Vec::new(),
+                case_sensitive: false,
+                context_chars: 20,
+                limit: 1,
+                offset: 1,
+            })
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].snippet, "needle two");
     }
 
     #[test]

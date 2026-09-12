@@ -18,6 +18,48 @@ enum SessionOutputFormat {
     Json,
 }
 
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+enum SearchOutputFormat {
+    Text,
+    Json,
+    Jsonl,
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+enum SearchField {
+    All,
+    Session,
+    Message,
+    Content,
+    Reasoning,
+    ToolCall,
+    Metadata,
+    AppData,
+    Attachment,
+    ToolOutput,
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+enum SearchRole {
+    System,
+    User,
+    Assistant,
+    Tool,
+    Error,
+}
+
+impl SearchRole {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::User => "user",
+            Self::Assistant => "assistant",
+            Self::Tool => "tool",
+            Self::Error => "error",
+        }
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(
     name = "tidev",
@@ -252,6 +294,38 @@ enum SessionCommand {
         #[arg(long, value_enum, default_value_t = SessionOutputFormat::Text)]
         format: SessionOutputFormat,
     },
+    /// Search textual session history by keyword
+    Search {
+        /// Literal keyword or phrase to search for
+        query: String,
+        /// Fields to search; defaults to message fields
+        #[arg(long, value_enum, value_delimiter = ',')]
+        field: Option<Vec<SearchField>>,
+        /// Restrict message matches to these roles
+        #[arg(long, value_enum, value_delimiter = ',')]
+        role: Vec<SearchRole>,
+        /// Restrict results to this session UUID or unique prefix
+        #[arg(long)]
+        session: Option<String>,
+        /// Restrict results to this workspace root
+        #[arg(long)]
+        workspace: Option<PathBuf>,
+        /// Maximum number of results
+        #[arg(short, long, default_value_t = 50)]
+        limit: u64,
+        /// Number of results to skip
+        #[arg(long, default_value_t = 0)]
+        offset: u64,
+        /// Number of surrounding characters included in each snippet
+        #[arg(long, default_value_t = 120)]
+        context: u64,
+        /// Match letter case exactly
+        #[arg(long)]
+        case_sensitive: bool,
+        /// Output format
+        #[arg(long, value_enum, default_value_t = SearchOutputFormat::Text)]
+        format: SearchOutputFormat,
+    },
     /// Delete sessions not updated for more than N days
     Prune {
         /// Number of days
@@ -350,6 +424,29 @@ async fn main() -> Result<()> {
                 message_id,
                 format,
             } => cli::session_show(&session_id, message_id.as_deref(), format),
+            SessionCommand::Search {
+                query,
+                field,
+                role,
+                session,
+                workspace,
+                limit,
+                offset,
+                context,
+                case_sensitive,
+                format,
+            } => cli::session_search(
+                &query,
+                field.as_deref().unwrap_or(&[]),
+                &role,
+                session.as_deref(),
+                workspace.as_deref(),
+                limit,
+                offset,
+                context,
+                case_sensitive,
+                format,
+            ),
             SessionCommand::Prune { older_than_days } => cli::session_prune(older_than_days),
         },
 

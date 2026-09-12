@@ -82,6 +82,38 @@ tidev session show <SESSION_UUID> --format json |
   jq '.messages[] | select(.message.role == "assistant")'
 ~~~
 
+### 5. Search message history across sessions
+
+Search the default message fields across every session, including child
+sessions:
+
+~~~bash
+tidev session search 'keyword' --format json
+~~~
+
+Use `--field all` to include session metadata, textual attachment fields, and
+retained tool output. Image bytes are skipped. Scope the search to a session
+with its complete UUID or a unique prefix:
+
+~~~bash
+tidev session search 'keyword' --field all --session a1b2c3d4e5f6 --format json
+~~~
+
+Each result includes the session ID, message ID, sequence, role, matched field,
+match count, and a context snippet. Use `--format jsonl` when a streaming
+one-result-per-line format is more convenient for shell pipelines.
+
+PowerShell can parse the JSON result and apply its own filtering and sorting:
+
+~~~powershell
+$hits = (tidev session search 'keyword' --field all --format json | Out-String) |
+  ConvertFrom-Json
+$hits |
+  Where-Object { $_.role -eq 'assistant' } |
+  Sort-Object created_at |
+  Select-Object session_id, message_id, field, snippet
+~~~
+
 ## Export fallback and advanced workflows
 
 Use export when you need a portable file, arbitrary SQL, an external SQLite
