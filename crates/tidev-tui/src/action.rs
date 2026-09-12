@@ -178,6 +178,8 @@ pub(crate) enum SettingsAction {
 pub(crate) enum ConnectAction {
     /// Save an API key for the given LLM provider.
     SaveApiKey { provider_id: String, key: String },
+    /// Copy an existing provider API key to the system clipboard.
+    CopyApiKey { provider_id: String },
     /// Remove a provider's API key (disconnect).
     Disconnect {
         provider_id: String,

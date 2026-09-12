@@ -255,6 +255,34 @@ impl App {
                         }
                     }
                 }
+                Action::Connect(ConnectAction::CopyApiKey { provider_id }) => {
+                    let display_name = self
+                        .runtime
+                        .config()
+                        .provider_display_name(&provider_id)
+                        .unwrap_or(&provider_id)
+                        .to_string();
+                    let key = self.runtime.auth().api_key(&provider_id).map(str::to_owned);
+
+                    let Some(key) = key else {
+                        self.set_toast(
+                            format!("No API key configured for {display_name}"),
+                            std::time::Duration::from_secs(3),
+                        );
+                        continue;
+                    };
+
+                    match copy_to_clipboard(&key) {
+                        Ok(()) => self.set_toast(
+                            format!("API key for {display_name} copied to clipboard"),
+                            std::time::Duration::from_secs(3),
+                        ),
+                        Err(error) => self.set_toast(
+                            format!("Copy failed: {error}"),
+                            std::time::Duration::from_secs(5),
+                        ),
+                    }
+                }
                 Action::Connect(ConnectAction::Disconnect {
                     provider_id,
                     display_name,

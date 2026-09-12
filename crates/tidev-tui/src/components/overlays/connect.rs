@@ -31,8 +31,16 @@ enum ConnectPhase {
     },
 }
 
+/// Focus within the provider picker.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProviderPickerFocus {
+    List,
+    Search,
+}
+
 pub(crate) struct ConnectDialog {
     phase: ConnectPhase,
+    provider_picker_focus: ProviderPickerFocus,
     /// Full provider list, built once from runtime in `update()`.
     all_providers: Vec<ProviderItem>,
     /// Current search query.
@@ -50,12 +58,15 @@ pub(crate) struct ProviderItem {
     pub display_name: String,
     pub source: ProviderSource,
     pub connected: bool,
+    /// Masked API key preview. The full key must never be kept in the item.
+    pub key_preview: Option<String>,
 }
 
 impl ConnectDialog {
     pub(crate) fn new() -> Self {
         Self {
             phase: ConnectPhase::ProviderPicker,
+            provider_picker_focus: ProviderPickerFocus::List,
             all_providers: Vec::new(),
             query: String::new(),
             selected: 0,
@@ -80,12 +91,14 @@ impl ConnectDialog {
                 let source = config
                     .provider_source(&provider_id)
                     .unwrap_or(ProviderSource::User);
-                let connected = auth.api_key(&provider_id).is_some();
+                let key_preview = auth.api_key(&provider_id).map(mask_api_key);
+                let connected = key_preview.is_some();
                 ProviderItem {
                     provider_id,
                     display_name,
                     source,
                     connected,
+                    key_preview,
                 }
             })
             .collect();
@@ -153,20 +166,39 @@ impl Component for ConnectDialog {
 
         match &mut self.phase {
             ConnectPhase::ProviderPicker => match key.code {
-                KeyCode::Esc => Some(Action::Overlay(OverlayAction::Close(
-                    OverlayKind::ConnectDialog,
-                ))),
-                KeyCode::Tab => None,
+                KeyCode::Esc => {
+                    if self.provider_picker_focus == ProviderPickerFocus::Search {
+                        self.provider_picker_focus = ProviderPickerFocus::List;
+                        None
+                    } else {
+                        Some(Action::Overlay(OverlayAction::Close(
+                            OverlayKind::ConnectDialog,
+                        )))
+                    }
+                }
+                KeyCode::Tab if key.modifiers.is_empty() => {
+                    self.provider_picker_focus = match self.provider_picker_focus {
+                        ProviderPickerFocus::List => ProviderPickerFocus::Search,
+                        ProviderPickerFocus::Search => ProviderPickerFocus::List,
+                    };
+                    None
+                }
+                KeyCode::Char('/') if key.modifiers.is_empty() => {
+                    self.provider_picker_focus = ProviderPickerFocus::Search;
+                    None
+                }
                 KeyCode::Enter
                     if !key.modifiers.contains(KeyModifiers::SHIFT)
                         && !key.modifiers.contains(KeyModifiers::ALT) =>
                 {
-                    if let Some(item) = self.visible_provider(self.selected) {
+                    if self.provider_picker_focus == ProviderPickerFocus::Search {
+                        self.provider_picker_focus = ProviderPickerFocus::List;
+                    } else if let Some(item) = self.visible_provider(self.selected) {
                         self.switch_to_api_key(item.provider_id.clone(), item.display_name.clone());
                     }
                     None
                 }
-                KeyCode::Up => {
+                KeyCode::Up if self.provider_picker_focus == ProviderPickerFocus::List => {
                     let count = self.visible_count();
                     if count > 0 {
                         let current = self.selected.min(count.saturating_sub(1));
@@ -178,7 +210,7 @@ impl Component for ConnectDialog {
                     }
                     None
                 }
-                KeyCode::Down => {
+                KeyCode::Down if self.provider_picker_focus == ProviderPickerFocus::List => {
                     let count = self.visible_count();
                     if count > 0 {
                         let current = self.selected.min(count.saturating_sub(1));
@@ -186,13 +218,19 @@ impl Component for ConnectDialog {
                     }
                     None
                 }
-                KeyCode::Char(c) if key.modifiers.contains(KeyModifiers::CONTROL) && c == 'p' => {
-                    Some(Action::Connect(ConnectAction::PruneOrphans))
+                KeyCode::Char('c' | 'C')
+                    if self.provider_picker_focus == ProviderPickerFocus::List
+                        && key.modifiers.is_empty() =>
+                {
+                    self.visible_provider(self.selected).map(|item| {
+                        Action::Connect(ConnectAction::CopyApiKey {
+                            provider_id: item.provider_id.clone(),
+                        })
+                    })
                 }
                 KeyCode::Char('d' | 'D')
-                    if key.modifiers.contains(KeyModifiers::CONTROL)
-                        && key.modifiers.contains(KeyModifiers::SHIFT)
-                        && !key.modifiers.contains(KeyModifiers::ALT) =>
+                    if self.provider_picker_focus == ProviderPickerFocus::List
+                        && key.modifiers.is_empty() =>
                 {
                     if let Some(item) = self.visible_provider(self.selected)
                         && item.connected
@@ -204,12 +242,21 @@ impl Component for ConnectDialog {
                     }
                     None
                 }
-                KeyCode::Char(c) if !c.is_control() => {
+                KeyCode::Char('p' | 'P')
+                    if self.provider_picker_focus == ProviderPickerFocus::List
+                        && key.modifiers.is_empty() =>
+                {
+                    Some(Action::Connect(ConnectAction::PruneOrphans))
+                }
+                KeyCode::Char(c)
+                    if self.provider_picker_focus == ProviderPickerFocus::Search
+                        && !c.is_control() =>
+                {
                     self.query.push(c);
                     self.selected = 0;
                     None
                 }
-                KeyCode::Backspace => {
+                KeyCode::Backspace if self.provider_picker_focus == ProviderPickerFocus::Search => {
                     self.query.pop();
                     self.selected = 0;
                     None
@@ -225,6 +272,7 @@ impl Component for ConnectDialog {
                     self.phase = ConnectPhase::ProviderPicker;
                     self.query.clear();
                     self.selected = 0;
+                    self.provider_picker_focus = ProviderPickerFocus::List;
                     None
                 }
                 KeyCode::Enter
@@ -311,6 +359,7 @@ impl Component for ConnectDialog {
                 let auth = ctx.runtime.auth();
                 self.rebuild_all_providers(&config, &auth);
                 self.selected = 0;
+                self.provider_picker_focus = ProviderPickerFocus::List;
                 vec![]
             }
             Action::Connect(ConnectAction::Disconnect { .. }) => {
@@ -319,6 +368,7 @@ impl Component for ConnectDialog {
                 let auth = ctx.runtime.auth();
                 self.rebuild_all_providers(&config, &auth);
                 self.selected = 0;
+                self.provider_picker_focus = ProviderPickerFocus::List;
                 vec![]
             }
             _ => {
@@ -383,24 +433,35 @@ impl Component for ConnectDialog {
                 // Search input
                 let (visible_query, cursor) = single_line_input_cursor(sections[0], 2, &self.query);
                 let search_display = if self.query.is_empty() {
-                    "Search providers by id or display name... (type to filter)"
+                    "Search providers by id or display name... (press / to search)"
                 } else {
                     visible_query
                 };
                 frame.render_widget(
                     Paragraph::new(Line::from(vec![
                         Span::styled("> ", Style::default().fg(palette.accent)),
-                        Span::styled(search_display, Style::default().fg(palette.text)),
+                        Span::styled(
+                            search_display,
+                            Style::default().fg(
+                                if self.provider_picker_focus == ProviderPickerFocus::Search {
+                                    palette.text
+                                } else {
+                                    palette.muted
+                                },
+                            ),
+                        ),
                     ]))
                     .style(Style::default().bg(palette.panel_alt)),
                     sections[0],
                 );
-                frame.set_cursor_position(cursor);
+                if self.provider_picker_focus == ProviderPickerFocus::Search {
+                    frame.set_cursor_position(cursor);
+                }
 
                 // Hint
                 frame.render_widget(
                     Paragraph::new(format!(
-                        "{} provider(s) available · Ctrl+P to prune orphan auth entries",
+                        "{} provider(s) available · p to prune orphan auth entries",
                         self.visible_count(),
                     ))
                     .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
@@ -445,6 +506,11 @@ impl Component for ConnectDialog {
                     } else {
                         Style::default().fg(palette.muted).bg(bg)
                     };
+                    let connection_label = if let Some(preview) = item.key_preview.as_deref() {
+                        format!("connected [{preview}]")
+                    } else {
+                        "not connected".to_string()
+                    };
                     let line = Line::from(vec![
                         Span::styled(
                             prefix,
@@ -469,14 +535,7 @@ impl Component for ConnectDialog {
                             Style::default().fg(palette.accent_soft).bg(bg),
                         ),
                         Span::raw("  "),
-                        Span::styled(
-                            if item.connected {
-                                "connected"
-                            } else {
-                                "not connected"
-                            },
-                            status_style,
-                        ),
+                        Span::styled(connection_label, status_style),
                     ]);
                     frame.render_widget(
                         Paragraph::new(line).style(Style::default().bg(bg)),
@@ -488,9 +547,11 @@ impl Component for ConnectDialog {
 
                 // Help footer
                 frame.render_widget(
-                    Paragraph::new(
-                        "↑↓ navigate · Enter select · Ctrl+Shift+D disconnect · Esc cancel · type to filter",
-                    )
+                    Paragraph::new(if self.provider_picker_focus == ProviderPickerFocus::Search {
+                        "Type to filter · Enter list · Esc back"
+                    } else {
+                        "↑↓ select · Enter configure · c copy key · d disconnect · p prune · / search · Esc close"
+                    })
                     .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                     sections[3],
                 );
@@ -599,10 +660,13 @@ impl Component for ConnectDialog {
     }
 
     fn wants_terminal_cursor(&self) -> bool {
-        matches!(
-            self.phase,
-            ConnectPhase::ProviderPicker | ConnectPhase::ApiKey { .. }
-        )
+        match &self.phase {
+            ConnectPhase::ProviderPicker => {
+                self.provider_picker_focus == ProviderPickerFocus::Search
+            }
+            ConnectPhase::ApiKey { .. } => true,
+            ConnectPhase::DisconnectConfirm { .. } => false,
+        }
     }
 
     fn handle_paste(&mut self, text: &str) -> Option<Action> {
@@ -622,4 +686,94 @@ fn provider_picker_matches(query: &str, provider_id: &str, display_name: &str) -
     let provider_id = provider_id.to_ascii_lowercase();
     let display_name = display_name.to_ascii_lowercase();
     provider_id.contains(query) || display_name.contains(query)
+}
+
+/// Return a short, non-sensitive preview of an API key.
+fn mask_api_key(key: &str) -> String {
+    let key = key.trim();
+    if key.is_empty() {
+        return String::new();
+    }
+
+    let chars: Vec<char> = key.chars().collect();
+    if chars.len() <= 5 {
+        return "***".to_string();
+    }
+
+    let prefix: String = chars.iter().copied().take(3).collect();
+    let suffix: String = chars
+        .iter()
+        .copied()
+        .skip(chars.len().saturating_sub(2))
+        .collect();
+    format!("{prefix}***{suffix}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn provider(connected: bool) -> ProviderItem {
+        ProviderItem {
+            provider_id: "openai".into(),
+            display_name: "OpenAI".into(),
+            source: ProviderSource::Bundled,
+            connected,
+            key_preview: connected.then(|| "sk-***8f".into()),
+        }
+    }
+
+    #[test]
+    fn masks_api_key_with_prefix_and_suffix() {
+        assert_eq!(mask_api_key("sk-abc1238f"), "sk-***8f");
+    }
+
+    #[test]
+    fn fully_masks_short_api_keys() {
+        assert_eq!(mask_api_key("short"), "***");
+        assert_eq!(mask_api_key("   "), "");
+    }
+
+    #[test]
+    fn copy_is_a_single_key_in_list_focus() {
+        let mut dialog = ConnectDialog::new();
+        dialog.all_providers = vec![provider(true)];
+
+        let action =
+            dialog.handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::empty()));
+
+        assert!(matches!(
+            action,
+            Some(Action::Connect(ConnectAction::CopyApiKey { provider_id }))
+                if provider_id == "openai"
+        ));
+        assert!(matches!(dialog.phase, ConnectPhase::ProviderPicker));
+    }
+
+    #[test]
+    fn search_mode_keeps_c_as_search_text() {
+        let mut dialog = ConnectDialog::new();
+        dialog.all_providers = vec![provider(true)];
+
+        dialog.handle_key_event(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::empty()));
+        let action =
+            dialog.handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::empty()));
+
+        assert!(action.is_none());
+        assert_eq!(dialog.query, "c");
+    }
+
+    #[test]
+    fn disconnect_uses_a_single_key_for_connected_provider() {
+        let mut dialog = ConnectDialog::new();
+        dialog.all_providers = vec![provider(true)];
+
+        dialog.handle_key_event(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::empty()));
+
+        assert!(matches!(
+            dialog.phase,
+            ConnectPhase::DisconnectConfirm { ref provider_id, .. }
+                if provider_id == "openai"
+        ));
+    }
 }
