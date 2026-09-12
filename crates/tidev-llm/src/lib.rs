@@ -131,30 +131,6 @@ pub struct LlmClient {
     debug_config: Arc<RwLock<LlmDebugConfig>>,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{LlmClient, LlmDebugConfig};
-
-    #[test]
-    fn cloned_clients_share_debug_configuration() {
-        let client = LlmClient::new(false, 1, false, 1).expect("client should build");
-        let clone = client.clone();
-
-        clone.update_debug_config(LlmDebugConfig {
-            save_request_body: true,
-            max_request_files: 9,
-            save_response_body: true,
-            max_response_files: 7,
-        });
-
-        let current = client.debug_config();
-        assert!(current.save_request_body);
-        assert_eq!(current.max_request_files, 9);
-        assert!(current.save_response_body);
-        assert_eq!(current.max_response_files, 7);
-    }
-}
-
 impl LlmClient {
     /// Build a new client without an application-specific default User-Agent.
     ///
@@ -533,5 +509,29 @@ impl LlmClient {
                 .await
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{LlmClient, LlmDebugConfig};
+
+    #[test]
+    fn cloned_clients_share_debug_configuration() {
+        let client = LlmClient::new(false, 1, false, 1).expect("client should build");
+        let clone = client.clone();
+
+        clone.update_debug_config(LlmDebugConfig {
+            save_request_body: true,
+            max_request_files: 9,
+            save_response_body: true,
+            max_response_files: 7,
+        });
+
+        let current = client.debug_config();
+        assert!(current.save_request_body);
+        assert_eq!(current.max_request_files, 9);
+        assert!(current.save_response_body);
+        assert_eq!(current.max_response_files, 7);
     }
 }
