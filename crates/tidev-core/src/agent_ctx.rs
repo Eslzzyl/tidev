@@ -604,8 +604,12 @@ pub struct CoreContext {
     approval_broker: ApprovalBroker,
     /// This loop's session ID.
     session_id: Uuid,
-    /// Current session mode.
+    /// Initial session mode, used as a fallback for legacy messages without
+    /// persisted mode metadata.
     mode: Mode,
+    /// Mode used by the request currently being prepared or executed.
+    /// Updated from the latest user message in `load_messages`.
+    request_mode: StdRwLock<Mode>,
     /// Pre-composed system prompt (session-scoped, immutable after creation).
     system_prompt: String,
     /// Resolved model config for the LLM call.
@@ -793,6 +797,7 @@ impl CoreContext {
             approval_broker,
             session_id,
             mode,
+            request_mode: StdRwLock::new(mode),
             system_prompt,
             model_config,
             cancel,
@@ -814,6 +819,10 @@ impl CoreContext {
     /// Helper: emit an event; logging the error is sufficient (UI may have gone away).
     fn emit(&self, event: BackendEvent) {
         let _ = self.event_bus.send_backend(event);
+    }
+
+    fn request_mode(&self) -> Mode {
+        *self.request_mode.read().unwrap()
     }
 
     /// Persist a provider failure as application metadata plus an `error`
@@ -995,59 +1004,82 @@ impl CoreContext {
         Ok(updated)
     }
 
-    /// Inject the mode reminder into the last user message when the mode
-    /// changes, preserving the existing message prefix and persistence order.
+    /// Prepare and persist the mode reminder for the last user message in the
+    /// current request view.
+    ///
+    /// The reminder is added exactly once to each user message. Persisting it
+    /// before the provider request makes the message bytes stable when the
+    /// message becomes history in a later request.
     async fn inject_mode_reminder_impl(
         &self,
-        session_id: Uuid,
         messages: &mut [Message],
+        current_mode: Mode,
     ) -> Result<()> {
         let last_user_idx = match messages.iter().rposition(|m| m.role == MessageRole::User) {
             Some(idx) => idx,
             None => return Ok(()),
         };
 
+        let message_id = messages[last_user_idx].id;
         let buffer = self.buffer.read().await;
-        let prev_mode = messages[..last_user_idx]
+        let prev_mode = buffer
+            .load()
             .iter()
             .rev()
             .filter(|m| m.role == MessageRole::User)
+            .skip_while(|m| m.id != message_id)
+            .skip(1)
             .find_map(|m| {
                 buffer
                     .app_data(m.id)
                     .and_then(|data| data.mode.as_deref()?.parse::<Mode>().ok())
             });
         drop(buffer);
-        let is_first_user = prev_mode.is_none();
-        let reminder = match (is_first_user, prev_mode) {
-            (true, _) => Some(crate::prompts::mode_reminder(self.mode)),
-            (false, Some(previous)) if previous != self.mode => Some(match self.mode {
+        let text = match prev_mode {
+            None => crate::prompts::mode_reminder(current_mode),
+            Some(previous) if previous != current_mode => match current_mode {
                 Mode::Plan => crate::prompts::plan_switch_reminder(),
                 Mode::Build => crate::prompts::build_switch_reminder(),
-            }),
-            _ => None,
+            },
+            Some(_) => crate::prompts::mode_reminder(current_mode),
         };
 
-        let Some(text) = reminder else {
-            return Ok(());
-        };
-        if messages[last_user_idx].content.starts_with(&text) {
+        // This guard is useful when a caller reuses a prepared request view.
+        // It also preserves legacy mode reminders that used a longer text.
+        if messages[last_user_idx].content.starts_with(&text)
+            || Self::has_mode_reminder_prefix(&messages[last_user_idx].content)
+        {
             return Ok(());
         }
 
         let new_content = format!("{text}\n\n{}", messages[last_user_idx].content);
-        let message_id = messages[last_user_idx].id;
         messages[last_user_idx].content = new_content.clone();
-        self.update_message_content(session_id, message_id, new_content)
+        self.update_message_content(self.session_id, message_id, new_content)
             .await?;
 
-        log::info!(
-            "injected mode reminder into user message {} (mode={:?}, is_first={})",
+        log::debug!(
+            "persisted mode reminder for user message {} (mode={:?}, previous_mode={:?})",
             message_id,
-            self.mode,
-            is_first_user,
+            current_mode,
+            prev_mode,
         );
         Ok(())
+    }
+
+    /// Return whether a user message already starts with a mode reminder.
+    ///
+    /// The prefix check intentionally accepts the older, more verbose mode
+    /// reminder format so loading an existing session does not rewrite bytes
+    /// that may already have been sent to a provider.
+    fn has_mode_reminder_prefix(content: &str) -> bool {
+        let Some(end) = content.find("</system-reminder>") else {
+            return false;
+        };
+        let prefix = &content[..end];
+        prefix.contains("You are in Plan mode")
+            || prefix.contains("You are in Build mode")
+            || prefix.contains("switched to Plan mode")
+            || prefix.contains("switched to Build mode")
     }
 
     /// Update the content of an existing message in both the buffer and store.
@@ -1155,9 +1187,8 @@ impl CoreContext {
     async fn request_tool_approval(
         &self,
         tool_calls: &[ToolCall],
-        read_only: bool,
+        mode: Mode,
     ) -> Result<Vec<ApprovedTool>> {
-        let mode = if read_only { Mode::Plan } else { Mode::Build };
         let sensitive_patterns = load_sensitive_patterns(&self.workspace_root);
         let access_control = {
             let cfg = self.config.read().unwrap();
@@ -1324,9 +1355,8 @@ impl AgentContext for CoreContext {
         session_id: Uuid,
         request_id: u64,
     ) -> Result<Vec<(ToolCall, ToolExecutionResult)>> {
-        let approved_tools = self
-            .request_tool_approval(tool_calls, self.mode == Mode::Plan)
-            .await?;
+        let mode = self.request_mode();
+        let approved_tools = self.request_tool_approval(tool_calls, mode).await?;
 
         let mut results: Vec<(ToolCall, ToolExecutionResult)> = Vec::new();
         for approved in &approved_tools {
@@ -1370,7 +1400,7 @@ impl AgentContext for CoreContext {
             registry: self.tool_registry.clone(),
             session_id,
             request_id,
-            mode: self.mode,
+            mode,
             cancel: self.cancel.clone(),
             event_tx: self.event_bus.agent_sender(),
             permissions,
@@ -1422,7 +1452,7 @@ impl AgentContext for CoreContext {
                     workspace_root: self.workspace_root.clone(),
                     config_dir: self.config_dir.clone(),
                     event_bus: self.event_bus.clone(),
-                    mode: self.mode,
+                    mode,
                     system_prompt: self.system_prompt.clone(),
                     snapshot: self.snapshot.clone(),
                     config: self.config.clone(),
@@ -1703,11 +1733,30 @@ impl AgentContext for CoreContext {
 
         let mut messages = prepared.messages;
 
+        // Resolve the mode from the message being sent. This preserves the
+        // submission-time mode for queue/steer messages even when the outer
+        // agent loop was started in a different mode.
+        let current_mode = {
+            let buffer = self.buffer.read().await;
+            buffer
+                .load()
+                .iter()
+                .rev()
+                .find(|message| message.role == MessageRole::User)
+                .and_then(|message| {
+                    buffer
+                        .app_data(message.id)
+                        .and_then(|data| data.mode.as_deref()?.parse::<Mode>().ok())
+                })
+                .unwrap_or(self.mode)
+        };
+        *self.request_mode.write().unwrap() = current_mode;
+
         // Keep both injections in the same order as the original agent loop:
         // instruction files first, then the mode reminder.
         self.inject_instructions_impl(session_id, &mut messages)
             .await?;
-        self.inject_mode_reminder_impl(session_id, &mut messages)
+        self.inject_mode_reminder_impl(&mut messages, current_mode)
             .await?;
         restore_full_tool_output_semantics(&mut messages);
         Ok(messages)

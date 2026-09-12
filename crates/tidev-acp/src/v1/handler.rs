@@ -327,7 +327,7 @@ pub async fn run_acp_agent() -> Result<()> {
                         let messages = state
                             .runtime
                             .session_manager()
-                            .load_messages(session_id)
+                            .load_session_messages(session_id)
                             .map_err(|e| {
                                 agent_client_protocol::Error::internal_error()
                                     .data(format!("failed to load messages: {e}"))
@@ -358,7 +358,7 @@ pub async fn run_acp_agent() -> Result<()> {
 
                         state
                             .runtime
-                            .set_message_buffer(session_id, messages)
+                            .set_session_message_buffer(session_id, messages)
                             .await;
 
                         // The context_manager is lazily created from the DB

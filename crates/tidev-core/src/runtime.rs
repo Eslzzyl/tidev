@@ -1175,11 +1175,12 @@ impl Runtime {
         let filtered_tools = workspace
             .tool_registry()
             .definitions_for_model(&active_model);
-        // The buffer is shared with the spawned task (for persisting queued
-        // prompts after a turn) and moved into the CoreContext.
+        // The buffer is shared with the spawned task for persisting queued
+        // prompts after a turn and moved into the CoreContext.
         let buffer = self.message_buffer(session_id).await;
         let buffer_for_queued = buffer.clone();
         let session_manager = self.session_manager.clone();
+        let pending_prompts = self.pending_prompts.clone();
         let ctx = crate::agent_ctx::CoreContext::new(
             self.llm.clone(),
             self.session_manager.clone(),
@@ -1224,16 +1225,6 @@ impl Runtime {
             .or_insert_with(|| Arc::new(Notify::new()))
             .clone();
 
-        // Extract the per-session pending prompts for this loop run.
-        // Steering entries are consumed as keep-alive signals by the loop;
-        // queueing entries are persisted by the host after the loop exits.
-        let per_session_queue: Arc<std::sync::Mutex<VecDeque<PendingPrompt>>> = {
-            let mut qmap = self.pending_prompts.lock().unwrap();
-            Arc::new(std::sync::Mutex::new(
-                qmap.remove(&session_id).unwrap_or_default(),
-            ))
-        };
-
         let loop_config = tidev_agent::AgentLoopConfig {
             session_id,
             system_prompt,
@@ -1248,7 +1239,6 @@ impl Runtime {
         let handles = self.run_loop_handles.clone();
         let cancels = self.active_loop_cancels.clone();
         let steer_signals = self.steer_signals.clone();
-        let qmap_restore = self.pending_prompts.clone();
         let session_outcomes = self.session_outcomes.clone();
 
         let join = tokio::spawn(async move {
@@ -1276,13 +1266,14 @@ impl Runtime {
                     log::error!("agent loop for session {session_id} exited with error: {e}");
                 }
                 // Drain prompts queued while the loop was running. Steering
-                // entries were already consumed as keep-alive signals and
-                // their messages are persisted — only queueing entries
-                // remain to be persisted here.
-                let queued: Vec<PendingPrompt> = per_session_queue
+                // entries were already persisted; queueing entries are
+                // persisted here before the next loop iteration.
+                let mut queued: VecDeque<PendingPrompt> = pending_prompts
                     .lock()
                     .unwrap()
-                    .drain(..)
+                    .remove(&session_id)
+                    .unwrap_or_default()
+                    .into_iter()
                     .filter(|p| p.delivery == DeliveryMode::Queue)
                     .collect();
                 if queued.is_empty() {
@@ -1291,7 +1282,7 @@ impl Runtime {
                 // Persist queued prompts (buffer + store) so the next
                 // loop iteration's load_messages() picks them up.
                 let mut failed = false;
-                for prompt in queued {
+                while let Some(prompt) = queued.pop_front() {
                     let mut msg = Message::new(MessageRole::User, prompt.content);
                     msg.id = prompt.message_id;
                     msg.attachments = prompt.attachments;
@@ -1317,22 +1308,22 @@ impl Runtime {
                     }
                 }
                 if failed {
+                    // The failed prompt is already present in the shared
+                    // buffer; retain only prompts that were not attempted so
+                    // a later submission can retry them without duplicating
+                    // the current message.
+                    if !queued.is_empty() {
+                        pending_prompts
+                            .lock()
+                            .unwrap()
+                            .entry(session_id)
+                            .or_default()
+                            .extend(queued);
+                    }
                     break;
                 }
                 // Loop again — the next run_agent_loop loads the persisted
                 // prompts and starts the next turn.
-            }
-            // On exit, restore any remaining pending prompts back to the
-            // per-session map so they aren't lost (e.g. on cancellation or
-            // a persistence failure).
-            let remaining: Vec<PendingPrompt> =
-                per_session_queue.lock().unwrap().drain(..).collect();
-            if !remaining.is_empty() {
-                let mut map = qmap_restore.lock().unwrap();
-                let q = map.entry(session_id).or_default();
-                for prompt in remaining {
-                    q.push_back(prompt);
-                }
             }
             session_outcomes
                 .lock()
@@ -1877,9 +1868,35 @@ fn prompt_message_matches_submission(message: &Message, submission: &PromptSubmi
         crate::prompts::steer_reminder()
     );
     message.role == MessageRole::User
-        && (message.content == submission.content || message.content == steering_content)
+        && (message.content == submission.content
+            || message.content == steering_content
+            || strip_leading_persisted_reminders(&message.content) == submission.content
+            || strip_leading_persisted_reminders(&message.content) == steering_content)
         && message.attachments == submission.attachments
         && message.thinking_level == submission.thinking_level
+}
+
+fn strip_leading_persisted_reminders(mut content: &str) -> &str {
+    loop {
+        if !content.starts_with("<system-reminder>") {
+            return content;
+        }
+        let Some(end) = content.find("</system-reminder>") else {
+            return content;
+        };
+        let block = &content[..end];
+        if !(block.contains("You are in Plan mode")
+            || block.contains("You are in Build mode")
+            || block.contains("switched to Plan mode")
+            || block.contains("switched to Build mode")
+            || block.contains("This is a steering message")
+            || block.contains("Instructions from:"))
+        {
+            return content;
+        }
+        content = &content[end + "</system-reminder>".len()..];
+        content = content.strip_prefix("\n\n").unwrap_or(content);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2273,7 +2290,7 @@ mod tests {
 
         rt.submit_prompt_with_attachments(
             sid,
-            Mode::Build,
+            Mode::Plan,
             "queued message".into(),
             Vec::new(),
             None,
@@ -2295,6 +2312,7 @@ mod tests {
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].delivery, DeliveryMode::Queue);
         assert_eq!(pending[0].content, "queued message");
+        assert_eq!(pending[0].mode, Mode::Plan);
 
         // The frontend must be told it is queued.
         match recv_created_event(&mut events).await {
@@ -2321,7 +2339,7 @@ mod tests {
 
         rt.submit_prompt_with_attachments(
             sid,
-            Mode::Build,
+            Mode::Plan,
             "steer message".into(),
             Vec::new(),
             None,
@@ -2339,6 +2357,13 @@ mod tests {
             messages[0].content.contains("<system-reminder>"),
             "steering message must carry a system-reminder: {}",
             messages[0].content
+        );
+        assert_eq!(
+            buf.read()
+                .await
+                .app_data(messages[0].id)
+                .and_then(|data| data.mode.as_deref()),
+            Some("plan")
         );
 
         // The keep-alive signal must be set for the running loop.
@@ -2482,6 +2507,32 @@ mod tests {
         assert!(error.to_string().contains("different content"));
 
         rt.cancel_session(sid).await;
+    }
+
+    #[test]
+    fn prompt_submission_matching_accepts_persisted_reminders() {
+        let content = format!(
+            "{}\n\n{}\n\n{}",
+            crate::prompts::plan_mode_reminder(),
+            "<system-reminder>\nInstructions from: AGENTS.md\n</system-reminder>",
+            "original prompt",
+        );
+        let message = Message::new(MessageRole::User, content);
+        let submission = PromptSubmission::new("original prompt".into(), Mode::Plan);
+        assert!(prompt_message_matches_submission(&message, &submission));
+
+        let steered_content = format!(
+            "{}\n\n{}\n\n{}",
+            crate::prompts::build_mode_reminder(),
+            "steered prompt",
+            crate::prompts::steer_reminder(),
+        );
+        let steered_message = Message::new(MessageRole::User, steered_content);
+        let steered_submission = PromptSubmission::new("steered prompt".into(), Mode::Build);
+        assert!(prompt_message_matches_submission(
+            &steered_message,
+            &steered_submission
+        ));
     }
 
     #[tokio::test]

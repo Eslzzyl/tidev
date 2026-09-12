@@ -398,14 +398,17 @@ async fn load_and_activate(
     let messages = state
         .runtime
         .session_manager()
-        .load_messages(session_id)
+        .load_session_messages(session_id)
         .map_err(internal_error)?;
     if session.workspace_root != cwd.0.to_string_lossy() {
         return Err(invalid_error(
             "session workspace differs from requested cwd",
         ));
     }
-    state.runtime.set_message_buffer(session_id, messages).await;
+    state
+        .runtime
+        .set_session_message_buffer(session_id, messages)
+        .await;
     activate(state, session_id).await;
     *state.session_named.write().await = true;
     Ok(())

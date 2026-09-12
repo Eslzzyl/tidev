@@ -1,7 +1,7 @@
 # tidev 当前目标架构
 
 **状态**：重写已于 2026-08 验收完成，本文档持续更新
-**更新**：2026-09-02
+**更新**：2026-09-12
 
 本文档描述当前重写代码的实际边界。本文档不再保留旧 tidev-types 架构的
 兼容描述。
@@ -224,11 +224,11 @@ spawn 外层循环（一轮结束后持久化排队条目并继续）。TUI 只�
 取消语义：排队条目随 `cancel`/`cancel_session` 丢弃（与旧 TUI 行为
 一致）；引导消息已持久化，不可撤回。
 
-字节不变性：排队消息在进入 buffer 前不参与任何请求，进入后字节原样；
-引导消息提交即入库、重放原样；两者都不改变历史前缀的请求字节。引导
-消息的 system-reminder 在持久化时写入消息文本（后缀），与 mode
-reminder 的前缀注入（inject_mode_reminder_impl）互不干扰；TUI 渲染
-时经 strip_system_reminder_tags 剥离。
+字节不变性：排队消息在进入 buffer 前不参与任何请求；首次构造其请求时
+写入 mode reminder，之后复用相同字节。引导消息提交即入库，先持久化
+steering reminder 后在首次请求时持久化 mode reminder；两者都不改变历史
+消息已经发送过的请求字节。该 mode 同时用于本次请求的工具权限和子代理
+限制。TUI 渲染时经 strip_system_reminder_tags 剥离。
 
 ## 当前不做
 

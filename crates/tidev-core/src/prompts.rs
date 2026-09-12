@@ -10,40 +10,22 @@ pub fn mode_reminder(mode: Mode) -> String {
     }
 }
 
-fn plan_constraints() -> &'static str {
-    r#"You are FORBIDDEN from writing, editing, applying patches, or running any shell command that modifies files; only read-only commands such as grep, glob, read, ls, cat, and git log are allowed, and you must ensure these commands do not change any state. When delegating sub-agents, only explorer, librarian, and oracle are permitted — never fixer."#
-}
-
-fn build_constraints() -> &'static str {
-    r#"Implement changes with write, edit, or apply_patch. Preserve existing style, and verify with build or test before finishing."#
-}
-
 pub fn plan_mode_reminder() -> String {
-    format!(
-        "<system-reminder>\nYou are in Plan mode. READ-ONLY.\n\n{constraints}\n</system-reminder>",
-        constraints = plan_constraints(),
-    )
+    "<system-reminder>\nYou are in Plan mode.\n</system-reminder>".to_string()
 }
 
 pub fn build_mode_reminder() -> String {
-    format!(
-        "<system-reminder>\nYou are in Build mode.\n\n{constraints}\n</system-reminder>",
-        constraints = build_constraints(),
-    )
+    "<system-reminder>\nYou are in Build mode.\n</system-reminder>".to_string()
 }
 
 pub fn plan_switch_reminder() -> String {
-    format!(
-        "<system-reminder>\nThe user switched to Plan mode since this message. READ-ONLY.\n\n{constraints}\n</system-reminder>",
-        constraints = plan_constraints(),
-    )
+    "<system-reminder>\nThe user switched to Plan mode since this message.\n</system-reminder>"
+        .to_string()
 }
 
 pub fn build_switch_reminder() -> String {
-    format!(
-        "<system-reminder>\nThe user switched to Build mode since this message.\n\n{constraints}\n</system-reminder>",
-        constraints = build_constraints(),
-    )
+    "<system-reminder>\nThe user switched to Build mode since this message.\n</system-reminder>"
+        .to_string()
 }
 
 /// Reminder appended to a user message that was steered into a running turn.
@@ -107,4 +89,33 @@ Prefer short sections and bullets. If the repo is simple, keep the file simple. 
 
 If `AGENTS.md` already exists at `${path}`, improve it in place rather than rewriting blindly. Preserve verified useful guidance, delete fluff or stale claims, and reconcile it with the current codebase."#;
     template.replace("$ARGUMENTS", args.trim())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mode_reminders_are_short_and_mode_specific() {
+        assert_eq!(
+            plan_mode_reminder(),
+            "<system-reminder>\nYou are in Plan mode.\n</system-reminder>"
+        );
+        assert_eq!(
+            build_mode_reminder(),
+            "<system-reminder>\nYou are in Build mode.\n</system-reminder>"
+        );
+    }
+
+    #[test]
+    fn switch_reminders_describe_the_new_mode() {
+        assert_eq!(
+            plan_switch_reminder(),
+            "<system-reminder>\nThe user switched to Plan mode since this message.\n</system-reminder>"
+        );
+        assert_eq!(
+            build_switch_reminder(),
+            "<system-reminder>\nThe user switched to Build mode since this message.\n</system-reminder>"
+        );
+    }
 }
