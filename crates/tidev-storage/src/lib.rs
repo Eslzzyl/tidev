@@ -625,6 +625,22 @@ impl SessionStore {
         })
     }
 
+    /// Find session IDs whose canonical UUID starts with the supplied prefix.
+    /// Hyphens in the prefix are ignored so compact UUID prefixes work too.
+    pub fn find_session_ids_by_prefix(&self, prefix: &str) -> Result<Vec<Uuid>> {
+        let prefix = prefix.trim().replace('-', "").to_ascii_lowercase();
+        self.read_query(
+            "SELECT id FROM sessions WHERE substr(replace(lower(id), '-', ''), 1, length(?1)) = ?1 ORDER BY created_at DESC, id DESC",
+            params![prefix],
+            |row| {
+                let id = row.get::<_, String>(0)?;
+                Uuid::parse_str(&id).map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(error))
+                })
+            },
+        )
+    }
+
     /// Load a conversation (session + messages).
     pub fn load_conversation(&self, session_id: Uuid) -> Result<Option<schema::Conversation>> {
         let Some(session) = self.load_session(session_id)? else {
@@ -3170,6 +3186,44 @@ mod tests {
         let ws_b_sessions = store.list_sessions_for_workspace("/ws-b", 10, 0).unwrap();
         assert_eq!(ws_b_sessions.len(), 1);
         assert_eq!(ws_b_sessions[0].title, "B");
+    }
+
+    #[test]
+    fn session_id_prefix_lookup_returns_matching_sessions() {
+        let (store, _tmp) = test_store();
+        let first = Uuid::parse_str("a1b2c3d4-e5f6-4789-abcd-0123456789ab").unwrap();
+        let second = Uuid::parse_str("a1b2c3d4-e5f6-4789-abcd-abcdefabcdef").unwrap();
+        store
+            .create_session(
+                first,
+                "/workspace",
+                "deepseek",
+                "DeepSeek",
+                "deepseek-v4-flash",
+                "DeepSeek-V4-Flash",
+                "First",
+                None,
+                None,
+            )
+            .unwrap();
+        store
+            .create_session(
+                second,
+                "/workspace",
+                "deepseek",
+                "DeepSeek",
+                "deepseek-v4-flash",
+                "DeepSeek-V4-Flash",
+                "Second",
+                None,
+                None,
+            )
+            .unwrap();
+
+        let matches = store.find_session_ids_by_prefix("A1B2C3D4E5F6").unwrap();
+        assert_eq!(matches.len(), 2);
+        assert!(matches.contains(&first));
+        assert!(matches.contains(&second));
     }
 
     #[test]

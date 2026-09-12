@@ -1,6 +1,7 @@
 //! Prompt text helpers shared across the workspace.
 
 use crate::Mode;
+use uuid::Uuid;
 
 /// Mode reminder for a given session mode.
 pub fn mode_reminder(mode: Mode) -> String {
@@ -26,6 +27,16 @@ pub fn plan_switch_reminder() -> String {
 pub fn build_switch_reminder() -> String {
     "<system-reminder>\nThe user switched to Build mode since this message.\n</system-reminder>"
         .to_string()
+}
+
+/// Reminder shown after context compaction so the model can recover older
+/// messages on demand.
+pub fn history_reminder(session_id: Uuid) -> String {
+    let short_id = session_id.simple().to_string();
+    let short_id = &short_id[..12];
+    format!(
+        "<system-reminder>\nYou can use the `session-history` skill and inspect session `{short_id}` to get older message history.\n</system-reminder>"
+    )
 }
 
 /// Reminder appended to a user message that was steered into a running turn.
@@ -116,6 +127,15 @@ mod tests {
         assert_eq!(
             build_switch_reminder(),
             "<system-reminder>\nThe user switched to Build mode since this message.\n</system-reminder>"
+        );
+    }
+
+    #[test]
+    fn history_reminder_uses_a_stable_short_session_id() {
+        let session_id = Uuid::parse_str("a1b2c3d4-e5f6-4789-abcd-0123456789ab").unwrap();
+        assert_eq!(
+            history_reminder(session_id),
+            "<system-reminder>\nYou can use the `session-history` skill and inspect session `a1b2c3d4e5f6` to get older message history.\n</system-reminder>"
         );
     }
 }

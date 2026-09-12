@@ -279,12 +279,12 @@ pub fn session_show(
     message_id: Option<&str>,
     format: SessionOutputFormat,
 ) -> Result<()> {
-    let session_id = parse_session_id(session_id)?;
     let message_id = message_id
         .map(parse_message_id)
         .transpose()
         .context("invalid message UUID")?;
     let (_paths, store) = open_store()?;
+    let session_id = resolve_session_id(&store, session_id)?;
     let mut inspection = store
         .load_session_inspection(session_id)?
         .with_context(|| format!("session not found: {session_id}"))?;
@@ -309,6 +309,32 @@ pub fn session_show(
 
 fn parse_session_id(value: &str) -> Result<Uuid> {
     Uuid::parse_str(value).with_context(|| format!("invalid session UUID: {value}"))
+}
+
+fn resolve_session_id(store: &tidev_storage::SessionStore, value: &str) -> Result<Uuid> {
+    if let Ok(session_id) = parse_session_id(value) {
+        return Ok(session_id);
+    }
+
+    let prefix = value.trim();
+    let normalized_prefix = prefix.replace('-', "");
+    if normalized_prefix.len() < 8 || !normalized_prefix.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        anyhow::bail!("invalid session UUID or UUID prefix: {value}");
+    }
+
+    let matches = store.find_session_ids_by_prefix(&normalized_prefix)?;
+    match matches.as_slice() {
+        [] => anyhow::bail!("session not found for UUID or prefix: {value}"),
+        [session_id] => Ok(*session_id),
+        _ => {
+            let ids = matches
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", ");
+            anyhow::bail!("session UUID prefix '{value}' is ambiguous; matches: {ids}");
+        }
+    }
 }
 
 fn parse_message_id(value: &str) -> Result<Uuid> {

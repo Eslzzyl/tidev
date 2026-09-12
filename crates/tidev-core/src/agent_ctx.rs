@@ -131,6 +131,29 @@ pub(crate) fn restore_full_tool_output_semantics(messages: &mut [Message]) {
     }
 }
 
+/// Append the stable history reminder to the synthetic summary message.
+///
+/// The summary message is rebuilt for every provider request, so this does
+/// not mutate or persist any historical protocol message.
+fn inject_history_reminder(messages: &mut [Message], session_id: Uuid) {
+    let Some(summary) = messages.first_mut().filter(|message| {
+        message.role == MessageRole::User
+            && message
+                .content
+                .starts_with("Earlier conversation summary:\n")
+    }) else {
+        return;
+    };
+
+    let reminder = crate::prompts::history_reminder(session_id);
+    if summary.content.ends_with(&reminder) {
+        return;
+    }
+
+    summary.content.push_str("\n\n");
+    summary.content.push_str(&reminder);
+}
+
 fn mark_full_tool_result(tool_call: &ToolCall, result: &mut ToolExecutionResult) {
     if tidev_utils::tool_name::canonical_tool_name(&tool_call.name) == Some("task") {
         result.metadata.preserve_full_output = true;
@@ -1733,6 +1756,10 @@ impl AgentContext for CoreContext {
 
         let mut messages = prepared.messages;
 
+        // Keep the reminder in the synthetic summary message so it is
+        // visible after compaction without adding a persistent protocol row.
+        inject_history_reminder(&mut messages, session_id);
+
         // Resolve the mode from the message being sent. This preserves the
         // submission-time mode for queue/steer messages even when the outer
         // agent loop was started in a different mode.
@@ -2156,6 +2183,44 @@ mod child_session_app_data_tests {
             Some(child_session_id)
         );
         assert_eq!(child_session_id_for_tool_call(&buffer, "missing"), None);
+    }
+}
+
+#[cfg(test)]
+mod history_reminder_tests {
+    use super::*;
+
+    #[test]
+    fn reminder_is_added_only_to_the_synthetic_summary() {
+        let session_id = Uuid::parse_str("a1b2c3d4-e5f6-4789-abcd-0123456789ab").unwrap();
+        let mut messages = vec![
+            Message::new(MessageRole::User, "Earlier conversation summary:\nsummary"),
+            Message::new(MessageRole::User, "current request"),
+        ];
+
+        inject_history_reminder(&mut messages, session_id);
+        let first_result = messages[0].content.clone();
+        inject_history_reminder(&mut messages, session_id);
+
+        assert_eq!(messages[0].content, first_result);
+        assert!(messages[0].content.contains(
+            "You can use the `session-history` skill and inspect session `a1b2c3d4e5f6`"
+        ));
+        assert_eq!(messages[1].content, "current request");
+        assert_eq!(messages.len(), 2);
+    }
+
+    #[test]
+    fn reminder_is_skipped_without_a_summary_message() {
+        let session_id = Uuid::new_v4();
+        let original = Message::new(MessageRole::User, "current request");
+        let mut messages = vec![original.clone()];
+
+        inject_history_reminder(&mut messages, session_id);
+
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].id, original.id);
+        assert_eq!(messages[0].content, original.content);
     }
 }
 

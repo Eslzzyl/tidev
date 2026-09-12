@@ -243,7 +243,7 @@ enum SessionCommand {
     /// Show a complete session or one message without starting the TUI
     #[command(alias = "view")]
     Show {
-        /// Session UUID
+        /// Session UUID or unique UUID prefix
         session_id: String,
         /// Show only this message in the session
         #[arg(long)]
