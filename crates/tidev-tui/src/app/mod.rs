@@ -348,6 +348,10 @@ impl App {
             || self.message_list.as_ref().is_some_and(|c| c.is_dirty())
             || self.composer.as_ref().is_some_and(|c| c.is_dirty())
             || self.runtime.mcp_manager().summaries() != self.last_mcp_summaries
+            || self
+                .toast
+                .as_ref()
+                .is_some_and(|(_, expires_at)| Instant::now() >= *expires_at)
     }
 
     /// Whether the frame being rendered should leave the terminal cursor

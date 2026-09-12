@@ -9,10 +9,120 @@ use crate::context::DrawContext;
 use ratatui::layout::{Alignment, Constraint, Layout, Margin, Rect};
 use ratatui::prelude::{Color, Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Clear, Paragraph};
+use ratatui::widgets::{Block, Clear, Padding, Paragraph, Wrap};
 use tidev_core::mcp::McpConnectionStatus;
 use tidev_utils::path::display_path_with_tilde;
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+
+const TOAST_MAX_WIDTH: u16 = 64;
+const TOAST_MAX_HEIGHT: u16 = 8;
+const TOAST_HORIZONTAL_PADDING: u16 = 1;
+const TOAST_VERTICAL_PADDING: u16 = 1;
+const TOAST_MIN_WIDTH: u16 = TOAST_HORIZONTAL_PADDING * 2 + 1;
+const TOAST_MIN_HEIGHT: u16 = TOAST_VERTICAL_PADDING * 2 + 1;
+
+struct ToastLayout {
+    rect: Rect,
+    content: String,
+}
+
+fn truncate_toast_line(line: &str, width: usize) -> String {
+    if width == 0 {
+        return String::new();
+    }
+    if width == 1 {
+        return "…".to_string();
+    }
+
+    let mut result = String::new();
+    let mut current_width = 0;
+    for character in line.chars() {
+        let character_width = character.width().unwrap_or(0);
+        if current_width + character_width > width - 1 {
+            break;
+        }
+        result.push(character);
+        current_width += character_width;
+    }
+    result.push('…');
+    result
+}
+
+fn toast_layout(anchor: Rect, message: &str) -> Option<ToastLayout> {
+    if anchor.width < TOAST_MIN_WIDTH || anchor.height < TOAST_MIN_HEIGHT {
+        return None;
+    }
+
+    let right_margin = u16::from(anchor.width > TOAST_MIN_WIDTH);
+    let max_width = anchor
+        .width
+        .saturating_sub(right_margin)
+        .min(TOAST_MAX_WIDTH);
+    if max_width < TOAST_MIN_WIDTH {
+        return None;
+    }
+
+    let longest_line_width = message
+        .split('\n')
+        .map(UnicodeWidthStr::width)
+        .max()
+        .unwrap_or_default();
+    let preferred_width = longest_line_width
+        .saturating_add(TOAST_HORIZONTAL_PADDING as usize * 2)
+        .min(u16::MAX as usize) as u16;
+    let toast_width = preferred_width.max(TOAST_MIN_WIDTH).min(max_width);
+    let content_width = toast_width.saturating_sub(TOAST_HORIZONTAL_PADDING * 2) as usize;
+    if content_width == 0 {
+        return None;
+    }
+
+    let wrapped_lines = textwrap::wrap(
+        message,
+        textwrap::Options::new(content_width)
+            .break_words(true)
+            .wrap_algorithm(textwrap::WrapAlgorithm::FirstFit),
+    );
+    let wrapped_content = wrapped_lines
+        .iter()
+        .map(|line| line.as_ref())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let desired_height = wrapped_lines
+        .len()
+        .saturating_add(TOAST_VERTICAL_PADDING as usize * 2)
+        .min(u16::MAX as usize) as u16;
+    let max_toast_height = TOAST_MAX_HEIGHT.min(anchor.height);
+    if max_toast_height < TOAST_MIN_HEIGHT {
+        return None;
+    }
+    let toast_height = desired_height.clamp(TOAST_MIN_HEIGHT, max_toast_height);
+
+    let visible_line_count = toast_height.saturating_sub(TOAST_VERTICAL_PADDING * 2) as usize;
+    let content = if wrapped_lines.len() > visible_line_count {
+        let mut visible_lines = wrapped_lines
+            .iter()
+            .take(visible_line_count)
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+        if let Some(last_line) = visible_lines.last_mut() {
+            *last_line = truncate_toast_line(last_line, content_width);
+        }
+        visible_lines.join("\n")
+    } else {
+        wrapped_content
+    };
+
+    let top_margin = u16::from(anchor.height > toast_height);
+    let toast_x = anchor
+        .right()
+        .saturating_sub(toast_width.saturating_add(right_margin));
+    let toast_y = anchor.y.saturating_add(top_margin);
+
+    Some(ToastLayout {
+        rect: Rect::new(toast_x, toast_y, toast_width, toast_height),
+        content,
+    })
+}
 
 impl App {
     pub(crate) fn footer_status_text(&self) -> String {
@@ -375,6 +485,7 @@ impl App {
                 workspace_root: self.runtime.workspace_root(),
             };
             self.overlays.draw(frame, area, area, &draw_ctx);
+            self.draw_toast(frame, palette, area);
             return;
         }
 
@@ -627,37 +738,6 @@ impl App {
             Rect::new(status_x, notice_line.y, status_width, 1),
         );
 
-        // ── Toast notification ──
-        // Small popup at the top-right of the message area, auto-expires.
-        // Mirrors old TUI's render_toast: positioned relative to message content area.
-        if let Some((msg, expires_at)) = &self.toast.clone() {
-            if Instant::now() < *expires_at {
-                let chat_area = self.message_list.as_ref().and_then(|ml| ml.content_area);
-                if let Some(chat_area) = chat_area {
-                    let toast_width = (msg.len() as u16).min(32).saturating_add(2);
-                    let toast_rect = Rect::new(
-                        chat_area.right().saturating_sub(toast_width + 1),
-                        chat_area.y + 1,
-                        toast_width,
-                        3,
-                    );
-                    frame.render_widget(Clear, toast_rect);
-                    let block =
-                        Block::default().style(Style::default().bg(palette.panel).fg(palette.text));
-                    let centered = format!("\n{}", msg);
-                    frame.render_widget(
-                        Paragraph::new(centered)
-                            .style(Style::default().bg(palette.panel).fg(palette.text))
-                            .alignment(Alignment::Center)
-                            .block(block),
-                        toast_rect,
-                    );
-                }
-            } else {
-                self.toast = None;
-            }
-        }
-
         // ── Mouse selection overlay ──
         // Apply after all widgets have been drawn, so the selection style
         // paints on top of the rendered content.
@@ -731,6 +811,46 @@ impl App {
                         std::time::Duration::from_secs(5),
                     );
                 }
+            }
+        }
+
+        self.draw_toast(frame, palette, area);
+    }
+
+    /// Render the transient toast above the current content or full screen.
+    ///
+    /// Welcome has no message-list content area, so the full terminal area is
+    /// used as the fallback anchor. This keeps notifications visible while
+    /// centered overlays are open on the welcome screen.
+    fn draw_toast(&mut self, frame: &mut Frame, palette: ThemePalette, fallback_area: Rect) {
+        if let Some((msg, expires_at)) = &self.toast.clone() {
+            if Instant::now() < *expires_at {
+                let anchor = self
+                    .message_list
+                    .as_ref()
+                    .and_then(|ml| ml.content_area)
+                    .unwrap_or(fallback_area);
+                let Some(layout) = toast_layout(anchor, msg) else {
+                    return;
+                };
+
+                frame.render_widget(Clear, layout.rect);
+                let block = Block::default()
+                    .padding(Padding::symmetric(
+                        TOAST_HORIZONTAL_PADDING,
+                        TOAST_VERTICAL_PADDING,
+                    ))
+                    .style(Style::default().bg(palette.panel).fg(palette.text));
+                frame.render_widget(
+                    Paragraph::new(layout.content)
+                        .style(Style::default().bg(palette.panel).fg(palette.text))
+                        .alignment(Alignment::Center)
+                        .wrap(Wrap { trim: false })
+                        .block(block),
+                    layout.rect,
+                );
+            } else {
+                self.toast = None;
             }
         }
     }
@@ -1057,5 +1177,65 @@ impl App {
 
         // Render block last so it draws borders on top
         frame.render_widget(block, block_area);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn toast_layout_uses_display_width_for_cjk_text() {
+        let layout = toast_layout(Rect::new(10, 20, 40, 20), "中文").unwrap();
+
+        assert_eq!(layout.rect.width, 6);
+        assert_eq!(layout.rect.height, 3);
+        assert_eq!(layout.content, "中文");
+        assert_eq!(layout.rect.x, 43);
+        assert_eq!(layout.rect.y, 21);
+    }
+
+    #[test]
+    fn toast_layout_expands_height_for_explicit_lines() {
+        let layout = toast_layout(Rect::new(0, 0, 40, 20), "first\nsecond\nthird").unwrap();
+
+        assert_eq!(layout.rect.width, 8);
+        assert_eq!(layout.rect.height, 5);
+        assert_eq!(layout.content, "first\nsecond\nthird");
+    }
+
+    #[test]
+    fn toast_layout_breaks_long_unspaced_text() {
+        let message = "x".repeat(500);
+        let layout = toast_layout(Rect::new(0, 0, 80, 30), &message).unwrap();
+        let content_width = layout
+            .rect
+            .width
+            .saturating_sub(TOAST_HORIZONTAL_PADDING * 2) as usize;
+
+        assert_eq!(layout.rect.width, TOAST_MAX_WIDTH);
+        assert_eq!(layout.rect.height, TOAST_MAX_HEIGHT);
+        assert!(layout.content.ends_with('…'));
+        assert!(layout.content.lines().count() <= (TOAST_MAX_HEIGHT - 2) as usize);
+        assert!(
+            layout
+                .content
+                .lines()
+                .all(|line| line.width() <= content_width)
+        );
+    }
+
+    #[test]
+    fn toast_layout_stays_inside_a_narrow_anchor() {
+        let layout = toast_layout(Rect::new(10, 5, 10, 4), "a very long message").unwrap();
+
+        assert_eq!(layout.rect, Rect::new(10, 5, 9, 4));
+        assert!(layout.content.ends_with('…'));
+    }
+
+    #[test]
+    fn toast_layout_skips_anchors_without_room_for_a_message() {
+        assert!(toast_layout(Rect::new(0, 0, 2, 10), "message").is_none());
+        assert!(toast_layout(Rect::new(0, 0, 10, 2), "message").is_none());
     }
 }
