@@ -468,7 +468,7 @@ async fn terminal_ws_handler(
     Query(query): Query<WsQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
     // Validate auth token if configured
-    if let Some(configured) = crate::api::configured_auth_token(&state) {
+    if let Some(configured) = crate::api::mcp::configured_auth_token(&state) {
         let provided = query.token.as_deref().unwrap_or("");
         if provided != configured {
             return Err(ApiError::unauthorized("Invalid or missing auth token"));
