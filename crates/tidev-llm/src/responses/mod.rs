@@ -12,6 +12,7 @@ use crate::debug::{
 use crate::error::{NetworkError, classify_response_status};
 use crate::event::LlmEvent;
 use crate::message::{Message, ToolCall};
+use crate::reasoning::ThinkingLevelType;
 use crate::think_parser::strip_think_tags;
 use crate::{apply_request_headers, types::LlmProviderConfig, types::ToolDefinition};
 
@@ -19,7 +20,9 @@ use log::{debug as log_debug, error as log_error};
 
 use self::error::{classify_responses_stream_error, response_error_details};
 use self::event::ResponseStreamEvent;
-use self::request::{ToolCallBuilder, build_responses_request};
+use self::request::{
+    ToolCallBuilder, build_responses_request, build_responses_request_with_thinking,
+};
 use self::types::{ResponseStreamResponse, ResponsesCompleteResponse};
 
 mod error;
@@ -37,6 +40,7 @@ pub(crate) async fn stream_responses(
     model: LlmProviderConfig,
     messages: Vec<Message>,
     tools: Vec<ToolDefinition>,
+    thinking_level: ThinkingLevelType,
     tx: UnboundedSender<LlmEvent>,
     save_request_body: bool,
     max_request_files: usize,
@@ -48,7 +52,14 @@ pub(crate) async fn stream_responses(
         .clone()
         .with_context(|| format!("missing API key for provider '{}'", model.provider_id))?;
 
-    let request = build_responses_request(&model, messages, true, &tools, None)?;
+    let request = build_responses_request_with_thinking(
+        &model,
+        messages,
+        true,
+        &tools,
+        None,
+        thinking_level,
+    )?;
     let request_body = serde_json::to_string(&request).unwrap_or_default();
     let request_body_size = request_body.len();
     save_request_for_debugging(&request_body, save_request_body, max_request_files);

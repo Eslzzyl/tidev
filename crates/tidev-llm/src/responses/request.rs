@@ -4,6 +4,7 @@ use serde::Serialize;
 
 use crate::attachments::{image_attachments, message_text_with_file_references};
 use crate::message::{Message, MessageAttachment, MessageRole};
+use crate::reasoning::ThinkingLevelType;
 use crate::{types::LlmProviderConfig, types::ToolDefinition};
 
 pub(super) fn build_responses_request(
@@ -12,6 +13,24 @@ pub(super) fn build_responses_request(
     stream: bool,
     tools: &[ToolDefinition],
     prompt_cache_key: Option<String>,
+) -> Result<ResponsesRequest> {
+    build_responses_request_with_thinking(
+        model,
+        messages,
+        stream,
+        tools,
+        prompt_cache_key,
+        model.thinking_level.clone(),
+    )
+}
+
+pub(super) fn build_responses_request_with_thinking(
+    model: &LlmProviderConfig,
+    messages: Vec<Message>,
+    stream: bool,
+    tools: &[ToolDefinition],
+    prompt_cache_key: Option<String>,
+    thinking_level: ThinkingLevelType,
 ) -> Result<ResponsesRequest> {
     // System prompt comes from the model config directly.
     // No context summary merging needed — compaction summaries are now
@@ -160,7 +179,7 @@ pub(super) fn build_responses_request(
         Some(tools.iter().map(ResponseTool::from).collect())
     };
 
-    let thinking = model.thinking_config();
+    let thinking = thinking_level.thinking_config();
     // Always request encrypted reasoning content so reasoning items can be
     // preserved and replayed across multi-turn conversations. Without this,
     // stateless / non-persisted reasoning items (store=false / ZDR) cannot
@@ -852,16 +871,17 @@ mod tests {
             api_key: None,
             extra_body: Some(serde_json::json!({"service_tier": "flex"})),
             thinking_level: crate::reasoning::ThinkingLevelType::Gpt5(
-                crate::reasoning::Gpt5ThinkingLevel::High,
+                crate::reasoning::Gpt5ThinkingLevel::Medium,
             ),
         };
 
-        let request = build_responses_request(
+        let request = build_responses_request_with_thinking(
             &model,
             vec![Message::new(MessageRole::User, "Hello")],
             true,
             &[],
             None,
+            crate::reasoning::ThinkingLevelType::Gpt5(crate::reasoning::Gpt5ThinkingLevel::High),
         )
         .unwrap();
         let json = serde_json::to_value(request).unwrap();

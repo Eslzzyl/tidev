@@ -486,6 +486,7 @@ impl LlmClient {
                     model,
                     messages,
                     tools,
+                    thinking_level,
                     tx,
                     debug.save_request_body,
                     debug.max_request_files,
