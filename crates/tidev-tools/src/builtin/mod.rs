@@ -67,7 +67,7 @@ pub fn definitions() -> Vec<ToolDefinition> {
     definitions.extend(web::definitions());
     definitions.push(ToolDefinition::new::<QuestionArgs>(
         "question",
-        "Ask the user questions during execution",
+        "Ask the user to choose among materially different options. Do not use for confirmations; ask those in normal chat.",
         ToolPermission::Session,
     ));
     definitions.push(ToolDefinition::new::<SkillArgs>(

@@ -1138,7 +1138,6 @@ impl Runtime {
                 Some(s) if !s.system_prompt.is_empty() => s.system_prompt,
                 _ => {
                     let sp = crate::agent_ctx::compose_system_prompt(
-                        crate::agent_type::AgentType::General,
                         workspace.root(),
                         workspace.skills(),
                     );
@@ -1181,6 +1180,7 @@ impl Runtime {
             self.approval_broker.clone(),
             session_id,
             mode,
+            true,
             system_prompt.clone(),
             llm_config,
             cancel.clone(),

@@ -21,7 +21,6 @@ pub(crate) struct AgentInfo {
     pub description: String,
     pub read_only: bool,
     pub tools: Vec<String>,
-    pub temperature: f32,
 }
 
 pub(crate) struct AgentsPanel {
@@ -44,7 +43,6 @@ impl AgentsPanel {
                     description: at.description().to_string(),
                     read_only: at.is_read_only(),
                     tools,
-                    temperature: at.default_temperature(),
                 }
             })
             .collect();

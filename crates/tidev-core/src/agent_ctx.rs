@@ -54,7 +54,7 @@ use crate::tool_def::to_llm_tool_def;
 /// Compose the complete system prompt for a session.
 ///
 /// Assembled once at session creation and stored in `AgentLoopConfig.system_prompt`.
-/// Includes: base agent prompt + environment info + the skill catalog section.
+/// Includes: environment info + the skill catalog section.
 /// The catalog is frozen here for the session lifetime (persisted with the
 /// session and never rebuilt), so the bytes stay stable for prompt caching;
 /// the live catalog remains queryable through the `skill` tool's list mode.
@@ -62,21 +62,18 @@ use crate::tool_def::to_llm_tool_def;
 /// `<system-reminder>` tags instead (see `inject_instructions`).
 /// Mode reminders are injected into user messages instead (see `inject_mode_reminder`).
 pub fn compose_system_prompt(
-    agent_type: crate::agent_type::AgentType,
     workspace_root: &std::path::Path,
     skills: &tidev_tools::SkillCatalog,
 ) -> String {
-    let base_prompt = crate::agent_type::system_prompt(agent_type);
-
-    // Environment info (detected once, frozen for the session lifetime).
+    // The environment is detected once and frozen for the session lifetime.
     let system_info = crate::system_info::SystemInfo::detect();
     let working_dir = std::env::current_dir()
-        .map(|p| p.display().to_string())
+        .map(|path| path.display().to_string())
         .unwrap_or_default();
     let is_git = crate::system_info::is_git_repo(workspace_root);
-
-    let env_block = format!(
-        "\n\nHere is some useful information about the environment:\n\
+    let mut prompt = format!(
+        "You are tidev, a helpful assistant.\n\n\
+         Here is some useful information about the environment:\n\
          <env>\n  \
          Working directory: {}\n  \
          Workspace root folder: {}\n  \
@@ -93,8 +90,6 @@ pub fn compose_system_prompt(
         tidev_tools::shell::get().program,
     );
 
-    let mut prompt = base_prompt;
-    prompt.push_str(&env_block);
     prompt.push_str("\n\n");
     prompt.push_str(&skills.catalog_section());
 
@@ -628,6 +623,8 @@ pub struct CoreContext {
     /// Mode used by the request currently being prepared or executed.
     /// Updated from the latest user message in `load_messages`.
     request_mode: StdRwLock<Mode>,
+    /// Whether user messages receive an injected mode reminder.
+    inject_mode_reminder: bool,
     /// Pre-composed system prompt (session-scoped, immutable after creation).
     system_prompt: String,
     /// Resolved model config for the LLM call.
@@ -791,6 +788,7 @@ impl CoreContext {
         approval_broker: ApprovalBroker,
         session_id: Uuid,
         mode: Mode,
+        inject_mode_reminder: bool,
         system_prompt: String,
         model_config: LlmProviderConfig,
         cancel: CancellationToken,
@@ -816,6 +814,7 @@ impl CoreContext {
             session_id,
             mode,
             request_mode: StdRwLock::new(mode),
+            inject_mode_reminder,
             system_prompt,
             model_config,
             cancel,
@@ -1488,7 +1487,6 @@ impl AgentContext for CoreContext {
                     config_dir: self.config_dir.clone(),
                     event_bus: self.event_bus.clone(),
                     mode,
-                    system_prompt: self.system_prompt.clone(),
                     snapshot: self.snapshot.clone(),
                     config: self.config.clone(),
                     auth: self.auth.clone(),
@@ -1791,12 +1789,12 @@ impl AgentContext for CoreContext {
         };
         *self.request_mode.write().unwrap() = current_mode;
 
-        // Keep both injections in the same order as the original agent loop:
-        // instruction files first, then the mode reminder.
         self.inject_instructions_impl(session_id, &mut messages)
             .await?;
-        self.inject_mode_reminder_impl(&mut messages, current_mode)
-            .await?;
+        if self.inject_mode_reminder {
+            self.inject_mode_reminder_impl(&mut messages, current_mode)
+                .await?;
+        }
         restore_full_tool_output_semantics(&mut messages);
         Ok(messages)
     }
@@ -1858,7 +1856,6 @@ struct SubagentSpawner {
     config_dir: PathBuf,
     event_bus: CoreEventBus,
     mode: Mode,
-    system_prompt: String,
     snapshot: Option<SnapshotService>,
     config: Arc<StdRwLock<AppConfig>>,
     auth: Arc<StdRwLock<AuthStore>>,
@@ -1916,8 +1913,8 @@ async fn execute_task_tool(
         );
     }
 
-    // 2. Build agent definition.
-    let agent_def = build_agent_def(agent_type, &spawner.system_prompt);
+    // 2. Build the child definition without inheriting the parent's prompt.
+    let agent_def = build_agent_def(agent_type);
 
     // 3. Resolve child model: check [agent.models] config, fall back to parent model.
     let child_model = {
@@ -2036,6 +2033,7 @@ async fn execute_task_tool(
         ApprovalBroker::new(tokio::sync::mpsc::unbounded_channel().0),
         child_session_id,
         spawner.mode,
+        false,
         agent_def.system_prompt.clone(),
         child_model_config,
         config.cancel_token.clone(),
@@ -2086,22 +2084,26 @@ async fn execute_task_tool(
     Ok((final_result, child_session_id))
 }
 
-fn build_agent_def(agent_type: AgentType, parent_prompt: &str) -> AgentDefinition {
+fn build_agent_def(agent_type: AgentType) -> AgentDefinition {
     AgentDefinition {
         display_name: agent_type.display_name().to_string(),
         description: agent_type.description().to_string(),
-        system_prompt: format!(
-            "{}\n\nYou are running as a subagent ({}). \
-             Your output will be reviewed by the parent agent. \
-             Be concise and complete in your specialized role.",
-            parent_prompt,
-            agent_type.display_name()
-        ),
+        system_prompt: subagent_task_description(agent_type).to_string(),
         allowed_tools: agent_type
             .default_tool_restrictions()
-            .map(|t| t.iter().map(|s| s.to_string()).collect()),
-        temperature: Some(agent_type.default_temperature()),
+            .map(|tools| tools.iter().map(|tool| (*tool).to_string()).collect()),
+        temperature: None,
         read_only: agent_type.is_read_only(),
+    }
+}
+
+fn subagent_task_description(agent_type: AgentType) -> &'static str {
+    match agent_type {
+        AgentType::General => "Handle the assigned task.",
+        AgentType::Explorer => "Locate relevant code and report concise, evidence-based findings.",
+        AgentType::Librarian => "Research relevant documentation and summarize reliable findings.",
+        AgentType::Oracle => "Analyze the problem and provide a clear technical recommendation.",
+        AgentType::Fixer => "Implement the requested change and report the result.",
     }
 }
 

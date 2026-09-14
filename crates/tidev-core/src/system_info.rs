@@ -1,9 +1,7 @@
-//! System environment information detection for providing context to the LLM.
+//! System environment information detection for the model-visible environment block.
 
 use std::path::Path;
 use std::process::Command;
-
-use tidev_utils::encoding::decode_command_output;
 
 /// Operating system type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,7 +27,6 @@ impl OsType {
 #[derive(Debug, Clone)]
 pub struct SystemInfo {
     pub os_type: OsType,
-    pub kernel_version: Option<String>,
     pub is_wsl: bool,
     pub is_ssh: bool,
     pub current_date: String,
@@ -37,29 +34,16 @@ pub struct SystemInfo {
 
 impl SystemInfo {
     pub fn detect() -> Self {
-        let os_type = detect_os_type();
-        let kernel_version = detect_kernel_version();
-        let is_wsl = detect_wsl();
-        let is_ssh = detect_ssh();
-        let current_date = chrono::Local::now().format("%Y-%m-%d").to_string();
-
         Self {
-            os_type,
-            kernel_version,
-            is_wsl,
-            is_ssh,
-            current_date,
+            os_type: detect_os_type(),
+            is_wsl: detect_wsl(),
+            is_ssh: detect_ssh(),
+            current_date: chrono::Local::now().format("%Y-%m-%d").to_string(),
         }
     }
 
     pub fn format_env(&self) -> String {
-        let mut lines = Vec::new();
-
-        lines.push(format!("Platform: {}", self.os_type.as_str()));
-
-        if let Some(ref kernel) = self.kernel_version {
-            lines.push(format!("Kernel: {}", kernel));
-        }
+        let mut lines = vec![format!("Platform: {}", self.os_type.as_str())];
 
         if self.is_wsl {
             lines.push("WSL: yes".to_string());
@@ -70,7 +54,6 @@ impl SystemInfo {
         }
 
         lines.push(format!("Today's date: {}", self.current_date));
-
         lines.join("\n  ")
     }
 }
@@ -111,32 +94,6 @@ fn detect_os_type() -> OsType {
     }
 }
 
-fn detect_kernel_version() -> Option<String> {
-    #[cfg(target_os = "linux")]
-    {
-        if let Ok(version) = std::fs::read_to_string("/proc/version") {
-            let version = version.trim();
-            if let Some(start) = version.find(" version ") {
-                let after = &version[start + 9..];
-                let end = after.find(' ').unwrap_or(after.len());
-                return Some(after[..end].to_string());
-            }
-            return Some(version.to_string());
-        }
-    }
-
-    if let Ok(output) = Command::new("uname").arg("-r").output()
-        && output.status.success()
-    {
-        let version = decode_command_output(&output.stdout).trim().to_string();
-        if !version.is_empty() {
-            return Some(version);
-        }
-    }
-
-    None
-}
-
 fn detect_wsl() -> bool {
     if std::env::var("WSL_DISTRO_NAME").is_ok() {
         return true;
@@ -164,26 +121,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_detect_os_type() {
-        let os_type = detect_os_type();
-        assert_ne!(os_type, OsType::Unknown);
+    fn detects_a_known_platform() {
+        assert_ne!(detect_os_type(), OsType::Unknown);
     }
 
     #[test]
-    fn test_system_info_format() {
+    fn formats_retained_environment_fields() {
         let info = SystemInfo {
             os_type: OsType::Linux,
-            kernel_version: Some("5.15.0-generic".to_string()),
-            is_wsl: false,
-            is_ssh: false,
-            current_date: "2026-07-13".to_string(),
+            is_wsl: true,
+            is_ssh: true,
+            current_date: "2026-09-14".to_string(),
         };
 
-        let env = info.format_env();
-        assert!(env.contains("Platform: linux"));
-        assert!(env.contains("Kernel: 5.15.0-generic"));
-        assert!(env.contains("Today's date: 2026-07-13"));
-        assert!(!env.contains("WSL"));
-        assert!(!env.contains("SSH"));
+        let environment = info.format_env();
+        assert!(environment.contains("Platform: linux"));
+        assert!(environment.contains("WSL: yes"));
+        assert!(environment.contains("SSH session: yes"));
+        assert!(environment.contains("Today's date: 2026-09-14"));
     }
 }
