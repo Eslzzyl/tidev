@@ -22,7 +22,9 @@ use tidev_config::{AuthStore, WebSearchConfig};
 use tidev_tools::execute_tool_call;
 use tidev_tools::{ShellOutput, SkillCatalog, TodoPersistence};
 
-use crate::mcp::{McpManager, McpServerSummary};
+use crate::mcp::{
+    MCP_CALL_TOOL_NAME, MCP_LIST_TOOL_NAME, MCP_SEARCH_TOOL_NAME, McpManager, McpServerSummary,
+};
 use crate::mode::Mode;
 use crate::tool_adapter::execute_builtin_via_agent;
 
@@ -76,7 +78,7 @@ impl ToolRegistry {
     /// When `event_tx` is `Some`, shell output is streamed as
     /// [`ShellOutput`] events.
     ///
-    /// MCP-backed tools are dispatched directly to the [`McpManager`].
+    /// MCP router tools are dispatched directly to the [`McpManager`].
     #[allow(clippy::too_many_arguments)]
     pub async fn execute(
         &self,
@@ -89,14 +91,32 @@ impl ToolRegistry {
         cancel: &CancellationToken,
         event_tx: Option<UnboundedSender<ShellOutput>>,
     ) -> ToolExecutionResult {
-        // MCP tool dispatch.
-        if self.mcp.definition_for(&call.name).is_some() {
-            match self.mcp.execute_call(call).await {
+        match call.name.as_str() {
+            MCP_LIST_TOOL_NAME => match self.mcp.execute_list(call) {
                 Ok(result) => return result,
-                Err(e) => {
-                    return ToolExecutionResult::new(format!("Error: MCP tool call failed: {e:#}"));
+                Err(error) => {
+                    return ToolExecutionResult::new(format!(
+                        "Error: MCP tool list failed: {error:#}"
+                    ));
                 }
-            }
+            },
+            MCP_SEARCH_TOOL_NAME => match self.mcp.execute_search(call) {
+                Ok(result) => return result,
+                Err(error) => {
+                    return ToolExecutionResult::new(format!(
+                        "Error: MCP tool search failed: {error:#}"
+                    ));
+                }
+            },
+            MCP_CALL_TOOL_NAME => match self.mcp.execute_mcp_call(call, mode).await {
+                Ok(result) => return result,
+                Err(error) => {
+                    return ToolExecutionResult::new(format!(
+                        "Error: MCP tool call failed: {error:#}"
+                    ));
+                }
+            },
+            _ => {}
         }
 
         // Built-in tool dispatch.
@@ -139,9 +159,11 @@ impl ToolRegistry {
             .unwrap_or_default()
     }
 
-    /// Return all available tool definitions (unfiltered, without MCP tools).
+    /// Return all available tool definitions, including the fixed MCP router.
     pub fn definitions(&self) -> Vec<ToolDefinition> {
-        tidev_tools::tool_definitions()
+        let mut definitions = tidev_tools::tool_definitions();
+        definitions.extend(self.mcp.model_definitions());
+        definitions
     }
 
     /// Return tool definitions filtered for the given model.
@@ -150,15 +172,15 @@ impl ToolRegistry {
     /// not `write`/`edit`. All other models (Claude, DeepSeek, Gemini, GPT-4,
     /// any OSS model) receive `write`/`edit` but not `apply_patch`.
     ///
-    /// MCP tools from connected servers are appended at the end.
+    /// The fixed MCP router definitions are included regardless of current
+    /// server connection state.
     pub fn definitions_for_model(&self, model: &ActiveModel) -> Vec<ToolDefinition> {
-        let mut definitions = tidev_tools::tool_definitions();
+        let mut definitions = self.definitions();
         if model.use_apply_patch() {
             definitions.retain(|d| d.name != "edit" && d.name != "write");
         } else {
             definitions.retain(|d| d.name != "apply_patch");
         }
-        definitions.extend(self.mcp.all_definitions());
         definitions
     }
 
@@ -213,17 +235,12 @@ impl ToolRegistry {
 
     // ── Tool lookup helpers (for TUI permission UI) ─────────────────────
 
-    /// Look up a [`ToolDefinition`] by name (supports canonical name aliases
-    /// and MCP tools).
+    /// Look up a [`ToolDefinition`] by name (supports canonical name aliases).
     pub fn definition_for(&self, tool_name: &str) -> Option<ToolDefinition> {
-        // First try exact match in built-in tools.
+        // First try exact match in the fixed tool definitions.
         let definitions = self.definitions();
         if let Some(def) = definitions.iter().find(|d| d.name == tool_name) {
             return Some(def.clone());
-        }
-        // Then try MCP tools.
-        if let Some(def) = self.mcp.definition_for(tool_name) {
-            return Some(def);
         }
         // Fall back to canonical name lookup.
         let canonical = tidev_utils::tool_name::canonical_tool_name(tool_name)?;
@@ -233,15 +250,22 @@ impl ToolRegistry {
     /// Returns `true` if the tool exists and its permission level is allowed
     /// in the given session mode (hardcoded per mode).
     pub fn can_execute(&self, tool_name: &str, mode: Mode) -> bool {
-        // Check built-in tools first.
-        if self
-            .definition_for(tool_name)
-            .is_some_and(|def| def.permission.allowed_in_read_only(mode == Mode::Plan))
-        {
-            return true;
+        if tool_name == MCP_CALL_TOOL_NAME && mode == Mode::Plan {
+            return false;
         }
-        // Then check MCP tools.
-        self.mcp.can_execute(tool_name, mode)
+        self.definition_for(tool_name)
+            .is_some_and(|def| def.permission.allowed_in_read_only(mode == Mode::Plan))
+    }
+
+    /// Determine whether a concrete call is allowed in the given session mode.
+    ///
+    /// `mcp_call` checks the live target because its permission depends on the
+    /// selected MCP tool rather than its fixed outer definition.
+    pub fn can_execute_call(&self, call: &ToolCall, mode: Mode) -> anyhow::Result<bool> {
+        if call.name == MCP_CALL_TOOL_NAME {
+            return self.mcp.can_execute_mcp_call(call, mode);
+        }
+        Ok(self.can_execute(&call.name, mode))
     }
 }
 
@@ -303,21 +327,30 @@ mod tests {
     }
 
     #[test]
-    fn test_mcp_definition_for_disconnected_server_is_unavailable() {
+    fn test_fixed_mcp_definitions_are_available_without_servers() {
         let reg = make_registry_with_mcp();
-        let def = reg.definition_for("mcp__srv__tool");
-        assert!(def.is_none());
+        assert!(reg.definition_for(MCP_LIST_TOOL_NAME).is_some());
+        assert!(reg.definition_for(MCP_SEARCH_TOOL_NAME).is_some());
+        assert!(reg.definition_for(MCP_CALL_TOOL_NAME).is_some());
+        assert!(reg.definition_for("mcp__srv__tool").is_none());
     }
 
     #[test]
-    fn test_mcp_cannot_execute_when_disconnected() {
+    fn test_mcp_call_checks_live_target_availability() {
         let reg = make_registry_with_mcp();
-        assert!(!reg.can_execute("mcp__srv__tool", Mode::Build));
-        assert!(!reg.can_execute("mcp__srv__tool", Mode::Plan));
+        let call = ToolCall {
+            id: "call-1".into(),
+            name: MCP_CALL_TOOL_NAME.into(),
+            arguments: r#"{"server":"srv","tool":"tool","arguments":{}}"#.into(),
+            thought_signature: None,
+        };
+        assert!(!reg.can_execute_call(&call, Mode::Build).unwrap());
+        assert!(!reg.can_execute_call(&call, Mode::Plan).unwrap());
+        assert!(!reg.can_execute(MCP_CALL_TOOL_NAME, Mode::Plan));
     }
 
     #[test]
-    fn test_mcp_definitions_for_model_excludes_disconnected_tools() {
+    fn test_mcp_definitions_for_model_are_connection_independent() {
         let reg = make_registry_with_mcp();
         // Use a model that doesn't apply_patch (the default path).
         let defs = reg.definitions_for_model(&tidev_config::auth::ActiveModel {
@@ -344,7 +377,14 @@ mod tests {
         let mcp_names: Vec<&str> = defs.iter().map(|d| d.name.as_str()).collect();
         assert!(
             !mcp_names.contains(&"mcp__srv__tool"),
-            "Disconnected MCP tools must not be offered to the model: {mcp_names:?}"
+            "Live MCP tools must not be offered directly to the model: {mcp_names:?}"
+        );
+        assert!(mcp_names.contains(&MCP_LIST_TOOL_NAME));
+        assert!(mcp_names.contains(&MCP_SEARCH_TOOL_NAME));
+        assert!(mcp_names.contains(&MCP_CALL_TOOL_NAME));
+        assert!(
+            !mcp_names.iter().any(|name| name.starts_with("mcp__")),
+            "Flattened MCP names must never reach the model: {mcp_names:?}"
         );
     }
 

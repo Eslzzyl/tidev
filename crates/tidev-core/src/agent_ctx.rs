@@ -4,7 +4,7 @@
 //! LLM calls, tool execution, message persistence, context compaction, and
 //! permission approvals.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex as StdMutex, RwLock as StdRwLock};
 use std::time::Instant;
@@ -105,17 +105,12 @@ pub fn compose_system_prompt(
 // Tools that are safe to run in parallel.
 // ---------------------------------------------------------------------------
 
-/// Tool names that can be read-only and thus run concurrently.
-fn read_only_tool_names() -> HashSet<&'static str> {
-    ["read", "glob", "grep", "websearch", "webfetch"]
-        .into_iter()
-        .collect()
-}
-
 /// Whether a tool call is read-only (and may thus run in parallel with others).
 fn is_read_only(name: &str) -> bool {
-    read_only_tool_names()
-        .contains(tidev_utils::tool_name::canonical_tool_name(name).unwrap_or(name))
+    matches!(
+        tidev_utils::tool_name::canonical_tool_name(name).unwrap_or(name),
+        "read" | "glob" | "grep" | "websearch" | "webfetch" | "mcp_list" | "mcp_search"
+    )
 }
 
 /// Restore the generic full-output marker for legacy subagent messages.
@@ -1221,7 +1216,24 @@ impl CoreContext {
         let mut approved = Vec::with_capacity(tool_calls.len());
         let mut pending = Vec::new();
         for tc in tool_calls {
-            if !self.tool_registry.can_execute(&tc.name, mode) {
+            let can_execute = match self.tool_registry.can_execute_call(tc, mode) {
+                Ok(can_execute) => can_execute,
+                Err(error) => {
+                    approved.push(ApprovedTool {
+                        tool_call: tc.clone(),
+                        rejection: Some(ToolExecutionResult::new(format!(
+                            "Tool '{}' has invalid arguments: {error:#}",
+                            tc.name,
+                        ))),
+                        child_session_id: None,
+                        allow_outside: false,
+                        sensitive_file_approved: false,
+                        user_reason: None,
+                    });
+                    continue;
+                }
+            };
+            if !can_execute {
                 approved.push(ApprovedTool {
                     tool_call: tc.clone(),
                     rejection: Some(ToolExecutionResult::new(format!(
@@ -2143,7 +2155,15 @@ fn filter_subagent_tools(
 fn is_read_tool(name: &str) -> bool {
     matches!(
         name,
-        "read" | "glob" | "grep" | "websearch" | "webfetch" | "question"
+        "read"
+            | "glob"
+            | "grep"
+            | "websearch"
+            | "webfetch"
+            | "question"
+            | "mcp_list"
+            | "mcp_search"
+            | "mcp_call"
     )
 }
 

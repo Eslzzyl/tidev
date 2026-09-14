@@ -15,9 +15,11 @@ client and registry in `tidev-agent`, using `rmcp`. `tidev-core` retains only
 the product integration layer: configuration mapping, workspace path
 resolution, permission mapping, and TUI-facing connection state.
 
-MCP tools are exposed through the same generic `Tool` and `ToolRegistry`
-interfaces as built-in tools. A disconnected or failed server contributes no
-tool definitions and cannot execute calls.
+`tidev-agent` exposes MCP tools through the generic `Tool` and `ToolRegistry`
+interfaces. `tidev-core` exposes fixed `mcp_list`, `mcp_search`, and `mcp_call`
+tools to models, then resolves each `mcp_call` target from the current catalog. A
+disconnected or failed server leaves the model-facing definitions unchanged and
+causes only calls targeting that server to be unavailable.
 
 ## Scope boundary
 

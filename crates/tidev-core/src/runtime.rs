@@ -1162,16 +1162,6 @@ impl Runtime {
         };
         let llm_config = crate::agent_ctx::to_llm_provider_config(&active_model);
 
-        // If any MCP server is still connecting (e.g. background startup discovery),
-        // wait briefly so the initial turn receives complete tool definitions and
-        // preserves prompt caching across subsequent turns.
-        if workspace.mcp_manager().has_connecting() {
-            let _ = workspace
-                .mcp_manager()
-                .wait_until_ready(Duration::from_secs(5))
-                .await;
-        }
-
         let filtered_tools = workspace
             .tool_registry()
             .definitions_for_model(&active_model);

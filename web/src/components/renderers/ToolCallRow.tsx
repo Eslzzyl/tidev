@@ -9,6 +9,7 @@ import {
   LayoutTemplate,
   ListTodo,
   Search,
+  Server,
   Sparkles,
   Terminal,
   Wrench,
@@ -24,6 +25,7 @@ import { JsonTreeView } from "../ui/JsonTreeView";
 import { ActivityRipple } from "./ActivityRipple";
 import { DiffRenderer } from "./DiffRenderer";
 import { MarkdownRenderer } from "./MarkdownRenderer";
+import { McpCatalogRenderer, parseMcpCatalogOutput } from "./McpCatalogRenderer";
 import { formatFileSize, ReadResultRenderer } from "./ReadResultRenderer";
 import { SubagentCard } from "./SubagentCard";
 import { TodoRenderer } from "./TodoRenderer";
@@ -62,6 +64,9 @@ const TOOL_LABELS: Record<string, string> = {
   websearch: "Web search",
   webfetch: "Fetch web page",
   question: "Ask",
+  mcp_list: "MCP list",
+  mcp_search: "MCP search",
+  mcp_call: "MCP call",
 };
 
 type ToolArguments = Record<string, unknown> | null;
@@ -112,6 +117,10 @@ function toolIcon(name: string): ComponentType<{ size?: number; className?: stri
       return LayoutTemplate;
     case "todowrite":
       return ListTodo;
+    case "mcp_list":
+    case "mcp_search":
+    case "mcp_call":
+      return Server;
     default:
       return Wrench;
   }
@@ -124,22 +133,16 @@ function toolTone(name: string) {
   if (name === "task") return "task";
   if (name === "todowrite") return "todo";
   if (WEB_TOOLS.has(name)) return "web";
+  if (name === "mcp_list" || name === "mcp_search" || name === "mcp_call") return "mcp";
   return "default";
 }
 
-export function parseMcpToolName(name: string): { server: string; tool: string } | null {
-  if (!name.startsWith("mcp__")) return null;
-  const parts = name.slice(5).split("__");
-  if (parts.length >= 2 && parts[0] && parts[1]) {
-    return { server: parts[0], tool: parts.slice(1).join("__") };
-  }
-  return null;
-}
-
 function toolLabel(entry: ToolCallEntry, t: TFunction, args: ToolArguments) {
-  const mcp = parseMcpToolName(entry.name);
-  if (mcp) {
-    return `MCP ${mcp.server} ❯ ${mcp.tool}`;
+  if (entry.name === "mcp_list") {
+    const server = stringArgument(args, "server").trim();
+    return server
+      ? t("List tools from {{server}} MCP", { server })
+      : t("List MCP servers");
   }
   if (entry.name === "grep" || entry.name === "glob") return "";
   if (entry.name === "skill") {
@@ -176,27 +179,6 @@ function summarizeArguments(
   args: ToolArguments,
 ) {
   if (!args) return entry.arguments || "…";
-  const mcp = parseMcpToolName(entry.name);
-  if (mcp) {
-    const entries = Object.entries(args);
-    if (entries.length === 0) return "";
-    if (entries.length === 1) {
-      const [k, v] = entries[0];
-      if (typeof v === "string") {
-        return `${k}="${v.length > 60 ? v.slice(0, 57) + "..." : v}"`;
-      }
-      return `${k}=${JSON.stringify(v)}`;
-    }
-    const parts = entries.map(([k, v]) => {
-      const str =
-        typeof v === "string"
-          ? `"${v.length > 35 ? v.slice(0, 32) + "..." : v}"`
-          : JSON.stringify(v);
-      return `${k}=${str}`;
-    });
-    const joined = parts.join(", ");
-    return joined.length > 80 ? `${joined.slice(0, 77)}...` : joined;
-  }
   switch (entry.name) {
     case "read":
     case "write":
@@ -255,6 +237,15 @@ function summarizeArguments(
         })
         .filter(Boolean);
       return prompts.join(t("File change separator")) || t("Unknown");
+    }
+    case "mcp_list":
+      return "";
+    case "mcp_search":
+      return stringArgument(args, "query") || t("No query");
+    case "mcp_call": {
+      const server = stringArgument(args, "server");
+      const tool = stringArgument(args, "tool");
+      return server && tool ? `${server} / ${tool}` : t("Unknown");
     }
     default:
       return entry.arguments.length > 80 ? `${entry.arguments.slice(0, 80)}...` : entry.arguments;
@@ -325,6 +316,10 @@ const ToolCallBody = memo(function ToolCallBody({
   const fileChanges = metadata?.file_changes.filter((change) => Boolean(change.diff)) ?? [];
   const hasDiff = Boolean(metadata?.diff) || fileChanges.length > 0;
   const normalized = useMemo(() => normalizeToolOutput(output), [output]);
+  const mcpCatalog = useMemo(
+    () => parseMcpCatalogOutput(entry.name, args, output),
+    [args, entry.name, output],
+  );
   const parsedJson = !isWriteTool(entry.name) && !isBash(entry.name) ? normalized.data : null;
   const displayText = normalized.text;
 
@@ -362,6 +357,9 @@ const ToolCallBody = memo(function ToolCallBody({
         />
       ) : null}
       {entry.result && entry.name === "todowrite" ? <TodoRenderer output={displayText} /> : null}
+      {entry.result && mcpCatalog ? (
+        <McpCatalogRenderer catalog={mcpCatalog} search={entry.name === "mcp_search"} />
+      ) : null}
       {entry.result && isReadOnlyTool(entry.name) && entry.name !== "read" ? (
         parsedJson ? (
           <JsonTreeView
@@ -386,6 +384,7 @@ const ToolCallBody = memo(function ToolCallBody({
       !isWriteTool(entry.name) &&
       !isBash(entry.name) &&
       entry.name !== "todowrite" &&
+      !mcpCatalog &&
       !WEB_TOOLS.has(entry.name) ? (
         parsedJson ? (
           <JsonTreeView data={parsedJson} initialExpanded embedded />
@@ -405,7 +404,11 @@ const ToolCallBody = memo(function ToolCallBody({
         </div>
       ) : null}
       {!entry.result ? (
-        <pre className="tool-arguments">{entry.arguments || t("Waiting for arguments…")}</pre>
+        entry.name === "mcp_call" && args?.arguments && typeof args.arguments === "object" ? (
+          <JsonTreeView data={args.arguments} initialExpanded maxDepth={3} embedded />
+        ) : (
+          <pre className="tool-arguments">{entry.arguments || t("Waiting for arguments…")}</pre>
+        )
       ) : null}
     </div>
   );

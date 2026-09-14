@@ -1,30 +1,46 @@
 import { describe, expect, it } from "vitest";
-import { parseMcpToolName, normalizeToolOutput } from "./ToolCallRow";
+import { parseMcpCatalogOutput } from "./McpCatalogRenderer";
+import { normalizeToolOutput } from "./ToolCallRow";
 
-describe("parseMcpToolName", () => {
-  it("extracts server and tool name correctly", () => {
-    expect(parseMcpToolName("mcp__blender__get_scene_info")).toEqual({
-      server: "blender",
-      tool: "get_scene_info",
-    });
-    expect(parseMcpToolName("mcp__github__create_issue")).toEqual({
-      server: "github",
-      tool: "create_issue",
-    });
-  });
-
-  it("handles multi-underscore tool names", () => {
-    expect(parseMcpToolName("mcp__server__foo__bar")).toEqual({
-      server: "server",
-      tool: "foo__bar",
+describe("parseMcpCatalogOutput", () => {
+  it("parses server JSONL from mcp_list without a server argument", () => {
+    expect(
+      parseMcpCatalogOutput(
+        "mcp_list",
+        { server: "" },
+        '{"server":"blender","kind":"stdio","status":"disabled","tool_count":0}',
+      ),
+    ).toEqual({
+      kind: "servers",
+      records: [{ server: "blender", kind: "stdio", status: "disabled", tool_count: 0 }],
     });
   });
 
-  it("returns null for non-mcp tools", () => {
-    expect(parseMcpToolName("read")).toBeNull();
-    expect(parseMcpToolName("write")).toBeNull();
-    expect(parseMcpToolName("bash")).toBeNull();
-    expect(parseMcpToolName("mcp_single")).toBeNull();
+  it("parses tool JSONL from mcp_search", () => {
+    expect(
+      parseMcpCatalogOutput(
+        "mcp_search",
+        { query: "scene" },
+        '{"server":"blender","tool":"get_scene","description":"Get the scene","input_schema":{},"read_only":true}',
+      ),
+    ).toEqual({
+      kind: "tools",
+      records: [
+        {
+          server: "blender",
+          tool: "get_scene",
+          description: "Get the scene",
+          input_schema: {},
+          read_only: true,
+        },
+      ],
+    });
+  });
+
+  it("falls back for a truncated catalog result", () => {
+    expect(parseMcpCatalogOutput("mcp_search", { query: "scene" }, "[Output truncated]")).toBe(
+      null,
+    );
   });
 });
 

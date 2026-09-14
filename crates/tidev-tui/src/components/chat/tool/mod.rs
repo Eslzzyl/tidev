@@ -5,6 +5,7 @@
 //! formatting for read/write/edit/shell/websearch/webfetch/task/question/todowrite tools.
 
 mod diff_summary;
+mod mcp;
 mod question;
 mod read;
 mod shell;
@@ -39,6 +40,7 @@ use diff_summary::{
     render_diff_summary_lines,
 };
 pub(crate) use diff_summary::{tool_call_arguments_are_complete, tool_result_has_diff};
+use mcp::render_catalog_result_lines;
 use question::render_question_result_pairs;
 use shell::parse_shell_exit_code;
 use subagent::render_subagent_task_preview;
@@ -179,7 +181,13 @@ pub(crate) fn render_tool_call_with_result(
 
     // Get result lines and exit code (for shell)
     let (result_lines, exit_code, mut regions) = if let Some(result_msg) = tool_result {
-        render_tool_result_detail_lines(result_msg, content_width, ctx, is_expanded)
+        render_tool_result_detail_lines(
+            result_msg,
+            &tool_call.arguments,
+            content_width,
+            ctx,
+            is_expanded,
+        )
     } else {
         (Vec::new(), None, vec![])
     };
@@ -335,7 +343,7 @@ fn render_tool_call_lines(
     };
 
     let mut lines = Vec::new();
-    let canonical_name = canonical_tool_name(&tool_call.name).unwrap_or("");
+    let canonical_name = canonical_tool_name(&tool_call.name).unwrap_or(&tool_call.name);
 
     match canonical_name {
         "shell" => {
@@ -573,83 +581,100 @@ fn render_tool_call_lines(
                 "   ",
             ));
         }
-        _ => {
-            if let Some((server, tool)) = parse_mcp_tool_name(&tool_call.name) {
-                let mut title_spans = vec![
-                    Span::styled("MCP ", Style::default().fg(palette.accent_soft)),
-                    Span::styled(server.to_string(), Style::default().fg(palette.accent_soft)),
-                    Span::styled(" ❯ ", Style::default().fg(palette.muted)),
+        "mcp_list" => {
+            let server = string_field("server").unwrap_or_default();
+            let target = if server.trim().is_empty() {
+                "servers".to_string()
+            } else {
+                format!("server {server}")
+            };
+            lines.extend(wrap_tool_title(
+                Line::from(vec![
+                    Span::styled("MCP list ", Style::default().fg(palette.accent_soft)),
                     Span::styled(
-                        tool.to_string(),
+                        target,
                         Style::default()
                             .fg(palette.text)
                             .add_modifier(Modifier::BOLD),
                     ),
-                ];
-                if let Some(code) = exit_code {
-                    if code == 0 {
-                        title_spans.push(Span::styled("  ✓", Style::default().fg(palette.success)));
-                    } else {
-                        title_spans.push(Span::styled(
-                            format!("  ✗ {}", code),
-                            Style::default().fg(palette.error),
-                        ));
-                    }
-                }
-                lines.extend(wrap_tool_title(
-                    Line::from(title_spans),
-                    content_width,
-                    "      ",
-                ));
-
-                if let Ok(serde_json::Value::Object(map)) =
-                    serde_json::from_str::<serde_json::Value>(&tool_call.arguments)
-                {
-                    render_structured_arguments(&mut lines, &map, content_width, palette);
-                }
+                ]),
+                content_width,
+                "         ",
+            ));
+        }
+        "mcp_search" => {
+            let query = string_field("query").unwrap_or_default();
+            lines.extend(wrap_tool_title(
+                Line::from(vec![
+                    Span::styled("MCP search ", Style::default().fg(palette.accent_soft)),
+                    Span::styled(
+                        format!("\"{query}\""),
+                        Style::default()
+                            .fg(palette.text)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ]),
+                content_width,
+                "           ",
+            ));
+        }
+        "mcp_call" => {
+            let server = string_field("server").unwrap_or_default();
+            let tool = string_field("tool").unwrap_or_default();
+            lines.extend(wrap_tool_title(
+                Line::from(vec![
+                    Span::styled("MCP call ", Style::default().fg(palette.accent_soft)),
+                    Span::styled(server, Style::default().fg(palette.accent_soft)),
+                    Span::styled(" / ", Style::default().fg(palette.muted)),
+                    Span::styled(
+                        tool,
+                        Style::default()
+                            .fg(palette.text)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ]),
+                content_width,
+                "         ",
+            ));
+            if let Ok(serde_json::Value::Object(map)) =
+                serde_json::from_str::<serde_json::Value>(&tool_call.arguments)
+                && let Some(serde_json::Value::Object(arguments)) = map.get("arguments")
+            {
+                render_structured_arguments(&mut lines, arguments, content_width, palette);
+            }
+        }
+        _ => {
+            let title = if tool_call.name.is_empty() {
+                "Tool".to_string()
             } else {
-                let title = if tool_call.name.is_empty() {
-                    "Tool".to_string()
-                } else {
-                    format!("Tool {}", tool_call.name)
-                };
-                lines.extend(wrap_tool_title(
-                    Line::from(vec![Span::styled(
-                        title,
-                        Style::default().fg(palette.accent_soft),
-                    )]),
-                    content_width,
-                    "  ",
-                ));
+                format!("Tool {}", tool_call.name)
+            };
+            lines.extend(wrap_tool_title(
+                Line::from(vec![Span::styled(
+                    title,
+                    Style::default().fg(palette.accent_soft),
+                )]),
+                content_width,
+                "  ",
+            ));
 
-                if let Ok(serde_json::Value::Object(map)) =
-                    serde_json::from_str::<serde_json::Value>(&tool_call.arguments)
-                {
-                    render_structured_arguments(&mut lines, &map, content_width, palette);
-                } else {
-                    let summary = summarize_tool_call(tool_call, content_width);
-                    if !summary.is_empty() {
-                        lines.push(Line::from(vec![Span::styled(
-                            format!("  {summary}"),
-                            Style::default().fg(palette.muted),
-                        )]));
-                    }
+            if let Ok(serde_json::Value::Object(map)) =
+                serde_json::from_str::<serde_json::Value>(&tool_call.arguments)
+            {
+                render_structured_arguments(&mut lines, &map, content_width, palette);
+            } else {
+                let summary = summarize_tool_call(tool_call, content_width);
+                if !summary.is_empty() {
+                    lines.push(Line::from(vec![Span::styled(
+                        format!("  {summary}"),
+                        Style::default().fg(palette.muted),
+                    )]));
                 }
             }
         }
     }
 
     lines
-}
-
-pub(crate) fn parse_mcp_tool_name(name: &str) -> Option<(&str, &str)> {
-    let stripped = name.strip_prefix("mcp__")?;
-    let (server, tool) = stripped.split_once("__")?;
-    if server.is_empty() || tool.is_empty() {
-        None
-    } else {
-        Some((server, tool))
-    }
 }
 
 fn render_structured_arguments(
@@ -751,6 +776,7 @@ fn render_structured_arguments(
 
 fn render_tool_result_detail_lines(
     message: &Message,
+    tool_arguments: &str,
     content_width: usize,
     ctx: &RenderContext,
     is_expanded: bool,
@@ -922,6 +948,19 @@ fn render_tool_result_detail_lines(
             None,
             vec![],
         );
+    }
+
+    if !is_error
+        && let Some(lines) = render_catalog_result_lines(
+            canonical_name,
+            tool_arguments,
+            effective_output,
+            content_width,
+            palette,
+            is_expanded,
+        )
+    {
+        return (hyper_lines(lines), None, vec![]);
     }
 
     // Fallback: standard output preview (normalized and unescaped for JSON/MCP outputs)
@@ -1509,21 +1548,6 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_mcp_tool_name() {
-        assert_eq!(
-            parse_mcp_tool_name("mcp__blender__get_scene_info"),
-            Some(("blender", "get_scene_info"))
-        );
-        assert_eq!(
-            parse_mcp_tool_name("mcp__my_server__read_file"),
-            Some(("my_server", "read_file"))
-        );
-        assert_eq!(parse_mcp_tool_name("shell"), None);
-        assert_eq!(parse_mcp_tool_name("mcp____"), None);
-        assert_eq!(parse_mcp_tool_name("mcp__onlyserver"), None);
-    }
-
-    #[test]
     fn test_normalize_tool_output_nested_json() {
         let nested_json = r#"{"result": "{\n  \"up_to_date\": true,\n  \"version\": 4\n}"}"#;
         let (output, lang) = normalize_tool_output(nested_json);
@@ -1550,19 +1574,17 @@ mod tests {
     }
 
     #[test]
-    fn test_mcp_tool_card_rendering() {
+    fn test_mcp_list_card_rendering() {
         let tool_call = ToolCall {
             id: "call_mcp_1".into(),
-            name: "mcp__blender__execute_blender_code".into(),
-            arguments:
-                r#"{"code":"import bpy\nprint(bpy.app.version)","user_prompt":"check version"}"#
-                    .into(),
+            name: "mcp_list".into(),
+            arguments: r#"{"server":""}"#.into(),
             thought_signature: None,
         };
-        let result =
-            ToolExecutionResult::new(r#"{"result": "Code executed successfully: 5.2.1 LTS 3"}"#);
-        let result_msg =
-            Message::tool_result("call_mcp_1", "mcp__blender__execute_blender_code", result);
+        let result = ToolExecutionResult::new(
+            r#"{"server":"blender","kind":"stdio","status":"disabled","tool_count":0}"#,
+        );
+        let result_msg = Message::tool_result("call_mcp_1", "mcp_list", result);
 
         let palette = test_palette();
         let empty_set = HashSet::new();
@@ -1589,12 +1611,57 @@ mod tests {
             .flat_map(|line| line.line.spans.iter().map(|span| span.content.as_ref()))
             .collect();
 
-        assert!(rendered.contains("MCP"));
+        assert!(rendered.contains("MCP list"));
         assert!(rendered.contains("blender"));
-        assert!(rendered.contains("execute_blender_code"));
-        assert!(rendered.contains("code:"));
-        assert!(rendered.contains("import bpy"));
-        assert!(rendered.contains("user_prompt:"));
-        assert!(rendered.contains("Code executed successfully: 5.2.1 LTS 3"));
+        assert!(rendered.contains("stdio"));
+        assert!(rendered.contains("disabled"));
+        assert!(!rendered.contains("\"server\""));
+    }
+
+    #[test]
+    fn mcp_call_card_omits_routing_arguments() {
+        let tool_call = ToolCall {
+            id: "call_mcp_1".into(),
+            name: "mcp_call".into(),
+            arguments:
+                r#"{"server":"blender","tool":"get_scene_info","arguments":{"detail":"summary"}}"#
+                    .into(),
+            thought_signature: None,
+        };
+        let result_msg = Message::tool_result(
+            "call_mcp_1",
+            "mcp_call",
+            ToolExecutionResult::new("scene summary"),
+        );
+
+        let palette = test_palette();
+        let empty_set = HashSet::new();
+        let ctx = RenderContext {
+            palette,
+            spinner: ".",
+            workspace_root: Path::new("/test"),
+            expanded_tool_results: &empty_set,
+            hovered_card: None,
+            model_display_name: "test",
+            running_subagents: &[],
+            hovered_inline_subagent: None,
+            thinking_collapsed_overrides: &empty_set,
+            default_collapse_thinking: false,
+            default_collapse_diffs: false,
+            message_app_data: None,
+            reasoning_displays: &EMPTY_REASONING_DISPLAYS,
+        };
+
+        let (lines, _) =
+            render_tool_call_with_result(&tool_call, Some(&result_msg), 80, false, &ctx, false);
+        let rendered: String = lines
+            .iter()
+            .flat_map(|line| line.line.spans.iter().map(|span| span.content.as_ref()))
+            .collect();
+
+        assert!(rendered.contains("MCP call blender / get_scene_info"));
+        assert!(rendered.contains("detail:"));
+        assert!(!rendered.contains("server:"));
+        assert!(!rendered.contains("tool:"));
     }
 }

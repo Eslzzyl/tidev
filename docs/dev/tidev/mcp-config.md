@@ -140,12 +140,17 @@ tidev 启动时会自动读取全局及工作区 MCP 配置并初始化 MCP 管�
 
 ## 8. MCP 工具如何工作
 
-tidev 会将已连接 MCP 服务器中的工具转换为内部工具定义：
+tidev 向模型固定提供三个 MCP 工具：
 
-- 工具名称会被映射成 `server-name / tool-name` 的形式
-- 描述、参数 schema 会被保留
-- tidev 会根据 MCP 工具的 `read_only_hint` 或内置名称，自动映射权限类型
-- MCP 工具与本地工具统一进入 `ToolRegistry`，可在会话中一起执行
+- `mcp_list`：无参数或空 `server` 时列出所有已配置服务器；指定 `server` 时列出该服务器当前可用的工具。
+- `mcp_search`：以非空查询词搜索当前已连接服务器上的工具。查询词会匹配工具名、服务器名、display name、描述和参数 schema。
+- `mcp_call`：使用 `mcp_list` 或 `mcp_search` 返回的 `server`、`tool` 和参数调用具体 MCP 工具。
+
+`mcp_list` 与 `mcp_search` 都返回 JSONL：每一行是一个独立 JSON 记录。两者不在工具内限制结果数量或截断；超长结果由通用工具结果归档机制保存完整内容，并向模型提供输出 ID 以便通过 `tidev tool-output <ID> | <filter_command>` 查询。
+
+MCP 服务器连接、断开或刷新工具列表不会改变模型请求中的工具定义。`mcp_call`
+会在审批和实际执行时分别按当前目录重新解析目标；计划模式只允许目标工具标记为只读。
+TUI 和 Web 的 MCP 面板仍直接展示当前服务器及其工具状态。
 
 ## 9. 调试与常见问题
 

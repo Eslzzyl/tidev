@@ -684,6 +684,24 @@ impl McpRegistry {
             .map(|tool| tool.info.clone())
     }
 
+    /// Look up a connected MCP tool by its server and protocol tool name.
+    ///
+    /// Unlike [`Self::tool_info_for`], this does not rely on the host's
+    /// flattened display name. Hosts that expose a stable MCP router can use
+    /// this to resolve the target against the current live catalog.
+    pub fn tool_info_for_target(&self, server_name: &str, tool_name: &str) -> Option<McpToolInfo> {
+        let inner = self.inner.lock().unwrap();
+        let state = inner.servers.get(server_name)?;
+        if !matches!(state.status, McpConnectionStatus::Connected) {
+            return None;
+        }
+        state
+            .tools
+            .iter()
+            .find(|tool| tool.info.tool_name == tool_name)
+            .map(|tool| tool.info.clone())
+    }
+
     pub fn read_only_for(&self, tool_name: &str) -> Option<bool> {
         self.tool_info_for(tool_name).map(|tool| tool.read_only)
     }
@@ -696,6 +714,25 @@ impl McpRegistry {
         tool.execute_arguments(arguments).await
     }
 
+    /// Call a connected MCP tool selected by server and protocol tool name.
+    ///
+    /// The target is resolved immediately before execution so a host does not
+    /// retain stale tool implementations while a server reconnects or updates
+    /// its catalog.
+    pub async fn execute_target(
+        &self,
+        server_name: &str,
+        tool_name: &str,
+        arguments: Map<String, Value>,
+    ) -> Result<ToolExecutionResult> {
+        let tool = self
+            .find_tool_by_target(server_name, tool_name)
+            .with_context(|| {
+                format!("MCP tool '{server_name}/{tool_name}' is not currently available")
+            })?;
+        tool.execute_arguments(arguments).await
+    }
+
     fn find_tool(&self, tool_name: &str) -> Option<Arc<McpTool>> {
         let inner = self.inner.lock().unwrap();
         inner
@@ -704,6 +741,19 @@ impl McpRegistry {
             .filter(|state| matches!(state.status, McpConnectionStatus::Connected))
             .flat_map(|state| state.tools.iter())
             .find(|tool| tool.info.definition.name == tool_name)
+            .cloned()
+    }
+
+    fn find_tool_by_target(&self, server_name: &str, tool_name: &str) -> Option<Arc<McpTool>> {
+        let inner = self.inner.lock().unwrap();
+        let state = inner.servers.get(server_name)?;
+        if !matches!(state.status, McpConnectionStatus::Connected) {
+            return None;
+        }
+        state
+            .tools
+            .iter()
+            .find(|tool| tool.info.tool_name == tool_name)
             .cloned()
     }
 
@@ -910,7 +960,9 @@ fn parse_tool(server_name: &str, tool: McpToolModel) -> Result<McpToolInfo> {
     let tool_name = tool.name.to_string();
     let read_only = match tool_name.as_str() {
         "websearch" | "webfetch" => true,
-        _ => annotations.read_only_hint.unwrap_or(false),
+        // MCP annotations are optional. Treat a missing readOnlyHint as read-only by design so
+        // Plan mode remains usable with servers that do not publish annotations.
+        _ => annotations.read_only_hint.unwrap_or(true),
     };
     let name = mcp_name(server_name, &tool_name);
     let display_name = tool
@@ -1064,6 +1116,35 @@ fn image_filename(tool_name: &str, index: usize, mime_type: &str) -> String {
 mod tests {
     use super::*;
     use rmcp::model::{CallToolResult, ContentBlock, Resource};
+
+    fn tool_model(annotations: Option<serde_json::Value>) -> McpToolModel {
+        let mut value = serde_json::json!({
+            "name": "get_scene_info",
+            "inputSchema": { "type": "object" },
+        });
+        if let Some(annotations) = annotations {
+            value["annotations"] = annotations;
+        }
+        serde_json::from_value(value).expect("valid MCP tool model")
+    }
+
+    #[test]
+    fn missing_read_only_hint_defaults_to_read_only_for_plan_mode() {
+        let tool = parse_tool("blender", tool_model(None)).expect("parse MCP tool");
+
+        assert!(tool.read_only);
+    }
+
+    #[test]
+    fn explicit_read_only_hint_false_remains_non_read_only() {
+        let tool = parse_tool(
+            "blender",
+            tool_model(Some(serde_json::json!({ "readOnlyHint": false }))),
+        )
+        .expect("parse MCP tool");
+
+        assert!(!tool.read_only);
+    }
 
     #[test]
     fn result_text_is_preserved() {

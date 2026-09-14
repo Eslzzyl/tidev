@@ -445,6 +445,9 @@
 .tool-renderer.tool-tone-todo {
   color: var(--muted);
 }
+.tool-renderer.tool-tone-mcp {
+  color: var(--muted);
+}
 .tool-renderer-header {
   display: flex;
   align-items: center;
@@ -588,6 +591,95 @@
   color: var(--muted);
   font-size: var(--tool-font-size);
   line-height: var(--chat-detail-line-height);
+}
+.mcp-catalog {
+  min-width: 0;
+}
+.mcp-catalog-list {
+  display: grid;
+  gap: 8px;
+}
+.mcp-catalog-server,
+.mcp-catalog-tool {
+  min-width: 0;
+}
+.mcp-catalog-server-title,
+.mcp-catalog-tool-title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.mcp-catalog-server-title code,
+.mcp-catalog-tool-title code {
+  min-width: 0;
+  color: var(--text);
+  font-family: var(--ui-mono-font);
+  font-size: var(--chat-code-size);
+  line-height: var(--chat-code-line-height);
+  overflow-wrap: anywhere;
+}
+.mcp-catalog-tool-title code > span {
+  color: var(--muted);
+}
+.mcp-catalog-tool-title code strong {
+  font-weight: 600;
+}
+.mcp-catalog-status,
+.mcp-catalog-read-only {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: var(--chat-meta-size);
+  line-height: var(--chat-meta-line-height);
+}
+.mcp-catalog-status {
+  color: var(--muted);
+  background: color-mix(in srgb, var(--muted) 12%, transparent);
+}
+.mcp-catalog-status-connected,
+.mcp-catalog-read-only {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+}
+.mcp-catalog-status-failed {
+  color: var(--error);
+  background: color-mix(in srgb, var(--error) 12%, transparent);
+}
+.mcp-catalog-status-connecting {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+}
+.mcp-catalog-meta,
+.mcp-catalog-description,
+.mcp-catalog-error {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--tool-font-size);
+  line-height: var(--chat-detail-line-height);
+}
+.mcp-catalog-description,
+.mcp-catalog-error {
+  margin-top: 2px;
+}
+.mcp-catalog-error {
+  color: var(--error);
+}
+.mcp-catalog-schema {
+  margin-top: 4px;
+  color: var(--muted);
+}
+.mcp-catalog-schema > summary {
+  width: fit-content;
+  cursor: pointer;
+  font-family: var(--ui-mono-font);
+  font-size: var(--chat-meta-size);
+  line-height: var(--chat-meta-line-height);
+}
+.mcp-catalog-schema > .tool-json-tree {
+  margin-top: 4px;
 }
 .tool-collapsed-summary,
 .tool-streaming-line {
