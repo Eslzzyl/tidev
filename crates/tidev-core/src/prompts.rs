@@ -1,7 +1,6 @@
 //! Prompt text helpers shared across the workspace.
 
 use crate::Mode;
-use uuid::Uuid;
 
 /// Mode reminder for a given session mode.
 pub fn mode_reminder(mode: Mode) -> String {
@@ -29,16 +28,6 @@ pub fn build_switch_reminder() -> String {
         .to_string()
 }
 
-/// Reminder shown after context compaction so the model can recover older
-/// messages on demand.
-pub fn history_reminder(session_id: Uuid) -> String {
-    let short_id = session_id.simple().to_string();
-    let short_id = &short_id[..12];
-    format!(
-        "<system-reminder>\nYou can use the `session-history` skill and inspect session `{short_id}` to get older message history.\n</system-reminder>"
-    )
-}
-
 /// Reminder appended to a user message that was steered into a running turn.
 ///
 /// Steering messages are submitted while the agent loop is busy and are
@@ -46,10 +35,9 @@ pub fn history_reminder(session_id: Uuid) -> String {
 /// model stream. The reminder tells the model to keep advancing the task
 /// while adjusting direction according to the message.
 ///
-/// The reminder is appended as a suffix (mode reminders are injected as a
-/// prefix by `inject_mode_reminder_impl`) so both can coexist on the same
-/// message. It is persisted with the message so the request bytes stay
-/// stable across replays; the TUI strips the tag for display.
+/// The reminder is appended as a suffix after any persisted prefix. It is
+/// stored with the message so request bytes stay stable across replays; the
+/// TUI strips the tag for display.
 pub fn steer_reminder() -> String {
     "<system-reminder>\nThis is a steering message from the user. Continue the current task and adjust your direction according to this message.\n</system-reminder>"
         .to_string()
@@ -127,15 +115,6 @@ mod tests {
         assert_eq!(
             build_switch_reminder(),
             "<system-reminder>\nThe user switched to Build mode since this message.\n</system-reminder>"
-        );
-    }
-
-    #[test]
-    fn history_reminder_uses_a_stable_short_session_id() {
-        let session_id = Uuid::parse_str("a1b2c3d4-e5f6-4789-abcd-0123456789ab").unwrap();
-        assert_eq!(
-            history_reminder(session_id),
-            "<system-reminder>\nYou can use the `session-history` skill and inspect session `a1b2c3d4e5f6` to get older message history.\n</system-reminder>"
         );
     }
 }

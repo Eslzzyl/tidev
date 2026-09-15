@@ -121,7 +121,7 @@ fn render_assistant_body_lines(
             messages[..message_index]
                 .iter()
                 .rev()
-                .find(|m| matches!(m.role, MessageRole::User))
+                .find(|m| matches!(m.role, MessageRole::User) && !m.is_compaction())
                 .and_then(|m| m.thinking_level.clone())
         });
         if let Some(level) = thinking_level.filter(|level| level.is_supported()) {
@@ -133,7 +133,7 @@ fn render_assistant_body_lines(
             let prev_user = messages
                 .iter()
                 .take_while(|m| m.id != message.id)
-                .filter(|m| matches!(m.role, MessageRole::User))
+                .filter(|m| matches!(m.role, MessageRole::User) && !m.is_compaction())
                 .last()
                 .map(|m| m.created_at)
                 .unwrap_or(message.created_at);
@@ -498,6 +498,9 @@ pub(super) fn render_single_card(
     content_width: usize,
     is_round_end: bool,
 ) -> Vec<(Color, Vec<HyperlinkLine>)> {
+    if message.is_compaction() {
+        return render_system_card(ctx, message, content_width, is_round_end);
+    }
     match message.role {
         MessageRole::User => render_user_card(ctx, message, content_width),
         MessageRole::Error => render_error_card(ctx, message, content_width),
@@ -535,9 +538,10 @@ fn render_text_body_lines(
 /// Check if the message at `start_idx` is the first User message in `messages`.
 pub(super) fn is_first_user_message(messages: &[Message], start_idx: usize) -> bool {
     matches!(messages[start_idx].role, MessageRole::User)
+        && !messages[start_idx].is_compaction()
         && !messages[..start_idx]
             .iter()
-            .any(|m| matches!(m.role, MessageRole::User))
+            .any(|m| matches!(m.role, MessageRole::User) && !m.is_compaction())
 }
 
 /// Strip `<system-reminder>…</system-reminder>` tags from user-message

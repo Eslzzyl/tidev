@@ -409,7 +409,7 @@ impl App {
                                 .messages
                                 .iter()
                                 .rev()
-                                .find(|m| m.role == MessageRole::User)
+                                .find(|m| m.role == MessageRole::User && !m.is_compaction())
                                 .and_then(|m| ctx.app_data(m.id))
                                 .and_then(|data| {
                                     data.mode
@@ -461,7 +461,7 @@ impl App {
                             ctx.messages
                                 .iter()
                                 .rev()
-                                .find(|m| m.role == MessageRole::User)
+                                .find(|m| m.role == MessageRole::User && !m.is_compaction())
                                 .and_then(|m| m.thinking_level.clone())
                         });
                         self.sync_active_model_for_session(session_id, session_thinking_level);
@@ -494,7 +494,7 @@ impl App {
                     let session_thinking_level = messages
                         .iter()
                         .rev()
-                        .find(|m| m.role == MessageRole::User)
+                        .find(|m| m.role == MessageRole::User && !m.is_compaction())
                         .and_then(|m| m.thinking_level.clone());
 
                     // Resolve session mode from the last user message.
@@ -503,7 +503,9 @@ impl App {
                     self.mode = session_messages
                         .iter()
                         .rev()
-                        .find(|m| m.role == tidev_llm::message::MessageRole::User)
+                        .find(|m| {
+                            m.role == tidev_llm::message::MessageRole::User && !m.is_compaction()
+                        })
                         .and_then(|m| m.mode())
                         .unwrap_or(SessionMode::Build);
 
@@ -607,7 +609,7 @@ impl App {
                         None => return,
                     };
 
-                    // Load messages from DB
+                    // Count the retained messages for the confirmation notice.
                     let messages = match self.runtime.session_manager().load_messages(session_id) {
                         Ok(msgs) => msgs,
                         Err(e) => {
@@ -616,7 +618,6 @@ impl App {
                         }
                     };
 
-                    // Find the message index by UUID
                     let message_index = match messages.iter().position(|m| m.id == message_id) {
                         Some(idx) => idx,
                         None => {
@@ -625,86 +626,14 @@ impl App {
                         }
                     };
 
-                    // Load session title from DB
-                    let session_title = self
-                        .runtime
-                        .session_manager()
-                        .load_session(session_id)
-                        .ok()
-                        .flatten()
-                        .map(|r| r.title)
-                        .unwrap_or_default();
-
-                    let workspace_root =
-                        self.runtime.workspace_root().to_string_lossy().to_string();
-                    let active_model = match self.runtime.resolve_active_model() {
-                        Ok(m) => m,
-                        Err(e) => {
-                            log::error!("Failed to resolve active model for fork: {e}");
-                            return;
-                        }
-                    };
-
-                    // Create new session
-                    let new_session_id = uuid::Uuid::new_v4();
-                    if let Err(e) = self.runtime.session_manager().create_session(
-                        new_session_id,
-                        &workspace_root,
-                        &active_model.provider_id,
-                        &active_model.provider_display_name,
-                        &active_model.model_id,
-                        &active_model.display_name,
-                        &format!("Fork of {}", session_title),
-                        None,
-                        None,
-                    ) {
-                        log::error!("Failed to create fork session: {e}");
-                        return;
-                    }
-
-                    // Copy parent's system prompt
-                    if !active_model.system_prompt.is_empty() {
-                        let _ = self.runtime.session_manager().store().update_session(
-                            new_session_id,
-                            None,
-                            None,
-                            None,
-                            None,
-                            Some(&active_model.system_prompt),
-                            None,
-                            None,
-                            None,
-                            None,
-                        );
-                    }
-
-                    // Copy messages up to the selected message, assigning new IDs
-                    let mut id_mapping: std::collections::HashMap<uuid::Uuid, uuid::Uuid> =
-                        std::collections::HashMap::new();
-
-                    for original in messages.iter().take(message_index + 1) {
-                        let mut new_message = original.clone();
-                        let new_id = uuid::Uuid::new_v4();
-                        id_mapping.insert(original.id, new_id);
-                        new_message.id = new_id;
-
-                        // Update tool_call_id references to new IDs
-                        if let Some(ref tool_call_id) = new_message.tool_call_id
-                            && let Ok(old_id) = uuid::Uuid::parse_str(tool_call_id)
-                            && let Some(&new_tool_call_id) = id_mapping.get(&old_id)
-                        {
-                            new_message.tool_call_id = Some(new_tool_call_id.to_string());
-                        }
-
-                        if let Err(e) = self
-                            .runtime
-                            .session_manager()
-                            .append_message(new_session_id, &new_message)
-                        {
-                            log::error!("Failed to copy message to fork: {e}");
-                            return;
-                        }
-                    }
+                    let new_session_id =
+                        match self.runtime.fork_session(session_id, message_id, None) {
+                            Ok(id) => id,
+                            Err(e) => {
+                                log::error!("Failed to fork session: {e}");
+                                return;
+                            }
+                        };
 
                     // Switch to the new session
                     self.current_session_id = Some(new_session_id);

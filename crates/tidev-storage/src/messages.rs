@@ -139,6 +139,83 @@ impl SessionStore {
         Ok(())
     }
 
+    /// Persist protocol messages and newly applied instruction sources together.
+    ///
+    /// The message bytes and the source ledger form one durable boundary: a
+    /// source is recorded only when the message carrying its instructions is
+    /// committed successfully.
+    pub fn append_messages_with_app_data_and_instruction_sources(
+        &self,
+        session_id: Uuid,
+        messages: &[Message],
+        app_data: &HashMap<Uuid, MessageAppData>,
+        instruction_sources: &[String],
+    ) -> Result<()> {
+        let mut conn = self.write_conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        for msg in messages {
+            let fallback;
+            let data = match app_data.get(&msg.id) {
+                Some(data) => data,
+                None => {
+                    fallback = MessageAppData::default();
+                    &fallback
+                }
+            };
+            Self::insert_message_with_app_data(&tx, session_id, msg, data)?;
+        }
+
+        if !instruction_sources.is_empty() {
+            let current_json: String = tx.query_row(
+                "SELECT instruction_sources FROM sessions WHERE id = ?1",
+                params![session_id.to_string()],
+                |row| row.get(0),
+            )?;
+            let mut sources: Vec<String> = serde_json::from_str(&current_json).unwrap_or_default();
+            for source in instruction_sources {
+                if !sources.contains(source) {
+                    sources.push(source.clone());
+                }
+            }
+            tx.execute(
+                "UPDATE sessions SET instruction_sources = ?1 WHERE id = ?2",
+                params![serde_json::to_string(&sources)?, session_id.to_string()],
+            )?;
+        }
+
+        tx.execute(
+            "UPDATE sessions SET updated_at = ?1 WHERE id = ?2",
+            params![Utc::now().to_rfc3339(), session_id.to_string()],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Persist compaction state and its provider-visible summary message in
+    /// the same transaction.
+    pub fn apply_compaction(
+        &self,
+        session_id: Uuid,
+        summary: &str,
+        retained_from: usize,
+        marker: &Message,
+    ) -> Result<()> {
+        let mut conn = self.write_conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        Self::insert_message(&tx, session_id, marker)?;
+        tx.execute(
+            "UPDATE sessions SET context_summary = ?1, context_retained_from = ?2, updated_at = ?3 WHERE id = ?4",
+            params![
+                compress_text(summary),
+                retained_from as i64,
+                Utc::now().to_rfc3339(),
+                session_id.to_string(),
+            ],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Append a single message to a session.
     pub fn append_message(&self, session_id: Uuid, msg: &Message) -> Result<()> {
         let conn = self.write_conn.lock().unwrap();

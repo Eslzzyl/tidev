@@ -65,20 +65,30 @@ pub fn system_prompt_and_sources(
     config_dir: &Path,
     instructions: &[String],
 ) -> Result<(String, Vec<String>)> {
+    let sections = instruction_sections(workspace_root, config_dir, instructions)?;
+    let prompt = sections
+        .iter()
+        .map(|(source, content)| format!("Instructions from: {source}\n{content}"))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let sources = sections.into_iter().map(|(source, _)| source).collect();
+    Ok((prompt, sources))
+}
+
+/// Load the instruction source names and their exact contents.
+pub fn instruction_sections(
+    workspace_root: &Path,
+    config_dir: &Path,
+    instructions: &[String],
+) -> Result<Vec<(String, String)>> {
     let mut sections = Vec::new();
-    let mut sources = Vec::new();
     let paths = system_paths(workspace_root, config_dir, instructions)?;
 
     for path in paths {
         if let Ok(content) = read_text_file(&path)
             && !content.trim().is_empty()
         {
-            sections.push(format!(
-                "Instructions from: {}\n{}",
-                path.display(),
-                content
-            ));
-            sources.push(path.display().to_string());
+            sections.push((path.display().to_string(), content));
         }
     }
 
@@ -89,12 +99,11 @@ pub fn system_prompt_and_sources(
         if let Ok(content) = fetch_remote(url)
             && !content.trim().is_empty()
         {
-            sections.push(format!("Instructions from: {}\n{}", url, content));
-            sources.push(url.clone());
+            sections.push((url.clone(), content));
         }
     }
 
-    Ok((sections.join("\n\n"), sources))
+    Ok(sections)
 }
 
 /// Build system prompt with content caching to avoid redundant file I/O.

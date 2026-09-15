@@ -36,6 +36,17 @@ impl MessageStore for MemoryStore {
         self.messages.lock().unwrap().extend_from_slice(messages);
         Ok(())
     }
+
+    async fn apply_compaction(
+        &self,
+        session_id: Uuid,
+        _summary: &str,
+        _retained_from: usize,
+        marker: &Message,
+    ) -> Result<()> {
+        self.save_messages(session_id, std::slice::from_ref(marker))
+            .await
+    }
 }
 
 struct EchoTool;

@@ -249,7 +249,9 @@ fn render_block_from_cache(
 
     // First user message: add extra blank line before it for spacing
     if messages.get(block.message_start_idx).is_some_and(|m| {
-        m.role == MessageRole::User && is_first_user_message(messages, block.message_start_idx)
+        m.role == MessageRole::User
+            && !m.is_compaction()
+            && is_first_user_message(messages, block.message_start_idx)
     }) {
         lines.push(HyperlinkLine::new(Line::from("")));
     }
@@ -271,7 +273,8 @@ fn render_block_from_cache(
                     }
                     track_selectable_region(selectable_regions, card_lines, start_line);
                     let show_hover = ctx.hovered_card == Some(block.message_id)
-                        && matches!(role, MessageRole::User);
+                        && matches!(role, MessageRole::User)
+                        && !messages[block.message_start_idx].is_compaction();
                     let adjusted_bg = if show_hover {
                         ctx.palette.hover_bg(*bg)
                     } else {
@@ -300,8 +303,9 @@ fn render_block_from_cache(
             if !card_lines.is_empty() {
                 let start_line = current_line_offset + lines.len();
                 track_selectable_region(selectable_regions, card_lines, start_line);
-                let show_hover =
-                    ctx.hovered_card == Some(block.message_id) && matches!(role, MessageRole::User);
+                let show_hover = ctx.hovered_card == Some(block.message_id)
+                    && matches!(role, MessageRole::User)
+                    && !msg.is_compaction();
                 let adjusted_bg = if show_hover {
                     ctx.palette.hover_bg(*bg)
                 } else {

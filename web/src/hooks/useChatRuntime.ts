@@ -1527,7 +1527,9 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
       if (!parsed) return false;
       const { command, args } = parsed;
       if (command === "undo") {
-        const lastUser = [...messages].reverse().find((r) => r.message.role === "user");
+        const lastUser = [...messages]
+          .reverse()
+          .find((r) => r.message.role === "user" && r.message.metadata.compaction_manual == null);
         if (lastUser) await handleRevert(lastUser.message.id);
         else setError(i18n.t("No user message to undo"));
         return true;
@@ -1541,7 +1543,9 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
         return true;
       }
       if (command === "fork") {
-        const target = [...messages].reverse().find((r) => r.message.role === "user");
+        const target = [...messages]
+          .reverse()
+          .find((r) => r.message.role === "user" && r.message.metadata.compaction_manual == null);
         if (target) await handleFork(target.message.id);
         else setError(i18n.t("No message to fork from"));
         return true;

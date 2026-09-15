@@ -3,7 +3,7 @@
 //! These are pure functions that operate on message lists. The orchestration
 //! (snapshot capture, persistence, event emission) lives in [`Runtime`](crate::Runtime).
 
-use tidev_llm::message::{COMPACTION_MESSAGE_LABEL, MessageRole};
+use tidev_llm::message::MessageRole;
 use tidev_snapshot::Patch;
 use uuid::Uuid;
 
@@ -18,9 +18,7 @@ pub fn last_visible_user_message(messages: &[SessionMessage]) -> Option<Uuid> {
     messages
         .iter()
         .rev()
-        .find(|m| {
-            m.role == MessageRole::User && !m.streaming && m.content != COMPACTION_MESSAGE_LABEL
-        })
+        .find(|m| m.role == MessageRole::User && !m.streaming && !m.is_compaction())
         .map(|m| m.id)
 }
 
@@ -28,11 +26,7 @@ pub fn last_visible_user_message(messages: &[SessionMessage]) -> Option<Uuid> {
 pub fn prev_user_message_before(messages: &[SessionMessage], before_id: Uuid) -> Option<Uuid> {
     let mut found = false;
     for m in messages.iter().rev() {
-        if found
-            && m.role == MessageRole::User
-            && !m.streaming
-            && m.content != COMPACTION_MESSAGE_LABEL
-        {
+        if found && m.role == MessageRole::User && !m.streaming && !m.is_compaction() {
             return Some(m.id);
         }
         if m.id == before_id {
@@ -46,11 +40,7 @@ pub fn prev_user_message_before(messages: &[SessionMessage], before_id: Uuid) ->
 pub fn next_user_message_after(messages: &[SessionMessage], after_id: Uuid) -> Option<Uuid> {
     let mut found = false;
     for m in messages {
-        if found
-            && m.role == MessageRole::User
-            && !m.streaming
-            && m.content != COMPACTION_MESSAGE_LABEL
-        {
+        if found && m.role == MessageRole::User && !m.streaming && !m.is_compaction() {
             return Some(m.id);
         }
         if m.id == after_id {
@@ -87,7 +77,7 @@ pub fn restore_context_from_compaction(
         // Compaction markers store the state *before* that compaction.
         // The first compaction marker after target_id tells us what state
         // was current when target_id was active.
-        if m.content.starts_with(COMPACTION_MESSAGE_LABEL)
+        if m.is_compaction()
             && let Some((s, r)) = extract_compaction_prior_state(m)
         {
             *summary = s;
@@ -281,10 +271,7 @@ mod tests {
     #[test]
     fn last_visible_user_message_skips_compaction() {
         let id1 = Uuid::new_v4();
-        let mut compact = SessionMessage::new(
-            Message::new(MessageRole::User, COMPACTION_MESSAGE_LABEL.to_string()),
-            Default::default(),
-        );
+        let mut compact = SessionMessage::new(Message::compaction("summary"), Default::default());
         compact.id = id1;
         let msgs = vec![compact, msg_user(Uuid::new_v4())];
         let result = last_visible_user_message(&msgs);

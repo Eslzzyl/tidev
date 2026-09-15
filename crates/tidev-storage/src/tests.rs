@@ -4,6 +4,8 @@ use tempfile::TempDir;
 
 type RawMessageFields = (Vec<u8>, Option<Vec<u8>>, Vec<u8>, Vec<u8>, Vec<u8>);
 
+const TEST_SYSTEM_PROMPT: &str = "You are tidev, a helpful assistant.";
+
 fn test_store() -> (SessionStore, TempDir) {
     let tmp = TempDir::new().unwrap();
     let db = Database::open(tmp.path().join("test.db")).unwrap();
@@ -22,6 +24,7 @@ fn create_test_session(store: &SessionStore, workspace: &str, title: &str) -> Uu
             "deepseek-v4-flash",
             "DeepSeek-V4-Flash",
             title,
+            TEST_SYSTEM_PROMPT,
             None,
             None,
         )
@@ -62,7 +65,6 @@ fn context_state_round_trip() {
             None,
             None,
             None,
-            None,
         )
         .unwrap();
 
@@ -88,6 +90,7 @@ fn parent_child_session_relationship() {
             "deepseek-v4-flash",
             "DeepSeek-V4-Flash",
             "Child",
+            TEST_SYSTEM_PROMPT,
             Some(parent),
             None,
         )
@@ -111,6 +114,7 @@ fn child_sessions_excluded_from_listing() {
             "deepseek-v4-flash",
             "DeepSeek-V4-Flash",
             "Child",
+            TEST_SYSTEM_PROMPT,
             Some(parent),
             None,
         )
@@ -151,6 +155,7 @@ fn session_id_prefix_lookup_returns_matching_sessions() {
             "deepseek-v4-flash",
             "DeepSeek-V4-Flash",
             "First",
+            TEST_SYSTEM_PROMPT,
             None,
             None,
         )
@@ -164,6 +169,7 @@ fn session_id_prefix_lookup_returns_matching_sessions() {
             "deepseek-v4-flash",
             "DeepSeek-V4-Flash",
             "Second",
+            TEST_SYSTEM_PROMPT,
             None,
             None,
         )
@@ -214,30 +220,12 @@ fn activity_listing_filters_and_paginates_top_level_sessions() {
 }
 
 #[test]
-fn system_prompt_round_trip() {
+fn system_prompt_is_stored_at_creation() {
     let (store, _tmp) = test_store();
     let id = create_test_session(&store, "/workspace", "prompt test");
 
     let loaded = store.load_session(id).unwrap().unwrap();
-    assert_eq!(loaded.system_prompt, "");
-
-    store
-        .update_session(
-            id,
-            None,
-            None,
-            None,
-            None,
-            Some("You are a helpful AI."),
-            None,
-            None,
-            None,
-            None,
-        )
-        .unwrap();
-
-    let loaded = store.load_session(id).unwrap().unwrap();
-    assert_eq!(loaded.system_prompt, "You are a helpful AI.");
+    assert_eq!(loaded.system_prompt, TEST_SYSTEM_PROMPT);
 }
 
 #[test]
@@ -803,7 +791,6 @@ fn session_update_title_and_status() {
             None,
             None,
             None,
-            None,
         )
         .unwrap();
 
@@ -878,6 +865,7 @@ fn usage_insight_aggregates_are_scoped_and_bounded() {
             "gpt-5",
             "GPT-5",
             "secondary model",
+            TEST_SYSTEM_PROMPT,
             None,
             None,
         )
@@ -1221,9 +1209,24 @@ fn empty_tool_output_stored_as_empty_blob() {
 #[test]
 fn session_compressed_fields_storage_test() {
     let (store, tmp) = test_store();
-    let sid = create_test_session(&store, "/workspace", "session compress test");
+    let large_prompt = "You are an AI pair programmer following AGENTS.md rules. ".repeat(200);
+    let sid = Uuid::new_v4();
+    store
+        .create_session(
+            sid,
+            "/workspace",
+            "deepseek",
+            "DeepSeek",
+            "deepseek-v4-flash",
+            "DeepSeek-V4-Flash",
+            "session compress test",
+            &large_prompt,
+            None,
+            None,
+        )
+        .unwrap();
 
-    // 1. Initial state: both context_summary and system_prompt should be empty 0-length blobs in SQLite
+    // 1. Initial state: context_summary is empty and system_prompt is compressed in SQLite.
     let (raw_summary, raw_prompt): (Vec<u8>, Vec<u8>) = store
         .read(|conn| {
             Ok(conn.query_row(
@@ -1238,16 +1241,15 @@ fn session_compressed_fields_storage_test() {
         "initial context_summary should be 0-length blob"
     );
     assert!(
-        raw_prompt.is_empty(),
-        "initial system_prompt should be 0-length blob"
+        !raw_prompt.is_empty(),
+        "initial system_prompt should be stored"
     );
 
     let loaded = store.load_session(sid).unwrap().unwrap();
     assert_eq!(loaded.context_summary, None);
-    assert_eq!(loaded.system_prompt, "");
+    assert_eq!(loaded.system_prompt, large_prompt);
 
-    // 2. Update with large repetitive content
-    let large_prompt = "You are an AI pair programmer following AGENTS.md rules. ".repeat(200);
+    // 2. Update the context state.
     let summary_text = "Context summary: modified 10 files and ran cargo test. ".repeat(50);
 
     store
@@ -1257,7 +1259,6 @@ fn session_compressed_fields_storage_test() {
             None,
             Some(&summary_text),
             Some(15),
-            Some(&large_prompt),
             None,
             None,
             None,

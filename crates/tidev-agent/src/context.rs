@@ -110,6 +110,14 @@ pub trait AgentContext: Send + Sync {
     /// Return the workspace root path.
     fn workspace_root(&self) -> &Path;
 
+    /// Materialize any new protocol state required for the next request.
+    ///
+    /// Implementations must persist that state before returning. Request
+    /// assembly itself then reads only durable messages.
+    async fn prepare_request(&self, _session_id: uuid::Uuid) -> Result<()> {
+        Ok(())
+    }
+
     /// Load all messages for the current session.
     async fn load_messages(&self, session_id: uuid::Uuid) -> Result<Vec<Message>>;
 }

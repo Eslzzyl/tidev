@@ -30,6 +30,7 @@ impl SessionManager {
         model_id: &str,
         model_display_name: &str,
         title: &str,
+        system_prompt: &str,
         parent_session_id: Option<Uuid>,
         snapshot_start_hash: Option<&str>,
     ) -> Result<()> {
@@ -41,6 +42,7 @@ impl SessionManager {
             model_id,
             model_display_name,
             title,
+            system_prompt,
             parent_session_id,
             snapshot_start_hash,
         )
@@ -115,6 +117,37 @@ impl SessionManager {
             .append_messages_with_app_data(session_id, messages, app_data)
     }
 
+    /// Persist protocol messages and their newly applied instruction sources
+    /// as one durable operation.
+    pub fn append_messages_with_app_data_and_instruction_sources(
+        &self,
+        session_id: Uuid,
+        messages: &[tidev_llm::message::Message],
+        app_data: &HashMap<Uuid, tidev_storage::MessageAppData>,
+        instruction_sources: &[String],
+    ) -> Result<()> {
+        self.store
+            .append_messages_with_app_data_and_instruction_sources(
+                session_id,
+                messages,
+                app_data,
+                instruction_sources,
+            )
+    }
+
+    /// Persist the compaction state and the provider-visible summary marker
+    /// in one transaction.
+    pub fn apply_compaction(
+        &self,
+        session_id: Uuid,
+        summary: &str,
+        retained_from: usize,
+        marker: &tidev_llm::message::Message,
+    ) -> Result<()> {
+        self.store
+            .apply_compaction(session_id, summary, retained_from, marker)
+    }
+
     /// Persist compaction state (summary + retained_from).
     pub fn update_context_state(
         &self,
@@ -132,7 +165,6 @@ impl SessionManager {
             None,
             None,
             None,
-            None,
         )
     }
 
@@ -144,35 +176,8 @@ impl SessionManager {
         status: Option<&str>,
     ) -> Result<()> {
         self.store.update_session(
-            session_id, title, status, None, None, None, None, None, None, None,
+            session_id, title, status, None, None, None, None, None, None,
         )
-    }
-
-    /// Persist the system prompt for a session.
-    pub fn update_system_prompt(&self, session_id: Uuid, system_prompt: &str) -> Result<()> {
-        self.store.update_session(
-            session_id,
-            None,
-            None,
-            None,
-            None,
-            Some(system_prompt),
-            None,
-            None,
-            None,
-            None,
-        )
-    }
-
-    /// Update the content of a single message in-place in the store.
-    pub fn update_message_content(
-        &self,
-        session_id: Uuid,
-        message_id: Uuid,
-        content: &str,
-    ) -> Result<()> {
-        self.store
-            .update_message_content(session_id, message_id, content)
     }
 
     /// Update the metadata of a single message in-place in the store.
@@ -218,7 +223,6 @@ impl SessionManager {
     ) -> Result<()> {
         self.store.update_session(
             session_id,
-            None,
             None,
             None,
             None,

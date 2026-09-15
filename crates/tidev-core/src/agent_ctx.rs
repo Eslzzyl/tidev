@@ -58,9 +58,8 @@ use crate::tool_def::to_llm_tool_def;
 /// The catalog is frozen here for the session lifetime (persisted with the
 /// session and never rebuilt), so the bytes stay stable for prompt caching;
 /// the live catalog remains queryable through the `skill` tool's list mode.
-/// Instruction files (AGENTS.md etc.) are injected into user messages via
-/// `<system-reminder>` tags instead (see `inject_instructions`).
-/// Mode reminders are injected into user messages instead (see `inject_mode_reminder`).
+/// Instruction and mode reminders are materialized in user messages before
+/// those messages are persisted.
 pub fn compose_system_prompt(
     workspace_root: &std::path::Path,
     skills: &tidev_tools::SkillCatalog,
@@ -96,6 +95,73 @@ pub fn compose_system_prompt(
     prompt
 }
 
+/// Build the instruction prefix and source list for one newly persisted user
+/// message. Sources already recorded for the session are not repeated.
+pub(crate) fn instruction_reminder_for_new_message(
+    workspace_root: &std::path::Path,
+    config_dir: &std::path::Path,
+    configured_instructions: &[String],
+    recorded_sources: &[String],
+) -> Result<(Option<String>, Vec<String>)> {
+    let sections = tidev_instructions::instruction_sections(
+        workspace_root,
+        config_dir,
+        configured_instructions,
+    )?;
+    let new_sections: Vec<(String, String)> = sections
+        .into_iter()
+        .filter(|(source, _)| !recorded_sources.contains(source))
+        .collect();
+    if new_sections.is_empty() {
+        return Ok((None, Vec::new()));
+    }
+
+    let sources = new_sections
+        .iter()
+        .map(|(source, _)| source.clone())
+        .collect();
+    let sections = new_sections
+        .into_iter()
+        .map(|(source, content)| format!("Instructions from: {source}\n{content}"))
+        .collect::<Vec<_>>();
+    Ok((
+        Some(format!(
+            "<system-reminder>\n{}\n</system-reminder>",
+            sections.join("\n\n")
+        )),
+        sources,
+    ))
+}
+
+pub(crate) fn instruction_loaded_notice(
+    workspace_root: &std::path::Path,
+    sources: &[String],
+) -> Option<Message> {
+    if sources.is_empty() {
+        return None;
+    }
+    let display: Vec<String> = sources
+        .iter()
+        .map(|source| {
+            std::path::Path::new(source)
+                .strip_prefix(workspace_root)
+                .unwrap_or_else(|_| std::path::Path::new(source))
+                .display()
+                .to_string()
+        })
+        .collect();
+    let content = if display.len() == 1 {
+        format!("Loaded instructions from {}", display[0])
+    } else {
+        format!(
+            "Loaded {} instruction files: {}",
+            display.len(),
+            display.join(", ")
+        )
+    };
+    Some(Message::new(MessageRole::System, content))
+}
+
 // ---------------------------------------------------------------------------
 // Tools that are safe to run in parallel.
 // ---------------------------------------------------------------------------
@@ -106,42 +172,6 @@ fn is_read_only(name: &str) -> bool {
         tidev_utils::tool_name::canonical_tool_name(name).unwrap_or(name),
         "read" | "glob" | "grep" | "websearch" | "webfetch" | "mcp_list" | "mcp_search"
     )
-}
-
-/// Restore the generic full-output marker for legacy subagent messages.
-///
-/// Older sessions persisted only the product tool name. The marker is applied
-/// in the product layer before any request is built so those sessions retain
-/// their historical provider input after the LLM layer is product-neutral.
-pub(crate) fn restore_full_tool_output_semantics(messages: &mut [Message]) {
-    for message in messages {
-        if message.role == MessageRole::Tool && message.tool_name.as_deref() == Some("task") {
-            message.metadata.preserve_full_output = true;
-        }
-    }
-}
-
-/// Append the stable history reminder to the synthetic summary message.
-///
-/// The summary message is rebuilt for every provider request, so this does
-/// not mutate or persist any historical protocol message.
-fn inject_history_reminder(messages: &mut [Message], session_id: Uuid) {
-    let Some(summary) = messages.first_mut().filter(|message| {
-        message.role == MessageRole::User
-            && message
-                .content
-                .starts_with("Earlier conversation summary:\n")
-    }) else {
-        return;
-    };
-
-    let reminder = crate::prompts::history_reminder(session_id);
-    if summary.content.ends_with(&reminder) {
-        return;
-    }
-
-    summary.content.push_str("\n\n");
-    summary.content.push_str(&reminder);
 }
 
 fn mark_full_tool_result(tool_call: &ToolCall, result: &mut ToolExecutionResult) {
@@ -623,8 +653,6 @@ pub struct CoreContext {
     /// Mode used by the request currently being prepared or executed.
     /// Updated from the latest user message in `load_messages`.
     request_mode: StdRwLock<Mode>,
-    /// Whether user messages receive an injected mode reminder.
-    inject_mode_reminder: bool,
     /// Pre-composed system prompt (session-scoped, immutable after creation).
     system_prompt: String,
     /// Resolved model config for the LLM call.
@@ -651,14 +679,11 @@ pub struct CoreContext {
     config: Arc<StdRwLock<AppConfig>>,
     /// Auth store (shared, hot-reloadable).
     auth: Arc<StdRwLock<AuthStore>>,
-    /// Cached instruction file contents to avoid redundant I/O.
-    /// Key: canonical path, Value: file content.
-    instruction_content_cache: Arc<Mutex<HashMap<String, String>>>,
     /// Config directory path (for instruction file lookup).
     config_dir: PathBuf,
-    /// Instruction sources discovered during tool execution. They are
-    /// persisted immediately, while the replay notification is appended after
-    /// the corresponding tool results to preserve message order.
+    /// Instruction sources discovered during tool execution. They are held
+    /// until the corresponding tool results can be committed with the source
+    /// ledger in one transaction.
     pending_instruction_sources: Arc<Mutex<Vec<String>>>,
     /// Durable draft recorder for this context's streamed assistant messages.
     stream_recorder: StreamRecorder,
@@ -788,7 +813,6 @@ impl CoreContext {
         approval_broker: ApprovalBroker,
         session_id: Uuid,
         mode: Mode,
-        inject_mode_reminder: bool,
         system_prompt: String,
         model_config: LlmProviderConfig,
         cancel: CancellationToken,
@@ -814,7 +838,6 @@ impl CoreContext {
             session_id,
             mode,
             request_mode: StdRwLock::new(mode),
-            inject_mode_reminder,
             system_prompt,
             model_config,
             cancel,
@@ -826,7 +849,6 @@ impl CoreContext {
             session_start_hash: Arc::new(Mutex::new(session_start_hash)),
             config,
             auth,
-            instruction_content_cache: Arc::new(Mutex::new(HashMap::new())),
             config_dir,
             pending_instruction_sources: Arc::new(Mutex::new(Vec::new())),
             stream_recorder,
@@ -854,7 +876,7 @@ impl CoreContext {
         let user_message_id = messages
             .iter()
             .rev()
-            .find(|message| message.role == MessageRole::User)
+            .find(|message| message.role == MessageRole::User && !message.is_compaction())
             .map(|message| message.id);
         let message = Message::new(MessageRole::Error, &error.message);
         let app_data = MessageAppData {
@@ -867,275 +889,30 @@ impl CoreContext {
             ..Default::default()
         };
 
-        self.buffer
-            .write()
-            .await
-            .append_with_app_data(message.clone(), app_data.clone());
         self.session_manager.append_messages_with_app_data(
             self.session_id,
             std::slice::from_ref(&message),
-            &[(message.id, app_data)].into_iter().collect(),
-        )
-    }
-
-    /// Inject new instruction files into the last user message.
-    ///
-    /// Loads all workspace-root instruction files (AGENTS.md, CLAUDE.md, etc.),
-    /// compares against already-injected sources in the DB, and prepends
-    /// `<system-reminder>` blocks for new sources to the last user message.
-    ///
-    /// Called once per agent loop turn, before `stream_turn`.  After the first
-    /// turn all workspace-root sources are injected, so subsequent turns are
-    /// no-ops (unless new sources are discovered via tool results).
-    pub(crate) async fn inject_instructions_impl(
-        &self,
-        session_id: Uuid,
-        messages: &mut [Message],
-    ) -> Result<Vec<String>> {
-        // 1. Load all instruction sources (with content cache).
-        let instructions = self.config.read().unwrap().instructions.clone();
-        let mut cache = self.instruction_content_cache.lock().await;
-        let (_, all_sources, new_cache) = tidev_instructions::system_prompt_and_sources_with_cache(
-            &self.workspace_root,
-            &self.config_dir,
-            &instructions,
-            &cache,
-        )
-        .unwrap_or_default();
-        *cache = new_cache;
-        drop(cache);
-
-        // 2. Load already-injected sources from DB.
-        let already_injected = self
-            .session_manager
-            .store()
-            .load_instruction_sources(session_id)?;
-
-        if all_sources.is_empty() {
-            return Ok(already_injected);
-        }
-
-        // 3. Find the last user message.
-        let last_user_idx = match messages.iter().rposition(|m| m.role == MessageRole::User) {
-            Some(idx) => idx,
-            None => return Ok(already_injected),
-        };
-
-        // 4. Find new sources (paths from system_prompt_and_sources_with_cache
-        //    are already canonical — see system_paths + canonicalize_display).
-        let new_sources: Vec<&String> = all_sources
-            .iter()
-            .filter(|s| !already_injected.contains(s))
-            .collect();
-
-        if new_sources.is_empty() {
-            return Ok(already_injected);
-        }
-
-        // 5. Build <system-reminder> block from new sources.
-        let cache = self.instruction_content_cache.lock().await;
-        let mut sections: Vec<String> = Vec::new();
-        for source in &new_sources {
-            if let Some(content) = cache.get(*source) {
-                sections.push(format!("Instructions from: {}\n{}", source, content));
-            }
-        }
-        drop(cache);
-
-        if sections.is_empty() {
-            return Ok(already_injected);
-        }
-
-        let injection = format!(
-            "<system-reminder>\n{}\n</system-reminder>",
-            sections.join("\n\n"),
-        );
-
-        // 6. Safety check: avoid double injection if <system-reminder> already
-        //    present (should never happen given DB tracking, but be defensive).
-        if messages[last_user_idx]
-            .content
-            .contains("<system-reminder>")
-        {
-            return Ok(already_injected);
-        }
-
-        // 7. Prepend injection to the last user message (same pattern as
-        //    inject_mode_reminder in loop_.rs).
-        let new_content = format!("{}\n\n{}", injection, messages[last_user_idx].content);
-        let msg_id = messages[last_user_idx].id;
-        messages[last_user_idx].content = new_content.clone();
-
-        // Persist to store + buffer via the existing dual-write method.
-        self.update_message_content(session_id, msg_id, new_content)
-            .await?;
-
-        // 8. Persist new sources to DB so subsequent turns don't re-inject.
-        // Merge with already-injected sources (save_instruction_sources replaces ALL).
-        let mut updated = already_injected;
-        updated.extend(new_sources.iter().map(|s| (*s).clone()));
-        self.session_manager
-            .store()
-            .save_instruction_sources(session_id, &updated)?;
-
-        // 9. Notify frontend.
-        let string_sources: Vec<String> = new_sources.iter().map(|s| (*s).clone()).collect();
-        self.emit(BackendEvent::InstructionsLoaded {
-            session_id,
-            sources: string_sources,
-        });
-
-        log::info!(
-            "injected {} new instruction file(s) into user message {}",
-            new_sources.len(),
-            msg_id,
-        );
-
-        // 10. Persist "Loaded instructions from" notification for
-        //     cross-session replay (only the first time each source
-        //     is injected).
-        let display_paths: Vec<String> = new_sources
-            .iter()
-            .map(|s| {
-                let path = std::path::Path::new(s);
-                path.strip_prefix(&self.workspace_root)
-                    .unwrap_or(path)
-                    .display()
-                    .to_string()
-            })
-            .collect();
-        let display_content = if display_paths.len() == 1 {
-            format!("Loaded instructions from {}", display_paths[0])
-        } else {
-            format!(
-                "Loaded {} instruction files: {}",
-                display_paths.len(),
-                display_paths.join(", ")
-            )
-        };
-        self.session_manager.append_message(
-            session_id,
-            &Message::new(MessageRole::System, &display_content),
+            &[(message.id, app_data.clone())].into_iter().collect(),
         )?;
-
-        Ok(updated)
-    }
-
-    /// Prepare and persist the mode reminder for the last user message in the
-    /// current request view.
-    ///
-    /// The reminder is added exactly once to each user message. Persisting it
-    /// before the provider request makes the message bytes stable when the
-    /// message becomes history in a later request.
-    async fn inject_mode_reminder_impl(
-        &self,
-        messages: &mut [Message],
-        current_mode: Mode,
-    ) -> Result<()> {
-        let last_user_idx = match messages.iter().rposition(|m| m.role == MessageRole::User) {
-            Some(idx) => idx,
-            None => return Ok(()),
-        };
-
-        let message_id = messages[last_user_idx].id;
-        let buffer = self.buffer.read().await;
-        let prev_mode = buffer
-            .load()
-            .iter()
-            .rev()
-            .filter(|m| m.role == MessageRole::User)
-            .skip_while(|m| m.id != message_id)
-            .skip(1)
-            .find_map(|m| {
-                buffer
-                    .app_data(m.id)
-                    .and_then(|data| data.mode.as_deref()?.parse::<Mode>().ok())
-            });
-        drop(buffer);
-        let text = match prev_mode {
-            None => crate::prompts::mode_reminder(current_mode),
-            Some(previous) if previous != current_mode => match current_mode {
-                Mode::Plan => crate::prompts::plan_switch_reminder(),
-                Mode::Build => crate::prompts::build_switch_reminder(),
-            },
-            Some(_) => crate::prompts::mode_reminder(current_mode),
-        };
-
-        // This guard is useful when a caller reuses a prepared request view.
-        // It also preserves legacy mode reminders that used a longer text.
-        if messages[last_user_idx].content.starts_with(&text)
-            || Self::has_mode_reminder_prefix(&messages[last_user_idx].content)
-        {
-            return Ok(());
-        }
-
-        let new_content = format!("{text}\n\n{}", messages[last_user_idx].content);
-        messages[last_user_idx].content = new_content.clone();
-        self.update_message_content(self.session_id, message_id, new_content)
-            .await?;
-
-        log::debug!(
-            "persisted mode reminder for user message {} (mode={:?}, previous_mode={:?})",
-            message_id,
-            current_mode,
-            prev_mode,
-        );
+        self.buffer
+            .write()
+            .await
+            .append_with_app_data(message, app_data.clone());
         Ok(())
     }
 
-    /// Return whether a user message already starts with a mode reminder.
-    ///
-    /// The prefix check intentionally accepts the older, more verbose mode
-    /// reminder format so loading an existing session does not rewrite bytes
-    /// that may already have been sent to a provider.
-    fn has_mode_reminder_prefix(content: &str) -> bool {
-        let Some(end) = content.find("</system-reminder>") else {
-            return false;
-        };
-        let prefix = &content[..end];
-        prefix.contains("You are in Plan mode")
-            || prefix.contains("You are in Build mode")
-            || prefix.contains("switched to Plan mode")
-            || prefix.contains("switched to Build mode")
-    }
-
-    /// Update the content of an existing message in both the buffer and store.
-    async fn update_message_content(
-        &self,
-        session_id: Uuid,
-        message_id: Uuid,
-        content: String,
-    ) -> Result<()> {
-        {
-            let mut buf = self.buffer.write().await;
-            buf.update_content(message_id, content.clone());
-        }
-        self.session_manager
-            .update_message_content(session_id, message_id, &content)?;
-        Ok(())
-    }
-
-    /// Move instruction sources collected by tools into persistent session
-    /// state while deferring their replay notice until tool results are saved.
+    /// Stage newly discovered instruction sources until their tool results are
+    /// persisted.
     async fn collect_instruction_sources(&self, session_id: Uuid) -> Result<()> {
         let sources = self.tool_registry.take_instruction_sources(session_id);
         if sources.is_empty() {
             return Ok(());
         }
 
-        self.emit(BackendEvent::InstructionsLoaded {
-            session_id,
-            sources: sources.clone(),
-        });
-
         let already_injected = self
             .session_manager
             .store()
             .load_instruction_sources(session_id)?;
-        self.session_manager
-            .store()
-            .append_instruction_sources(session_id, &sources)?;
-
         let mut unique = sources;
         unique.sort();
         unique.dedup();
@@ -1163,42 +940,6 @@ impl CoreContext {
             mark_full_tool_result(tool_call, result);
         }
         Ok(order_tool_results(tool_calls, results))
-    }
-
-    /// Append the replay notice after the tool result messages have been
-    /// persisted. This matches the previous loop-level ordering.
-    async fn append_pending_instruction_message(&self, session_id: Uuid) -> Result<()> {
-        let sources = {
-            let mut pending = self.pending_instruction_sources.lock().await;
-            std::mem::take(&mut *pending)
-        };
-        if sources.is_empty() {
-            return Ok(());
-        }
-
-        let display: Vec<String> = sources
-            .iter()
-            .map(|source| {
-                std::path::Path::new(source)
-                    .strip_prefix(&self.workspace_root)
-                    .unwrap_or(std::path::Path::new(source))
-                    .display()
-                    .to_string()
-            })
-            .collect();
-        let content = if display.len() == 1 {
-            format!("Loaded instructions from {}", display[0])
-        } else {
-            format!(
-                "Loaded {} instruction files: {}",
-                display.len(),
-                display.join(", ")
-            )
-        };
-        let message = Message::new(MessageRole::System, &content);
-        self.buffer.write().await.append(message.clone());
-        self.session_manager.append_message(session_id, &message)?;
-        Ok(())
     }
 
     async fn request_tool_approval(
@@ -1667,33 +1408,59 @@ impl AgentContext for CoreContext {
             .filter(|message| Some(message.id) != completed_stream_message_id)
             .cloned()
             .collect();
+        let instruction_sources = if has_tool_results {
+            let mut pending = self.pending_instruction_sources.lock().await;
+            std::mem::take(&mut *pending)
+        } else {
+            Vec::new()
+        };
+        let mut persisted_messages = new_messages.clone();
+        if let Some(notice) = instruction_loaded_notice(&self.workspace_root, &instruction_sources)
+        {
+            persisted_messages.push(notice);
+        }
+        if !persisted_messages.is_empty()
+            && let Err(error) = self
+                .session_manager
+                .append_messages_with_app_data_and_instruction_sources(
+                    session_id,
+                    &persisted_messages,
+                    &app_data,
+                    &instruction_sources,
+                )
+        {
+            if !instruction_sources.is_empty() {
+                self.pending_instruction_sources
+                    .lock()
+                    .await
+                    .extend(instruction_sources);
+            }
+            return Err(error);
+        }
         {
             let mut buf = self.buffer.write().await;
-            for msg in &new_messages {
+            for msg in &persisted_messages {
                 let data = app_data.get(&msg.id).cloned().unwrap_or_default();
                 buf.append_with_app_data(msg.clone(), data);
             }
         }
-        if !new_messages.is_empty() {
-            self.session_manager.append_messages_with_app_data(
+        if !instruction_sources.is_empty() {
+            self.emit(BackendEvent::InstructionsLoaded {
                 session_id,
-                &new_messages,
-                &app_data,
-            )?;
-        }
-        if has_tool_results {
-            self.append_pending_instruction_message(session_id).await?;
+                sources: instruction_sources,
+            });
         }
         Ok(())
     }
 
-    async fn load_messages(&self, session_id: Uuid) -> Result<Vec<Message>> {
-        let mut compaction_messages = {
-            let buf = self.buffer.read().await;
-            buf.protocol().load().to_vec()
-        };
-        restore_full_tool_output_semantics(&mut compaction_messages);
-
+    async fn prepare_request(&self, session_id: Uuid) -> Result<()> {
+        if session_id != self.session_id {
+            anyhow::bail!(
+                "agent context is bound to session {}, got {}",
+                self.session_id,
+                session_id
+            );
+        }
         let tools: Vec<tidev_llm::ToolDefinition> = self
             .tool_registry
             .definitions_for_model(&self.active_model)
@@ -1703,99 +1470,116 @@ impl AgentContext for CoreContext {
         let mut compact_model = self.model_config.clone();
         compact_model.system_prompt = Some(self.system_prompt.clone());
 
-        let (prior_summary, prior_retained_from) = {
+        let mut buffer = self.buffer.write().await;
+        let (should_compact, prior_summary, prior_retained_from) = {
             let cm = self.context_manager.lock().await;
-            (cm.summary.clone(), cm.retained_from)
-        };
-        let should_compact = {
-            let buf = self.buffer.read().await;
-            let cm = self.context_manager.lock().await;
-            cm.needs_compaction(
-                buf.protocol(),
-                compact_model.context_window,
-                compact_model.max_output_tokens,
+            (
+                cm.needs_compaction(
+                    buffer.protocol(),
+                    compact_model.context_window,
+                    compact_model.max_output_tokens,
+                ),
+                cm.summary.clone(),
+                cm.retained_from,
             )
         };
-        if should_compact {
-            self.emit(BackendEvent::ContextCompactionStarted {
-                session_id: self.session_id,
-                manual: false,
-                model_id: Some(self.active_model.model_id.clone()),
-            });
+        if !should_compact {
+            return Ok(());
         }
-        let prepared = {
-            let buf = self.buffer.read().await;
-            let mut cm = self.context_manager.lock().await;
-            cm.prepare_request_messages(
+
+        self.emit(BackendEvent::ContextCompactionStarted {
+            session_id: self.session_id,
+            manual: false,
+            model_id: Some(self.active_model.model_id.clone()),
+        });
+
+        let compaction_messages = buffer.protocol().load().to_vec();
+        let compaction_result = {
+            let cm = self.context_manager.lock().await;
+            cm.compact(
                 &self.llm,
                 &compact_model,
                 &tools,
-                buf.protocol(),
-                Some(&compaction_messages),
+                &compaction_messages,
                 session_id,
                 None,
             )
-            .await?
+            .await
+        };
+        let result = match compaction_result {
+            Ok(result) => result,
+            Err(error) => {
+                self.emit(BackendEvent::ContextCompacted {
+                    session_id: self.session_id,
+                    compacted: false,
+                    manual: false,
+                    summary: None,
+                    retained_from: 0,
+                    model_id: Some(self.active_model.model_id.clone()),
+                    completed_at: Some(Utc::now()),
+                    error: Some(error.to_string()),
+                });
+                return Err(error);
+            }
         };
 
-        if let Some(result) = prepared.compaction {
-            self.session_manager.update_context_state(
+        let mut marker = Message::compaction(&result.summary);
+        marker.metadata.prior_summary = prior_summary;
+        marker.metadata.prior_retained_from = Some(prior_retained_from);
+        self.session_manager.apply_compaction(
+            self.session_id,
+            &result.summary,
+            result.retained_from,
+            &marker,
+        )?;
+        buffer.append(marker);
+        drop(buffer);
+
+        self.context_manager
+            .lock()
+            .await
+            .apply_compaction(result.summary.clone(), result.retained_from);
+        self.emit(BackendEvent::ContextCompacted {
+            session_id: self.session_id,
+            compacted: true,
+            manual: false,
+            summary: Some(result.summary),
+            retained_from: result.retained_from,
+            model_id: Some(self.active_model.model_id.clone()),
+            completed_at: Some(Utc::now()),
+            error: None,
+        });
+        Ok(())
+    }
+
+    async fn load_messages(&self, session_id: Uuid) -> Result<Vec<Message>> {
+        if session_id != self.session_id {
+            anyhow::bail!(
+                "agent context is bound to session {}, got {}",
                 self.session_id,
-                Some(&result.summary),
-                result.retained_from,
-            )?;
-
-            let mut marker = Message::compaction(&result.summary);
-            marker.metadata.prior_summary = prior_summary;
-            marker.metadata.prior_retained_from = Some(prior_retained_from);
-            self.buffer.write().await.append(marker.clone());
-            self.session_manager
-                .append_message(self.session_id, &marker)?;
-
-            self.emit(BackendEvent::ContextCompacted {
-                session_id: self.session_id,
-                compacted: true,
-                manual: false,
-                summary: Some(result.summary),
-                retained_from: result.retained_from,
-                model_id: Some(self.active_model.model_id.clone()),
-                completed_at: Some(Utc::now()),
-                error: None,
-            });
+                session_id
+            );
         }
 
-        let mut messages = prepared.messages;
-
-        // Keep the reminder in the synthetic summary message so it is
-        // visible after compaction without adding a persistent protocol row.
-        inject_history_reminder(&mut messages, session_id);
-
-        // Resolve the mode from the message being sent. This preserves the
-        // submission-time mode for queue/steer messages even when the outer
-        // agent loop was started in a different mode.
-        let current_mode = {
-            let buffer = self.buffer.read().await;
-            buffer
-                .load()
-                .iter()
-                .rev()
-                .find(|message| message.role == MessageRole::User)
-                .and_then(|message| {
-                    buffer
-                        .app_data(message.id)
-                        .and_then(|data| data.mode.as_deref()?.parse::<Mode>().ok())
-                })
-                .unwrap_or(self.mode)
-        };
+        // Resolve request metadata from the latest durable user message.
+        let buffer = self.buffer.read().await;
+        let current_mode = buffer
+            .load()
+            .iter()
+            .rev()
+            .find(|message| message.role == MessageRole::User && !message.is_compaction())
+            .and_then(|message| {
+                buffer
+                    .app_data(message.id)
+                    .and_then(|data| data.mode.as_deref()?.parse::<Mode>().ok())
+            })
+            .unwrap_or(self.mode);
         *self.request_mode.write().unwrap() = current_mode;
 
-        self.inject_instructions_impl(session_id, &mut messages)
-            .await?;
-        if self.inject_mode_reminder {
-            self.inject_mode_reminder_impl(&mut messages, current_mode)
-                .await?;
-        }
-        restore_full_tool_output_semantics(&mut messages);
+        let messages = {
+            let cm = self.context_manager.lock().await;
+            cm.build_request_messages(buffer.protocol())
+        };
         Ok(messages)
     }
 }
@@ -1937,9 +1721,31 @@ async fn execute_task_tool(
     let model_tools = spawner.tool_registry.definitions_for_model(&child_model);
     let sub_tools = filter_subagent_tools(&model_tools, agent_type, spawner.mode)?;
 
-    // 5. Create child session.
-    let child_session_id = match config.child_session_id {
-        Some(id) => id,
+    // 5. Create or restore the child session. The assigned task and any
+    // workspace instructions are stored before the child loop can build its
+    // first request. A resumed child only reads its existing durable history.
+    let (child_session_id, child_buffer) = match config.child_session_id {
+        Some(child_session_id) => {
+            let session = spawner
+                .session_manager
+                .load_session(child_session_id)?
+                .ok_or_else(|| anyhow::anyhow!("child session {child_session_id} not found"))?;
+            if session.system_prompt != agent_def.system_prompt {
+                anyhow::bail!(
+                    "child session {child_session_id} has a different persisted system prompt"
+                );
+            }
+            let messages = spawner
+                .session_manager
+                .load_session_messages(child_session_id)
+                .context("failed to load child session messages")?;
+            (
+                child_session_id,
+                Arc::new(RwLock::new(CoreMessageBuffer::from_session_messages(
+                    messages,
+                ))),
+            )
+        }
         None => {
             let child_session_id = Uuid::new_v4();
             spawner
@@ -1952,22 +1758,63 @@ async fn execute_task_tool(
                     &child_model.model_id,
                     &child_model.display_name,
                     &format!("subagent:{:?} {}", agent_type, description),
+                    &agent_def.system_prompt,
                     Some(config.parent_session_id),
                     None,
                 )
                 .context("failed to create child session")?;
-            child_session_id
+
+            let configured_instructions = spawner.config.read().unwrap().instructions.clone();
+            let (instruction_reminder, instruction_sources) = instruction_reminder_for_new_message(
+                &spawner.workspace_root,
+                &spawner.config_dir,
+                &configured_instructions,
+                &[],
+            )?;
+            let content = match instruction_reminder {
+                Some(reminder) => format!("{reminder}\n\n{prompt}"),
+                None => prompt,
+            };
+            let user_msg = Message::new(MessageRole::User, content);
+            let mut messages = vec![user_msg.clone()];
+            if let Some(notice) =
+                instruction_loaded_notice(&spawner.workspace_root, &instruction_sources)
+            {
+                messages.push(notice);
+            }
+            let app_data = HashMap::from([(user_msg.id, MessageAppData::default())]);
+            spawner
+                .session_manager
+                .append_messages_with_app_data_and_instruction_sources(
+                    child_session_id,
+                    &messages,
+                    &app_data,
+                    &instruction_sources,
+                )
+                .context("failed to seed child session")?;
+            if !instruction_sources.is_empty() {
+                let _ = spawner
+                    .event_bus
+                    .send_backend(BackendEvent::InstructionsLoaded {
+                        session_id: child_session_id,
+                        sources: instruction_sources,
+                    });
+            }
+            let session_messages = messages
+                .into_iter()
+                .map(|message| {
+                    let data = app_data.get(&message.id).cloned().unwrap_or_default();
+                    crate::SessionMessage::new(message, data)
+                })
+                .collect();
+            (
+                child_session_id,
+                Arc::new(RwLock::new(CoreMessageBuffer::from_session_messages(
+                    session_messages,
+                ))),
+            )
         }
     };
-
-    // 5. Create child buffer + seed with the user prompt.
-    let child_buffer = Arc::new(RwLock::new(CoreMessageBuffer::empty()));
-    let user_msg = Message::new(tidev_llm::message::MessageRole::User, prompt);
-    child_buffer.write().await.append(user_msg.clone());
-    spawner
-        .session_manager
-        .append_message(child_session_id, &user_msg)
-        .context("failed to seed child session")?;
 
     // 6. Emit SubagentStatus that the child has started (parent session).
     let _ = spawner
@@ -2033,7 +1880,6 @@ async fn execute_task_tool(
         ApprovalBroker::new(tokio::sync::mpsc::unbounded_channel().0),
         child_session_id,
         spawner.mode,
-        false,
         agent_def.system_prompt.clone(),
         child_model_config,
         config.cancel_token.clone(),
@@ -2209,44 +2055,6 @@ mod child_session_app_data_tests {
 }
 
 #[cfg(test)]
-mod history_reminder_tests {
-    use super::*;
-
-    #[test]
-    fn reminder_is_added_only_to_the_synthetic_summary() {
-        let session_id = Uuid::parse_str("a1b2c3d4-e5f6-4789-abcd-0123456789ab").unwrap();
-        let mut messages = vec![
-            Message::new(MessageRole::User, "Earlier conversation summary:\nsummary"),
-            Message::new(MessageRole::User, "current request"),
-        ];
-
-        inject_history_reminder(&mut messages, session_id);
-        let first_result = messages[0].content.clone();
-        inject_history_reminder(&mut messages, session_id);
-
-        assert_eq!(messages[0].content, first_result);
-        assert!(messages[0].content.contains(
-            "You can use the `session-history` skill and inspect session `a1b2c3d4e5f6`"
-        ));
-        assert_eq!(messages[1].content, "current request");
-        assert_eq!(messages.len(), 2);
-    }
-
-    #[test]
-    fn reminder_is_skipped_without_a_summary_message() {
-        let session_id = Uuid::new_v4();
-        let original = Message::new(MessageRole::User, "current request");
-        let mut messages = vec![original.clone()];
-
-        inject_history_reminder(&mut messages, session_id);
-
-        assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0].id, original.id);
-        assert_eq!(messages[0].content, original.content);
-    }
-}
-
-#[cfg(test)]
 mod full_tool_output_semantics_tests {
     use super::*;
 
@@ -2257,19 +2065,6 @@ mod full_tool_output_semantics_tests {
             arguments: "{}".to_string(),
             thought_signature: None,
         }
-    }
-
-    #[test]
-    fn legacy_task_messages_restore_full_output_marker() {
-        let mut message = Message::tool_result(
-            "call-task",
-            "task",
-            ToolExecutionResult::new("complete output"),
-        );
-
-        restore_full_tool_output_semantics(std::slice::from_mut(&mut message));
-
-        assert!(message.metadata.preserve_full_output);
     }
 
     #[test]

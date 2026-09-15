@@ -459,7 +459,9 @@ impl App {
                 } else {
                     ctx.messages
                         .iter()
-                        .rposition(|message| message.role == MessageRole::User)
+                        .rposition(|message| {
+                            message.role == MessageRole::User && !message.is_compaction()
+                        })
                         .map(|user_idx| user_idx + 1)
                         .unwrap_or(ctx.messages.len())
                 };

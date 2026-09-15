@@ -2,10 +2,9 @@
 //!
 //! This module provides:
 //!
-//! - [`ContextManager`]: holds compaction state (summary, retained_from) and
-//!   performs compaction by injecting a user message and calling the LLM.
-//! - [`build_request_messages`]: builds the message list sent to the LLM,
-//!   skipping already-compacted messages and injecting the summary.
+//! - [`ContextManager`]: holds compaction state and performs compaction.
+//! - [`build_request_messages`]: selects persisted protocol messages for the
+//!   next provider request.
 
 use anyhow::Result;
 use tidev_llm::message::{Message, MessageRole};
@@ -35,14 +34,6 @@ pub struct CompactionResult {
     pub retained_from: usize,
 }
 
-/// Result of preparing the next protocol request.
-pub struct ContextPreparation {
-    /// Protocol messages ready for the provider request.
-    pub messages: Vec<Message>,
-    /// A compaction performed while preparing the request, if any.
-    pub compaction: Option<CompactionResult>,
-}
-
 // ---------------------------------------------------------------------------
 // ContextManager
 // ---------------------------------------------------------------------------
@@ -50,9 +41,8 @@ pub struct ContextPreparation {
 /// Holds compaction state and performs context compression.
 ///
 /// The manager tracks which messages have been compacted (via `retained_from`)
-/// and the current summary. The message view seen by the LLM is constructed
-/// by [`build_request_messages`], which skips messages before `retained_from`
-/// and prepends the summary (if any).
+/// and the current summary. The summary itself is persisted as a protocol
+/// message by the host before a later request can use it.
 #[derive(Clone, Debug)]
 pub struct ContextManager {
     pub summary: Option<String>,
@@ -188,12 +178,9 @@ impl ContextManager {
 
     /// Perform context compaction.
     ///
-    /// Builds the request message list (reusing [`build_request_messages`]
-    /// for prefix-cache compatibility), appends a summary instruction as a
-    /// User message, and calls the LLM. The returned
-    /// [`CompactionResult`] must be applied by the caller: update
-    /// `self.summary` / `self.retained_from`, persist to the DB, and
-    /// update the message buffer.
+    /// Reads the persisted request view, appends the compaction instruction,
+    /// and calls the LLM. The host persists the returned summary as a protocol
+    /// message before a later provider request can use it.
     pub async fn compact(
         &self,
         llm: &LlmClient,
@@ -203,15 +190,8 @@ impl ContextManager {
         session_id: Uuid,
         event_tx: Option<crate::AgentEventSender>,
     ) -> Result<CompactionResult> {
-        // 1. Build prefix (same logic as build_request_messages -> prefix cache hit).
-        let mut compact_msgs = Vec::new();
-        if let Some(summary) = &self.summary {
-            compact_msgs.push(Message::new(
-                MessageRole::User,
-                format!("Earlier conversation summary:\n{summary}"),
-            ));
-        }
-        compact_msgs.extend(self.build_request_messages_raw(messages));
+        // 1. Select the persisted prefix used by the normal request path.
+        let mut compact_msgs = self.build_request_messages_raw(messages);
 
         // 2. Append summary instruction.
         compact_msgs.push(Message::new(MessageRole::User, SUMMARY_INSTRUCTION));
@@ -243,52 +223,15 @@ impl ContextManager {
         })
     }
 
-    /// Internal: build request messages from a raw message slice (without summary injection).
+    /// Select persisted protocol messages from a raw message slice.
     fn build_request_messages_raw(&self, messages: &[Message]) -> Vec<Message> {
-        let mut out = Vec::new();
-        let mut pending_tool_calls: Vec<(String, String)> = Vec::new();
-        for msg in messages.iter().skip(self.retained_from) {
-            if msg.streaming {
-                continue;
-            }
-            match msg.role {
-                MessageRole::System | MessageRole::Error => continue,
-                MessageRole::User => {
-                    Self::drain_pending_tool_calls(&mut out, &mut pending_tool_calls);
-                    out.push(msg.clone());
-                }
-                MessageRole::Assistant => {
-                    let mut sanitized = msg.clone();
-                    for tc in &mut sanitized.tool_calls {
-                        if serde_json::from_str::<serde_json::Value>(&tc.arguments).is_err() {
-                            tc.arguments = "{}".to_string();
-                        }
-                    }
-                    if sanitized.content.is_empty() && sanitized.tool_calls.is_empty() {
-                        continue;
-                    }
-                    pending_tool_calls.extend(
-                        sanitized
-                            .tool_calls
-                            .iter()
-                            .map(|tc| (tc.id.clone(), tc.name.clone())),
-                    );
-                    out.push(sanitized);
-                }
-                MessageRole::Tool => {
-                    if let Some(tool_call_id) = &msg.tool_call_id
-                        && let Some(index) = pending_tool_calls
-                            .iter()
-                            .position(|(id, _)| id == tool_call_id)
-                    {
-                        pending_tool_calls.remove(index);
-                        out.push(msg.clone());
-                    }
-                }
-            }
-        }
-        Self::drain_pending_tool_calls(&mut out, &mut pending_tool_calls);
-        out
+        messages
+            .iter()
+            .skip(self.retained_from)
+            .filter(|message| !message.streaming)
+            .filter(|message| !matches!(message.role, MessageRole::System | MessageRole::Error))
+            .cloned()
+            .collect()
     }
 
     /// Apply a compaction result to this manager's state.
@@ -297,39 +240,6 @@ impl ContextManager {
         self.retained_from = retained_from;
     }
 
-    /// Compact when necessary and build the next provider request view.
-    ///
-    /// `compaction_messages` allows a host to apply protocol-only compatibility
-    /// normalization before the generic compaction call. The host must keep the
-    /// same message order and bytes used by its normal request pipeline.
-    #[allow(clippy::too_many_arguments)]
-    pub async fn prepare_request_messages(
-        &mut self,
-        llm: &LlmClient,
-        model: &LlmProviderConfig,
-        tools: &[ToolDefinition],
-        buffer: &MessageBuffer,
-        compaction_messages: Option<&[Message]>,
-        session_id: Uuid,
-        event_tx: Option<crate::AgentEventSender>,
-    ) -> Result<ContextPreparation> {
-        let mut compaction = None;
-        if self.needs_compaction(buffer, model.context_window, model.max_output_tokens) {
-            let messages = compaction_messages
-                .map(ToOwned::to_owned)
-                .unwrap_or_else(|| buffer.load().to_vec());
-            let result = self
-                .compact(llm, model, tools, &messages, session_id, event_tx)
-                .await?;
-            self.apply_compaction(result.summary.clone(), result.retained_from);
-            compaction = Some(result);
-        }
-
-        Ok(ContextPreparation {
-            messages: self.build_request_messages(buffer),
-            compaction,
-        })
-    }
     async fn compact_non_streaming(
         &self,
         llm: &LlmClient,
@@ -414,48 +324,9 @@ impl ContextManager {
     // Message construction
     // -----------------------------------------------------------------------
 
-    /// Build the message list sent to the LLM for the next turn.
-    ///
-    /// - Skips messages before `retained_from` (they are covered by the summary).
-    /// - Prepends the existing summary (if any) as a User message.
-    /// - Filters out System and Error messages.
-    /// - Validates and sanitizes assistant tool_call arguments.
-    /// - Tracks tool_call / tool_result pairing, injecting synthetic failures
-    ///   for orphaned tool_calls.
+    /// Select the persisted message list sent to the LLM for the next turn.
     pub fn build_request_messages(&self, buffer: &MessageBuffer) -> Vec<Message> {
-        let messages = buffer.load();
-        let mut out = Vec::new();
-
-        // 1. Inject the summary as a User message (if any).
-        if let Some(summary) = &self.summary {
-            out.push(Message::new(
-                MessageRole::User,
-                format!("Earlier conversation summary:\n{summary}"),
-            ));
-        }
-
-        // 2. Append remaining visible messages.
-        out.extend(self.build_request_messages_raw(messages));
-        out
-    }
-
-    /// Inject synthetic failure tool results for orphaned tool_calls.
-    fn drain_pending_tool_calls(out: &mut Vec<Message>, pending: &mut Vec<(String, String)>) {
-        if pending.is_empty() {
-            return;
-        }
-        let orphans = std::mem::take(pending);
-        for (tool_call_id, tool_name) in orphans {
-            out.push(Message::tool_result(
-                &tool_call_id,
-                &tool_name,
-                tidev_llm::message::ToolExecutionResult::new(
-                    "[Tool result was not captured before context compaction. \
-                     The tool may need to be re-run if still relevant.]"
-                        .to_string(),
-                ),
-            ));
-        }
+        self.build_request_messages_raw(buffer.load())
     }
 }
 
@@ -522,17 +393,6 @@ mod tests {
     }
 
     #[test]
-    fn build_request_messages_injects_summary() {
-        let cm = ContextManager::from_state(Some("previous summary".into()), 2);
-        let buf = MessageBuffer::new(vec![user_msg("msg1"), user_msg("msg2"), user_msg("msg3")]);
-        let result = cm.build_request_messages(&buf);
-        // First message is the summary injection
-        assert_eq!(result.len(), 2); // summary + msg3 (since retained_from=2)
-        assert_eq!(result[0].role, MessageRole::User);
-        assert!(result[0].content.contains("previous summary"));
-    }
-
-    #[test]
     fn build_request_messages_skips_before_retained_from() {
         let msgs = vec![user_msg("old1"), user_msg("old2"), user_msg("current")];
         let buf = MessageBuffer::new(msgs);
@@ -540,29 +400,6 @@ mod tests {
         let result = cm.build_request_messages(&buf);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].content, "current");
-    }
-
-    #[test]
-    fn build_request_messages_drains_pending_on_user_message() {
-        // If there are pending tool_calls when a User message arrives, they
-        // should be drained first.
-        let tc = ToolCall {
-            id: "call_1".into(),
-            name: "read".into(),
-            arguments: "{}".into(),
-            thought_signature: None,
-        };
-        let msgs = vec![assistant_with_tool_calls(vec![tc]), user_msg("never mind")];
-        let buf = MessageBuffer::new(msgs);
-        let cm = ContextManager::new();
-        let result = cm.build_request_messages(&buf);
-        // Should have: assistant msg, synthetic tool_result, user msg
-        assert_eq!(result.len(), 3);
-        assert_eq!(result[0].role, MessageRole::Assistant);
-        assert_eq!(result[1].role, MessageRole::Tool);
-        assert_eq!(result[1].tool_name.as_deref(), Some("read"));
-        assert!(result[1].content.contains("not captured"));
-        assert_eq!(result[2].role, MessageRole::User);
     }
 
     #[test]
@@ -590,48 +427,6 @@ mod tests {
     }
 
     #[test]
-    fn build_request_messages_skips_orphan_tool_result() {
-        // A tool result without a matching pending tool_call should be dropped.
-        let msgs = vec![
-            tool_result_msg("call_ghost", "read", "should not appear"),
-            user_msg("hi"),
-        ];
-        let buf = MessageBuffer::new(msgs);
-        let cm = ContextManager::new();
-        let result = cm.build_request_messages(&buf);
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].content, "hi");
-    }
-
-    #[test]
-    fn build_request_messages_skips_assistant_with_no_content_and_no_tool_calls() {
-        let empty = Message::new(MessageRole::Assistant, "");
-        let buf = MessageBuffer::new(vec![empty, user_msg("hello")]);
-        let cm = ContextManager::new();
-        let result = cm.build_request_messages(&buf);
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].content, "hello");
-    }
-
-    #[test]
-    fn build_request_messages_sanitizes_invalid_tool_call_arguments() {
-        let tc = ToolCall {
-            id: "bad".into(),
-            name: "read".into(),
-            arguments: "not valid json".into(),
-            thought_signature: None,
-        };
-        let msgs = vec![assistant_with_tool_calls(vec![tc])];
-        let buf = MessageBuffer::new(msgs);
-        let cm = ContextManager::new();
-        let result = cm.build_request_messages(&buf);
-        // assistant msg + synthetic tool_result for orphaned call
-        assert_eq!(result.len(), 2);
-        assert_eq!(result[0].tool_calls[0].arguments, "{}");
-        assert_eq!(result[1].role, MessageRole::Tool);
-    }
-
-    #[test]
     fn build_request_messages_preserves_valid_tool_call_arguments() {
         let tc = ToolCall {
             id: "good".into(),
@@ -650,52 +445,8 @@ mod tests {
     }
 
     #[test]
-    fn build_request_messages_drains_pending_at_end() {
-        let tc = ToolCall {
-            id: "orphan".into(),
-            name: "shell".into(),
-            arguments: "{}".into(),
-            thought_signature: None,
-        };
-        let msgs = vec![assistant_with_tool_calls(vec![tc])];
-        let buf = MessageBuffer::new(msgs);
-        let cm = ContextManager::new();
-        let result = cm.build_request_messages(&buf);
-        assert_eq!(result.len(), 2);
-        assert_eq!(result[0].role, MessageRole::Assistant);
-        assert_eq!(result[1].role, MessageRole::Tool);
-        assert_eq!(result[1].tool_name.as_deref(), Some("shell"));
-    }
-
-    #[test]
-    fn build_request_messages_preserves_multiple_orphan_order() {
-        let calls = ["first", "second", "third"]
-            .into_iter()
-            .map(|id| ToolCall {
-                id: id.into(),
-                name: format!("tool-{id}"),
-                arguments: "{}".into(),
-                thought_signature: None,
-            })
-            .collect();
-        let buf = MessageBuffer::new(vec![assistant_with_tool_calls(calls)]);
-        let result = ContextManager::new().build_request_messages(&buf);
-
-        let result_ids: Vec<&str> = result[1..]
-            .iter()
-            .map(|message| message.tool_call_id.as_deref().unwrap())
-            .collect();
-        assert_eq!(result_ids, ["first", "second", "third"]);
-        let result_names: Vec<&str> = result[1..]
-            .iter()
-            .map(|message| message.tool_name.as_deref().unwrap())
-            .collect();
-        assert_eq!(result_names, ["tool-first", "tool-second", "tool-third"]);
-    }
-
-    #[test]
     fn build_request_messages_global_ordering() {
-        // Complex scenario with summary, retained_from, and interleaved calls.
+        // Complex scenario with retained messages and interleaved calls.
         let tc1 = ToolCall {
             id: "c1".into(),
             name: "read".into(),
@@ -709,15 +460,13 @@ mod tests {
             user_msg("second"),
         ];
         let buf = MessageBuffer::new(msgs);
-        let cm = ContextManager::from_state(Some("sum".into()), 0);
+        let cm = ContextManager::new();
         let result = cm.build_request_messages(&buf);
-        assert_eq!(result.len(), 5);
-        // summary injection, user, assistant, tool_result, user
-        assert_eq!(result[0].content, "Earlier conversation summary:\nsum");
-        assert_eq!(result[1].content, "first");
-        assert_eq!(result[2].role, MessageRole::Assistant);
-        assert_eq!(result[3].role, MessageRole::Tool);
-        assert_eq!(result[4].content, "second");
+        assert_eq!(result.len(), 4);
+        assert_eq!(result[0].content, "first");
+        assert_eq!(result[1].role, MessageRole::Assistant);
+        assert_eq!(result[2].role, MessageRole::Tool);
+        assert_eq!(result[3].content, "second");
     }
 
     // ── compaction_budget ─────────────────────────────────────────────────

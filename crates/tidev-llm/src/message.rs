@@ -401,11 +401,16 @@ impl Message {
 
     pub fn compaction_with_manual(summary: impl Into<String>, manual: bool) -> Self {
         let mut message = Self::new(
-            MessageRole::System,
+            MessageRole::User,
             format!("{COMPACTION_MESSAGE_LABEL}\n\n{}", summary.into()),
         );
         message.metadata.compaction_manual = Some(manual);
         message
+    }
+
+    /// Return whether this is a persisted compaction summary marker.
+    pub fn is_compaction(&self) -> bool {
+        self.metadata.compaction_manual.is_some()
     }
 
     /// Create a streaming message (role + content, streaming = true).
@@ -861,9 +866,9 @@ mod tests {
     }
 
     #[test]
-    fn message_compaction_creates_system_message() {
+    fn message_compaction_creates_provider_visible_message() {
         let msg = Message::compaction("summary text");
-        assert_eq!(msg.role, MessageRole::System);
+        assert_eq!(msg.role, MessageRole::User);
         assert!(msg.content.starts_with("Compaction"));
         assert!(msg.content.contains("summary text"));
     }

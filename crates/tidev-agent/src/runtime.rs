@@ -32,19 +32,15 @@ pub trait MessageStore: Send + Sync {
     /// Persist protocol messages in the order supplied by the runtime.
     async fn save_messages(&self, session_id: uuid::Uuid, messages: &[Message]) -> Result<()>;
 
-    /// Persist the generic context-compaction state for one session.
-    ///
-    /// Stores that do not persist context metadata may keep the default no-op
-    /// implementation. Product hosts with undo or session reload support
-    /// should override it.
-    async fn save_context_state(
+    /// Persist the context state and its provider-visible marker as one
+    /// durable operation.
+    async fn apply_compaction(
         &self,
-        _session_id: uuid::Uuid,
-        _summary: Option<&str>,
-        _retained_from: usize,
-    ) -> Result<()> {
-        Ok(())
-    }
+        session_id: uuid::Uuid,
+        summary: &str,
+        retained_from: usize,
+        marker: &Message,
+    ) -> Result<()>;
 }
 
 /// A ready-to-use [`AgentContext`] implementation.
@@ -307,6 +303,59 @@ impl AgentContext for AgentRuntime {
         Ok(())
     }
 
+    async fn prepare_request(&self, session_id: uuid::Uuid) -> Result<()> {
+        self.ensure_session(session_id)?;
+        let messages = {
+            let messages = self
+                .messages
+                .lock()
+                .map_err(|_| anyhow::anyhow!("agent message buffer is poisoned"))?;
+            messages.load().to_vec()
+        };
+        let mut context_manager = self
+            .context_manager
+            .lock()
+            .map_err(|_| anyhow::anyhow!("agent context manager is poisoned"))?
+            .clone();
+        let buffer = MessageBuffer::new(messages.clone());
+        if !context_manager.needs_compaction(
+            &buffer,
+            self.model.context_window,
+            self.model.max_output_tokens,
+        ) {
+            return Ok(());
+        }
+
+        let result = context_manager
+            .compact(
+                &self.llm,
+                &self.model,
+                &self.tools.definitions(),
+                &messages,
+                session_id,
+                None,
+            )
+            .await?;
+        let marker = Message::compaction(&result.summary);
+        self.store
+            .apply_compaction(session_id, &result.summary, result.retained_from, &marker)
+            .await?;
+        {
+            let mut messages = self
+                .messages
+                .lock()
+                .map_err(|_| anyhow::anyhow!("agent message buffer is poisoned"))?;
+            messages.append(marker);
+        }
+        context_manager.apply_compaction(result.summary, result.retained_from);
+        let mut shared_context_manager = self
+            .context_manager
+            .lock()
+            .map_err(|_| anyhow::anyhow!("agent context manager is poisoned"))?;
+        *shared_context_manager = context_manager;
+        Ok(())
+    }
+
     async fn load_messages(&self, session_id: uuid::Uuid) -> Result<Vec<Message>> {
         self.ensure_session(session_id)?;
         let buffer = {
@@ -316,51 +365,14 @@ impl AgentContext for AgentRuntime {
                 .map_err(|_| anyhow::anyhow!("agent message buffer is poisoned"))?;
             MessageBuffer::new(messages.load().to_vec())
         };
-        let mut context_manager = {
+        let context_manager = {
             let context_manager = self
                 .context_manager
                 .lock()
                 .map_err(|_| anyhow::anyhow!("agent context manager is poisoned"))?;
             context_manager.clone()
         };
-        let prepared = context_manager
-            .prepare_request_messages(
-                &self.llm,
-                &self.model,
-                &self.tools.definitions(),
-                &buffer,
-                None,
-                session_id,
-                None,
-            )
-            .await?;
-        {
-            let mut shared_context_manager = self
-                .context_manager
-                .lock()
-                .map_err(|_| anyhow::anyhow!("agent context manager is poisoned"))?;
-            *shared_context_manager = context_manager;
-        }
-
-        if let Some(compaction) = prepared.compaction.as_ref() {
-            self.store
-                .save_context_state(
-                    session_id,
-                    Some(&compaction.summary),
-                    compaction.retained_from,
-                )
-                .await?;
-            let marker = Message::compaction(&compaction.summary);
-            self.store
-                .save_messages(session_id, std::slice::from_ref(&marker))
-                .await?;
-            let mut messages = self
-                .messages
-                .lock()
-                .map_err(|_| anyhow::anyhow!("agent message buffer is poisoned"))?;
-            messages.append(marker);
-        }
-        Ok(prepared.messages)
+        Ok(context_manager.build_request_messages(&buffer))
     }
 }
 
@@ -385,6 +397,17 @@ mod tests {
 
         async fn save_messages(&self, _session_id: uuid::Uuid, messages: &[Message]) -> Result<()> {
             self.saved.lock().unwrap().push(messages.to_vec());
+            Ok(())
+        }
+
+        async fn apply_compaction(
+            &self,
+            _session_id: uuid::Uuid,
+            _summary: &str,
+            _retained_from: usize,
+            marker: &Message,
+        ) -> Result<()> {
+            self.saved.lock().unwrap().push(vec![marker.clone()]);
             Ok(())
         }
     }

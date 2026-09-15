@@ -16,14 +16,15 @@ impl SessionStore {
         model_id: &str,
         model_display_name: &str,
         title: &str,
+        system_prompt: &str,
         parent_session_id: Option<Uuid>,
         snapshot_start_hash: Option<&str>,
     ) -> Result<()> {
         let now = Utc::now().to_rfc3339();
         let conn = self.write_conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO sessions (id, parent_session_id, workspace_root, provider_id, provider_display_name, model_id, model_display_name, title, created_at, updated_at, snapshot_start_hash) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-            params![session_id.to_string(), parent_session_id.map(|id| id.to_string()), workspace_root, provider_id, provider_display_name, model_id, model_display_name, title, now, now, snapshot_start_hash],
+            "INSERT INTO sessions (id, parent_session_id, workspace_root, provider_id, provider_display_name, model_id, model_display_name, title, created_at, updated_at, system_prompt, snapshot_start_hash) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![session_id.to_string(), parent_session_id.map(|id| id.to_string()), workspace_root, provider_id, provider_display_name, model_id, model_display_name, title, now, now, compress_text(system_prompt), snapshot_start_hash],
         )?;
         Ok(())
     }
@@ -842,7 +843,6 @@ impl SessionStore {
         status: Option<&str>,
         context_summary: Option<&str>,
         context_retained_from: Option<usize>,
-        system_prompt: Option<&str>,
         provider_id: Option<&str>,
         provider_display_name: Option<&str>,
         model_id: Option<&str>,
@@ -872,11 +872,6 @@ impl SessionStore {
         if let Some(v) = context_retained_from {
             sets.push(format!("context_retained_from = ?{idx}"));
             params.push(Box::new(v as i64));
-            idx += 1;
-        }
-        if let Some(v) = system_prompt {
-            sets.push(format!("system_prompt = ?{idx}"));
-            params.push(Box::new(compress_text(v)));
             idx += 1;
         }
         if let Some(v) = provider_id {

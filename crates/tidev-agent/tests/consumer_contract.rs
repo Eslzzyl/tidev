@@ -37,6 +37,17 @@ impl MessageStore for RecordingStore {
         self.saves.lock().unwrap().push(messages.to_vec());
         Ok(())
     }
+
+    async fn apply_compaction(
+        &self,
+        session_id: Uuid,
+        _summary: &str,
+        _retained_from: usize,
+        marker: &Message,
+    ) -> Result<()> {
+        self.save_messages(session_id, std::slice::from_ref(marker))
+            .await
+    }
 }
 
 struct EchoTool;
@@ -619,6 +630,7 @@ async fn independent_consumer_sends_compaction_request_through_provider() -> Res
         CancellationToken::new(),
     );
 
+    runtime.prepare_request(session_id).await?;
     let prepared = runtime.load_messages(session_id).await?;
     assert_eq!(prepared.len(), 1);
     assert!(

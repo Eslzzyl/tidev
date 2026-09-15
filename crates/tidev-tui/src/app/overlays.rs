@@ -74,7 +74,10 @@ impl App {
                     .map(|ctx| {
                         ctx.visible_messages()
                             .iter()
-                            .filter(|m| matches!(m.role, tidev_llm::message::MessageRole::User))
+                            .filter(|m| {
+                                matches!(m.role, tidev_llm::message::MessageRole::User)
+                                    && !m.is_compaction()
+                            })
                             .enumerate()
                             .map(|(i, m)| MessagePanelMessage {
                                 message_id: m.id,

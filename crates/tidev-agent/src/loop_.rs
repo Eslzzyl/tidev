@@ -36,16 +36,17 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
             return Ok(());
         }
 
-        // ─── 1. Load messages ────────────────────────────────────────────
+        // ─── 1. Materialize and load messages ────────────────────────────
+        ctx.prepare_request(session_id).await?;
         let messages = ctx.load_messages(session_id).await?;
 
         // ─── 2. Notify frontend that a new turn is starting ───────────────
-        // CoreContext has already performed injection while loading, so the
-        // streaming assistant message is created after any system notices.
+        // New protocol state is durable before the streaming assistant draft
+        // is created, so future requests replay the same message bytes.
         let user_message_id = messages
             .iter()
             .rev()
-            .find(|message| message.role == MessageRole::User)
+            .find(|message| message.role == MessageRole::User && !message.is_compaction())
             .map(|message| message.id);
         ctx.emit_stream_event(AgentEvent::TurnStarting {
             request_id,
@@ -64,7 +65,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
         let thinking_level = messages
             .iter()
             .rev()
-            .find(|m| m.role == MessageRole::User)
+            .find(|message| message.role == MessageRole::User && !message.is_compaction())
             .and_then(|m| m.thinking_level.clone())
             .unwrap_or_else(|| config.thinking_level.clone());
         let turn = match ctx

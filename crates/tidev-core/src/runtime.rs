@@ -214,6 +214,7 @@ struct PendingPrompt {
     content: String,
     attachments: Vec<MessageAttachment>,
     thinking_level: Option<ThinkingLevelType>,
+    instruction_sources: Vec<String>,
 }
 
 /// A frontend-neutral user prompt submission.
@@ -575,6 +576,8 @@ impl Runtime {
     fn create_session_in_workspace(&self, workspace: &Workspace, title: &str) -> Result<Uuid> {
         let session_id = Uuid::new_v4();
         let model = self.active_model.read().unwrap().clone();
+        let system_prompt =
+            crate::agent_ctx::compose_system_prompt(workspace.root(), workspace.skills());
         self.session_manager.create_session(
             session_id,
             &workspace.root().to_string_lossy(),
@@ -583,6 +586,7 @@ impl Runtime {
             &model.model_id,
             &model.display_name,
             title,
+            &system_prompt,
             None,
             None,
         )?;
@@ -610,11 +614,11 @@ impl Runtime {
         session_id: Uuid,
         msg: tidev_llm::message::Message,
     ) -> Result<()> {
+        self.session_manager.append_message(session_id, &msg)?;
         {
             let buf = self.message_buffer(session_id).await;
             buf.write().await.append(msg.clone());
         }
-        self.session_manager.append_message(session_id, &msg)?;
         Ok(())
     }
 
@@ -714,11 +718,11 @@ impl Runtime {
                     .position(|m| m.id == revert_msg_id)
                     .unwrap_or(write_buf.len());
                 let to_remove: Vec<Uuid> = write_buf.load()[pos..].iter().map(|m| m.id).collect();
-                write_buf.truncate(pos);
                 if !to_remove.is_empty() {
                     self.session_manager
                         .delete_messages(session_id, &to_remove)?;
-                };
+                }
+                write_buf.truncate(pos);
                 pos
             };
             self.session_manager
@@ -732,20 +736,20 @@ impl Runtime {
                     });
         }
 
-        // 2. Build the user message. Steering messages carry a
-        //    system-reminder suffix so the model keeps advancing the task
-        //    while adjusting direction.
-        let mut user_msg = Message::new(MessageRole::User, content);
+        // 2. Materialize every provider-visible prefix before the message is
+        //    persisted. Later request assembly only reads these stored bytes.
+        let (materialized_content, instruction_sources) = self
+            .materialize_user_content(
+                session_id,
+                mode,
+                content,
+                delivery == Some(DeliveryMode::Steer),
+            )
+            .await?;
+        let mut user_msg = Message::new(MessageRole::User, materialized_content);
         user_msg.id = message_id;
         user_msg.attachments = attachments;
         user_msg.thinking_level = thinking_level;
-        if delivery == Some(DeliveryMode::Steer) {
-            user_msg.content = format!(
-                "{}\n\n{}",
-                user_msg.content,
-                crate::prompts::steer_reminder()
-            );
-        }
         let user_app_data = MessageAppData {
             mode: Some(mode.as_str().to_string()),
             ..Default::default()
@@ -758,8 +762,14 @@ impl Runtime {
             //     next load_messages() in the loop picks the message up.
             Some(DeliveryMode::Steer) => {
                 let buf = self.message_buffer(session_id).await;
-                self.persist_user_message(session_id, &buf, &user_msg, &user_app_data)
-                    .await?;
+                self.persist_user_message(
+                    session_id,
+                    &buf,
+                    &user_msg,
+                    &user_app_data,
+                    &instruction_sources,
+                )
+                .await?;
                 let _ = self.event_bus(session_id).await.send_backend(
                     BackendEvent::UserMessageCreated {
                         session_id,
@@ -777,6 +787,7 @@ impl Runtime {
                         content: String::new(),
                         attachments: Vec::new(),
                         thinking_level: None,
+                        instruction_sources: Vec::new(),
                     },
                 );
                 Ok(PromptSubmissionReceipt {
@@ -808,6 +819,7 @@ impl Runtime {
                         content: q_content,
                         attachments: q_attachments,
                         thinking_level: q_thinking,
+                        instruction_sources,
                     },
                 );
                 Ok(PromptSubmissionReceipt {
@@ -818,8 +830,14 @@ impl Runtime {
             // 4c. Idle: persist and spawn the loop.
             None => {
                 let buf = self.message_buffer(session_id).await;
-                self.persist_user_message(session_id, &buf, &user_msg, &user_app_data)
-                    .await?;
+                self.persist_user_message(
+                    session_id,
+                    &buf,
+                    &user_msg,
+                    &user_app_data,
+                    &instruction_sources,
+                )
+                .await?;
                 let _ = self.event_bus(session_id).await.send_backend(
                     BackendEvent::UserMessageCreated {
                         session_id,
@@ -878,7 +896,7 @@ impl Runtime {
         }) {
             if prompt.delivery == DeliveryMode::Queue
                 && prompt.mode == submission.mode
-                && prompt.content == submission.content
+                && strip_leading_persisted_reminders(&prompt.content) == submission.content
                 && prompt.attachments == submission.attachments
                 && prompt.thinking_level == submission.thinking_level
             {
@@ -892,6 +910,94 @@ impl Runtime {
         Ok(false)
     }
 
+    async fn previous_submission_mode(&self, session_id: Uuid) -> Option<Mode> {
+        if let Some(mode) = self
+            .pending_prompts
+            .lock()
+            .unwrap()
+            .get(&session_id)
+            .and_then(|prompts| prompts.back())
+            .map(|prompt| prompt.mode)
+        {
+            return Some(mode);
+        }
+
+        let buffer = self.message_buffer(session_id).await;
+        let buffer = buffer.read().await;
+        buffer
+            .load()
+            .iter()
+            .rev()
+            .find(|message| message.role == MessageRole::User && !message.is_compaction())
+            .and_then(|message| {
+                buffer
+                    .app_data(message.id)
+                    .and_then(|data| data.mode.as_deref()?.parse::<Mode>().ok())
+            })
+    }
+
+    async fn materialize_user_content(
+        &self,
+        session_id: Uuid,
+        mode: Mode,
+        content: String,
+        steering: bool,
+    ) -> Result<(String, Vec<String>)> {
+        let session = self
+            .session_manager
+            .load_session(session_id)?
+            .ok_or_else(|| anyhow::anyhow!("session {session_id} not found"))?;
+        let workspace = if session.workspace_root.is_empty() {
+            Arc::clone(&self.default_workspace)
+        } else {
+            self.workspace_for(&session.workspace_root).await?
+        };
+        let mut known_sources = self
+            .session_manager
+            .store()
+            .load_instruction_sources(session_id)?;
+        if let Some(pending) = self.pending_prompts.lock().unwrap().get(&session_id) {
+            for source in pending
+                .iter()
+                .flat_map(|prompt| prompt.instruction_sources.iter())
+            {
+                if !known_sources.contains(source) {
+                    known_sources.push(source.clone());
+                }
+            }
+        }
+
+        let configured_instructions = self.config.read().unwrap().instructions.clone();
+        let (instruction_reminder, instruction_sources) =
+            crate::agent_ctx::instruction_reminder_for_new_message(
+                workspace.root(),
+                &self.paths.config_dir,
+                &configured_instructions,
+                &known_sources,
+            )?;
+        let previous_mode = self.previous_submission_mode(session_id).await;
+        let mode_reminder = match previous_mode {
+            Some(previous) if previous != mode => match mode {
+                Mode::Plan => crate::prompts::plan_switch_reminder(),
+                Mode::Build => crate::prompts::build_switch_reminder(),
+            },
+            _ => crate::prompts::mode_reminder(mode),
+        };
+
+        let mut materialized = content;
+        if steering {
+            materialized.push_str("\n\n");
+            materialized.push_str(&crate::prompts::steer_reminder());
+        }
+        if let Some(reminder) = instruction_reminder {
+            materialized = format!("{reminder}\n\n{materialized}");
+        }
+        Ok((
+            format!("{mode_reminder}\n\n{materialized}"),
+            instruction_sources,
+        ))
+    }
+
     /// Persist a user message to the in-memory buffer and the store,
     /// paired with its application data.
     async fn persist_user_message(
@@ -900,15 +1006,49 @@ impl Runtime {
         buf: &Arc<RwLock<CoreMessageBuffer>>,
         msg: &Message,
         app_data: &MessageAppData,
+        instruction_sources: &[String],
     ) -> Result<()> {
-        buf.write()
-            .await
-            .append_with_app_data(msg.clone(), app_data.clone());
-        self.session_manager.append_messages_with_app_data(
-            session_id,
-            std::slice::from_ref(msg),
-            &[(msg.id, app_data.clone())].into_iter().collect(),
-        )
+        let workspace_root = self
+            .session_manager
+            .load_session(session_id)?
+            .and_then(|session| {
+                (!session.workspace_root.is_empty()).then(|| PathBuf::from(session.workspace_root))
+            })
+            .unwrap_or_else(|| self.default_workspace.root().to_path_buf());
+        let mut messages = vec![msg.clone()];
+        if let Some(notice) =
+            crate::agent_ctx::instruction_loaded_notice(&workspace_root, instruction_sources)
+        {
+            messages.push(notice);
+        }
+        let app_data_by_message = [(msg.id, app_data.clone())].into_iter().collect();
+        self.session_manager
+            .append_messages_with_app_data_and_instruction_sources(
+                session_id,
+                &messages,
+                &app_data_by_message,
+                instruction_sources,
+            )?;
+        let mut buffer = buf.write().await;
+        for message in messages {
+            let data = if message.id == msg.id {
+                app_data.clone()
+            } else {
+                MessageAppData::default()
+            };
+            buffer.append_with_app_data(message, data);
+        }
+        drop(buffer);
+        if !instruction_sources.is_empty() {
+            let _ =
+                self.event_bus(session_id)
+                    .await
+                    .send_backend(BackendEvent::InstructionsLoaded {
+                        session_id,
+                        sources: instruction_sources.to_vec(),
+                    });
+        }
+        Ok(())
     }
 
     /// Register a pending prompt for a busy session.
@@ -936,6 +1076,11 @@ impl Runtime {
     /// `mode` should be the session's current mode; it is read from the last
     /// user message's `mode` field if `None` is passed.
     pub async fn continue_session(&self, session_id: Uuid, mode: Option<Mode>) -> Result<()> {
+        let _submission_guard = self.prompt_submission_lock.lock().await;
+        self.continue_session_locked(session_id, mode).await
+    }
+
+    async fn continue_session_locked(&self, session_id: Uuid, mode: Option<Mode>) -> Result<()> {
         // Fast path: avoid DB reload if the session is already running.
         // The atomic check in start_agent_loop prevents TOCTOU.
         if self.is_session_busy(session_id) {
@@ -954,7 +1099,7 @@ impl Runtime {
                 messages
                     .iter()
                     .rev()
-                    .find(|m| m.role == MessageRole::User)
+                    .find(|message| message.role == MessageRole::User && !message.is_compaction())
                     .and_then(|m| m.mode())
                     .unwrap_or(Mode::Build)
             }
@@ -978,7 +1123,9 @@ impl Runtime {
         let last_user_id = messages
             .iter()
             .rev()
-            .find(|message| message.message.role == MessageRole::User)
+            .find(|message| {
+                message.message.role == MessageRole::User && !message.message.is_compaction()
+            })
             .map(|message| message.message.id);
         if last_user_id != Some(user_message_id) {
             anyhow::bail!("the provider failure is no longer the latest turn");
@@ -999,7 +1146,7 @@ impl Runtime {
             .delete_messages(session_id, &provider_error_ids)?;
         self.reload_message_buffer(session_id).await;
 
-        self.continue_session(session_id, None).await
+        self.continue_session_locked(session_id, None).await
     }
 
     /// Quick synchronous check — is any session's agent loop active?
@@ -1094,6 +1241,25 @@ impl Runtime {
     /// Uses `session_start_lock` to prevent a TOCTOU race: only one task
     /// per session gets past the busy check and marks the session as busy.
     async fn start_agent_loop(&self, session_id: Uuid, mode: Mode) -> Result<()> {
+        let session = self
+            .session_manager
+            .load_session(session_id)?
+            .ok_or_else(|| anyhow::anyhow!("session {session_id} not found"))?;
+        if session.system_prompt.is_empty() {
+            anyhow::bail!("session {session_id} has no persisted system prompt");
+        }
+        let system_prompt = session.system_prompt;
+        let session_start_hash = session.snapshot_start_hash;
+        let session_model = (session.provider_id, session.model_id);
+        let workspace = if session.workspace_root.is_empty() {
+            Arc::clone(&self.default_workspace)
+        } else {
+            self.workspace_for(&session.workspace_root).await?
+        };
+        let persisted_messages = self.session_manager.load_session_messages(session_id)?;
+        self.set_session_message_buffer(session_id, persisted_messages)
+            .await;
+
         // ── Check-and-claim: atomic under session_start_lock ──────────
         {
             let _lock = self.session_start_lock.lock().unwrap();
@@ -1118,43 +1284,11 @@ impl Runtime {
         let context_manager = self.context_manager(session_id).await;
         let event_bus = self.event_bus(session_id).await;
 
-        // Compose or load the system prompt (mode-agnostic — see inject_mode_reminder).
-        let (system_prompt, session_start_hash, workspace, session_model) = {
-            let session = self.session_manager.load_session(session_id)?;
-            let ssh = session.as_ref().and_then(|s| s.snapshot_start_hash.clone());
-            let workspace_path = session
-                .as_ref()
-                .map(|s| s.workspace_root.clone())
-                .unwrap_or_default();
-            let sm = session
-                .as_ref()
-                .map(|s| (s.provider_id.clone(), s.model_id.clone()));
-            let workspace = if workspace_path.is_empty() {
-                Arc::clone(&self.default_workspace)
-            } else {
-                self.workspace_for(&workspace_path).await?
-            };
-            let sp = match session {
-                Some(s) if !s.system_prompt.is_empty() => s.system_prompt,
-                _ => {
-                    let sp = crate::agent_ctx::compose_system_prompt(
-                        workspace.root(),
-                        workspace.skills(),
-                    );
-                    // Persist system prompt to the session record.
-                    self.session_manager.update_system_prompt(session_id, &sp)?;
-                    sp
-                }
-            };
-            (sp, ssh, workspace, sm)
-        };
-
-        let active_model = if let Some((ref provider_id, ref model_id)) = session_model
-            && let Ok(model) = self.config.read().unwrap().resolve_model_by_ids(
-                &self.auth.read().unwrap(),
-                provider_id,
-                model_id,
-            ) {
+        let active_model = if let Ok(model) = self.config.read().unwrap().resolve_model_by_ids(
+            &self.auth.read().unwrap(),
+            &session_model.0,
+            &session_model.1,
+        ) {
             model
         } else {
             self.active_model.read().unwrap().clone()
@@ -1170,6 +1304,8 @@ impl Runtime {
         let buffer_for_queued = buffer.clone();
         let session_manager = self.session_manager.clone();
         let pending_prompts = self.pending_prompts.clone();
+        let queued_workspace_root = workspace.root().to_path_buf();
+        let queued_event_bus = event_bus.clone();
         let ctx = crate::agent_ctx::CoreContext::new(
             self.llm.clone(),
             self.session_manager.clone(),
@@ -1180,7 +1316,6 @@ impl Runtime {
             self.approval_broker.clone(),
             session_id,
             mode,
-            true,
             system_prompt.clone(),
             llm_config,
             cancel.clone(),
@@ -1271,37 +1406,58 @@ impl Runtime {
                 }
                 // Persist queued prompts (buffer + store) so the next
                 // loop iteration's load_messages() picks them up.
-                let mut failed = false;
+                let mut failed_prompt = None;
                 while let Some(prompt) = queued.pop_front() {
-                    let mut msg = Message::new(MessageRole::User, prompt.content);
+                    let mut msg = Message::new(MessageRole::User, prompt.content.clone());
                     msg.id = prompt.message_id;
-                    msg.attachments = prompt.attachments;
-                    msg.thinking_level = prompt.thinking_level;
+                    msg.attachments = prompt.attachments.clone();
+                    msg.thinking_level = prompt.thinking_level.clone();
                     let app_data = MessageAppData {
                         mode: Some(prompt.mode.as_str().to_string()),
                         ..Default::default()
                     };
-                    buffer_for_queued
-                        .write()
-                        .await
-                        .append_with_app_data(msg.clone(), app_data.clone());
-                    if let Err(e) = session_manager.append_messages_with_app_data(
-                        session_id,
-                        std::slice::from_ref(&msg),
-                        &[(msg.id, app_data)].into_iter().collect(),
+                    let mut messages = vec![msg.clone()];
+                    if let Some(notice) = crate::agent_ctx::instruction_loaded_notice(
+                        &queued_workspace_root,
+                        &prompt.instruction_sources,
                     ) {
+                        messages.push(notice);
+                    }
+                    let app_data_by_message = [(msg.id, app_data.clone())].into_iter().collect();
+                    if let Err(e) = session_manager
+                        .append_messages_with_app_data_and_instruction_sources(
+                            session_id,
+                            &messages,
+                            &app_data_by_message,
+                            &prompt.instruction_sources,
+                        )
+                    {
                         log::error!(
                             "failed to persist queued prompt for session {session_id}: {e}"
                         );
-                        failed = true;
+                        failed_prompt = Some(prompt);
                         break;
                     }
+                    {
+                        let mut buffer = buffer_for_queued.write().await;
+                        for message in messages {
+                            let data = if message.id == msg.id {
+                                app_data.clone()
+                            } else {
+                                MessageAppData::default()
+                            };
+                            buffer.append_with_app_data(message, data);
+                        }
+                    }
+                    if !prompt.instruction_sources.is_empty() {
+                        let _ = queued_event_bus.send_backend(BackendEvent::InstructionsLoaded {
+                            session_id,
+                            sources: prompt.instruction_sources,
+                        });
+                    }
                 }
-                if failed {
-                    // The failed prompt is already present in the shared
-                    // buffer; retain only prompts that were not attempted so
-                    // a later submission can retry them without duplicating
-                    // the current message.
+                if let Some(failed_prompt) = failed_prompt {
+                    queued.push_front(failed_prompt);
                     if !queued.is_empty() {
                         pending_prompts
                             .lock()
@@ -1442,7 +1598,7 @@ impl Runtime {
             .iter()
             .position(|m| m.id == target_id)
             .ok_or_else(|| anyhow::anyhow!("target message {target_id} not found"))?;
-        if messages[target_pos].role != MessageRole::User {
+        if messages[target_pos].role != MessageRole::User || messages[target_pos].is_compaction() {
             anyhow::bail!("can only revert to user messages");
         }
         self.revert_to_message(session_id, &messages, target_id)
@@ -1467,14 +1623,43 @@ impl Runtime {
             .session_manager
             .load_session(source_session_id)?
             .ok_or_else(|| anyhow::anyhow!("source session {source_session_id} not found"))?;
-        let messages = self.session_manager.load_messages(source_session_id)?;
+        let messages = self
+            .session_manager
+            .load_session_messages(source_session_id)?;
+        let instruction_sources = self
+            .session_manager
+            .store()
+            .load_instruction_sources(source_session_id)?;
         let target_idx = messages
             .iter()
-            .position(|m| m.id == target_message_id)
+            .position(|m| m.message.id == target_message_id)
             .ok_or_else(|| anyhow::anyhow!("target message {target_message_id} not found"))?;
-        if messages[target_idx].role != MessageRole::User {
+        if messages[target_idx].message.role != MessageRole::User
+            || messages[target_idx].message.is_compaction()
+        {
             anyhow::bail!("can only fork from user messages");
         }
+        if source.system_prompt.is_empty() {
+            anyhow::bail!("source session {source_session_id} has no persisted system prompt");
+        }
+        let fork_context = messages
+            .iter()
+            .take(target_idx + 1)
+            .enumerate()
+            .rev()
+            .find_map(|(index, message)| {
+                message.message.is_compaction().then(|| {
+                    (
+                        message
+                            .message
+                            .content
+                            .split_once("\n\n")
+                            .map(|(_, summary)| summary.to_string())
+                            .unwrap_or_default(),
+                        index,
+                    )
+                })
+            });
         let new_session_id = Uuid::new_v4();
         let fork_title = title.unwrap_or_else(|| format!("Fork of {}", source.title));
         self.session_manager.create_session(
@@ -1485,29 +1670,17 @@ impl Runtime {
             &source.model_id,
             &source.model_display_name,
             &fork_title,
+            &source.system_prompt,
             None,
             None,
         )?;
-        if !source.system_prompt.is_empty() {
-            // Best-effort: copy system prompt so the fork shares the same prefix.
-            let _ = self.session_manager.store().update_session(
-                new_session_id,
-                None,
-                None,
-                None,
-                None,
-                Some(&source.system_prompt),
-                None,
-                None,
-                None,
-                None,
-            );
-        }
         let mut id_map = HashMap::new();
+        let mut forked_messages = Vec::with_capacity(target_idx + 1);
+        let mut forked_app_data = HashMap::with_capacity(target_idx + 1);
         for original in messages.iter().take(target_idx + 1) {
-            let mut new_message = original.clone();
+            let mut new_message = original.message.clone();
             let new_id = Uuid::new_v4();
-            id_map.insert(original.id, new_id);
+            id_map.insert(original.message.id, new_id);
             new_message.id = new_id;
             if let Some(tool_call_id) = new_message.tool_call_id.clone()
                 && let Ok(old_id) = Uuid::parse_str(&tool_call_id)
@@ -1515,8 +1688,22 @@ impl Runtime {
             {
                 new_message.tool_call_id = Some(new_tool_call_id.to_string());
             }
-            self.session_manager
-                .append_message(new_session_id, &new_message)?;
+            forked_app_data.insert(new_message.id, original.app_data.clone());
+            forked_messages.push(new_message);
+        }
+        self.session_manager
+            .append_messages_with_app_data_and_instruction_sources(
+                new_session_id,
+                &forked_messages,
+                &forked_app_data,
+                &instruction_sources,
+            )?;
+        if let Some((summary, retained_from)) = fork_context {
+            self.session_manager.update_context_state(
+                new_session_id,
+                Some(&summary),
+                retained_from,
+            )?;
         }
         log::info!(
             "fork completed {} -> {} at {} ({} messages)",
@@ -1567,29 +1754,39 @@ impl Runtime {
     ) -> Result<()> {
         use crate::agent_ctx::to_llm_provider_config;
 
+        let _submission_guard = self.prompt_submission_lock.lock().await;
+        if self.is_session_busy(session_id) {
+            anyhow::bail!("cannot compact a session while its agent loop is running");
+        }
+        let session = self
+            .session_manager
+            .load_session(session_id)?
+            .ok_or_else(|| anyhow::anyhow!("session {session_id} not found"))?;
+        if session.system_prompt.is_empty() {
+            anyhow::bail!("session {session_id} has no persisted system prompt");
+        }
+        let persisted_messages = self.session_manager.load_session_messages(session_id)?;
+        self.set_session_message_buffer(session_id, persisted_messages)
+            .await;
+
         // 1. Collect the inputs: messages, context manager, model config, tools.
-        let mut messages = {
+        let messages = {
             let buf = self.message_buffer(session_id).await;
             buf.read().await.load().to_vec()
         };
-        crate::agent_ctx::restore_full_tool_output_semantics(&mut messages);
         let cm = self.context_manager(session_id).await;
-        let model_config = {
-            let active = self.active_model.read().unwrap();
-            to_llm_provider_config(&active)
+        let active_model = if let Ok(model) = self.config.read().unwrap().resolve_model_by_ids(
+            &self.auth.read().unwrap(),
+            &session.provider_id,
+            &session.model_id,
+        ) {
+            model
+        } else {
+            self.active_model.read().unwrap().clone()
         };
-        // Match the session's system prompt used by normal requests.
-        let compact_model = {
-            let session = self.session_manager.load_session(session_id)?;
-            let mut m = model_config;
-            if let Some(s) = session
-                && !s.system_prompt.is_empty()
-            {
-                m.system_prompt = Some(s.system_prompt);
-            }
-            m
-        };
-        let active_model = self.active_model.read().unwrap().clone();
+        let model_config = to_llm_provider_config(&active_model);
+        let mut compact_model = model_config;
+        compact_model.system_prompt = Some(session.system_prompt);
         let tools: Vec<tidev_llm::ToolDefinition> = self
             .tool_registry()
             .definitions_for_model(&active_model)
@@ -1634,31 +1831,26 @@ impl Runtime {
             (result, prior_summary, prior_retained_from)
         };
 
-        // 3. Apply compaction state.
-        {
-            let mut cm_lock = cm.lock().await;
-            cm_lock.apply_compaction(result.summary.clone(), result.retained_from);
-        }
-
-        // 4. Persist compaction state to the session store.
-        self.session_manager.update_context_state(
+        // 3. Persist the state and provider-visible marker together before
+        // exposing either to a later request.
+        let mut marker = Message::compaction_with_manual(&result.summary, true);
+        marker.metadata.prior_summary = prior_summary;
+        marker.metadata.prior_retained_from = Some(prior_retained_from);
+        self.session_manager.apply_compaction(
             session_id,
-            Some(&result.summary),
+            &result.summary,
             result.retained_from,
+            &marker,
         )?;
+        let buf = self.message_buffer(session_id).await;
+        buf.write().await.append(marker);
 
-        // 5. Append a compaction marker message for undo support.
-        //     Stores the prior state so revert_to_message can restore it.
-        {
-            let mut marker = Message::compaction_with_manual(&result.summary, true);
-            marker.metadata.prior_summary = prior_summary;
-            marker.metadata.prior_retained_from = Some(prior_retained_from);
-            let buf = self.message_buffer(session_id).await;
-            buf.write().await.append(marker.clone());
-            self.session_manager.append_message(session_id, &marker)?;
-        }
+        // 4. The in-memory cursor advances only after the durable commit.
+        cm.lock()
+            .await
+            .apply_compaction(result.summary.clone(), result.retained_from);
 
-        // 6. Notify the TUI (BackendEvent::ContextCompacted is already sent by
+        // 5. Notify the TUI (BackendEvent::ContextCompacted is already sent by
         //    compact() via event_tx when streaming, but for consistency we
         //    always send the final event here as well).
         let model_id = active_model.model_id.clone();
@@ -1858,6 +2050,7 @@ fn prompt_message_matches_submission(message: &Message, submission: &PromptSubmi
         crate::prompts::steer_reminder()
     );
     message.role == MessageRole::User
+        && !message.is_compaction()
         && (message.content == submission.content
             || message.content == steering_content
             || strip_leading_persisted_reminders(&message.content) == submission.content
@@ -2301,7 +2494,10 @@ mod tests {
         let pending = pending.expect("queued prompt should be registered");
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].delivery, DeliveryMode::Queue);
-        assert_eq!(pending[0].content, "queued message");
+        assert_eq!(
+            pending[0].content,
+            format!("{}\n\nqueued message", crate::prompts::plan_mode_reminder())
+        );
         assert_eq!(pending[0].mode, Mode::Plan);
 
         // The frontend must be told it is queued.
@@ -2337,16 +2533,18 @@ mod tests {
         .await
         .expect("submit should succeed");
 
-        // The message must be persisted immediately, with a
-        // system-reminder suffix appended.
+        // The message must be persisted immediately with its durable prefix
+        // and steering suffix.
         let buf = rt.message_buffer(sid).await;
         let messages = buf.read().await.load().to_vec();
         assert_eq!(messages.len(), 1);
-        assert!(messages[0].content.starts_with("steer message"));
-        assert!(
-            messages[0].content.contains("<system-reminder>"),
-            "steering message must carry a system-reminder: {}",
-            messages[0].content
+        assert_eq!(
+            messages[0].content,
+            format!(
+                "{}\n\nsteer message\n\n{}",
+                crate::prompts::plan_mode_reminder(),
+                crate::prompts::steer_reminder(),
+            )
         );
         assert_eq!(
             buf.read()
@@ -2380,12 +2578,14 @@ mod tests {
             .await
             .expect("submit should succeed");
 
-        // Idle submission persists without a reminder and starts a loop.
+        // Idle submission persists its durable mode prefix and starts a loop.
         let buf = rt.message_buffer(sid).await;
         let messages = buf.read().await.load().to_vec();
         assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0].content, "fresh turn");
-        assert!(!messages[0].content.contains("<system-reminder>"));
+        assert_eq!(
+            messages[0].content,
+            format!("{}\n\nfresh turn", crate::prompts::build_mode_reminder())
+        );
         assert!(rt.is_session_busy(sid), "loop should be running");
 
         match recv_created_event(&mut events).await {
