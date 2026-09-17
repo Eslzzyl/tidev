@@ -59,10 +59,20 @@ jobs:
             target: x86_64-pc-windows-msvc
             artifact: tidev-windows-x64.exe
     runs-on: ${{ matrix.os }}
+    env:
+      TIDEV_WEB_BUILD_REQUIRED: "1"
     steps:
       - uses: actions/checkout@v6
         with:
           ref: ${{ needs.resolve.outputs.ref }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: latest
+      - uses: actions/setup-node@v7
+        with:
+          node-version: latest
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
       - uses: dtolnay/rust-toolchain@stable
         with:
           target: ${{ matrix.target }}
@@ -156,9 +166,9 @@ jobs:
             ```
 
       - name: Publish to npm
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
-          node-version: '24'
+          node-version: latest
           registry-url: 'https://registry.npmjs.org'
           package-manager-cache: false
       - name: Publish

@@ -6,6 +6,7 @@ use std::process::Command;
 fn main() {
     let is_release = env::var("PROFILE").as_deref() == Ok("release");
     let builds_web = is_release && env::var_os("TIDEV_WEB_SKIP_BUILD").is_none();
+    let web_build_required = env::var("TIDEV_WEB_BUILD_REQUIRED").as_deref() == Ok("1");
 
     // The Windows Vite process has reproducibly crashed with 0xc0000374 when its
     // production build runs alongside Cargo's Rust compilation. Reserving Cargo's remaining
@@ -20,6 +21,7 @@ fn main() {
 
     println!("cargo:rerun-if-env-changed=PROFILE");
     println!("cargo:rerun-if-env-changed=TIDEV_WEB_SKIP_BUILD");
+    println!("cargo:rerun-if-env-changed=TIDEV_WEB_BUILD_REQUIRED");
     for path in [
         web_dir.join("package.json"),
         web_dir.join("pnpm-lock.yaml"),
@@ -45,18 +47,28 @@ fn main() {
 
     if builds_web {
         if let Err(error) = run_pnpm(&web_dir, &["install", "--frozen-lockfile"]) {
+            if web_build_required {
+                panic!("web frontend build failed: {error}");
+            }
             println!("cargo:warning={error}");
         } else if let Err(error) = run_pnpm(&web_dir, &["run", "build"]) {
+            if web_build_required {
+                panic!("web frontend build failed: {error}");
+            }
             println!("cargo:warning={error}");
         }
     }
 
     if !dist_dir.join("index.html").is_file() {
-        println!(
-            "cargo:warning=web frontend assets are unavailable; the release binary will serve the compatibility fallback page. Build them with `pnpm --dir {} install --frozen-lockfile && pnpm --dir {} run build`.",
+        let message = format!(
+            "web frontend assets are unavailable. Build them with `pnpm --dir {} install --frozen-lockfile && pnpm --dir {} run build`.",
             web_dir.display(),
             web_dir.display(),
         );
+        if web_build_required {
+            panic!("{message}");
+        }
+        println!("cargo:warning={message}");
         return;
     }
 
@@ -108,16 +120,12 @@ fn run_pnpm(web_dir: &Path, args: &[&str]) -> Result<(), String> {
     #[cfg(not(windows))]
     let status = run_pnpm_command("pnpm", web_dir, args);
 
-    let status = status
-        .map_err(|error| {
-            format!(
-                "failed to execute pnpm for the web frontend: {error}; the release binary will serve the compatibility fallback page"
-            )
-        })?;
+    let status =
+        status.map_err(|error| format!("failed to execute pnpm for the web frontend: {error}"))?;
 
     if !status.success() {
         return Err(format!(
-            "pnpm {} failed with status {status}; the release binary will serve the compatibility fallback page",
+            "pnpm {} failed with status {status}",
             args.join(" ")
         ));
     }
