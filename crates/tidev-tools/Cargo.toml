@@ -11,11 +11,11 @@ anyhow = "1.0"
 async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 diffy = "0.5"
-dirs = "6"
+dirs = "7"
 glob = "0.3"
 globset = "0.4"
 grep = "0.4"
-html2md = { package = "fast_html2md", version = "0.0.62", default-features = false, features = [
+html2md = { package = "fast_html2md", version = "0.0.63", default-features = false, features = [
     "rewriter",
     "ignore_cookies",
 ] }

@@ -12,7 +12,7 @@ use async_trait::async_trait;
 use futures_util::StreamExt;
 use http::{HeaderMap, HeaderName, HeaderValue, header};
 use rmcp::model::{
-    CallToolRequestParams, ClientCapabilities, ClientInfo, Implementation, Tool as McpToolModel,
+    CallToolRequestParams, ClientCapabilities, ClientConfig, Implementation, Tool as McpToolModel,
 };
 use rmcp::service::{RoleClient, RunningService, RxJsonRpcMessage, ServiceExt, TxJsonRpcMessage};
 use rmcp::transport::Transport;
@@ -31,7 +31,7 @@ use tidev_llm::message::{MessageAttachment, ToolCall, ToolExecutionResult, ToolM
 
 use crate::{Tool, ToolContext};
 
-type McpClient = RunningService<RoleClient, ClientInfo>;
+type McpClient = RunningService<RoleClient, ClientConfig>;
 
 /// Host-resolved MCP server connection parameters.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -758,7 +758,7 @@ impl McpRegistry {
     }
 
     async fn connect_client(spec: &McpServerSpec) -> Result<McpClient> {
-        let client_info = ClientInfo::new(
+        let client_info = ClientConfig::new(
             ClientCapabilities::builder().build(),
             Implementation::new("tidev", env!("CARGO_PKG_VERSION")),
         );

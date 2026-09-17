@@ -66,7 +66,7 @@ pub(crate) fn build_agent(
                 let state = state.clone();
                 move |request: acp::InitializeRequest,
                       responder: agent_client_protocol::Responder<acp::InitializeResponse>,
-                      _cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>| {
+                      _cx: agent_client_protocol::V2ConnectionTo<agent_client_protocol::Client>| {
                     let state = state.clone();
                     async move {
                 *state.client_supports_elicitation.write().await = request
@@ -104,7 +104,7 @@ pub(crate) fn build_agent(
             let state = state.clone();
             move |request: acp::NewSessionRequest,
                   responder: agent_client_protocol::Responder<acp::NewSessionResponse>,
-                  cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>| {
+                  cx: agent_client_protocol::V2ConnectionTo<agent_client_protocol::Client>| {
                 let state = state.clone();
                 async move {
                     let workspace = state
@@ -139,7 +139,7 @@ pub(crate) fn build_agent(
             let state = state.clone();
             move |request: acp::ResumeSessionRequest,
                   responder: agent_client_protocol::Responder<acp::ResumeSessionResponse>,
-                  cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>| {
+                  cx: agent_client_protocol::V2ConnectionTo<agent_client_protocol::Client>| {
                 let state = state.clone();
                 async move {
                     let session_id = parse_session_id(&request.session_id)?;
@@ -172,7 +172,7 @@ pub(crate) fn build_agent(
             let state = state.clone();
             move |request: acp::ListSessionsRequest,
                   responder: agent_client_protocol::Responder<acp::ListSessionsResponse>,
-                  _cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>| {
+                  _cx: agent_client_protocol::V2ConnectionTo<agent_client_protocol::Client>| {
                 let state = state.clone();
                 async move {
                     let records = state
@@ -202,7 +202,7 @@ pub(crate) fn build_agent(
             let state = state.clone();
             move |request: acp::DeleteSessionRequest,
                   responder: agent_client_protocol::Responder<acp::DeleteSessionResponse>,
-                  _cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>| {
+                  _cx: agent_client_protocol::V2ConnectionTo<agent_client_protocol::Client>| {
                 let state = state.clone();
                 async move {
                     let session_id = parse_session_id(&request.session_id)?;
@@ -226,7 +226,7 @@ pub(crate) fn build_agent(
             let state = state.clone();
             move |request: acp::PromptRequest,
                   responder: agent_client_protocol::Responder<acp::PromptResponse>,
-                  _cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>| {
+                  _cx: agent_client_protocol::V2ConnectionTo<agent_client_protocol::Client>| {
                 let state = state.clone();
                 async move {
                     let session_id = validate_session(&state, &request.session_id).await?;
@@ -268,7 +268,7 @@ pub(crate) fn build_agent(
         .on_receive_notification({
             let state = state.clone();
             move |notification: acp::CancelSessionNotification,
-                  _cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>| {
+                  _cx: agent_client_protocol::V2ConnectionTo<agent_client_protocol::Client>| {
                 let state = state.clone();
                 async move {
                     if let Ok(session_id) = validate_session(&state, &notification.session_id).await {
@@ -282,7 +282,7 @@ pub(crate) fn build_agent(
             let state = state.clone();
             move |request: acp::CloseSessionRequest,
                   responder: agent_client_protocol::Responder<acp::CloseSessionResponse>,
-                  _cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>| {
+                  _cx: agent_client_protocol::V2ConnectionTo<agent_client_protocol::Client>| {
                 let state = state.clone();
                 async move {
                     let session_id = validate_session(&state, &request.session_id).await?;
@@ -298,7 +298,7 @@ pub(crate) fn build_agent(
             let state = state.clone();
             move |request: acp::SetSessionConfigOptionRequest,
                   responder: agent_client_protocol::Responder<acp::SetSessionConfigOptionResponse>,
-                  cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>| {
+                  cx: agent_client_protocol::V2ConnectionTo<agent_client_protocol::Client>| {
                 let state = state.clone();
                 async move {
                     let session_id = validate_session(&state, &request.session_id).await?;
@@ -355,7 +355,7 @@ pub(crate) fn build_agent(
 async fn run_event_loop(
     state: Arc<State>,
     mut event_rx: tokio::sync::mpsc::UnboundedReceiver<tidev_core::BackendEvent>,
-    cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>,
+    cx: agent_client_protocol::V2ConnectionTo<agent_client_protocol::Client>,
 ) {
     while let Some(event) = event_rx.recv().await {
         if state.active_session.read().await.as_ref() != Some(&event.session_id()) {
@@ -417,7 +417,7 @@ async fn load_and_activate(
 async fn replay_messages(
     state: &State,
     session_id: Uuid,
-    cx: &agent_client_protocol::ConnectionTo<agent_client_protocol::Client>,
+    cx: &agent_client_protocol::V2ConnectionTo<agent_client_protocol::Client>,
 ) {
     if let Ok(messages) = state.runtime.session_manager().load_messages(session_id) {
         for message in messages {

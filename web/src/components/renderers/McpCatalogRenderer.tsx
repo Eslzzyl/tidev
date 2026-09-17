@@ -124,9 +124,13 @@ function ToolCatalog({ records, emptyLabel }: { records: McpToolRecord[]; emptyL
             <code>
               <span>{record.server}</span> / <strong>{record.tool}</strong>
             </code>
-            {record.read_only ? <span className="mcp-catalog-read-only">{t("Read-only")}</span> : null}
+            {record.read_only ? (
+              <span className="mcp-catalog-read-only">{t("Read-only")}</span>
+            ) : null}
           </div>
-          {record.description ? <p className="mcp-catalog-description">{record.description}</p> : null}
+          {record.description ? (
+            <p className="mcp-catalog-description">{record.description}</p>
+          ) : null}
           <details className="mcp-catalog-schema">
             <summary>{t("Input schema")}</summary>
             <JsonTreeView data={record.input_schema} maxDepth={3} embedded />

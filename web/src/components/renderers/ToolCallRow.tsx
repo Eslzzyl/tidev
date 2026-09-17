@@ -140,9 +140,7 @@ function toolTone(name: string) {
 function toolLabel(entry: ToolCallEntry, t: TFunction, args: ToolArguments) {
   if (entry.name === "mcp_list") {
     const server = stringArgument(args, "server").trim();
-    return server
-      ? t("List tools from {{server}} MCP", { server })
-      : t("List MCP servers");
+    return server ? t("List tools from {{server}} MCP", { server }) : t("List MCP servers");
   }
   if (entry.name === "grep" || entry.name === "glob") return "";
   if (entry.name === "skill") {

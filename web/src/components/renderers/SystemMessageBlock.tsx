@@ -191,9 +191,7 @@ export function SystemMessageBlock({
     const title = message.metadata.compaction_manual
       ? t("Context compacted")
       : t("Context automatically compacted");
-    return (
-      <PersistedCompactionMessage messageId={message.id} title={title} summary={summary} />
-    );
+    return <PersistedCompactionMessage messageId={message.id} title={title} summary={summary} />;
   }
 
   return (

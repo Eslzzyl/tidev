@@ -10,7 +10,7 @@ use tokio::sync::RwLock;
 pub(crate) fn spawn(
     runtime: Runtime,
     mut request_rx: tokio::sync::mpsc::UnboundedReceiver<FrontendRequest>,
-    cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>,
+    cx: agent_client_protocol::V2ConnectionTo<agent_client_protocol::Client>,
     supports_elicitation: Arc<RwLock<bool>>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
@@ -126,7 +126,7 @@ async fn handle_question(
     _request: &FrontendRequest,
     item: &tidev_core::ToolCallWithViolations,
     session_id: &acp::SessionId,
-    cx: &agent_client_protocol::ConnectionTo<agent_client_protocol::Client>,
+    cx: &agent_client_protocol::V2ConnectionTo<agent_client_protocol::Client>,
     supports_elicitation: bool,
 ) -> ApprovedTool {
     let tool = &item.tool_call;
