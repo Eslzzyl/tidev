@@ -18,6 +18,7 @@ use tokio_util::sync::CancellationToken;
 
 #[derive(RustEmbed)]
 #[folder = "web-dist"]
+#[compression = "zstd"]
 #[allow_missing = true]
 struct EmbeddedAssets;
 
