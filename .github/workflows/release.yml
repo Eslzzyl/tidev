@@ -92,6 +92,7 @@ jobs:
 
   release:
     needs: [build, resolve]
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -173,6 +174,7 @@ jobs:
 
   homebrew-tap:
     needs: [release, resolve]
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout homebrew-tap repository
