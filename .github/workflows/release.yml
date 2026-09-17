@@ -4,11 +4,6 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
-    inputs:
-      version:
-        description: "Version to release (e.g., 0.4.0, without v prefix)"
-        required: true
-        type: string
 
 permissions:
   contents: read
@@ -25,17 +20,22 @@ jobs:
       ref: ${{ steps.resolve.outputs.ref }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && 'master' || github.ref }}
       - name: Resolve tag & version
         id: resolve
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            REF="v${{ inputs.version }}"
-            git fetch --force origin "refs/tags/${REF}:refs/tags/${REF}"
+            REF="master"
+            VERSION="$(node -p "require('./npm/tidev/package.json').version")"
+            TAG="v${VERSION}"
           else
             REF="${GITHUB_REF_NAME}"
+            VERSION="${REF#v}"
+            TAG="${REF}"
           fi
-          echo "tag=${REF}" >> "$GITHUB_OUTPUT"
-          echo "version=${REF#v}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "ref=${REF}" >> "$GITHUB_OUTPUT"
 
   build:
