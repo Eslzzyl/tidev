@@ -778,6 +778,8 @@ impl Runtime {
                         queued: true,
                     },
                 );
+                self.emit_instruction_sources_loaded(session_id, &instruction_sources)
+                    .await;
                 self.push_pending_prompt(
                     session_id,
                     PendingPrompt {
@@ -846,6 +848,8 @@ impl Runtime {
                         queued: false,
                     },
                 );
+                self.emit_instruction_sources_loaded(session_id, &instruction_sources)
+                    .await;
                 self.start_agent_loop(session_id, mode).await?;
                 Ok(PromptSubmissionReceipt {
                     message_id,
@@ -1039,16 +1043,20 @@ impl Runtime {
             buffer.append_with_app_data(message, data);
         }
         drop(buffer);
-        if !instruction_sources.is_empty() {
-            let _ =
-                self.event_bus(session_id)
-                    .await
-                    .send_backend(BackendEvent::InstructionsLoaded {
-                        session_id,
-                        sources: instruction_sources.to_vec(),
-                    });
-        }
         Ok(())
+    }
+
+    async fn emit_instruction_sources_loaded(&self, session_id: Uuid, sources: &[String]) {
+        if sources.is_empty() {
+            return;
+        }
+        let _ = self
+            .event_bus(session_id)
+            .await
+            .send_backend(BackendEvent::InstructionsLoaded {
+                session_id,
+                sources: sources.to_vec(),
+            });
     }
 
     /// Register a pending prompt for a busy session.
@@ -2571,6 +2579,11 @@ mod tests {
         let rt = make_test_runtime().await;
         let sid = rt.create_default_session("idle test").unwrap();
         let mut events = rt.event_rx().await;
+        std::fs::write(
+            rt.workspace_root().join("AGENTS.md"),
+            "# Test instructions\n",
+        )
+        .expect("instruction file should be written");
 
         rt.config.write().unwrap().ui.send_while_busy = SendWhileBusy::Steer;
 
@@ -2581,16 +2594,28 @@ mod tests {
         // Idle submission persists its durable mode prefix and starts a loop.
         let buf = rt.message_buffer(sid).await;
         let messages = buf.read().await.load().to_vec();
-        assert_eq!(messages.len(), 1);
-        assert_eq!(
-            messages[0].content,
-            format!("{}\n\nfresh turn", crate::prompts::build_mode_reminder())
+        assert_eq!(messages.len(), 2);
+        assert!(
+            messages[0]
+                .content
+                .starts_with(&format!("{}\n\n", crate::prompts::build_mode_reminder()))
         );
+        assert!(messages[0].content.contains("Instructions from:"));
+        assert!(messages[0].content.contains("# Test instructions"));
+        assert!(messages[0].content.ends_with("\n\nfresh turn"));
+        assert_eq!(messages[1].content, "Loaded instructions from AGENTS.md");
         assert!(rt.is_session_busy(sid), "loop should be running");
 
         match recv_created_event(&mut events).await {
             BackendEvent::UserMessageCreated { queued, .. } => assert!(!queued),
             other => panic!("expected UserMessageCreated, got {other:?}"),
+        }
+        match recv_created_event(&mut events).await {
+            BackendEvent::InstructionsLoaded { sources, .. } => {
+                assert_eq!(sources.len(), 1);
+                assert!(sources[0].ends_with("/AGENTS.md"));
+            }
+            other => panic!("expected InstructionsLoaded, got {other:?}"),
         }
 
         rt.cancel_session(sid).await;
