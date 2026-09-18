@@ -58,9 +58,9 @@ export default defineConfig({
         start_url: "/",
         icons: [
           {
-            src: "/favicon.svg",
-            sizes: "any",
-            type: "image/svg+xml",
+            src: "/favicon.ico",
+            sizes: "16x16 32x32 48x48 64x64",
+            type: "image/x-icon",
           },
         ],
       },
