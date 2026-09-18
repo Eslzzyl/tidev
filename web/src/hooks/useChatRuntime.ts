@@ -47,6 +47,7 @@ import {
   updateShellResult,
   updateSubagentEntry,
 } from "./chatRuntime/streamState";
+import { mergeMessageRecords } from "./chatRuntime/messageState";
 
 const SESSION_PAGE_SIZE = 50;
 
@@ -413,29 +414,36 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
       if (!sessionId?.trim()) return false;
       try {
         const response = await api.listMessages(sessionId);
-        messagesCacheRef.current.set(sessionId, response.messages);
+        const cached = messagesCacheRef.current.get(sessionId) ?? [];
+        const pendingMessageIds = new Set(
+          [...pendingBackendMessageSessionsRef.current]
+            .filter(([, messageSessionId]) => messageSessionId === sessionId)
+            .map(([messageId]) => messageId),
+        );
+        const pendingCached = cached.filter((record) => pendingMessageIds.has(record.message.id));
+        const loadedIds = new Set(response.messages.map((record) => record.message.id));
+        for (const [messageId, messageSessionId] of pendingBackendMessageSessionsRef.current) {
+          if (messageSessionId === sessionId && loadedIds.has(messageId)) {
+            pendingBackendMessageSessionsRef.current.delete(messageId);
+          }
+        }
+        const mergedMessages = mergeMessageRecords(response.messages, pendingCached);
+        messagesCacheRef.current.set(sessionId, mergedMessages);
         applyChangedFileSummary(
           sessionId,
-          latestChangedFiles(response.messages),
-          latestChangedFileSnapshotHash(response.messages),
+          latestChangedFiles(mergedMessages),
+          latestChangedFileSnapshotHash(mergedMessages),
         );
         if (selectedSessionRef.current === sessionId && changedFilesPanelOpen) {
           void loadChangedFileDiffs(sessionId, true);
         }
         if (selectedSessionRef.current === sessionId) {
-          const loadedIds = new Set(response.messages.map((record) => record.message.id));
-          for (const [messageId, messageSessionId] of pendingBackendMessageSessionsRef.current) {
-            if (messageSessionId === sessionId && loadedIds.has(messageId)) {
-              pendingBackendMessageSessionsRef.current.delete(messageId);
-            }
-          }
-          setMessages((current) => [
-            ...response.messages,
-            ...current.filter(
-              (record) =>
-                pendingBackendMessageSessionsRef.current.get(record.message.id) === sessionId,
+          setMessages((current) =>
+            mergeMessageRecords(
+              mergedMessages,
+              current.filter((record) => pendingMessageIds.has(record.message.id)),
             ),
-          ]);
+          );
         }
         return true;
       } catch (reason) {
@@ -760,11 +768,7 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
         const appData = payload.app_data as MessageRecord["app_data"] | undefined;
         touchSession(sessionId);
         if (message) {
-          if (payload.queued === true) {
-            pendingBackendMessageSessionsRef.current.set(message.id, sessionId);
-          } else {
-            pendingBackendMessageSessionsRef.current.delete(message.id);
-          }
+          pendingBackendMessageSessionsRef.current.set(message.id, sessionId);
           const cached = messagesCacheRef.current.get(sessionId) ?? [];
           const record = { message, app_data: appData ?? {} };
           const idx = cached.findIndex((item) => item.message.id === message.id);
