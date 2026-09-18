@@ -69,7 +69,7 @@ body {
 }
 
 html {
-  background-color: #ffffff;
+  background-color: var(--bg);
 }
 
 /* Focus styles */

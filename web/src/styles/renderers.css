@@ -47,10 +47,6 @@
   min-height: 0;
 }
 
-.message-stage {
-  background: var(--panel-strong);
-}
-
 .message-scroll {
   overflow-anchor: none;
   padding: 24px max(24px, calc((100% - 1200px) / 2)) 28px;

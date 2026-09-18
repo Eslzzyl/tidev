@@ -55,7 +55,7 @@
   :root {
     --bg: #0d1016;
     --panel: #12161e;
-    --panel-strong: #171c25;
+    --panel-strong: #0d1016;
     --line: #252c38;
     --line-soft: #1d232d;
     --text: #e8ecf3;
@@ -118,7 +118,7 @@
   color-scheme: dark;
   --bg: #0d1016;
   --panel: #12161e;
-  --panel-strong: #171c25;
+  --panel-strong: #0d1016;
   --line: #252c38;
   --line-soft: #1d232d;
   --text: #e8ecf3;
