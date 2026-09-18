@@ -102,7 +102,7 @@
 .composer-status-capsule {
   position: absolute;
   z-index: 30;
-  bottom: calc(100% + 8px);
+  bottom: calc(100% + 16px);
   left: 50%;
   display: inline-flex;
   align-items: stretch;
@@ -171,10 +171,15 @@
 .composer-todo-segment:first-child .composer-status-trigger {
   border-radius: 999px 0 0 999px;
 }
+.composer-todo-segment:only-child {
+  border-radius: 999px;
+}
+.composer-todo-segment:only-child .composer-status-trigger {
+  border-radius: 999px;
+}
 .composer-changed-files-segment:last-child .composer-status-trigger {
   border-radius: 0 999px 999px 0;
 }
-.composer-status-capsule:has(.composer-status-segment:only-child) .composer-status-trigger,
 .composer-status-segment:only-child .composer-status-trigger {
   border-radius: 999px;
 }
