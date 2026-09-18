@@ -19,6 +19,7 @@ import { useTranslation } from "react-i18next";
 
 import type { MessageAttachment, ToolExecutionResult } from "../../types/api";
 import type { ToolCallEntry } from "../../utils/round";
+import { stripSystemReminderTags } from "../../utils/format";
 import { Button } from "../ui";
 import { ExpandableBody } from "../ui/ExpandableBody";
 import { JsonTreeView } from "../ui/JsonTreeView";
@@ -313,10 +314,11 @@ const ToolCallBody = memo(function ToolCallBody({
 }: ToolCallBodyProps) {
   const fileChanges = metadata?.file_changes.filter((change) => Boolean(change.diff)) ?? [];
   const hasDiff = Boolean(metadata?.diff) || fileChanges.length > 0;
-  const normalized = useMemo(() => normalizeToolOutput(output), [output]);
+  const displayOutput = useMemo(() => stripSystemReminderTags(output), [output]);
+  const normalized = useMemo(() => normalizeToolOutput(displayOutput), [displayOutput]);
   const mcpCatalog = useMemo(
-    () => parseMcpCatalogOutput(entry.name, args, output),
-    [args, entry.name, output],
+    () => parseMcpCatalogOutput(entry.name, args, displayOutput),
+    [args, displayOutput, entry.name],
   );
   const parsedJson = !isWriteTool(entry.name) && !isBash(entry.name) ? normalized.data : null;
   const displayText = normalized.text;
@@ -349,7 +351,7 @@ const ToolCallBody = memo(function ToolCallBody({
       ) : null}
       {entry.result && entry.name === "read" ? (
         <ReadResultRenderer
-          output={entry.result.output}
+          output={displayOutput}
           filepath={metadata?.filepath ?? undefined}
           attachments={entry.result.attachments}
         />

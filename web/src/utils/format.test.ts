@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatThinkingDuration } from "./format";
+import { formatThinkingDuration, stripSystemReminderTags } from "./format";
 
 function translate(key: string, options?: Record<string, unknown>) {
   switch (key) {
@@ -34,5 +34,21 @@ describe("formatThinkingDuration", () => {
     expect(formatThinkingDuration(61000, translate)).toBe("1m 1s");
     expect(formatThinkingDuration(3600000, translate)).toBe("1h 0m 0s");
     expect(formatThinkingDuration(3661000, translate)).toBe("1h 1m 1s");
+  });
+});
+
+describe("stripSystemReminderTags", () => {
+  it("removes injected reminder blocks and their separator whitespace", () => {
+    expect(
+      stripSystemReminderTags("<system-reminder>\nBuild mode\n</system-reminder>\n\nuser prompt"),
+    ).toBe("user prompt");
+  });
+
+  it("preserves ordinary text around multiple reminder blocks", () => {
+    expect(
+      stripSystemReminderTags(
+        "before\n<system-reminder>first</system-reminder>\nmiddle\n<system-reminder>second</system-reminder>\nafter",
+      ),
+    ).toBe("before\nmiddle\nafter");
   });
 });

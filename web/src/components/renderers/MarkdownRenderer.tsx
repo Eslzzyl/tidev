@@ -294,7 +294,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({ content }: Prop
           code({ className, children, ...props }) {
             const match = /language-(\w+)/.exec(className || "");
             const language = match ? match[1] : "";
-            const content = String(children).replace(/\n$/, "");
+            const content = String(children ?? "").replace(/\n$/, "");
 
             // Check if it's a mermaid diagram
             if (isMermaidCode(language, content)) {

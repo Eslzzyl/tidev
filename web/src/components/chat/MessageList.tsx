@@ -364,7 +364,7 @@ function renderSegment(
     );
   }
   if (segment.type === "text" && segment.content) {
-    return <MarkdownRenderer content={stripSystemReminderTags(segment.content)} />;
+    return <MarkdownRenderer content={segment.content} />;
   }
   if (segment.type === "tool_call" && entry) {
     return (

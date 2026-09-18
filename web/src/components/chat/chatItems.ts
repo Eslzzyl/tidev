@@ -9,7 +9,7 @@ import {
   type SystemMessageBlock as SystemMessageBlockData,
   type ToolCallEntry,
 } from "../../utils/round";
-import { formatTime, getDuration, stripSystemReminderTags } from "../../utils/format";
+import { formatTime, getDuration } from "../../utils/format";
 import { formatThinkingLevel, isThinkingLevelEnabled } from "../../utils/chat";
 import { latestTurnStream, segmentReasoningTiming } from "../../utils/stream";
 
@@ -629,7 +629,7 @@ export function buildChatItems(
     const footerParts = buildRoundFooterParts(round, models, session, t);
     const finalReplyContent =
       hasFinalAnswer && mergedSegments[previewIndex]?.type === "text"
-        ? stripSystemReminderTags(mergedSegments[previewIndex].content)
+        ? mergedSegments[previewIndex].content
         : "";
     if (
       !hasStreamContinuation &&

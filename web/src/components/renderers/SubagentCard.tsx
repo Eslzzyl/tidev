@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import { api } from "../../api/client";
 import type { MessageRecord } from "../../types/api";
+import { stripSystemReminderTags } from "../../utils/format";
 import type { ToolCallEntry } from "../../utils/round";
 import { ExpandableBody } from "../ui/ExpandableBody";
 import { ActivityRipple } from "./ActivityRipple";
@@ -148,7 +149,7 @@ export function SubagentCard({
           {loading ? <div className="tool-loading">{t("Loading sub-session…")}</div> : null}
           {records ? <ChildMessages records={records} /> : null}
           {!records && entry.result?.output ? (
-            <MarkdownRenderer content={entry.result.output} />
+            <MarkdownRenderer content={stripSystemReminderTags(entry.result.output)} />
           ) : null}
         </div>
       </ExpandableBody>
