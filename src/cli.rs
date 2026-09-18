@@ -133,7 +133,9 @@ pub fn config_show() -> Result<()> {
 /// Show diagnostic information about the tidev installation.
 pub fn info() -> Result<()> {
     let paths = tidev_config::paths::ConfigPaths::discover()?;
-    println!("tidev v{}", env!("CARGO_PKG_VERSION"));
+    println!("tidev v{}", tidev_utils::build_info::DISPLAY_VERSION);
+    println!("Commit:            {}", tidev_utils::build_info::COMMIT);
+    println!("Dirty worktree:    {}", tidev_utils::build_info::is_dirty());
     println!("Config directory:  {}", paths.config_dir.display());
     println!("Data directory:    {}", paths.data_dir.display());
     println!("Config file:       {}", paths.config_file.display());

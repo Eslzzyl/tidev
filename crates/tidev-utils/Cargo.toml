@@ -5,6 +5,7 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "Shared utility functions for tidev"
+build = "build.rs"
 
 [dependencies]
 anyhow = "1"

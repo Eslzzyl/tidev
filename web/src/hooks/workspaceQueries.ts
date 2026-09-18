@@ -4,6 +4,14 @@ import { queryKeys } from "./queryKeys";
 
 // ── Workspace ──────────────────────────────────────────────────────────────
 
+export function useBuildInfo() {
+  return useQuery({
+    queryKey: queryKeys.buildInfo,
+    queryFn: api.getBuildInfo,
+    staleTime: Infinity,
+  });
+}
+
 export function useWorkspace() {
   return useQuery({
     queryKey: queryKeys.workspace,

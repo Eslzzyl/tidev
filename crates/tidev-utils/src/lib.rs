@@ -9,6 +9,7 @@
 //! * [`encoding`] — text and command output decoding to UTF-8 with legacy
 //!   encoding detection and source-encoding preservation
 
+pub mod build_info;
 pub mod encoding;
 pub mod path;
 pub mod session;

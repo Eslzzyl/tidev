@@ -21,6 +21,7 @@ use tidev_core::{
     PromptSubmission,
 };
 use tidev_llm::message::{Message, MessageAttachment};
+use tidev_utils::build_info;
 use tidev_utils::path::{display_path_with_tilde, expand_tilde};
 use tokio::fs;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -58,6 +59,13 @@ struct HealthResponse {
     status: &'static str,
     service: &'static str,
     frontend: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct BuildInfoResponse {
+    version: &'static str,
+    commit: &'static str,
+    dirty: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -655,6 +663,7 @@ impl From<tidev_core::ApprovalError> for ApiError {
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/health", get(health))
+        .route("/build-info", get(build_info))
         .route("/auth/status", get(auth_status))
         .route("/auth/verify", post(auth_verify))
         .route("/auth/configure", post(auth_configure))
@@ -798,6 +807,14 @@ async fn health(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         status: "ok",
         service: "tidev-web",
         frontend: frontend_name(state.frontend_mode),
+    })
+}
+
+async fn build_info() -> Json<BuildInfoResponse> {
+    Json(BuildInfoResponse {
+        version: build_info::DISPLAY_VERSION,
+        commit: build_info::COMMIT,
+        dirty: build_info::is_dirty(),
     })
 }
 

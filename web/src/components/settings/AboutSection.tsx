@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Terminal, RefreshCw, Activity, Cpu } from "lucide-react";
 import { api, waitForServerRestart } from "../../api/client";
+import { useBuildInfo } from "../../hooks/workspaceQueries";
 import { useUIStore } from "../../stores/useUIStore";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { Button } from "../ui";
@@ -11,6 +12,7 @@ export function AboutSection() {
   const connectionStatus = useUIStore((s) => s.connectionStatus);
   const [restarting, setRestarting] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+  const { data: buildInfo } = useBuildInfo();
 
   const statusConfig: Record<string, { color: string; dot: string; label: string }> = {
     connected: {
@@ -60,7 +62,7 @@ export function AboutSection() {
               tidev
             </h2>
             <span className="rounded-full bg-neutral-200/80 px-2 py-0.5 text-[11px] font-mono font-medium text-neutral-700 dark:bg-neutral-700 dark:text-neutral-300">
-              v0.9.0
+              {buildInfo ? `v${buildInfo.version}` : "—"}
             </span>
           </div>
           <p className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
@@ -99,7 +101,9 @@ export function AboutSection() {
                 {t("Web UI Version")}
               </span>
             </div>
-            <span className="font-mono text-xs text-neutral-600 dark:text-neutral-400">0.9.0</span>
+            <span className="font-mono text-xs text-neutral-600 dark:text-neutral-400">
+              {buildInfo?.version ?? "—"}
+            </span>
           </div>
         </div>
       </div>

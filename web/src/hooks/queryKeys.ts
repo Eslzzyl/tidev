@@ -1,6 +1,7 @@
 // ── Query keys ─────────────────────────────────────────────────────────────
 
 export const queryKeys = {
+  buildInfo: ["build-info"] as const,
   // Session
   sessions: ["sessions"] as const,
   session: (id: string) => ["session", id] as const,

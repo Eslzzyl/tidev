@@ -33,6 +33,12 @@ export interface SessionListResponse {
   workspace_roots: string[];
 }
 
+export interface BuildInfo {
+  version: string;
+  commit: string;
+  dirty: boolean;
+}
+
 export interface FileDiff {
   path: string;
   file_path?: string;

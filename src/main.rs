@@ -63,7 +63,7 @@ impl SearchRole {
 #[derive(Parser, Debug)]
 #[command(
     name = "tidev",
-    version,
+    version = tidev_utils::build_info::DISPLAY_VERSION,
     about = "tidev — A terminal-based AI coding agent"
 )]
 struct Cli {

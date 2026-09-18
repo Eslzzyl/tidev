@@ -60,6 +60,7 @@ import type {
   SessionListCursor,
   SessionListResponse,
   SessionDiffsResponse,
+  BuildInfo,
 } from "../types/api";
 import { getAuthToken, useAuthStore } from "../stores/useAuthStore";
 import i18n from "../i18n";
@@ -140,6 +141,7 @@ function sessionPath(sessionId: string, subpath = ""): string {
 }
 
 export const api = {
+  getBuildInfo: () => fetchJson<BuildInfo>(`${API_BASE}/build-info`),
   // Workspace
   getWorkspace: () => fetchJson<WorkspaceInfo>(`${API_BASE}/workspace`),
 
