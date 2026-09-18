@@ -1,10 +1,11 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Check, ChevronDown } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import type { Model } from "../types/api";
 import { formatThinkingLevel } from "../utils/chat";
-import { Button, Menu } from "./ui";
+import { Button, Input, Menu } from "./ui";
+import { filterModelProviderGroups, groupModelsByProvider } from "../utils/modelPicker";
 
 interface ModelPickerProps {
   models: Model[];
@@ -13,13 +14,6 @@ interface ModelPickerProps {
   onSelectModel: (model: Model) => void;
   onSelectThinkingLevel: (level: string) => void;
   onOpen?: () => void;
-}
-
-interface ProviderGroup {
-  id: string;
-  name: string;
-  connected: boolean;
-  models: Model[];
 }
 
 export function ModelPicker({
@@ -31,26 +25,12 @@ export function ModelPicker({
   onOpen,
 }: ModelPickerProps) {
   const { t } = useTranslation();
-  const providers = useMemo<ProviderGroup[]>(() => {
-    const groups = new Map<string, ProviderGroup>();
-    for (const model of models) {
-      const group = groups.get(model.provider_id);
-      if (group) {
-        group.models.push(model);
-        group.connected ||= model.connected;
-      } else {
-        groups.set(model.provider_id, {
-          id: model.provider_id,
-          name: model.provider_display_name,
-          connected: model.connected,
-          models: [model],
-        });
-      }
-    }
-    return [...groups.values()].sort(
-      (left, right) => Number(right.connected) - Number(left.connected),
-    );
-  }, [models]);
+  const [modelSearch, setModelSearch] = useState("");
+  const providers = useMemo(() => groupModelsByProvider(models), [models]);
+  const filteredProviders = useMemo(
+    () => filterModelProviderGroups(providers, modelSearch),
+    [modelSearch, providers],
+  );
 
   const supportsThinking = Boolean(activeModel?.thinking_levels.length);
   const selectedThinkingLevel = thinkingLevel ?? activeModel?.thinking_level;
@@ -59,7 +39,16 @@ export function ModelPicker({
     : t("Not available");
 
   return (
-    <Menu.Root onOpenChange={(nextOpen) => nextOpen && onOpen?.()}>
+    <Menu.Root
+      onOpenChange={(nextOpen) => {
+        if (nextOpen) {
+          setModelSearch("");
+          onOpen?.();
+        } else {
+          setModelSearch("");
+        }
+      }}
+    >
       <Menu.Trigger asChild>
         <Button
           type="button"
@@ -86,8 +75,26 @@ export function ModelPicker({
             </span>
           </Menu.SubTrigger>
           <Menu.SubContent className="model-picker-submenu model-picker-panel">
-            {providers.length ? (
-              providers.map((provider) =>
+            <Input
+              className="model-picker-search-input"
+              type="search"
+              value={modelSearch}
+              aria-label={t("Search models")}
+              placeholder={t("Search models...")}
+              onChange={(event) => setModelSearch(event.target.value)}
+              onKeyDown={(event) => {
+                if (
+                  event.key !== "Escape" &&
+                  event.key !== "ArrowDown" &&
+                  event.key !== "ArrowUp" &&
+                  event.key !== "Tab"
+                ) {
+                  event.stopPropagation();
+                }
+              }}
+            />
+            {filteredProviders.length ? (
+              filteredProviders.map((provider) =>
                 provider.connected ? (
                   <Menu.Sub key={provider.id} instant>
                     <Menu.SubTrigger className="model-picker-submenu-item">
@@ -129,7 +136,9 @@ export function ModelPicker({
                 ),
               )
             ) : (
-              <div className="model-picker-empty">{t("No models available")}</div>
+              <div className="model-picker-empty">
+                {modelSearch ? t("No models match your search") : t("No models available")}
+              </div>
             )}
           </Menu.SubContent>
         </Menu.Sub>

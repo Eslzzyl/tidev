@@ -1122,6 +1122,19 @@
   overflow-y: auto;
 }
 
+.ui-menu-content.model-picker-submenu .model-picker-search-input {
+  width: calc(100% - 14px);
+  margin: 4px 7px;
+}
+
+.ui-menu-content.model-picker-submenu .model-picker-empty {
+  padding: 6px 7px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
 .ui-menu-content.model-picker-menu-content .model-picker-models {
   min-width: 160px;
 }
