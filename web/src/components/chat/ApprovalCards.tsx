@@ -28,9 +28,18 @@ export function ProviderErrorCard({
 }) {
   const { t } = useTranslation();
   const canRetry = error.retryable && !retrying && Boolean(messageId) && Boolean(onRetry);
+  const className = [
+    "chat-message",
+    "assistant-message",
+    "assistant-segment-row",
+    "provider-error-row",
+    retrying ? "is-retrying" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
-    <article className={retrying ? "provider-error-row is-retrying" : "provider-error-row"}>
+    <article className={className}>
       <div
         className={retrying ? "provider-error-card is-retrying" : "provider-error-card"}
         role="alert"

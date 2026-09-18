@@ -214,7 +214,7 @@ function PersistedCompactionMessage({
   const bodyId = `compaction-summary-${messageId.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
 
   return (
-    <article className="system-message-block compaction-message">
+    <article className="chat-message assistant-message assistant-segment-row compaction-message">
       <Button
         type="button"
         className="compaction-message-header"

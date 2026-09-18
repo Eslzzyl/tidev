@@ -293,7 +293,7 @@ function CompactionMessage({ notice }: { notice: CompactionNotice }) {
   const bodyId = "context-compaction-summary";
 
   return (
-    <article className="system-message-block compaction-message">
+    <article className="chat-message assistant-message assistant-segment-row compaction-message">
       <Button
         type="button"
         className="compaction-message-header"

@@ -1080,23 +1080,39 @@ pre.markdown-code-block code {
 .compaction-message {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding-top: 4px;
-}
-.compaction-message-header {
-  display: inline-flex;
-  align-self: flex-start;
-  align-items: center;
-  gap: 7px;
-  min-height: 26px;
-  padding: 3px 0;
+  gap: 0;
   color: var(--muted);
+  font-size: var(--chat-detail-size);
+  line-height: var(--chat-detail-line-height);
 }
-.compaction-message-header:not(:disabled):hover {
+.ui-button[data-variant="ghost"].compaction-message-header {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 7px;
+  min-height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: inherit;
+  background: transparent;
+  font-size: inherit;
+  font-weight: 400;
+  line-height: inherit;
+  text-align: left;
+  white-space: normal;
+}
+.ui-button[data-variant="ghost"].compaction-message-header:hover:not(:disabled) {
+  border-color: transparent;
   color: var(--text);
+  background: transparent;
 }
-.compaction-message-header:disabled {
+.ui-button.compaction-message-header:disabled {
   opacity: 1;
+}
+.compaction-message-header > .ui-button-label {
+  display: contents;
 }
 .compaction-message-header strong {
   font-weight: 400;
@@ -1348,7 +1364,7 @@ pre.markdown-code-block code {
 }
 
 .provider-error-row {
-  padding-inline: 14px;
+  padding: 2px 14px 0;
 }
 
 @media (max-width: 760px) {

@@ -561,7 +561,9 @@ export function buildChatItems(
       round.status === "complete" &&
       !round.interrupted &&
       hasFinalAnswer &&
-      footerParts.length
+      footerParts.length &&
+      round.providerErrors.length === 0 &&
+      !turnProviderError
     ) {
       items.push({
         kind: "round-footer",
@@ -691,12 +693,12 @@ export function estimateChatItemSize(item: ChatItem | undefined) {
     case "system":
       return 80;
     case "compaction":
-      return item.notice.status === "complete" && item.notice.summary ? 64 : 34;
+      return item.notice.status === "failed" && item.notice.error ? 46 : 26;
     case "stream-empty":
       return 24;
     case "stream-error":
       return 36;
     case "provider-error":
-      return 86;
+      return 66;
   }
 }
