@@ -5,6 +5,7 @@
 use super::{SearchField, SearchOutputFormat, SearchRole, SessionOutputFormat};
 use anyhow::{Context, Result};
 use chrono::Duration;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use tidev_storage::{SessionInspection, StoredMessageView};
 use uuid::Uuid;
@@ -23,6 +24,19 @@ fn open_store() -> Result<(
         .context("failed to open database")?;
     let store = database.create_store()?;
     Ok((paths, store))
+}
+
+/// Ask the user to confirm a potentially destructive operation.
+pub(crate) fn confirm_action(prompt: &str) -> Result<bool> {
+    eprint!("{prompt} [y/N] ");
+    io::stderr().flush()?;
+
+    let mut answer = String::new();
+    io::stdin().read_line(&mut answer)?;
+    Ok(matches!(
+        answer.trim().to_ascii_lowercase().as_str(),
+        "y" | "yes"
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -65,9 +79,18 @@ pub fn auth_list() -> Result<()> {
 }
 
 /// Remove an API key for a provider.
-pub fn auth_remove(provider: &str) -> Result<()> {
+pub fn auth_remove(provider: &str, yes: bool) -> Result<()> {
     let paths = tidev_config::paths::ConfigPaths::discover()?;
     let mut auth = tidev_config::AuthStore::load_or_create(&paths)?;
+    if auth.providers.contains_key(provider)
+        && !yes
+        && !confirm_action(&format!(
+            "Remove stored authentication for provider '{provider}'"
+        ))?
+    {
+        println!("Authentication removal cancelled.");
+        return Ok(());
+    }
     if auth.providers.remove(provider).is_some() {
         auth.save(&paths)?;
         println!("Removed API key for provider '{provider}'");
@@ -149,7 +172,18 @@ pub fn info() -> Result<()> {
 // ---------------------------------------------------------------------------
 
 /// Import sessions from an uncompressed SQLite export file.
-pub fn import(file: PathBuf, session: Vec<String>, replace: bool) -> Result<()> {
+pub fn import(file: PathBuf, session: Vec<String>, replace: bool, yes: bool) -> Result<()> {
+    if replace
+        && !yes
+        && !confirm_action(&format!(
+            "Replace existing sessions from '{}'",
+            file.display()
+        ))?
+    {
+        println!("Import cancelled.");
+        return Ok(());
+    }
+
     let (_paths, store) = open_store()?;
 
     let session_ids: Option<Vec<Uuid>> = if session.is_empty() {
@@ -221,7 +255,17 @@ pub fn tmp_list(min_age_minutes: u64) -> Result<()> {
 }
 
 /// Clean tidev temporary files older than a given age.
-pub fn tmp_clean(min_age_minutes: u64, dry_run: bool) -> Result<()> {
+pub fn tmp_clean(min_age_minutes: u64, dry_run: bool, yes: bool) -> Result<()> {
+    if !dry_run
+        && !yes
+        && !confirm_action(&format!(
+            "Remove tidev temporary files older than {min_age_minutes} minutes"
+        ))?
+    {
+        println!("Temporary file cleanup cancelled.");
+        return Ok(());
+    }
+
     let max_age = std::time::Duration::from_secs(min_age_minutes * 60);
     let removed = tidev_utils::tmp::clean_temp_files(max_age, dry_run)?;
     if removed.is_empty() {
@@ -634,7 +678,16 @@ pub fn print_tool_output(id: &str) -> Result<()> {
 }
 
 /// Delete sessions older than the specified number of days.
-pub fn session_prune(older_than_days: u64) -> Result<()> {
+pub fn session_prune(older_than_days: u64, yes: bool) -> Result<()> {
+    if !yes {
+        if !confirm_action(&format!(
+            "Delete sessions older than {older_than_days} days? This cannot be undone."
+        ))? {
+            println!("Prune cancelled.");
+            return Ok(());
+        }
+    }
+
     let (_paths, store) = open_store()?;
     let duration = Duration::days(older_than_days as i64);
     let deleted = store.delete_sessions_older_than(duration)?;

@@ -131,6 +131,9 @@ enum Command {
         /// Output file path (defaults to a format-specific file)
         #[arg(short, long)]
         output: Option<PathBuf>,
+        /// Skip the confirmation prompt when overwriting an existing file
+        #[arg(short = 'y', long)]
+        yes: bool,
     },
 
     /// Import sessions from an uncompressed SQLite export file
@@ -145,6 +148,9 @@ enum Command {
         /// Replace existing sessions with the same UUID
         #[arg(short, long)]
         replace: bool,
+        /// Skip the confirmation prompt when replacing existing sessions
+        #[arg(short = 'y', long)]
+        yes: bool,
     },
 
     // ── Authentication ──────────────────────────────────────────────
@@ -206,6 +212,9 @@ enum AuthCommand {
     Remove {
         /// Provider name
         provider: String,
+        /// Skip the confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
     },
 }
 
@@ -260,6 +269,9 @@ enum TmpCommand {
         /// Perform a dry run without deleting anything
         #[arg(short, long)]
         dry_run: bool,
+        /// Skip the confirmation prompt when deleting files
+        #[arg(short = 'y', long)]
+        yes: bool,
     },
 }
 
@@ -330,6 +342,9 @@ enum SessionCommand {
     Prune {
         /// Number of days
         older_than_days: u64,
+        /// Skip the confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
     },
 }
 
@@ -366,20 +381,22 @@ async fn main() -> Result<()> {
             all,
             format,
             output,
-        }) => run_export(session, all, format, output),
+            yes,
+        }) => run_export(session, all, format, output, yes),
 
         // ── Import ──────────────────────────────────────────────
         Some(Command::Import {
             file,
             session,
             replace,
-        }) => cli::import(file, session, replace),
+            yes,
+        }) => cli::import(file, session, replace, yes),
 
         // ── Auth ────────────────────────────────────────────────
         Some(Command::Auth(cmd)) => match cmd {
             AuthCommand::Set { provider, key } => cli::auth_set(&provider, &key),
             AuthCommand::List => cli::auth_list(),
-            AuthCommand::Remove { provider } => cli::auth_remove(&provider),
+            AuthCommand::Remove { provider, yes } => cli::auth_remove(&provider, yes),
         },
 
         // ── Model ───────────────────────────────────────────────
@@ -408,7 +425,8 @@ async fn main() -> Result<()> {
             TmpCommand::Clean {
                 min_age_minutes,
                 dry_run,
-            } => cli::tmp_clean(min_age_minutes, dry_run),
+                yes,
+            } => cli::tmp_clean(min_age_minutes, dry_run, yes),
         },
 
         // ── Session ─────────────────────────────────────────────
@@ -447,7 +465,10 @@ async fn main() -> Result<()> {
                 case_sensitive,
                 format,
             ),
-            SessionCommand::Prune { older_than_days } => cli::session_prune(older_than_days),
+            SessionCommand::Prune {
+                older_than_days,
+                yes,
+            } => cli::session_prune(older_than_days, yes),
         },
 
         // ── Tool output dump ────────────────────────────────────
@@ -463,6 +484,7 @@ fn run_export(
     all: bool,
     format: ExportFormat,
     output: Option<PathBuf>,
+    yes: bool,
 ) -> Result<()> {
     if session.is_empty() && !all {
         anyhow::bail!("Specify at least one --session <UUID> or --all to export all sessions");
@@ -494,6 +516,17 @@ fn run_export(
         ExportFormat::Sqlite => PathBuf::from("./tidev-export.db"),
         ExportFormat::Jsonl => PathBuf::from("./tidev-export.jsonl"),
     });
+
+    if output.exists()
+        && !yes
+        && !cli::confirm_action(&format!(
+            "Overwrite existing export file '{}'",
+            output.display()
+        ))?
+    {
+        println!("Export cancelled.");
+        return Ok(());
+    }
 
     match format {
         ExportFormat::Sqlite => {
