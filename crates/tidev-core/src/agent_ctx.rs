@@ -44,6 +44,7 @@ use crate::approval::{
 use crate::message_buf::CoreMessageBuffer;
 use crate::mode::Mode;
 use crate::registry::ToolRegistry;
+use crate::runtime::PendingPromptStore;
 use crate::session::SessionManager;
 use crate::tool_def::to_llm_tool_def;
 
@@ -687,6 +688,9 @@ pub struct CoreContext {
     pending_instruction_sources: Arc<Mutex<Vec<String>>>,
     /// Durable draft recorder for this context's streamed assistant messages.
     stream_recorder: StreamRecorder,
+    /// Prompts submitted while the session is busy. They are materialized at
+    /// the next request boundary after any automatic compaction completes.
+    pending_prompts: Option<PendingPromptStore>,
 }
 
 /// Executes already-approved, non-task calls through tidev's host registry.
@@ -824,6 +828,7 @@ impl CoreContext {
         auth: Arc<StdRwLock<AuthStore>>,
         session_start_hash: Option<String>,
         config_dir: PathBuf,
+        pending_prompts: Option<PendingPromptStore>,
     ) -> Self {
         let stream_recorder =
             StreamRecorder::new(session_id, session_manager.clone(), buffer.clone());
@@ -852,6 +857,7 @@ impl CoreContext {
             config_dir,
             pending_instruction_sources: Arc::new(Mutex::new(Vec::new())),
             stream_recorder,
+            pending_prompts,
         }
     }
 
@@ -1051,6 +1057,75 @@ impl CoreContext {
         };
         approved.extend(user_approved);
         Ok(approved)
+    }
+}
+
+impl CoreContext {
+    async fn materialize_pending_prompts(&self) -> Result<()> {
+        let Some(store) = self.pending_prompts.as_ref() else {
+            return Ok(());
+        };
+        let mut pending = store
+            .lock()
+            .expect("pending prompt mutex poisoned")
+            .remove(&self.session_id)
+            .unwrap_or_default();
+        if pending.is_empty() {
+            return Ok(());
+        }
+
+        while let Some(prompt) = pending.pop_front() {
+            let mut message = Message::new(MessageRole::User, prompt.content.clone());
+            message.id = prompt.message_id;
+            let message_id = message.id;
+            message.attachments = prompt.attachments.clone();
+            message.thinking_level = prompt.thinking_level.clone();
+            let app_data = MessageAppData {
+                mode: Some(prompt.mode.as_str().to_string()),
+                ..Default::default()
+            };
+            let mut messages = vec![message.clone()];
+            if let Some(notice) =
+                instruction_loaded_notice(&self.workspace_root, &prompt.instruction_sources)
+            {
+                messages.push(notice);
+            }
+            let app_data_by_message = [(message.id, app_data.clone())].into_iter().collect();
+            if let Err(error) = self
+                .session_manager
+                .append_messages_with_app_data_and_instruction_sources(
+                    self.session_id,
+                    &messages,
+                    &app_data_by_message,
+                    &prompt.instruction_sources,
+                )
+            {
+                let mut store = store.lock().expect("pending prompt mutex poisoned");
+                let remaining = store.entry(self.session_id).or_default();
+                remaining.push_front(prompt);
+                remaining.append(&mut pending);
+                return Err(error);
+            }
+
+            {
+                let mut buffer = self.buffer.write().await;
+                for message in messages {
+                    let data = if message.id == message_id {
+                        app_data.clone()
+                    } else {
+                        MessageAppData::default()
+                    };
+                    buffer.append_with_app_data(message, data);
+                }
+            }
+            if !prompt.instruction_sources.is_empty() {
+                self.emit(BackendEvent::InstructionsLoaded {
+                    session_id: self.session_id,
+                    sources: prompt.instruction_sources,
+                });
+            }
+        }
+        Ok(())
     }
 }
 
@@ -1470,85 +1545,87 @@ impl AgentContext for CoreContext {
         let mut compact_model = self.model_config.clone();
         compact_model.system_prompt = Some(self.system_prompt.clone());
 
-        let mut buffer = self.buffer.write().await;
-        let (should_compact, prior_summary, prior_retained_from) = {
-            let cm = self.context_manager.lock().await;
-            (
-                cm.needs_compaction(
-                    buffer.protocol(),
-                    compact_model.context_window,
-                    compact_model.max_output_tokens,
-                ),
-                cm.summary.clone(),
-                cm.retained_from,
-            )
-        };
-        if !should_compact {
-            return Ok(());
-        }
+        {
+            let mut buffer = self.buffer.write().await;
+            let (should_compact, prior_summary, prior_retained_from) = {
+                let cm = self.context_manager.lock().await;
+                (
+                    cm.needs_compaction(
+                        buffer.protocol(),
+                        compact_model.context_window,
+                        compact_model.max_output_tokens,
+                    ),
+                    cm.summary.clone(),
+                    cm.retained_from,
+                )
+            };
+            if should_compact {
+                self.emit(BackendEvent::ContextCompactionStarted {
+                    session_id: self.session_id,
+                    manual: false,
+                    model_id: Some(self.active_model.model_id.clone()),
+                });
 
-        self.emit(BackendEvent::ContextCompactionStarted {
-            session_id: self.session_id,
-            manual: false,
-            model_id: Some(self.active_model.model_id.clone()),
-        });
+                let compaction_messages = buffer.protocol().load().to_vec();
+                let compaction_result = {
+                    let cm = self.context_manager.lock().await;
+                    cm.compact(
+                        &self.llm,
+                        &compact_model,
+                        &tools,
+                        &compaction_messages,
+                        session_id,
+                        None,
+                    )
+                    .await
+                };
+                let result = match compaction_result {
+                    Ok(result) => result,
+                    Err(error) => {
+                        self.emit(BackendEvent::ContextCompacted {
+                            session_id: self.session_id,
+                            compacted: false,
+                            manual: false,
+                            summary: None,
+                            retained_from: 0,
+                            model_id: Some(self.active_model.model_id.clone()),
+                            completed_at: Some(Utc::now()),
+                            error: Some(error.to_string()),
+                        });
+                        return Err(error);
+                    }
+                };
 
-        let compaction_messages = buffer.protocol().load().to_vec();
-        let compaction_result = {
-            let cm = self.context_manager.lock().await;
-            cm.compact(
-                &self.llm,
-                &compact_model,
-                &tools,
-                &compaction_messages,
-                session_id,
-                None,
-            )
-            .await
-        };
-        let result = match compaction_result {
-            Ok(result) => result,
-            Err(error) => {
+                let mut marker = Message::compaction(&result.summary);
+                marker.metadata.prior_summary = prior_summary;
+                marker.metadata.prior_retained_from = Some(prior_retained_from);
+                self.session_manager.apply_compaction(
+                    self.session_id,
+                    &result.summary,
+                    result.retained_from,
+                    &marker,
+                )?;
+                buffer.append(marker);
+                self.context_manager
+                    .lock()
+                    .await
+                    .apply_compaction(result.summary.clone(), result.retained_from);
                 self.emit(BackendEvent::ContextCompacted {
                     session_id: self.session_id,
-                    compacted: false,
+                    compacted: true,
                     manual: false,
-                    summary: None,
-                    retained_from: 0,
+                    summary: Some(result.summary),
+                    retained_from: result.retained_from,
                     model_id: Some(self.active_model.model_id.clone()),
                     completed_at: Some(Utc::now()),
-                    error: Some(error.to_string()),
+                    error: None,
                 });
-                return Err(error);
             }
-        };
+        }
 
-        let mut marker = Message::compaction(&result.summary);
-        marker.metadata.prior_summary = prior_summary;
-        marker.metadata.prior_retained_from = Some(prior_retained_from);
-        self.session_manager.apply_compaction(
-            self.session_id,
-            &result.summary,
-            result.retained_from,
-            &marker,
-        )?;
-        buffer.append(marker);
-        drop(buffer);
-
-        self.context_manager
-            .lock()
-            .await
-            .apply_compaction(result.summary.clone(), result.retained_from);
-        self.emit(BackendEvent::ContextCompacted {
-            session_id: self.session_id,
-            compacted: true,
-            manual: false,
-            summary: Some(result.summary),
-            retained_from: result.retained_from,
-            model_id: Some(self.active_model.model_id.clone()),
-            completed_at: Some(Utc::now()),
-            error: None,
-        });
+        // Busy prompts are appended only after compaction so the next user
+        // message remains verbatim after the summary marker.
+        self.materialize_pending_prompts().await?;
         Ok(())
     }
 
@@ -1891,6 +1968,7 @@ async fn execute_task_tool(
         spawner.auth,
         spawner.session_start_hash,
         spawner.config_dir,
+        None,
     );
 
     let loop_config = AgentLoopConfig {

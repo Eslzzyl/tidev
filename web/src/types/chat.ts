@@ -15,6 +15,8 @@ export interface CompactionNotice {
   error: string | null;
   modelId: string | null;
   completedAt: string | null;
+  afterUserMessageId: string | null;
+  beforeRequestId: number | null;
 }
 
 export interface StreamMessage {

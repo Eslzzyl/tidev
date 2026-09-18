@@ -304,6 +304,26 @@ describe("round preview state", () => {
     ]);
   });
 
+  it("keeps a compaction marker at its persisted position within a round", () => {
+    const compaction = message("Compaction\n\nsummary", "user");
+    compaction.metadata.compaction_manual = false;
+    const finalAssistant = message("answer after compaction", "assistant");
+
+    const built = buildRounds([
+      record(message("prompt", "user")),
+      record(message("answer before compaction")),
+      record(compaction),
+      record(finalAssistant),
+    ]);
+
+    expect(built).toHaveLength(1);
+    expect((built[0] as Round).segments.map((segment) => segment.type)).toEqual([
+      "text",
+      "compaction",
+      "text",
+    ]);
+  });
+
   it("parses both single-file and multi-file instruction notices", () => {
     expect(parseInstructionMessage("Loaded instructions from AGENTS.md")).toEqual({
       count: null,

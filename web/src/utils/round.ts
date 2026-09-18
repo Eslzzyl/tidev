@@ -29,6 +29,7 @@ export type RoundSegment =
       completedAt?: string;
     }
   | { type: "instruction"; message: Message }
+  | { type: "compaction"; message: Message }
   | { type: "tool_call"; toolCallId: string };
 
 export type RoundInterruptionKind = "cancelled" | "failed" | "interrupted";
@@ -185,11 +186,15 @@ export function buildRounds(records: MessageRecord[]): (Round | SystemMessageBlo
     const msg = unwrapMessage(record);
 
     if (msg.metadata.compaction_manual != null) {
-      rounds.push({
-        id: `system-${msg.id}`,
-        message: msg,
-        kind: "system",
-      });
+      if (currentRound) {
+        currentRound.segments.push({ type: "compaction", message: msg });
+      } else {
+        rounds.push({
+          id: `system-${msg.id}`,
+          message: msg,
+          kind: "system",
+        });
+      }
     } else if (msg.role === "user") {
       currentRound = {
         id: `round-${msg.id}`,

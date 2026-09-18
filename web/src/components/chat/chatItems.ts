@@ -222,6 +222,8 @@ function makeSegmentItems(
       segmentSubKey = `tool-${segment.toolCallId}`;
     } else if (segment.type === "instruction") {
       segmentSubKey = `instruction-${segment.message.id}`;
+    } else if (segment.type === "compaction") {
+      segmentSubKey = `compaction-${segment.message.id}`;
     } else if (segment.type === "reasoning") {
       segmentSubKey = `reasoning-${reasoningCounter++}`;
     } else {
@@ -230,7 +232,10 @@ function makeSegmentItems(
 
     visible.push({
       key: `${keyPrefix}-${segmentSubKey}`,
-      contentId: visible.length === 0 ? contentId : undefined,
+      contentId:
+        segment.type !== "compaction" && !visible.some((item) => item.segment.type !== "compaction")
+          ? contentId
+          : undefined,
       segment,
       entry,
       instructionContent:
@@ -238,7 +243,7 @@ function makeSegmentItems(
           ? instructionContentByMessageId?.get(segment.message.id)
           : undefined,
       active: segmentActive,
-      collapsed: !showAll && index !== previewIndex,
+      collapsed: segment.type !== "compaction" && !showAll && index !== previewIndex,
       reasoningStartedAt: segmentStartedAt,
       reasoningCompletedAt: segmentCompletedAt,
     });
@@ -325,6 +330,27 @@ function buildRoundFooterParts(
   return parts;
 }
 
+function persistedCompactionNotice(message: Message): CompactionNotice {
+  return {
+    status: "complete",
+    manual: message.metadata.compaction_manual === true,
+    summary: message.content.split("\n\n").slice(1).join("\n\n").trim() || null,
+    error: null,
+    modelId: null,
+    completedAt: message.created_at || null,
+    afterUserMessageId: null,
+    beforeRequestId: null,
+  };
+}
+
+function matchesCompactionNotice(message: Message, notice: CompactionNotice | null): boolean {
+  if (!notice || notice.status !== "complete" || !notice.summary) return false;
+  return (
+    message.metadata.compaction_manual === notice.manual &&
+    message.content === `Compaction\n\n${notice.summary}`
+  );
+}
+
 export function buildChatItems(
   rounds: (Round | SystemMessageBlockData)[],
   streams: StreamMessage[],
@@ -345,6 +371,17 @@ export function buildChatItems(
       .map((stream) => stream.userMessageId)
       .filter((messageId): messageId is string => Boolean(messageId)),
   );
+  const persistedLiveCompaction = rounds.some((value) =>
+    isSystemBlock(value)
+      ? matchesCompactionNotice(value.message, compactionNotice)
+      : value.segments.some(
+          (segment) =>
+            segment.type === "compaction" &&
+            matchesCompactionNotice(segment.message, compactionNotice),
+        ),
+  );
+  const liveCompactionNotice = persistedLiveCompaction ? null : compactionNotice;
+  let liveCompactionInserted = false;
   const userMessageTimestampMap = new Map<string, string>();
   for (const value of rounds) {
     if (!isSystemBlock(value) && value.userMessage.created_at) {
@@ -354,11 +391,6 @@ export function buildChatItems(
 
   for (const value of rounds) {
     if (isSystemBlock(value)) {
-      const isLiveCompletedCompaction =
-        compactionNotice?.status === "complete" &&
-        compactionNotice.summary &&
-        value.message.content === `Compaction\n\n${compactionNotice.summary}`;
-      if (isLiveCompletedCompaction) continue;
       items.push({ kind: "system", key: value.id, block: value });
       continue;
     }
@@ -469,7 +501,9 @@ export function buildChatItems(
     const expanded =
       expandedTurns[turnId] ?? (isTurnStreamActive || terminalInterruption || !collapsible);
     const previewIndex = getTextPreviewIndex(mergedSegments);
-    const hasFinalAnswer = previewIndex >= 0 && previewIndex === mergedSegments.length - 1;
+    const hasFinalAnswer =
+      previewIndex >= 0 &&
+      mergedSegments.slice(previewIndex + 1).every((segment) => segment.type === "compaction");
     const active = isTurnStreamActive || pendingInstructions.length > 0;
 
     const interruptionLabel = round.interrupted
@@ -525,8 +559,49 @@ export function buildChatItems(
       turnStream?.reasoningCompletedAt,
       instructionContentByMessageId,
     );
-    for (const segment of segments) {
-      items.push({ kind: "assistant-segment", item: segment });
+    const liveCompactionForRound =
+      liveCompactionNotice?.afterUserMessageId === turnId ? liveCompactionNotice : null;
+    const streamIsAfterAutomaticCompaction =
+      liveCompactionForRound &&
+      !liveCompactionForRound.manual &&
+      turnStream &&
+      (liveCompactionForRound.beforeRequestId === null ||
+        turnStream.requestId > liveCompactionForRound.beforeRequestId ||
+        (turnStream.requestId === liveCompactionForRound.beforeRequestId &&
+          turnStream.status === "streaming" &&
+          !turnStream.providerFinished));
+    const streamSegmentIndex = streamIsAfterAutomaticCompaction
+      ? segments.findIndex((segment) => turnStream.segments.includes(segment.segment))
+      : -1;
+    const appendSegment = (segment: SegmentItem) => {
+      if (segment.segment.type === "compaction") {
+        items.push({
+          kind: "compaction",
+          key: segment.key,
+          notice: persistedCompactionNotice(segment.segment.message),
+        });
+      } else {
+        items.push({ kind: "assistant-segment", item: segment });
+      }
+    };
+    segments.forEach((segment, index) => {
+      if (index === streamSegmentIndex && liveCompactionForRound) {
+        items.push({
+          kind: "compaction",
+          key: "context-compaction",
+          notice: liveCompactionForRound,
+        });
+        liveCompactionInserted = true;
+      }
+      appendSegment(segment);
+    });
+    if (liveCompactionForRound && !liveCompactionInserted) {
+      items.push({
+        kind: "compaction",
+        key: "context-compaction",
+        notice: liveCompactionForRound,
+      });
+      liveCompactionInserted = true;
     }
 
     for (const providerError of round.providerErrors) {
@@ -659,8 +734,8 @@ export function buildChatItems(
     }
   }
 
-  if (compactionNotice) {
-    items.push({ kind: "compaction", key: "context-compaction", notice: compactionNotice });
+  if (liveCompactionNotice && !liveCompactionInserted) {
+    items.push({ kind: "compaction", key: "context-compaction", notice: liveCompactionNotice });
   }
 
   return items;
@@ -682,6 +757,8 @@ export function estimateChatItemSize(item: ChatItem | undefined) {
           return 30;
         case "instruction":
           return 28;
+        case "compaction":
+          return 26;
         case "text":
           return 72;
       }

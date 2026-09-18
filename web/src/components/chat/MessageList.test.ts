@@ -204,4 +204,138 @@ describe("interrupted stream rendering", () => {
       "user-1:segment-text-0",
     ]);
   });
+
+  it("renders a persisted compaction marker between segments", () => {
+    const compaction = {
+      ...round().userMessage,
+      id: "compaction-1",
+      content: "Compaction\n\nsummary",
+      metadata: { ...round().userMessage.metadata, compaction_manual: false },
+    };
+    const items = buildChatItems(
+      [
+        round({
+          segments: [
+            { type: "text", content: "before" },
+            { type: "compaction", message: compaction },
+            { type: "text", content: "after" },
+          ],
+        }),
+      ],
+      [],
+      {},
+      [],
+      "",
+      [],
+      undefined,
+      translate,
+    );
+
+    expect(items.map((item) => item.kind)).toEqual([
+      "user",
+      "assistant-segment",
+      "compaction",
+      "assistant-segment",
+    ]);
+  });
+
+  it("anchors automatic live compaction before the next stream", () => {
+    const stream = {
+      ...interruptedStream(),
+      status: "streaming" as const,
+      providerFinished: false,
+      segments: [{ type: "text" as const, content: "after" }],
+      requestId: 3,
+    };
+    const items = buildChatItems(
+      [round({ segments: [{ type: "text", content: "before" }] })],
+      [stream],
+      {},
+      [],
+      "",
+      [],
+      undefined,
+      translate,
+      {
+        status: "running",
+        manual: false,
+        summary: null,
+        error: null,
+        modelId: null,
+        completedAt: null,
+        afterUserMessageId: "user-1",
+        beforeRequestId: 3,
+      },
+    );
+
+    expect(items.map((item) => item.kind)).toEqual([
+      "user",
+      "assistant-meta",
+      "assistant-segment",
+      "compaction",
+      "assistant-segment",
+    ]);
+  });
+
+  it("keeps manual live compaction after the completed round", () => {
+    const items = buildChatItems(
+      [round({ segments: [{ type: "text", content: "completed answer" }] })],
+      [],
+      {},
+      [],
+      "",
+      [],
+      undefined,
+      translate,
+      {
+        status: "complete",
+        manual: true,
+        summary: "summary",
+        error: null,
+        modelId: null,
+        completedAt: "2026-09-18T00:01:00.000Z",
+        afterUserMessageId: "user-1",
+        beforeRequestId: null,
+      },
+    );
+
+    expect(items.map((item) => item.kind)).toEqual(["user", "assistant-segment", "compaction"]);
+  });
+
+  it("keeps automatic compaction before a queued user round", () => {
+    const queuedRound = round({
+      id: "round-user-2",
+      userMessage: { ...round().userMessage, id: "user-2", content: "queued prompt" },
+      segments: [],
+      status: "user_only",
+      completedAt: undefined,
+    });
+    const items = buildChatItems(
+      [round({ segments: [{ type: "text", content: "completed answer" }] }), queuedRound],
+      [],
+      {},
+      [],
+      "",
+      [],
+      undefined,
+      translate,
+      {
+        status: "complete",
+        manual: false,
+        summary: "summary",
+        error: null,
+        modelId: null,
+        completedAt: "2026-09-18T00:01:00.000Z",
+        afterUserMessageId: "user-1",
+        beforeRequestId: null,
+      },
+    );
+
+    expect(items.map((item) => item.kind)).toEqual([
+      "user",
+      "assistant-segment",
+      "compaction",
+      "user",
+    ]);
+  });
 });

@@ -137,11 +137,9 @@ pub struct Runtime {
     /// Per-session queues of user messages submitted while the session's
     /// agent loop was busy.
     ///
-    /// Steering entries are persisted to the message buffer immediately by
-    /// `submit_prompt_with_attachments` and only serve as a keep-alive
-    /// signal for the running loop (see `steer_signals`). Queueing entries
-    /// are drained by the host after the loop exits, persisted, and start
-    /// the next turn.
+    /// Both steering and queueing entries stay pending until the next request
+    /// boundary. `CoreContext::prepare_request` performs automatic compaction
+    /// first, then persists all pending prompts in submission order.
     pending_prompts: Arc<std::sync::Mutex<HashMap<Uuid, VecDeque<PendingPrompt>>>>,
     /// Per-session steering signals. Set when a steering message is
     /// submitted while the loop is running; consumed by the loop at the
@@ -191,31 +189,32 @@ impl Drop for SessionLoopGuard {
 
 /// How a user message submitted while the agent loop is busy is delivered.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum DeliveryMode {
+pub(crate) enum DeliveryMode {
     /// Wait until the current turn (all requests and tool calls) finishes,
     /// then start a new turn with the message.
     Queue,
-    /// Persist immediately and insert into the running turn at the next
-    /// request boundary, without interrupting the in-flight stream.
+    /// Insert into the running turn at the next request boundary, without
+    /// interrupting the in-flight stream.
     Steer,
 }
 
 /// A user message submitted while the session's agent loop was busy.
 ///
-/// The host decides delivery from the `send_while_busy` config: steering
-/// entries are persisted to the buffer at submission time (the entry is
-/// only a keep-alive signal), queueing entries are persisted after the
-/// current turn exits.
+/// The host decides delivery from the `send_while_busy` config. Both delivery
+/// modes stay pending until the next request boundary so automatic compaction
+/// can finish before either message becomes part of the next request.
 #[derive(Clone, Debug)]
-struct PendingPrompt {
-    message_id: Uuid,
-    delivery: DeliveryMode,
-    mode: Mode,
-    content: String,
-    attachments: Vec<MessageAttachment>,
-    thinking_level: Option<ThinkingLevelType>,
-    instruction_sources: Vec<String>,
+pub(crate) struct PendingPrompt {
+    pub(crate) message_id: Uuid,
+    pub(crate) delivery: DeliveryMode,
+    pub(crate) mode: Mode,
+    pub(crate) content: String,
+    pub(crate) attachments: Vec<MessageAttachment>,
+    pub(crate) thinking_level: Option<ThinkingLevelType>,
+    pub(crate) instruction_sources: Vec<String>,
 }
+
+pub(crate) type PendingPromptStore = Arc<StdMutex<HashMap<Uuid, VecDeque<PendingPrompt>>>>;
 
 /// A frontend-neutral user prompt submission.
 ///
@@ -641,11 +640,11 @@ impl Runtime {
     /// When the session's agent loop is already running, the `send_while_busy`
     /// config decides the delivery:
     ///
-    /// - `steer`: the message is persisted immediately (with a
-    ///   `<system-reminder>` suffix) and inserted into the running turn at the
-    ///   next request boundary, without interrupting the in-flight stream.
-    /// - `queue`: the message is held in the pending queue and only persisted
-    ///   after the current turn exits, starting the next turn.
+    /// - `steer`: the message is held with a `<system-reminder>` suffix and
+    ///   inserted into the running turn at the next request boundary, without
+    ///   interrupting the in-flight stream.
+    /// - `queue`: the message is held in the pending queue and persisted at
+    ///   the next request boundary, starting the next turn.
     pub async fn submit_prompt_with_attachments(
         &self,
         session_id: Uuid,
@@ -758,38 +757,28 @@ impl Runtime {
         let event_app_data = user_app_data.clone();
 
         match delivery {
-            // 4a. Steering: persist now and signal the running loop. The
-            //     next load_messages() in the loop picks the message up.
+            // 4a. Steering: keep the fully materialized message pending and
+            //     signal the running loop. The next request boundary performs
+            //     automatic compaction first, then persists this message.
             Some(DeliveryMode::Steer) => {
-                let buf = self.message_buffer(session_id).await;
-                self.persist_user_message(
-                    session_id,
-                    &buf,
-                    &user_msg,
-                    &user_app_data,
-                    &instruction_sources,
-                )
-                .await?;
                 let _ = self.event_bus(session_id).await.send_backend(
                     BackendEvent::UserMessageCreated {
                         session_id,
-                        message: Box::new(user_msg),
+                        message: Box::new(user_msg.clone()),
                         app_data: Box::new(event_app_data),
                         queued: true,
                     },
                 );
-                self.emit_instruction_sources_loaded(session_id, &instruction_sources)
-                    .await;
                 self.push_pending_prompt(
                     session_id,
                     PendingPrompt {
                         message_id,
                         delivery: DeliveryMode::Steer,
                         mode,
-                        content: String::new(),
-                        attachments: Vec::new(),
-                        thinking_level: None,
-                        instruction_sources: Vec::new(),
+                        content: user_msg.content,
+                        attachments: user_msg.attachments,
+                        thinking_level: user_msg.thinking_level,
+                        instruction_sources,
                     },
                 );
                 Ok(PromptSubmissionReceipt {
@@ -797,9 +786,8 @@ impl Runtime {
                     duplicate: false,
                 })
             }
-            // 4b. Queueing: hold the content in the pending queue. The host
-            //     persists it after the current turn exits and starts the
-            //     next turn.
+            // 4b. Queueing: hold the content in the pending queue. The next
+            //     request boundary compacts first, then persists it.
             Some(DeliveryMode::Queue) => {
                 let q_content = user_msg.content.clone();
                 let q_attachments = user_msg.attachments.clone();
@@ -898,11 +886,12 @@ impl Runtime {
                 .iter()
                 .find(|prompt| prompt.message_id == submission.message_id)
         }) {
-            if prompt.delivery == DeliveryMode::Queue
-                && prompt.mode == submission.mode
-                && strip_leading_persisted_reminders(&prompt.content) == submission.content
-                && prompt.attachments == submission.attachments
-                && prompt.thinking_level == submission.thinking_level
+            let mut message = Message::new(MessageRole::User, prompt.content.clone());
+            message.id = prompt.message_id;
+            message.attachments = prompt.attachments.clone();
+            message.thinking_level = prompt.thinking_level.clone();
+            if prompt.mode == submission.mode
+                && prompt_message_matches_submission(&message, submission)
             {
                 return Ok(true);
             }
@@ -1062,8 +1051,9 @@ impl Runtime {
     /// Register a pending prompt for a busy session.
     ///
     /// Steering entries set the session's steering signal so the running
-    /// loop keeps going (their content is already persisted); queueing
-    /// entries are drained by the host after the loop exits.
+    /// loop reaches another request boundary; both delivery modes remain in
+    /// the pending store until `CoreContext::prepare_request` materializes
+    /// them.
     fn push_pending_prompt(&self, session_id: Uuid, prompt: PendingPrompt) {
         let delivery = prompt.delivery;
         let mut queue = self.pending_prompts.lock().unwrap();
@@ -1306,14 +1296,9 @@ impl Runtime {
         let filtered_tools = workspace
             .tool_registry()
             .definitions_for_model(&active_model);
-        // The buffer is shared with the spawned task for persisting queued
-        // prompts after a turn and moved into the CoreContext.
+        // The buffer and pending prompt store are shared with the CoreContext.
         let buffer = self.message_buffer(session_id).await;
-        let buffer_for_queued = buffer.clone();
-        let session_manager = self.session_manager.clone();
         let pending_prompts = self.pending_prompts.clone();
-        let queued_workspace_root = workspace.root().to_path_buf();
-        let queued_event_bus = event_bus.clone();
         let ctx = crate::agent_ctx::CoreContext::new(
             self.llm.clone(),
             self.session_manager.clone(),
@@ -1335,6 +1320,7 @@ impl Runtime {
             self.auth.clone(),
             session_start_hash,
             self.paths.config_dir.clone(),
+            Some(pending_prompts.clone()),
         );
 
         // Create the steering signal for this loop run. Steering messages
@@ -1384,12 +1370,9 @@ impl Runtime {
                 idle_notify,
             };
             let mut loop_error = None;
-            // The outer loop keeps the session busy across turns: after
-            // run_agent_loop exits (the model stopped responding), queued
-            // prompts are persisted and the loop runs again for the next
-            // turn. Steering messages never reach this point — they were
-            // persisted at submission time and the loop consumed their
-            // keep-alive signals.
+            // The outer loop keeps the session busy across turns. Pending
+            // prompts are materialized by CoreContext at the next request
+            // boundary, after any automatic compaction has completed.
             loop {
                 if cancel.is_cancelled() {
                     break;
@@ -1398,86 +1381,16 @@ impl Runtime {
                     loop_error = Some(e.to_string());
                     log::error!("agent loop for session {session_id} exited with error: {e}");
                 }
-                // Drain prompts queued while the loop was running. Steering
-                // entries were already persisted; queueing entries are
-                // persisted here before the next loop iteration.
-                let mut queued: VecDeque<PendingPrompt> = pending_prompts
+                let has_pending_prompts = pending_prompts
                     .lock()
                     .unwrap()
-                    .remove(&session_id)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter(|p| p.delivery == DeliveryMode::Queue)
-                    .collect();
-                if queued.is_empty() {
+                    .get(&session_id)
+                    .is_some_and(|prompts| !prompts.is_empty());
+                if !has_pending_prompts {
                     break;
                 }
-                // Persist queued prompts (buffer + store) so the next
-                // loop iteration's load_messages() picks them up.
-                let mut failed_prompt = None;
-                while let Some(prompt) = queued.pop_front() {
-                    let mut msg = Message::new(MessageRole::User, prompt.content.clone());
-                    msg.id = prompt.message_id;
-                    msg.attachments = prompt.attachments.clone();
-                    msg.thinking_level = prompt.thinking_level.clone();
-                    let app_data = MessageAppData {
-                        mode: Some(prompt.mode.as_str().to_string()),
-                        ..Default::default()
-                    };
-                    let mut messages = vec![msg.clone()];
-                    if let Some(notice) = crate::agent_ctx::instruction_loaded_notice(
-                        &queued_workspace_root,
-                        &prompt.instruction_sources,
-                    ) {
-                        messages.push(notice);
-                    }
-                    let app_data_by_message = [(msg.id, app_data.clone())].into_iter().collect();
-                    if let Err(e) = session_manager
-                        .append_messages_with_app_data_and_instruction_sources(
-                            session_id,
-                            &messages,
-                            &app_data_by_message,
-                            &prompt.instruction_sources,
-                        )
-                    {
-                        log::error!(
-                            "failed to persist queued prompt for session {session_id}: {e}"
-                        );
-                        failed_prompt = Some(prompt);
-                        break;
-                    }
-                    {
-                        let mut buffer = buffer_for_queued.write().await;
-                        for message in messages {
-                            let data = if message.id == msg.id {
-                                app_data.clone()
-                            } else {
-                                MessageAppData::default()
-                            };
-                            buffer.append_with_app_data(message, data);
-                        }
-                    }
-                    if !prompt.instruction_sources.is_empty() {
-                        let _ = queued_event_bus.send_backend(BackendEvent::InstructionsLoaded {
-                            session_id,
-                            sources: prompt.instruction_sources,
-                        });
-                    }
-                }
-                if let Some(failed_prompt) = failed_prompt {
-                    queued.push_front(failed_prompt);
-                    if !queued.is_empty() {
-                        pending_prompts
-                            .lock()
-                            .unwrap()
-                            .entry(session_id)
-                            .or_default()
-                            .extend(queued);
-                    }
-                    break;
-                }
-                // Loop again — the next run_agent_loop loads the persisted
-                // prompts and starts the next turn.
+                // Loop again — prepare_request compacts the current context,
+                // materializes the pending prompts, and starts the next turn.
             }
             session_outcomes
                 .lock()
@@ -1520,8 +1433,8 @@ impl Runtime {
         }
 
         self.busy_sessions.lock().unwrap().clear();
-        // Queued (non-steered) prompts are abandoned on cancellation —
-        // steering messages were already persisted and cannot be retracted.
+        // Busy prompts are abandoned on cancellation before the next request
+        // boundary can materialize them.
         self.pending_prompts.lock().unwrap().clear();
 
         // 2. Drop handles without aborting — the loops will exit naturally
@@ -1544,9 +1457,8 @@ impl Runtime {
         }
 
         self.busy_sessions.lock().unwrap().remove(&session_id);
-        // Queued (non-steered) prompts for this session are abandoned on
-        // cancellation — steering messages were already persisted and
-        // cannot be retracted.
+        // Busy prompts for this session are abandoned on cancellation before
+        // the next request boundary can materialize them.
         self.pending_prompts.lock().unwrap().remove(&session_id);
         self.steer_signals.lock().unwrap().remove(&session_id);
 
@@ -2520,7 +2432,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn busy_steer_persists_with_reminder_and_sets_signal() {
+    async fn busy_steer_stays_pending_with_reminder_and_sets_signal() {
         let rt = make_test_runtime().await;
         let sid = rt.create_default_session("steer test").unwrap();
         let mut events = rt.event_rx().await;
@@ -2541,25 +2453,26 @@ mod tests {
         .await
         .expect("submit should succeed");
 
-        // The message must be persisted immediately with its durable prefix
-        // and steering suffix.
+        // The message is held until the next request boundary so compaction
+        // can finish before the steer message is appended.
         let buf = rt.message_buffer(sid).await;
         let messages = buf.read().await.load().to_vec();
-        assert_eq!(messages.len(), 1);
+        assert!(messages.is_empty());
+        let pending = rt
+            .pending_prompts
+            .lock()
+            .unwrap()
+            .get(&sid)
+            .cloned()
+            .expect("steer message should be pending");
+        assert_eq!(pending.len(), 1);
         assert_eq!(
-            messages[0].content,
+            pending[0].content,
             format!(
                 "{}\n\nsteer message\n\n{}",
                 crate::prompts::plan_mode_reminder(),
                 crate::prompts::steer_reminder(),
             )
-        );
-        assert_eq!(
-            buf.read()
-                .await
-                .app_data(messages[0].id)
-                .and_then(|data| data.mode.as_deref()),
-            Some("plan")
         );
 
         // The keep-alive signal must be set for the running loop.

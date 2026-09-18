@@ -36,11 +36,10 @@ pub struct AgentLoopConfig {
     pub cancel: CancellationToken,
     /// Steering signal for user messages that arrived while the loop was busy.
     ///
-    /// Steering messages are persisted to the message buffer immediately by
-    /// the host; this signal only tells [`run_agent_loop`] that such a message
-    /// exists, so the loop must keep running instead of exiting after a turn
-    /// without tool calls. The next iteration's `load_messages` picks the
-    /// message up naturally.
+    /// The host keeps steering messages pending until the next request
+    /// boundary; this signal tells [`run_agent_loop`] that the loop must keep
+    /// running instead of exiting after a turn without tools. The host's
+    /// `prepare_request` hook materializes the message before loading it.
     pub steer_signal: Arc<AtomicBool>,
 }
 

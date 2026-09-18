@@ -107,13 +107,14 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
             ctx.save_messages(session_id, &[msg]).await?;
 
             // Check for user messages steered into this session while the
-            // turn was running. Steering messages are persisted to the
-            // buffer by the host immediately — the signal only keeps the
-            // loop alive so the next load_messages() picks them up.
+            // turn was running. The host keeps them pending until the next
+            // request boundary, where prepare_request performs compaction
+            // before materializing them. The signal only keeps the loop alive
+            // so the next iteration can reach that boundary.
             //
-            // Queued (non-steered) messages do NOT set this signal: the
-            // host drains them after the loop exits and starts a fresh
-            // loop for the next turn.
+            // Queued (non-steered) messages do not set this signal. The host
+            // keeps the outer session loop alive when it sees those pending
+            // messages after this agent loop returns.
             if config
                 .steer_signal
                 .swap(false, std::sync::atomic::Ordering::SeqCst)

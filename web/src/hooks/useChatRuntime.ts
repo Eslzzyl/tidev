@@ -53,6 +53,22 @@ const SESSION_PAGE_SIZE = 50;
 
 type SessionStatus = "idle" | "loading" | "ready" | "missing" | "error";
 
+function latestUserMessageId(
+  records: readonly MessageRecord[],
+  excludedIds: ReadonlySet<string> = new Set(),
+): string | null {
+  return (
+    [...records]
+      .reverse()
+      .find(
+        (record) =>
+          record.message.role === "user" &&
+          record.message.metadata.compaction_manual == null &&
+          !excludedIds.has(record.message.id),
+      )?.message.id ?? null
+  );
+}
+
 export interface UseChatRuntimeOptions {
   routeSessionId?: string | null;
   onSelectSessionRoute?: (sessionId: string | null) => void;
@@ -157,7 +173,9 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
   const instructionToolSessionsRef = useRef<Set<string>>(new Set());
   const childSessionIdsRef = useRef<Set<string>>(new Set());
   const pendingBackendMessageSessionsRef = useRef(new Map<string, string>());
+  const pendingQueuedMessageSessionsRef = useRef(new Map<string, string>());
   const pendingImagesRef = useRef<PendingImage[]>([]);
+  const streamsRef = useRef<Record<string, StreamMessage>>({});
   const cursorRef = useRef<number | null>(
     (() => {
       try {
@@ -174,6 +192,9 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
   useEffect(() => {
     pendingImagesRef.current = pendingImages;
   }, [pendingImages]);
+  useEffect(() => {
+    streamsRef.current = streams;
+  }, [streams]);
   useEffect(
     () => () => {
       for (const image of pendingImagesRef.current) URL.revokeObjectURL(image.previewUrl);
@@ -425,6 +446,7 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
         for (const [messageId, messageSessionId] of pendingBackendMessageSessionsRef.current) {
           if (messageSessionId === sessionId && loadedIds.has(messageId)) {
             pendingBackendMessageSessionsRef.current.delete(messageId);
+            pendingQueuedMessageSessionsRef.current.delete(messageId);
           }
         }
         const mergedMessages = mergeMessageRecords(response.messages, pendingCached);
@@ -769,6 +791,11 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
         touchSession(sessionId);
         if (message) {
           pendingBackendMessageSessionsRef.current.set(message.id, sessionId);
+          if (payload.queued === true) {
+            pendingQueuedMessageSessionsRef.current.set(message.id, sessionId);
+          } else {
+            pendingQueuedMessageSessionsRef.current.delete(message.id);
+          }
           const cached = messagesCacheRef.current.get(sessionId) ?? [];
           const record = { message, app_data: appData ?? {} };
           const idx = cached.findIndex((item) => item.message.id === message.id);
@@ -825,6 +852,22 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
       }
       if (kind === "ContextCompactionStarted") {
         if (selectedSessionRef.current !== sessionId) return;
+        const pendingQueuedIds = new Set(
+          [...pendingQueuedMessageSessionsRef.current]
+            .filter(([, messageSessionId]) => messageSessionId === sessionId)
+            .map(([messageId]) => messageId),
+        );
+        const afterUserMessageId = latestUserMessageId(
+          messagesCacheRef.current.get(sessionId) ?? [],
+          pendingQueuedIds,
+        );
+        const beforeRequestId = Object.values(streamsRef.current)
+          .filter((stream) => stream.userMessageId === afterUserMessageId)
+          .reduce<number | null>(
+            (latest, stream) =>
+              latest === null ? stream.requestId : Math.max(latest, stream.requestId),
+            null,
+          );
         setCompactionNotice({
           status: "running",
           manual: payload.manual === true,
@@ -832,6 +875,8 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
           error: null,
           modelId: asString(payload.model_id) || null,
           completedAt: null,
+          afterUserMessageId,
+          beforeRequestId,
         });
         if (payload.manual === true) touchSession(sessionId, true);
         return;
@@ -850,12 +895,18 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
             error,
             modelId: asString(payload.model_id) || current?.modelId || null,
             completedAt: asString(payload.completed_at) || new Date().toISOString(),
+            afterUserMessageId: current?.afterUserMessageId ?? null,
+            beforeRequestId: current?.beforeRequestId ?? null,
           };
         });
         if (manual) touchSession(sessionId, false);
         return;
       }
       if (kind === "TurnStarting") {
+        const userMessageId = asString(payload.user_message_id);
+        if (userMessageId) {
+          pendingQueuedMessageSessionsRef.current.delete(userMessageId);
+        }
         const requestId = Number(payload.request_id);
         if (Number.isFinite(requestId)) {
           const key = `${sessionId}:${requestId}`;
