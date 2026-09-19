@@ -8,6 +8,7 @@ import { Check, Code2, Copy, Maximize2, Minimize2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { HLJSApi } from "highlight.js";
 import { Button, IconButton } from "../ui";
+import { normalizeMathDelimiters } from "../../lib/markdown/normalizeMathDelimiters";
 
 let hljsInstance: HLJSApi | null = null;
 let hljsPromise: Promise<HLJSApi> | null = null;
@@ -323,7 +324,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({ content }: Prop
           },
         }}
       >
-        {content}
+        {normalizeMathDelimiters(content)}
       </ReactMarkdown>
     </div>
   );

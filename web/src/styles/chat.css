@@ -187,6 +187,24 @@
   word-break: break-word;
 }
 
+.user-message-bubble .markdown-body {
+  min-width: 0;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.user-message-bubble .markdown-body > :first-child {
+  margin-top: 0;
+}
+
+.user-message-bubble .markdown-body > :last-child {
+  margin-bottom: 0;
+}
+
+.user-message-bubble .markdown-body .markdown-code-card {
+  max-width: 100%;
+}
+
 .message-image-gallery {
   display: flex;
   max-width: 100%;

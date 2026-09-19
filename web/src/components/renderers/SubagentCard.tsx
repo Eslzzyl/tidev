@@ -57,7 +57,9 @@ function ChildMessages({ records }: { records: MessageRecord[] }) {
         return (
           <div className="subagent-message" key={message.id}>
             {message.reasoning ? (
-              <div className="subagent-reasoning">{message.reasoning}</div>
+              <div className="subagent-reasoning">
+                <MarkdownRenderer content={message.reasoning} />
+              </div>
             ) : null}
             {message.content ? <MarkdownRenderer content={message.content} /> : null}
           </div>
@@ -141,7 +143,9 @@ export function SubagentCard({
             </div>
           ) : null}
           {entry.subagentReasoningDelta ? (
-            <div className="subagent-live-reasoning">{entry.subagentReasoningDelta}</div>
+            <div className="subagent-live-reasoning">
+              <MarkdownRenderer content={entry.subagentReasoningDelta} />
+            </div>
           ) : null}
           {entry.subagentContentDelta ? (
             <MarkdownRenderer content={entry.subagentContentDelta} />

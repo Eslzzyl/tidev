@@ -332,6 +332,18 @@ summary {
   max-width: 100%;
 }
 
+.markdown-body .katex-display {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25rem 0;
+}
+
+.markdown-body .katex-display > .katex {
+  display: inline-block;
+  min-width: max-content;
+}
+
 .markdown-body pre:not(.markdown-code-block) {
   margin-top: 0.75rem;
   margin-bottom: 0.75rem;

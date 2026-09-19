@@ -86,7 +86,11 @@ function UserMessageItem({
   return (
     <article className="chat-message user-message">
       <div className="user-message-inner">
-        {content ? <div className="user-message-bubble">{content}</div> : null}
+        {content ? (
+          <div className="user-message-bubble">
+            <MarkdownRenderer content={content} />
+          </div>
+        ) : null}
         <MessageImageGallery attachments={round.userMessage.attachments} />
         <div className="user-message-meta">
           {userTime ? <time>{userTime}</time> : null}

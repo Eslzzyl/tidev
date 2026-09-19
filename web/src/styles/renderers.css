@@ -1156,7 +1156,24 @@ pre.markdown-code-block code {
   color: var(--muted);
   font-size: var(--chat-detail-size);
   line-height: var(--chat-detail-line-height);
-  white-space: pre-wrap;
+}
+.subagent-reasoning .markdown-body,
+.subagent-live-reasoning .markdown-body {
+  font-size: inherit;
+  line-height: inherit;
+}
+.subagent-reasoning .markdown-body > :first-child,
+.subagent-live-reasoning .markdown-body > :first-child {
+  margin-top: 0;
+}
+.subagent-reasoning .markdown-body > :last-child,
+.subagent-live-reasoning .markdown-body > :last-child {
+  margin-bottom: 0;
+}
+.subagent-live-reasoning {
+  color: var(--muted);
+  font-size: var(--chat-detail-size);
+  line-height: var(--chat-detail-line-height);
 }
 .tool-loading {
   display: flex;
