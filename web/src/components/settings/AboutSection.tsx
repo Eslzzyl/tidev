@@ -1,11 +1,17 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Terminal, RefreshCw, Activity, Cpu } from "lucide-react";
+import { Terminal, RefreshCw } from "lucide-react";
 import { api, waitForServerRestart } from "../../api/client";
 import { useBuildInfo } from "../../hooks/workspaceQueries";
 import { useUIStore } from "../../stores/useUIStore";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { Button } from "../ui";
+import {
+  SettingsSectionHeader,
+  SettingsGroup,
+  SettingsRow,
+  SettingsActionRow,
+} from "./SettingsCommon";
 
 export function AboutSection() {
   const { t } = useTranslation();
@@ -51,16 +57,21 @@ export function AboutSection() {
 
   return (
     <section className="space-y-6">
+      <SettingsSectionHeader
+        title={t("About")}
+        description={t("Version, runtime status, and server maintenance")}
+      />
+
       {/* Brand Header Card */}
       <div className="flex items-center gap-4 rounded-xl border border-neutral-200/80 bg-neutral-50/60 p-4 dark:border-neutral-800/80 dark:bg-neutral-800/40">
-        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[var(--accent)] text-white shadow-sm">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300 shadow-xs">
           <Terminal className="h-6 w-6" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <h2 className="text-lg font-bold tracking-tight text-neutral-900 dark:text-neutral-100">
+            <h3 className="text-base font-bold tracking-tight text-neutral-900 dark:text-neutral-100">
               tidev
-            </h2>
+            </h3>
             <span className="rounded-full bg-neutral-200/80 px-2 py-0.5 text-[11px] font-mono font-medium text-neutral-700 dark:bg-neutral-700 dark:text-neutral-300">
               {buildInfo ? `v${buildInfo.version}` : "—"}
             </span>
@@ -72,57 +83,34 @@ export function AboutSection() {
       </div>
 
       {/* System Status Details */}
-      <div className="space-y-3">
-        <label className="text-xs font-semibold uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
-          {t("System Status")}
-        </label>
-        <div className="rounded-xl border border-neutral-200/80 bg-neutral-50/50 divide-y divide-neutral-200/60 dark:border-neutral-800/80 dark:bg-neutral-800/30 dark:divide-neutral-800/60">
-          {/* Connection Status Row */}
-          <div className="flex items-center justify-between p-3.5">
-            <div className="flex items-center gap-2.5">
-              <Activity className="h-4 w-4 text-neutral-400" />
-              <span className="text-xs font-medium text-neutral-800 dark:text-neutral-200">
-                {t("Server Status")}
-              </span>
-            </div>
+      <SettingsGroup title={t("System Status")}>
+        <SettingsRow
+          label={t("Server Status")}
+          control={
             <span
               className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium ${currentStatus.color}`}
             >
               <span className={`h-1.5 w-1.5 rounded-full ${currentStatus.dot}`} />
               {currentStatus.label}
             </span>
-          </div>
-
-          {/* Web UI Version Row */}
-          <div className="flex items-center justify-between p-3.5">
-            <div className="flex items-center gap-2.5">
-              <Cpu className="h-4 w-4 text-neutral-400" />
-              <span className="text-xs font-medium text-neutral-800 dark:text-neutral-200">
-                {t("Web UI Version")}
-              </span>
-            </div>
+          }
+        />
+        <SettingsRow
+          label={t("Web UI Version")}
+          control={
             <span className="font-mono text-xs text-neutral-600 dark:text-neutral-400">
               {buildInfo?.version ?? "—"}
             </span>
-          </div>
-        </div>
-      </div>
+          }
+        />
+      </SettingsGroup>
 
-      {/* Maintenance Actions Card */}
-      <div className="space-y-3">
-        <label className="text-xs font-semibold uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
-          {t("Server Management")}
-        </label>
-        <div className="rounded-xl border border-neutral-200/80 bg-neutral-50/50 p-4 space-y-3 dark:border-neutral-800/80 dark:bg-neutral-800/30">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="min-w-0">
-              <span className="block text-xs font-medium text-neutral-900 dark:text-neutral-100">
-                {t("Restart Service")}
-              </span>
-              <span className="block text-[11px] text-neutral-500 dark:text-neutral-400">
-                {t("Auto-reconnects after restart. Refresh manually if it does not recover.")}
-              </span>
-            </div>
+      {/* Server Management */}
+      <SettingsGroup title={t("Server Management")}>
+        <SettingsActionRow
+          label={t("Restart Service")}
+          description={t("Auto-reconnects after restart. Refresh manually if it does not recover.")}
+          action={
             <Button
               type="button"
               disabled={restarting}
@@ -136,9 +124,9 @@ export function AboutSection() {
             >
               {restarting ? t("Restarting...") : t("Restart Service")}
             </Button>
-          </div>
-        </div>
-      </div>
+          }
+        />
+      </SettingsGroup>
 
       <ConfirmDialog
         isOpen={showConfirm}

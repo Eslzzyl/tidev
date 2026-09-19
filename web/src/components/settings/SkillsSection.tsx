@@ -18,6 +18,7 @@ import { useSkillsQuery, useSkillFileQuery } from "../../hooks/workspaceQueries"
 import { useUIStore } from "../../stores/useUIStore";
 import { MarkdownRenderer } from "../renderers/MarkdownRenderer";
 import { Button, IconButton, Input, Tabs } from "../ui";
+import { SettingsSectionHeader } from "./SettingsCommon";
 import type { SkillInfo } from "../../types/api";
 
 type SkillFilter = "all" | "bundled" | "custom";
@@ -93,31 +94,27 @@ export function SkillsSection() {
 
   return (
     <section className="space-y-6">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
+      <SettingsSectionHeader
+        title={
           <div className="flex items-center gap-2">
-            <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
-              {t("Skills")}
-            </h2>
-            <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] font-medium text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400">
+            <span>{t("Skills")}</span>
+            <span className="rounded-full bg-neutral-200/70 dark:bg-neutral-700/70 px-2 py-0.5 text-[11px] font-medium text-neutral-700 dark:text-neutral-300">
               {skills.length}
             </span>
           </div>
-          <p className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
-            {t("Browse, preview, and load agent skills and companion documents")}
-          </p>
-        </div>
-
-        <IconButton
-          label={t("Refresh skills")}
-          size="sm"
-          onClick={() => void refetch()}
-          title={t("Refresh skills")}
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? "animate-spin" : ""}`} />
-        </IconButton>
-      </div>
+        }
+        description={t("Browse, preview, and load agent skills and companion documents")}
+        action={
+          <IconButton
+            label={t("Refresh skills")}
+            size="sm"
+            onClick={() => void refetch()}
+            title={t("Refresh skills")}
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? "animate-spin" : ""}`} />
+          </IconButton>
+        }
+      />
 
       {/* Search & Filter Bar */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">

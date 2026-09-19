@@ -5,15 +5,36 @@ import { useTranslation } from "react-i18next";
 import type { Model } from "../types/api";
 import { formatThinkingLevel } from "../utils/chat";
 import { Button, Input, Menu } from "./ui";
+import { cx } from "./ui/utils";
 import { filterModelProviderGroups, groupModelsByProvider } from "../utils/modelPicker";
 
-interface ModelPickerProps {
+export interface ModelPickerProps {
   models: Model[];
   activeModel: Model | undefined;
   thinkingLevel: string | undefined;
   onSelectModel: (model: Model) => void;
   onSelectThinkingLevel: (level: string) => void;
   onOpen?: () => void;
+
+  // Subagent / inherit mode options
+  allowInherit?: boolean;
+  isInherited?: boolean;
+  parentModel?: Model;
+  onSelectInherit?: () => void;
+  unavailableModelLabel?: string;
+
+  // Thinking level options
+  allowAutomaticThinking?: boolean;
+  isAutomaticThinking?: boolean;
+
+  // Visual & placement options
+  disabled?: boolean;
+  side?: "top" | "bottom" | "left" | "right";
+  align?: "start" | "end" | "center";
+  sideOffset?: number;
+  triggerVariant?: "secondary" | "ghost";
+  triggerClassName?: string;
+  ariaLabel?: string;
 }
 
 export function ModelPicker({
@@ -23,6 +44,20 @@ export function ModelPicker({
   onSelectModel,
   onSelectThinkingLevel,
   onOpen,
+  allowInherit = false,
+  isInherited = false,
+  parentModel,
+  onSelectInherit,
+  unavailableModelLabel,
+  allowAutomaticThinking = false,
+  isAutomaticThinking = false,
+  disabled = false,
+  side = "top",
+  align = "start",
+  sideOffset = 8,
+  triggerVariant = "secondary",
+  triggerClassName,
+  ariaLabel,
 }: ModelPickerProps) {
   const { t } = useTranslation();
   const [modelSearch, setModelSearch] = useState("");
@@ -32,11 +67,43 @@ export function ModelPicker({
     [modelSearch, providers],
   );
 
-  const supportsThinking = Boolean(activeModel?.thinking_levels.length);
-  const selectedThinkingLevel = thinkingLevel ?? activeModel?.thinking_level;
-  const currentThinking = supportsThinking
-    ? formatThinkingLevel(selectedThinkingLevel ?? "")
-    : t("Not available");
+  const effectiveModel = isInherited ? parentModel : activeModel;
+  const supportsThinking = Boolean(effectiveModel?.thinking_levels.length);
+  const selectedThinkingLevel = thinkingLevel ?? effectiveModel?.thinking_level;
+
+  let currentThinking: string;
+  if (!supportsThinking) {
+    currentThinking = t("Not available");
+  } else if (allowAutomaticThinking && (isAutomaticThinking || !selectedThinkingLevel)) {
+    currentThinking = t("Automatic");
+  } else {
+    currentThinking = formatThinkingLevel(selectedThinkingLevel ?? "");
+  }
+
+  let triggerModelLabel: string;
+  if (isInherited) {
+    triggerModelLabel = parentModel
+      ? `${t("Inherit main agent model")} (${parentModel.model_display_name})`
+      : t("Inherit main agent model");
+  } else if (activeModel) {
+    triggerModelLabel = activeModel.model_display_name;
+  } else if (unavailableModelLabel) {
+    triggerModelLabel = unavailableModelLabel;
+  } else {
+    triggerModelLabel = t("Select model");
+  }
+
+  const inheritLabel = parentModel
+    ? `${t("Inherit main agent model")} (${parentModel.model_display_name})`
+    : t("Inherit main agent model");
+
+  const normalizedQuery = modelSearch.trim().toLowerCase();
+  const showInheritInSearch =
+    allowInherit &&
+    (!normalizedQuery ||
+      inheritLabel.toLowerCase().includes(normalizedQuery) ||
+      t("Inherit main agent model").toLowerCase().includes(normalizedQuery) ||
+      "inherit".includes(normalizedQuery));
 
   return (
     <Menu.Root
@@ -52,26 +119,31 @@ export function ModelPicker({
       <Menu.Trigger asChild>
         <Button
           type="button"
-          className="composer-control model-picker-trigger"
+          className={cx("composer-control model-picker-trigger", triggerClassName)}
           aria-haspopup="menu"
-          variant="secondary"
+          aria-label={ariaLabel}
+          variant={triggerVariant}
           size="sm"
+          disabled={disabled}
           trailingIcon={<ChevronDown size={13} />}
         >
-          <span className="model-picker-trigger-model">
-            {activeModel?.model_display_name ?? t("Select model")}
-          </span>
+          <span className="model-picker-trigger-model">{triggerModelLabel}</span>
           {supportsThinking ? (
             <span className="model-picker-trigger-thinking">{currentThinking}</span>
           ) : null}
         </Button>
       </Menu.Trigger>
-      <Menu.Content className="model-picker-menu-content" side="top" align="start" sideOffset={8}>
+      <Menu.Content
+        className="model-picker-menu-content"
+        side={side}
+        align={align}
+        sideOffset={sideOffset}
+      >
         <Menu.Sub instant>
           <Menu.SubTrigger className="model-picker-entry">
             <span className="model-picker-entry-copy">
               <strong>{t("Model")}</strong>
-              <span>{activeModel?.model_display_name ?? t("Select model")}</span>
+              <span>{triggerModelLabel}</span>
             </span>
           </Menu.SubTrigger>
           <Menu.SubContent className="model-picker-submenu model-picker-panel">
@@ -93,6 +165,34 @@ export function ModelPicker({
                 }
               }}
             />
+            {showInheritInSearch ? (
+              <>
+                <Menu.Item
+                  className={
+                    isInherited
+                      ? "model-picker-submenu-item model-picker-model selected"
+                      : "model-picker-submenu-item model-picker-model"
+                  }
+                  onSelect={() => onSelectInherit?.()}
+                >
+                  <span>{inheritLabel}</span>
+                  {isInherited ? <Check size={14} /> : null}
+                </Menu.Item>
+                <Menu.Separator />
+              </>
+            ) : null}
+            {unavailableModelLabel && !isInherited && !activeModel ? (
+              <>
+                <Menu.Item
+                  disabled
+                  className="model-picker-submenu-item model-picker-model selected"
+                >
+                  <span>{unavailableModelLabel}</span>
+                  <Check size={14} />
+                </Menu.Item>
+                <Menu.Separator />
+              </>
+            ) : null}
             {filteredProviders.length ? (
               filteredProviders.map((provider) =>
                 provider.connected ? (
@@ -103,6 +203,7 @@ export function ModelPicker({
                     <Menu.SubContent className="model-picker-submenu model-picker-models model-picker-panel">
                       {provider.models.map((model) => {
                         const selected =
+                          !isInherited &&
                           activeModel?.provider_id === model.provider_id &&
                           activeModel.model_id === model.model_id;
                         return (
@@ -135,11 +236,11 @@ export function ModelPicker({
                   </Menu.Item>
                 ),
               )
-            ) : (
+            ) : !showInheritInSearch ? (
               <div className="model-picker-empty">
                 {modelSearch ? t("No models match your search") : t("No models available")}
               </div>
-            )}
+            ) : null}
           </Menu.SubContent>
         </Menu.Sub>
 
@@ -151,20 +252,34 @@ export function ModelPicker({
             </span>
           </Menu.SubTrigger>
           <Menu.SubContent className="model-picker-submenu thinking-picker-submenu model-picker-panel">
-            {activeModel?.thinking_levels.map((level) => (
+            {allowAutomaticThinking ? (
               <Menu.Item
-                key={level}
                 className={
-                  selectedThinkingLevel === level
+                  isAutomaticThinking || !selectedThinkingLevel
                     ? "model-picker-submenu-item selected"
                     : "model-picker-submenu-item"
                 }
-                onSelect={() => onSelectThinkingLevel(level)}
+                onSelect={() => onSelectThinkingLevel("")}
               >
-                <span>{formatThinkingLevel(level)}</span>
-                {selectedThinkingLevel === level ? <Check size={14} /> : null}
+                <span>{t("Automatic")}</span>
+                {isAutomaticThinking || !selectedThinkingLevel ? <Check size={14} /> : null}
               </Menu.Item>
-            ))}
+            ) : null}
+            {effectiveModel?.thinking_levels.map((level) => {
+              const selected = !isAutomaticThinking && selectedThinkingLevel === level;
+              return (
+                <Menu.Item
+                  key={level}
+                  className={
+                    selected ? "model-picker-submenu-item selected" : "model-picker-submenu-item"
+                  }
+                  onSelect={() => onSelectThinkingLevel(level)}
+                >
+                  <span>{formatThinkingLevel(level)}</span>
+                  {selected ? <Check size={14} /> : null}
+                </Menu.Item>
+              );
+            })}
           </Menu.SubContent>
         </Menu.Sub>
       </Menu.Content>

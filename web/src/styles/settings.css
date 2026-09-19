@@ -259,7 +259,7 @@
 }
 
 .settings-page-content {
-  padding: 42px clamp(20px, 5vw, 72px) 64px;
+  padding: 32px clamp(20px, 4vw, 56px) 64px;
 }
 
 @media (min-width: 768px) {
@@ -268,24 +268,25 @@
   }
 
   .settings-page-content {
-    padding-top: 88px;
+    padding-top: 40px;
   }
 }
 
 .settings-page-content-inner {
   width: 100%;
-  max-width: 960px;
+  max-width: 920px;
   margin: 0 auto;
 }
 
 .settings-page-content-inner > section > div:first-child h2 {
-  font-size: 28px;
-  line-height: 1.2;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.3;
 }
 
 .settings-page-content-inner > section > div:first-child p {
-  margin-top: 6px;
-  font-size: 14px;
+  margin-top: 4px;
+  font-size: 12px;
 }
 
 .settings-page-mobile-list {
@@ -847,4 +848,39 @@
   to {
     transform: rotate(360deg);
   }
+}
+
+/* Settings Model Picker Trigger */
+.ui-button.model-picker-trigger.settings-model-picker-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 32px;
+  max-width: 320px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel-strong);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  transition: all 140ms ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.ui-button.model-picker-trigger.settings-model-picker-trigger:hover:not(:disabled) {
+  background: var(--hover);
+  border-color: var(--line);
+}
+
+.ui-button.model-picker-trigger.settings-model-picker-trigger .model-picker-trigger-thinking {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--hover);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
 }

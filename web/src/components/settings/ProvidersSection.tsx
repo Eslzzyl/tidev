@@ -20,6 +20,7 @@ import {
 import type { CreateModelRequest, CreateProviderRequest, ProviderInfo } from "../../types/api";
 import { Button, Dialog, Field, IconButton, Input, Select, Switch } from "../ui";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
+import { SettingsSectionHeader } from "./SettingsCommon";
 
 const API_TYPE_OPTIONS = [
   { value: "openai_chat_completions", label: "OpenAI Chat Completions" },
@@ -446,25 +447,21 @@ export function ProvidersSection() {
 
   return (
     <section className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
-            {t("Providers")}
-          </h2>
-          <p className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
-            {t("Manage provider API keys and custom model endpoints")}
-          </p>
-        </div>
-        <Button
-          type="button"
-          variant="primary"
-          size="sm"
-          leadingIcon={<Plus className="h-3.5 w-3.5" />}
-          onClick={openAdd}
-        >
-          {t("Add Provider")}
-        </Button>
-      </div>
+      <SettingsSectionHeader
+        title={t("Providers")}
+        description={t("Manage provider API keys and custom model endpoints")}
+        action={
+          <Button
+            type="button"
+            variant="primary"
+            size="sm"
+            leadingIcon={<Plus className="h-3.5 w-3.5" />}
+            onClick={openAdd}
+          >
+            {t("Add Provider")}
+          </Button>
+        }
+      />
 
       {actionError ? (
         <div

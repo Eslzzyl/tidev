@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { Bot, RefreshCw } from "lucide-react";
+import { useState } from "react";
+import { RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   useAgentModels,
@@ -9,7 +9,13 @@ import {
   useSubagentConfig,
 } from "../../hooks/workspaceQueries";
 import type { Model } from "../../types/api";
-import { Select, Switch } from "../ui";
+import { ModelPicker } from "../ModelPicker";
+import {
+  SettingsSectionHeader,
+  SettingsGroup,
+  SettingsSwitchRow,
+  SettingsRow,
+} from "./SettingsCommon";
 
 const INHERIT_MODEL = "__inherit__";
 const AUTOMATIC_THINKING = "__automatic__";
@@ -74,23 +80,6 @@ export function AgentsSection() {
   const { mutateAsync: setSubagentConfig, isPending: isSavingConfig } = useSetSubagentConfig();
   const [actionError, setActionError] = useState<string | null>(null);
 
-  const selectableModels = useMemo(() => models.filter((model) => model.connected), [models]);
-  const groupedModels = useMemo(() => {
-    const groups = new Map<string, { label: string; models: Model[] }>();
-    for (const model of selectableModels) {
-      const group = groups.get(model.provider_id);
-      if (group) {
-        group.models.push(model);
-      } else {
-        groups.set(model.provider_id, {
-          label: model.provider_display_name,
-          models: [model],
-        });
-      }
-    }
-    return [...groups.values()];
-  }, [selectableModels]);
-
   const parentModel = findModel(
     models,
     agentModels?.default_model ? modelKey(agentModels.default_model) : undefined,
@@ -138,14 +127,10 @@ export function AgentsSection() {
 
   return (
     <section className="space-y-6">
-      <div>
-        <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
-          {t("Agents")}
-        </h2>
-        <p className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
-          {t("Configure the subagents available to the task tool")}
-        </p>
-      </div>
+      <SettingsSectionHeader
+        title={t("Agents")}
+        description={t("Configure the subagents available to the task tool")}
+      />
 
       {isLoading ? (
         <div className="flex items-center justify-center py-12 text-sm text-neutral-500">
@@ -158,136 +143,66 @@ export function AgentsSection() {
         </div>
       ) : (
         <>
-          <div className="space-y-3">
-            <label className="text-xs font-semibold uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
-              {t("Subagent Capabilities")}
-            </label>
-            <div className="rounded-xl border border-neutral-200/80 bg-neutral-50/50 p-4 dark:border-neutral-800/80 dark:bg-neutral-800/30">
-              <label className="flex items-center justify-between gap-4 cursor-pointer">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white shadow-xs text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
-                    <Bot className="h-4 w-4" />
-                  </div>
-                  <div className="min-w-0">
-                    <span className="block truncate text-xs font-medium text-neutral-900 dark:text-neutral-100">
-                      {t("Enable subagents")}
+          <SettingsGroup title={t("Subagent Capabilities")}>
+            <SettingsSwitchRow
+              label={t("Enable subagents")}
+              description={t("Allow the task tool to spawn subagents")}
+              checked={subagentConfig?.enabled ?? false}
+              disabled={isSavingConfig}
+              onCheckedChange={() => void handleToggle()}
+            />
+          </SettingsGroup>
+
+          <SettingsGroup title={t("Subagent models")}>
+            {AGENTS.map((agent) => {
+              const configuredModel = agentModels?.agent_models[agent.type];
+              const configuredModelInfo = findModel(models, configuredModel);
+              const configuredThinking = agentModels?.agent_thinking_levels?.[agent.type] ?? "";
+              const isInherited = !configuredModel || configuredModel === INHERIT_MODEL;
+              const isAutomatic = !configuredThinking || configuredThinking === AUTOMATIC_THINKING;
+              const hasUnavailableModel =
+                Boolean(configuredModel) &&
+                !isInherited &&
+                (!configuredModelInfo || !configuredModelInfo.connected);
+              const unavailableLabel = hasUnavailableModel
+                ? `${configuredModelInfo ? modelDisplayName(configuredModelInfo) : configuredModel} (${t("Unavailable")})`
+                : undefined;
+
+              return (
+                <SettingsRow
+                  key={agent.type}
+                  label={t(agent.label)}
+                  badge={
+                    <span className="rounded-full bg-neutral-200/70 dark:bg-neutral-700/70 px-2 py-0.5 text-[10px] font-medium text-neutral-700 dark:text-neutral-300">
+                      {agent.readOnly ? t("Read-only") : t("Build")}
                     </span>
-                    <span className="block text-[11px] text-neutral-500 dark:text-neutral-400">
-                      {t("Allow the task tool to spawn subagents")}
-                    </span>
-                  </div>
-                </div>
-                <Switch
-                  aria-label={t("Enable subagents")}
-                  checked={subagentConfig?.enabled ?? false}
-                  disabled={isSavingConfig}
-                  onCheckedChange={() => void handleToggle()}
+                  }
+                  description={t(agent.description)}
+                  control={
+                    <ModelPicker
+                      models={models}
+                      activeModel={configuredModelInfo}
+                      parentModel={parentModel}
+                      isInherited={isInherited}
+                      allowInherit
+                      onSelectInherit={() => handleModelChange(agent.type, INHERIT_MODEL)}
+                      onSelectModel={(model) => handleModelChange(agent.type, modelKey(model))}
+                      thinkingLevel={configuredThinking}
+                      allowAutomaticThinking
+                      isAutomaticThinking={isAutomatic}
+                      onSelectThinkingLevel={(level) => handleThinkingChange(agent.type, level)}
+                      unavailableModelLabel={unavailableLabel}
+                      disabled={isSavingAgentModel}
+                      side="bottom"
+                      align="end"
+                      triggerClassName="settings-model-picker-trigger"
+                      ariaLabel={`${t(agent.label)} ${t("Model")}`}
+                    />
+                  }
                 />
-              </label>
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            <label className="text-xs font-semibold uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
-              {t("Subagent models")}
-            </label>
-            <div className="rounded-xl border border-neutral-200/80 bg-neutral-50/50 divide-y divide-neutral-200/60 dark:border-neutral-800/80 dark:bg-neutral-800/30 dark:divide-neutral-800/60">
-              {AGENTS.map((agent) => {
-                const configuredModel = agentModels?.agent_models[agent.type];
-                const configuredModelInfo = findModel(models, configuredModel);
-                const selectedModel = configuredModelInfo ?? parentModel;
-                const configuredThinking =
-                  agentModels?.agent_thinking_levels?.[agent.type] ?? AUTOMATIC_THINKING;
-                const thinkingOptions = selectedModel?.thinking_levels ?? [];
-                const thinkingValue = thinkingOptions.includes(configuredThinking)
-                  ? configuredThinking
-                  : AUTOMATIC_THINKING;
-                const hasUnavailableModel =
-                  configuredModel !== undefined &&
-                  (!configuredModelInfo || !configuredModelInfo.connected);
-                const modelSelectValue = configuredModel
-                  ? configuredModelInfo
-                    ? modelKey(configuredModelInfo)
-                    : configuredModel
-                  : INHERIT_MODEL;
-
-                return (
-                  <div key={agent.type} className="space-y-3 p-4">
-                    <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-semibold text-neutral-900 dark:text-neutral-100">
-                            {t(agent.label)}
-                          </span>
-                          <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-medium text-neutral-600 shadow-xs dark:bg-neutral-800 dark:text-neutral-400">
-                            {agent.readOnly ? t("Read-only") : t("Build")}
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-0.5">
-                          {t(agent.description)}
-                        </p>
-                      </div>
-                      {selectedModel && (
-                        <span className="font-mono text-[10px] text-neutral-400 dark:text-neutral-500">
-                          {modelDisplayName(selectedModel)}
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <label className="flex flex-col gap-1">
-                        <span className="text-[11px] font-medium text-neutral-600 dark:text-neutral-400">
-                          {t("Model")}
-                        </span>
-                        <Select
-                          value={modelSelectValue}
-                          disabled={isSavingAgentModel}
-                          onValueChange={(value) => handleModelChange(agent.type, value)}
-                          ariaLabel={t("Model")}
-                          className="settings-agent-select"
-                          options={[
-                            { value: INHERIT_MODEL, label: t("Inherit main agent model") },
-                            ...(hasUnavailableModel
-                              ? [
-                                  {
-                                    value: modelSelectValue,
-                                    label: `${configuredModelInfo ? modelDisplayName(configuredModelInfo) : configuredModel} (${t("Unavailable")})`,
-                                  },
-                                ]
-                              : []),
-                          ]}
-                          groups={groupedModels.map((group) => ({
-                            label: group.label,
-                            options: group.models.map((model) => ({
-                              value: modelKey(model),
-                              label: model.model_display_name,
-                            })),
-                          }))}
-                        />
-                      </label>
-
-                      <label className="flex flex-col gap-1">
-                        <span className="text-[11px] font-medium text-neutral-600 dark:text-neutral-400">
-                          {t("Thinking level")}
-                        </span>
-                        <Select
-                          value={thinkingValue}
-                          disabled={thinkingOptions.length === 0 || isSavingAgentModel}
-                          onValueChange={(value) => handleThinkingChange(agent.type, value)}
-                          ariaLabel={t("Thinking level")}
-                          className="settings-agent-select"
-                          options={[
-                            { value: AUTOMATIC_THINKING, label: t("Automatic") },
-                            ...thinkingOptions.map((level) => ({ value: level, label: level })),
-                          ]}
-                        />
-                      </label>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+              );
+            })}
+          </SettingsGroup>
         </>
       )}
 

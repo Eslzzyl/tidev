@@ -815,6 +815,16 @@ const en = {
   "Access requires authentication token": "Access requires authentication token",
   "Web interface is currently accessible without credentials":
     "Web interface is currently accessible without credentials",
+  "Base font size": "Base font size",
+  "Base font size for editor and code blocks": "Base font size for editor and code blocks",
+  "Theme mode": "Theme mode",
+  "Display language": "Display language",
+  "Choose your preferred color theme (Light, Dark, or System)":
+    "Choose your preferred color theme (Light, Dark, or System)",
+  "Choose the display language for the application":
+    "Choose the display language for the application",
+  "Code Diff Layout": "Code Diff Layout",
+  "Choose how file differences are displayed": "Choose how file differences are displayed",
 } as const;
 
 const zhCN: Record<keyof typeof en, string> = {
@@ -1612,6 +1622,15 @@ const zhCN: Record<keyof typeof en, string> = {
   "Enable image attachment inputs for this model": "允许该模型接收图片附件输入",
   "Access requires authentication token": "访问 Web 界面需要提供密码验证",
   "Web interface is currently accessible without credentials": "当前无需密码即可直接访问 Web 界面",
+  "Base font size": "基础字号",
+  "Base font size for editor and code blocks": "代码和编辑器文本的基础字号",
+  "Theme mode": "主题模式",
+  "Display language": "显示语言",
+  "Choose your preferred color theme (Light, Dark, or System)":
+    "选择界面的显示主题（浅色、深色或跟随系统）",
+  "Choose the display language for the application": "选择应用界面的显示语言",
+  "Code Diff Layout": "差异对比布局",
+  "Choose how file differences are displayed": "选择代码差异的展示形式（并排对比或单栏内联）",
 };
 
 export const resources = {

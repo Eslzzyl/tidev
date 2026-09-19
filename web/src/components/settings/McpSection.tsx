@@ -25,6 +25,7 @@ import {
 } from "../../hooks/workspaceQueries";
 import type { McpServerInfo, McpServerConfig, McpToolSummary } from "../../types/api";
 import { Button, IconButton, Input, Switch, Textarea } from "../ui";
+import { SettingsSectionHeader } from "./SettingsCommon";
 
 interface ServerDraft {
   name: string;
@@ -257,25 +258,20 @@ export function McpSection() {
 
   return (
     <section className="space-y-6">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
-            {t("MCP Servers")}
-          </h2>
-          <p className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
-            {t("Manage Model Context Protocol (MCP) server connections and tools")}
-          </p>
-        </div>
-        <Button
-          onClick={handleOpenAdd}
-          variant="primary"
-          size="sm"
-          leadingIcon={<Plus className="h-3.5 w-3.5" />}
-        >
-          {t("Add Server")}
-        </Button>
-      </div>
+      <SettingsSectionHeader
+        title={t("MCP Servers")}
+        description={t("Manage Model Context Protocol (MCP) server connections and tools")}
+        action={
+          <Button
+            onClick={handleOpenAdd}
+            variant="primary"
+            size="sm"
+            leadingIcon={<Plus className="h-3.5 w-3.5" />}
+          >
+            {t("Add Server")}
+          </Button>
+        }
+      />
 
       {/* Loading & Error States */}
       {isLoading ? (
