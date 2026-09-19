@@ -13,6 +13,7 @@ use ratatui::widgets::{Block, Clear, List, ListItem, Paragraph};
 use crate::action::{Action, OverlayAction, OverlayKind, SearchAction};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
+use crate::i18n::{TextKey, UiText};
 use crate::utils::{centered_rect, single_line_input_cursor};
 
 // ---------------------------------------------------------------------------
@@ -25,8 +26,6 @@ struct ProviderInfo {
     display_name: &'static str,
     needs_api_key: bool,
     needs_cx: bool,
-    #[allow(dead_code)]
-    description: &'static str,
 }
 
 const BUILTIN_PROVIDERS: &[ProviderInfo] = &[
@@ -35,28 +34,24 @@ const BUILTIN_PROVIDERS: &[ProviderInfo] = &[
         display_name: "Exa",
         needs_api_key: false,
         needs_cx: false,
-        description: "Public endpoint, no key required",
     },
     ProviderInfo {
         id: "brave",
         display_name: "Brave Search",
         needs_api_key: true,
         needs_cx: false,
-        description: "Free tier: 2,000 queries/month",
     },
     ProviderInfo {
         id: "google",
         display_name: "Google Custom Search",
         needs_api_key: true,
         needs_cx: true,
-        description: "Free tier: 100 queries/day",
     },
     ProviderInfo {
         id: "tavily",
         display_name: "Tavily",
         needs_api_key: true,
         needs_cx: false,
-        description: "Free tier: 1,000 requests/month",
     },
 ];
 
@@ -142,7 +137,7 @@ impl SearchPanel {
         self.input_buffer.clear();
     }
 
-    fn provider_status(&self, index: usize) -> String {
+    fn provider_status(&self, index: usize, ui_text: &UiText) -> String {
         if index >= BUILTIN_PROVIDERS.len() {
             return String::new();
         }
@@ -150,20 +145,20 @@ impl SearchPanel {
 
         let status = if info.needs_cx {
             if self.provider_keys_set[index] && self.provider_cx_set {
-                "Ready"
+                ui_text.text(TextKey::Ready)
             } else if !self.provider_keys_set[index] {
-                "Set API key"
+                ui_text.text(TextKey::SetApiKey)
             } else {
-                "Set Search Engine ID"
+                ui_text.text(TextKey::SetSearchEngineId)
             }
         } else if info.needs_api_key {
             if self.provider_keys_set[index] {
-                "Ready"
+                ui_text.text(TextKey::Ready)
             } else {
-                "Set API key"
+                ui_text.text(TextKey::SetApiKey)
             }
         } else {
-            "Ready"
+            ui_text.text(TextKey::Ready)
         };
 
         format!("{}  —  {}", info.display_name, status)
@@ -361,6 +356,7 @@ impl Component for SearchPanel {
 
     fn draw(&mut self, frame: &mut Frame, rect: Rect, ctx: &DrawContext) {
         let palette = ctx.palette;
+        let ui_text = &ctx.ui_text;
         let overlay = centered_rect(rect.width.min(60), rect.height.min(20), rect);
         frame.render_widget(Clear, overlay);
 
@@ -375,7 +371,7 @@ impl Component for SearchPanel {
         // Title
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
-                " Search Provider ",
+                format!(" {} ", ui_text.text(TextKey::SearchProvider)),
                 Style::default()
                     .fg(palette.accent)
                     .add_modifier(Modifier::BOLD),
@@ -401,7 +397,7 @@ impl Component for SearchPanel {
 
             // Placeholder label
             let placeholder = if self.editing_cx {
-                "Enter Google Search Engine ID (cx): "
+                format!("{} ", ui_text.text(TextKey::GoogleSearchEngineId))
             } else {
                 let provider_id = self.editing_api_key.as_deref().unwrap_or("");
                 let display_name = BUILTIN_PROVIDERS
@@ -409,7 +405,10 @@ impl Component for SearchPanel {
                     .find(|info| info.id == provider_id)
                     .map(|info| info.display_name)
                     .unwrap_or(provider_id);
-                &format!("Enter API key for {}: ", display_name)
+                format!(
+                    "{}: ",
+                    ui_text.text_with_value(TextKey::EnterApiKey, "name", display_name)
+                )
             };
 
             frame.render_widget(
@@ -435,13 +434,16 @@ impl Component for SearchPanel {
             // Footer
             let footer = Line::from(vec![
                 Span::styled(
-                    "Enter to save",
+                    ui_text.text(TextKey::Save),
                     Style::default()
                         .fg(palette.accent)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw("  ·  "),
-                Span::styled("Esc to cancel", Style::default().fg(palette.muted)),
+                Span::styled(
+                    ui_text.text(TextKey::Cancel),
+                    Style::default().fg(palette.muted),
+                ),
             ]);
             frame.render_widget(
                 Paragraph::new(footer)
@@ -462,7 +464,7 @@ impl Component for SearchPanel {
 
         // Instruction
         frame.render_widget(
-            Paragraph::new("Select a web search provider. ↑↓ navigate, Enter select.")
+            Paragraph::new(ui_text.text(TextKey::SearchProviderInstruction))
                 .alignment(ratatui::layout::Alignment::Center)
                 .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
             sections[0],
@@ -471,7 +473,7 @@ impl Component for SearchPanel {
         // Provider list
         let mut rows: Vec<ListItem> = Vec::new();
         for (i, info) in BUILTIN_PROVIDERS.iter().enumerate() {
-            let status_text = self.provider_status(i);
+            let status_text = self.provider_status(i, ui_text);
 
             let is_selected = i == self.selected_index;
             let row_style = if is_selected {
@@ -504,22 +506,10 @@ impl Component for SearchPanel {
         );
 
         // Footer help
-        let footer = Line::from(vec![
-            Span::styled(
-                "Enter",
-                Style::default()
-                    .fg(palette.accent)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(" select provider · "),
-            Span::styled(
-                "Esc",
-                Style::default()
-                    .fg(palette.accent)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(" close"),
-        ]);
+        let footer = Line::from(vec![Span::styled(
+            ui_text.text(TextKey::SearchPanelFooter),
+            Style::default().fg(palette.muted),
+        )]);
         frame.render_widget(
             Paragraph::new(footer)
                 .alignment(ratatui::layout::Alignment::Center)

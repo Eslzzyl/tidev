@@ -59,7 +59,7 @@ fn render_assistant_body_lines(
             ctx.thinking_collapsed_overrides,
             ctx.default_collapse_thinking,
         );
-        let duration = thinking_duration_str(message);
+        let duration = thinking_duration_str(message, &ctx.ui_text);
         lines.extend(render_reasoning_lines(
             ctx,
             &message.id,
@@ -83,10 +83,11 @@ fn render_assistant_body_lines(
                 lines.push(HyperlinkLine::new(dl.clone()));
             }
         } else {
-            let md = markdown::render_markdown_text_with_width_and_cwd(
+            let md = markdown::render_markdown_text_with_width_and_cwd_with_ui(
                 &message.content,
                 Some(content_width),
                 Some(ctx.workspace_root),
+                &ctx.ui_text,
             );
             lines.extend(markdown_to_hyperlink_lines(&md));
         }
@@ -99,7 +100,7 @@ fn render_assistant_body_lines(
         && message.tool_calls.is_empty()
     {
         lines.push(HyperlinkLine::new(Line::from(Span::styled(
-            "(empty)",
+            ctx.ui_text.text(crate::i18n::TextKey::EmptyContent),
             Style::default().fg(palette.muted),
         ))));
     }
@@ -125,7 +126,11 @@ fn render_assistant_body_lines(
                 .and_then(|m| m.thinking_level.clone())
         });
         if let Some(level) = thinking_level.filter(|level| level.is_supported()) {
-            parts.push(level.display_name().to_string());
+            parts.push(ctx.ui_text.text_with_value(
+                crate::i18n::TextKey::ThinkingLevel,
+                "level",
+                &crate::i18n::thinking_level_name(&ctx.ui_text, level.display_name()),
+            ));
         }
 
         // Duration: from previous user message created_at to this message completed_at
@@ -143,18 +148,39 @@ fn render_assistant_body_lines(
             let minutes = (total_secs % 3600) / 60;
             let seconds = total_secs % 60;
             let duration = if hours > 0 {
-                format!("{}h {}min {}s", hours, minutes, seconds)
+                ctx.ui_text.text_with_values(
+                    crate::i18n::TextKey::DurationHoursMinutesSeconds,
+                    &[
+                        ("hours", &hours.to_string()),
+                        ("minutes", &minutes.to_string()),
+                        ("seconds", &seconds.to_string()),
+                    ],
+                )
             } else if minutes > 0 {
-                format!("{}min {}s", minutes, seconds)
+                ctx.ui_text.text_with_values(
+                    crate::i18n::TextKey::DurationMinutesSeconds,
+                    &[
+                        ("minutes", &minutes.to_string()),
+                        ("seconds", &seconds.to_string()),
+                    ],
+                )
             } else {
-                format!("{}s", seconds)
+                ctx.ui_text.text_with_value(
+                    crate::i18n::TextKey::DurationSeconds,
+                    "seconds",
+                    &seconds.to_string(),
+                )
             };
             parts.push(duration);
         }
 
         // Tokens per second
         if let Some(tps) = message.tokens_per_second {
-            parts.push(format!("{:.1} t/s", tps));
+            parts.push(ctx.ui_text.text_with_value(
+                crate::i18n::TextKey::TokensPerSecond,
+                "value",
+                &format!("{tps:.1}"),
+            ));
         }
 
         // End time
@@ -174,7 +200,7 @@ fn render_assistant_body_lines(
             .and_then(|data| data.mode.as_deref())
             .and_then(|value| value.parse::<tidev_core::Mode>().ok())
         {
-            parts.push(mode.title().to_string());
+            parts.push(crate::i18n::mode_title(&ctx.ui_text, mode));
         }
 
         if !parts.is_empty() {
@@ -210,7 +236,7 @@ fn render_user_card(
         render_text_body_lines(ctx, &display_content, content_width.saturating_sub(2))
     }; // 2 for ┃ prefix
 
-    let image_labels = image_badge_labels(&display_content, &message.attachments);
+    let image_labels = image_badge_labels(&display_content, &message.attachments, &ctx.ui_text);
     if !image_labels.is_empty() {
         if !content_lines.is_empty() {
             content_lines.push(HyperlinkLine::new(Line::from("")));
@@ -271,7 +297,7 @@ fn render_error_card(
             ctx.thinking_collapsed_overrides,
             ctx.default_collapse_thinking,
         );
-        let duration = thinking_duration_str(message);
+        let duration = thinking_duration_str(message, &ctx.ui_text);
         lines.extend(render_reasoning_lines(
             ctx,
             &message.id,
@@ -286,7 +312,12 @@ fn render_error_card(
 
     // 2. Error text
     let error_text = if message.content.trim().is_empty() {
-        "Request cancelled.".to_string()
+        ctx.ui_text.text(crate::i18n::TextKey::RequestCancelled)
+    } else if message.content == "Request interrupted by user" {
+        ctx.ui_text.text(crate::i18n::TextKey::RequestInterrupted)
+    } else if let Some(error) = message.content.strip_prefix("Request failed: ") {
+        ctx.ui_text
+            .text_with_value(crate::i18n::TextKey::RequestFailed, "error", error)
     } else {
         message.content.clone()
     };
@@ -317,7 +348,10 @@ fn render_error_card(
     if lines.is_empty() {
         lines.push(annotate_web_urls_in_line(Line::from(vec![
             Span::styled("! ", prefix_style),
-            Span::styled("Request cancelled.", error_style),
+            Span::styled(
+                ctx.ui_text.text(crate::i18n::TextKey::RequestCancelled),
+                error_style,
+            ),
         ])));
     }
 
@@ -339,10 +373,29 @@ pub(super) fn render_system_card(
     if content.starts_with("Loaded instructions from")
         || (content.starts_with("Loaded ") && content.contains(" instruction files:"))
     {
+        let display_content = if let Some(path) = content.strip_prefix("Loaded instructions from ")
+        {
+            ctx.ui_text.text_with_value(
+                crate::i18n::TextKey::InstructionSourcesLoaded,
+                "path",
+                path,
+            )
+        } else if let Some(rest) = content.strip_prefix("Loaded ") {
+            if let Some((count, paths)) = rest.split_once(" instruction files: ") {
+                ctx.ui_text.text_with_values(
+                    crate::i18n::TextKey::InstructionSourcesLoadedMany,
+                    &[("count", count), ("paths", paths)],
+                )
+            } else {
+                content.clone()
+            }
+        } else {
+            content.clone()
+        };
         let line = Line::from(vec![
             Span::styled("󱁤  ", Style::default().fg(palette.accent_soft)),
             Span::styled(
-                content.clone(),
+                display_content,
                 Style::default()
                     .fg(palette.text)
                     .add_modifier(Modifier::ITALIC),
@@ -375,22 +428,23 @@ pub(super) fn render_system_card(
             .unwrap_or("")
             .trim();
         let label = if message.metadata.compaction_manual == Some(false) {
-            "Automatic compaction"
+            ctx.ui_text.text(crate::i18n::TextKey::AutomaticCompaction)
         } else {
-            COMPACTION_MESSAGE_LABEL
+            ctx.ui_text.text(crate::i18n::TextKey::CompactionLabel)
         };
         let mut lines = Vec::new();
         lines.push(render_compaction_divider_line(
-            label,
+            &label,
             content_width,
             palette,
         ));
         if !summary.is_empty() {
             lines.push(HyperlinkLine::new(Line::from("")));
-            let md = markdown::render_markdown_text_with_width_and_cwd(
+            let md = markdown::render_markdown_text_with_width_and_cwd_with_ui(
                 summary,
                 Some(content_width),
                 Some(ctx.workspace_root),
+                &ctx.ui_text,
             );
             lines.extend(markdown_to_hyperlink_lines(&md));
         }
@@ -407,16 +461,37 @@ pub(super) fn render_system_card(
                 let minutes = (total_secs % 3600) / 60;
                 let seconds = total_secs % 60;
                 let duration = if hours > 0 {
-                    format!("{}h {}min {}s", hours, minutes, seconds)
+                    ctx.ui_text.text_with_values(
+                        crate::i18n::TextKey::DurationHoursMinutesSeconds,
+                        &[
+                            ("hours", &hours.to_string()),
+                            ("minutes", &minutes.to_string()),
+                            ("seconds", &seconds.to_string()),
+                        ],
+                    )
                 } else if minutes > 0 {
-                    format!("{}min {}s", minutes, seconds)
+                    ctx.ui_text.text_with_values(
+                        crate::i18n::TextKey::DurationMinutesSeconds,
+                        &[
+                            ("minutes", &minutes.to_string()),
+                            ("seconds", &seconds.to_string()),
+                        ],
+                    )
                 } else {
-                    format!("{}s", seconds)
+                    ctx.ui_text.text_with_value(
+                        crate::i18n::TextKey::DurationSeconds,
+                        "seconds",
+                        &seconds.to_string(),
+                    )
                 };
                 parts.push(duration);
             }
             if let Some(tps) = message.tokens_per_second {
-                parts.push(format!("{:.1} t/s", tps));
+                parts.push(ctx.ui_text.text_with_value(
+                    crate::i18n::TextKey::TokensPerSecond,
+                    "value",
+                    &format!("{tps:.1}"),
+                ));
             }
             if let Some(completed) = message.completed_at {
                 parts.push(
@@ -432,7 +507,7 @@ pub(super) fn render_system_card(
                 .and_then(|data| data.mode.as_deref())
                 .and_then(|value| value.parse::<tidev_core::Mode>().ok())
             {
-                parts.push(mode.title().to_string());
+                parts.push(crate::i18n::mode_title(&ctx.ui_text, mode));
             }
             if !parts.is_empty() {
                 let suffix = parts.join(" · ");
@@ -463,12 +538,18 @@ pub(super) fn render_tool_card(
     content_width: usize,
 ) -> Vec<(Color, Vec<HyperlinkLine>)> {
     let palette = ctx.palette;
-    let tool_name = message.tool_name.clone().unwrap_or_else(|| "tool".into());
+    let tool_name = message
+        .tool_name
+        .clone()
+        .unwrap_or_else(|| ctx.ui_text.text(crate::i18n::TextKey::Tool));
     let mut lines = Vec::new();
 
     // Header line
     lines.push(HyperlinkLine::new(Line::from(vec![
-        Span::styled("Tool: ", Style::default().fg(palette.accent_soft)),
+        Span::styled(
+            format!("{} ", ctx.ui_text.text(crate::i18n::TextKey::Tool)),
+            Style::default().fg(palette.accent_soft),
+        ),
         Span::styled(
             tool_name,
             Style::default()
@@ -522,14 +603,15 @@ fn render_text_body_lines(
 ) -> Vec<HyperlinkLine> {
     if text.trim().is_empty() {
         vec![HyperlinkLine::new(Line::from(Span::styled(
-            "(empty)",
+            ctx.ui_text.text(crate::i18n::TextKey::EmptyContent),
             Style::default().fg(ctx.palette.muted),
         )))]
     } else {
-        let md = markdown::render_markdown_text_with_width_and_cwd(
+        let md = markdown::render_markdown_text_with_width_and_cwd_with_ui(
             text,
             Some(content_width),
             Some(ctx.workspace_root),
+            &ctx.ui_text,
         );
         markdown_to_hyperlink_lines(&md)
     }

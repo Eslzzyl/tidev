@@ -11,16 +11,13 @@ use tidev_core::agent_type::AgentType;
 use crate::action::{Action, OverlayAction, OverlayKind};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
+use crate::i18n::{TextKey, agent_type_name};
 use crate::utils::{centered_rect, render_scrollbar};
 
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub(crate) struct AgentInfo {
     pub agent_type: AgentType,
-    pub display_name: String,
-    pub description: String,
     pub read_only: bool,
-    pub tools: Vec<String>,
 }
 
 pub(crate) struct AgentsPanel {
@@ -32,18 +29,9 @@ impl AgentsPanel {
     pub(crate) fn new() -> Self {
         let agents = AgentType::all()
             .iter()
-            .map(|at| {
-                let tools = at
-                    .default_tool_restrictions()
-                    .map(|t| t.iter().map(|s| s.to_string()).collect())
-                    .unwrap_or_else(|| vec!["all".to_string()]);
-                AgentInfo {
-                    agent_type: *at,
-                    display_name: at.display_name().to_string(),
-                    description: at.description().to_string(),
-                    read_only: at.is_read_only(),
-                    tools,
-                }
+            .map(|at| AgentInfo {
+                agent_type: *at,
+                read_only: at.is_read_only(),
             })
             .collect();
 
@@ -147,7 +135,7 @@ impl Component for AgentsPanel {
 
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
-                " Agents ",
+                format!(" {} ", ctx.ui_text.text(TextKey::AgentsTitle)),
                 Style::default()
                     .fg(palette.accent)
                     .add_modifier(Modifier::BOLD),
@@ -158,14 +146,14 @@ impl Component for AgentsPanel {
 
         let header = Line::from(vec![
             Span::styled(
-                "  Agent",
+                format!("  {}", ctx.ui_text.text(TextKey::Agents)),
                 Style::default()
                     .fg(palette.accent)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::raw("    "),
             Span::styled(
-                "Description",
+                ctx.ui_text.text(TextKey::AgentDescription),
                 Style::default()
                     .fg(palette.accent)
                     .add_modifier(Modifier::BOLD),
@@ -206,16 +194,24 @@ impl Component for AgentsPanel {
         let scroll = self.scroll_offset;
         let visible_height = content_area.height as usize;
         for agent in self.agents.iter().skip(scroll).take(visible_height) {
-            let tag = if agent.read_only { " [read-only]" } else { "" };
+            let tag = if agent.read_only {
+                ctx.ui_text.text(TextKey::AgentsReadOnly)
+            } else {
+                String::new()
+            };
             lines.push(Line::from(vec![
                 Span::styled(
-                    format!("  @{}", agent.display_name),
+                    format!("  @{}", agent_type_name(&ctx.ui_text, agent.agent_type)),
                     Style::default()
                         .fg(palette.text)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
-                    format!("  {}{}", agent.description, tag),
+                    format!(
+                        "  {}{}",
+                        agent_description(&ctx.ui_text, agent.agent_type),
+                        tag
+                    ),
                     Style::default().fg(palette.muted),
                 ),
             ]));
@@ -225,7 +221,7 @@ impl Component for AgentsPanel {
         if remaining >= 2 {
             lines.push(Line::raw(""));
             lines.push(Line::from(Span::styled(
-                "  ↑/↓ scroll · Esc/q close",
+                format!("  {}", ctx.ui_text.text(TextKey::AgentsFooter)),
                 Style::default().fg(palette.muted),
             )));
         }
@@ -261,5 +257,15 @@ impl Component for AgentsPanel {
 
     fn blocks_input(&self) -> bool {
         true
+    }
+}
+
+fn agent_description(ui_text: &crate::i18n::UiText, agent_type: AgentType) -> String {
+    match agent_type {
+        AgentType::General => ui_text.text(TextKey::AgentGeneralDescription),
+        AgentType::Explorer => ui_text.text(TextKey::AgentExplorerDescription),
+        AgentType::Librarian => ui_text.text(TextKey::AgentLibrarianDescription),
+        AgentType::Oracle => ui_text.text(TextKey::AgentOracleDescription),
+        AgentType::Fixer => ui_text.text(TextKey::AgentFixerDescription),
     }
 }

@@ -12,6 +12,7 @@ use ratatui_image::{Image, protocol::Protocol};
 use crate::action::{Action, OverlayAction, OverlayKind};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext};
+use crate::i18n::TextKey;
 
 pub(crate) struct ImageViewer {
     dyn_img: image::DynamicImage,
@@ -71,7 +72,7 @@ impl Component for ImageViewer {
         let Some(picker) = &self.picker else {
             let placeholder = Paragraph::new(Line::from(vec![
                 Span::styled(
-                    "Image: ",
+                    ctx.ui_text.text(TextKey::ImageLabel),
                     Style::default()
                         .fg(palette.accent)
                         .add_modifier(Modifier::BOLD),
@@ -109,7 +110,7 @@ impl Component for ImageViewer {
         // Title line
         let title = Line::from(vec![
             Span::styled(
-                " Image ",
+                format!(" {} ", ctx.ui_text.text(TextKey::ImagePreviewTitle)),
                 Style::default()
                     .fg(palette.selection_fg)
                     .bg(palette.selection_bg)
@@ -151,7 +152,7 @@ impl Component for ImageViewer {
 
         // Hint at the bottom
         let hint = Line::from(Span::styled(
-            " Press any key to close ",
+            format!(" {} ", ctx.ui_text.text(TextKey::ImageCloseHint)),
             Style::default().fg(palette.muted),
         ));
         let hint_area = Rect {

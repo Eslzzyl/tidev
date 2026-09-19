@@ -19,6 +19,7 @@ use uuid::Uuid;
 use crate::action::{Action, ChatAction, OverlayAction, OverlayKind};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
+use crate::i18n::{TextKey, mode_title};
 use crate::utils::{centered_rect, single_line_input_cursor, strip_system_reminder_tags};
 use unicode_width::UnicodeWidthStr;
 
@@ -284,7 +285,7 @@ impl Component for MessagePanel {
         // ── Title ──
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
-                " User messages ",
+                format!(" {} ", ctx.ui_text.text(TextKey::MessageTitle)),
                 Style::default()
                     .fg(palette.accent)
                     .add_modifier(Modifier::BOLD),
@@ -295,17 +296,15 @@ impl Component for MessagePanel {
 
         // ── Instruction ──
         frame.render_widget(
-            Paragraph::new(
-                "Type to filter current session user messages. Enter jumps to the selected message.",
-            )
-            .alignment(ratatui::layout::Alignment::Center)
-            .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
+            Paragraph::new(ctx.ui_text.text(TextKey::MessageSearchInstruction))
+                .alignment(ratatui::layout::Alignment::Center)
+                .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
             sections[1],
         );
 
         // ── Search input ──
         let input_style = Style::default().bg(palette.panel_alt);
-        let prefix = " Search user messages: ";
+        let prefix = format!(" {} ", ctx.ui_text.text(TextKey::MessageSearchPrefix));
         let (visible_query, cursor) =
             single_line_input_cursor(sections[2], prefix.width() as u16, &self.query);
         frame.render_widget(
@@ -322,7 +321,7 @@ impl Component for MessagePanel {
         let matches = self.matching_indices();
         if matches.is_empty() {
             frame.render_widget(
-                Paragraph::new("No user messages match this search.")
+                Paragraph::new(ctx.ui_text.text(TextKey::NoUserMessages))
                     .alignment(ratatui::layout::Alignment::Center)
                     .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                 sections[3],
@@ -347,9 +346,8 @@ impl Component for MessagePanel {
 
                 // Mode column
                 let mode_str = match message.mode {
-                    Some(SessionMode::Build) => " Build",
-                    Some(SessionMode::Plan) => "  Plan",
-                    None => "      ",
+                    Some(mode) => mode_title(&ctx.ui_text, mode),
+                    None => "      ".to_string(),
                 };
                 let mode_color = message.mode.map_or(palette.muted, |m| match m {
                     SessionMode::Build => palette.mode_build,
@@ -398,11 +396,9 @@ impl Component for MessagePanel {
 
         // ── Footer ──
         frame.render_widget(
-            Paragraph::new(
-                "Enter: jump · Ctrl+G: fork · Ctrl+Z: undo · Esc: close · Ctrl+P/N: nav",
-            )
-            .alignment(ratatui::layout::Alignment::Center)
-            .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
+            Paragraph::new(ctx.ui_text.text(TextKey::MessageFooter))
+                .alignment(ratatui::layout::Alignment::Center)
+                .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
             sections[4],
         );
     }

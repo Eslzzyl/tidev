@@ -2,7 +2,10 @@ use super::webfetch::strip_webfetch_content;
 use super::*;
 
 use crate::hyperlink::HyperlinkLine;
-use crate::markdown::markdown_to_hyperlink_lines;
+use crate::i18n::{TextKey, UiText};
+use crate::markdown::{
+    markdown_to_hyperlink_lines, render_markdown_text_with_width_and_cwd_with_ui,
+};
 
 // ---------------------------------------------------------------------------
 // Web search result rendering
@@ -12,6 +15,7 @@ pub(super) fn render_websearch_result_lines(
     output: &str,
     content_width: usize,
     palette: ThemePalette,
+    ui_text: &UiText,
     is_expanded: bool,
     is_error: bool,
 ) -> Vec<HyperlinkLine> {
@@ -19,7 +23,7 @@ pub(super) fn render_websearch_result_lines(
 
     if output.trim().is_empty() {
         lines.push(HyperlinkLine::new(Line::from(Span::styled(
-            "(no results)",
+            ui_text.text(TextKey::NoMatches),
             Style::default().fg(palette.muted),
         ))));
         return lines;
@@ -31,18 +35,20 @@ pub(super) fn render_websearch_result_lines(
             None,
             content_width,
             palette,
+            ui_text,
             is_expanded,
             true,
         );
     }
 
     lines.push(HyperlinkLine::new(Line::from(vec![Span::styled(
-        "Search Results",
+        ui_text.text(TextKey::Search),
         Style::default().fg(palette.accent_soft),
     )])));
     lines.push(HyperlinkLine::new(Line::from("")));
 
-    let rendered = render_markdown_text_with_width_and_cwd(output, Some(content_width), None);
+    let rendered =
+        render_markdown_text_with_width_and_cwd_with_ui(output, Some(content_width), None, ui_text);
     let md_lines: Vec<HyperlinkLine> = markdown_to_hyperlink_lines(&rendered);
 
     if is_expanded {
@@ -50,7 +56,7 @@ pub(super) fn render_websearch_result_lines(
         lines.extend(md_lines);
         if has_lines {
             lines.push(HyperlinkLine::new(Line::from(vec![Span::styled(
-                "▲ Click to collapse",
+                ui_text.text(TextKey::ClickToCollapse),
                 Style::default().fg(palette.muted),
             )])));
         }
@@ -63,8 +69,12 @@ pub(super) fn render_websearch_result_lines(
             lines.extend(md_lines.into_iter().take(max_preview));
             lines.push(HyperlinkLine::new(Line::from(vec![Span::styled(
                 format!(
-                    "  ▼ {} more line(s) — Click to expand",
-                    line_count - max_preview
+                    "  {}",
+                    ui_text.text_with_value(
+                        TextKey::MoreLinesClickExpand,
+                        "count",
+                        &(line_count - max_preview).to_string(),
+                    )
                 ),
                 Style::default().fg(palette.muted),
             )])));
@@ -82,6 +92,7 @@ pub(super) fn render_webfetch_result_lines(
     output: &str,
     content_width: usize,
     palette: ThemePalette,
+    ui_text: &UiText,
     is_expanded: bool,
     is_error: bool,
 ) -> Vec<HyperlinkLine> {
@@ -89,7 +100,7 @@ pub(super) fn render_webfetch_result_lines(
 
     if output.trim().is_empty() {
         lines.push(HyperlinkLine::new(Line::from(Span::styled(
-            "(empty page)",
+            ui_text.text(TextKey::NoOutput),
             Style::default().fg(palette.muted),
         ))));
         return lines;
@@ -101,20 +112,22 @@ pub(super) fn render_webfetch_result_lines(
             None,
             content_width,
             palette,
+            ui_text,
             is_expanded,
             true,
         );
     }
 
     lines.push(HyperlinkLine::new(Line::from(vec![Span::styled(
-        "Page Content",
+        ui_text.text(TextKey::Output),
         Style::default().fg(palette.accent_soft),
     )])));
     lines.push(HyperlinkLine::new(Line::from("")));
 
     // Strip line-number prefixes and metadata footers for clean TUI display
     let clean = strip_webfetch_content(output);
-    let rendered = render_markdown_text_with_width_and_cwd(&clean, Some(content_width), None);
+    let rendered =
+        render_markdown_text_with_width_and_cwd_with_ui(&clean, Some(content_width), None, ui_text);
     let md_lines: Vec<HyperlinkLine> = markdown_to_hyperlink_lines(&rendered);
 
     if is_expanded {
@@ -122,7 +135,7 @@ pub(super) fn render_webfetch_result_lines(
         lines.extend(md_lines);
         if has_lines {
             lines.push(HyperlinkLine::new(Line::from(vec![Span::styled(
-                "▲ Click to collapse",
+                ui_text.text(TextKey::ClickToCollapse),
                 Style::default().fg(palette.muted),
             )])));
         }
@@ -135,8 +148,12 @@ pub(super) fn render_webfetch_result_lines(
             lines.extend(md_lines.into_iter().take(max_preview));
             lines.push(HyperlinkLine::new(Line::from(vec![Span::styled(
                 format!(
-                    "  ▼ {} more line(s) — Click to expand",
-                    line_count - max_preview
+                    "  {}",
+                    ui_text.text_with_value(
+                        TextKey::MoreLinesClickExpand,
+                        "count",
+                        &(line_count - max_preview).to_string(),
+                    )
                 ),
                 Style::default().fg(palette.muted),
             )])));

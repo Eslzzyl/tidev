@@ -1,4 +1,5 @@
 use super::*;
+use crate::i18n::{TextKey, UiText};
 
 // ---------------------------------------------------------------------------
 // Todos checkbox list rendering
@@ -13,12 +14,13 @@ pub(super) fn render_todos_checkbox_list(
     todos: &[TodoItem],
     content_width: usize,
     palette: ThemePalette,
+    ui_text: &UiText,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
 
     if todos.is_empty() {
         lines.push(Line::from(Span::styled(
-            "  (no items)",
+            format!("  {}", ui_text.text(TextKey::NoItems)),
             Style::default().fg(palette.muted),
         )));
         return lines;

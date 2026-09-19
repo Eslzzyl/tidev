@@ -96,6 +96,12 @@ fn apply_setting_change(
             config.ui.right_sidebar_visible = value;
             true
         }
+        (SettingKey::Language, SettingValue::Choice(value))
+            if matches!(value.as_str(), "system" | "en-US" | "zh-CN") =>
+        {
+            config.ui.locale = value;
+            true
+        }
         _ => false,
     }
 }
@@ -111,16 +117,21 @@ impl App {
                 Action::CopyLastAssistant => {
                     self.copy_last_assistant_message();
                 }
+                Action::ImageAttachmentUnsupported => {
+                    self.set_notice(self.ui_text().text(TextKey::ImageAttachmentUnsupported));
+                }
                 Action::ToggleRightSidebar(visible) => {
                     let target = visible.unwrap_or(!self.runtime.config().ui.right_sidebar_visible);
                     let key = SettingKey::RightSidebarVisible;
                     let value = SettingValue::Bool(target);
                     // Reuse Settings handling for persistence and overlay sync.
                     // Push Notice first so Settings is popped and persisted before the notice is shown.
-                    queue.push(Action::Notice(format!(
-                        "Right sidebar {}",
-                        if target { "shown" } else { "hidden" }
-                    )));
+                    let ui_text = self.ui_text();
+                    queue.push(Action::Notice(if target {
+                        ui_text.text(TextKey::RightSidebarShown)
+                    } else {
+                        ui_text.text(TextKey::RightSidebarHidden)
+                    }));
                     queue.push(Action::Settings(SettingsAction::Change { key, value }));
                 }
                 Action::Overlay(OverlayAction::Open(kind)) => {
@@ -152,13 +163,17 @@ impl App {
                     };
 
                     if !valid {
-                        self.set_notice("Invalid settings value");
+                        self.set_notice(self.ui_text().text(TextKey::InvalidSettingsValue));
                         continue;
                     }
 
                     if let Err(error) = self.runtime.save_config() {
                         self.runtime.update_config(|config| *config = previous);
-                        self.set_notice(format!("Failed to save settings: {error}"));
+                        self.set_notice(self.ui_text().text_with_value(
+                            TextKey::FailedSaveSettings,
+                            "error",
+                            &error.to_string(),
+                        ));
                         continue;
                     }
 
@@ -197,7 +212,7 @@ impl App {
                 }
                 Action::Connect(ConnectAction::SaveApiKey { provider_id, key }) => {
                     if key.trim().is_empty() {
-                        self.set_notice("API key was empty");
+                        self.set_notice(self.ui_text().text(TextKey::ApiKeyEmpty));
                         return;
                     }
 
@@ -245,13 +260,19 @@ impl App {
                                 );
                             }
 
-                            self.set_notice(format!(
-                                "Connected to {}",
-                                model.provider_display_name
+                            let ui_text = self.ui_text();
+                            self.set_notice(ui_text.text_with_value(
+                                TextKey::ConnectedTo,
+                                "name",
+                                &model.provider_display_name,
                             ));
                         }
                         Err(e) => {
-                            self.set_notice(format!("Connected, but failed to resolve model: {e}"));
+                            self.set_notice(self.ui_text().text_with_value(
+                                TextKey::ConnectedResolveModelFailed,
+                                "error",
+                                &e.to_string(),
+                            ));
                         }
                     }
                 }
@@ -265,8 +286,13 @@ impl App {
                     let key = self.runtime.auth().api_key(&provider_id).map(str::to_owned);
 
                     let Some(key) = key else {
+                        let ui_text = self.ui_text();
                         self.set_toast(
-                            format!("No API key configured for {display_name}"),
+                            ui_text.text_with_value(
+                                TextKey::NoApiKeyConfigured,
+                                "name",
+                                &display_name,
+                            ),
                             std::time::Duration::from_secs(3),
                         );
                         continue;
@@ -274,11 +300,19 @@ impl App {
 
                     match copy_to_clipboard(&key) {
                         Ok(()) => self.set_toast(
-                            format!("API key for {display_name} copied to clipboard"),
+                            self.ui_text().text_with_value(
+                                TextKey::ApiKeyCopied,
+                                "name",
+                                &display_name,
+                            ),
                             std::time::Duration::from_secs(3),
                         ),
                         Err(error) => self.set_toast(
-                            format!("Copy failed: {error}"),
+                            self.ui_text().text_with_value(
+                                TextKey::CopyFailed,
+                                "error",
+                                &error.to_string(),
+                            ),
                             std::time::Duration::from_secs(5),
                         ),
                     }
@@ -293,7 +327,11 @@ impl App {
                     });
                     if removed {
                         let _ = self.runtime.save_auth();
-                        self.set_notice(format!("Disconnected: {display_name}"));
+                        self.set_notice(self.ui_text().text_with_value(
+                            TextKey::DisconnectedFrom,
+                            "name",
+                            &display_name,
+                        ));
                     }
                 }
                 Action::Connect(ConnectAction::PruneOrphans) => {
@@ -304,11 +342,13 @@ impl App {
                     });
                     if pruned > 0 {
                         let _ = self.runtime.save_auth();
-                        self.set_notice(format!(
-                            "Pruned {pruned} orphan provider(s) from auth file"
+                        self.set_notice(self.ui_text().text_with_value(
+                            TextKey::PrunedAuthEntries,
+                            "count",
+                            &pruned.to_string(),
                         ));
                     } else {
-                        self.set_notice("No orphan auth entries to prune");
+                        self.set_notice(self.ui_text().text(TextKey::NoOrphanAuthEntries));
                     }
                 }
                 Action::Mcp(action) => {
@@ -640,9 +680,10 @@ impl App {
                     self.shown_instruction_sources.clear();
                     self.scroll_target = None;
 
-                    self.set_notice(format!(
-                        "Forked session with {} messages",
-                        message_index + 1,
+                    self.set_notice(self.ui_text().text_with_value(
+                        TextKey::ForkedSession,
+                        "count",
+                        &(message_index + 1).to_string(),
                     ));
 
                     log::info!(
@@ -657,7 +698,7 @@ impl App {
                         Some(id) => id,
                         None => return,
                     };
-                    self.set_notice("Undo in progress...");
+                    self.set_notice(self.ui_text().text(TextKey::UndoInProgress));
                     let rt = self.runtime.clone();
                     tokio::spawn(async move {
                         // Cancel this session's running loop first.
@@ -672,7 +713,7 @@ impl App {
                         Some(id) => id,
                         None => return,
                     };
-                    self.set_notice("Redo in progress...");
+                    self.set_notice(self.ui_text().text(TextKey::RedoInProgress));
                     let rt = self.runtime.clone();
                     tokio::spawn(async move {
                         rt.cancel_session(session_id).await;
@@ -688,20 +729,20 @@ impl App {
                     // If a request is in progress, queue the compact.
                     if self.has_active_request() {
                         self.pending_compacts.insert(sid);
-                        self.set_notice("Compaction queued");
+                        self.set_notice(self.ui_text().text(TextKey::CompactionQueued));
                         return;
                     }
                     self.execute_compact();
                 }
                 Action::Session(SessionAction::Rename(session_id, title)) => {
                     let final_title = if title.trim().is_empty() {
-                        "Untitled session"
+                        self.ui_text().text(TextKey::UntitledSession)
                     } else {
-                        title.trim()
+                        title.trim().to_string()
                     };
-                    match self.runtime.update_session_title(session_id, final_title) {
+                    match self.runtime.update_session_title(session_id, &final_title) {
                         Ok(_) => {
-                            self.set_notice("Session title updated");
+                            self.set_notice(self.ui_text().text(TextKey::SessionTitleUpdated));
                             log::info!("Renamed session {} to {}", session_id, final_title);
                         }
                         Err(e) => log::error!("Failed to rename session: {e}"),
@@ -717,9 +758,13 @@ impl App {
                         &next.to_string(),
                     );
                     if next.is_supported() {
-                        self.set_notice(format!("Thinking: {}", next.display_name()));
+                        self.set_notice(self.ui_text().text_with_value(
+                            TextKey::ThinkingLevel,
+                            "level",
+                            &crate::i18n::thinking_level_name(&self.ui_text(), next.display_name()),
+                        ));
                     } else {
-                        self.set_notice("Thinking: off");
+                        self.set_notice(self.ui_text().text(TextKey::ThinkingOff));
                     }
                 }
                 Action::Session(SessionAction::Create) => {
@@ -803,7 +848,9 @@ impl App {
                             let sid = match session_id {
                                 Some(id) => id,
                                 None => {
-                                    match self.runtime.create_default_session("Untitled session") {
+                                    let untitled_title =
+                                        self.ui_text().text(TextKey::UntitledSession);
+                                    match self.runtime.create_default_session(&untitled_title) {
                                         Ok(id) => {
                                             self.current_session_id = Some(id);
                                             self.shown_instruction_sources.clear();
@@ -837,7 +884,9 @@ impl App {
                                         }
                                         Err(e) => {
                                             log::error!("Failed to create session: {e}");
-                                            self.set_notice("Failed to create session");
+                                            self.set_notice(
+                                                self.ui_text().text(TextKey::FailedCreateSession),
+                                            );
                                             return;
                                         }
                                     }
@@ -850,7 +899,7 @@ impl App {
                             self.thinking_level = thinking_level.clone();
                             let rt = self.runtime.clone();
                             let text_for_title = text.clone();
-                            self.set_notice("Sending...");
+                            self.set_notice(self.ui_text().text(TextKey::Sending));
                             if let Some(ref mut chat) = self.message_list {
                                 chat.follow_tail = true;
                             }
@@ -870,9 +919,10 @@ impl App {
                             });
 
                             // Update session title from prompt (matching old behaviour).
+                            let untitled_title = self.ui_text().text(TextKey::UntitledSession);
                             if let Some(ref mut chat) = self.message_list
                                 && let Some(ref mut ctx) = chat.active_chat_context_mut()
-                                && (ctx.title.is_empty() || ctx.title == "Untitled session")
+                                && (ctx.title.is_empty() || ctx.title == untitled_title)
                             {
                                 let title = title_from_prompt(&text_for_title);
                                 ctx.title = title.clone();
@@ -911,6 +961,20 @@ impl App {
                 }
                 Action::Notice(msg) => {
                     self.set_notice(msg);
+                }
+                Action::CommandUsage(command) => {
+                    self.set_notice(self.ui_text().text_with_value(
+                        TextKey::UsageCommand,
+                        "command",
+                        command,
+                    ));
+                }
+                Action::ClipboardError(error) => {
+                    self.set_notice(self.ui_text().text_with_value(
+                        TextKey::ClipboardError,
+                        "error",
+                        &error,
+                    ));
                 }
                 Action::Noop => {}
                 Action::Consumed => {}
@@ -1169,7 +1233,7 @@ impl App {
     fn copy_last_assistant_message(&mut self) {
         let Some(session_id) = self.current_session_id else {
             self.set_toast(
-                "Copy is available in an active session",
+                self.ui_text().text(TextKey::CopyAvailableActive),
                 std::time::Duration::from_secs(3),
             );
             return;
@@ -1183,7 +1247,7 @@ impl App {
         let is_compacting = self.compacting_sessions.contains(&session_id);
         if self.has_active_request() || has_pending_input || has_pending_compact || is_compacting {
             self.set_toast(
-                "Copy is available when idle",
+                self.ui_text().text(TextKey::CopyAvailableIdle),
                 std::time::Duration::from_secs(3),
             );
             return;
@@ -1198,7 +1262,7 @@ impl App {
 
         let Some(content) = content else {
             self.set_toast(
-                "No completed assistant message to copy",
+                self.ui_text().text(TextKey::NoAssistantToCopy),
                 std::time::Duration::from_secs(3),
             );
             return;
@@ -1206,11 +1270,12 @@ impl App {
 
         match copy_to_clipboard(&content) {
             Ok(()) => self.set_toast(
-                "Assistant message copied to clipboard",
+                self.ui_text().text(TextKey::AssistantCopied),
                 std::time::Duration::from_secs(3),
             ),
             Err(error) => self.set_toast(
-                format!("Copy failed: {error}"),
+                self.ui_text()
+                    .text_with_value(TextKey::CopyFailed, "error", &error.to_string()),
                 std::time::Duration::from_secs(5),
             ),
         }

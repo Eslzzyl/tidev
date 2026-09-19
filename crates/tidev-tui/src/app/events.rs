@@ -33,7 +33,7 @@ impl App {
                 return;
             }
             self.abort_confirmation_deadline = Some(Instant::now() + Duration::from_secs(3));
-            self.set_notice("Press Esc again within 3 seconds to stop the current request");
+            self.set_notice(self.ui_text().text(TextKey::StopRequestHint));
             return;
         }
         self.abort_confirmation_deadline = None;
@@ -44,7 +44,7 @@ impl App {
                 && !composer.is_empty()
             {
                 composer.clear();
-                self.set_notice("Input cleared");
+                self.set_notice(self.ui_text().text(TextKey::InputCleared));
             }
             return;
         }
@@ -171,7 +171,7 @@ impl App {
         {
             // Cancel pending mode switch.
             self.pending_modes.remove(&sid);
-            self.set_notice("Mode switch cancelled");
+            self.set_notice(self.ui_text().text(TextKey::ModeSwitchCancelled));
             return;
         }
 
@@ -185,14 +185,15 @@ impl App {
             if let Some(sid) = self.current_session_id {
                 self.pending_modes.insert(sid, new_mode);
             }
-            self.set_notice(format!(
-                "Mode will switch to {} on completion",
-                new_mode.title()
-            ));
+            let ui_text = self.ui_text();
+            let mode = mode_title(&ui_text, new_mode);
+            self.set_notice(ui_text.text_with_value(TextKey::ModeWillSwitchTo, "mode", &mode));
         } else {
             // Apply immediately.
             self.mode = self.mode.toggle();
-            self.set_notice(format!("Mode switched to {}", self.mode.title()));
+            let ui_text = self.ui_text();
+            let mode = mode_title(&ui_text, self.mode);
+            self.set_notice(ui_text.text_with_value(TextKey::ModeSwitched, "mode", &mode));
         }
     }
 

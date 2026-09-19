@@ -351,6 +351,9 @@ impl SendWhileBusy {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct UiConfig {
+    /// UI locale preference: `system`, `en-US`, or `zh-CN`.
+    #[serde(default = "default_ui_locale")]
+    pub locale: String,
     pub sidebar_width: u16,
     pub welcome_width: u16,
     pub max_input_lines: u16,
@@ -377,6 +380,9 @@ pub struct UiConfig {
 fn default_scroll_speed() -> f32 {
     3.0
 }
+fn default_ui_locale() -> String {
+    "system".to_string()
+}
 fn default_tab_width() -> usize {
     4
 }
@@ -387,6 +393,7 @@ fn default_right_sidebar_visible() -> bool {
 impl Default for UiConfig {
     fn default() -> Self {
         Self {
+            locale: default_ui_locale(),
             sidebar_width: 40,
             welcome_width: 90,
             max_input_lines: 6,
@@ -677,7 +684,16 @@ impl AppConfig {
 
         // Sub-configs: full replacement when section is present
         if has("ui") {
+            let locale = self.ui.locale.clone();
+            let overlay_has_locale = toml::from_str::<toml::Value>(overlay_toml)
+                .ok()
+                .and_then(|value| value.get("ui").cloned())
+                .and_then(|value| value.as_table().cloned())
+                .is_some_and(|table| table.contains_key("locale"));
             self.ui = overlay.ui;
+            if !overlay_has_locale {
+                self.ui.locale = locale;
+            }
         }
         if has("logging") {
             self.logging = overlay.logging;

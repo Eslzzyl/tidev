@@ -6,9 +6,10 @@ use ratatui::text::{Line, Span};
 use tidev_llm::message::Message;
 
 use super::utils::tool_output_is_error;
-use super::{hyper_lines, pluralize, wrap_tool_title};
+use super::{hyper_lines, wrap_tool_title};
 use crate::diff_render::split_diff_sections;
 use crate::hyperlink::HyperlinkLine;
+use crate::i18n::{TextKey, UiText};
 use crate::theme::ThemePalette;
 
 // ---------------------------------------------------------------------------
@@ -32,6 +33,7 @@ pub(super) fn render_diff_summary_lines(
     content_width: usize,
     palette: ThemePalette,
     canonical_name: &str,
+    ui_text: &UiText,
 ) -> Option<Vec<HyperlinkLine>> {
     let output = crate::utils::strip_system_reminder_tags(&message.content);
     if tool_output_is_error(&output) {
@@ -47,14 +49,15 @@ pub(super) fn render_diff_summary_lines(
             message.metadata.file_changes.len(),
             palette,
             content_width,
+            ui_text,
         ));
         first = false;
         for change in &message.metadata.file_changes {
             let label = match change.operation.as_str() {
-                "A" => "Write",
-                "M" => "Edit",
-                "D" => "Delete",
-                _ => "Edit",
+                "A" => ui_text.text(TextKey::Write),
+                "M" => ui_text.text(TextKey::Edit),
+                "D" => ui_text.text(TextKey::Delete),
+                _ => ui_text.text(TextKey::Edit),
             };
             let (adds, dels) = change
                 .diff
@@ -64,7 +67,7 @@ pub(super) fn render_diff_summary_lines(
             push_diff_summary_line(
                 &mut lines,
                 &mut first,
-                label,
+                &label,
                 change.path.clone(),
                 adds,
                 dels,
@@ -81,11 +84,11 @@ pub(super) fn render_diff_summary_lines(
             if let Some((adds, dels)) = count_diff_section_lines(&section) {
                 let path = diff_section_file_path(&section)
                     .or_else(|| message.metadata.filepath.clone())
-                    .unwrap_or_else(|| "(unknown)".to_string());
+                    .unwrap_or_else(|| ui_text.text(TextKey::Unknown));
                 push_diff_summary_line(
                     &mut lines,
                     &mut first,
-                    diff_section_operation(&section),
+                    &diff_operation_label(diff_section_operation(&section), ui_text),
                     path,
                     adds,
                     dels,
@@ -108,7 +111,7 @@ pub(super) fn render_diff_summary_lines(
             any = true;
             let path = diff_section_file_path(&section)
                 .or_else(|| message.metadata.filepath.clone())
-                .unwrap_or_else(|| "(unknown)".to_string());
+                .unwrap_or_else(|| ui_text.text(TextKey::Unknown));
             push_diff_summary_line(
                 &mut lines,
                 &mut first,
@@ -155,12 +158,23 @@ fn build_apply_patch_summary_header(
     file_count: usize,
     palette: ThemePalette,
     content_width: usize,
+    ui_text: &UiText,
 ) -> Vec<Line<'static>> {
     wrap_tool_title(
         Line::from(vec![
-            Span::styled("Apply patch ", Style::default().fg(palette.accent_soft)),
             Span::styled(
-                format!("· {}", pluralize(file_count, "file", "files")),
+                format!("{} ", ui_text.text(TextKey::ApplyPatchSummary)),
+                Style::default().fg(palette.accent_soft),
+            ),
+            Span::styled(
+                format!(
+                    "· {}",
+                    if file_count == 1 {
+                        ui_text.text_with_count(TextKey::FileCountOne, file_count)
+                    } else {
+                        ui_text.text_with_count(TextKey::FileCount, file_count)
+                    }
+                ),
                 Style::default()
                     .fg(palette.text)
                     .add_modifier(Modifier::BOLD),
@@ -170,6 +184,15 @@ fn build_apply_patch_summary_header(
         content_width,
         "  ",
     )
+}
+
+fn diff_operation_label(label: &str, ui_text: &UiText) -> String {
+    match label {
+        "Write" => ui_text.text(TextKey::Write),
+        "Edit" => ui_text.text(TextKey::Edit),
+        "Delete" => ui_text.text(TextKey::Delete),
+        _ => label.to_string(),
+    }
 }
 
 /// Build a single wrapped summary line for one file:

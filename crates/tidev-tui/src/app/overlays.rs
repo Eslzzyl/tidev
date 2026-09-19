@@ -22,6 +22,7 @@ use crate::components::overlays::skills::{SkillItem, SkillsPanel};
 use crate::components::overlays::theme::ThemePanel;
 use crate::components::overlays::undo::UndoConfirmDialog;
 use crate::context::{InitContext, UpdateContext};
+use crate::i18n::agent_type_name;
 use crate::utils::strip_system_reminder_tags;
 
 impl App {
@@ -108,7 +109,7 @@ impl App {
 
                 let mut tabs = vec![ModelPanelTab::new(
                     "general",
-                    "General",
+                    &self.ui_text().text(TextKey::General),
                     &active_model.label(),
                 )];
                 for agent_type in AgentType::all() {
@@ -117,7 +118,8 @@ impl App {
                     }
                     let ty = agent_type.display_name();
                     let label = config.agent_model_display(ty);
-                    tabs.push(ModelPanelTab::new(ty, agent_type.display_name(), &label));
+                    let display_name = agent_type_name(&self.ui_text(), *agent_type);
+                    tabs.push(ModelPanelTab::new(ty, &display_name, &label));
                 }
 
                 let connected_models = config.connected_models(&auth);

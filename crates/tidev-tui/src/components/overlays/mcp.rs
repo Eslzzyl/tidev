@@ -19,6 +19,7 @@ use tidev_core::mcp::{McpConnectionStatus, McpManager, McpServerSummary};
 use crate::action::{Action, McpAction, OverlayAction, OverlayKind};
 use crate::component::Component;
 use crate::context::{DrawContext, UpdateContext};
+use crate::i18n::{TextKey, UiText};
 use crate::utils::{centered_rect, render_scrollbar, single_line_input_cursor};
 
 // ---------------------------------------------------------------------------
@@ -364,23 +365,33 @@ impl McpServerPanel {
         tools: &[tidev_tools::types::ToolDefinition],
         palette: &crate::theme::ThemePalette,
         details_width: usize,
+        ui_text: &UiText,
     ) -> Vec<Line<'static>> {
         let mut lines = Vec::new();
 
         // ── Status & Transport ──
         let (status_icon, status_label, status_color) = if summary.disabled {
-            ("○", "Disabled", palette.muted)
+            ("○", ui_text.text(TextKey::Disabled), palette.muted)
         } else {
             match &summary.status {
-                McpConnectionStatus::Connected => ("●", "Connected", Color::Green),
-                McpConnectionStatus::Connecting => ("◌", "Connecting", Color::Yellow),
-                McpConnectionStatus::Disconnected => ("○", "Disconnected", palette.muted),
-                McpConnectionStatus::Failed(_) => ("✕", "Failed", Color::Red),
+                McpConnectionStatus::Connected => {
+                    ("●", ui_text.text(TextKey::Connected), Color::Green)
+                }
+                McpConnectionStatus::Connecting => {
+                    ("◌", ui_text.text(TextKey::Connecting), Color::Yellow)
+                }
+                McpConnectionStatus::Disconnected => {
+                    ("○", ui_text.text(TextKey::Disconnected), palette.muted)
+                }
+                McpConnectionStatus::Failed(_) => ("✕", ui_text.text(TextKey::Failed), Color::Red),
             }
         };
 
         lines.push(Line::from(vec![
-            Span::styled("  Status:    ", Style::default().fg(palette.muted)),
+            Span::styled(
+                format!("  {}: ", ui_text.text(TextKey::Status)),
+                Style::default().fg(palette.muted),
+            ),
             Span::styled(
                 format!("{status_icon} {status_label}"),
                 Style::default()
@@ -390,7 +401,10 @@ impl McpServerPanel {
         ]));
 
         lines.push(Line::from(vec![
-            Span::styled("  Transport: ", Style::default().fg(palette.muted)),
+            Span::styled(
+                format!("  {}: ", ui_text.text(TextKey::Transport)),
+                Style::default().fg(palette.muted),
+            ),
             Span::styled(
                 summary.kind.clone(),
                 Style::default()
@@ -410,7 +424,10 @@ impl McpServerPanel {
                     ..
                 } => {
                     lines.push(Line::from(vec![
-                        Span::styled("  Command:   ", Style::default().fg(palette.muted)),
+                        Span::styled(
+                            format!("  {}: ", ui_text.text(TextKey::Command)),
+                            Style::default().fg(palette.muted),
+                        ),
                         Span::styled(command.clone(), Style::default().fg(palette.text)),
                     ]));
                     if !args.is_empty() {
@@ -419,12 +436,18 @@ impl McpServerPanel {
                             textwrap::wrap(&args_str, details_width.saturating_sub(16).max(20));
                         if wrapped.len() <= 1 {
                             lines.push(Line::from(vec![
-                                Span::styled("  Args:      ", Style::default().fg(palette.muted)),
+                                Span::styled(
+                                    format!("  {}: ", ui_text.text(TextKey::Arguments)),
+                                    Style::default().fg(palette.muted),
+                                ),
                                 Span::styled(args_str, Style::default().fg(palette.text)),
                             ]));
                         } else {
                             lines.push(Line::from(vec![
-                                Span::styled("  Args:      ", Style::default().fg(palette.muted)),
+                                Span::styled(
+                                    format!("  {}: ", ui_text.text(TextKey::Arguments)),
+                                    Style::default().fg(palette.muted),
+                                ),
                                 Span::styled(
                                     wrapped[0].to_string(),
                                     Style::default().fg(palette.text),
@@ -443,7 +466,10 @@ impl McpServerPanel {
                     }
                     if let Some(cwd) = cwd {
                         lines.push(Line::from(vec![
-                            Span::styled("  Cwd:       ", Style::default().fg(palette.muted)),
+                            Span::styled(
+                                format!("  {}: ", ui_text.text(TextKey::WorkingDirectory)),
+                                Style::default().fg(palette.muted),
+                            ),
                             Span::styled(cwd.clone(), Style::default().fg(palette.text)),
                         ]));
                     }
@@ -454,7 +480,10 @@ impl McpServerPanel {
                             .collect::<Vec<_>>()
                             .join(", ");
                         lines.push(Line::from(vec![
-                            Span::styled("  Env:       ", Style::default().fg(palette.muted)),
+                            Span::styled(
+                                format!("  {}: ", ui_text.text(TextKey::Environment)),
+                                Style::default().fg(palette.muted),
+                            ),
                             Span::styled(env_str, Style::default().fg(palette.muted)),
                         ]));
                     }
@@ -462,7 +491,10 @@ impl McpServerPanel {
                 McpServerConfig::Http { url, headers, .. }
                 | McpServerConfig::Sse { url, headers, .. } => {
                     lines.push(Line::from(vec![
-                        Span::styled("  URL:       ", Style::default().fg(palette.muted)),
+                        Span::styled(
+                            format!("  {}: ", ui_text.text(TextKey::Url)),
+                            Style::default().fg(palette.muted),
+                        ),
                         Span::styled(url.clone(), Style::default().fg(palette.text)),
                     ]));
                     if !headers.is_empty() {
@@ -472,7 +504,10 @@ impl McpServerPanel {
                             .collect::<Vec<_>>()
                             .join(", ");
                         lines.push(Line::from(vec![
-                            Span::styled("  Headers:   ", Style::default().fg(palette.muted)),
+                            Span::styled(
+                                format!("  {}: ", ui_text.text(TextKey::Headers)),
+                                Style::default().fg(palette.muted),
+                            ),
                             Span::styled(headers_str, Style::default().fg(palette.muted)),
                         ]));
                     }
@@ -486,7 +521,7 @@ impl McpServerPanel {
             if err_wrap.is_empty() {
                 lines.push(Line::from(vec![
                     Span::styled(
-                        "  Error:     ",
+                        format!("  {}: ", ui_text.text(TextKey::Error)),
                         Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(err.clone(), Style::default().fg(Color::Red)),
@@ -494,7 +529,7 @@ impl McpServerPanel {
             } else {
                 lines.push(Line::from(vec![
                     Span::styled(
-                        "  Error:     ",
+                        format!("  {}: ", ui_text.text(TextKey::Error)),
                         Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(err_wrap[0].to_string(), Style::default().fg(Color::Red)),
@@ -510,7 +545,7 @@ impl McpServerPanel {
 
         lines.push(Line::from(""));
         lines.push(Line::from(vec![Span::styled(
-            format!("  Tools ({})", tools.len()),
+            ui_text.text_with_count(TextKey::McpToolCount, tools.len()),
             Style::default()
                 .fg(palette.accent)
                 .add_modifier(Modifier::BOLD),
@@ -521,12 +556,12 @@ impl McpServerPanel {
         if tools.is_empty() {
             if summary.status == McpConnectionStatus::Connected {
                 lines.push(Line::from(Span::styled(
-                    "    (No tools registered by this server)",
+                    format!("    {}", ui_text.text(TextKey::NoToolsRegistered)),
                     Style::default().fg(palette.muted),
                 )));
             } else {
                 lines.push(Line::from(Span::styled(
-                    "    (Press [Enter] to connect and discover tools)",
+                    format!("    {}", ui_text.text(TextKey::ConnectDiscoverTools)),
                     Style::default().fg(palette.muted),
                 )));
             }
@@ -817,6 +852,7 @@ impl Component for McpServerPanel {
 
         // ── Main panel ─────────────────────────────────────────────────
         let palette = ctx.palette;
+        let ui_text = &ctx.ui_text;
         let overlay_w = (area.width * 92 / 100)
             .clamp(76, 120)
             .min(area.width.saturating_sub(2));
@@ -835,12 +871,16 @@ impl Component for McpServerPanel {
 
         // ── Title Header ──
         let title_text = if self.summaries.is_empty() {
-            " MCP Servers ".to_string()
+            format!(" {} ", ui_text.text(TextKey::McpServers))
         } else {
+            let current = ((self.selected_index + 1).min(self.filtered_count())).to_string();
+            let total = self.filtered_count().to_string();
             format!(
-                " MCP Servers · {}/{} ",
-                (self.selected_index + 1).min(self.filtered_count()),
-                self.filtered_count()
+                " {} ",
+                ui_text.text_with_values(
+                    TextKey::McpServersCount,
+                    &[("current", &current), ("total", &total)],
+                )
             )
         };
         frame.render_widget(
@@ -866,21 +906,21 @@ impl Component for McpServerPanel {
             let empty_text = vec![
                 Line::from(""),
                 Line::from(Span::styled(
-                    "  No MCP servers configured",
+                    format!("  {}", ui_text.text(TextKey::NoServers)),
                     Style::default().fg(palette.muted),
                 )),
                 Line::from(""),
                 Line::from(Span::styled(
-                    "  Press [n] to add a new server",
+                    format!("  {}", ui_text.text(TextKey::McpEmptyAdd)),
                     Style::default().fg(palette.text),
                 )),
                 Line::from(Span::styled(
-                    "  Or configure mcpServers in ~/.config/tidev/mcp.json",
+                    format!("  {}", ui_text.text(TextKey::McpConfigHint)),
                     Style::default().fg(palette.muted),
                 )),
                 Line::from(""),
                 Line::from(Span::styled(
-                    "  Press Esc or q to close",
+                    format!("  {}", ui_text.text(TextKey::McpEmptyClose)),
                     Style::default().fg(palette.muted),
                 )),
             ];
@@ -892,7 +932,7 @@ impl Component for McpServerPanel {
             let footer_y = inner.y + inner.height - 1;
             frame.render_widget(
                 Paragraph::new(Line::from(Span::styled(
-                    "  [n] add server  •  [Esc] close",
+                    format!("  {}", ui_text.text(TextKey::McpAddFooter)),
                     Style::default().fg(palette.muted),
                 )))
                 .style(Style::default().bg(palette.panel_alt)),
@@ -928,11 +968,11 @@ impl Component for McpServerPanel {
         let filter_area = Rect::new(left_area.x, left_area.y, left_area.width, 1);
         let (visible_query, cursor) = single_line_input_cursor(filter_area, 10, &self.query);
         let filter_text = if self.query_active {
-            format!("  Search: {visible_query}")
+            format!("  {}: {visible_query}", ui_text.text(TextKey::McpSearch))
         } else if self.query.is_empty() {
-            "  Search... (/)".to_string()
+            format!("  {}... (/)", ui_text.text(TextKey::McpSearch))
         } else {
-            format!("  Search: {}", self.query)
+            format!("  {}: {}", ui_text.text(TextKey::McpSearch), self.query)
         };
         let filter_style = if self.query_active {
             Style::default().fg(palette.accent)
@@ -955,13 +995,13 @@ impl Component for McpServerPanel {
             Paragraph::new(Line::from(vec![
                 Span::styled("   ", Style::default().fg(palette.accent)),
                 Span::styled(
-                    format!("{:<name_col_w$}", "Server"),
+                    format!("{:<name_col_w$}", ui_text.text(TextKey::Server)),
                     Style::default()
                         .fg(palette.accent)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
-                    "  Kind",
+                    format!("  {}", ui_text.text(TextKey::Kind)),
                     Style::default()
                         .fg(palette.accent)
                         .add_modifier(Modifier::BOLD),
@@ -1094,7 +1134,7 @@ impl Component for McpServerPanel {
         let right_header_area = Rect::new(right_area.x, right_area.y, right_area.width, 1);
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
-                "  Server Details",
+                format!("  {}", ui_text.text(TextKey::ServerDetails)),
                 Style::default()
                     .fg(palette.accent)
                     .add_modifier(Modifier::BOLD),
@@ -1148,6 +1188,7 @@ impl Component for McpServerPanel {
                 &tools,
                 &palette,
                 details_area.width as usize,
+                ui_text,
             );
 
             let total_detail_lines = all_lines.len();
@@ -1177,13 +1218,13 @@ impl Component for McpServerPanel {
         // ── Footer Toolbar ──
         let footer_y = inner.y + inner.height - 1;
         let footer_text = if self.query_active {
-            "  Enter: confirm search  •  Esc: cancel"
+            format!("  {}", ui_text.text(TextKey::McpFooterSearch))
         } else if inner.width >= 86 {
-            "  [Enter] Toggle  •  [r] Refresh  •  [n] Add  •  [e] Edit  •  [d] Delete  •  [/] Search  •  [Esc] Close"
+            format!("  {}", ui_text.text(TextKey::McpFooterFull))
         } else if inner.width >= 68 {
-            "  [Enter] Toggle  [r] Refresh  [n] Add  [e] Edit  [d] Delete  [/] Search  [Esc] Close"
+            format!("  {}", ui_text.text(TextKey::McpFooterMedium))
         } else {
-            "  [Enter] Toggle  [r] Sync  [n] Add  [e] Edit  [d] Del  [Esc] Close"
+            format!("  {}", ui_text.text(TextKey::McpFooterCompact))
         };
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
@@ -1201,6 +1242,7 @@ impl Component for McpServerPanel {
 impl McpServerPanel {
     fn draw_editor(&mut self, frame: &mut Frame, area: Rect, ctx: &DrawContext) {
         let palette = ctx.palette;
+        let ui_text = &ctx.ui_text;
         let is_stdio = self.edit_draft.kind == "stdio";
         let height = if is_stdio { 18u16 } else { 16u16 };
         let editor_area = centered_rect(area.width.min(68), area.height.min(height), area);
@@ -1216,9 +1258,12 @@ impl McpServerPanel {
 
         // Title
         let title = if let Some(ref orig) = self.edit_original_name {
-            format!(" Edit MCP Server: {} ", orig)
+            format!(
+                " {} ",
+                ui_text.text_with_value(TextKey::EditMcpServerNamed, "name", orig)
+            )
         } else {
-            " Add MCP Server ".to_string()
+            format!(" {} ", ui_text.text(TextKey::AddMcpServer))
         };
 
         frame.render_widget(
@@ -1243,65 +1288,108 @@ impl McpServerPanel {
         );
 
         // Active fields based on kind
-        let fields: Vec<(&'static str, String, usize, &'static str)> = if is_stdio {
+        let fields: Vec<(String, String, usize, String)> = if is_stdio {
             vec![
-                ("Name", self.edit_draft.name.clone(), 0, ""),
                 (
-                    "Kind",
+                    ui_text.text(TextKey::Name),
+                    self.edit_draft.name.clone(),
+                    0,
+                    String::new(),
+                ),
+                (
+                    ui_text.text(TextKey::Kind),
                     self.edit_draft.kind.clone(),
                     1,
-                    " (Space to cycle: stdio → http → sse)",
+                    format!(" {}", ui_text.text(TextKey::CycleTransport)),
                 ),
-                ("Command", self.edit_draft.command.clone(), 2, ""),
-                ("Args", self.edit_draft.args.clone(), 3, " (optional)"),
                 (
-                    "Cwd",
+                    ui_text.text(TextKey::Command),
+                    self.edit_draft.command.clone(),
+                    2,
+                    String::new(),
+                ),
+                (
+                    ui_text.text(TextKey::Arguments),
+                    self.edit_draft.args.clone(),
+                    3,
+                    format!(" ({})", ui_text.text(TextKey::Optional)),
+                ),
+                (
+                    ui_text.text(TextKey::WorkingDirectory),
                     self.edit_draft.cwd.clone(),
                     4,
-                    " (optional, relative to workspace)",
+                    format!(" {}", ui_text.text(TextKey::RelativeWorkspace)),
                 ),
                 (
-                    "Env",
+                    ui_text.text(TextKey::Environment),
                     self.edit_draft.env.clone(),
                     5,
-                    " (KEY=VAL, optional)",
+                    format!(" {}", ui_text.text(TextKey::EnvFormat)),
                 ),
                 (
-                    "Enabled",
+                    ui_text.text(TextKey::Enabled),
                     if self.edit_draft.disabled {
-                        "No".to_string()
+                        ui_text.text(TextKey::No)
                     } else {
-                        "Yes".to_string()
+                        ui_text.text(TextKey::Yes)
                     },
                     8,
-                    " (Space to toggle: Yes / No)",
+                    format!(
+                        " {}",
+                        ui_text.text_with_values(
+                            TextKey::ToggleEnabled,
+                            &[
+                                ("yes", &ui_text.text(TextKey::Yes)),
+                                ("no", &ui_text.text(TextKey::No)),
+                            ],
+                        )
+                    ),
                 ),
             ]
         } else {
             vec![
-                ("Name", self.edit_draft.name.clone(), 0, ""),
                 (
-                    "Kind",
+                    ui_text.text(TextKey::Name),
+                    self.edit_draft.name.clone(),
+                    0,
+                    String::new(),
+                ),
+                (
+                    ui_text.text(TextKey::Kind),
                     self.edit_draft.kind.clone(),
                     1,
-                    " (Space to cycle: stdio → http → sse)",
+                    format!(" {}", ui_text.text(TextKey::CycleTransport)),
                 ),
-                ("URL", self.edit_draft.url.clone(), 6, ""),
                 (
-                    "Headers",
+                    ui_text.text(TextKey::Url),
+                    self.edit_draft.url.clone(),
+                    6,
+                    String::new(),
+                ),
+                (
+                    ui_text.text(TextKey::Headers),
                     self.edit_draft.headers.clone(),
                     7,
-                    " (Header: value, optional)",
+                    format!(" {}", ui_text.text(TextKey::HeaderFormat)),
                 ),
                 (
-                    "Enabled",
+                    ui_text.text(TextKey::Enabled),
                     if self.edit_draft.disabled {
-                        "No".to_string()
+                        ui_text.text(TextKey::No)
                     } else {
-                        "Yes".to_string()
+                        ui_text.text(TextKey::Yes)
                     },
                     8,
-                    " (Space to toggle: Yes / No)",
+                    format!(
+                        " {}",
+                        ui_text.text_with_values(
+                            TextKey::ToggleEnabled,
+                            &[
+                                ("yes", &ui_text.text(TextKey::Yes)),
+                                ("no", &ui_text.text(TextKey::No)),
+                            ],
+                        )
+                    ),
                 ),
             ]
         };
@@ -1341,7 +1429,10 @@ impl McpServerPanel {
                 Span::styled(display_value, value_style),
             ];
             if !hint.is_empty() {
-                spans.push(Span::styled(*hint, Style::default().fg(palette.muted)));
+                spans.push(Span::styled(
+                    hint.clone(),
+                    Style::default().fg(palette.muted),
+                ));
             }
 
             frame.render_widget(
@@ -1358,7 +1449,11 @@ impl McpServerPanel {
             let err_y = field_start_y + fields.len() as u16;
             frame.render_widget(
                 Paragraph::new(Line::from(Span::styled(
-                    format!("  Error: {err}"),
+                    format!(
+                        "  {}: {}",
+                        ui_text.text(TextKey::Error),
+                        localize_error(ui_text, err)
+                    ),
                     Style::default().fg(Color::Red),
                 )))
                 .style(Style::default().bg(palette.panel_alt)),
@@ -1370,12 +1465,21 @@ impl McpServerPanel {
         let help_y = inner.y + inner.height - 1;
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
-                "  [Tab/↑↓] next field  •  [Enter] save  •  [Esc] cancel",
+                format!("  {}", ui_text.text(TextKey::McpEditorHelp)),
                 Style::default().fg(palette.muted),
             )))
             .style(Style::default().bg(palette.panel_alt)),
             Rect::new(inner.x, help_y, inner.width, 1),
         );
+    }
+}
+
+fn localize_error(ui_text: &UiText, error: &str) -> String {
+    match error {
+        "Server name cannot be empty" => ui_text.text(TextKey::ServerNameRequired),
+        "Command is required for stdio servers" => ui_text.text(TextKey::CommandRequired),
+        "URL is required for HTTP/SSE servers" => ui_text.text(TextKey::UrlRequired),
+        _ => error.to_owned(),
     }
 }
 

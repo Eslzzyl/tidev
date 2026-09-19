@@ -156,6 +156,7 @@ pub(crate) enum SettingKey {
     CollapseDiffs,
     SendWhileBusy,
     RightSidebarVisible,
+    Language,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -293,6 +294,9 @@ pub(crate) enum Action {
     Git(GitAction),
     /// Copy the most recent completed assistant message to the clipboard.
     CopyLastAssistant,
+    /// Show the localized notice used when an image is pasted for an
+    /// image-incompatible model.
+    ImageAttachmentUnsupported,
     /// Toggle the right-hand sidebar. `None` means flip current value.
     ToggleRightSidebar(Option<bool>),
 
@@ -320,6 +324,10 @@ pub(crate) enum Action {
     // ── Internal ──
     /// Show a one-line status notice at the bottom of the screen.
     Notice(String),
+    /// Show a localized command usage notice.
+    CommandUsage(&'static str),
+    /// Show a localized clipboard error with the system error as payload.
+    ClipboardError(String),
     Noop,
     /// The event was consumed by an overlay with no side effect (e.g. a
     /// scroll tick inside a panel that is already at its edge). Unlike

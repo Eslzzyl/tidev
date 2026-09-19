@@ -98,7 +98,7 @@ impl App {
                     }
                     None => {
                         log::info!("Opening WorkspaceBoundaryDialog for: {path_str}");
-                        self.set_notice("Workspace boundary violation — please make a decision");
+                        self.set_notice(self.ui_text().text(TextKey::WorkspaceBoundaryNotice));
                         self.overlays.push(Box::new(WorkspaceBoundaryDialog::new(
                             path.clone(),
                             self.runtime.workspace_root().clone(),
@@ -141,7 +141,7 @@ impl App {
                     }
                     None => {
                         log::info!("Opening SensitiveFileDialog for: {path_str}");
-                        self.set_notice("Sensitive file access — please make a decision");
+                        self.set_notice(self.ui_text().text(TextKey::SensitiveAccessNotice));
                         self.overlays.push(Box::new(SensitiveFileDialog::new(
                             path.clone(),
                             self.runtime.workspace_root().clone(),
@@ -157,7 +157,7 @@ impl App {
             if is_question {
                 if let Ok(qa) = serde_json::from_str::<QuestionArgs>(&args) {
                     log::info!("Opening QuestionDialog ({} questions)", qa.questions.len());
-                    self.set_notice("LLM has questions — please provide answers");
+                    self.set_notice(self.ui_text().text(TextKey::LlmQuestionsNotice));
                     self.overlays
                         .push(Box::new(QuestionDialog::new(qa.questions)));
                     return;

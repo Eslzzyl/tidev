@@ -11,6 +11,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::action::{Action, OverlayAction, OverlayKind, SettingKey, SettingValue, SettingsAction};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
+use crate::i18n::{TextKey, UiText};
 use crate::theme::ThemePalette;
 use crate::utils::centered_rect;
 
@@ -30,8 +31,6 @@ pub(crate) enum SettingType {
 
 #[derive(Clone, Debug)]
 pub(crate) struct SettingItem {
-    pub name: String,
-    pub description: String,
     pub setting_type: SettingType,
     pub key: SettingKey,
 }
@@ -47,7 +46,6 @@ enum CategoryId {
 
 struct SettingCategory {
     id: CategoryId,
-    name: &'static str,
     items: Vec<SettingItem>,
 }
 
@@ -98,11 +96,8 @@ impl SettingsPanel {
         let categories = vec![
             SettingCategory {
                 id: CategoryId::Interface,
-                name: "Interface",
                 items: vec![
                     SettingItem {
-                        name: String::from("Scroll speed"),
-                        description: String::from("Scroll speed multiplier for chat navigation"),
                         setting_type: SettingType::Number {
                             value: config.ui.scroll_speed,
                             min: 1.0,
@@ -111,26 +106,14 @@ impl SettingsPanel {
                         key: SettingKey::ScrollSpeed,
                     },
                     SettingItem {
-                        name: String::from("Collapse thinking"),
-                        description: String::from(
-                            "Collapse thinking content by default for newly rendered messages",
-                        ),
                         setting_type: SettingType::Toggle(config.ui.collapse_thinking),
                         key: SettingKey::CollapseThinking,
                     },
                     SettingItem {
-                        name: String::from("Collapse diffs"),
-                        description: String::from(
-                            "Collapse edit, write, and patch diffs by default",
-                        ),
                         setting_type: SettingType::Toggle(config.ui.collapse_diffs),
                         key: SettingKey::CollapseDiffs,
                     },
                     SettingItem {
-                        name: String::from("Send while busy"),
-                        description: String::from(
-                            "Choose whether messages wait in a queue or steer the running turn",
-                        ),
                         setting_type: SettingType::Cycle {
                             options: vec![String::from("queue"), String::from("steer")],
                             selected: match config.ui.send_while_busy {
@@ -141,38 +124,41 @@ impl SettingsPanel {
                         key: SettingKey::SendWhileBusy,
                     },
                     SettingItem {
-                        name: String::from("Right sidebar"),
-                        description: String::from("Show the right-hand info sidebar"),
                         setting_type: SettingType::Toggle(config.ui.right_sidebar_visible),
                         key: SettingKey::RightSidebarVisible,
+                    },
+                    SettingItem {
+                        setting_type: SettingType::Cycle {
+                            options: vec![
+                                String::from("system"),
+                                String::from("en-US"),
+                                String::from("zh-CN"),
+                            ],
+                            selected: match config.ui.locale.as_str() {
+                                "en-US" => 1,
+                                "zh-CN" => 2,
+                                _ => 0,
+                            },
+                        },
+                        key: SettingKey::Language,
                     },
                 ],
             },
             SettingCategory {
                 id: CategoryId::Notifications,
-                name: "Notifications",
                 items: vec![SettingItem {
-                    name: String::from("Desktop notifications"),
-                    description: String::from("Show terminal or desktop notifications"),
                     setting_type: SettingType::Toggle(config.notifications.enabled),
                     key: SettingKey::NotificationEnabled,
                 }],
             },
             SettingCategory {
                 id: CategoryId::Logging,
-                name: "Logging",
                 items: vec![
                     SettingItem {
-                        name: String::from("Logging"),
-                        description: String::from(
-                            "Enable writing debug logs to the tidev data directory",
-                        ),
                         setting_type: SettingType::Toggle(config.logging.enabled),
                         key: SettingKey::LoggingEnabled,
                     },
                     SettingItem {
-                        name: String::from("Log level"),
-                        description: String::from("Set the minimum level written by the logger"),
                         setting_type: SettingType::Cycle {
                             options: log_levels,
                             selected: log_level_index,
@@ -180,16 +166,10 @@ impl SettingsPanel {
                         key: SettingKey::LogLevel,
                     },
                     SettingItem {
-                        name: String::from("Save request body"),
-                        description: String::from(
-                            "Save serialized LLM request bodies for debugging",
-                        ),
                         setting_type: SettingType::Toggle(config.logging.save_request_body),
                         key: SettingKey::SaveRequestBody,
                     },
                     SettingItem {
-                        name: String::from("Save response body"),
-                        description: String::from("Save raw LLM response payloads for debugging"),
                         setting_type: SettingType::Toggle(config.logging.save_response_body),
                         key: SettingKey::SaveResponseBody,
                     },
@@ -197,23 +177,14 @@ impl SettingsPanel {
             },
             SettingCategory {
                 id: CategoryId::Security,
-                name: "Security",
                 items: vec![
                     SettingItem {
-                        name: String::from("Allow sensitive file access"),
-                        description: String::from(
-                            "Allow reading sensitive files without confirmation",
-                        ),
                         setting_type: SettingType::Toggle(
                             config.access_control.allow_sensitive_file_access,
                         ),
                         key: SettingKey::AllowSensitiveFileAccess,
                     },
                     SettingItem {
-                        name: String::from("Allow outside workspace access"),
-                        description: String::from(
-                            "Allow accessing files outside the workspace without confirmation",
-                        ),
                         setting_type: SettingType::Toggle(
                             config.access_control.allow_outside_workspace_access,
                         ),
@@ -223,10 +194,7 @@ impl SettingsPanel {
             },
             SettingCategory {
                 id: CategoryId::Agents,
-                name: "Agents",
                 items: vec![SettingItem {
-                    name: String::from("Subagent"),
-                    description: String::from("Allow the task tool to spawn subagents"),
                     setting_type: SettingType::Toggle(config.subagent.enabled),
                     key: SettingKey::SubagentEnabled,
                 }],
@@ -630,7 +598,7 @@ impl Component for SettingsPanel {
 
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
-                " Settings ",
+                format!(" {} ", ctx.ui_text.text(TextKey::Settings)),
                 Style::default()
                     .fg(palette.accent)
                     .add_modifier(Modifier::BOLD),
@@ -648,12 +616,12 @@ impl Component for SettingsPanel {
         );
 
         for (area, title) in [
-            (layout.left, "Categories"),
+            (layout.left, ctx.ui_text.text(TextKey::Categories)),
             (
                 layout.right,
                 self.current_category()
-                    .map(|c| c.name)
-                    .unwrap_or("Settings"),
+                    .map(|c| category_text(&ctx.ui_text, c.id))
+                    .unwrap_or_else(|| ctx.ui_text.text(TextKey::Settings)),
             ),
         ] {
             frame.render_widget(
@@ -695,7 +663,11 @@ impl Component for SettingsPanel {
                     Style::default().fg(palette.text)
                 };
                 ListItem::new(Line::from(Span::styled(
-                    format!("  {}  {}", if selected { "›" } else { " " }, category.name),
+                    format!(
+                        "  {}  {}",
+                        if selected { "›" } else { " " },
+                        category_text(&ctx.ui_text, category.id)
+                    ),
                     style,
                 )))
             })
@@ -731,6 +703,7 @@ impl Component for SettingsPanel {
                             layout.settings_list.width as usize,
                             palette,
                             Some(item.key) == selected_key && focus == FocusPane::Settings,
+                            &ctx.ui_text,
                         )
                     })
                     .collect()
@@ -745,13 +718,13 @@ impl Component for SettingsPanel {
             frame.render_widget(
                 Paragraph::new(vec![
                     Line::from(Span::styled(
-                        format!("  {}", item.name),
+                        format!("  {}", setting_name(&ctx.ui_text, item.key)),
                         Style::default()
                             .fg(palette.muted)
                             .add_modifier(Modifier::BOLD),
                     )),
                     Line::from(Span::styled(
-                        format!("  {}", item.description),
+                        format!("  {}", setting_description(&ctx.ui_text, item.key)),
                         Style::default().fg(palette.muted),
                     )),
                 ])
@@ -761,7 +734,16 @@ impl Component for SettingsPanel {
             );
         }
 
-        let footer = "↑/↓ navigate  ←/→ change  Tab switch pane  Enter edit  Esc close";
+        let footer = ctx.ui_text.text_with_values(
+            TextKey::SettingsFooter,
+            &[
+                ("navigate", &ctx.ui_text.text(TextKey::Navigate)),
+                ("change", &ctx.ui_text.text(TextKey::Change)),
+                ("switch", &ctx.ui_text.text(TextKey::SwitchPane)),
+                ("edit", &ctx.ui_text.text(TextKey::EditValue)),
+                ("close", &ctx.ui_text.text(TextKey::CloseOverlay)),
+            ],
+        );
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 format!("  {footer}"),
@@ -824,6 +806,7 @@ fn format_setting_line(
     width: usize,
     palette: ThemePalette,
     selected: bool,
+    ui_text: &UiText,
 ) -> Line<'static> {
     let base_style = if selected {
         Style::default()
@@ -833,11 +816,11 @@ fn format_setting_line(
     } else {
         Style::default().bg(palette.panel_alt).fg(palette.text)
     };
-    let name = format!("  {}", item.name);
+    let name = format!("  {}", setting_name(ui_text, item.key));
     let (value, value_style) = match &item.setting_type {
         // Keep both states five columns wide so adjacent rows stay aligned.
         SettingType::Toggle(true) => (
-            String::from("● ON "),
+            format!("● {} ", ui_text.text(TextKey::On)),
             if selected {
                 base_style
             } else {
@@ -845,7 +828,7 @@ fn format_setting_line(
             },
         ),
         SettingType::Toggle(false) => (
-            String::from("○ OFF"),
+            format!("○ {}", ui_text.text(TextKey::Off)),
             if selected {
                 base_style
             } else {
@@ -868,8 +851,8 @@ fn format_setting_line(
                 "▾ {}",
                 options
                     .get(*selected_index)
-                    .map(String::as_str)
-                    .unwrap_or("?")
+                    .map(|option| setting_option_text(ui_text, option))
+                    .unwrap_or_else(|| "?".to_string())
             ),
             if selected {
                 base_style
@@ -887,4 +870,72 @@ fn format_setting_line(
         Span::styled(" ".repeat(gap), base_style),
         Span::styled(value, value_style),
     ])
+}
+
+fn category_text(ui_text: &UiText, id: CategoryId) -> String {
+    let key = match id {
+        CategoryId::Interface => TextKey::Interface,
+        CategoryId::Notifications => TextKey::Notifications,
+        CategoryId::Logging => TextKey::Logging,
+        CategoryId::Security => TextKey::Security,
+        CategoryId::Agents => TextKey::Agents,
+    };
+    ui_text.text(key)
+}
+
+fn setting_name(ui_text: &UiText, key: SettingKey) -> String {
+    let key = match key {
+        SettingKey::ScrollSpeed => TextKey::ScrollSpeed,
+        SettingKey::CollapseThinking => TextKey::CollapseThinking,
+        SettingKey::CollapseDiffs => TextKey::CollapseDiffs,
+        SettingKey::SendWhileBusy => TextKey::SendWhileBusy,
+        SettingKey::RightSidebarVisible => TextKey::RightSidebar,
+        SettingKey::Language => TextKey::Language,
+        SettingKey::NotificationEnabled => TextKey::DesktopNotifications,
+        SettingKey::LoggingEnabled => TextKey::LoggingEnabled,
+        SettingKey::LogLevel => TextKey::LogLevel,
+        SettingKey::SaveRequestBody => TextKey::SaveRequestBody,
+        SettingKey::SaveResponseBody => TextKey::SaveResponseBody,
+        SettingKey::AllowSensitiveFileAccess => TextKey::AllowSensitiveFileAccess,
+        SettingKey::AllowOutsideWorkspaceAccess => TextKey::AllowOutsideWorkspaceAccess,
+        SettingKey::SubagentEnabled => TextKey::Subagent,
+    };
+    ui_text.text(key)
+}
+
+fn setting_description(ui_text: &UiText, key: SettingKey) -> String {
+    let key = match key {
+        SettingKey::ScrollSpeed => TextKey::SettingScrollSpeedDescription,
+        SettingKey::CollapseThinking => TextKey::SettingCollapseThinkingDescription,
+        SettingKey::CollapseDiffs => TextKey::SettingCollapseDiffsDescription,
+        SettingKey::SendWhileBusy => TextKey::SettingSendWhileBusyDescription,
+        SettingKey::RightSidebarVisible => TextKey::SettingRightSidebarDescription,
+        SettingKey::Language => TextKey::SettingLanguageDescription,
+        SettingKey::NotificationEnabled => TextKey::SettingNotificationsDescription,
+        SettingKey::LoggingEnabled => TextKey::SettingLoggingDescription,
+        SettingKey::LogLevel => TextKey::SettingLogLevelDescription,
+        SettingKey::SaveRequestBody => TextKey::SettingSaveRequestDescription,
+        SettingKey::SaveResponseBody => TextKey::SettingSaveResponseDescription,
+        SettingKey::AllowSensitiveFileAccess => TextKey::SettingSensitiveAccessDescription,
+        SettingKey::AllowOutsideWorkspaceAccess => TextKey::SettingOutsideWorkspaceDescription,
+        SettingKey::SubagentEnabled => TextKey::SettingSubagentDescription,
+    };
+    ui_text.text(key)
+}
+
+fn setting_option_text(ui_text: &UiText, option: &str) -> String {
+    let key = match option {
+        "system" => Some(TextKey::LanguageSystem),
+        "en-US" => Some(TextKey::LanguageEnglish),
+        "zh-CN" => Some(TextKey::LanguageSimplifiedChinese),
+        "queue" => Some(TextKey::Queue),
+        "steer" => Some(TextKey::Steer),
+        "DEBUG" => Some(TextKey::LogDebug),
+        "INFO" => Some(TextKey::LogInfo),
+        "WARN" => Some(TextKey::LogWarn),
+        "ERROR" => Some(TextKey::LogError),
+        _ => None,
+    };
+    key.map(|key| ui_text.text(key))
+        .unwrap_or_else(|| option.to_string())
 }

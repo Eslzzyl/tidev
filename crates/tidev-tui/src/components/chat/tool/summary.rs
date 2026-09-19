@@ -9,10 +9,11 @@ use tidev_utils::tool_name::canonical_tool_name;
 use unicode_width::UnicodeWidthStr;
 
 use crate::components::chat::render::RenderContext;
+use crate::i18n::{TextKey, UiText};
 use crate::markdown::{WrapOptions, word_wrap_line};
 
 use super::read::{
-    format_file_size, format_read_result_label, parse_line_range_from_read_output,
+    format_file_size, format_read_result_label_with_locale, parse_line_range_from_read_output,
     parse_read_content_metadata,
 };
 use super::utils::{tool_output_is_error, truncate_utf8};
@@ -41,13 +42,14 @@ pub(super) fn render_tool_call_summary_line_inner(
 
     let rel_path = |p: &str| display_workspace_relative(ctx.workspace_root, Path::new(p));
 
+    let ui_text = &ctx.ui_text;
     let (action_label, target_spans) = match canonical_name {
         "grep" => {
             let pattern = string_field("pattern").unwrap_or_default();
             let path = string_field("path").unwrap_or_else(|| ".".to_string());
             let rel = rel_path(&path);
             (
-                "Search",
+                ui_text.text(TextKey::Search),
                 vec![
                     Span::styled(
                         format!("\"{}\"", pattern),
@@ -55,7 +57,10 @@ pub(super) fn render_tool_call_summary_line_inner(
                             .fg(palette.text)
                             .add_modifier(Modifier::BOLD),
                     ),
-                    Span::styled(" in ", Style::default().fg(palette.muted)),
+                    Span::styled(
+                        format!(" {} ", ui_text.text(TextKey::Within)),
+                        Style::default().fg(palette.muted),
+                    ),
                     Span::styled(
                         rel,
                         Style::default()
@@ -70,7 +75,7 @@ pub(super) fn render_tool_call_summary_line_inner(
             let path = string_field("path").unwrap_or_else(|| ".".to_string());
             let rel = rel_path(&path);
             (
-                "Find",
+                ui_text.text(TextKey::Find),
                 vec![
                     Span::styled(
                         pattern.clone(),
@@ -78,7 +83,10 @@ pub(super) fn render_tool_call_summary_line_inner(
                             .fg(palette.text)
                             .add_modifier(Modifier::BOLD),
                     ),
-                    Span::styled(" in ", Style::default().fg(palette.muted)),
+                    Span::styled(
+                        format!(" {} ", ui_text.text(TextKey::Within)),
+                        Style::default().fg(palette.muted),
+                    ),
                     Span::styled(
                         rel,
                         Style::default()
@@ -89,10 +97,10 @@ pub(super) fn render_tool_call_summary_line_inner(
             )
         }
         "read" => {
-            let path = string_field("file_path").unwrap_or_else(|| "file".to_string());
+            let path = string_field("file_path").unwrap_or_else(|| ui_text.text(TextKey::File));
             let rel = rel_path(&path);
             (
-                "Read",
+                ui_text.text(TextKey::Read),
                 vec![Span::styled(
                     rel,
                     Style::default()
@@ -106,7 +114,11 @@ pub(super) fn render_tool_call_summary_line_inner(
             let path = normalize_skill_path(string_field("path"));
             match (name, path) {
                 (Some(name), Some(path)) => (
-                    "Read skill",
+                    format!(
+                        "{} {}",
+                        ui_text.text(TextKey::Read),
+                        ui_text.text(TextKey::Skill)
+                    ),
                     vec![Span::styled(
                         format!("{name}/{path}"),
                         Style::default()
@@ -115,7 +127,11 @@ pub(super) fn render_tool_call_summary_line_inner(
                     )],
                 ),
                 (Some(name), None) => (
-                    "Loaded skill",
+                    format!(
+                        "{} {}",
+                        ui_text.text(TextKey::Loading),
+                        ui_text.text(TextKey::Skill)
+                    ),
                     vec![Span::styled(
                         name,
                         Style::default()
@@ -123,7 +139,7 @@ pub(super) fn render_tool_call_summary_line_inner(
                             .add_modifier(Modifier::BOLD),
                     )],
                 ),
-                (None, _) => ("Listed skills", Vec::new()),
+                (None, _) => (ui_text.text(TextKey::Skills), Vec::new()),
             }
         }
         _ => {
@@ -137,7 +153,12 @@ pub(super) fn render_tool_call_summary_line_inner(
 
     let result_suffix = if let Some(result_msg) = tool_result {
         let output = &result_msg.content;
-        compute_tool_result_suffix(canonical_name, output, &result_msg.attachments)
+        compute_tool_result_suffix_with_locale(
+            canonical_name,
+            output,
+            &result_msg.attachments,
+            ui_text,
+        )
     } else {
         " ...".to_string()
     };
@@ -155,7 +176,7 @@ pub(super) fn render_tool_call_summary_line_inner(
     let line = Line::from(all_spans);
 
     // Wrap the line if it exceeds content_width
-    let indent_width = UnicodeWidthStr::width(action_label) + 1;
+    let indent_width = UnicodeWidthStr::width(action_label.as_str()) + 1;
     let indent = Line::from(" ".repeat(indent_width));
     let wrapped = word_wrap_line(
         &line,
@@ -180,12 +201,27 @@ pub(super) fn render_tool_call_summary_line_inner(
 // Tool result suffix computation (for summary lines)
 // ---------------------------------------------------------------------------
 
+#[cfg(test)]
 pub(super) fn compute_tool_result_suffix(
     canonical_name: &str,
     output: &str,
     attachments: &[MessageAttachment],
 ) -> String {
-    match canonical_name {
+    compute_tool_result_suffix_with_locale(
+        canonical_name,
+        output,
+        attachments,
+        &UiText::from_preference("en-US"),
+    )
+}
+
+fn compute_tool_result_suffix_with_locale(
+    canonical_name: &str,
+    output: &str,
+    attachments: &[MessageAttachment],
+    ui_text: &UiText,
+) -> String {
+    let suffix = match canonical_name {
         "grep" | "glob" => {
             if tool_output_is_error(output) {
                 let count = if output.is_empty() {
@@ -193,7 +229,7 @@ pub(super) fn compute_tool_result_suffix(
                 } else {
                     output.lines().count()
                 };
-                format!(" → failed ({} lines)", count)
+                ui_text.text_with_value(TextKey::ToolResultFailed, "count", &count.to_string())
             } else {
                 let count = output
                     .lines()
@@ -209,25 +245,27 @@ pub(super) fn compute_tool_result_suffix(
                     })
                     .unwrap_or_else(|| output.lines().count());
                 match count {
-                    0 => " → no match".to_string(),
-                    1 => " → 1 match".to_string(),
-                    n => format!(" → {} matches", n),
+                    0 => ui_text.text(TextKey::ToolResultNoMatch),
+                    1 => ui_text.text(TextKey::ToolResultOneMatch),
+                    n => {
+                        ui_text.text_with_value(TextKey::ToolResultMatches, "count", &n.to_string())
+                    }
                 }
             }
         }
         "read" => {
             if output.contains("file not found") {
                 if output.contains("Did you mean") {
-                    " → not found (with suggestions)".to_string()
+                    ui_text.text(TextKey::ToolResultNotFoundSuggestions)
                 } else {
-                    " → not found".to_string()
+                    ui_text.text(TextKey::ToolResultNotFound)
                 }
             } else if output.contains("escapes the workspace root")
                 || output.contains(" was denied")
             {
-                " → blocked by policy".to_string()
+                ui_text.text(TextKey::ToolResultBlocked)
             } else if tool_output_is_error(output) {
-                " → error".to_string()
+                ui_text.text(TextKey::ToolResultError)
             } else if has_image_attachment(attachments) {
                 // Enriched image suffix: " → TYPE, SIZE"
                 let image = attachments.iter().find_map(|a| {
@@ -242,9 +280,12 @@ pub(super) fn compute_tool_result_suffix(
                 });
                 if let Some((mime, size)) = image {
                     let type_label = mime.strip_prefix("image/").unwrap_or(mime);
-                    format!(" → {}, {}", type_label, format_file_size(size))
+                    ui_text.text_with_values(
+                        TextKey::ToolResultImageType,
+                        &[("type", type_label), ("size", &format_file_size(size))],
+                    )
                 } else {
-                    " → image".to_string()
+                    ui_text.text(TextKey::ToolResultImage)
                 }
             } else if has_directory_attachment(attachments) {
                 // Count files and subdirectories from list_dir output
@@ -262,13 +303,16 @@ pub(super) fn compute_tool_result_suffix(
                     }
                 }
                 if files == 0 && dirs == 0 {
-                    " → empty".to_string()
+                    ui_text.text(TextKey::ToolResultEmpty)
                 } else if dirs == 0 {
-                    format!(" → {} files", files)
+                    ui_text.text_with_value(TextKey::ToolResultFiles, "count", &files.to_string())
                 } else if files == 0 {
-                    format!(" → {} dirs", dirs)
+                    ui_text.text_with_value(TextKey::ToolResultDirs, "count", &dirs.to_string())
                 } else {
-                    format!(" → {} files, {} dirs", files, dirs)
+                    ui_text.text_with_values(
+                        TextKey::ToolResultFilesDirs,
+                        &[("files", &files.to_string()), ("dirs", &dirs.to_string())],
+                    )
                 }
             } else {
                 let metadata = parse_read_content_metadata(output);
@@ -280,17 +324,25 @@ pub(super) fn compute_tool_result_suffix(
                             || truncated_by.as_deref() == Some("lines")
                             || (start == 1 && end == total)
                         {
-                            format_read_result_label(
+                            format_read_result_label_with_locale(
                                 start,
                                 end,
                                 total,
                                 requested_range,
                                 truncated_by.as_deref(),
                                 is_size_truncated,
+                                ui_text,
                             )
                         } else {
                             // Partial read without truncation
-                            format!(" → Line {}-{} of {}", start, end, total)
+                            ui_text.text_with_values(
+                                TextKey::ToolResultLineRange,
+                                &[
+                                    ("start", &start.to_string()),
+                                    ("end", &end.to_string()),
+                                    ("total", &total.to_string()),
+                                ],
+                            )
                         }
                     }
                     None => {
@@ -301,19 +353,37 @@ pub(super) fn compute_tool_result_suffix(
                         match line_range {
                             Some((start, end)) => {
                                 if truncated && output.contains("Output capped at 50 KB") {
-                                    format!(" → Line {}-{} (truncated)", start, end)
+                                    ui_text.text_with_values(
+                                        TextKey::ToolResultLineRangeTruncated,
+                                        &[
+                                            ("start", &start.to_string()),
+                                            ("end", &end.to_string()),
+                                            ("suffix", &ui_text.text(TextKey::ToolResultTruncated)),
+                                        ],
+                                    )
                                 } else {
-                                    format!(" → Line {}-{}", start, end)
+                                    ui_text.text_with_values(
+                                        TextKey::ToolResultLineRangeShort,
+                                        &[("start", &start.to_string()), ("end", &end.to_string())],
+                                    )
                                 }
                             }
                             None => {
                                 let total_lines = output.lines().count();
                                 if total_lines == 0 {
-                                    " → empty".to_string()
+                                    ui_text.text(TextKey::ToolResultEmpty)
                                 } else if truncated {
-                                    format!(" → {} lines (truncated)", total_lines)
+                                    ui_text.text_with_value(
+                                        TextKey::ToolResultLinesTruncated,
+                                        "count",
+                                        &total_lines.to_string(),
+                                    )
                                 } else {
-                                    format!(" → {} lines", total_lines)
+                                    ui_text.text_with_value(
+                                        TextKey::ToolResultLines,
+                                        "count",
+                                        &total_lines.to_string(),
+                                    )
                                 }
                             }
                         }
@@ -321,8 +391,13 @@ pub(super) fn compute_tool_result_suffix(
                 }
             }
         }
-        "skill" => skill_result_suffix(output),
+        "skill" => skill_result_suffix(output, ui_text),
         _ => String::new(),
+    };
+    if suffix.starts_with('→') {
+        format!(" {suffix}")
+    } else {
+        suffix
     }
 }
 
@@ -330,24 +405,24 @@ fn normalize_skill_path(path: Option<String>) -> Option<String> {
     path.filter(|path| !path.is_empty())
 }
 
-fn skill_result_suffix(output: &str) -> String {
+fn skill_result_suffix(output: &str, ui_text: &UiText) -> String {
     if tool_output_is_error(output) {
         if output.contains("unknown skill '") {
-            " → skill not found".to_string()
+            ui_text.text(TextKey::ToolResultSkillNotFound)
         } else if output.contains("file not found") {
-            " → file not found".to_string()
+            ui_text.text(TextKey::ToolResultFileNotFound)
         } else if output.contains("escapes the skill directory")
             || output.contains("path must be relative to the skill directory")
         {
-            " → blocked by policy".to_string()
+            ui_text.text(TextKey::ToolResultBlocked)
         } else if output.contains("a path requires a skill name")
             || output.contains("path must not be empty")
         {
-            " → invalid request".to_string()
+            ui_text.text(TextKey::ToolResultInvalidRequest)
         } else if output.contains("Cannot read binary file") {
-            " → binary file".to_string()
+            ui_text.text(TextKey::ToolResultBinaryFile)
         } else {
-            " → error".to_string()
+            ui_text.text(TextKey::ToolResultError)
         }
     } else if output.starts_with("Available skills") {
         // List mode: report the catalog total when the page header
@@ -358,8 +433,10 @@ fn skill_result_suffix(output: &str) -> String {
             .and_then(|s| s.split([')', ':']).next())
             .and_then(|s| s.trim().parse::<usize>().ok());
         match total {
-            Some(n) => format!(" → {n} available"),
-            None => " → listed".to_string(),
+            Some(n) => {
+                ui_text.text_with_value(TextKey::ToolResultAvailable, "count", &n.to_string())
+            }
+            None => ui_text.text(TextKey::ToolResultListed),
         }
     } else {
         let content_lines: Vec<_> = output
@@ -367,7 +444,11 @@ fn skill_result_suffix(output: &str) -> String {
             .skip_while(|l| l.starts_with('#') || l.starts_with("**"))
             .filter(|l| !l.is_empty())
             .collect();
-        format!(" → {} lines", content_lines.len())
+        ui_text.text_with_value(
+            TextKey::ToolResultLines,
+            "count",
+            &content_lines.len().to_string(),
+        )
     }
 }
 

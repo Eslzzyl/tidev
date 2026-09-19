@@ -15,6 +15,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use uuid::Uuid;
 
 use crate::components::chat::render_cache::SelectableRegionRange;
+use crate::i18n::{TextKey, UiText};
 
 /// Information about an image badge found in a rendered user message card.
 /// Used for mouse hit-testing to open the ImageViewer overlay.
@@ -63,11 +64,15 @@ enum MessageBadgeKind {
 
 /// Return display labels for image attachments that do not already have a
 /// corresponding image badge in the message content.
-pub(super) fn image_badge_labels(content: &str, attachments: &[MessageAttachment]) -> Vec<String> {
+pub(super) fn image_badge_labels(
+    content: &str,
+    attachments: &[MessageAttachment],
+    ui_text: &UiText,
+) -> Vec<String> {
     let existing_count = count_image_badges(content);
     attachments
         .iter()
-        .filter_map(image_badge_label)
+        .filter_map(|attachment| image_badge_label(attachment, ui_text))
         .skip(existing_count)
         .collect()
 }
@@ -77,8 +82,9 @@ pub(super) fn image_badge_labels(content: &str, attachments: &[MessageAttachment
 pub(crate) fn display_text_with_image_badges(
     content: &str,
     attachments: &[MessageAttachment],
+    ui_text: &UiText,
 ) -> String {
-    let labels = image_badge_labels(content, attachments);
+    let labels = image_badge_labels(content, attachments, ui_text);
     if labels.is_empty() {
         return content.to_string();
     }
@@ -101,7 +107,7 @@ fn count_image_badges(text: &str) -> usize {
     count
 }
 
-fn image_badge_label(attachment: &MessageAttachment) -> Option<String> {
+fn image_badge_label(attachment: &MessageAttachment, ui_text: &UiText) -> Option<String> {
     let MessageAttachment::Image { filename, .. } = attachment else {
         return None;
     };
@@ -116,9 +122,9 @@ fn image_badge_label(attachment: &MessageAttachment) -> Option<String> {
         .collect();
     let safe_filename = safe_filename.trim();
     if safe_filename.is_empty() {
-        Some("[Image]".to_string())
+        Some(ui_text.text(TextKey::ImageBadge))
     } else {
-        Some(format!("[Image: {safe_filename}]"))
+        Some(ui_text.text_with_value(TextKey::ImageBadgeNamed, "name", safe_filename))
     }
 }
 
@@ -194,15 +200,19 @@ pub(super) fn track_selectable_region(
     }
 }
 
-pub(super) fn build_header_lines(is_subsession: bool, palette: ThemePalette) -> Vec<HyperlinkLine> {
+pub(super) fn build_header_lines(
+    is_subsession: bool,
+    palette: ThemePalette,
+    ui_text: &UiText,
+) -> Vec<HyperlinkLine> {
     if is_subsession {
         vec![
             HyperlinkLine::new(Line::from(Span::styled(
-                "SUBSESSION active — viewing a child session.",
+                ui_text.text(TextKey::SubsessionActive),
                 Style::default().fg(palette.accent_soft),
             ))),
             HyperlinkLine::new(Line::from(Span::styled(
-                "Press Ctrl+X then Up arrow to return to the parent session.",
+                ui_text.text(TextKey::SubsessionReturnHint),
                 Style::default().fg(palette.muted),
             ))),
             HyperlinkLine::new(Line::from("")),

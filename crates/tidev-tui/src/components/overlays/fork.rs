@@ -11,6 +11,7 @@ use uuid::Uuid;
 use crate::action::{Action, OverlayAction, OverlayKind, SessionAction};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
+use crate::i18n::TextKey;
 use crate::utils::centered_rect;
 
 pub(crate) struct ForkConfirmDialog {
@@ -27,18 +28,6 @@ impl ForkConfirmDialog {
             message_count,
             confirmed: false,
         }
-    }
-
-    fn title(&self) -> String {
-        "Fork session".to_string()
-    }
-
-    fn description(&self) -> String {
-        format!(
-            "Create a new session from this message? This will copy {} message{} to a new session.",
-            self.message_count,
-            if self.message_count == 1 { "" } else { "s" }
-        )
     }
 }
 
@@ -115,7 +104,7 @@ impl Component for ForkConfirmDialog {
         // Title
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
-                self.title(),
+                ctx.ui_text.text(TextKey::Fork),
                 Style::default()
                     .fg(palette.accent)
                     .add_modifier(Modifier::BOLD),
@@ -126,16 +115,19 @@ impl Component for ForkConfirmDialog {
 
         // Description
         frame.render_widget(
-            Paragraph::new(self.description())
-                .alignment(ratatui::layout::Alignment::Center)
-                .wrap(Wrap { trim: true })
-                .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
+            Paragraph::new(
+                ctx.ui_text
+                    .text_with_count(TextKey::ForkDescription, self.message_count),
+            )
+            .alignment(ratatui::layout::Alignment::Center)
+            .wrap(Wrap { trim: true })
+            .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
             sections[2],
         );
 
         // Help text
         frame.render_widget(
-            Paragraph::new("Enter to confirm · Esc or N to cancel")
+            Paragraph::new(ctx.ui_text.text(TextKey::ForkFooter))
                 .alignment(ratatui::layout::Alignment::Center)
                 .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
             sections[3],

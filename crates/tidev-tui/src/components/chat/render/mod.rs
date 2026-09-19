@@ -40,6 +40,7 @@ use crate::components::chat::layout_index::MessageLayoutIndex;
 use crate::components::chat::render_cache::{
     MessageRenderCacheEntry, MessageRenderCacheKey, SelectableRegionRange,
 };
+use crate::i18n::UiText;
 
 // ---------------------------------------------------------------------------
 // RenderContext
@@ -48,6 +49,7 @@ use crate::components::chat::render_cache::{
 /// Shared context assembled once per frame and threaded through all rendering.
 pub(crate) struct RenderContext<'a> {
     pub palette: ThemePalette,
+    pub ui_text: UiText,
     pub spinner: &'a str,
     pub workspace_root: &'a Path,
     pub expanded_tool_results: &'a HashSet<Uuid>,
@@ -100,6 +102,7 @@ pub(crate) fn render_messages(
     render_cache: &mut lru::LruCache<MessageRenderCacheKey, MessageRenderCacheEntry>,
     chat_context: &ChatContext,
     palette: ThemePalette,
+    ui_text: &UiText,
     scroll_offset: &mut usize,
     follow_tail: &mut bool,
     expanded_tool_results: &mut HashSet<Uuid>,
@@ -129,6 +132,7 @@ pub(crate) fn render_messages(
     let spinner = loading_spinner(spinner_start);
     let ctx = RenderContext {
         palette,
+        ui_text: ui_text.clone(),
         spinner,
         workspace_root,
         expanded_tool_results,
@@ -283,6 +287,7 @@ mod tests {
     ) -> RenderContext<'a> {
         RenderContext {
             palette: *palette,
+            ui_text: UiText::from_preference("en-US"),
             spinner: "|",
             workspace_root: Path::new("."),
             expanded_tool_results: expanded,
@@ -489,7 +494,11 @@ mod tests {
     #[test]
     fn pending_image_preview_derives_badge_without_mutating_content() {
         let attachment = image_attachment("capture.png");
-        let content = display_text_with_image_badges("", std::slice::from_ref(&attachment));
+        let content = display_text_with_image_badges(
+            "",
+            std::slice::from_ref(&attachment),
+            &UiText::from_preference("en-US"),
+        );
 
         assert_eq!(content, "[Image: capture.png]");
         assert!(attachment.is_image());
@@ -673,6 +682,7 @@ mod tests {
                     &mut cache,
                     &chat_ctx,
                     palette,
+                    &UiText::from_preference("en-US"),
                     &mut scroll_offset,
                     &mut follow_tail,
                     &mut expanded_tool_results,
@@ -746,7 +756,10 @@ mod tests {
             .map(|span| span.content.as_ref())
             .collect();
 
-        assert!(rendered.contains("test · High · 0s"), "{rendered}");
+        assert!(
+            rendered.contains("test · Thinking: High · 0s"),
+            "{rendered}"
+        );
     }
 
     #[test]

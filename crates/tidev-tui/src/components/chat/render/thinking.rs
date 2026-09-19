@@ -17,7 +17,10 @@ use crate::markdown;
 /// - ≥ 1s, <1m  → "42.5s"        (one decimal place)
 /// - ≥ 1m, <1h  → "3min 15s"
 /// - ≥ 1h       → "1h 5min 30s"
-pub(super) fn thinking_duration_str(message: &Message) -> Option<String> {
+pub(super) fn thinking_duration_str(
+    message: &Message,
+    ui_text: &crate::i18n::UiText,
+) -> Option<String> {
     let started = message.reasoning_started_at?;
     let ended = message
         .reasoning_completed_at
@@ -32,17 +35,38 @@ pub(super) fn thinking_duration_str(message: &Message) -> Option<String> {
         let hours = total_secs / 3600;
         let minutes = (total_secs % 3600) / 60;
         let seconds = total_secs % 60;
-        Some(format!("{}h {}min {}s", hours, minutes, seconds))
+        Some(ui_text.text_with_values(
+            crate::i18n::TextKey::DurationHoursMinutesSeconds,
+            &[
+                ("hours", &hours.to_string()),
+                ("minutes", &minutes.to_string()),
+                ("seconds", &seconds.to_string()),
+            ],
+        ))
     } else if total_secs >= 60 {
         let minutes = total_secs / 60;
         let seconds = total_secs % 60;
-        Some(format!("{}min {}s", minutes, seconds))
+        Some(ui_text.text_with_values(
+            crate::i18n::TextKey::DurationMinutesSeconds,
+            &[
+                ("minutes", &minutes.to_string()),
+                ("seconds", &seconds.to_string()),
+            ],
+        ))
     } else if total_secs >= 1 {
         let total_millis = elapsed.num_milliseconds().max(0) as f64;
-        Some(format!("{:.1}s", total_millis / 1000.0))
+        Some(ui_text.text_with_value(
+            crate::i18n::TextKey::DurationSecondsDecimal,
+            "seconds",
+            &format!("{:.1}", total_millis / 1000.0),
+        ))
     } else {
         let total_millis = elapsed.num_milliseconds().max(0) as u64;
-        Some(format!("{}ms", total_millis))
+        Some(ui_text.text_with_value(
+            crate::i18n::TextKey::DurationMilliseconds,
+            "milliseconds",
+            &total_millis.to_string(),
+        ))
     }
 }
 
@@ -87,9 +111,9 @@ pub(super) fn render_reasoning_lines(
 
     // Label: ┃ Thinking: or ┃ Thought:
     let label = if is_streaming {
-        "Thinking:"
+        ctx.ui_text.text(crate::i18n::TextKey::ThinkingLabel)
     } else {
-        "Thought:"
+        ctx.ui_text.text(crate::i18n::TextKey::ThoughtLabel)
     };
 
     // Build header with duration and fold indicator
@@ -167,10 +191,11 @@ fn render_reasoning_segment(
     lines: &mut Vec<HyperlinkLine>,
 ) {
     let effective = content_width.saturating_sub(2).max(1); // 2 for ┃ prefix
-    let rendered = markdown::render_markdown_text_with_width_and_cwd(
+    let rendered = markdown::render_markdown_text_with_width_and_cwd_with_ui(
         reasoning,
         Some(effective),
         Some(ctx.workspace_root),
+        &ctx.ui_text,
     );
 
     let mut rendered_lines = markdown::markdown_to_hyperlink_lines(&rendered).into_iter();

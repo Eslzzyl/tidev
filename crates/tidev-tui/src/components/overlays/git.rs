@@ -12,6 +12,7 @@ use crate::action::{Action, GitAction, GitQueryKind, GitTab, OverlayAction, Over
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
 use crate::diff_render::render_unified_diff_text;
+use crate::i18n::TextKey;
 use crate::utils::{centered_rect, shorten};
 
 const PANEL_WIDTH: u16 = 132;
@@ -102,10 +103,10 @@ impl GitPanel {
         Action::Git(GitAction::SwitchTab(tab))
     }
 
-    fn tab_title(tab: GitTab) -> &'static str {
+    fn tab_title(tab: GitTab, ui_text: &crate::i18n::UiText) -> String {
         match tab {
-            GitTab::Status => "Status",
-            GitTab::History => "History",
+            GitTab::Status => ui_text.text(TextKey::StatusTab),
+            GitTab::History => ui_text.text(TextKey::HistoryTab),
         }
     }
 
@@ -143,7 +144,7 @@ impl GitPanel {
                 Style::default().fg(palette.muted)
             };
             spans.push(Span::styled(
-                format!(" {} {} ", index + 1, Self::tab_title(tab)),
+                format!(" {} {} ", index + 1, Self::tab_title(tab, &ctx.ui_text)),
                 style,
             ));
         }
@@ -154,9 +155,14 @@ impl GitPanel {
         let palette = ctx.palette;
         let Some(status) = &self.status else {
             if let Some(error) = &self.error {
-                self.draw_error_state(frame, left, right, error, palette);
+                self.draw_error_state(frame, left, right, error, palette, &ctx.ui_text);
             } else {
-                self.draw_message(frame, right, "Loading workspace status...", palette.muted);
+                self.draw_message(
+                    frame,
+                    right,
+                    &ctx.ui_text.text(TextKey::GitLoadingStatus),
+                    palette.muted,
+                );
             }
             return;
         };
@@ -194,7 +200,7 @@ impl GitPanel {
         }
         if left_lines.is_empty() {
             left_lines.push(Line::from(Span::styled(
-                "Clean working tree",
+                ctx.ui_text.text(TextKey::GitClean),
                 Style::default().fg(palette.success),
             )));
         }
@@ -205,14 +211,32 @@ impl GitPanel {
             .branch
             .as_deref()
             .map(|value| value.to_string())
-            .unwrap_or_else(|| "(detached HEAD)".to_string());
+            .unwrap_or_else(|| ctx.ui_text.text(TextKey::GitDetachedHead));
         let ahead_behind = match (status.repo.ahead, status.repo.behind) {
             (Some(ahead), Some(behind)) => format!("  ↑{ahead} ↓{behind}"),
             _ => String::new(),
         };
+        let files = status.files.len().to_string();
+        let staged = status.counts.staged.to_string();
+        let modified = status.counts.unstaged.to_string();
+        let untracked = status.counts.untracked.to_string();
+        let conflicted = status.counts.conflicted.to_string();
+        let changes_text = ctx.ui_text.text_with_values(
+            TextKey::GitSummary,
+            &[
+                ("files", &files),
+                ("staged", &staged),
+                ("modified", &modified),
+                ("untracked", &untracked),
+                ("conflicted", &conflicted),
+            ],
+        );
         let summary = vec![
             Line::from(vec![
-                Span::styled("Branch  ", Style::default().fg(palette.accent)),
+                Span::styled(
+                    format!("{}  ", ctx.ui_text.text(TextKey::GitBranch)),
+                    Style::default().fg(palette.accent),
+                ),
                 Span::styled(
                     branch,
                     Style::default()
@@ -222,18 +246,11 @@ impl GitPanel {
                 Span::styled(ahead_behind, Style::default().fg(palette.muted)),
             ]),
             Line::from(vec![
-                Span::styled("Changes ", Style::default().fg(palette.accent)),
                 Span::styled(
-                    format!(
-                        "{} files · {} staged · {} modified · {} untracked · {} conflicts",
-                        status.files.len(),
-                        status.counts.staged,
-                        status.counts.unstaged,
-                        status.counts.untracked,
-                        status.counts.conflicted,
-                    ),
-                    Style::default().fg(palette.text),
+                    format!("{} ", ctx.ui_text.text(TextKey::GitChangesLabel)),
+                    Style::default().fg(palette.accent),
                 ),
+                Span::styled(changes_text, Style::default().fg(palette.text)),
             ]),
         ];
         let right_chunks =
@@ -244,19 +261,19 @@ impl GitPanel {
             self.draw_message(
                 frame,
                 right_chunks[1],
-                "Working tree is clean",
+                &ctx.ui_text.text(TextKey::GitClean),
                 palette.success,
             );
             return;
         };
         let Some(diff) = &self.diff else {
             if let Some(error) = &self.error {
-                self.draw_centered_error(frame, right_chunks[1], error, palette);
+                self.draw_centered_error(frame, right_chunks[1], error, palette, &ctx.ui_text);
             } else {
                 self.draw_message(
                     frame,
                     right_chunks[1],
-                    "Loading worktree diff...",
+                    &ctx.ui_text.text(TextKey::GitLoadingDiff),
                     palette.muted,
                 );
             }
@@ -266,7 +283,7 @@ impl GitPanel {
             self.draw_message(
                 frame,
                 right_chunks[1],
-                "Loading worktree diff...",
+                &ctx.ui_text.text(TextKey::GitLoadingDiff),
                 palette.muted,
             );
             return;
@@ -279,7 +296,7 @@ impl GitPanel {
             self.draw_message(
                 frame,
                 right_chunks[1],
-                "No textual diff for selected file",
+                &ctx.ui_text.text(TextKey::GitNoTextDiff),
                 palette.muted,
             );
             return;
@@ -298,7 +315,7 @@ impl GitPanel {
         if self.history.is_empty()
             && let Some(error) = &self.error
         {
-            self.draw_error_state(frame, left, right, error, palette);
+            self.draw_error_state(frame, left, right, error, palette, &ctx.ui_text);
             return;
         }
         let mut left_lines = Vec::new();
@@ -331,9 +348,9 @@ impl GitPanel {
         if left_lines.is_empty() {
             left_lines.push(Line::from(Span::styled(
                 if self.error.is_some() {
-                    "Git unavailable"
+                    ctx.ui_text.text(TextKey::GitUnavailable)
                 } else {
-                    "No commits"
+                    ctx.ui_text.text(TextKey::GitNoCommits)
                 },
                 Style::default().fg(if self.error.is_some() {
                     palette.error
@@ -346,9 +363,14 @@ impl GitPanel {
 
         let Some(commit) = self.history.get(self.history_selected) else {
             if let Some(error) = &self.error {
-                self.draw_centered_error(frame, right, error, palette);
+                self.draw_centered_error(frame, right, error, palette, &ctx.ui_text);
             } else {
-                self.draw_message(frame, right, "Select a commit", palette.muted);
+                self.draw_message(
+                    frame,
+                    right,
+                    &ctx.ui_text.text(TextKey::GitSelectCommit),
+                    palette.muted,
+                );
             }
             return;
         };
@@ -363,18 +385,27 @@ impl GitPanel {
                     .add_modifier(Modifier::BOLD),
             )),
             Line::from(vec![
-                Span::styled("commit ", Style::default().fg(palette.accent)),
+                Span::styled(
+                    format!("{} ", ctx.ui_text.text(TextKey::GitCommit)),
+                    Style::default().fg(palette.accent),
+                ),
                 Span::styled(commit.id.clone(), Style::default().fg(palette.muted)),
             ]),
             Line::from(vec![
-                Span::styled("author ", Style::default().fg(palette.accent)),
+                Span::styled(
+                    format!("{} ", ctx.ui_text.text(TextKey::GitAuthor)),
+                    Style::default().fg(palette.accent),
+                ),
                 Span::styled(
                     format!("{} <{}>", commit.author, commit.author_email),
                     Style::default().fg(palette.muted),
                 ),
             ]),
             Line::from(vec![
-                Span::styled("date   ", Style::default().fg(palette.accent)),
+                Span::styled(
+                    format!("{} ", ctx.ui_text.text(TextKey::GitDate)),
+                    Style::default().fg(palette.accent),
+                ),
                 Span::styled(
                     commit.authored_at.clone(),
                     Style::default().fg(palette.muted),
@@ -383,7 +414,10 @@ impl GitPanel {
         ];
         if !commit.refs.is_empty() {
             summary.push(Line::from(vec![
-                Span::styled("refs   ", Style::default().fg(palette.accent)),
+                Span::styled(
+                    format!("{} ", ctx.ui_text.text(TextKey::GitRefs)),
+                    Style::default().fg(palette.accent),
+                ),
                 Span::styled(commit.refs.join(", "), Style::default().fg(palette.muted)),
             ]));
         }
@@ -391,12 +425,12 @@ impl GitPanel {
 
         let Some(diff) = &self.diff else {
             if let Some(error) = &self.error {
-                self.draw_centered_error(frame, right_chunks[1], error, palette);
+                self.draw_centered_error(frame, right_chunks[1], error, palette, &ctx.ui_text);
             } else {
                 self.draw_message(
                     frame,
                     right_chunks[1],
-                    "Loading commit diff...",
+                    &ctx.ui_text.text(TextKey::GitLoadingCommitDiff),
                     palette.muted,
                 );
             }
@@ -406,7 +440,7 @@ impl GitPanel {
             self.draw_message(
                 frame,
                 right_chunks[1],
-                "Loading commit diff...",
+                &ctx.ui_text.text(TextKey::GitLoadingCommitDiff),
                 palette.muted,
             );
             return;
@@ -430,18 +464,28 @@ impl GitPanel {
     ) {
         let palette = ctx.palette;
         if binary {
-            self.draw_message(frame, area, "Binary file changed", palette.warning);
+            self.draw_message(
+                frame,
+                area,
+                &ctx.ui_text.text(TextKey::GitBinaryChanged),
+                palette.warning,
+            );
             return;
         }
         if patch.is_empty() {
-            self.draw_message(frame, area, "No diff", palette.muted);
+            self.draw_message(
+                frame,
+                area,
+                &ctx.ui_text.text(TextKey::GitNoDiff),
+                palette.muted,
+            );
             return;
         }
         let rendered = render_unified_diff_text(patch, area.width as usize, palette, 4)
             .map(|(lines, _)| lines)
             .unwrap_or_else(|| {
                 vec![Line::from(Span::styled(
-                    "Unable to render diff",
+                    ctx.ui_text.text(TextKey::GitRenderFailed),
                     Style::default().fg(palette.error),
                 ))]
             });
@@ -491,6 +535,7 @@ impl GitPanel {
         right: Rect,
         error: &GitError,
         palette: crate::theme::ThemePalette,
+        ui_text: &crate::i18n::UiText,
     ) {
         let area = Rect {
             x: left.x,
@@ -498,7 +543,7 @@ impl GitPanel {
             width: left.width.saturating_add(right.width),
             height: left.height.min(right.height),
         };
-        self.draw_centered_error(frame, area, error, palette);
+        self.draw_centered_error(frame, area, error, palette, ui_text);
     }
 
     fn draw_centered_error(
@@ -507,12 +552,15 @@ impl GitPanel {
         area: Rect,
         error: &GitError,
         palette: crate::theme::ThemePalette,
+        ui_text: &crate::i18n::UiText,
     ) {
         let title = match error {
-            GitError::NotRepository { .. } => "No Git repository",
-            GitError::WorkspaceMissing { .. } => "Workspace unavailable",
-            GitError::GitUnavailable => "Git unavailable",
-            GitError::CommandFailed { .. } | GitError::InvalidOutput(_) => "Git query failed",
+            GitError::NotRepository { .. } => ui_text.text(TextKey::GitNoRepository),
+            GitError::WorkspaceMissing { .. } => ui_text.text(TextKey::GitWorkspaceUnavailable),
+            GitError::GitUnavailable => ui_text.text(TextKey::GitUnavailable),
+            GitError::CommandFailed { .. } | GitError::InvalidOutput(_) => {
+                ui_text.text(TextKey::GitQueryFailed)
+            }
         };
         let color = Self::error_color(error, palette);
         let lines = vec![
@@ -782,7 +830,7 @@ impl Component for GitPanel {
         frame.render_widget(Clear, overlay);
         frame.render_widget(
             Block::default()
-                .title(" Git ")
+                .title(format!(" {} ", ctx.ui_text.text(TextKey::GitTitle)))
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(palette.border))
                 .style(Style::default().bg(palette.panel_alt)),
@@ -814,14 +862,13 @@ impl Component for GitPanel {
             GitTab::History => self.draw_history(frame, body[0], body[1], ctx),
         }
         let footer = if let Some((_, query)) = self.loading {
-            format!(
-                "Loading {:?}...  ·  Tab switch  ·  r refresh  ·  Esc close",
-                query
-            )
+            ctx.ui_text
+                .text_with_value(TextKey::GitFooterLoading, "query", &format!("{query:?}"))
         } else if let Some(error) = &self.error {
-            format!("Error: {error}")
+            ctx.ui_text
+                .text_with_value(TextKey::GitFooterError, "error", &error.to_string())
         } else {
-            "1/2 tabs  ·  ↑/↓ select  ·  PgUp/PgDown scroll  ·  r refresh  ·  Esc close".to_string()
+            ctx.ui_text.text(TextKey::GitFooter)
         };
         let footer_color = self
             .error
@@ -920,6 +967,7 @@ mod tests {
             .draw(|frame| {
                 let context = DrawContext {
                     palette: test_palette(),
+                    ui_text: crate::i18n::UiText::from_preference("en-US"),
                     focused: true,
                     mode: SessionMode::Build,
                     pending_mode: None,

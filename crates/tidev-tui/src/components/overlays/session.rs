@@ -22,6 +22,7 @@ use uuid::Uuid;
 use crate::action::{Action, OverlayAction, OverlayKind, SessionAction};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
+use crate::i18n::TextKey;
 use crate::utils::{centered_rect, single_line_input_cursor};
 
 // ---------------------------------------------------------------------------
@@ -614,10 +615,14 @@ impl Component for SessionPanel {
         });
 
         let view_mode_text = match self.view_mode {
-            SessionViewMode::CurrentWorkspace => "Current Workspace",
-            SessionViewMode::AllSessions => "All Sessions",
+            SessionViewMode::CurrentWorkspace => ctx.ui_text.text(TextKey::CurrentWorkspace),
+            SessionViewMode::AllSessions => ctx.ui_text.text(TextKey::AllSessions),
         };
-        let title_text = format!(" Sessions: {} ", view_mode_text);
+        let title_text = format!(
+            " {} ",
+            ctx.ui_text
+                .text_with_value(TextKey::SessionsTitle, "mode", &view_mode_text)
+        );
 
         let sections = Layout::vertical([
             Constraint::Length(1),
@@ -642,7 +647,7 @@ impl Component for SessionPanel {
 
         // Instruction
         frame.render_widget(
-            Paragraph::new("Type to filter by title, model, provider, or session id.")
+            Paragraph::new(ctx.ui_text.text(TextKey::SessionSearchInstruction))
                 .alignment(Alignment::Center)
                 .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
             sections[1],
@@ -650,10 +655,10 @@ impl Component for SessionPanel {
 
         // Search input
         let input_style = Style::default().bg(palette.panel_alt);
-        let prefix = " Search sessions: ";
+        let prefix = format!(" {} ", ctx.ui_text.text(TextKey::SessionSearchPrefix));
         let (visible_query, cursor) = single_line_input_cursor(
             sections[2],
-            UnicodeWidthStr::width(prefix) as u16,
+            UnicodeWidthStr::width(prefix.as_str()) as u16,
             &self.query,
         );
         frame.render_widget(
@@ -672,7 +677,7 @@ impl Component for SessionPanel {
 
         if matches.is_empty() {
             frame.render_widget(
-                Paragraph::new("No sessions match this search.")
+                Paragraph::new(ctx.ui_text.text(TextKey::NoSessionsMatch))
                     .alignment(Alignment::Center)
                     .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                 sections[3],
@@ -774,20 +779,23 @@ impl Component for SessionPanel {
                 if is_current {
                     right_spans.push(Span::raw("  "));
                     right_spans.push(Span::styled(
-                        "current",
+                        ctx.ui_text.text(TextKey::CurrentBadge),
                         Style::default().fg(palette.success),
                     ));
                 }
                 if session.parent_session_id.is_some() {
                     right_spans.push(Span::raw("  "));
                     right_spans.push(Span::styled(
-                        "child",
+                        ctx.ui_text.text(TextKey::ChildBadge),
                         Style::default().fg(palette.accent_soft),
                     ));
                 }
                 if self.active_sessions.contains(&session.session_id) {
                     right_spans.push(Span::raw("  "));
-                    right_spans.push(Span::styled("active", Style::default().fg(palette.warning)));
+                    right_spans.push(Span::styled(
+                        ctx.ui_text.text(TextKey::ActiveBadge),
+                        Style::default().fg(palette.warning),
+                    ));
                 }
 
                 let right_line = Line::from(right_spans).alignment(Alignment::Right);
@@ -820,9 +828,9 @@ impl Component for SessionPanel {
 
         // Footer
         let help_text = if self.operation_mode == OperationMode::MultiSelect {
-            "Enter: switch · Ctrl+D: delete · Space: select · Ctrl+A: exit multi-select · Tab: switch view · Ctrl+X: cleanup · Ctrl+E: export"
+            ctx.ui_text.text(TextKey::SessionMultiFooter)
         } else {
-            "Enter: switch · Ctrl+D: delete · Ctrl+X: cleanup · Ctrl+A: multi-select · Tab: switch view · Ctrl+E: export"
+            ctx.ui_text.text(TextKey::SessionFooter)
         };
         frame.render_widget(
             Paragraph::new(help_text)
@@ -883,7 +891,7 @@ impl SessionPanel {
                 // Title
                 frame.render_widget(
                     Paragraph::new(Line::from(vec![Span::styled(
-                        " Delete session(s) ",
+                        format!(" {} ", ctx.ui_text.text(TextKey::SessionDeleteTitle)),
                         Style::default()
                             .fg(palette.accent)
                             .add_modifier(Modifier::BOLD),
@@ -894,9 +902,12 @@ impl SessionPanel {
 
                 // Message
                 frame.render_widget(
-                    Paragraph::new(format!("Delete {} session(s)?", session_ids.len()))
-                        .alignment(Alignment::Center)
-                        .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
+                    Paragraph::new(
+                        ctx.ui_text
+                            .text_with_count(TextKey::SessionDeleteMessage, session_ids.len()),
+                    )
+                    .alignment(Alignment::Center)
+                    .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
                     sections[1],
                 );
 
@@ -906,7 +917,11 @@ impl SessionPanel {
                     content.push_str(&format!("  • {}\n", title));
                 }
                 if session_titles.len() > 5 {
-                    content.push_str(&format!("  ... and {} more\n", session_titles.len() - 5));
+                    content.push_str(&format!(
+                        "  {}\n",
+                        ctx.ui_text
+                            .text_with_count(TextKey::SessionMore, session_titles.len() - 5)
+                    ));
                 }
                 frame.render_widget(
                     Paragraph::new(content)
@@ -916,7 +931,7 @@ impl SessionPanel {
 
                 // Footer
                 frame.render_widget(
-                    Paragraph::new("Enter: confirm · Esc: cancel")
+                    Paragraph::new(ctx.ui_text.text(TextKey::SessionConfirmFooter))
                         .alignment(Alignment::Center)
                         .style(
                             Style::default()
@@ -950,7 +965,7 @@ impl SessionPanel {
                 // Title
                 frame.render_widget(
                     Paragraph::new(Line::from(vec![Span::styled(
-                        " Export session(s) ",
+                        format!(" {} ", ctx.ui_text.text(TextKey::SessionExportTitle)),
                         Style::default()
                             .fg(palette.accent)
                             .add_modifier(Modifier::BOLD),
@@ -961,9 +976,12 @@ impl SessionPanel {
 
                 // Message
                 frame.render_widget(
-                    Paragraph::new(format!("Export {} session(s) to JSONL?", session_ids.len()))
-                        .alignment(Alignment::Center)
-                        .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
+                    Paragraph::new(
+                        ctx.ui_text
+                            .text_with_count(TextKey::SessionExportMessage, session_ids.len()),
+                    )
+                    .alignment(Alignment::Center)
+                    .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
                     sections[1],
                 );
 
@@ -973,7 +991,11 @@ impl SessionPanel {
                     content.push_str(&format!("  • {}\n", title));
                 }
                 if session_titles.len() > 5 {
-                    content.push_str(&format!("  ... and {} more\n", session_titles.len() - 5));
+                    content.push_str(&format!(
+                        "  {}\n",
+                        ctx.ui_text
+                            .text_with_count(TextKey::SessionMore, session_titles.len() - 5)
+                    ));
                 }
                 frame.render_widget(
                     Paragraph::new(content)
@@ -983,7 +1005,7 @@ impl SessionPanel {
 
                 // Footer
                 frame.render_widget(
-                    Paragraph::new("Enter: export · Esc: cancel")
+                    Paragraph::new(ctx.ui_text.text(TextKey::SessionExportFooter))
                         .alignment(Alignment::Center)
                         .style(
                             Style::default()
@@ -1020,7 +1042,7 @@ impl SessionPanel {
                 // Title
                 frame.render_widget(
                     Paragraph::new(Line::from(vec![Span::styled(
-                        " Cleanup Sessions ",
+                        format!(" {} ", ctx.ui_text.text(TextKey::SessionCleanupTitle)),
                         Style::default()
                             .fg(palette.accent)
                             .add_modifier(Modifier::BOLD),
@@ -1032,22 +1054,33 @@ impl SessionPanel {
                 // Status message
                 let (title_text, hint_text) = if *cleanup_workspace {
                     (
-                        "Delete all sessions in current workspace".to_string(),
-                        "5: current workspace (selected)".to_string(),
+                        ctx.ui_text.text(TextKey::SessionCleanupWorkspace),
+                        ctx.ui_text.text(TextKey::SessionCleanupDurationHint),
                     )
                 } else {
                     let duration_text = match selected_duration {
-                        Some(d) if *d <= ChronoDuration::weeks(1) => "1 week",
-                        Some(d) if *d <= ChronoDuration::days(30) => "1 month",
-                        Some(d) if *d <= ChronoDuration::days(90) => "3 months",
-                        Some(d) if *d <= ChronoDuration::days(365) => "1 year",
-                        None => "Select duration",
-                        _ => "Custom",
+                        Some(d) if *d <= ChronoDuration::weeks(1) => {
+                            ctx.ui_text.text(TextKey::DurationWeek)
+                        }
+                        Some(d) if *d <= ChronoDuration::days(30) => {
+                            ctx.ui_text.text(TextKey::DurationMonth)
+                        }
+                        Some(d) if *d <= ChronoDuration::days(90) => {
+                            ctx.ui_text.text(TextKey::DurationMonths)
+                        }
+                        Some(d) if *d <= ChronoDuration::days(365) => {
+                            ctx.ui_text.text(TextKey::DurationYear)
+                        }
+                        None => ctx.ui_text.text(TextKey::SessionSelectDuration),
+                        _ => ctx.ui_text.text(TextKey::DurationCustom),
                     };
                     (
-                        format!("Delete sessions older than: {}", duration_text),
-                        "1: 1 week · 2: 1 month · 3: 3 months · 4: 1 year · 5: current workspace"
-                            .to_string(),
+                        ctx.ui_text.text_with_value(
+                            TextKey::SessionCleanupDuration,
+                            "duration",
+                            &duration_text,
+                        ),
+                        ctx.ui_text.text(TextKey::SessionCleanupDurationHint),
                     )
                 };
 
@@ -1070,7 +1103,11 @@ impl SessionPanel {
 
                 // Preview counts
                 let mut preview_text = String::new();
-                preview_text.push_str(&format!("Total: {} session(s)\n", preview.total_count));
+                preview_text.push_str(&format!(
+                    "{}\n",
+                    ctx.ui_text
+                        .text_with_count(TextKey::SessionTotal, preview.total_count)
+                ));
                 for (ws, count) in &preview.workspace_counts {
                     preview_text.push_str(&format!("  • {}: {}\n", ws, count));
                 }
@@ -1082,7 +1119,7 @@ impl SessionPanel {
 
                 // Footer
                 frame.render_widget(
-                    Paragraph::new("Enter: confirm · Esc: cancel")
+                    Paragraph::new(ctx.ui_text.text(TextKey::SessionCleanupFooter))
                         .alignment(Alignment::Center)
                         .style(
                             Style::default()

@@ -28,6 +28,7 @@ use crate::components::chat::render_cache::{
 use crate::components::chat::streaming::StreamingBuffer;
 use crate::components::chat::tool::tool_call_arguments_are_complete;
 use crate::context::{DrawContext, InitContext, UpdateContext};
+use crate::i18n::{TextKey, UiText};
 use scroll::{ScrollbarDrag, compute_scrollbar_rect};
 use tidev_utils::tool_name::canonical_tool_name;
 
@@ -125,6 +126,7 @@ pub(crate) struct MessageList {
     cancelled: bool,
     /// Whether the interruption notice must wait for pending tool results.
     pending_interruption_notice: bool,
+    ui_text: UiText,
 }
 
 impl MessageList {
@@ -162,6 +164,7 @@ impl MessageList {
             dirty: true,
             cancelled: false,
             pending_interruption_notice: false,
+            ui_text: UiText::from_preference("en-US"),
         }
     }
 
@@ -304,10 +307,9 @@ impl MessageList {
                     if canonical_tool_name(&tc.name) == Some("task")
                         && !tool_result_ids.contains(tc.id.as_str())
                     {
-                        let status = old_status
-                            .get(tc.id.as_str())
-                            .cloned()
-                            .unwrap_or_else(|| "Awaiting delegation...".to_string());
+                        let status = old_status.get(tc.id.as_str()).cloned().unwrap_or_else(|| {
+                            self.ui_text.text(TextKey::SubagentAwaitingDelegation)
+                        });
                         self.running_subagents
                             .push(render_mod::RunningSubagentInfo {
                                 tool_call_id: tc.id.clone(),
@@ -451,7 +453,7 @@ impl MessageList {
         // so their inline cards remain visible and clickable, preserving access
         // to the child subsession conversation.
         for exec in &mut self.running_subagents {
-            exec.status_text = "Interrupted".to_string();
+            exec.status_text = self.ui_text.text(TextKey::SubagentInterrupted);
             exec.interrupted = true;
         }
 
@@ -534,7 +536,9 @@ impl MessageList {
                                     tool_call_id: tool_call.id.clone(),
                                     description: desc,
                                     subagent_type: sub_type,
-                                    status_text: "Awaiting delegation...".to_string(),
+                                    status_text: self
+                                        .ui_text
+                                        .text(TextKey::SubagentAwaitingDelegation),
                                     child_session_id: None,
                                     interrupted: false,
                                 });
@@ -588,7 +592,11 @@ impl MessageList {
                         .iter_mut()
                         .find(|e| e.tool_call_id == *tool_call_id && !e.interrupted)
                     {
-                        exec.status_text = status_text.clone();
+                        exec.status_text = if status_text.starts_with("Started ") {
+                            self.ui_text.text(TextKey::SubagentStarted)
+                        } else {
+                            status_text.clone()
+                        };
                         exec.child_session_id = Some(*child_session_id);
                     }
                 }
@@ -599,7 +607,7 @@ impl MessageList {
         // ── 1. Update running subagent card status ─────────────────────
         // Run this BEFORE the chat_context routing so that events update
         // the inline card regardless of whether the chat_context exists.
-        if let Some(text) = infer_subagent_status(event)
+        if let Some(text) = infer_subagent_status(event, &self.ui_text)
             && let Some(exec) = self
                 .running_subagents
                 .iter_mut()
@@ -1468,12 +1476,14 @@ impl Component for MessageList {
             Action::Chat(ChatAction::ExpandAllThinking) => {
                 let default_collapse = ctx.runtime.config().ui.collapse_thinking;
                 let (total, changed) = self.set_all_thinking_collapsed(false, default_collapse);
-                thinking_command_notice("expanded", total, changed)
+                let ui_text = UiText::from_preference(&ctx.runtime.config().ui.locale);
+                thinking_command_notice_with_locale("expanded", total, changed, &ui_text)
             }
             Action::Chat(ChatAction::CollapseAllThinking) => {
                 let default_collapse = ctx.runtime.config().ui.collapse_thinking;
                 let (total, changed) = self.set_all_thinking_collapsed(true, default_collapse);
-                thinking_command_notice("collapsed", total, changed)
+                let ui_text = UiText::from_preference(&ctx.runtime.config().ui.locale);
+                thinking_command_notice_with_locale("collapsed", total, changed, &ui_text)
             }
 
             _ => vec![],
@@ -1481,6 +1491,7 @@ impl Component for MessageList {
     }
 
     fn draw(&mut self, frame: &mut Frame, rect: Rect, ctx: &DrawContext) {
+        self.ui_text = ctx.ui_text.clone();
         let session_id = match self.active_session_id {
             Some(id) => id,
             None => return,
@@ -1518,6 +1529,7 @@ impl Component for MessageList {
             &mut self.render_cache,
             chat_context,
             ctx.palette,
+            &ctx.ui_text,
             &mut self.scroll_offset,
             &mut self.follow_tail,
             &mut self.expanded_tool_results,
@@ -1748,22 +1760,22 @@ fn extract_subagent_type(arguments: &str) -> String {
 /// subagent's streaming events arrive on the shared event channel with
 /// the child session_id, the TUI can infer the equivalent status without
 /// any backend changes.
-fn infer_subagent_status(event: &BackendEvent) -> Option<String> {
+fn infer_subagent_status(event: &BackendEvent, ui_text: &UiText) -> Option<String> {
     match event {
-        BackendEvent::Delta { .. } => Some("Writing output".to_string()),
-        BackendEvent::ReasoningDelta { .. } => Some("Thinking".to_string()),
-        BackendEvent::ReasoningSummaryDelta { .. } => Some("Thinking".to_string()),
+        BackendEvent::Delta { .. } => Some(ui_text.text(TextKey::WritingOutput)),
+        BackendEvent::ReasoningDelta { .. } => Some(ui_text.text(TextKey::Thinking)),
+        BackendEvent::ReasoningSummaryDelta { .. } => Some(ui_text.text(TextKey::Thinking)),
         BackendEvent::ToolCallUpdated { tool_call, .. } => {
             let name = canonical_tool_name(&tool_call.name).unwrap_or(&tool_call.name);
-            Some(format!("Tool: {name}"))
+            Some(ui_text.text_with_value(TextKey::ToolStatus, "name", name))
         }
         BackendEvent::ToolCompleted { tool_call, .. } => {
             let name = canonical_tool_name(&tool_call.name).unwrap_or(&tool_call.name);
-            Some(format!("Completed: {name}"))
+            Some(ui_text.text_with_value(TextKey::CompletedStatus, "name", name))
         }
         BackendEvent::Finished { .. }
         | BackendEvent::StreamEnd { .. }
-        | BackendEvent::TurnStarting { .. } => Some("Thinking".to_string()),
+        | BackendEvent::TurnStarting { .. } => Some(ui_text.text(TextKey::Thinking)),
         _ => None,
     }
 }
@@ -1810,17 +1822,40 @@ fn append_interruption_notice(messages: &mut Vec<Message>) {
 ///
 /// `verb` is the past-tense action ("expanded"/"collapsed"); `total` counts
 /// thinking blocks in the session, `changed` how many actually flipped state.
+#[cfg(test)]
 fn thinking_command_notice(verb: &str, total: usize, changed: usize) -> Vec<Action> {
+    thinking_command_notice_with_locale(verb, total, changed, &UiText::from_preference("en-US"))
+}
+
+fn thinking_command_notice_with_locale(
+    verb: &str,
+    total: usize,
+    changed: usize,
+    ui_text: &UiText,
+) -> Vec<Action> {
     if total == 0 {
-        vec![Action::Notice(
-            "No thinking blocks in this session".to_string(),
-        )]
+        vec![Action::Notice(ui_text.text(TextKey::NoThinkingBlocks))]
     } else if changed == 0 {
-        vec![Action::Notice(format!(
-            "All thinking blocks are already {verb}"
+        let state = if verb == "expanded" {
+            ui_text.text(TextKey::Expand)
+        } else {
+            ui_text.text(TextKey::Collapse)
+        };
+        vec![Action::Notice(ui_text.text_with_value(
+            TextKey::ThinkingBlocksAlready,
+            "state",
+            &state,
         ))]
     } else {
-        vec![Action::Notice(format!("{verb} {changed} thinking blocks"))]
+        let state = if verb == "expanded" {
+            ui_text.text(TextKey::Expand)
+        } else {
+            ui_text.text(TextKey::Collapse)
+        };
+        vec![Action::Notice(ui_text.text_with_values(
+            TextKey::ThinkingBlocksChanged,
+            &[("state", &state), ("count", &changed.to_string())],
+        ))]
     }
 }
 

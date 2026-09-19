@@ -3,6 +3,7 @@ use ratatui::text::{Line, Span};
 use serde::Deserialize;
 use serde_json::Value;
 
+use crate::i18n::{TextKey, UiText};
 use crate::markdown::{WrapOptions, word_wrap_line};
 use crate::theme::ThemePalette;
 
@@ -31,31 +32,38 @@ pub(super) fn render_catalog_result_lines(
     output: &str,
     content_width: usize,
     palette: ThemePalette,
+    ui_text: &UiText,
     is_expanded: bool,
 ) -> Option<Vec<Line<'static>>> {
     let list_server = server_argument(tool_arguments);
     match tool_name {
         "mcp_list" if list_server.is_none() => {
             if output.trim().is_empty() {
-                return Some(vec![muted_line("No MCP servers", palette)]);
+                return Some(vec![muted_line(&ui_text.text(TextKey::NoServers), palette)]);
             }
             let records = parse_jsonl::<McpServerRecord>(output)?;
-            Some(render_server_records(&records, content_width, palette))
+            Some(render_server_records(
+                &records,
+                content_width,
+                palette,
+                ui_text,
+            ))
         }
         "mcp_list" | "mcp_search" => {
             if output.trim().is_empty() {
                 let label = if tool_name == "mcp_search" {
-                    "No matching MCP tools"
+                    ui_text.text(TextKey::NoMatches)
                 } else {
-                    "No MCP tools"
+                    ui_text.text(TextKey::NoTools)
                 };
-                return Some(vec![muted_line(label, palette)]);
+                return Some(vec![muted_line(&label, palette)]);
             }
             let records = parse_jsonl::<McpToolRecord>(output)?;
             Some(render_tool_records(
                 &records,
                 content_width,
                 palette,
+                ui_text,
                 is_expanded,
             ))
         }
@@ -89,6 +97,7 @@ fn render_server_records(
     records: &[McpServerRecord],
     content_width: usize,
     palette: ThemePalette,
+    ui_text: &UiText,
 ) -> Vec<Line<'static>> {
     records
         .iter()
@@ -98,6 +107,12 @@ fn render_server_records(
                 "failed" => palette.error,
                 "disabled" => palette.muted,
                 _ => palette.warning,
+            };
+            let status_label = match record.status.as_str() {
+                "connected" => ui_text.text(TextKey::Connected),
+                "failed" => ui_text.text(TextKey::Failed),
+                "disabled" => ui_text.text(TextKey::Disabled),
+                _ => record.status.clone(),
             };
             let mut lines = wrap_line(
                 Line::from(vec![
@@ -109,11 +124,20 @@ fn render_server_records(
                             .add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(
-                        format!("  {} · {} tools", record.kind, record.tool_count),
+                        format!(
+                            "  {}",
+                            ui_text.text_with_values(
+                                TextKey::McpKindTools,
+                                &[
+                                    ("kind", &record.kind),
+                                    ("count", &record.tool_count.to_string()),
+                                ],
+                            )
+                        ),
                         Style::default().fg(palette.muted),
                     ),
                     Span::styled(
-                        format!("  {}", record.status),
+                        format!("  {status_label}"),
                         Style::default().fg(status_color),
                     ),
                 ]),
@@ -139,6 +163,7 @@ fn render_tool_records(
     records: &[McpToolRecord],
     content_width: usize,
     palette: ThemePalette,
+    ui_text: &UiText,
     is_expanded: bool,
 ) -> Vec<Line<'static>> {
     records
@@ -160,7 +185,7 @@ fn render_tool_records(
             ];
             if record.read_only {
                 title.push(Span::styled(
-                    "  read-only",
+                    format!("  {}", ui_text.text(TextKey::ReadOnly)),
                     Style::default().fg(palette.success),
                 ));
             }
@@ -178,7 +203,7 @@ fn render_tool_records(
             }
             if is_expanded {
                 lines.push(Line::from(Span::styled(
-                    "    input schema:",
+                    format!("    {}", ui_text.text(TextKey::InputSchema)),
                     Style::default().fg(palette.muted),
                 )));
                 let schema = serde_json::to_string_pretty(&record.input_schema)

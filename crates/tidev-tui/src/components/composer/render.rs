@@ -15,6 +15,7 @@ use ratatui::widgets::{Block, Clear, List, ListItem, ListState, Paragraph};
 
 use super::{Composer, InlineSpan, compute_visual_lines_with_spans};
 use crate::context::DrawContext;
+use crate::i18n::{TextKey, mode_title, thinking_level_name};
 
 /// Draw the composer component.
 pub(crate) fn draw_composer(
@@ -24,6 +25,7 @@ pub(crate) fn draw_composer(
     ctx: &DrawContext,
 ) {
     composer.last_cursor_position = None;
+    composer.set_image_label(ctx.ui_text.text(TextKey::ImageLabel));
     let palette = ctx.palette;
 
     // ── Background fill ─────────────────────────────────────────────
@@ -172,9 +174,13 @@ pub(crate) fn draw_composer(
 
         // Mode label (Build / Plan)
         let mode_label = if let Some(pending) = &ctx.pending_mode {
-            format!("{} → {}", ctx.mode.title(), pending.title())
+            format!(
+                "{} → {}",
+                mode_title(&ctx.ui_text, ctx.mode),
+                mode_title(&ctx.ui_text, *pending)
+            )
         } else {
-            ctx.mode.title().to_string()
+            mode_title(&ctx.ui_text, ctx.mode)
         };
         meta_spans.push(Span::styled(
             mode_label,
@@ -201,7 +207,7 @@ pub(crate) fn draw_composer(
         {
             meta_spans.push(Span::styled(" · ", Style::default().fg(palette.muted)));
             meta_spans.push(Span::styled(
-                level.display_name().to_string(),
+                thinking_level_name(&ctx.ui_text, level.display_name()),
                 Style::default().fg(palette.accent_soft),
             ));
         }
@@ -210,7 +216,7 @@ pub(crate) fn draw_composer(
         if ctx.subagent_disabled {
             meta_spans.push(Span::styled(" · ", Style::default().fg(palette.muted)));
             meta_spans.push(Span::styled(
-                "Subagent",
+                ctx.ui_text.text(TextKey::Subagent),
                 Style::default()
                     .fg(palette.muted)
                     .add_modifier(Modifier::CROSSED_OUT),
@@ -258,7 +264,10 @@ pub(crate) fn draw_composer(
                                 .add_modifier(Modifier::BOLD),
                         ),
                         Span::raw("  "),
-                        Span::styled(s.spec.description, Style::default().fg(palette.muted)),
+                        Span::styled(
+                            ctx.ui_text.text(s.spec.description_key),
+                            Style::default().fg(palette.muted),
+                        ),
                     ]))
                 })
                 .collect();

@@ -18,15 +18,22 @@ use tidev_config::ThemeCatalog;
 use crate::action::{Action, OverlayAction, OverlayKind, ThemeAction};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
+use crate::i18n::TextKey;
 use crate::markdown::set_syntax_theme_by_key;
 use crate::theme::preview::build_preview_lines;
 use crate::theme::{ThemePalette, resolve_palette};
 use crate::utils::{centered_rect, render_scrollbar, single_line_input_cursor};
 
 #[derive(Clone, Debug)]
-pub(crate) enum DisplayItem {
-    Header(&'static str),
+enum DisplayItem {
+    Header(ThemeGroup),
     Theme(String),
+}
+
+#[derive(Clone, Copy, Debug)]
+enum ThemeGroup {
+    Light,
+    Dark,
 }
 
 pub(crate) struct ThemePanel {
@@ -77,7 +84,7 @@ impl ThemePanel {
             .map(|(id, _)| id.to_string())
             .collect();
         if !light.is_empty() {
-            items.push(DisplayItem::Header("Light"));
+            items.push(DisplayItem::Header(ThemeGroup::Light));
             for t in light {
                 items.push(DisplayItem::Theme(t));
             }
@@ -90,7 +97,7 @@ impl ThemePanel {
             .map(|(id, _)| id.to_string())
             .collect();
         if !dark.is_empty() {
-            items.push(DisplayItem::Header("Dark"));
+            items.push(DisplayItem::Header(ThemeGroup::Dark));
             for t in dark {
                 items.push(DisplayItem::Theme(t));
             }
@@ -203,7 +210,7 @@ impl ThemePanel {
     /// so the code/diff samples render with its colors; afterwards the app's
     /// current syntax theme is restored so only the preview pane carries the
     /// selected theme.
-    fn ensure_preview(&mut self, width: usize) {
+    fn ensure_preview(&mut self, width: usize, ui_text: &crate::i18n::UiText) {
         let up_to_date = matches!(
             &self.cached_preview,
             Some((theme, w, _, _)) if *theme == self.preview_theme && *w == width
@@ -211,7 +218,7 @@ impl ThemePanel {
         if !up_to_date {
             let palette = resolve_palette(&self.catalog, &self.preview_theme);
             let def = self.catalog.get(&self.preview_theme);
-            let lines = build_preview_lines(&self.preview_theme, palette, def, width);
+            let lines = build_preview_lines(&self.preview_theme, palette, def, width, ui_text);
             if self.preview_theme != self.original_theme
                 && let Some(orig) = self
                     .catalog
@@ -380,10 +387,14 @@ impl Component for ThemePanel {
         });
 
         // ── Title row ──
+        let current = self.selected_theme_pos().to_string();
+        let total = self.theme_count().to_string();
         let title = format!(
-            " Theme · {}/{} ",
-            self.selected_theme_pos(),
-            self.theme_count()
+            " {} ",
+            ctx.ui_text.text_with_values(
+                TextKey::ThemesCount,
+                &[("current", &current), ("total", &total)]
+            ),
         );
         frame.render_widget(
             Paragraph::new(Line::from(vec![
@@ -406,7 +417,7 @@ impl Component for ThemePanel {
         let search_area = Rect::new(inner.x, inner.y + 1, inner.width, 1);
         let (visible_query, cursor) = single_line_input_cursor(search_area, 2, &self.query);
         let search_text = if self.query.is_empty() {
-            "  Type to search...".to_string()
+            format!("  {}", ctx.ui_text.text(TextKey::ThemeSearchPlaceholder))
         } else {
             format!("  {visible_query}")
         };
@@ -464,7 +475,7 @@ impl Component for ThemePanel {
         // ── Left Pane: List ──
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
-                "  Themes",
+                format!("  {}", ctx.ui_text.text(TextKey::Themes)),
                 Style::default()
                     .fg(palette.accent)
                     .add_modifier(Modifier::BOLD),
@@ -520,7 +531,11 @@ impl Component for ThemePanel {
             let y = list_area.y + i;
 
             match item {
-                DisplayItem::Header(label) => {
+                DisplayItem::Header(group) => {
+                    let label = match group {
+                        ThemeGroup::Light => ctx.ui_text.text(TextKey::ThemePreviewLight),
+                        ThemeGroup::Dark => ctx.ui_text.text(TextKey::ThemePreviewDark),
+                    };
                     frame.render_widget(
                         Paragraph::new(Line::from(Span::styled(
                             format!(" {} ", label),
@@ -602,7 +617,7 @@ impl Component for ThemePanel {
         };
 
         if preview_area.width > 0 {
-            self.ensure_preview(preview_area.width as usize);
+            self.ensure_preview(preview_area.width as usize, &ctx.ui_text);
         }
         let preview_palette = self
             .cached_preview
@@ -612,7 +627,7 @@ impl Component for ThemePanel {
 
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
-                "  Preview",
+                format!("  {}", ctx.ui_text.text(TextKey::Preview)),
                 Style::default()
                     .fg(preview_palette.accent)
                     .add_modifier(Modifier::BOLD),
@@ -661,7 +676,7 @@ impl Component for ThemePanel {
         }
 
         // ── Footer hints ──
-        let hints = "↑/↓: navigate  •  ←/→: scroll preview  •  type: search  •  Enter: apply  •  Esc: close";
+        let hints = ctx.ui_text.text(TextKey::ThemeFooter);
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 format!("  {}", hints),

@@ -20,6 +20,7 @@ pub(super) struct TableState {
     pub(super) prefix: Vec<Span<'static>>,
     pub(super) base_style: Style,
     pub(super) alignments: Vec<Alignment>,
+    pub(super) column_label: String,
     pub(super) rows: Vec<TableRowState>,
     pub(super) current_row: Option<TableRowState>,
     pub(super) in_head: bool,
@@ -30,11 +31,13 @@ impl TableState {
         prefix: Vec<Span<'static>>,
         base_style: Style,
         alignments: Vec<Alignment>,
+        column_label: String,
     ) -> Self {
         Self {
             prefix,
             base_style,
             alignments,
+            column_label,
             rows: Vec::new(),
             current_row: None,
             in_head: false,
@@ -316,7 +319,7 @@ impl TableState {
                 .get(index)
                 .map(|cell| line_to_plain_text(&cell.line))
                 .filter(|value| !value.is_empty())
-                .unwrap_or_else(|| format!("Column {}", index + 1));
+                .unwrap_or_else(|| format!("{} {}", self.column_label, index + 1));
             let value = row.cells.get(index).cloned().unwrap_or_default();
 
             let mut field = HyperlinkLine::new(Line::from(vec![Span::styled(

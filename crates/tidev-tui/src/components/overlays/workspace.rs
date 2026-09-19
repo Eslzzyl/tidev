@@ -19,6 +19,7 @@ use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
 use crate::action::{Action, BoundaryDecision, OverlayAction, OverlayKind};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
+use crate::i18n::{TextKey, UiText};
 use crate::utils::{bottom_centered_rect, wrapped_input_tail};
 
 // ---------------------------------------------------------------------------
@@ -77,8 +78,13 @@ impl WorkspaceBoundaryDialog {
         }
     }
 
-    fn title(&self) -> String {
-        format!("Security Warning {} of {}", self.current_index, self.total)
+    fn title(&self, ui_text: &UiText) -> String {
+        let current = self.current_index.to_string();
+        let total = self.total.to_string();
+        ui_text.text_with_values(
+            TextKey::WorkspaceTitleCount,
+            &[("current", &current), ("total", &total)],
+        )
     }
 
     fn path_display(&self) -> String {
@@ -291,7 +297,7 @@ impl Component for WorkspaceBoundaryDialog {
                 // Title
                 frame.render_widget(
                     Paragraph::new(Line::from(vec![Span::styled(
-                        self.title(),
+                        self.title(&ctx.ui_text),
                         Style::default()
                             .fg(palette.accent)
                             .add_modifier(Modifier::BOLD),
@@ -302,16 +308,17 @@ impl Component for WorkspaceBoundaryDialog {
 
                 // Message
                 frame.render_widget(
-                    Paragraph::new("A tool is trying to access a path outside the workspace:")
+                    Paragraph::new(ctx.ui_text.text(TextKey::WorkspaceToolMessage))
                         .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
                     sections[1],
                 );
 
                 // Path info
-                let path_text = format!(
-                    "Requested: {}\nWorkspace: {}",
-                    self.path_display(),
-                    self.workspace_display()
+                let path = self.path_display();
+                let workspace = self.workspace_display();
+                let path_text = ctx.ui_text.text_with_values(
+                    TextKey::WorkspacePathInfo,
+                    &[("path", &path), ("workspace", &workspace)],
                 );
                 frame.render_widget(
                     Paragraph::new(path_text).style(
@@ -324,10 +331,7 @@ impl Component for WorkspaceBoundaryDialog {
 
                 // Help
                 frame.render_widget(
-                    Paragraph::new(
-                        "Y allow once · A allow until exit · N deny once (with reason) · D deny until exit · Esc deny once",
-                    )
-                    .style(
+                    Paragraph::new(ctx.ui_text.text(TextKey::WorkspaceHelp)).style(
                         Style::default()
                             .bg(palette.panel_alt)
                             .fg(palette.accent)
@@ -349,7 +353,7 @@ impl Component for WorkspaceBoundaryDialog {
                 // Title
                 frame.render_widget(
                     Paragraph::new(Line::from(vec![Span::styled(
-                        self.title(),
+                        self.title(&ctx.ui_text),
                         Style::default()
                             .fg(palette.accent)
                             .add_modifier(Modifier::BOLD),
@@ -360,7 +364,7 @@ impl Component for WorkspaceBoundaryDialog {
 
                 // Prompt
                 frame.render_widget(
-                    Paragraph::new("Enter a reason for denying (optional):")
+                    Paragraph::new(ctx.ui_text.text(TextKey::WorkspaceReasonPrompt))
                         .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
                     sections[1],
                 );
@@ -378,7 +382,7 @@ impl Component for WorkspaceBoundaryDialog {
 
                 // Help
                 frame.render_widget(
-                    Paragraph::new("Enter confirm · Esc cancel").style(
+                    Paragraph::new(ctx.ui_text.text(TextKey::WorkspaceConfirmFooter)).style(
                         Style::default()
                             .bg(palette.panel_alt)
                             .fg(palette.accent_soft),
@@ -400,7 +404,7 @@ impl Component for WorkspaceBoundaryDialog {
                 // Title
                 frame.render_widget(
                     Paragraph::new(Line::from(vec![Span::styled(
-                        self.title(),
+                        self.title(&ctx.ui_text),
                         Style::default()
                             .fg(palette.accent)
                             .add_modifier(Modifier::BOLD),
@@ -411,15 +415,18 @@ impl Component for WorkspaceBoundaryDialog {
 
                 // Confirmation message
                 let action_text = if *action == BoundaryDecision::AllowUntilExit {
-                    "allow"
+                    ctx.ui_text.text(TextKey::WorkspaceAllow)
                 } else {
-                    "deny"
+                    ctx.ui_text.text(TextKey::WorkspaceDeny)
                 };
+                let confirmation = ctx.ui_text.text_with_value(
+                    TextKey::WorkspaceConfirmTitle,
+                    "action",
+                    &action_text,
+                );
                 frame.render_widget(
-                    Paragraph::new(format!(
-                        "Are you sure you want to {action_text} this path until exit?"
-                    ))
-                    .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
+                    Paragraph::new(confirmation)
+                        .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
                     sections[1],
                 );
 
@@ -455,12 +462,20 @@ impl Component for WorkspaceBoundaryDialog {
                     Style::default().fg(palette.text).bg(palette.panel_alt)
                 };
 
-                frame.render_widget(Paragraph::new(" Confirm ").style(confirm_style), buttons[0]);
-                frame.render_widget(Paragraph::new(" Cancel ").style(cancel_style), buttons[1]);
+                frame.render_widget(
+                    Paragraph::new(format!(" {} ", ctx.ui_text.text(TextKey::ConfirmButton)))
+                        .style(confirm_style),
+                    buttons[0],
+                );
+                frame.render_widget(
+                    Paragraph::new(format!(" {} ", ctx.ui_text.text(TextKey::CancelButton)))
+                        .style(cancel_style),
+                    buttons[1],
+                );
 
                 // Help
                 frame.render_widget(
-                    Paragraph::new("← → switch · Enter confirm · Esc cancel").style(
+                    Paragraph::new(ctx.ui_text.text(TextKey::NavigationConfirm)).style(
                         Style::default()
                             .bg(palette.panel_alt)
                             .fg(palette.accent)

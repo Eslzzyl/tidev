@@ -6,6 +6,7 @@ use crate::component::Component;
 use crate::components::chat::render::{display_text_with_image_badges, wrap_text_lines};
 use crate::components::selection::copy_to_clipboard;
 use crate::context::DrawContext;
+use crate::i18n::{TextKey, UiText, mode_title};
 use ratatui::layout::{Alignment, Constraint, Layout, Margin, Rect};
 use ratatui::prelude::{Color, Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -126,6 +127,7 @@ fn toast_layout(anchor: Rect, message: &str) -> Option<ToastLayout> {
 
 impl App {
     pub(crate) fn footer_status_text(&self) -> String {
+        let ui_text = UiText::from_preference(&self.runtime.config().ui.locale);
         let queued_count = self.pending_inputs.iter().filter(|p| !p.steered).count();
         let steered_count = self.pending_inputs.len() - queued_count;
 
@@ -135,7 +137,7 @@ impl App {
                 .abort_confirmation_deadline
                 .is_some_and(|deadline| deadline > Instant::now())
         {
-            return "Esc again to stop".to_string();
+            return ui_text.text(TextKey::StopAgain);
         }
 
         // 2. Token usage helper
@@ -176,28 +178,54 @@ impl App {
                         .is_some_and(|ml| ml.is_subagent_running(sid))
                 });
                 if subagent_running {
-                    format!("{spinner} Thinking...")
+                    ui_text.text_with_value(TextKey::StatusSubsessionThinking, "spinner", spinner)
                 } else {
-                    "Subsession active · Up: parent  Left/Right: switch subagent".to_string()
+                    format!(
+                        "{} · {}: {}  {}/{}: {}",
+                        ui_text.text(TextKey::Active),
+                        ui_text.text(TextKey::Up),
+                        ui_text.text(TextKey::ReturnToParent),
+                        ui_text.text(TextKey::Left),
+                        ui_text.text(TextKey::Right),
+                        ui_text.text(TextKey::SwitchSubagent),
+                    )
                 }
             } else if let Some(ref ml) = self.message_list {
                 let sub_count = ml.running_subagents_count();
                 if sub_count > 0 {
-                    let label = if sub_count == 1 {
-                        "subagent"
-                    } else {
-                        "subagents"
-                    };
-                    format!("{spinner} Waiting for {sub_count} {label}")
+                    ui_text.text_with_values(
+                        TextKey::StatusWaitingSubagents,
+                        &[
+                            ("spinner", spinner),
+                            ("waiting", &ui_text.text(TextKey::Waiting)),
+                            ("count", &sub_count.to_string()),
+                            ("label", &ui_text.text(TextKey::Subagents)),
+                        ],
+                    )
                 } else if ml.running_tools_count() > 0 {
                     let counts = ml.running_tool_counts();
                     let total = ml.running_tools_count();
                     if counts.len() == 1 {
                         let (name, n) = &counts[0];
                         if *n == 1 {
-                            format!("{spinner} Running {name}")
+                            ui_text.text_with_values(
+                                TextKey::StatusRunningTool,
+                                &[
+                                    ("spinner", spinner),
+                                    ("running", &ui_text.text(TextKey::Running)),
+                                    ("name", name),
+                                ],
+                            )
                         } else {
-                            format!("{spinner} Running {n}× {name}")
+                            ui_text.text_with_values(
+                                TextKey::StatusRunningToolCount,
+                                &[
+                                    ("spinner", spinner),
+                                    ("running", &ui_text.text(TextKey::Running)),
+                                    ("count", &n.to_string()),
+                                    ("name", name),
+                                ],
+                            )
                         }
                     } else {
                         let items: Vec<String> = counts
@@ -210,40 +238,65 @@ impl App {
                                 }
                             })
                             .collect();
-                        format!("{spinner} Running {} tools ({})", total, items.join(", "))
+                        ui_text.text_with_values(
+                            TextKey::StatusRunningToolsMany,
+                            &[
+                                ("spinner", spinner),
+                                ("running", &ui_text.text(TextKey::Running)),
+                                ("count", &total.to_string()),
+                                ("tools", &ui_text.text(TextKey::Tools)),
+                                ("items", &items.join(", ")),
+                            ],
+                        )
                     }
                 } else if ml.is_streaming() {
                     let pending_mode = self
                         .current_session_id
                         .and_then(|sid| self.pending_modes.get(&sid));
                     match pending_mode {
-                        Some(pending) => {
-                            format!(
-                                "{spinner} {} → {} (on completion)",
-                                self.mode.title(),
-                                pending.title()
-                            )
-                        }
-                        None => format!("{spinner} {}", self.mode.title()),
+                        Some(pending) => ui_text.text_with_values(
+                            TextKey::StatusPendingMode,
+                            &[
+                                ("spinner", spinner),
+                                ("current", &mode_title(&ui_text, self.mode)),
+                                ("pending", &mode_title(&ui_text, *pending)),
+                                ("completion", &ui_text.text(TextKey::OnCompletion)),
+                            ],
+                        ),
+                        None => ui_text.text_with_values(
+                            TextKey::StatusStreamingMode,
+                            &[
+                                ("spinner", spinner),
+                                ("mode", &mode_title(&ui_text, self.mode)),
+                            ],
+                        ),
                     }
                 } else if self
                     .current_session_id
                     .is_some_and(|sid| self.pending_approvals.contains_key(&sid))
                 {
-                    format!("{spinner} Running tools")
+                    ui_text.text_with_values(
+                        TextKey::StatusPendingApprovals,
+                        &[
+                            ("spinner", spinner),
+                            ("status", &ui_text.text(TextKey::RunningTools)),
+                        ],
+                    )
                 } else {
                     let pending_mode = self
                         .current_session_id
                         .and_then(|sid| self.pending_modes.get(&sid));
                     match pending_mode {
-                        Some(pending) => {
-                            format!(
-                                "{spinner} {} → {} (on completion)",
-                                self.mode.title(),
-                                pending.title()
-                            )
-                        }
-                        None => format!("{spinner} {}", self.mode.title()),
+                        Some(pending) => ui_text.text_with_values(
+                            TextKey::StatusPendingMode,
+                            &[
+                                ("spinner", spinner),
+                                ("current", &mode_title(&ui_text, self.mode)),
+                                ("pending", &mode_title(&ui_text, *pending)),
+                                ("completion", &ui_text.text(TextKey::OnCompletion)),
+                            ],
+                        ),
+                        None => format!("{spinner} {}", mode_title(&ui_text, self.mode)),
                     }
                 }
             } else {
@@ -253,12 +306,13 @@ impl App {
                 match pending_mode {
                     Some(pending) => {
                         format!(
-                            "{spinner} {} → {} (on completion)",
-                            self.mode.title(),
-                            pending.title()
+                            "{spinner} {} → {} ({})",
+                            mode_title(&ui_text, self.mode),
+                            mode_title(&ui_text, *pending),
+                            ui_text.text(TextKey::OnCompletion)
                         )
                     }
-                    None => format!("{spinner} {}", self.mode.title()),
+                    None => format!("{spinner} {}", mode_title(&ui_text, self.mode)),
                 }
             };
 
@@ -267,15 +321,32 @@ impl App {
                 .is_some_and(|sid| self.pending_compacts.contains(&sid));
             let extra = match (queued_count, steered_count, is_pending_compact) {
                 (0, 0, false) => String::new(),
-                (1, 0, false) => " · queued 1".to_string(),
-                (q, 0, false) => format!(" · queued {q}"),
-                (0, 1, false) => " · steer 1".to_string(),
-                (0, s, false) => format!(" · steer {s}"),
-                (q, s, false) => format!(" · queued {q} · steer {s}"),
-                (0, 0, true) => " · compact pending".to_string(),
-                (q, 0, true) => format!(" · queued {q} · compact pending"),
-                (0, s, true) => format!(" · steer {s} · compact pending"),
-                (q, s, true) => format!(" · queued {q} · steer {s} · compact pending"),
+                (1, 0, false) => format!(" · {} 1", ui_text.text(TextKey::Queued)),
+                (q, 0, false) => format!(" · {} {q}", ui_text.text(TextKey::Queued)),
+                (0, 1, false) => format!(" · {} 1", ui_text.text(TextKey::Steered)),
+                (0, s, false) => format!(" · {} {s}", ui_text.text(TextKey::Steered)),
+                (q, s, false) => format!(
+                    " · {} {q} · {} {s}",
+                    ui_text.text(TextKey::Queued),
+                    ui_text.text(TextKey::Steered)
+                ),
+                (0, 0, true) => format!(" · {}", ui_text.text(TextKey::CompactPending)),
+                (q, 0, true) => format!(
+                    " · {} {q} · {}",
+                    ui_text.text(TextKey::Queued),
+                    ui_text.text(TextKey::CompactPending)
+                ),
+                (0, s, true) => format!(
+                    " · {} {s} · {}",
+                    ui_text.text(TextKey::Steered),
+                    ui_text.text(TextKey::CompactPending)
+                ),
+                (q, s, true) => format!(
+                    " · {} {q} · {} {s} · {}",
+                    ui_text.text(TextKey::Queued),
+                    ui_text.text(TextKey::Steered),
+                    ui_text.text(TextKey::CompactPending)
+                ),
             };
             let status = format!("{status}{extra}");
 
@@ -288,7 +359,7 @@ impl App {
         // 3b. Compacting in progress — show spinner + status
         if self.is_compacting() {
             let spinner = self.loading_spinner();
-            let status = format!("{spinner} Compacting...");
+            let status = format!("{spinner} {}", ui_text.text(TextKey::Compacting));
             if let Some(ref t) = token_status {
                 return format!("{status} · {t}");
             }
@@ -306,23 +377,26 @@ impl App {
                 .current_session_id
                 .is_some_and(|sid| self.pending_compacts.contains(&sid));
             let compact_part = if is_pending_compact {
-                " · compact pending"
+                format!(" · {}", ui_text.text(TextKey::CompactPending))
             } else {
-                ""
+                String::new()
             };
             let mut parts: Vec<String> = Vec::new();
             if queued_count > 0 {
                 parts.push(if queued_count == 1 {
-                    "1 queued message".to_string()
+                    format!("1 {}", ui_text.text(TextKey::QueuedMessage))
                 } else {
-                    format!("{queued_count} queued messages")
+                    format!("{queued_count} {}", ui_text.text(TextKey::QueuedMessages))
                 });
             }
             if steered_count > 0 {
                 parts.push(if steered_count == 1 {
-                    "1 steering message".to_string()
+                    format!("1 {}", ui_text.text(TextKey::SteeringMessage))
                 } else {
-                    format!("{steered_count} steering messages")
+                    format!(
+                        "{steered_count} {}",
+                        ui_text.text(TextKey::SteeringMessages)
+                    )
                 });
             }
             let status = format!("{}{compact_part}", parts.join(" · "));
@@ -352,15 +426,24 @@ impl App {
             .and_then(|ctx| ctx.parent_session_id)
             .is_some();
         if is_subsession {
-            return "Subsession active · Up: parent  Left/Right: switch subagent".to_string();
+            return format!(
+                "{} · {}: {}  {}/{}: {}",
+                ui_text.text(TextKey::Active),
+                ui_text.text(TextKey::Up),
+                ui_text.text(TextKey::ReturnToParent),
+                ui_text.text(TextKey::Left),
+                ui_text.text(TextKey::Right),
+                ui_text.text(TextKey::SwitchSubagent),
+            );
         }
 
         // 8. Ready
-        "Ready".to_string()
+        ui_text.text(TextKey::Ready)
     }
 
     /// Return formatted MCP status line and its display width, if any MCP servers are configured.
     pub(crate) fn mcp_status_line(&self) -> Option<(Line<'static>, usize)> {
+        let ui_text = UiText::from_preference(&self.runtime.config().ui.locale);
         let summaries = self.runtime.mcp_manager().summaries();
         if summaries.is_empty() {
             return None;
@@ -389,9 +472,17 @@ impl App {
         if connecting_count > 0 {
             let spinner = self.loading_spinner();
             let label = if total == 1 {
-                format!("{spinner} MCP: Connecting...")
+                format!(
+                    "{spinner} {}: {}...",
+                    ui_text.text(TextKey::Mcp),
+                    ui_text.text(TextKey::Connecting)
+                )
             } else {
-                format!("{spinner} MCP: Connecting ({connecting_count}/{total})...")
+                format!(
+                    "{spinner} {}: {} ({connecting_count}/{total})...",
+                    ui_text.text(TextKey::Mcp),
+                    ui_text.text(TextKey::Connecting)
+                )
             };
             let width = label.width();
             return Some((
@@ -404,14 +495,18 @@ impl App {
         }
 
         if failed_count > 0 {
-            let failed_text = format!("MCP: {failed_count} failed");
+            let failed_text = format!(
+                "{}: {failed_count} {}",
+                ui_text.text(TextKey::Mcp),
+                ui_text.text(TextKey::Failed)
+            );
             let mut width = 2 + failed_text.width();
             let mut spans = vec![
                 Span::styled("✕ ", Style::default().fg(Color::Red)),
                 Span::styled(failed_text, Style::default().fg(Color::Red)),
             ];
             if connected_count > 0 {
-                let online_text = format!(" · {connected_count} online");
+                let online_text = format!(" · {connected_count} {}", ui_text.text(TextKey::Online));
                 width += online_text.width();
                 spans.push(Span::styled(
                     online_text,
@@ -422,8 +517,12 @@ impl App {
         }
 
         if connected_count > 0 {
-            let tool_label = if tool_count == 1 { "tool" } else { "tools" };
-            let text = format!("MCP: {connected_count} active ({tool_count} {tool_label})");
+            let text = format!(
+                "{}: {connected_count} {} ({tool_count} {})",
+                ui_text.text(TextKey::Mcp),
+                ui_text.text(TextKey::Active),
+                ui_text.text(TextKey::Tools)
+            );
             let width = 2 + text.width();
             return Some((
                 Line::from(vec![
@@ -435,7 +534,11 @@ impl App {
         }
 
         // All disconnected
-        let text = format!("MCP: {total} offline");
+        let text = format!(
+            "{}: {total} {}",
+            ui_text.text(TextKey::Mcp),
+            ui_text.text(TextKey::Offline)
+        );
         let width = 2 + text.width();
         Some((
             Line::from(vec![
@@ -448,6 +551,7 @@ impl App {
 
     pub fn draw(&mut self, frame: &mut Frame) {
         let palette = self.current_palette;
+        let ui_text = self.ui_text();
         let area = frame.area();
         self.terminal_area = area;
         self.cursor_rendered = false;
@@ -471,6 +575,7 @@ impl App {
             // Draw overlays on top of welcome content.
             let draw_ctx = DrawContext {
                 palette,
+                ui_text: crate::i18n::UiText::from_preference(&self.runtime.config().ui.locale),
                 focused: true,
                 mode: self.mode,
                 pending_mode: self
@@ -547,8 +652,11 @@ impl App {
                 for (i, q) in self.pending_inputs.iter().take(visible).enumerate() {
                     // +1 for mode header line
                     let display_text = crate::utils::strip_system_reminder_tags(&q.message.content);
-                    let display_text =
-                        display_text_with_image_badges(&display_text, &q.message.attachments);
+                    let display_text = display_text_with_image_badges(
+                        &display_text,
+                        &q.message.attachments,
+                        &ui_text,
+                    );
                     let wrapped =
                         wrap_text_lines(&display_text, text_width, MAX_QUEUED_PROMPT_LINES);
                     inner += 1 + wrapped.len();
@@ -594,6 +702,7 @@ impl App {
         if let Some(ref mut chat) = self.message_list {
             let draw_ctx = DrawContext {
                 palette,
+                ui_text: crate::i18n::UiText::from_preference(&self.runtime.config().ui.locale),
                 focused: self.overlays.is_empty(),
                 mode: self.mode,
                 pending_mode: self
@@ -630,14 +739,10 @@ impl App {
                 Block::default().style(Style::default().bg(palette.panel)),
                 bg_rect,
             );
-            let hint = Line::from(vec![
-                Span::styled("Up", Style::default().fg(palette.accent_soft)),
-                Span::styled(": return to parent  ", Style::default().fg(palette.muted)),
-                Span::styled("Left", Style::default().fg(palette.accent_soft)),
-                Span::styled("/", Style::default().fg(palette.muted)),
-                Span::styled("Right", Style::default().fg(palette.accent_soft)),
-                Span::styled(": switch subagent", Style::default().fg(palette.muted)),
-            ]);
+            let hint = Line::from(Span::styled(
+                ui_text.text(TextKey::FooterSubagentNavigation),
+                Style::default().fg(palette.muted),
+            ));
             let y_offset = bg_rect.height.saturating_sub(1) / 2;
             let content_rect = Rect {
                 x: bg_rect.x,
@@ -655,10 +760,15 @@ impl App {
             if composer.has_popup() {
                 composer.sync_autocomplete();
             }
+            composer.set_placeholder(
+                UiText::from_preference(&self.runtime.config().ui.locale)
+                    .text(TextKey::WelcomeInputPlaceholder),
+            );
             self.cursor_rendered = self.overlays.is_empty();
             let active_model = self.runtime.active_model();
             let draw_ctx = DrawContext {
                 palette,
+                ui_text: crate::i18n::UiText::from_preference(&self.runtime.config().ui.locale),
                 focused: self.overlays.is_empty(),
                 mode: self.mode,
                 pending_mode: self
@@ -679,6 +789,7 @@ impl App {
         // Build DrawContext for overlays
         let draw_ctx = DrawContext {
             palette,
+            ui_text: crate::i18n::UiText::from_preference(&self.runtime.config().ui.locale),
             focused: true,
             mode: self.mode,
             pending_mode: self
@@ -703,6 +814,7 @@ impl App {
             self.sidebar.draw(
                 frame,
                 sidebar_area,
+                &draw_ctx,
                 palette,
                 self.runtime.workspace_root(),
                 chat_ctx,
@@ -780,14 +892,18 @@ impl App {
                 Ok(()) => {
                     self.mouse_selection.clear();
                     self.set_toast(
-                        "Selection copied to clipboard",
+                        self.ui_text().text(TextKey::SelectionCopied),
                         std::time::Duration::from_secs(3),
                     );
                 }
                 Err(e) => {
                     self.mouse_selection.clear();
                     self.set_toast(
-                        format!("Copy failed: {e}"),
+                        self.ui_text().text_with_value(
+                            TextKey::CopyFailed,
+                            "error",
+                            &e.to_string(),
+                        ),
                         std::time::Duration::from_secs(5),
                     );
                 }
@@ -801,13 +917,17 @@ impl App {
             match copy_to_clipboard(&text) {
                 Ok(()) => {
                     self.set_toast(
-                        "Selection copied to clipboard",
+                        self.ui_text().text(TextKey::SelectionCopied),
                         std::time::Duration::from_secs(3),
                     );
                 }
                 Err(e) => {
                     self.set_toast(
-                        format!("Copy failed: {e}"),
+                        self.ui_text().text_with_value(
+                            TextKey::CopyFailed,
+                            "error",
+                            &e.to_string(),
+                        ),
                         std::time::Duration::from_secs(5),
                     );
                 }
@@ -858,6 +978,7 @@ impl App {
     /// Render the welcome screen with logo, subtitle, and composer.
     fn draw_welcome(&mut self, frame: &mut Frame) {
         let palette = self.current_palette;
+        let ui_text = UiText::from_preference(&self.runtime.config().ui.locale);
         let area = frame.area();
 
         // Centered card — exact match to old TUI's render_welcome
@@ -918,7 +1039,7 @@ impl App {
         frame.render_widget(ascii_art, sections[0]);
 
         // Subtitle
-        let subtitle = Paragraph::new("Terminal AI assistant for focused coding work")
+        let subtitle = Paragraph::new(ui_text.text(TextKey::WelcomeSubtitle))
             .alignment(Alignment::Center)
             .style(Style::default().fg(palette.muted));
         frame.render_widget(subtitle, sections[1]);
@@ -928,9 +1049,11 @@ impl App {
             if composer.has_popup() {
                 composer.sync_autocomplete();
             }
+            composer.set_placeholder(ui_text.text(TextKey::WelcomeInputPlaceholder));
             let active_model = self.runtime.active_model();
             let draw_ctx = DrawContext {
                 palette,
+                ui_text: crate::i18n::UiText::from_preference(&self.runtime.config().ui.locale),
                 focused: self.overlays.is_empty(),
                 mode: self.mode,
                 pending_mode: self
@@ -1009,13 +1132,14 @@ impl App {
     /// Each card is independently hover-highlighted.
     fn render_queued_prompts(&mut self, frame: &mut Frame<'_>, area: Rect) {
         let palette = &self.current_palette;
+        let ui_text = UiText::from_preference(&self.runtime.config().ui.locale);
         let count = self.pending_inputs.len();
         let visible = count.min(MAX_VISIBLE_QUEUED_PROMPTS);
 
         // Build title: " PENDING " badge with background color + count
         let title = Line::from(vec![
             Span::styled(
-                " PENDING ",
+                format!(" {} ", ui_text.text(TextKey::Pending)),
                 Style::default()
                     .bg(palette.selection_bg)
                     .fg(palette.selection_fg)
@@ -1058,8 +1182,11 @@ impl App {
 
             // Strip system-reminder tags from steering messages for display.
             let display_text = crate::utils::strip_system_reminder_tags(&pending.message.content);
-            let display_text =
-                display_text_with_image_badges(&display_text, &pending.message.attachments);
+            let display_text = display_text_with_image_badges(
+                &display_text,
+                &pending.message.attachments,
+                &ui_text,
+            );
             // Word-wrap the prompt into up to MAX_QUEUED_PROMPT_LINES lines
             let wrapped_lines = wrap_text_lines(&display_text, width, MAX_QUEUED_PROMPT_LINES);
             // +1 for mode header line
@@ -1094,7 +1221,11 @@ impl App {
             }
 
             // ── Mode header: delivery type + mode ─────────────────────
-            let delivery_label = if pending.steered { "STEER" } else { "QUEUE" };
+            let delivery_label = if pending.steered {
+                ui_text.text(TextKey::Steered)
+            } else {
+                ui_text.text(TextKey::Queued)
+            };
             let mode_color = palette.border_mode_color(pending.mode);
             let header_line = Line::from(vec![
                 Span::styled(
@@ -1108,7 +1239,7 @@ impl App {
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
-                    pending.mode.title(),
+                    crate::i18n::mode_title(&ui_text, pending.mode),
                     Style::default().fg(mode_color).add_modifier(Modifier::BOLD),
                 ),
             ]);
@@ -1165,7 +1296,8 @@ impl App {
 
         // Overflow indicator
         if count > MAX_VISIBLE_QUEUED_PROMPTS && (y_offset as usize) < inner_height {
-            let more_text = format!("+{} more...", count - MAX_VISIBLE_QUEUED_PROMPTS);
+            let more_text =
+                ui_text.text_with_count(TextKey::MorePrompts, count - MAX_VISIBLE_QUEUED_PROMPTS);
             frame.render_widget(
                 Paragraph::new(Line::from(Span::styled(
                     more_text,

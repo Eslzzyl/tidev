@@ -12,6 +12,7 @@ pub(crate) mod context;
 pub(crate) mod diff_render;
 pub(crate) mod editor;
 pub(crate) mod hyperlink;
+pub(crate) mod i18n;
 mod markdown;
 pub(crate) mod theme;
 pub mod tui;

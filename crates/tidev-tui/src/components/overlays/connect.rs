@@ -11,6 +11,7 @@ use tidev_config::provider::ProviderSource;
 use crate::action::{Action, ConnectAction, OverlayAction, OverlayKind};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
+use crate::i18n::{TextKey, UiText};
 use crate::utils::{centered_rect, paste_from_clipboard, single_line_input_cursor};
 
 /// Phase of the connect dialog.
@@ -129,11 +130,13 @@ impl ConnectDialog {
             .nth(idx)
     }
 
-    fn title(&self) -> &str {
+    fn title(&self, ui_text: &UiText) -> String {
         match self.phase {
-            ConnectPhase::ProviderPicker => " Connect to provider ",
-            ConnectPhase::ApiKey { .. } => " API Key ",
-            ConnectPhase::DisconnectConfirm { .. } => " Disconnect Provider ",
+            ConnectPhase::ProviderPicker => format!(" {} ", ui_text.text(TextKey::ConnectProvider)),
+            ConnectPhase::ApiKey { .. } => format!(" {} ", ui_text.text(TextKey::ApiKey)),
+            ConnectPhase::DisconnectConfirm { .. } => {
+                format!(" {} ", ui_text.text(TextKey::DisconnectProvider))
+            }
         }
     }
 
@@ -145,10 +148,10 @@ impl ConnectDialog {
         };
     }
 
-    fn provider_source_label(source: &ProviderSource) -> &'static str {
+    fn provider_source_label(source: &ProviderSource, ui_text: &UiText) -> String {
         match source {
-            ProviderSource::User => "custom",
-            ProviderSource::Bundled => "preset",
+            ProviderSource::User => ui_text.text(TextKey::Custom),
+            ProviderSource::Bundled => ui_text.text(TextKey::Preset),
         }
     }
 }
@@ -385,6 +388,7 @@ impl Component for ConnectDialog {
 
     fn draw(&mut self, frame: &mut Frame, rect: Rect, ctx: &DrawContext) {
         let palette = ctx.palette;
+        let ui_text = &ctx.ui_text;
         let (overlay_width, overlay_height) = match &self.phase {
             ConnectPhase::ProviderPicker => (rect.width.min(92), rect.height.min(28)),
             ConnectPhase::ApiKey { .. } => (rect.width.min(80), rect.height.min(24)),
@@ -404,7 +408,7 @@ impl Component for ConnectDialog {
         // Title
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
-                self.title(),
+                self.title(ui_text),
                 Style::default()
                     .fg(palette.accent)
                     .add_modifier(Modifier::BOLD),
@@ -433,9 +437,9 @@ impl Component for ConnectDialog {
                 // Search input
                 let (visible_query, cursor) = single_line_input_cursor(sections[0], 2, &self.query);
                 let search_display = if self.query.is_empty() {
-                    "Search providers by id or display name... (press / to search)"
+                    ui_text.text(TextKey::SearchProvidersPlaceholder)
                 } else {
-                    visible_query
+                    visible_query.to_string()
                 };
                 frame.render_widget(
                     Paragraph::new(Line::from(vec![
@@ -460,10 +464,9 @@ impl Component for ConnectDialog {
 
                 // Hint
                 frame.render_widget(
-                    Paragraph::new(format!(
-                        "{} provider(s) available · p to prune orphan auth entries",
-                        self.visible_count(),
-                    ))
+                    Paragraph::new(
+                        ui_text.text_with_count(TextKey::ProvidersAvailable, self.visible_count()),
+                    )
                     .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                     sections[1],
                 );
@@ -499,7 +502,7 @@ impl Component for ConnectDialog {
                         palette.text
                     };
 
-                    let source_label = Self::provider_source_label(&item.source);
+                    let source_label = Self::provider_source_label(&item.source, ui_text);
                     let prefix = if is_selected { "▶ " } else { "  " };
                     let status_style = if item.connected {
                         Style::default().fg(palette.success).bg(bg)
@@ -507,9 +510,9 @@ impl Component for ConnectDialog {
                         Style::default().fg(palette.muted).bg(bg)
                     };
                     let connection_label = if let Some(preview) = item.key_preview.as_deref() {
-                        format!("connected [{preview}]")
+                        ui_text.text_with_value(TextKey::ConnectedPreview, "preview", preview)
                     } else {
-                        "not connected".to_string()
+                        ui_text.text(TextKey::NotConnected)
                     };
                     let line = Line::from(vec![
                         Span::styled(
@@ -547,11 +550,13 @@ impl Component for ConnectDialog {
 
                 // Help footer
                 frame.render_widget(
-                    Paragraph::new(if self.provider_picker_focus == ProviderPickerFocus::Search {
-                        "Type to filter · Enter list · Esc back"
-                    } else {
-                        "↑↓ select · Enter configure · c copy key · d disconnect · p prune · / search · Esc close"
-                    })
+                    Paragraph::new(
+                        if self.provider_picker_focus == ProviderPickerFocus::Search {
+                            ui_text.text(TextKey::ConnectPickerSearchFooter)
+                        } else {
+                            ui_text.text(TextKey::ConnectPickerFooter)
+                        },
+                    )
                     .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                     sections[3],
                 );
@@ -572,7 +577,7 @@ impl Component for ConnectDialog {
                 // Provider label
                 frame.render_widget(
                     Paragraph::new(Line::from(vec![Span::styled(
-                        format!("Enter API key for {}", display_name),
+                        ui_text.text_with_value(TextKey::EnterApiKey, "name", display_name),
                         Style::default().fg(palette.text),
                     )]))
                     .style(Style::default().bg(palette.panel_alt)),
@@ -581,23 +586,24 @@ impl Component for ConnectDialog {
 
                 // Security notice
                 frame.render_widget(
-                    Paragraph::new(
-                        "The key will be stored in auth.json and used for future requests.",
-                    )
-                    .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
+                    Paragraph::new(ui_text.text(TextKey::ApiStoredNotice))
+                        .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                     sections[1],
                 );
 
                 // Key input
                 let (visible_key, cursor) = single_line_input_cursor(sections[2], 5, buffer);
                 let display = if buffer.is_empty() {
-                    "Paste or type your API key..."
+                    ui_text.text(TextKey::PasteApiKey)
                 } else {
-                    visible_key
+                    visible_key.to_string()
                 };
                 frame.render_widget(
                     Paragraph::new(Line::from(vec![
-                        Span::styled("Key: ", Style::default().fg(palette.accent)),
+                        Span::styled(
+                            format!("{}: ", ui_text.text(TextKey::Key)),
+                            Style::default().fg(palette.accent),
+                        ),
                         Span::styled(display, Style::default().fg(palette.text)),
                     ]))
                     .style(Style::default().bg(palette.panel_alt))
@@ -608,7 +614,7 @@ impl Component for ConnectDialog {
 
                 // Help
                 frame.render_widget(
-                    Paragraph::new("Enter save · Esc back · type to enter key")
+                    Paragraph::new(ui_text.text(TextKey::ApiKeyFooter))
                         .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                     sections[3],
                 );
@@ -626,15 +632,19 @@ impl Component for ConnectDialog {
 
                 // Confirmation message
                 frame.render_widget(
-                    Paragraph::new(format!("Disconnect from {}?", display_name,))
-                        .alignment(Alignment::Center)
-                        .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
+                    Paragraph::new(ui_text.text_with_value(
+                        TextKey::DisconnectFrom,
+                        "name",
+                        display_name,
+                    ))
+                    .alignment(Alignment::Center)
+                    .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
                     sections[0],
                 );
 
                 // Hint
                 frame.render_widget(
-                    Paragraph::new("Enter: confirm · Esc: cancel")
+                    Paragraph::new(ui_text.text(TextKey::ConfirmCancel))
                         .alignment(Alignment::Center)
                         .style(
                             Style::default()

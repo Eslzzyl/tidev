@@ -1,3 +1,4 @@
+use crate::i18n::{TextKey, UiText};
 use crate::theme::ThemePalette;
 use ratatui::prelude::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -31,6 +32,7 @@ pub(crate) fn render_running_subagent_lines(
     info: &RunningSubagentInfo,
     content_width: usize,
     palette: ThemePalette,
+    ui_text: &UiText,
 ) -> Vec<HyperlinkLine> {
     let mut lines = Vec::new();
 
@@ -41,10 +43,16 @@ pub(crate) fn render_running_subagent_lines(
     let description = info.description.trim();
     let header_line = Line::from(vec![
         Span::styled(
-            format!("@{}", info.subagent_type),
+            format!(
+                "@{}",
+                crate::i18n::agent_type_name_from_str(ui_text, &info.subagent_type)
+            ),
             Style::default().fg(palette.accent_soft),
         ),
-        Span::styled(" subagent: ", Style::default().fg(palette.muted)),
+        Span::styled(
+            ui_text.text(TextKey::SubagentLabel),
+            Style::default().fg(palette.muted),
+        ),
         Span::styled(
             description.to_string(),
             Style::default()
@@ -88,14 +96,16 @@ pub(crate) fn render_running_subagent_lines(
 pub(crate) fn count_running_subagent_card_lines(
     info: &RunningSubagentInfo,
     content_width: usize,
+    ui_text: &UiText,
 ) -> usize {
     let mut count = 0;
     // Top padding
     count += 1;
     // Header line (word-wrapped)
     let header_text = format!(
-        "@{} subagent: {}",
-        info.subagent_type,
+        "@{}{}{}",
+        crate::i18n::agent_type_name_from_str(ui_text, &info.subagent_type),
+        ui_text.text(TextKey::SubagentLabel),
         info.description.trim()
     );
     count += adaptive_wrap_line(

@@ -13,6 +13,7 @@ use ratatui::widgets::{Block, Clear, List, ListItem, ListState, Paragraph};
 use crate::action::{Action, OverlayAction, OverlayKind, PanelAction};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
+use crate::i18n::{TextKey, UiText};
 use crate::utils::{centered_rect, single_line_input_cursor};
 
 // ---------------------------------------------------------------------------
@@ -20,49 +21,38 @@ use crate::utils::{centered_rect, single_line_input_cursor};
 // ---------------------------------------------------------------------------
 
 struct PanelEntry {
-    description: &'static str,
     action: PanelAction,
 }
 
 static PANEL_ENTRIES: &[PanelEntry] = &[
     PanelEntry {
-        description: "Switch AI model provider",
         action: PanelAction::Model,
     },
     PanelEntry {
-        description: "Manage MCP servers",
         action: PanelAction::McpServers,
     },
     PanelEntry {
-        description: "Manage chat sessions",
         action: PanelAction::Session,
     },
     PanelEntry {
-        description: "Change color theme",
         action: PanelAction::Theme,
     },
     PanelEntry {
-        description: "Configure application settings",
         action: PanelAction::Settings,
     },
     PanelEntry {
-        description: "List available sub-agent types",
         action: PanelAction::Agents,
     },
     PanelEntry {
-        description: "Browse and preview available skills",
         action: PanelAction::Skills,
     },
     PanelEntry {
-        description: "View message details in the current session",
         action: PanelAction::Message,
     },
     PanelEntry {
-        description: "Search web / providers",
         action: PanelAction::Search,
     },
     PanelEntry {
-        description: "View Git history, status, and diffs",
         action: PanelAction::Git,
     },
 ];
@@ -88,7 +78,7 @@ fn fuzzy_score(query: &str, text: &str) -> i32 {
 
 /// Return the description text that will be searched.
 fn entry_search_text(entry: &PanelEntry) -> String {
-    format!("{:?} {}", entry.action, entry.description)
+    format!("{:?}", entry.action)
 }
 
 // ---------------------------------------------------------------------------
@@ -247,7 +237,7 @@ impl Component for PanelLauncher {
         let (visible_query, cursor) =
             single_line_input_cursor(Rect::new(inner.x, inner.y, inner.width, 1), 2, &self.query);
         let search_text = if self.query.is_empty() {
-            "  Type to filter panels...".to_string()
+            format!("  {}", ctx.ui_text.text(TextKey::PanelSearchPlaceholder))
         } else {
             format!("  {visible_query}")
         };
@@ -282,7 +272,12 @@ impl Component for PanelLauncher {
         let items: Vec<ListItem> = self
             .filtered
             .iter()
-            .map(|entry| ListItem::new(Line::from(Span::raw(entry.description))))
+            .map(|entry| {
+                ListItem::new(Line::from(Span::raw(panel_description(
+                    &ctx.ui_text,
+                    entry.action,
+                ))))
+            })
             .collect();
 
         let mut state = ListState::default();
@@ -313,5 +308,20 @@ impl Component for PanelLauncher {
 
     fn wants_terminal_cursor(&self) -> bool {
         self.visible
+    }
+}
+
+fn panel_description(ui_text: &UiText, action: PanelAction) -> String {
+    match action {
+        PanelAction::Model => ui_text.text(TextKey::PanelModelDescription),
+        PanelAction::McpServers => ui_text.text(TextKey::PanelMcpDescription),
+        PanelAction::Session => ui_text.text(TextKey::PanelSessionDescription),
+        PanelAction::Theme => ui_text.text(TextKey::PanelThemeDescription),
+        PanelAction::Settings => ui_text.text(TextKey::PanelSettingsDescription),
+        PanelAction::Agents => ui_text.text(TextKey::PanelAgentsDescription),
+        PanelAction::Skills => ui_text.text(TextKey::PanelSkillsDescription),
+        PanelAction::Message => ui_text.text(TextKey::PanelMessageDescription),
+        PanelAction::Search => ui_text.text(TextKey::PanelSearchDescription),
+        PanelAction::Git => ui_text.text(TextKey::PanelGitDescription),
     }
 }

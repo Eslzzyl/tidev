@@ -1,7 +1,10 @@
 use super::*;
 
 use crate::hyperlink::HyperlinkLine;
-use crate::markdown::markdown_to_hyperlink_lines;
+use crate::i18n::{TextKey, UiText};
+use crate::markdown::{
+    markdown_to_hyperlink_lines, render_markdown_text_with_width_and_cwd_with_ui,
+};
 
 // ---------------------------------------------------------------------------
 // Subagent task preview
@@ -14,12 +17,13 @@ pub(super) fn render_subagent_task_preview(
     is_expanded: bool,
     description: &str,
     subagent_type: &str,
+    ui_text: &UiText,
 ) -> Vec<HyperlinkLine> {
     let mut lines = Vec::new();
 
     if output.trim().is_empty() {
         lines.push(HyperlinkLine::new(Line::from(Span::styled(
-            "(empty result)",
+            ui_text.text(TextKey::EmptyResult),
             Style::default().fg(palette.muted),
         ))));
         return lines;
@@ -31,10 +35,16 @@ pub(super) fn render_subagent_task_preview(
     // Header: [@type] subagent: description
     let header_line = Line::from(vec![
         Span::styled(
-            format!("@{}", subagent_type),
+            format!(
+                "@{}",
+                crate::i18n::agent_type_name_from_str(ui_text, subagent_type)
+            ),
             Style::default().fg(palette.accent_soft),
         ),
-        Span::styled(" subagent: ", Style::default().fg(palette.muted)),
+        Span::styled(
+            ui_text.text(TextKey::SubagentLabel),
+            Style::default().fg(palette.muted),
+        ),
         Span::styled(
             description.to_string(),
             Style::default()
@@ -60,7 +70,8 @@ pub(super) fn render_subagent_task_preview(
     lines.push(HyperlinkLine::new(Line::from("")));
 
     // Render output as markdown
-    let rendered = render_markdown_text_with_width_and_cwd(output, Some(content_width), None);
+    let rendered =
+        render_markdown_text_with_width_and_cwd_with_ui(output, Some(content_width), None, ui_text);
     let md_lines: Vec<HyperlinkLine> = markdown_to_hyperlink_lines(&rendered);
 
     if is_expanded {
@@ -73,7 +84,11 @@ pub(super) fn render_subagent_task_preview(
         } else {
             lines.extend(md_lines.into_iter().take(max_preview));
             lines.push(HyperlinkLine::new(Line::from(vec![Span::styled(
-                format!("   {} more line(s)", line_count - max_preview),
+                ui_text.text_with_value(
+                    TextKey::MoreLines,
+                    "count",
+                    &(line_count - max_preview).to_string(),
+                ),
                 Style::default().fg(palette.muted),
             )])));
         }

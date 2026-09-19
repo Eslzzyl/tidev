@@ -13,6 +13,7 @@ use tidev_tools::types::QuestionInfo;
 use crate::action::{Action, OverlayAction, OverlayKind};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
+use crate::i18n::{TextKey, UiText};
 use crate::utils::{bottom_centered_rect, wrapped_input_tail};
 
 // ---------------------------------------------------------------------------
@@ -63,10 +64,10 @@ impl QuestionDialog {
         self.questions.get(self.current_index)
     }
 
-    fn title(&self) -> String {
+    fn title(&self, ui_text: &UiText) -> String {
         let count = self.total();
         if count == 0 {
-            return "Questions".to_string();
+            return ui_text.text(TextKey::Questions);
         }
         let header = self
             .current_question()
@@ -74,23 +75,28 @@ impl QuestionDialog {
                 let h = q.header.trim();
                 if h.is_empty() { None } else { Some(h) }
             })
-            .unwrap_or("Questions");
-        format!(
-            "Question {} of {} · {}",
-            self.current_index + 1,
-            count,
-            header
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| ui_text.text(TextKey::Questions));
+        let current = (self.current_index + 1).to_string();
+        let total = count.to_string();
+        ui_text.text_with_values(
+            TextKey::QuestionOf,
+            &[
+                ("current", &current),
+                ("total", &total),
+                ("header", &header),
+            ],
         )
     }
 
-    fn body_title(&self) -> String {
+    fn body_title(&self, ui_text: &UiText) -> String {
         self.current_question()
             .and_then(|q| {
                 let qt = q.question.trim();
                 if qt.is_empty() { None } else { Some(qt) }
             })
-            .unwrap_or("Ask a question")
-            .to_string()
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| ui_text.text(TextKey::AskQuestion))
     }
 
     fn current_option_count(&self) -> usize {
@@ -263,9 +269,9 @@ impl QuestionDialog {
         parts.join("\n")
     }
 
-    fn regular_options_lines(&self, width: u16) -> Vec<String> {
+    fn regular_options_lines(&self, width: u16, ui_text: &UiText) -> Vec<String> {
         let Some(question) = self.current_question() else {
-            return vec!["No questions available.".to_string()];
+            return vec![ui_text.text(TextKey::NoQuestionsAvailable)];
         };
 
         let wrap_width = width.max(1) as usize;
@@ -276,30 +282,27 @@ impl QuestionDialog {
                 push_wrapped_line(
                     &mut lines,
                     wrap_width,
-                    "No predefined options were provided. Type a freeform answer below."
-                        .to_string(),
+                    ui_text.text(TextKey::NoPredefinedOptionsFreeform),
                 );
                 return lines;
             }
-            return vec!["No predefined options were provided.".to_string()];
+            return vec![ui_text.text(TextKey::NoPredefinedOptions)];
         }
 
+        let selection_hint = if question.multiple.unwrap_or(false) {
+            ui_text.text(TextKey::SelectOneOrMore)
+        } else {
+            ui_text.text(TextKey::SelectOne)
+        };
+        let input_hint = if question.custom.unwrap_or(true) {
+            ui_text.text(TextKey::TypeOwnAnswerIfNeeded)
+        } else {
+            ui_text.text(TextKey::TypeOptionNumberOrLabel)
+        };
         push_wrapped_line(
             &mut lines,
             wrap_width,
-            format!(
-                "{}{}",
-                if question.multiple.unwrap_or(false) {
-                    "Select one or more options. "
-                } else {
-                    "Select one option. "
-                },
-                if question.custom.unwrap_or(true) {
-                    "Type your own answer if needed."
-                } else {
-                    "Type the option number or label."
-                }
-            ),
+            format!("{selection_hint} {input_hint}"),
         );
 
         for (index, option) in question.options.iter().enumerate() {
@@ -335,7 +338,7 @@ impl QuestionDialog {
         lines
     }
 
-    fn custom_option_lines(&self, width: u16) -> Vec<String> {
+    fn custom_option_lines(&self, width: u16, ui_text: &UiText) -> Vec<String> {
         let Some(question) = self.current_question() else {
             return Vec::new();
         };
@@ -357,10 +360,9 @@ impl QuestionDialog {
             &mut lines,
             wrap_width,
             format!(
-                "{} {}. [{}] Type your own answer",
-                cursor,
+                "{cursor} {}. [{checked}] {}",
                 custom_index + 1,
-                checked
+                ui_text.text(TextKey::TypeOwnAnswer)
             ),
         );
         let custom_input = self.current_custom_input().trim();
@@ -372,14 +374,14 @@ impl QuestionDialog {
         lines
     }
 
-    fn options_lines(&self, width: u16) -> Vec<String> {
-        let mut lines = self.regular_options_lines(width);
-        lines.extend(self.custom_option_lines(width));
+    fn options_lines(&self, width: u16, ui_text: &UiText) -> Vec<String> {
+        let mut lines = self.regular_options_lines(width, ui_text);
+        lines.extend(self.custom_option_lines(width, ui_text));
         lines
     }
 
-    fn body_height(&self, width: u16) -> u16 {
-        let body = self.body_title();
+    fn body_height(&self, width: u16, ui_text: &UiText) -> u16 {
+        let body = self.body_title(ui_text);
         if body.is_empty() {
             return 2;
         }
@@ -551,11 +553,12 @@ impl Component for QuestionDialog {
 
     fn draw(&mut self, frame: &mut Frame, rect: Rect, ctx: &DrawContext) {
         let palette = ctx.palette;
+        let ui_text = &ctx.ui_text;
         // Dynamic height: body + options + custom_input area + padding
         let inner_w = rect.width.saturating_sub(4).max(20);
-        let options_lines = self.options_lines(inner_w);
+        let options_lines = self.options_lines(inner_w, ui_text);
         let options_height = options_lines.len().max(2) as u16;
-        let body_h = self.body_height(inner_w);
+        let body_h = self.body_height(inner_w, ui_text);
         let input_h: u16 = if self.editing_custom { 3 } else { 0 };
         let total_h = body_h
             .saturating_add(options_height)
@@ -592,14 +595,14 @@ impl Component for QuestionDialog {
         };
 
         let footer_text = if self.editing_custom {
-            "Enter save custom answer · Esc cancel · Ctrl+P/Ctrl+N/←/→ previous/next"
+            ui_text.text(TextKey::QuestionFooterEdit)
         } else {
-            "Enter select · Space toggle · Ctrl+P/Ctrl+N/←/→ previous/next · Esc dismiss"
+            ui_text.text(TextKey::QuestionFooterSelect)
         };
 
         // Title
         frame.render_widget(
-            Paragraph::new(self.title())
+            Paragraph::new(self.title(ui_text))
                 .alignment(ratatui::layout::Alignment::Center)
                 .wrap(Wrap { trim: false })
                 .style(
@@ -613,14 +616,14 @@ impl Component for QuestionDialog {
 
         // Body (question text)
         frame.render_widget(
-            Paragraph::new(self.body_title())
+            Paragraph::new(self.body_title(ui_text))
                 .wrap(Wrap { trim: false })
                 .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
             sections[1],
         );
 
         // Options
-        let options_text = self.options_lines(inner_w).join("\n");
+        let options_text = self.options_lines(inner_w, ui_text).join("\n");
         frame.render_widget(
             Paragraph::new(options_text)
                 .style(Style::default().bg(palette.panel_alt).fg(palette.text)),

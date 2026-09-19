@@ -11,6 +11,7 @@ use uuid::Uuid;
 use crate::action::{Action, OverlayAction, OverlayKind, SessionAction};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
+use crate::i18n::TextKey;
 use crate::utils::centered_rect;
 
 pub(crate) struct UndoConfirmDialog {
@@ -27,22 +28,6 @@ impl UndoConfirmDialog {
             message_content,
             confirmed: false,
         }
-    }
-
-    fn title(&self) -> String {
-        "Undo to message".to_string()
-    }
-
-    fn description(&self) -> String {
-        let preview = if self.message_content.len() > 50 {
-            format!("{}...", &self.message_content[..50])
-        } else {
-            self.message_content.clone()
-        };
-        format!(
-            "Revert workspace to this message?\n\"{}\"\n\nThis will undo all changes after this message.",
-            preview
-        )
     }
 }
 
@@ -117,7 +102,7 @@ impl Component for UndoConfirmDialog {
         // Title
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
-                self.title(),
+                ctx.ui_text.text(TextKey::UndoTitle),
                 Style::default()
                     .fg(palette.accent)
                     .add_modifier(Modifier::BOLD),
@@ -128,16 +113,27 @@ impl Component for UndoConfirmDialog {
 
         // Description
         frame.render_widget(
-            Paragraph::new(self.description())
-                .alignment(ratatui::layout::Alignment::Center)
-                .wrap(Wrap { trim: true })
-                .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
+            Paragraph::new({
+                let preview = if self.message_content.len() > 50 {
+                    format!("{}...", &self.message_content[..50])
+                } else {
+                    self.message_content.clone()
+                };
+                ctx.ui_text.text_with_value(
+                    TextKey::UndoDescriptionWithPreview,
+                    "preview",
+                    &preview,
+                )
+            })
+            .alignment(ratatui::layout::Alignment::Center)
+            .wrap(Wrap { trim: true })
+            .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
             sections[2],
         );
 
         // Help text
         frame.render_widget(
-            Paragraph::new("Enter to confirm · Esc or N to cancel")
+            Paragraph::new(ctx.ui_text.text(TextKey::UndoFooter))
                 .alignment(ratatui::layout::Alignment::Center)
                 .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
             sections[3],

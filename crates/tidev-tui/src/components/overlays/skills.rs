@@ -12,8 +12,9 @@ use ratatui::widgets::{Block, Clear, Paragraph};
 use crate::action::{Action, OverlayAction, OverlayKind};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
+use crate::i18n::TextKey;
 use crate::markdown::MarkdownRender;
-use crate::markdown::render_markdown_text_with_width_and_cwd;
+use crate::markdown::render_markdown_text_with_width_and_cwd_with_ui;
 use crate::utils::{centered_rect, render_scrollbar, single_line_input_cursor};
 
 #[derive(Clone, Debug)]
@@ -298,12 +299,16 @@ impl Component for SkillsPanel {
         });
 
         let skills_title = if self.is_empty() {
-            " Skills ".to_string()
+            format!(" {} ", ctx.ui_text.text(TextKey::SkillsTitle))
         } else {
+            let current = (self.selected_index + 1).to_string();
+            let total = self.filtered_count().to_string();
             format!(
-                " Skills · {}/{} ",
-                self.selected_index + 1,
-                self.filtered_count()
+                " {} ",
+                ctx.ui_text.text_with_values(
+                    TextKey::SkillsCount,
+                    &[("current", &current), ("total", &total)],
+                )
             )
         };
 
@@ -329,17 +334,17 @@ impl Component for SkillsPanel {
             let empty_text = vec![
                 Line::from(""),
                 Line::from(Span::styled(
-                    "  No skills discovered",
+                    format!("  {}", ctx.ui_text.text(TextKey::NoSkillsDiscovered)),
                     Style::default().fg(palette.muted),
                 )),
                 Line::from(""),
                 Line::from(Span::styled(
-                    "  Create .opencode/skills/SKILL.md to add skills",
+                    format!("  {}", ctx.ui_text.text(TextKey::SkillsCreateHint)),
                     Style::default().fg(palette.muted),
                 )),
                 Line::from(""),
                 Line::from(Span::styled(
-                    "  Press Esc or q to close",
+                    format!("  {}", ctx.ui_text.text(TextKey::SkillsCloseHint)),
                     Style::default().fg(palette.muted),
                 )),
             ];
@@ -375,11 +380,18 @@ impl Component for SkillsPanel {
         let filter_area = Rect::new(left_area.x, left_area.y, left_area.width, 1);
         let (visible_query, cursor) = single_line_input_cursor(filter_area, 10, &self.query);
         let filter_text = if self.query_active {
-            format!("  Search: {visible_query}")
+            format!(
+                "  {}: {visible_query}",
+                ctx.ui_text.text(TextKey::SkillsSearchPrefix)
+            )
         } else if self.query.is_empty() {
-            "  Search... (/)".to_string()
+            format!("  {}", ctx.ui_text.text(TextKey::SkillsSearchPlaceholder))
         } else {
-            format!("  Search: {}", self.query)
+            format!(
+                "  {}: {}",
+                ctx.ui_text.text(TextKey::SkillsSearchPrefix),
+                self.query
+            )
         };
         let filter_style = if self.query_active {
             Style::default().fg(palette.accent)
@@ -398,7 +410,7 @@ impl Component for SkillsPanel {
         // Name column header
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
-                "  Name",
+                format!("  {}", ctx.ui_text.text(TextKey::SkillsName)),
                 Style::default()
                     .fg(palette.accent)
                     .add_modifier(Modifier::BOLD),
@@ -495,7 +507,7 @@ impl Component for SkillsPanel {
         let preview_header_y = right_area.y + 1;
         frame.render_widget(
             Paragraph::new(vec![Line::from(vec![Span::styled(
-                "  Preview",
+                format!("  {}", ctx.ui_text.text(TextKey::Preview)),
                 Style::default()
                     .fg(palette.accent)
                     .add_modifier(Modifier::BOLD),
@@ -545,10 +557,11 @@ impl Component for SkillsPanel {
             None => true,
         };
         if needs_render && let Some(skill) = self.selected_skill() {
-            let rendered = render_markdown_text_with_width_and_cwd(
+            let rendered = render_markdown_text_with_width_and_cwd_with_ui(
                 &skill.content,
                 Some(self.preview_content_width),
                 None,
+                &ctx.ui_text,
             );
             self.cached_preview = Some((skill.name.clone(), rendered));
         }
@@ -587,9 +600,9 @@ impl Component for SkillsPanel {
 
         let footer_y = inner.y + inner.height - 1;
         let hints = if self.query_active {
-            "Enter: confirm search  •  Esc: cancel"
+            ctx.ui_text.text(TextKey::SkillsSearchFooter)
         } else {
-            "↑/↓: navigate  •  ←/→: scroll preview  •  /: search  •  Esc: close"
+            ctx.ui_text.text(TextKey::SkillsFooter)
         };
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(

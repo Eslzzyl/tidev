@@ -34,6 +34,7 @@ use crate::ansi::strip_ansi;
 use crate::hyperlink::{
     HyperlinkLine, HyperlinkRange, annotate_web_urls_in_line, remap_wrapped_line, web_destination,
 };
+use crate::i18n::{TextKey, UiText};
 use crate::utils::expand_tabs;
 use links::{render_local_link_target, should_render_link_destination};
 use styles::MarkdownStyles;
@@ -82,12 +83,12 @@ pub(crate) fn markdown_to_hyperlink_lines(md: &MarkdownRender) -> Vec<HyperlinkL
 }
 
 /// Cache key for the markdown render cache:
-/// (content_hash, wrap_width, cwd_hash, syntax_theme_gen)
+/// (content_hash, wrap_width, cwd_hash, syntax_theme_gen, locale)
 ///
 /// The syntax theme generation is part of the key because code fences inside
 /// the markdown are highlighted with the current syntect theme; without it
 /// the cached output would keep stale colors after a theme switch.
-type MarkdownCacheKey = (blake3::Hash, Option<usize>, blake3::Hash, u64);
+type MarkdownCacheKey = (blake3::Hash, Option<usize>, blake3::Hash, u64, String);
 
 /// Content-hash based cache for rendered markdown output.
 /// Keyed by (blake3::Hash of input, width, cwd_hash, syntax_theme_gen) to
@@ -101,19 +102,33 @@ static MARKDOWN_RENDER_CACHE: LazyLock<
 /// Maximum number of entries in the markdown render cache.
 const MARKDOWN_RENDER_CACHE_MAX_ENTRIES: usize = 256;
 
+#[allow(dead_code)]
 pub fn render_markdown_text_with_width_and_cwd(
     input: &str,
     width: Option<usize>,
     cwd: Option<&Path>,
 ) -> Arc<MarkdownRender> {
+    let ui_text = UiText::from_preference("en-US");
+    render_markdown_text_with_width_and_cwd_with_ui(input, width, cwd, &ui_text)
+}
+
+pub(crate) fn render_markdown_text_with_width_and_cwd_with_ui(
+    input: &str,
+    width: Option<usize>,
+    cwd: Option<&Path>,
+    ui_text: &UiText,
+) -> Arc<MarkdownRender> {
     let content_hash = blake3::hash(input.as_bytes());
     let cwd_hash = blake3::hash(cwd.map(|p| p.as_os_str().as_encoded_bytes()).unwrap_or(b""));
     let theme_gen = HIGHLIGHT_CACHE_GEN.load(Ordering::SeqCst);
+    let locale_key = ui_text.cache_key();
 
     // Check cache
     {
         let cache = MARKDOWN_RENDER_CACHE.lock().unwrap();
-        if let Some(cached) = cache.get(&(content_hash, width, cwd_hash, theme_gen)) {
+        if let Some(cached) =
+            cache.get(&(content_hash, width, cwd_hash, theme_gen, locale_key.clone()))
+        {
             return cached.clone();
         }
     }
@@ -123,7 +138,7 @@ pub fn render_markdown_text_with_width_and_cwd(
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TABLES);
     let parser = Parser::new_ext(input, options);
-    let mut writer = Writer::new(parser, cwd);
+    let mut writer = Writer::new(parser, cwd, ui_text.text(TextKey::Column));
     writer.wrap_width = width;
     writer.run();
 
@@ -141,7 +156,10 @@ pub fn render_markdown_text_with_width_and_cwd(
                 cache.remove(&key);
             }
         }
-        cache.insert((content_hash, width, cwd_hash, theme_gen), result.clone());
+        cache.insert(
+            (content_hash, width, cwd_hash, theme_gen, locale_key),
+            result.clone(),
+        );
     }
 
     // Return Arc (callers share via clone or clone inner on demand)
@@ -203,13 +221,14 @@ where
     tab_width: usize,
     table_state: Option<TableState>,
     in_table_cell: bool,
+    column_label: String,
 }
 
 impl<'a, I> Writer<'a, I>
 where
     I: Iterator<Item = Event<'a>>,
 {
-    fn new(iter: I, cwd: Option<&Path>) -> Self {
+    fn new(iter: I, cwd: Option<&Path>, column_label: String) -> Self {
         Self {
             iter,
             text: Text::default(),
@@ -237,6 +256,7 @@ where
             tab_width: 4,
             table_state: None,
             in_table_cell: false,
+            column_label,
         }
     }
 
@@ -418,6 +438,7 @@ where
             self.prefix_spans(false),
             self.current_line_style,
             alignments,
+            self.column_label.clone(),
         ));
         self.needs_newline = false;
     }
@@ -1052,6 +1073,31 @@ mod tests {
                 "└────────┴───────┘".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn localizes_generated_markdown_column_labels() {
+        let zh_text = UiText::from_preference("zh-CN");
+        let zh = render_markdown_text_with_width_and_cwd_with_ui(
+            "| | |\n|---|---|\n| value | 1 |\n",
+            Some(8),
+            None,
+            &zh_text,
+        );
+        let zh_rendered = lines_to_strings(&zh.text);
+        assert!(zh_rendered.iter().any(|line| line.contains('列')));
+        assert!(zh_rendered.iter().any(|line| line.contains("1:")));
+
+        let en_text = UiText::from_preference("en-US");
+        let en = render_markdown_text_with_width_and_cwd_with_ui(
+            "| | |\n|---|---|\n| value | 1 |\n",
+            Some(8),
+            None,
+            &en_text,
+        );
+        let en_rendered = lines_to_strings(&en.text);
+        assert!(en_rendered.iter().any(|line| line.contains("Colu")));
+        assert!(en_rendered.iter().any(|line| line.contains("mn")));
     }
 
     #[test]

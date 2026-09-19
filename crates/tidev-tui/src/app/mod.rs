@@ -28,6 +28,7 @@ use uuid::Uuid;
 
 use crate::component::Component;
 use crate::components::overlay_stack::OverlayStack;
+use crate::i18n::{TextKey, UiText, mode_title};
 
 use crate::components::chat::MessageList;
 use crate::components::composer::Composer;
@@ -263,6 +264,7 @@ impl App {
         let supports_images = runtime.active_model().supports_images;
         let thinking_level = runtime.active_model().thinking_level.clone();
         let notif_config = runtime.config().notifications.clone();
+        let ui_locale = runtime.config().ui.locale.clone();
 
         Self {
             runtime,
@@ -328,7 +330,9 @@ impl App {
                 r.ok()
             },
             composer: {
-                let mut c = Composer::new("Ask tidev about your code, task, or question...");
+                let ui_text = UiText::from_preference(&ui_locale);
+                let mut c = Composer::new(ui_text.text(TextKey::WelcomeInputPlaceholder));
+                c.set_image_label(ui_text.text(TextKey::ImageLabel));
                 c.set_file_search_index(file_index);
                 c.set_workspace_root(ws_root);
                 c.set_config_dir(cfg_dir);
@@ -340,6 +344,10 @@ impl App {
 
     pub fn should_quit(&self) -> bool {
         self.should_quit
+    }
+
+    pub(crate) fn ui_text(&self) -> UiText {
+        UiText::from_preference(&self.runtime.config().ui.locale)
     }
 
     /// Whether any component needs re-drawing.
@@ -569,7 +577,7 @@ impl App {
         // Reset abort state.
         self.abort_confirmation_deadline = None;
 
-        self.set_notice("Request cancelled");
+        self.set_notice(self.ui_text().text(TextKey::RequestCancelled));
     }
 
     /// Record a user message submitted while its session was busy. The
@@ -632,7 +640,7 @@ impl App {
             }
             chat.invalidate_layout();
         }
-        self.set_notice("Compacting session context...");
+        self.set_notice(self.ui_text().text(TextKey::CompactingSessionContext));
         self.compacting_sessions.insert(session_id);
         let rt = self.runtime.clone();
         tokio::spawn(async move {
@@ -646,13 +654,13 @@ impl App {
     /// while the editor runs, then the edited text replaces the composer.
     fn open_external_editor(&mut self) {
         let Some(ref mut composer) = self.composer else {
-            self.set_notice("No composer available");
+            self.set_notice(self.ui_text().text(TextKey::NoComposerAvailable));
             return;
         };
 
         let text = composer.text().to_string();
         if text.is_empty() {
-            self.set_notice("No text to edit");
+            self.set_notice(self.ui_text().text(TextKey::NoTextToEdit));
             return;
         }
 
@@ -660,10 +668,14 @@ impl App {
         match crate::editor::open_external_editor(&text, &ui_config) {
             Ok(edited) => {
                 composer.set_text(edited);
-                self.set_notice("Editor closed — text updated");
+                self.set_notice(self.ui_text().text(TextKey::EditorClosedTextUpdated));
             }
             Err(e) => {
-                self.set_notice(format!("Editor: {e}"));
+                self.set_notice(self.ui_text().text_with_value(
+                    TextKey::EditorError,
+                    "error",
+                    &e.to_string(),
+                ));
             }
         }
 

@@ -6,6 +6,8 @@
 use std::path::Path;
 
 use crate::chat_context::ChatContext;
+use crate::context::DrawContext;
+use crate::i18n::TextKey;
 use crate::theme::ThemePalette;
 use crate::utils::{TokenUsage, format_token_count};
 use ratatui::layout::{Margin, Rect};
@@ -56,6 +58,7 @@ impl Sidebar {
         &mut self,
         frame: &mut Frame,
         area: Rect,
+        draw_ctx: &DrawContext,
         palette: ThemePalette,
         workspace_root: &Path,
         chat_context: Option<&ChatContext>,
@@ -72,6 +75,8 @@ impl Sidebar {
             vertical: 0,
         });
         let sidebar_content_width = inner.width as usize;
+        let ui_text = &draw_ctx.ui_text;
+        let ctx = draw_ctx;
 
         // ── Build content lines ──
         let mut lines: Vec<Line> = Vec::new();
@@ -92,7 +97,7 @@ impl Sidebar {
 
         // Model section
         lines.push(Line::from(vec![Span::styled(
-            "Model",
+            ctx.ui_text.text(TextKey::Model),
             Style::default()
                 .fg(palette.accent)
                 .add_modifier(Modifier::BOLD),
@@ -120,14 +125,26 @@ impl Sidebar {
             if !session_tps.is_empty() {
                 let avg_tps = session_tps.iter().sum::<f32>() / session_tps.len() as f32;
                 lines.push(Line::from(vec![Span::styled(
-                    format!("Speed: {:.1} t/s (avg)", avg_tps),
+                    format!(
+                        "{} ({})",
+                        ui_text.text_with_value(
+                            TextKey::TokensPerSecond,
+                            "value",
+                            &format!("{}: {:.1}", ui_text.text(TextKey::Speed), avg_tps),
+                        ),
+                        ui_text.text(TextKey::Average)
+                    ),
                     Style::default().fg(palette.muted),
                 )]));
             } else if let Some(usage) = context_usage
                 && let Some(current_tps) = usage.tokens_per_second
             {
                 lines.push(Line::from(vec![Span::styled(
-                    format!("Speed: {:.1} t/s", current_tps),
+                    ui_text.text_with_value(
+                        TextKey::TokensPerSecond,
+                        "value",
+                        &format!("{}: {:.1}", ui_text.text(TextKey::Speed), current_tps),
+                    ),
                     Style::default().fg(palette.muted),
                 )]));
             }
@@ -136,7 +153,7 @@ impl Sidebar {
         // Token statistics
         lines.push(Line::from(""));
         lines.push(Line::from(vec![Span::styled(
-            "Tokens",
+            ctx.ui_text.text(TextKey::Tokens),
             Style::default()
                 .fg(palette.accent)
                 .add_modifier(Modifier::BOLD),
@@ -168,24 +185,35 @@ impl Sidebar {
         };
 
         lines.push(Line::from(vec![Span::styled(
-            format!("Total: {}", format_token_count(total)),
+            format!(
+                "{}: {}",
+                ctx.ui_text.text(TextKey::Total),
+                format_token_count(total)
+            ),
             Style::default().fg(palette.text),
         )]));
         lines.push(Line::from(vec![Span::styled(
             format!(
-                "In: {} ({:.1}% Cached)",
+                "{}: {} ({:.1}% {})",
+                ctx.ui_text.text(TextKey::In),
                 format_token_count(token_usage.input_tokens as u64),
                 cache_pct,
+                ctx.ui_text.text(TextKey::Cached),
             ),
             Style::default().fg(palette.muted),
         )]));
         lines.push(Line::from(vec![Span::styled(
-            format!("Non-cached In: {}", format_token_count(non_cached)),
+            format!(
+                "{}: {}",
+                ctx.ui_text.text(TextKey::NonCachedInput),
+                format_token_count(non_cached)
+            ),
             Style::default().fg(palette.muted),
         )]));
         lines.push(Line::from(vec![Span::styled(
             format!(
-                "Out: {}",
+                "{}: {}",
+                ctx.ui_text.text(TextKey::Out),
                 format_token_count(token_usage.output_tokens as u64)
             ),
             Style::default().fg(palette.muted),
@@ -201,7 +229,7 @@ impl Sidebar {
                 .filter(|m| matches!(m.role, tidev_llm::message::MessageRole::Assistant))
                 .count();
             lines.push(Line::from(vec![Span::styled(
-                format!("Requests: {request_count}"),
+                format!("{}: {request_count}", ui_text.text(TextKey::Requests)),
                 Style::default().fg(palette.text),
             )]));
         }
@@ -215,7 +243,7 @@ impl Sidebar {
                 .count();
             lines.push(Line::from(vec![
                 Span::styled(
-                    "MCP Servers",
+                    ctx.ui_text.text(TextKey::McpServers),
                     Style::default()
                         .fg(palette.accent)
                         .add_modifier(Modifier::BOLD),
@@ -231,16 +259,20 @@ impl Sidebar {
                     (
                         "○ ",
                         Style::default().fg(palette.muted),
-                        "disabled".to_string(),
+                        ctx.ui_text.text(TextKey::Disabled),
                         Style::default().fg(palette.muted),
                     )
                 } else {
                     match &server.status {
                         McpConnectionStatus::Connected => {
                             let tool_label = if server.tool_count == 1 {
-                                "1 tool".to_string()
+                                format!("1 {}", ctx.ui_text.text(TextKey::ToolsLower))
                             } else {
-                                format!("{} tools", server.tool_count)
+                                format!(
+                                    "{} {}",
+                                    server.tool_count,
+                                    ctx.ui_text.text(TextKey::ToolsLower)
+                                )
                             };
                             (
                                 "● ",
@@ -252,19 +284,19 @@ impl Sidebar {
                         McpConnectionStatus::Connecting => (
                             "◌ ",
                             Style::default().fg(palette.warning),
-                            "connecting".to_string(),
+                            ctx.ui_text.text(TextKey::StatusConnecting),
                             Style::default().fg(palette.muted),
                         ),
                         McpConnectionStatus::Failed(_) => (
                             "✕ ",
                             Style::default().fg(palette.error),
-                            "failed".to_string(),
+                            ctx.ui_text.text(TextKey::StatusFailed),
                             Style::default().fg(palette.error),
                         ),
                         McpConnectionStatus::Disconnected => (
                             "○ ",
                             Style::default().fg(palette.muted),
-                            "offline".to_string(),
+                            ctx.ui_text.text(TextKey::StatusOffline),
                             Style::default().fg(palette.muted),
                         ),
                     }
@@ -314,7 +346,7 @@ impl Sidebar {
 
         lines.push(Line::from(vec![
             Span::styled(
-                "Changed Files",
+                ctx.ui_text.text(TextKey::ChangedFiles),
                 Style::default()
                     .fg(palette.accent)
                     .add_modifier(Modifier::BOLD),
@@ -327,7 +359,7 @@ impl Sidebar {
 
         if all_diffs.is_empty() {
             lines.push(Line::from(vec![Span::styled(
-                "(no changes yet)",
+                ctx.ui_text.text(TextKey::NoChanges),
                 Style::default().fg(palette.muted),
             )]));
         } else {
@@ -400,7 +432,7 @@ impl Sidebar {
         // Todos section
         lines.push(Line::from(""));
         lines.push(Line::from(vec![Span::styled(
-            format!("Todos ({})", todos.len()),
+            format!("{} ({})", ctx.ui_text.text(TextKey::Todos), todos.len()),
             Style::default()
                 .fg(palette.accent)
                 .add_modifier(Modifier::BOLD),
@@ -408,7 +440,7 @@ impl Sidebar {
 
         if todos.is_empty() {
             lines.push(Line::from(vec![Span::styled(
-                "(no items)",
+                ctx.ui_text.text(TextKey::NoItems),
                 Style::default().fg(palette.muted),
             )]));
         } else {
@@ -439,7 +471,7 @@ impl Sidebar {
         {
             lines.push(Line::from(""));
             lines.push(Line::from(vec![Span::styled(
-                "⚠ Undo active",
+                ui_text.text(TextKey::UndoActive),
                 Style::default().fg(palette.warning),
             )]));
         }
@@ -456,7 +488,7 @@ impl Sidebar {
         let footer_lines: Vec<Line<'static>> = vec![
             Line::from(""),
             Line::from(vec![Span::styled(
-                "Workspace",
+                ctx.ui_text.text(TextKey::Workspace),
                 Style::default()
                     .fg(palette.accent)
                     .add_modifier(Modifier::BOLD),
@@ -581,13 +613,29 @@ mod tests {
         let backend = TestBackend::new(60, 80);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut sidebar = Sidebar::new();
+        let workspace_root = Path::new("/test");
+        let draw_ctx = DrawContext {
+            palette,
+            ui_text: crate::i18n::UiText::from_preference("en-US"),
+            focused: true,
+            mode: tidev_core::Mode::Build,
+            pending_mode: None,
+            model_display: Some("test-model"),
+            provider_display: Some("test-provider"),
+            thinking_level: None,
+            subagent_disabled: false,
+            collapse_thinking: false,
+            collapse_diffs: false,
+            workspace_root,
+        };
 
         let _ = terminal.draw(|frame| {
             sidebar.draw(
                 frame,
                 frame.area(),
+                &draw_ctx,
                 palette,
-                Path::new("/test"),
+                workspace_root,
                 chat_context,
                 context_usage,
                 todos,

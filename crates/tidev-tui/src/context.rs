@@ -1,5 +1,6 @@
 //! Component context types.
 
+use crate::i18n::UiText;
 use crate::theme::ThemePalette;
 use std::path::Path;
 use tidev_core::Mode as SessionMode;
@@ -14,6 +15,7 @@ pub(crate) struct InitContext<'a> {
 /// Read-only shared data passed to every component each frame during draw.
 pub(crate) struct DrawContext<'a> {
     pub palette: ThemePalette,
+    pub ui_text: UiText,
     pub focused: bool,
     /// Current session mode (Build/Plan).
     pub mode: SessionMode,

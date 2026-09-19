@@ -11,6 +11,7 @@ use uuid::Uuid;
 use crate::action::{Action, OverlayAction, OverlayKind, SessionAction};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
+use crate::i18n::TextKey;
 use crate::utils::{centered_rect, paste_from_clipboard, wrapped_input_tail};
 
 pub(crate) struct RenameDialog {
@@ -30,14 +31,6 @@ impl RenameDialog {
             buffer: original_title,
             confirmed: false,
         }
-    }
-
-    fn title(&self) -> String {
-        "Rename session".to_string()
-    }
-
-    fn description(&self) -> String {
-        format!("Current title: {}", self.original_title)
     }
 }
 
@@ -135,7 +128,7 @@ impl Component for RenameDialog {
         // Title
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
-                self.title(),
+                ctx.ui_text.text(TextKey::RenameTitle),
                 Style::default()
                     .fg(palette.accent)
                     .add_modifier(Modifier::BOLD),
@@ -146,14 +139,18 @@ impl Component for RenameDialog {
 
         // Description
         frame.render_widget(
-            Paragraph::new(self.description())
-                .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
+            Paragraph::new(ctx.ui_text.text_with_value(
+                TextKey::CurrentTitle,
+                "title",
+                &self.original_title,
+            ))
+            .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
             sections[1],
         );
 
         // Help text
         frame.render_widget(
-            Paragraph::new("Press Enter to save, Esc to cancel")
+            Paragraph::new(ctx.ui_text.text(TextKey::RenameFooter))
                 .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
             sections[2],
         );
@@ -161,7 +158,7 @@ impl Component for RenameDialog {
         // Input field
         let (visible_lines, cursor) = wrapped_input_tail(&self.buffer, sections[4]);
         let input_text = if self.buffer.is_empty() {
-            "New session title...".to_string()
+            ctx.ui_text.text(TextKey::RenamePlaceholder)
         } else {
             visible_lines.join("\n")
         };
@@ -175,7 +172,7 @@ impl Component for RenameDialog {
 
         // Bottom hint
         frame.render_widget(
-            Paragraph::new("Type a new name, then press Enter")
+            Paragraph::new(ctx.ui_text.text(TextKey::RenameInputHint))
                 .alignment(ratatui::layout::Alignment::Center)
                 .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
             sections[5],

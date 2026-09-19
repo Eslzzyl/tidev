@@ -32,6 +32,7 @@ use unicode_width::UnicodeWidthChar;
 use crate::action::{Action, ChatAction};
 use crate::component::Component;
 use crate::context::DrawContext;
+use crate::i18n::{TextKey, UiText};
 use tidev_llm::message::MessageAttachment;
 
 pub(crate) use at_mention::AtMentionState;
@@ -135,6 +136,9 @@ pub(crate) struct Composer {
     config_dir: PathBuf,
     /// Whether the current model supports image attachments.
     model_supports_images: bool,
+    /// Localized label used only for rendering image badges. The raw
+    /// placeholder in `text` remains stable for model requests and storage.
+    image_label: String,
     /// Scroll offset for multi-line input area.
     pub(crate) input_scroll_offset: usize,
     /// Last input area width (set during draw, used by keyboard handler).
@@ -171,6 +175,7 @@ impl Composer {
             workspace_root: PathBuf::new(),
             config_dir: PathBuf::new(),
             model_supports_images: false,
+            image_label: UiText::from_preference("en-US").text(TextKey::ImageLabel),
             input_scroll_offset: 0,
             last_input_width: 0,
             last_visible_lines: 0,
@@ -188,6 +193,22 @@ impl Composer {
 
     pub fn placeholder(&self) -> &str {
         &self.placeholder
+    }
+
+    pub fn set_placeholder(&mut self, placeholder: impl Into<String>) {
+        self.placeholder = placeholder.into();
+    }
+
+    pub(crate) fn set_image_label(&mut self, label: impl Into<String>) {
+        self.image_label = label.into();
+        let image_label = self.image_label.clone();
+        for span in &mut self.spans {
+            if span.kind == InlineSpanKind::Image
+                && let Some(filename) = span.image_filename.as_deref()
+            {
+                span.display = format!("[{image_label} {filename}]");
+            }
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -292,6 +313,14 @@ impl Composer {
         if start >= end {
             return;
         }
+        let display = if kind == InlineSpanKind::Image {
+            image_filename
+                .as_deref()
+                .map(|filename| format!("[{} {}]", self.image_label, filename))
+                .unwrap_or(display)
+        } else {
+            display
+        };
         let span = InlineSpan {
             start,
             end,
@@ -725,13 +754,11 @@ impl Composer {
                         log::info!("Pasted image: {} bytes", file_size);
                         None
                     } else {
-                        Some(Action::Notice(
-                            "This model does not support image attachments".to_string(),
-                        ))
+                        Some(Action::ImageAttachmentUnsupported)
                     }
                 }
                 Ok(None) => None,
-                Err(error) => Some(Action::Notice(error)),
+                Err(error) => Some(Action::ClipboardError(error)),
             }
         }
     }
@@ -1408,13 +1435,11 @@ impl Component for Composer {
                         self.ensure_input_cursor_visible();
                         log::info!("Pasted image: {} bytes", file_size);
                     } else {
-                        return Some(Action::Notice(
-                            "This model does not support image attachments".to_string(),
-                        ));
+                        return Some(Action::ImageAttachmentUnsupported);
                     }
                 }
                 Ok(None) => {}
-                Err(error) => return Some(Action::Notice(error)),
+                Err(error) => return Some(Action::ClipboardError(error)),
             }
             return None;
         }

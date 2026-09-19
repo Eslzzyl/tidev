@@ -19,6 +19,7 @@ use tidev_config::auth::{ActiveModel, ModelSummary};
 use crate::action::{Action, OverlayAction, OverlayKind};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
+use crate::i18n::TextKey;
 use crate::utils::{centered_rect, single_line_input_cursor};
 use unicode_width::UnicodeWidthStr;
 
@@ -613,7 +614,7 @@ impl Component for ModelPanel {
         // ── Title ──
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
-                " Select model ",
+                format!(" {} ", ctx.ui_text.text(TextKey::ModelSelectTitle)),
                 Style::default()
                     .fg(palette.accent)
                     .add_modifier(Modifier::BOLD),
@@ -657,9 +658,9 @@ impl Component for ModelPanel {
             .current_tab()
             .is_some_and(|t| t.thinking_level_expanded)
         {
-            "Select a thinking level. Enter to confirm, Esc to collapse."
+            ctx.ui_text.text(TextKey::ModelThinkingInstruction)
         } else {
-            "Select a model for this agent. Enter to save, Esc to close."
+            ctx.ui_text.text(TextKey::ModelAgentInstruction)
         };
         frame.render_widget(
             Paragraph::new(instruction)
@@ -670,7 +671,7 @@ impl Component for ModelPanel {
 
         // ── Search box ──
         let search_style = Style::default().bg(palette.panel_alt);
-        let prefix = " Search models: ";
+        let prefix = format!(" {} ", ctx.ui_text.text(TextKey::ModelSearchPrefix));
         let (visible_query, cursor) =
             single_line_input_cursor(sections[3], prefix.width() as u16, &self.query);
         frame.render_widget(
@@ -687,7 +688,7 @@ impl Component for ModelPanel {
         let items = &self.items_cache;
         if items.is_empty() {
             frame.render_widget(
-                Paragraph::new("No connected models match this search.")
+                Paragraph::new(ctx.ui_text.text(TextKey::NoConnectedModels))
                     .alignment(ratatui::layout::Alignment::Center)
                     .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                 sections[4],
@@ -773,11 +774,10 @@ impl Component for ModelPanel {
                                         .map(|t| t.thinking_level_index)
                                         .unwrap_or(0);
                                     let tl = &tl_options[tl_idx % tl_options.len()];
-                                    Some(
-                                        ThinkingLevelType::from_string(tl)
-                                            .display_name()
-                                            .to_string(),
-                                    )
+                                    Some(crate::i18n::thinking_level_name(
+                                        &ctx.ui_text,
+                                        ThinkingLevelType::from_string(tl).display_name(),
+                                    ))
                                 } else {
                                     None
                                 }
@@ -786,12 +786,11 @@ impl Component for ModelPanel {
                                 && self.is_general_tab()
                                 && self.active_model.thinking_level.is_supported()
                             {
-                                let name = self.active_model.thinking_level.display_name();
-                                if name.is_empty() {
-                                    None
-                                } else {
-                                    Some(name.to_string())
-                                }
+                                let name = crate::i18n::thinking_level_name(
+                                    &ctx.ui_text,
+                                    self.active_model.thinking_level.display_name(),
+                                );
+                                if name.is_empty() { None } else { Some(name) }
                             } else {
                                 None
                             }
@@ -820,9 +819,10 @@ impl Component for ModelPanel {
                                     .unwrap_or(0);
                                 for (oi, opt) in tl_options.iter().enumerate() {
                                     let is_tl_selected = oi == tl_idx % tl_options.len();
-                                    let level_name = ThinkingLevelType::from_string(opt)
-                                        .display_name()
-                                        .to_string();
+                                    let level_name = crate::i18n::thinking_level_name(
+                                        &ctx.ui_text,
+                                        ThinkingLevelType::from_string(opt).display_name(),
+                                    );
                                     let bullet = if is_tl_selected { " ● " } else { " ○ " };
                                     let tl_style = if is_tl_selected {
                                         Style::default()
@@ -891,9 +891,9 @@ impl Component for ModelPanel {
             .current_tab()
             .is_some_and(|t| t.thinking_level_expanded);
         let footer = if is_expanded {
-            "Enter confirm thinking · ↑ ↓ select level · Esc collapse"
+            ctx.ui_text.text(TextKey::ModelFooterThinking)
         } else {
-            "Enter apply / expand thinking · Tab switch tab · Esc close"
+            ctx.ui_text.text(TextKey::ModelFooterGeneral)
         };
         frame.render_widget(
             Paragraph::new(footer)

@@ -121,7 +121,8 @@ fn compute_and_cache_block(
                         .iter()
                         .find(|s| s.tool_call_id == tc.id)
                 {
-                    tc_line_count = count_running_subagent_card_lines(info, content_width);
+                    tc_line_count =
+                        count_running_subagent_card_lines(info, content_width, &ctx.ui_text);
                 }
                 line_count += tc_line_count;
             }
@@ -351,7 +352,8 @@ fn render_block_from_cache(
                     .position(|s| s.tool_call_id == tc.id)
             {
                 let info = &ctx.running_subagents[exec_index];
-                let running_lines = render_running_subagent_lines(info, content_width, ctx.palette);
+                let running_lines =
+                    render_running_subagent_lines(info, content_width, ctx.palette, &ctx.ui_text);
                 let start_line = current_line_offset + lines.len();
                 let mut card_bg = ctx.palette.panel;
                 if ctx.hovered_inline_subagent == Some(exec_index) {
@@ -621,7 +623,8 @@ pub(super) fn update_layout_index(
                             .iter()
                             .find(|s| s.tool_call_id == tc.id)
                     {
-                        tc_line_count = count_running_subagent_card_lines(info, content_width);
+                        tc_line_count =
+                            count_running_subagent_card_lines(info, content_width, &ctx.ui_text);
                     }
                     line_count += tc_line_count;
                 }
@@ -765,14 +768,18 @@ pub(super) fn messages_text(
     let mut thinking_header_infos: Vec<(Uuid, usize)> = Vec::new();
 
     // Header for sub-sessions
-    let header_lines = build_header_lines(chat_context.parent_session_id.is_some(), ctx.palette);
+    let header_lines = build_header_lines(
+        chat_context.parent_session_id.is_some(),
+        ctx.palette,
+        &ctx.ui_text,
+    );
     let header_line_count = header_lines.len();
 
     // Empty state
     if messages.is_empty() {
         lines.extend(header_lines);
         let empty_line = HyperlinkLine::new(Line::from(Span::styled(
-            "No messages yet.",
+            ctx.ui_text.text(crate::i18n::TextKey::NoMessages),
             Style::default().fg(ctx.palette.muted),
         )));
         lines.push(empty_line);
@@ -804,8 +811,19 @@ pub(super) fn messages_text(
             0
         };
 
-        let retry_after_str = format!("Retrying in {remaining}s");
-        let msg = format!("Retrying ({}/{}): {}", attempt, max_attempts, reason);
+        let retry_after_str = ctx.ui_text.text_with_value(
+            crate::i18n::TextKey::RequestRetryIn,
+            "seconds",
+            &remaining.to_string(),
+        );
+        let msg = ctx.ui_text.text_with_values(
+            crate::i18n::TextKey::RequestRetry,
+            &[
+                ("attempt", &attempt.to_string()),
+                ("max", &max_attempts.to_string()),
+                ("reason", reason),
+            ],
+        );
 
         let text_width = content_width.max(1);
         let palette = ctx.palette;

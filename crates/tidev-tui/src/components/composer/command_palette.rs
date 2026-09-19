@@ -16,6 +16,7 @@
 use tidev_config::ThemeCatalog;
 
 use crate::action::{Action, ChatAction, OverlayAction, OverlayKind, SessionAction, ThemeAction};
+use crate::i18n::TextKey;
 
 // ---------------------------------------------------------------------------
 // CommandAction
@@ -64,7 +65,7 @@ pub(crate) enum CommandAction {
 pub(crate) struct CommandSpec {
     pub name: &'static str,
     pub aliases: &'static [&'static str],
-    pub description: &'static str,
+    pub description_key: TextKey,
     pub action: CommandAction,
 }
 
@@ -93,133 +94,133 @@ pub(crate) static COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "connect",
         aliases: &["login"],
-        description: "Open the provider picker",
+        description_key: TextKey::CommandConnect,
         action: CommandAction::Connect,
     },
     CommandSpec {
         name: "model",
         aliases: &["models"],
-        description: "Open the model panel",
+        description_key: TextKey::CommandModel,
         action: CommandAction::Model,
     },
     CommandSpec {
         name: "mcp",
         aliases: &["mcps"],
-        description: "Open the MCP server management panel",
+        description_key: TextKey::CommandMcp,
         action: CommandAction::Mcp,
     },
     CommandSpec {
         name: "search",
         aliases: &["websearch"],
-        description: "Open the search provider panel",
+        description_key: TextKey::CommandSearch,
         action: CommandAction::Search,
     },
     CommandSpec {
         name: "session",
         aliases: &["sessions", "resume"],
-        description: "Open the session panel",
+        description_key: TextKey::CommandSession,
         action: CommandAction::Session,
     },
     CommandSpec {
         name: "message",
         aliases: &["msg", "timeline", "history"],
-        description: "Search current session user messages",
+        description_key: TextKey::CommandMessage,
         action: CommandAction::Message,
     },
     CommandSpec {
         name: "rename",
         aliases: &["title"],
-        description: "Rename the current session",
+        description_key: TextKey::CommandRename,
         action: CommandAction::Rename,
     },
     CommandSpec {
         name: "theme",
         aliases: &["appearance"],
-        description: "Switch between built-in themes",
+        description_key: TextKey::CommandTheme,
         action: CommandAction::Theme,
     },
     CommandSpec {
         name: "undo",
         aliases: &[],
-        description: "Revert the previous user message",
+        description_key: TextKey::CommandUndo,
         action: CommandAction::Undo,
     },
     CommandSpec {
         name: "redo",
         aliases: &[],
-        description: "Move one step forward in undo history",
+        description_key: TextKey::CommandRedo,
         action: CommandAction::Redo,
     },
     CommandSpec {
         name: "settings",
         aliases: &["config"],
-        description: "Open settings panel",
+        description_key: TextKey::CommandSettings,
         action: CommandAction::Settings,
     },
     CommandSpec {
         name: "new",
         aliases: &["clear"],
-        description: "Start a new conversation",
+        description_key: TextKey::CommandNew,
         action: CommandAction::Clear,
     },
     CommandSpec {
         name: "agents",
         aliases: &[],
-        description: "List all available sub-agent types",
+        description_key: TextKey::CommandAgents,
         action: CommandAction::Agents,
     },
     CommandSpec {
         name: "skills",
         aliases: &[],
-        description: "Browse and preview available skills",
+        description_key: TextKey::CommandSkills,
         action: CommandAction::Skills,
     },
     CommandSpec {
         name: "exit",
         aliases: &["quit", "q"],
-        description: "Exit tidev",
+        description_key: TextKey::CommandExit,
         action: CommandAction::Quit,
     },
     CommandSpec {
         name: "compact",
         aliases: &[],
-        description: "Compact the current session context to free space",
+        description_key: TextKey::CommandCompact,
         action: CommandAction::Compact,
     },
     CommandSpec {
         name: "init",
         aliases: &[],
-        description: "Analyze project and create AGENTS.md",
+        description_key: TextKey::CommandInit,
         action: CommandAction::Init,
     },
     CommandSpec {
         name: "expand-thinking",
         aliases: &["expand", "show-thinking"],
-        description: "Expand all thinking blocks in the current session",
+        description_key: TextKey::CommandExpandThinking,
         action: CommandAction::ExpandThinking,
     },
     CommandSpec {
         name: "collapse-thinking",
         aliases: &["collapse", "hide-thinking"],
-        description: "Collapse all thinking blocks in the current session",
+        description_key: TextKey::CommandCollapseThinking,
         action: CommandAction::CollapseThinking,
     },
     CommandSpec {
         name: "copy",
         aliases: &[],
-        description: "Copy the last completed assistant message",
+        description_key: TextKey::CommandCopy,
         action: CommandAction::CopyLastAssistant,
     },
     CommandSpec {
         name: "git",
         aliases: &[],
-        description: "Open the Git workspace panel",
+        description_key: TextKey::CommandGit,
         action: CommandAction::Git,
     },
     CommandSpec {
         name: "right-sidebar",
         aliases: &[],
-        description: "Toggle the right-hand sidebar",
+        description_key: TextKey::CommandRightSidebar,
         action: CommandAction::ToggleRightSidebar,
     },
 ];
@@ -540,14 +541,14 @@ pub(crate) fn execute_command(
             if args.is_empty() {
                 vec![Action::CopyLastAssistant]
             } else {
-                vec![Action::Notice("Usage: /copy".to_string())]
+                vec![Action::CommandUsage("/copy")]
             }
         }
         CommandAction::Git => {
             if args.is_empty() {
                 vec![Action::Overlay(OverlayAction::Open(OverlayKind::GitPanel))]
             } else {
-                vec![Action::Notice("Usage: /git".to_string())]
+                vec![Action::CommandUsage("/git")]
             }
         }
         CommandAction::ToggleRightSidebar => {
@@ -562,15 +563,11 @@ pub(crate) fn execute_command(
                         vec![Action::ToggleRightSidebar(Some(false))]
                     }
                     _ => {
-                        vec![Action::Notice(
-                            "Usage: /right-sidebar [on|off|toggle]".to_string(),
-                        )]
+                        vec![Action::CommandUsage("/right-sidebar [on|off|toggle]")]
                     }
                 }
             } else {
-                vec![Action::Notice(
-                    "Usage: /right-sidebar [on|off|toggle]".to_string(),
-                )]
+                vec![Action::CommandUsage("/right-sidebar [on|off|toggle]")]
             }
         }
         CommandAction::Mcp => {
@@ -579,7 +576,7 @@ pub(crate) fn execute_command(
                     OverlayKind::McpServerPanel,
                 ))]
             } else {
-                vec![Action::Notice("Usage: /mcp".to_string())]
+                vec![Action::CommandUsage("/mcp")]
             }
         }
     }
@@ -698,9 +695,13 @@ mod tests {
     fn test_copy_command_rejects_arguments() {
         let catalog = test_catalog();
         assert!(matches!(
-            execute_command(CommandAction::CopyLastAssistant, &["extra".into()], &catalog)
-                .as_slice(),
-            [Action::Notice(message)] if message == "Usage: /copy"
+            execute_command(
+                CommandAction::CopyLastAssistant,
+                &["extra".into()],
+                &catalog
+            )
+            .as_slice(),
+            [Action::CommandUsage("/copy")]
         ));
     }
 
@@ -724,7 +725,7 @@ mod tests {
         let catalog = test_catalog();
         assert!(matches!(
             execute_command(CommandAction::Git, &["status".into()], &catalog).as_slice(),
-            [Action::Notice(message)] if message == "Usage: /git"
+            [Action::CommandUsage("/git")]
         ));
     }
 
@@ -754,7 +755,7 @@ mod tests {
         let catalog = test_catalog();
         assert!(matches!(
             execute_command(CommandAction::Mcp, &["extra".into()], &catalog).as_slice(),
-            [Action::Notice(message)] if message == "Usage: /mcp"
+            [Action::CommandUsage("/mcp")]
         ));
     }
 

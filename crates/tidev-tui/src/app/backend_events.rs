@@ -107,8 +107,16 @@ impl App {
             } => {
                 log::info!("Retrying (attempt {attempt}/{max_attempts}): {reason}");
                 if Some(session_id) == self.current_session_id {
+                    let ui_text = self.ui_text();
                     self.set_toast(
-                        format!("Retry {attempt}/{max_attempts}: {reason}"),
+                        ui_text.text_with_values(
+                            TextKey::RequestRetry,
+                            &[
+                                ("attempt", &attempt.to_string()),
+                                ("max", &max_attempts.to_string()),
+                                ("reason", &reason),
+                            ],
+                        ),
                         std::time::Duration::from_secs(5),
                     );
                 }
@@ -130,13 +138,18 @@ impl App {
                 }
 
                 if Some(session_id) == self.current_session_id {
+                    let ui_text = self.ui_text();
                     self.set_toast(
-                        format!("Request failed: {error}"),
+                        ui_text.text_with_value(TextKey::RequestFailed, "error", &error),
                         std::time::Duration::from_secs(8),
                     );
                 }
-                self.desktop_notifications
-                    .notify(&format!("Request failed: {error}"));
+                let ui_text = self.ui_text();
+                self.desktop_notifications.notify(&ui_text.text_with_value(
+                    TextKey::RequestFailed,
+                    "error",
+                    &error,
+                ));
             }
             BackendEvent::Finished {
                 session_id, turn, ..
@@ -147,10 +160,18 @@ impl App {
                         && Some(session_id) == self.current_session_id
                     {
                         self.mode = new_mode;
-                        self.set_notice(format!("Mode switched to {}", self.mode.title()));
+                        let ui_text = self.ui_text();
+                        let mode = mode_title(&ui_text, self.mode);
+                        self.set_notice(ui_text.text_with_value(
+                            TextKey::ModeSwitched,
+                            "mode",
+                            &mode,
+                        ));
                     }
                     if Some(session_id) == self.current_session_id {
-                        self.desktop_notifications.notify("Response complete");
+                        let ui_text = self.ui_text();
+                        self.desktop_notifications
+                            .notify(&ui_text.text(TextKey::ResponseComplete));
                     }
                 }
 
@@ -169,12 +190,13 @@ impl App {
                 ..
             } => {
                 self.compacting_sessions.remove(&session_id);
-                let prefix = if manual {
-                    "Compaction failed"
+                let ui_text = self.ui_text();
+                let notice = if manual {
+                    ui_text.text_with_value(TextKey::CompactionFailed, "error", msg)
                 } else {
-                    "Automatic compaction failed"
+                    ui_text.text_with_value(TextKey::AutomaticCompactionFailed, "error", msg)
                 };
-                self.set_notice(format!("{prefix}: {msg}"));
+                self.set_notice(notice);
             }
             BackendEvent::ContextCompacted {
                 session_id,
@@ -183,20 +205,22 @@ impl App {
                 ..
             } => {
                 self.compacting_sessions.remove(&session_id);
+                let ui_text = self.ui_text();
                 self.set_notice(if manual {
-                    "Context compacted"
+                    ui_text.text(TextKey::ContextCompacted)
                 } else {
-                    "Context automatically compacted"
+                    ui_text.text(TextKey::ContextAutomaticallyCompacted)
                 });
             }
             BackendEvent::ContextCompactionStarted {
                 session_id, manual, ..
             } => {
                 self.compacting_sessions.insert(session_id);
+                let ui_text = self.ui_text();
                 self.set_notice(if manual {
-                    "Compacting session context..."
+                    ui_text.text(TextKey::CompactingSessionContext)
                 } else {
-                    "Automatically compacting session context..."
+                    ui_text.text(TextKey::AutomaticallyCompactingSessionContext)
                 });
             }
             BackendEvent::UserMessageCreated {
@@ -272,7 +296,7 @@ impl App {
                         composer.clear();
                     }
                 }
-                self.set_notice("Undo complete");
+                self.set_notice(self.ui_text().text(TextKey::UndoComplete));
             }
             BackendEvent::ToolCompleted {
                 session_id,

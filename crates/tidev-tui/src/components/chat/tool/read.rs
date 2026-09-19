@@ -2,6 +2,8 @@
 // Read tool metadata helpers
 // ---------------------------------------------------------------------------
 
+use crate::i18n::{TextKey, UiText};
+
 /// Parsed metadata from a read tool output's XML-style metadata block.
 type ReadContentMetadata = Option<(
     (i64, i64),         // line_range (start, end)
@@ -104,13 +106,14 @@ pub(super) fn parse_read_content_metadata(content: &str) -> ReadContentMetadata 
 /// When a specific range was requested **and** all requested lines were returned,
 /// the truncation label is omitted even if the 50KB cap was triggered internally,
 /// because the cap only affected content beyond what the user asked for.
-pub(super) fn format_read_result_label(
+pub(super) fn format_read_result_label_with_locale(
     start: i64,
     end: i64,
     total: i64,
     requested_range: Option<(i64, i64)>,
     truncated_by: Option<&str>,
     is_size_truncated: bool,
+    ui_text: &UiText,
 ) -> String {
     let is_full_file = start == 1 && end == total;
 
@@ -121,34 +124,62 @@ pub(super) fn format_read_result_label(
             if end >= req_end {
                 None // All requested lines returned; cap only affected lines beyond
             } else {
-                Some("truncated due to 50KB cap")
+                Some(ui_text.text(TextKey::ToolResultTruncatedSize))
             }
         } else {
-            Some("truncated due to 50KB cap")
+            Some(ui_text.text(TextKey::ToolResultTruncatedSize))
         }
     } else if truncated_by == Some("lines") {
-        Some("truncated due to 2000 lines cap")
+        Some(ui_text.text(TextKey::ToolResultTruncatedLines))
     } else {
         None
     };
 
     match (is_full_file, requested_range, trunc_suffix) {
         // Full file — no truncation possible when all lines are returned
-        (true, _, _) => format!(" → All {} lines", total),
+        (true, _, _) => {
+            ui_text.text_with_value(TextKey::ToolResultAllLines, "total", &total.to_string())
+        }
         // Partial read without truncation
-        (false, None, None) => {
-            format!(" → Line {start}-{end} of {total}")
-        }
-        (false, Some((req_start, req_end)), None) => {
-            format!(" → Line {start}-{end} of {total} (requested {req_start}-{req_end})")
-        }
+        (false, None, None) => ui_text.text_with_values(
+            TextKey::ToolResultLineRange,
+            &[
+                ("start", &start.to_string()),
+                ("end", &end.to_string()),
+                ("total", &total.to_string()),
+            ],
+        ),
+        (false, Some((req_start, req_end)), None) => ui_text.text_with_values(
+            TextKey::ToolResultLineRangeRequested,
+            &[
+                ("start", &start.to_string()),
+                ("end", &end.to_string()),
+                ("total", &total.to_string()),
+                ("requested_start", &req_start.to_string()),
+                ("requested_end", &req_end.to_string()),
+            ],
+        ),
         // Partial read with truncation
-        (false, None, Some(suffix)) => {
-            format!(" → Line {start}-{end} of {total} (requested all lines, {suffix})")
-        }
-        (false, Some((req_start, req_end)), Some(suffix)) => {
-            format!(" → Line {start}-{end} of {total} (requested {req_start}-{req_end}, {suffix})")
-        }
+        (false, None, Some(suffix)) => ui_text.text_with_values(
+            TextKey::ToolResultLineRangeAllRequested,
+            &[
+                ("start", &start.to_string()),
+                ("end", &end.to_string()),
+                ("total", &total.to_string()),
+                ("suffix", &suffix),
+            ],
+        ),
+        (false, Some((req_start, req_end)), Some(suffix)) => ui_text.text_with_values(
+            TextKey::ToolResultLineRangeRequestedTruncated,
+            &[
+                ("start", &start.to_string()),
+                ("end", &end.to_string()),
+                ("total", &total.to_string()),
+                ("requested_start", &req_start.to_string()),
+                ("requested_end", &req_end.to_string()),
+                ("suffix", &suffix),
+            ],
+        ),
     }
 }
 

@@ -12,7 +12,8 @@ use tidev_config::ThemeDefinition;
 use unicode_width::UnicodeWidthStr;
 
 use crate::diff_render::render_unified_diff_text;
-use crate::markdown::{highlight_code_to_lines, render_markdown_text_with_width_and_cwd};
+use crate::i18n::{TextKey, UiText};
+use crate::markdown::{highlight_code_to_lines, render_markdown_text_with_width_and_cwd_with_ui};
 use crate::theme::ThemePalette;
 
 /// Build the complete preview pane content for one theme.
@@ -21,6 +22,7 @@ pub(crate) fn build_preview_lines(
     palette: ThemePalette,
     def: Option<&ThemeDefinition>,
     width: usize,
+    ui_text: &UiText,
 ) -> Vec<Line<'static>> {
     let width = width.max(10);
     let mut out = Vec::new();
@@ -33,7 +35,14 @@ pub(crate) fn build_preview_lines(
             .add_modifier(Modifier::BOLD),
     )];
     header.push(Span::styled(
-        format!(" {} ", if palette.is_dark { "Dark" } else { "Light" }),
+        format!(
+            " {} ",
+            ui_text.text(if palette.is_dark {
+                TextKey::ThemePreviewDark
+            } else {
+                TextKey::ThemePreviewLight
+            })
+        ),
         Style::default().fg(palette.text).bg(palette.panel_light),
     ));
     let syntax = def.map_or_else(
@@ -47,32 +56,62 @@ pub(crate) fn build_preview_lines(
         |d| d.syntax_theme_key(),
     );
     header.push(Span::styled(
-        format!("  syntax: {syntax}"),
+        format!(
+            "  {}",
+            ui_text.text_with_value(TextKey::ThemePreviewSyntax, "value", syntax)
+        ),
         Style::default().fg(palette.muted),
     ));
     out.push(Line::from(header));
     out.push(Line::from(String::new()));
 
     // ── Palette swatches ────────────────────────────────────────
-    let entries: Vec<(&str, Color)> = vec![
-        ("background", palette.background),
-        ("panel", palette.panel),
-        ("panel_alt", palette.panel_alt),
-        ("panel_light", palette.panel_light),
-        ("text", palette.text),
-        ("muted", palette.muted),
-        ("border", palette.border),
-        ("accent", palette.accent),
-        ("accent_soft", palette.accent_soft),
-        ("success", palette.success),
-        ("warning", palette.warning),
-        ("error", palette.error),
-        ("diff_add", palette.diff_add),
-        ("diff_delete", palette.diff_delete),
-        ("selection_bg", palette.selection_bg),
-        ("selection_fg", palette.selection_fg),
-        ("mode_build", palette.mode_build),
-        ("mode_plan", palette.mode_plan),
+    let entries: Vec<(String, Color)> = vec![
+        (
+            ui_text.text(TextKey::ThemePreviewBackground),
+            palette.background,
+        ),
+        (ui_text.text(TextKey::ThemePreviewPanel), palette.panel),
+        (
+            ui_text.text(TextKey::ThemePreviewPanelAlt),
+            palette.panel_alt,
+        ),
+        (
+            ui_text.text(TextKey::ThemePreviewPanelLight),
+            palette.panel_light,
+        ),
+        (ui_text.text(TextKey::ThemePreviewText), palette.text),
+        (ui_text.text(TextKey::ThemePreviewMuted), palette.muted),
+        (ui_text.text(TextKey::ThemePreviewBorder), palette.border),
+        (ui_text.text(TextKey::ThemePreviewAccent), palette.accent),
+        (
+            ui_text.text(TextKey::ThemePreviewAccentSoft),
+            palette.accent_soft,
+        ),
+        (ui_text.text(TextKey::ThemePreviewSuccess), palette.success),
+        (ui_text.text(TextKey::ThemePreviewWarning), palette.warning),
+        (ui_text.text(TextKey::ThemePreviewError), palette.error),
+        (ui_text.text(TextKey::ThemePreviewDiffAdd), palette.diff_add),
+        (
+            ui_text.text(TextKey::ThemePreviewDiffDelete),
+            palette.diff_delete,
+        ),
+        (
+            ui_text.text(TextKey::ThemePreviewSelectionBg),
+            palette.selection_bg,
+        ),
+        (
+            ui_text.text(TextKey::ThemePreviewSelectionFg),
+            palette.selection_fg,
+        ),
+        (
+            ui_text.text(TextKey::ThemePreviewModeBuild),
+            palette.mode_build,
+        ),
+        (
+            ui_text.text(TextKey::ThemePreviewModePlan),
+            palette.mode_plan,
+        ),
     ];
     // Two columns when the pane is wide enough for "██ name #rrggbb" cells.
     let cols = if width >= 50 { 2 } else { 1 };
@@ -80,7 +119,7 @@ pub(crate) fn build_preview_lines(
     for (i, (entry_name, color)) in entries.iter().enumerate() {
         row_spans.push(Span::styled("██", Style::default().fg(*color)));
         row_spans.push(Span::styled(
-            format!(" {:<12} ", entry_name),
+            format!(" {entry_name:<12} "),
             Style::default().fg(palette.text),
         ));
         row_spans.push(Span::styled(
@@ -97,7 +136,11 @@ pub(crate) fn build_preview_lines(
     out.push(Line::from(String::new()));
 
     // ── Sample chat message card ────────────────────────────────
-    out.push(section_header(palette, "Messages", width));
+    out.push(section_header(
+        palette,
+        ui_text.text(TextKey::ThemePreviewMessages),
+        width,
+    ));
     out.push(Line::from(vec![
         Span::styled("┌", Style::default().fg(palette.border)),
         Span::styled(
@@ -123,16 +166,25 @@ pub(crate) fn build_preview_lines(
     out.push(card_row(
         palette,
         vec![
-            Span::styled("I will ", Style::default().fg(palette.text)),
             Span::styled(
-                "update",
+                ui_text.text(TextKey::ThemePreviewIWill),
+                Style::default().fg(palette.text),
+            ),
+            Span::styled(
+                ui_text.text(TextKey::ThemePreviewUpdate),
                 Style::default()
                     .fg(palette.text)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(" the ", Style::default().fg(palette.text)),
+            Span::styled(
+                ui_text.text(TextKey::ThemePreviewThe),
+                Style::default().fg(palette.text),
+            ),
             Span::styled("README.md", Style::default().fg(palette.accent)),
-            Span::styled(" and run ", Style::default().fg(palette.text)),
+            Span::styled(
+                ui_text.text(TextKey::ThemePreviewAndRun),
+                Style::default().fg(palette.text),
+            ),
             Span::styled("cargo test", Style::default().fg(palette.accent)),
             Span::styled(".", Style::default().fg(palette.text)),
         ],
@@ -141,19 +193,34 @@ pub(crate) fn build_preview_lines(
     out.push(card_row(
         palette,
         vec![
-            Span::styled("✓ Ready", Style::default().fg(palette.success)),
+            Span::styled(
+                format!("✓ {}", ui_text.text(TextKey::ThemePreviewReady)),
+                Style::default().fg(palette.success),
+            ),
             Span::styled("  ", Style::default().fg(palette.muted)),
-            Span::styled("▲ Pending", Style::default().fg(palette.warning)),
+            Span::styled(
+                format!("▲ {}", ui_text.text(TextKey::ThemePreviewPending)),
+                Style::default().fg(palette.warning),
+            ),
             Span::styled("  ", Style::default().fg(palette.muted)),
-            Span::styled("✗ Failed", Style::default().fg(palette.error)),
+            Span::styled(
+                format!("✗ {}", ui_text.text(TextKey::ThemePreviewFailed)),
+                Style::default().fg(palette.error),
+            ),
         ],
         width,
     ));
     out.push(card_row(
         palette,
         vec![
-            Span::styled("Tool: ", Style::default().fg(palette.muted)),
-            Span::styled("Read file", Style::default().fg(palette.accent_soft)),
+            Span::styled(
+                format!("{} ", ui_text.text(TextKey::ThemePreviewTool)),
+                Style::default().fg(palette.muted),
+            ),
+            Span::styled(
+                ui_text.text(TextKey::ThemePreviewReadFile),
+                Style::default().fg(palette.accent_soft),
+            ),
             Span::styled(" · ", Style::default().fg(palette.muted)),
             Span::styled(
                 "https://example.com",
@@ -167,7 +234,7 @@ pub(crate) fn build_preview_lines(
     out.push(card_row(
         palette,
         vec![Span::styled(
-            "selected item",
+            ui_text.text(TextKey::ThemePreviewSelected),
             Style::default()
                 .fg(palette.selection_fg)
                 .bg(palette.selection_bg),
@@ -185,7 +252,11 @@ pub(crate) fn build_preview_lines(
     out.push(Line::from(String::new()));
 
     // ── Syntax-highlighted code block ───────────────────────────
-    out.push(section_header(palette, "Syntax Highlighting", width));
+    out.push(section_header(
+        palette,
+        ui_text.text(TextKey::ThemePreviewSyntaxHighlighting),
+        width,
+    ));
     let code = "// tidev theme preview\nfn main() {\n    let msg = \"hello tidev\";\n    println!(\"{msg}\");\n}";
     out.push(pad_with_bg(
         Line::from(vec![
@@ -209,7 +280,11 @@ pub(crate) fn build_preview_lines(
     out.push(Line::from(String::new()));
 
     // ── Diff excerpt ────────────────────────────────────────────
-    out.push(section_header(palette, "Diff", width));
+    out.push(section_header(
+        palette,
+        ui_text.text(TextKey::ThemePreviewDiff),
+        width,
+    ));
     let diff = r#"diff --git a/src/main.rs b/src/main.rs
 index abc1234..def5678 100644
 --- a/src/main.rs
@@ -279,37 +354,63 @@ index abc1234..def5678 100644
     out.push(Line::from(String::new()));
 
     // ── Mode badges ─────────────────────────────────────────────
-    out.push(section_header(palette, "Mode", width));
+    out.push(section_header(
+        palette,
+        ui_text.text(TextKey::ThemePreviewMode),
+        width,
+    ));
     out.push(Line::from(vec![
         Span::styled(
-            "Build",
+            ui_text.text(TextKey::Build),
             Style::default()
                 .fg(palette.mode_build)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(" → ", Style::default().fg(palette.muted)),
         Span::styled(
-            "Plan",
+            ui_text.text(TextKey::Plan),
             Style::default()
                 .fg(palette.mode_plan)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(" · ", Style::default().fg(palette.muted)),
-        Span::styled("model-x", Style::default().fg(palette.text)),
+        Span::styled(
+            ui_text.text(TextKey::ThemePreviewModel),
+            Style::default().fg(palette.text),
+        ),
         Span::styled(" · ", Style::default().fg(palette.muted)),
-        Span::styled("provider", Style::default().fg(palette.muted)),
+        Span::styled(
+            ui_text.text(TextKey::ThemePreviewProvider),
+            Style::default().fg(palette.muted),
+        ),
         Span::styled(" · ", Style::default().fg(palette.muted)),
-        Span::styled("thinking", Style::default().fg(palette.accent_soft)),
+        Span::styled(
+            ui_text.text(TextKey::Thinking),
+            Style::default().fg(palette.accent_soft),
+        ),
     ]));
     out.push(Line::from(String::new()));
 
     // ── Surface blocks ──────────────────────────────────────────
-    out.push(section_header(palette, "Surfaces", width));
+    out.push(section_header(
+        palette,
+        ui_text.text(TextKey::ThemePreviewSurfaces),
+        width,
+    ));
     for (surface_name, color) in [
-        ("background", palette.background),
-        ("panel", palette.panel),
-        ("panel_alt", palette.panel_alt),
-        ("panel_light", palette.panel_light),
+        (
+            ui_text.text(TextKey::ThemePreviewBackground),
+            palette.background,
+        ),
+        (ui_text.text(TextKey::ThemePreviewPanel), palette.panel),
+        (
+            ui_text.text(TextKey::ThemePreviewPanelAlt),
+            palette.panel_alt,
+        ),
+        (
+            ui_text.text(TextKey::ThemePreviewPanelLight),
+            palette.panel_light,
+        ),
     ] {
         out.push(Line::from(vec![
             Span::styled(
@@ -324,7 +425,11 @@ index abc1234..def5678 100644
     out.push(Line::from(String::new()));
 
     // ── Markdown sample (static styles) ─────────────────────────
-    out.push(section_header(palette, "Markdown (static styles)", width));
+    out.push(section_header(
+        palette,
+        ui_text.text(TextKey::ThemePreviewMarkdown),
+        width,
+    ));
     let md = r#"# Heading One
 ## Heading Two
 ### Heading Three
@@ -353,14 +458,14 @@ fn greet(name: &str) -> String {
 }
 ```
 "#;
-    let rendered = render_markdown_text_with_width_and_cwd(md, Some(width), None);
+    let rendered = render_markdown_text_with_width_and_cwd_with_ui(md, Some(width), None, ui_text);
     out.extend(rendered.text.lines.iter().cloned());
 
     out
 }
 
 /// `── label ──────...` section divider, drawn in the border color.
-fn section_header(palette: ThemePalette, label: &str, width: usize) -> Line<'static> {
+fn section_header(palette: ThemePalette, label: String, width: usize) -> Line<'static> {
     let head = format!("── {label} ");
     let head_w = UnicodeWidthStr::width(head.as_str());
     Line::from(vec![
@@ -450,7 +555,13 @@ mod tests {
     fn preview_builds_for_dark_theme() {
         let def = test_def(true);
         let palette = ThemePalette::from_definition(&def);
-        let lines = build_preview_lines("test-dark", palette, Some(&def), 80);
+        let lines = build_preview_lines(
+            "test-dark",
+            palette,
+            Some(&def),
+            80,
+            &UiText::from_preference("en-US"),
+        );
         assert!(!lines.is_empty());
         let text = joined(&lines);
         // Theme info: name, badge, syntax theme key
@@ -503,7 +614,13 @@ mod tests {
     fn preview_builds_for_light_theme() {
         let def = test_def(false);
         let palette = ThemePalette::from_definition(&def);
-        let lines = build_preview_lines("test-light", palette, Some(&def), 60);
+        let lines = build_preview_lines(
+            "test-light",
+            palette,
+            Some(&def),
+            60,
+            &UiText::from_preference("en-US"),
+        );
         assert!(!lines.is_empty());
         let text = joined(&lines);
         assert!(text.contains("Light"));
@@ -514,7 +631,13 @@ mod tests {
     fn preview_builds_at_narrow_width() {
         let def = test_def(true);
         let palette = ThemePalette::from_definition(&def);
-        let lines = build_preview_lines("narrow", palette, Some(&def), 24);
+        let lines = build_preview_lines(
+            "narrow",
+            palette,
+            Some(&def),
+            24,
+            &UiText::from_preference("en-US"),
+        );
         assert!(!lines.is_empty());
         // Single-column swatch grid: every color still appears exactly once
         let text = joined(&lines);
@@ -528,7 +651,13 @@ mod tests {
         let def = test_def(true);
         let palette = ThemePalette::from_definition(&def);
         // `def: None` — the syntax key falls back to the palette default
-        let lines = build_preview_lines("ghost", palette, None, 60);
+        let lines = build_preview_lines(
+            "ghost",
+            palette,
+            None,
+            60,
+            &UiText::from_preference("en-US"),
+        );
         assert!(!lines.is_empty());
         let text = joined(&lines);
         assert!(text.contains("base16-ocean.dark"));

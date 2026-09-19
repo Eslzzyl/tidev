@@ -1,4 +1,5 @@
 use super::*;
+use crate::i18n::{TextKey, UiText};
 
 // ---------------------------------------------------------------------------
 // Question result pairs rendering
@@ -8,18 +9,19 @@ pub(super) fn render_question_result_pairs(
     output: &str,
     content_width: usize,
     palette: ThemePalette,
+    ui_text: &UiText,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
 
     lines.push(Line::from(vec![Span::styled(
-        "Questions & Answers",
+        ui_text.text(TextKey::QuestionsAnswers),
         Style::default().fg(palette.accent_soft),
     )]));
     lines.push(Line::from(""));
 
     if output.trim().is_empty() {
         lines.push(Line::from(Span::styled(
-            "(no output)",
+            ui_text.text(TextKey::NoOutput),
             Style::default().fg(palette.muted),
         )));
         return lines;
@@ -42,13 +44,18 @@ pub(super) fn render_question_result_pairs(
             .and_then(|a_line| a_line.strip_prefix("A: "))
             .map(|s| s.trim().to_string())
             .unwrap_or_default();
+        let answer_text = if answer_text == "Unanswered" {
+            ui_text.text(TextKey::Unanswered)
+        } else {
+            answer_text
+        };
 
         let q_line_owned = Line::from(question_text.clone());
         let q_wrapped = word_wrap_line(
             &q_line_owned,
             WrapOptions::new(content_width)
                 .initial_indent(Line::from(vec![Span::styled(
-                    "  Q: ",
+                    format!("  {}: ", ui_text.text(TextKey::QuestionLabel)),
                     Style::default()
                         .fg(palette.accent_soft)
                         .add_modifier(Modifier::BOLD),

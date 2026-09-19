@@ -32,7 +32,8 @@ use crate::components::chat::render::RenderContext;
 use crate::components::chat::render_cache::SelectableRegionRange;
 use crate::diff_render::render_unified_diff_text;
 use crate::hyperlink::{HyperlinkLine, annotate_web_urls_in_line};
-use crate::markdown::{WrapOptions, render_markdown_text_with_width_and_cwd, word_wrap_line};
+use crate::i18n::{TextKey, UiText};
+use crate::markdown::{WrapOptions, word_wrap_line};
 use crate::utils::expand_tabs;
 
 use diff_summary::{
@@ -150,6 +151,7 @@ pub(crate) fn render_tool_call_with_result(
             is_expanded,
             &task_args.description,
             task_args.subagent_type.as_str(),
+            &ctx.ui_text,
         );
         return (lines, Vec::new());
     }
@@ -173,8 +175,13 @@ pub(crate) fn render_tool_call_with_result(
     // replacing the title and the full diff entirely (no padding lines).
     if diff_collapsed == Some(true)
         && let Some(result_msg) = tool_result
-        && let Some(summary) =
-            render_diff_summary_lines(result_msg, content_width, palette, canonical_name)
+        && let Some(summary) = render_diff_summary_lines(
+            result_msg,
+            content_width,
+            palette,
+            canonical_name,
+            &ctx.ui_text,
+        )
     {
         return (summary, Vec::new());
     }
@@ -206,7 +213,7 @@ pub(crate) fn render_tool_call_with_result(
 
     if is_pending && !has_live_progress {
         // No live progress data yet → show generic preparing state
-        let preparing_text = preparing_text_for_tool(canonical_name);
+        let preparing_text = preparing_text_for_tool(canonical_name, &ctx.ui_text);
         lines.push(HyperlinkLine::new(Line::from(vec![
             Span::styled(
                 format!("{} ", ctx.spinner),
@@ -225,11 +232,23 @@ pub(crate) fn render_tool_call_with_result(
                     let offset = parsed.get("offset").and_then(|v| v.as_i64());
                     let limit = parsed.get("limit").and_then(|v| v.as_i64());
                     match (offset, limit) {
-                        (Some(off), Some(lim)) => {
-                            Some(format!(" → Line {}-{}", off, off + lim - 1))
-                        }
-                        (Some(off), None) => Some(format!(" → Line {}-...", off)),
-                        (None, Some(lim)) => Some(format!(" → Line 1-{}", lim)),
+                        (Some(off), Some(lim)) => Some(ctx.ui_text.text_with_values(
+                            TextKey::LineRangeFrom,
+                            &[
+                                ("start", &off.to_string()),
+                                ("end", &(off + lim - 1).to_string()),
+                            ],
+                        )),
+                        (Some(off), None) => Some(ctx.ui_text.text_with_value(
+                            TextKey::LineRangeToEnd,
+                            "start",
+                            &off.to_string(),
+                        )),
+                        (None, Some(lim)) => Some(ctx.ui_text.text_with_value(
+                            TextKey::LineRangeFromStart,
+                            "end",
+                            &lim.to_string(),
+                        )),
                         (None, None) => None,
                     }
                 })
@@ -241,6 +260,7 @@ pub(crate) fn render_tool_call_with_result(
             tool_call,
             content_width,
             palette,
+            &ctx.ui_text,
             exit_code,
             ctx.workspace_root,
             result_suffix,
@@ -265,19 +285,26 @@ pub(crate) fn render_tool_call_with_result(
     // Show live progress during streaming or waiting for write/edit
     if (is_pending && has_live_progress) || is_waiting_result {
         let progress_text = match canonical_name {
-            "write" if write_lines > 0 => format!("Writing {} lines...", write_lines),
-            "edit" if edit_old_lines > 0 && edit_new_lines > 0 => {
-                format!(
-                    "Replacing {} lines with {} lines...",
-                    edit_old_lines, edit_new_lines
-                )
-            }
-            "edit" if edit_old_lines > 0 => {
-                format!("Replacing {} lines with 0 lines...", edit_old_lines)
-            }
-            "edit" if edit_new_lines > 0 => {
-                format!("Replacing 0 lines with {} lines...", edit_new_lines)
-            }
+            "write" if write_lines > 0 => ctx.ui_text.text_with_value(
+                TextKey::WritingLines,
+                "count",
+                &write_lines.to_string(),
+            ),
+            "edit" if edit_old_lines > 0 && edit_new_lines > 0 => ctx.ui_text.text_with_values(
+                TextKey::ReplacingLines,
+                &[
+                    ("old", &edit_old_lines.to_string()),
+                    ("new", &edit_new_lines.to_string()),
+                ],
+            ),
+            "edit" if edit_old_lines > 0 => ctx.ui_text.text_with_values(
+                TextKey::ReplacingLines,
+                &[("old", &edit_old_lines.to_string()), ("new", "0")],
+            ),
+            "edit" if edit_new_lines > 0 => ctx.ui_text.text_with_values(
+                TextKey::ReplacingLines,
+                &[("old", "0"), ("new", &edit_new_lines.to_string())],
+            ),
             "apply_patch" if patch_file_ops > 0 => {
                 let mut parts = vec![];
                 if patch_add_lines > 0 {
@@ -289,12 +316,24 @@ pub(crate) fn render_tool_call_with_result(
                 let change_summary = if parts.is_empty() {
                     String::new()
                 } else {
-                    format!(" ({} lines)", parts.join(" "))
+                    ctx.ui_text
+                        .text_with_value(TextKey::PatchChanges, "changes", &parts.join(" "))
                 };
-                format!(
-                    "Applying patch to {}{}...",
-                    pluralize(patch_file_ops, "file", "files"),
-                    change_summary
+                ctx.ui_text.text_with_values(
+                    TextKey::ApplyingPatch,
+                    &[
+                        (
+                            "files",
+                            &if patch_file_ops == 1 {
+                                ctx.ui_text
+                                    .text_with_count(TextKey::FileCountOne, patch_file_ops)
+                            } else {
+                                ctx.ui_text
+                                    .text_with_count(TextKey::FileCount, patch_file_ops)
+                            },
+                        ),
+                        ("changes", &change_summary),
+                    ],
                 )
             }
             _ => unreachable!(),
@@ -328,6 +367,7 @@ fn render_tool_call_lines(
     tool_call: &ToolCall,
     content_width: usize,
     palette: ThemePalette,
+    ui_text: &UiText,
     exit_code: Option<i32>,
     workspace_root: &Path,
     result_suffix: Option<String>,
@@ -352,7 +392,10 @@ fn render_tool_call_lines(
 
             let display = desc.as_deref().unwrap_or(&command);
             let mut title_spans = vec![
-                Span::styled("Shell ", Style::default().fg(palette.accent_soft)),
+                Span::styled(
+                    format!("{} ", ui_text.text(TextKey::Shell)),
+                    Style::default().fg(palette.accent_soft),
+                ),
                 Span::styled(
                     display.to_string(),
                     Style::default()
@@ -398,11 +441,14 @@ fn render_tool_call_lines(
             }
         }
         "write" => {
-            let path = string_field("file_path").unwrap_or_else(|| "file".to_string());
+            let path = string_field("file_path").unwrap_or_else(|| ui_text.text(TextKey::File));
             let rel = display_workspace_relative(workspace_root, Path::new(&path));
             lines.extend(wrap_tool_title(
                 Line::from(vec![
-                    Span::styled("Write ", Style::default().fg(palette.accent_soft)),
+                    Span::styled(
+                        format!("{} ", ui_text.text(TextKey::Write)),
+                        Style::default().fg(palette.accent_soft),
+                    ),
                     Span::styled(
                         rel,
                         Style::default()
@@ -415,11 +461,14 @@ fn render_tool_call_lines(
             ));
         }
         "edit" => {
-            let path = string_field("file_path").unwrap_or_else(|| "file".to_string());
+            let path = string_field("file_path").unwrap_or_else(|| ui_text.text(TextKey::File));
             let rel = display_workspace_relative(workspace_root, Path::new(&path));
             lines.extend(wrap_tool_title(
                 Line::from(vec![
-                    Span::styled("Edit ", Style::default().fg(palette.accent_soft)),
+                    Span::styled(
+                        format!("{} ", ui_text.text(TextKey::Edit)),
+                        Style::default().fg(palette.accent_soft),
+                    ),
                     Span::styled(
                         rel,
                         Style::default()
@@ -434,7 +483,10 @@ fn render_tool_call_lines(
         "websearch" => {
             let query = string_field("query").unwrap_or_default();
             let mut title_spans = vec![
-                Span::styled("Search web for ", Style::default().fg(palette.accent_soft)),
+                Span::styled(
+                    format!("{} ", ui_text.text(TextKey::WebSearch)),
+                    Style::default().fg(palette.accent_soft),
+                ),
                 Span::styled(
                     query,
                     Style::default()
@@ -448,7 +500,11 @@ fn render_tool_call_lines(
                 .and_then(|v| v.get("num_results"))
                 .and_then(|v| v.as_i64())
             {
-                suffix_parts.push(format!("max: {}", num));
+                suffix_parts.push(ui_text.text_with_value(
+                    TextKey::MaxResults,
+                    "count",
+                    &num.to_string(),
+                ));
             }
             if let Some(st) = string_field("search_type") {
                 suffix_parts.push(st);
@@ -458,7 +514,11 @@ fn render_tool_call_lines(
                 .and_then(|v| v.get("offset"))
                 .and_then(|v| v.as_i64())
             {
-                suffix_parts.push(format!("offset={}", off));
+                suffix_parts.push(ui_text.text_with_value(
+                    TextKey::Offset,
+                    "count",
+                    &off.to_string(),
+                ));
             }
             if !suffix_parts.is_empty() {
                 title_spans.push(Span::styled(
@@ -476,7 +536,7 @@ fn render_tool_call_lines(
             let url = string_field("url").unwrap_or_default();
             let mut title_spans = vec![
                 Span::styled(
-                    "Fetch web page from ",
+                    format!("{} ", ui_text.text(TextKey::WebFetch)),
                     Style::default().fg(palette.accent_soft),
                 ),
                 Span::styled(
@@ -488,28 +548,40 @@ fn render_tool_call_lines(
             ];
             let mut suffix_parts: Vec<String> = Vec::new();
             if let Some(fmt) = string_field("format") {
-                suffix_parts.push(format!("format: {}", fmt));
+                suffix_parts.push(ui_text.text_with_value(TextKey::Format, "value", &fmt));
             }
             if let Some(to) = parsed
                 .as_ref()
                 .and_then(|v| v.get("timeout"))
                 .and_then(|v| v.as_i64())
             {
-                suffix_parts.push(format!("{}s", to));
+                suffix_parts.push(ui_text.text_with_value(
+                    TextKey::Seconds,
+                    "count",
+                    &to.to_string(),
+                ));
             }
             if let Some(off) = parsed
                 .as_ref()
                 .and_then(|v| v.get("offset"))
                 .and_then(|v| v.as_i64())
             {
-                suffix_parts.push(format!("offset={}", off));
+                suffix_parts.push(ui_text.text_with_value(
+                    TextKey::Offset,
+                    "count",
+                    &off.to_string(),
+                ));
             }
             if let Some(lim) = parsed
                 .as_ref()
                 .and_then(|v| v.get("limit"))
                 .and_then(|v| v.as_i64())
             {
-                suffix_parts.push(format!("limit={}", lim));
+                suffix_parts.push(ui_text.text_with_value(
+                    TextKey::Limit,
+                    "count",
+                    &lim.to_string(),
+                ));
             }
             if !suffix_parts.is_empty() {
                 title_spans.push(Span::styled(
@@ -535,11 +607,19 @@ fn render_tool_call_lines(
                 .map(|patch_text| patch_file_paths(&patch_text))
                 .unwrap_or_else(|| partial_patch_file_paths(&tool_call.arguments));
             let title = if file_paths.is_empty() {
-                "Apply patch".to_string()
+                ui_text.text(TextKey::Diff)
             } else if file_paths.len() == 1 {
-                format!("Apply patch to {}", file_paths[0])
+                format!("{} {}", ui_text.text(TextKey::Diff), file_paths[0])
             } else {
-                format!("Apply patch to {} files", file_paths.len())
+                format!(
+                    "{} {}",
+                    ui_text.text(TextKey::Diff),
+                    if file_paths.len() == 1 {
+                        ui_text.text_with_count(TextKey::DiffFilesOne, file_paths.len())
+                    } else {
+                        ui_text.text_with_count(TextKey::DiffFiles, file_paths.len())
+                    }
+                )
             };
             lines.extend(wrap_tool_title(
                 Line::from(vec![Span::styled(
@@ -557,11 +637,8 @@ fn render_tool_call_lines(
                 .and_then(|a| a.as_array())
                 .map(|a| a.len())
                 .unwrap_or(0);
-            let title = if count == 1 {
-                "Ask 1 question".to_string()
-            } else {
-                format!("Ask {} questions", count)
-            };
+            let title =
+                ui_text.text_with_value(TextKey::QuestionCount, "count", &count.to_string());
             lines.extend(wrap_tool_title(
                 Line::from(vec![Span::styled(
                     title,
@@ -574,7 +651,7 @@ fn render_tool_call_lines(
         "todowrite" => {
             lines.extend(wrap_tool_title(
                 Line::from(vec![Span::styled(
-                    "Update todo list",
+                    ui_text.text(TextKey::Todo),
                     Style::default().fg(palette.accent_soft),
                 )]),
                 content_width,
@@ -584,13 +661,16 @@ fn render_tool_call_lines(
         "mcp_list" => {
             let server = string_field("server").unwrap_or_default();
             let target = if server.trim().is_empty() {
-                "servers".to_string()
+                ui_text.text(TextKey::McpServers)
             } else {
-                format!("server {server}")
+                format!("{} {server}", ui_text.text(TextKey::Server))
             };
             lines.extend(wrap_tool_title(
                 Line::from(vec![
-                    Span::styled("MCP list ", Style::default().fg(palette.accent_soft)),
+                    Span::styled(
+                        format!("{} ", ui_text.text(TextKey::McpList)),
+                        Style::default().fg(palette.accent_soft),
+                    ),
                     Span::styled(
                         target,
                         Style::default()
@@ -606,7 +686,10 @@ fn render_tool_call_lines(
             let query = string_field("query").unwrap_or_default();
             lines.extend(wrap_tool_title(
                 Line::from(vec![
-                    Span::styled("MCP search ", Style::default().fg(palette.accent_soft)),
+                    Span::styled(
+                        format!("{} ", ui_text.text(TextKey::McpSearchAction)),
+                        Style::default().fg(palette.accent_soft),
+                    ),
                     Span::styled(
                         format!("\"{query}\""),
                         Style::default()
@@ -623,7 +706,10 @@ fn render_tool_call_lines(
             let tool = string_field("tool").unwrap_or_default();
             lines.extend(wrap_tool_title(
                 Line::from(vec![
-                    Span::styled("MCP call ", Style::default().fg(palette.accent_soft)),
+                    Span::styled(
+                        format!("{} ", ui_text.text(TextKey::McpCall)),
+                        Style::default().fg(palette.accent_soft),
+                    ),
                     Span::styled(server, Style::default().fg(palette.accent_soft)),
                     Span::styled(" / ", Style::default().fg(palette.muted)),
                     Span::styled(
@@ -645,9 +731,9 @@ fn render_tool_call_lines(
         }
         _ => {
             let title = if tool_call.name.is_empty() {
-                "Tool".to_string()
+                ui_text.text(TextKey::Tool)
             } else {
-                format!("Tool {}", tool_call.name)
+                format!("{} {}", ui_text.text(TextKey::Tool), tool_call.name)
             };
             lines.extend(wrap_tool_title(
                 Line::from(vec![Span::styled(
@@ -784,7 +870,11 @@ fn render_tool_result_detail_lines(
     let palette = ctx.palette;
     // Strip system-reminder tags injected by instruction file discovery
     let output = crate::utils::strip_system_reminder_tags(&message.content);
-    let tool_name = message.tool_name.as_deref().unwrap_or("tool");
+    let tool_name_fallback = ctx.ui_text.text(TextKey::Tool);
+    let tool_name = message
+        .tool_name
+        .as_deref()
+        .unwrap_or(tool_name_fallback.as_str());
     let canonical_name = canonical_tool_name(tool_name).unwrap_or(tool_name);
 
     // For shell, parse exit code and strip it from output
@@ -803,6 +893,7 @@ fn render_tool_result_detail_lines(
                 effective_output,
                 content_width,
                 palette,
+                &ctx.ui_text,
             )),
             None,
             vec![],
@@ -817,10 +908,10 @@ fn render_tool_result_detail_lines(
 
         for change in &message.metadata.file_changes {
             let label = match change.operation.as_str() {
-                "A" => "Write",
-                "M" => "Edit",
-                "D" => "Delete",
-                _ => "Edit",
+                "A" => ctx.ui_text.text(TextKey::Write),
+                "M" => ctx.ui_text.text(TextKey::Edit),
+                "D" => ctx.ui_text.text(TextKey::Delete),
+                _ => ctx.ui_text.text(TextKey::Edit),
             };
 
             lines.push(Line::from(vec![
@@ -913,7 +1004,12 @@ fn render_tool_result_detail_lines(
                 })
                 .collect();
             return (
-                hyper_lines(render_todos_checkbox_list(&todos, content_width, palette)),
+                hyper_lines(render_todos_checkbox_list(
+                    &todos,
+                    content_width,
+                    palette,
+                    &ctx.ui_text,
+                )),
                 None,
                 vec![],
             );
@@ -927,6 +1023,7 @@ fn render_tool_result_detail_lines(
                 effective_output,
                 content_width,
                 palette,
+                &ctx.ui_text,
                 is_expanded,
                 is_error,
             ),
@@ -942,6 +1039,7 @@ fn render_tool_result_detail_lines(
                 effective_output,
                 content_width,
                 palette,
+                &ctx.ui_text,
                 is_expanded,
                 is_error,
             ),
@@ -957,6 +1055,7 @@ fn render_tool_result_detail_lines(
             effective_output,
             content_width,
             palette,
+            &ctx.ui_text,
             is_expanded,
         )
     {
@@ -971,6 +1070,7 @@ fn render_tool_result_detail_lines(
             lang,
             content_width,
             palette,
+            &ctx.ui_text,
             is_expanded,
             is_error,
         ),
@@ -1034,6 +1134,7 @@ pub(crate) fn render_output_preview_lines(
     lang: Option<&str>,
     content_width: usize,
     palette: ThemePalette,
+    ui_text: &UiText,
     is_expanded: bool,
     is_error: bool,
 ) -> Vec<HyperlinkLine> {
@@ -1111,15 +1212,15 @@ pub(crate) fn render_output_preview_lines(
     if is_expanded {
         if total_output_lines > 0 {
             lines.push(Line::from(vec![Span::styled(
-                "▲ Click to collapse",
+                ui_text.text(TextKey::ClickToCollapse),
                 Style::default().fg(palette.muted),
             )]));
         }
     } else if total_output_lines > max_lines {
         lines.push(Line::from(vec![Span::styled(
-            format!(
-                "  ▼ {} more line(s) — Click to expand",
-                total_output_lines - max_lines
+            ui_text.text_with_count(
+                TextKey::MoreLinesClickExpand,
+                total_output_lines - max_lines,
             ),
             Style::default().fg(palette.muted),
         )]));
@@ -1127,7 +1228,7 @@ pub(crate) fn render_output_preview_lines(
 
     if lines.is_empty() {
         lines.push(Line::from(Span::styled(
-            "(no output)",
+            ui_text.text(TextKey::NoOutput),
             Style::default().fg(palette.muted),
         )));
     }
@@ -1139,28 +1240,20 @@ pub(crate) fn render_output_preview_lines(
 // Utility helpers
 // ---------------------------------------------------------------------------
 
-fn preparing_text_for_tool(canonical_name: &str) -> &'static str {
-    match canonical_name {
-        "shell" => "Preparing shell command...",
-        "write" => "Preparing write...",
-        "edit" => "Preparing edit...",
-        "websearch" => "Preparing web search...",
-        "webfetch" => "Preparing web fetch...",
-        "task" => "Preparing subagent task...",
-        "question" => "Preparing questions...",
-        "todowrite" => "Preparing todo list...",
-        "apply_patch" => "Preparing patch...",
-        _ => "Preparing...",
-    }
-}
-
-/// Simple pluralization helper.
-fn pluralize(n: usize, singular: &str, plural: &str) -> String {
-    if n == 1 {
-        format!("{n} {singular}")
-    } else {
-        format!("{n} {plural}")
-    }
+fn preparing_text_for_tool(canonical_name: &str, ui_text: &UiText) -> String {
+    let name = match canonical_name {
+        "shell" => ui_text.text(TextKey::Shell),
+        "write" => ui_text.text(TextKey::Write),
+        "edit" => ui_text.text(TextKey::Edit),
+        "websearch" => ui_text.text(TextKey::WebSearch),
+        "webfetch" => ui_text.text(TextKey::WebFetch),
+        "task" => ui_text.text(TextKey::SubagentTool),
+        "question" => ui_text.text(TextKey::Questions),
+        "todowrite" => ui_text.text(TextKey::Todo),
+        "apply_patch" => ui_text.text(TextKey::Diff),
+        _ => ui_text.text(TextKey::Tool),
+    };
+    ui_text.text_with_value(TextKey::Preparing, "name", &name)
 }
 
 /// Wrap a tool title Line at content_width, indenting continuation lines.
@@ -1246,6 +1339,7 @@ mod tests {
         let empty_set = HashSet::new();
         let ctx = RenderContext {
             palette,
+            ui_text: UiText::from_preference("en-US"),
             spinner: ".",
             workspace_root: Path::new("/test"),
             expanded_tool_results: &empty_set,
@@ -1417,6 +1511,7 @@ mod tests {
         let empty_set = HashSet::new();
         let ctx = RenderContext {
             palette,
+            ui_text: UiText::from_preference("en-US"),
             spinner: ".",
             workspace_root: Path::new("/test"),
             expanded_tool_results: &empty_set,
@@ -1468,6 +1563,7 @@ mod tests {
         let empty_set = HashSet::new();
         let ctx = RenderContext {
             palette,
+            ui_text: UiText::from_preference("en-US"),
             spinner: ".",
             workspace_root: Path::new("/test"),
             expanded_tool_results: &empty_set,
@@ -1519,6 +1615,7 @@ mod tests {
         let empty_set = HashSet::new();
         let ctx = RenderContext {
             palette,
+            ui_text: UiText::from_preference("en-US"),
             spinner: ".",
             workspace_root: Path::new("/test"),
             expanded_tool_results: &empty_set,
@@ -1590,6 +1687,7 @@ mod tests {
         let empty_set = HashSet::new();
         let ctx = RenderContext {
             palette,
+            ui_text: UiText::from_preference("en-US"),
             spinner: ".",
             workspace_root: Path::new("/test"),
             expanded_tool_results: &empty_set,
@@ -1638,6 +1736,7 @@ mod tests {
         let empty_set = HashSet::new();
         let ctx = RenderContext {
             palette,
+            ui_text: UiText::from_preference("en-US"),
             spinner: ".",
             workspace_root: Path::new("/test"),
             expanded_tool_results: &empty_set,
