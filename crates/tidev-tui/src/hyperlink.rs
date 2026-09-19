@@ -15,6 +15,8 @@ use unicode_width::UnicodeWidthChar;
 use unicode_width::UnicodeWidthStr;
 use url::Url;
 
+use crate::formula::FormulaImage;
+
 /// A hyperlink spanning display columns of a single rendered line.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct HyperlinkRange {
@@ -32,11 +34,19 @@ impl HyperlinkRange {
     }
 }
 
+/// A terminal image occupying a display-column range on one rendered line.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct FormulaPlacement {
+    pub(crate) image: std::sync::Arc<FormulaImage>,
+    pub(crate) columns: Range<usize>,
+}
+
 /// A rendered line plus the hyperlinks attached to it.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct HyperlinkLine {
     pub(crate) line: Line<'static>,
     pub(crate) hyperlinks: Vec<HyperlinkRange>,
+    pub(crate) formulas: Vec<FormulaPlacement>,
 }
 
 impl HyperlinkLine {
@@ -44,6 +54,7 @@ impl HyperlinkLine {
         Self {
             line,
             hyperlinks: Vec::new(),
+            formulas: Vec::new(),
         }
     }
 
@@ -116,7 +127,7 @@ pub(crate) fn remap_wrapped_line(
     wrapped: Vec<Line<'static>>,
 ) -> Vec<HyperlinkLine> {
     let mut out = plain_hyperlink_lines(wrapped);
-    if source.hyperlinks.is_empty() {
+    if source.hyperlinks.is_empty() && source.formulas.is_empty() {
         return out;
     }
 
@@ -124,6 +135,7 @@ pub(crate) fn remap_wrapped_line(
     let mut source_byte = 0usize;
     let mut source_column = 0usize;
     let mut link_index = 0usize;
+    let mut formula_ranges: Vec<Option<Range<usize>>> = vec![None; source.formulas.len()];
     for (index, line) in out.iter_mut().enumerate() {
         if index > 0 {
             let trimmed = source_text[source_byte..].trim_start_matches(char::is_whitespace);
@@ -156,8 +168,26 @@ pub(crate) fn remap_wrapped_line(
             {
                 push_link_range(line, output_column..output_column + width, link);
             }
+            for (formula_index, formula) in source.formulas.iter().enumerate() {
+                if formula.columns.contains(&source_column) {
+                    let range = output_column..output_column + width;
+                    match &mut formula_ranges[formula_index] {
+                        Some(existing) if existing.end == range.start => existing.end = range.end,
+                        Some(_) => {}
+                        slot @ None => *slot = Some(range),
+                    }
+                }
+            }
             source_column += width;
             output_column += width;
+        }
+        for (formula_index, range) in formula_ranges.iter_mut().enumerate() {
+            if let Some(range) = range.take() {
+                line.formulas.push(FormulaPlacement {
+                    image: source.formulas[formula_index].image.clone(),
+                    columns: range,
+                });
+            }
         }
         source_byte += mapped.len();
     }
@@ -577,6 +607,7 @@ mod tests {
                 /*columns*/ 10..14,
                 "https://example.com/first".to_string(),
             )],
+            formulas: Vec::new(),
         };
         // Simulated wrap output: the link columns land on the second row.
         let wrapped = vec![Line::from("  alpha"), Line::from("😀here")];

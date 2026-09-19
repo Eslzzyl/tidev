@@ -266,9 +266,19 @@ fn render_user_card(
     for line in &content_lines {
         let mut spans = vec![Span::styled("┃ ", prefix_style)];
         spans.extend(line.line.spans.iter().cloned());
+        let formulas = line
+            .formulas
+            .iter()
+            .cloned()
+            .map(|mut formula| {
+                formula.columns = formula.columns.start + 2..formula.columns.end + 2;
+                formula
+            })
+            .collect();
         lines.push(HyperlinkLine {
             line: Line::from(spans),
             hyperlinks: line.hyperlinks.clone(),
+            formulas,
         });
     }
     lines.push(HyperlinkLine::new(Line::from(vec![Span::styled(

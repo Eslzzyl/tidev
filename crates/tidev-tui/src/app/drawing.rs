@@ -550,6 +550,7 @@ impl App {
     }
 
     pub fn draw(&mut self, frame: &mut Frame) {
+        crate::formula::acknowledge_render_wakeup();
         let palette = self.current_palette;
         let ui_text = self.ui_text();
         let area = frame.area();

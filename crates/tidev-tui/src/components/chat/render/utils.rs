@@ -173,6 +173,9 @@ pub(super) fn decorate_card_lines(
                     hyperlink.columns =
                         hyperlink.columns.start + shift..hyperlink.columns.end + shift;
                 }
+                for formula in &mut line.formulas {
+                    formula.columns = formula.columns.start + shift..formula.columns.end + shift;
+                }
             }
             line
         })

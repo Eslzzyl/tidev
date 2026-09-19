@@ -19,12 +19,14 @@ use std::path::Path;
 use std::time::Instant;
 
 use crate::chat_context::{ChatContext, ReasoningDisplay};
+use crate::formula;
 use crate::hyperlink::{HyperlinkLine, HyperlinkRange, mark_buffer_hyperlinks};
 use crate::theme::ThemePalette;
 use ratatui::layout::Rect;
 use ratatui::prelude::{Frame, Style};
-use ratatui::text::Line;
+use ratatui::text::{Line, Text};
 use ratatui::widgets::Paragraph;
+use ratatui_image::sliced::{SignedPosition, SlicedImage};
 use uuid::Uuid;
 
 use blocks::messages_text;
@@ -127,6 +129,8 @@ pub(crate) fn render_messages(
         return;
     }
 
+    formula::set_foreground(palette.text);
+
     let (content_area, scrollbar_rect) = compute_content_layout(area);
 
     let spinner = loading_spinner(spinner_start);
@@ -181,22 +185,56 @@ pub(crate) fn render_messages(
     // Render the message text as a Paragraph widget, then inject OSC 8
     // hyperlinks into the frame buffer. Lines are pre-wrapped, so each
     // logical line occupies exactly one row at `area.y + i - render_scroll`.
-    let (lines, line_links): (Vec<Line<'static>>, Vec<Vec<HyperlinkRange>>) = output
+    let render_scroll = output.render_scroll;
+    let total_lines = output.total_lines;
+    let mut line_links: Vec<Vec<HyperlinkRange>> = Vec::with_capacity(output.hyperlink_lines.len());
+    let mut line_formulas = Vec::with_capacity(output.hyperlink_lines.len());
+    let lines: Vec<Line<'static>> = output
         .hyperlink_lines
         .into_iter()
-        .map(|hl| (hl.line, hl.hyperlinks))
-        .unzip();
-    let text = ratatui::text::Text::from(lines);
+        .map(
+            |HyperlinkLine {
+                 line,
+                 hyperlinks,
+                 formulas,
+             }| {
+                line_links.push(hyperlinks);
+                line_formulas.push(formulas);
+                line
+            },
+        )
+        .collect();
+    let text = Text::from(lines);
     let paragraph = Paragraph::new(text)
         .style(Style::default().bg(ctx.palette.background))
-        .scroll((output.render_scroll as u16, 0));
+        .scroll((render_scroll as u16, 0));
     frame.render_widget(paragraph, content_area);
-    mark_buffer_hyperlinks(
-        frame.buffer_mut(),
-        content_area,
-        &line_links,
-        output.render_scroll,
-    );
+    mark_buffer_hyperlinks(frame.buffer_mut(), content_area, &line_links, render_scroll);
+
+    for (line_index, formulas) in line_formulas.iter().enumerate() {
+        let y = line_index as isize - render_scroll as isize;
+        if y >= content_area.height as isize
+            || y + formulas
+                .iter()
+                .map(|formula| formula.image.size.height as isize)
+                .max()
+                .unwrap_or(0)
+                <= 0
+        {
+            continue;
+        }
+        for formula in formulas {
+            formula.image.request_render();
+            let Some(protocol) = formula.image.protocol() else {
+                continue;
+            };
+            let x = formula.columns.start as i16;
+            frame.render_widget(
+                SlicedImage::new(protocol, SignedPosition { x, y: y as i16 }),
+                content_area,
+            );
+        }
+    }
 
     // Scrollbar
     if let Some(sb) = scrollbar_rect {
@@ -204,7 +242,7 @@ pub(crate) fn render_messages(
             frame,
             sb,
             *scroll_offset,
-            output.total_lines,
+            total_lines,
             area.height as usize,
             ctx.palette,
             scrollbar_hovered,

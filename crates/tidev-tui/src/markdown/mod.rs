@@ -1,6 +1,7 @@
 mod highlight;
 mod line;
 mod links;
+mod math;
 mod styles;
 mod table;
 mod wrap;
@@ -25,14 +26,17 @@ pub use highlight::highlight_code_to_lines_for_path;
 pub(crate) use highlight::set_syntax_theme_by_key;
 
 use line::line_to_static;
+use math::normalize_math_delimiters;
 use wrap::RtOptions;
 pub use wrap::{RtOptions as WrapOptions, adaptive_wrap_line, adaptive_wrap_lines, word_wrap_line};
 
 pub use links::is_local_path_like_link;
 
 use crate::ansi::strip_ansi;
+use crate::formula::{self, FormulaKind};
 use crate::hyperlink::{
-    HyperlinkLine, HyperlinkRange, annotate_web_urls_in_line, remap_wrapped_line, web_destination,
+    FormulaPlacement, HyperlinkLine, HyperlinkRange, annotate_web_urls_in_line, remap_wrapped_line,
+    web_destination,
 };
 use crate::i18n::{TextKey, UiText};
 use crate::utils::expand_tabs;
@@ -52,13 +56,15 @@ pub(crate) fn render_markdown_text_with_width(input: &str, width: Option<usize>)
     arc.text.clone()
 }
 
-/// Rendered markdown output: the styled lines plus per-line hyperlink ranges.
+/// Rendered markdown output: the styled lines plus per-line overlays.
 ///
 /// `line_links` is index-aligned with `text.lines`: each entry lists the
 /// hyperlink ranges of the corresponding line in display columns.
+/// `line_formulas` follows the same indexing rule for formula images.
 pub(crate) struct MarkdownRender {
     pub text: Text<'static>,
     pub line_links: Vec<Vec<HyperlinkRange>>,
+    pub line_formulas: Vec<Vec<FormulaPlacement>>,
 }
 
 impl Deref for MarkdownRender {
@@ -75,25 +81,33 @@ pub(crate) fn markdown_to_hyperlink_lines(md: &MarkdownRender) -> Vec<HyperlinkL
         .lines
         .iter()
         .zip(md.line_links.iter())
-        .map(|(line, links)| HyperlinkLine {
+        .zip(md.line_formulas.iter())
+        .map(|((line, links), formulas)| HyperlinkLine {
             line: line.clone(),
             hyperlinks: links.clone(),
+            formulas: formulas.clone(),
         })
         .collect()
 }
 
 /// Cache key for the markdown render cache:
-/// (content_hash, wrap_width, cwd_hash, syntax_theme_gen, locale)
+/// (content_hash, wrap_width, cwd_hash, syntax_theme_gen, locale, formula_color)
 ///
 /// The syntax theme generation is part of the key because code fences inside
 /// the markdown are highlighted with the current syntect theme; without it
 /// the cached output would keep stale colors after a theme switch.
-type MarkdownCacheKey = (blake3::Hash, Option<usize>, blake3::Hash, u64, String);
+type MarkdownCacheKey = (
+    blake3::Hash,
+    Option<usize>,
+    blake3::Hash,
+    u64,
+    String,
+    [u8; 3],
+);
 
 /// Content-hash based cache for rendered markdown output.
-/// Keyed by (blake3::Hash of input, width, cwd_hash, syntax_theme_gen) to
-/// avoid re-parsing markdown when neither content, terminal width, workspace
-/// nor syntax theme has changed.
+/// Keyed by content, width, workspace, syntax theme, locale, and formula color
+/// to avoid re-parsing markdown when the rendered result can be reused.
 /// Wrapped in `Arc` so repeated cache hits share the same allocation.
 static MARKDOWN_RENDER_CACHE: LazyLock<
     Mutex<std::collections::HashMap<MarkdownCacheKey, Arc<MarkdownRender>>>,
@@ -122,13 +136,19 @@ pub(crate) fn render_markdown_text_with_width_and_cwd_with_ui(
     let cwd_hash = blake3::hash(cwd.map(|p| p.as_os_str().as_encoded_bytes()).unwrap_or(b""));
     let theme_gen = HIGHLIGHT_CACHE_GEN.load(Ordering::SeqCst);
     let locale_key = ui_text.cache_key();
+    let formula_color = formula::foreground_key();
 
     // Check cache
     {
         let cache = MARKDOWN_RENDER_CACHE.lock().unwrap();
-        if let Some(cached) =
-            cache.get(&(content_hash, width, cwd_hash, theme_gen, locale_key.clone()))
-        {
+        if let Some(cached) = cache.get(&(
+            content_hash,
+            width,
+            cwd_hash,
+            theme_gen,
+            locale_key.clone(),
+            formula_color,
+        )) {
             return cached.clone();
         }
     }
@@ -137,8 +157,15 @@ pub(crate) fn render_markdown_text_with_width_and_cwd_with_ui(
     let mut options = Options::empty();
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TABLES);
-    let parser = Parser::new_ext(input, options);
-    let mut writer = Writer::new(parser, cwd, ui_text.text(TextKey::Column));
+    options.insert(Options::ENABLE_MATH);
+    let normalized_input = normalize_math_delimiters(input);
+    let parser = Parser::new_ext(normalized_input.as_ref(), options);
+    let mut writer = Writer::new(
+        parser,
+        cwd,
+        ui_text.text(TextKey::Column),
+        formula::foreground_color(),
+    );
     writer.wrap_width = width;
     writer.run();
 
@@ -146,6 +173,7 @@ pub(crate) fn render_markdown_text_with_width_and_cwd_with_ui(
     let result = Arc::new(MarkdownRender {
         text: writer.text,
         line_links: writer.line_links,
+        line_formulas: writer.line_formulas,
     });
     {
         let mut cache = MARKDOWN_RENDER_CACHE.lock().unwrap();
@@ -157,7 +185,14 @@ pub(crate) fn render_markdown_text_with_width_and_cwd_with_ui(
             }
         }
         cache.insert(
-            (content_hash, width, cwd_hash, theme_gen, locale_key),
+            (
+                content_hash,
+                width,
+                cwd_hash,
+                theme_gen,
+                locale_key,
+                formula_color,
+            ),
             result.clone(),
         );
     }
@@ -198,6 +233,8 @@ where
     text: Text<'static>,
     /// Per-line hyperlink ranges, index-aligned with `text.lines`.
     line_links: Vec<Vec<HyperlinkRange>>,
+    /// Per-line formula images, index-aligned with `text.lines`.
+    line_formulas: Vec<Vec<FormulaPlacement>>,
     styles: MarkdownStyles,
     inline_styles: Vec<Style>,
     indent_stack: Vec<IndentContext>,
@@ -222,17 +259,26 @@ where
     table_state: Option<TableState>,
     in_table_cell: bool,
     column_label: String,
+    formula_foreground: StyleColor,
 }
+
+type StyleColor = ratatui::style::Color;
 
 impl<'a, I> Writer<'a, I>
 where
     I: Iterator<Item = Event<'a>>,
 {
-    fn new(iter: I, cwd: Option<&Path>, column_label: String) -> Self {
+    fn new(
+        iter: I,
+        cwd: Option<&Path>,
+        column_label: String,
+        formula_foreground: StyleColor,
+    ) -> Self {
         Self {
             iter,
             text: Text::default(),
             line_links: Vec::new(),
+            line_formulas: Vec::new(),
             styles: MarkdownStyles::default(),
             inline_styles: Vec::new(),
             indent_stack: Vec::new(),
@@ -257,6 +303,7 @@ where
             table_state: None,
             in_table_cell: false,
             column_label,
+            formula_foreground,
         }
     }
 
@@ -274,8 +321,8 @@ where
             Event::End(tag) => self.end_tag(tag),
             Event::Text(text) => self.text(text),
             Event::Code(code) => self.code(code),
-            Event::InlineMath(math) => self.text(math),
-            Event::DisplayMath(math) => self.text(math),
+            Event::InlineMath(math) => self.math(math.as_ref(), FormulaKind::Inline),
+            Event::DisplayMath(math) => self.math(math.as_ref(), FormulaKind::Display),
             Event::SoftBreak => self.soft_break(),
             Event::HardBreak => self.hard_break(),
             Event::Rule => {
@@ -552,6 +599,72 @@ where
             self.push_text_spans(&expand_tabs(line, self.tab_width), style);
         }
         self.needs_newline = false;
+    }
+
+    fn math(&mut self, source: &str, kind: FormulaKind) {
+        if self.suppressing_local_link_label() {
+            return;
+        }
+        self.line_ends_with_local_link_target = false;
+
+        let Some(image) =
+            formula::render_with_width(source, kind, self.formula_foreground, self.wrap_width)
+        else {
+            self.text(CowStr::Boxed(source.to_string().into_boxed_str()));
+            return;
+        };
+
+        let image_width = image.size.width as usize;
+        if self.wrap_width.is_some_and(|width| image_width > width) {
+            self.text(CowStr::Boxed(source.to_string().into_boxed_str()));
+            return;
+        }
+
+        if kind == FormulaKind::Display {
+            self.discard_empty_current_line();
+            self.push_line(Line::default());
+            self.push_formula_image(image);
+            self.flush_current_line();
+            self.needs_newline = true;
+            return;
+        }
+
+        if self.pending_marker_line {
+            self.push_line(Line::default());
+        }
+        self.pending_marker_line = false;
+        if self.needs_newline {
+            self.push_line(Line::default());
+            self.needs_newline = false;
+        }
+        self.push_formula_image(image);
+        self.needs_newline = false;
+    }
+
+    fn discard_empty_current_line(&mut self) {
+        let empty = self
+            .current_line_content
+            .as_ref()
+            .is_some_and(|line| line.width() == 0 && line.hyperlinks.is_empty());
+        if empty {
+            self.current_line_content = None;
+            self.current_initial_indent.clear();
+            self.current_subsequent_indent.clear();
+            self.current_line_in_code_block = false;
+        }
+    }
+
+    fn push_formula_image(&mut self, image: std::sync::Arc<formula::FormulaImage>) {
+        let width = image.size.width as usize;
+        let mut formula_line = HyperlinkLine::new(Line::from(Span::styled(
+            "\u{2800}".repeat(width),
+            self.inline_styles.last().copied().unwrap_or_default(),
+        )));
+        formula_line.formulas.push(FormulaPlacement {
+            image,
+            columns: 0..width,
+        });
+        self.push_annotated(formula_line);
     }
 
     fn code(&mut self, code: CowStr<'a>) {
@@ -862,10 +975,14 @@ where
                 let mut line = HyperlinkLine {
                     line: Line::from_iter(spans).style(style),
                     hyperlinks: line.hyperlinks,
+                    formulas: line.formulas,
                 };
                 for hyperlink in &mut line.hyperlinks {
                     hyperlink.columns =
                         hyperlink.columns.start + shift..hyperlink.columns.end + shift;
+                }
+                for formula in &mut line.formulas {
+                    formula.columns = formula.columns.start + shift..formula.columns.end + shift;
                 }
                 self.push_output_line(line);
             }
@@ -924,6 +1041,11 @@ where
                     link.columns = link.columns.start + shift..link.columns.end + shift;
                     link
                 }));
+            line.formulas
+                .extend(appended.formulas.into_iter().map(|mut formula| {
+                    formula.columns = formula.columns.start + shift..formula.columns.end + shift;
+                    formula
+                }));
         }
     }
 
@@ -951,11 +1073,23 @@ where
         self.push_annotated(annotated);
     }
 
-    /// Push a finished output line, keeping `line_links` aligned with `text.lines`.
+    /// Push a finished output line, keeping all per-line metadata aligned.
     fn push_output_line(&mut self, line: HyperlinkLine) {
         let links = line.hyperlinks;
+        let formulas = line.formulas;
+        let extra_rows = formulas
+            .iter()
+            .map(|formula| formula.image.size.height.saturating_sub(1) as usize)
+            .max()
+            .unwrap_or_default();
         self.text.lines.push(line.line);
         self.line_links.push(links);
+        self.line_formulas.push(formulas);
+        for _ in 0..extra_rows {
+            self.text.lines.push(Line::default());
+            self.line_links.push(Vec::new());
+            self.line_formulas.push(Vec::new());
+        }
     }
 
     fn push_blank_line(&mut self) {
@@ -1042,6 +1176,170 @@ mod tests {
         let text = render_markdown_text("```rust\nfn main() {}\n```\n");
         let rendered = lines_to_strings(&text);
         assert_eq!(rendered, vec!["fn main() {}".to_string()]);
+    }
+
+    #[test]
+    fn renders_inline_and_display_math_with_formula_metadata() {
+        formula::configure_picker(Some(ratatui_image::picker::Picker::halfblocks()));
+        formula::set_foreground(ratatui::style::Color::Rgb(230, 230, 230));
+        let rendered = render_markdown_text_with_width_and_cwd(
+            "Inline $x^2$ here.\n\n$$\\begin{aligned} a &= b \\\\ c &= d \\end{aligned}$$",
+            Some(80),
+            None,
+        );
+
+        let formula_count: usize = rendered.line_formulas.iter().map(Vec::len).sum();
+        assert_eq!(formula_count, 2);
+        assert!(rendered.line_formulas.iter().any(|line| {
+            line.first()
+                .is_some_and(|formula| formula.image.size.height > 1)
+        }));
+        assert_eq!(rendered.text.lines.len(), rendered.line_formulas.len());
+    }
+
+    #[test]
+    fn renders_bracket_delimited_display_math() {
+        formula::configure_picker(Some(ratatui_image::picker::Picker::halfblocks()));
+        formula::set_foreground(ratatui::style::Color::Rgb(230, 230, 230));
+        let rendered = render_markdown_text_with_width_and_cwd(
+            r#"\[
+\begin{aligned}
+ a &= b \\
+ c &= d
+\end{aligned}
+\]"#,
+            Some(80),
+            None,
+        );
+
+        let formulas: Vec<_> = rendered
+            .line_formulas
+            .iter()
+            .flat_map(|line| line.iter())
+            .collect();
+        assert_eq!(formulas.len(), 1);
+        assert!(formulas[0].image.size.width <= 80);
+        assert!(formulas[0].image.size.height > 1);
+    }
+
+    #[test]
+    fn renders_multiline_dollar_delimited_display_math() {
+        formula::configure_picker(Some(ratatui_image::picker::Picker::halfblocks()));
+        formula::set_foreground(ratatui::style::Color::Rgb(230, 230, 230));
+        let source = r#"渲染效果为：
+
+$$
+\begin{aligned}
+\min_{\theta,\phi}\quad
+&\mathcal{L}(\theta,\phi)
+
+\mathbb{E}_{x\sim p{\mathrm{data}}}
+\Bigg[
+-\mathbb{E}_{z\sim q{\phi}(z\mid x)}
+\log p_{\theta}(x\mid z)
++
+\beta,
+D_{\mathrm{KL}}
+!\left(
+q_{\phi}(z\mid x),\middle|,p(z)
+\right)
+\Bigg]
+\end{aligned}
+$$"#;
+        let rendered = render_markdown_text_with_width_and_cwd(source, Some(80), None);
+        let formulas: Vec<_> = rendered
+            .line_formulas
+            .iter()
+            .flat_map(|line| line.iter())
+            .collect();
+        assert_eq!(formulas.len(), 1);
+        assert!(formulas[0].image.size.width <= 80);
+        assert!(formulas[0].image.size.height > 1);
+    }
+
+    #[test]
+    fn renders_complex_formula_from_session_history() {
+        formula::configure_picker(Some(ratatui_image::picker::Picker::halfblocks()));
+        formula::set_foreground(ratatui::style::Color::Rgb(230, 230, 230));
+        let ui_text = UiText::from_preference("en-US");
+        let source = r#"\[
+\begin{aligned}
+\min_{\theta,\phi}\quad
+&\mathcal{L}(\theta,\phi)
+=
+\mathbb{E}_{x\sim p_{\mathrm{data}}}
+\Bigg[
+-\mathbb{E}_{z\sim q_{\phi}(z\mid x)}
+\log p_{\theta}(x\mid z)
++
+\beta\,
+D_{\mathrm{KL}}
+\!\left(
+q_{\phi}(z\mid x)\,\middle\|\,p(z)
+\right)
+\Bigg]
+\\[0.5em]
+&\quad
++\lambda_{1}\sum_{l=1}^{L}
+\left\|
+W_{Q}^{(l)}W_{K}^{(l)\top}
+-
+I
+\right\|_{F}^{2}
++\lambda_{2}\,
+\mathbb{E}_{(x,y)\sim\mathcal{D}}
+\left[
+\left\|
+f_{\theta}(x)-y
+\right\|_{2}^{2}
+\right]
+\\[0.5em]
+\text{subject to}\quad
+&\operatorname{Attn}^{(l)}(X)
+=
+\operatorname{softmax}
+\!\left(
+\frac{
+\left(XW_{Q}^{(l)}\right)
+\left(XW_{K}^{(l)}\right)^{\!\top}
+}{
+\sqrt{d_{k}}
+}
++
+M^{(l)}
+\right)
+XW_{V}^{(l)},
+\\[0.5em]
+&z=\mu_{\phi}(x)+\sigma_{\phi}(x)\odot\varepsilon,
+\qquad
+\varepsilon\sim\mathcal{N}(0,I),
+\qquad
+\sigma_{\phi}(x)>0,
+\\[0.5em]
+&\left\|
+\nabla_{x}f_{\theta}(x)
+\right\|_{2}
+\leq \kappa,
+\qquad
+\theta\in\Theta,\quad
+\phi\in\Phi .
+        \end{aligned}
+\]"#;
+        let rendered =
+            render_markdown_text_with_width_and_cwd_with_ui(source, Some(80), None, &ui_text);
+        let formulas: Vec<_> = rendered
+            .line_formulas
+            .iter()
+            .flat_map(|line| line.iter())
+            .collect();
+        assert_eq!(formulas.len(), 1);
+        assert!(formulas[0].image.size.width <= 80);
+        assert!(formulas[0].image.size.height > 1);
+        let protocol = formulas[0]
+            .image
+            .render_now()
+            .expect("complex formula should produce a terminal protocol");
+        assert_eq!(protocol.size(), formulas[0].image.size);
     }
 
     #[test]

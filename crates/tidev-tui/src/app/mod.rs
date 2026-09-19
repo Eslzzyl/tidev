@@ -265,6 +265,19 @@ impl App {
         let thinking_level = runtime.active_model().thinking_level.clone();
         let notif_config = runtime.config().notifications.clone();
         let ui_locale = runtime.config().ui.locale.clone();
+        let image_picker = {
+            log::info!("[img] from_query_stdio START");
+            let r = Picker::from_query_stdio();
+            log::info!(
+                "[img] from_query_stdio END: {:?}",
+                r.as_ref()
+                    .map(|p| (p.protocol_type(), p.font_size(), p.capabilities()))
+            );
+            r.ok()
+        };
+        crate::formula::configure_picker(Some(
+            image_picker.clone().unwrap_or_else(Picker::halfblocks),
+        ));
 
         Self {
             runtime,
@@ -319,16 +332,7 @@ impl App {
             todos: Vec::new(),
             shown_instruction_sources: Vec::new(),
             pending_instruction_sources: HashMap::new(),
-            image_picker: {
-                log::info!("[img] from_query_stdio START");
-                let r = Picker::from_query_stdio();
-                log::info!(
-                    "[img] from_query_stdio END: {:?}",
-                    r.as_ref()
-                        .map(|p| (p.protocol_type(), p.font_size(), p.capabilities()))
-                );
-                r.ok()
-            },
+            image_picker,
             composer: {
                 let ui_text = UiText::from_preference(&ui_locale);
                 let mut c = Composer::new(ui_text.text(TextKey::WelcomeInputPlaceholder));
@@ -355,6 +359,7 @@ impl App {
         self.welcome_dirty
             || self.message_list.as_ref().is_some_and(|c| c.is_dirty())
             || self.composer.as_ref().is_some_and(|c| c.is_dirty())
+            || crate::formula::render_wakeup_pending()
             || self.runtime.mcp_manager().summaries() != self.last_mcp_summaries
             || self
                 .toast

@@ -235,6 +235,10 @@ impl TableState {
                         hyperlink.columns.start + shift..hyperlink.columns.end + shift;
                     row_line.hyperlinks.push(hyperlink);
                 }
+                for mut formula in cell_line.formulas {
+                    formula.columns = formula.columns.start + shift..formula.columns.end + shift;
+                    row_line.formulas.push(formula);
+                }
                 column_start += width + 1;
                 row_line.line.push_span(Span::raw(" "));
                 row_line.line.push_span(Span::raw("│"));
@@ -334,6 +338,10 @@ impl TableState {
                 hyperlink.columns = hyperlink.columns.start + shift..hyperlink.columns.end + shift;
                 field.hyperlinks.push(hyperlink);
             }
+            for mut formula in value.formulas {
+                formula.columns = formula.columns.start + shift..formula.columns.end + shift;
+                field.formulas.push(formula);
+            }
 
             let wrapped =
                 adaptive_wrap_line(&field.line, RtOptions::new(card_width).break_words(true));
@@ -357,6 +365,10 @@ impl TableState {
                     hyperlink.columns =
                         hyperlink.columns.start + shift..hyperlink.columns.end + shift;
                     row_line.hyperlinks.push(hyperlink);
+                }
+                for mut formula in line.formulas {
+                    formula.columns = formula.columns.start + shift..formula.columns.end + shift;
+                    row_line.formulas.push(formula);
                 }
                 row_line.line.push_span(Span::raw(" "));
                 row_line.line.push_span(Span::raw("│"));

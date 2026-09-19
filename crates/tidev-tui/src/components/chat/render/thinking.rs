@@ -246,8 +246,17 @@ fn style_reasoning_line(
         }
         spans.push(span);
     }
+    let formulas = line
+        .formulas
+        .into_iter()
+        .map(|mut formula| {
+            formula.columns = formula.columns.start + 2..formula.columns.end + 2;
+            formula
+        })
+        .collect();
     HyperlinkLine {
         line: Line::from(spans),
         hyperlinks: line.hyperlinks,
+        formulas,
     }
 }

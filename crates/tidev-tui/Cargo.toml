@@ -27,6 +27,10 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 log = "0.4"
 memchr = "2"
 pulldown-cmark = "0.13"
+ratex-layout = "0.1.14"
+ratex-parser = "0.1.14"
+ratex-render = { version = "0.1.14", features = ["embed-fonts"] }
+ratex-types = "0.1.14"
 ratatui = { version = "0.30", default-features = false, features = ["crossterm", "macros"] }
 ratatui-image = { version = "11", default-features = false, features = ["crossterm"] }
 rayon = "1"

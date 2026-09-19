@@ -11,6 +11,7 @@ pub(crate) mod components;
 pub(crate) mod context;
 pub(crate) mod diff_render;
 pub(crate) mod editor;
+pub(crate) mod formula;
 pub(crate) mod hyperlink;
 pub(crate) mod i18n;
 mod markdown;
