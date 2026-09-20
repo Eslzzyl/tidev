@@ -590,7 +590,8 @@ impl Component for SkillsPanel {
                 .collect();
 
             frame.render_widget(
-                Paragraph::new(visible_lines).style(Style::default().bg(palette.panel_alt)),
+                Paragraph::new(visible_lines)
+                    .style(Style::default().fg(palette.text).bg(palette.panel_alt)),
                 preview_content_area,
             );
 

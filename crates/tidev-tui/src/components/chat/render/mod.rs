@@ -206,7 +206,11 @@ pub(crate) fn render_messages(
         .collect();
     let text = Text::from(lines);
     let paragraph = Paragraph::new(text)
-        .style(Style::default().bg(ctx.palette.background))
+        .style(
+            Style::default()
+                .fg(ctx.palette.text)
+                .bg(ctx.palette.background),
+        )
         .scroll((render_scroll as u16, 0));
     frame.render_widget(paragraph, content_area);
     mark_buffer_hyperlinks(frame.buffer_mut(), content_area, &line_links, render_scroll);
@@ -757,6 +761,84 @@ mod tests {
             linked_rows.len() >= 2,
             "expected OSC-8 cells on multiple actual frame rows, got {linked_rows:?}"
         );
+    }
+
+    #[test]
+    fn plain_chat_text_uses_the_theme_foreground() {
+        let palette = test_palette();
+        let subagents = Vec::new();
+        let collapsed = HashSet::new();
+        let message = assistant_msg("", "plain body", 4);
+        let chat_ctx = ChatContext::new(
+            Uuid::from_u128(102),
+            "test".into(),
+            vec![message],
+            None,
+            "test-model".into(),
+            "test-provider".into(),
+        );
+
+        let area = Rect::new(0, 0, 40, 10);
+        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
+        let mut index = MessageLayoutIndex::new();
+        let mut cache = lru::LruCache::new(std::num::NonZeroUsize::new(64).unwrap());
+        let mut scroll_offset = 0;
+        let mut follow_tail = false;
+        let mut expanded_tool_results = HashSet::new();
+        let mut card_bounds = Vec::new();
+        let mut selectable_regions = Vec::new();
+        let mut inline_running_card_ranges = Vec::new();
+        let mut image_badge_infos = Vec::new();
+        let mut thinking_header_infos = Vec::new();
+        let mut render_content_area = Rect::default();
+        let mut render_scroll = 0;
+
+        terminal
+            .draw(|frame| {
+                render_messages(
+                    frame,
+                    area,
+                    Path::new("/tmp"),
+                    &mut index,
+                    &mut cache,
+                    &chat_ctx,
+                    palette,
+                    &UiText::from_preference("en-US"),
+                    &mut scroll_offset,
+                    &mut follow_tail,
+                    &mut expanded_tool_results,
+                    &subagents,
+                    Instant::now(),
+                    None,
+                    None,
+                    &None,
+                    &collapsed,
+                    false,
+                    false,
+                    &mut card_bounds,
+                    &mut selectable_regions,
+                    &mut inline_running_card_ranges,
+                    &mut image_badge_infos,
+                    &mut thinking_header_infos,
+                    &mut render_content_area,
+                    &mut render_scroll,
+                    false,
+                );
+            })
+            .unwrap();
+
+        let body_cell = terminal
+            .backend()
+            .buffer()
+            .content()
+            .windows(10)
+            .find_map(|cells| {
+                let text: String = cells.iter().map(|cell| cell.symbol()).collect();
+                (text == "plain body").then(|| &cells[0])
+            });
+        let body_cell = body_cell.expect("plain body should be rendered");
+        assert_eq!(body_cell.fg, palette.text);
+        assert_eq!(body_cell.bg, palette.background);
     }
 
     #[test]

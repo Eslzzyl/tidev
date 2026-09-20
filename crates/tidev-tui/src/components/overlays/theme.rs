@@ -657,7 +657,11 @@ impl Component for ThemePanel {
                 .cloned()
                 .collect();
             frame.render_widget(
-                Paragraph::new(visible).style(Style::default().bg(preview_palette.panel_alt)),
+                Paragraph::new(visible).style(
+                    Style::default()
+                        .fg(preview_palette.text)
+                        .bg(preview_palette.panel_alt),
+                ),
                 preview_area,
             );
 
