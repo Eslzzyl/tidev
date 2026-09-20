@@ -190,6 +190,9 @@ impl App {
                     self.current_palette = resolve_palette(&self.theme_catalog, &name);
                     self.runtime.update_config(|cfg| cfg.set_theme(&name));
                     let _ = self.runtime.save_config();
+                    if let Some(ref mut chat) = self.message_list {
+                        chat.invalidate_theme();
+                    }
                 }
                 Action::Search(SearchAction::SwitchProvider(provider)) => {
                     self.runtime

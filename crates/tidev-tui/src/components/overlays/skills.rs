@@ -1,6 +1,7 @@
 //! SkillsPanel component — skill browsing panel.
 
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, MouseButton, MouseEvent, MouseEventKind};
@@ -32,7 +33,7 @@ pub(crate) struct SkillsPanel {
     list_scroll: usize,
     preview_scroll: usize,
     query_active: bool,
-    cached_preview: Option<(String, Arc<MarkdownRender>)>,
+    cached_preview: Option<(String, u64, [u8; 3], Arc<MarkdownRender>)>,
     preview_content_width: usize,
 }
 
@@ -287,6 +288,7 @@ impl Component for SkillsPanel {
 
     fn draw(&mut self, frame: &mut Frame, rect: Rect, ctx: &DrawContext) {
         let palette = ctx.palette;
+        crate::formula::set_foreground(palette.text);
 
         let overlay = centered_rect(85, 80, rect);
         frame.render_widget(Clear, overlay);
@@ -552,8 +554,16 @@ impl Component for SkillsPanel {
         };
 
         // Populate preview cache from SkillItem.content if it doesn't match the selected skill
+        let theme_gen = crate::markdown::HIGHLIGHT_CACHE_GEN.load(Ordering::SeqCst);
+        let formula_color = crate::formula::foreground_key();
         let needs_render = match &self.cached_preview {
-            Some((name, _)) => self.selected_skill().is_none_or(|s| *name != s.name),
+            Some((name, cached_theme_gen, cached_formula_color, _)) => {
+                self.selected_skill().is_none_or(|s| {
+                    *name != s.name
+                        || *cached_theme_gen != theme_gen
+                        || *cached_formula_color != formula_color
+                })
+            }
             None => true,
         };
         if needs_render && let Some(skill) = self.selected_skill() {
@@ -563,10 +573,10 @@ impl Component for SkillsPanel {
                 None,
                 &ctx.ui_text,
             );
-            self.cached_preview = Some((skill.name.clone(), rendered));
+            self.cached_preview = Some((skill.name.clone(), theme_gen, formula_color, rendered));
         }
 
-        if let Some((_, rendered)) = &self.cached_preview {
+        if let Some((_, _, _, rendered)) = &self.cached_preview {
             let total_preview_lines = rendered.lines.len();
             let max_scroll = total_preview_lines.saturating_sub(preview_content_height as usize);
             self.preview_scroll = self.preview_scroll.min(max_scroll);

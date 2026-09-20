@@ -331,6 +331,12 @@ impl MessageList {
         self.dirty = true;
     }
 
+    /// Invalidate theme-dependent render data while preserving message geometry.
+    pub fn invalidate_theme(&mut self) {
+        self.render_cache.clear();
+        self.dirty = true;
+    }
+
     /// Update token fields on the last streaming assistant message.
     #[allow(clippy::too_many_arguments)]
     pub fn set_last_message_tokens(

@@ -225,7 +225,7 @@ pub(super) fn scan_image_badges(
 #[allow(clippy::too_many_arguments)]
 fn render_block_from_cache(
     block: &MessageBlock,
-    cache: &lru::LruCache<MessageRenderCacheKey, MessageRenderCacheEntry>,
+    cache: &mut lru::LruCache<MessageRenderCacheKey, MessageRenderCacheEntry>,
     geom: &CardGeom,
     is_round_end: bool,
     selectable_regions: &mut Vec<SelectableRegionRange>,
@@ -257,73 +257,60 @@ fn render_block_from_cache(
         lines.push(HyperlinkLine::new(Line::from("")));
     }
 
-    let role = messages[block.message_start_idx].role.clone();
+    let msg = &messages[block.message_start_idx];
+    let role = msg.role.clone();
 
-    // Render Cards entry (assistant/user card)
-    if let Some(entry) = cache.peek(&cards_key) {
-        if let MessageRenderCacheValue::Cards(cards) = &entry.value {
-            for (bg, card_lines) in cards {
-                if !card_lines.is_empty() {
-                    let start_line = current_line_offset + lines.len();
-                    // Track thinking header position for assistant messages with reasoning.
-                    if matches!(role, MessageRole::Assistant) {
-                        let msg = &messages[block.message_start_idx];
-                        if !msg.reasoning.trim().is_empty() {
-                            thinking_header_infos.push((msg.id, start_line));
-                        }
-                    }
-                    track_selectable_region(selectable_regions, card_lines, start_line);
-                    let show_hover = ctx.hovered_card == Some(block.message_id)
-                        && matches!(role, MessageRole::User)
-                        && !messages[block.message_start_idx].is_compaction();
-                    let adjusted_bg = if show_hover {
-                        ctx.palette.hover_bg(*bg)
-                    } else {
-                        *bg
-                    };
-                    lines.extend(decorate_card_lines(card_lines.clone(), adjusted_bg, geom));
-                    let end_line = current_line_offset + lines.len();
-                    if !matches!(role, MessageRole::Assistant) {
-                        card_bounds.push((block.message_id, start_line, end_line));
-                        let msg = &messages[block.message_start_idx];
-                        image_badge_infos.extend(scan_image_badges(card_lines, msg, start_line));
-                    }
+    // Render the cards entry, rebuilding and caching it only when the visible
+    // block has no entry for the current visual state.
+    let cards = cache
+        .peek(&cards_key)
+        .and_then(|entry| match &entry.value {
+            MessageRenderCacheValue::Cards(cards) => Some(cards.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| {
+            let cards = match msg.role {
+                MessageRole::Assistant => {
+                    render_assistant_cards(ctx, msg, messages, content_width, is_round_end)
                 }
+                MessageRole::Tool => render_tool_card(ctx, msg, content_width),
+                _ => render_single_card(ctx, msg, content_width, is_round_end),
+            };
+            cache.put(
+                cards_key.clone(),
+                MessageRenderCacheEntry {
+                    value: MessageRenderCacheValue::Cards(cards.clone()),
+                },
+            );
+            cards
+        });
+
+    for (bg, card_lines) in &cards {
+        if !card_lines.is_empty() {
+            let start_line = current_line_offset + lines.len();
+            // Track thinking header position for assistant messages with reasoning.
+            if matches!(role, MessageRole::Assistant) && !msg.reasoning.trim().is_empty() {
+                thinking_header_infos.push((msg.id, start_line));
             }
-        }
-    } else {
-        // Cache miss — render directly instead of showing a placeholder.
-        let msg = &messages[block.message_start_idx];
-        let cards = match msg.role {
-            MessageRole::Assistant => {
-                render_assistant_cards(ctx, msg, messages, content_width, is_round_end)
-            }
-            _ => render_single_card(ctx, msg, content_width, is_round_end),
-        };
-        for (bg, card_lines) in &cards {
-            if !card_lines.is_empty() {
-                let start_line = current_line_offset + lines.len();
-                track_selectable_region(selectable_regions, card_lines, start_line);
-                let show_hover = ctx.hovered_card == Some(block.message_id)
-                    && matches!(role, MessageRole::User)
-                    && !msg.is_compaction();
-                let adjusted_bg = if show_hover {
-                    ctx.palette.hover_bg(*bg)
-                } else {
-                    *bg
-                };
-                lines.extend(decorate_card_lines(card_lines.clone(), adjusted_bg, geom));
-                let end_line = current_line_offset + lines.len();
-                if !matches!(role, MessageRole::Assistant) {
-                    card_bounds.push((block.message_id, start_line, end_line));
-                    image_badge_infos.extend(scan_image_badges(card_lines, msg, start_line));
-                }
+            track_selectable_region(selectable_regions, card_lines, start_line);
+            let show_hover = ctx.hovered_card == Some(block.message_id)
+                && matches!(role, MessageRole::User)
+                && !msg.is_compaction();
+            let adjusted_bg = if show_hover {
+                ctx.palette.hover_bg(*bg)
+            } else {
+                *bg
+            };
+            lines.extend(decorate_card_lines(card_lines.clone(), adjusted_bg, geom));
+            let end_line = current_line_offset + lines.len();
+            if !matches!(role, MessageRole::Assistant) {
+                card_bounds.push((block.message_id, start_line, end_line));
+                image_badge_infos.extend(scan_image_badges(card_lines, msg, start_line));
             }
         }
     }
 
     // Render ToolResult entries (tool call output) for assistant blocks
-    let msg = &messages[block.message_start_idx];
     if matches!(msg.role, MessageRole::Assistant) && !msg.tool_calls.is_empty() {
         // Blank line between assistant body and tool calls
         lines.push(HyperlinkLine::new(Line::from("")));
@@ -377,24 +364,34 @@ fn render_block_from_cache(
                 is_round_end,
                 kind: MessageRenderCacheKind::ToolCall(tc.id.clone()),
             };
+            let cached_tool = cache.peek(&tool_key).and_then(|entry| match &entry.value {
+                MessageRenderCacheValue::ToolResult(tl, tr) => Some((tl.clone(), tr.clone())),
+                _ => None,
+            });
             let (tool_lines, tool_regions): (Vec<HyperlinkLine>, Vec<SelectableRegionRange>) =
-                if let Some(entry) = cache.peek(&tool_key) {
-                    match &entry.value {
-                        MessageRenderCacheValue::ToolResult(tl, tr) => (tl.clone(), tr.clone()),
-                        _ => (Vec::new(), Vec::new()),
-                    }
+                if let Some(cached_tool) = cached_tool {
+                    cached_tool
                 } else {
-                    // Cache miss — render directly.
                     let tool_result = tool_results_by_id.get(&tc.id).copied();
                     let is_expanded = ctx.expanded_tool_results.contains(&block.message_id);
-                    tool::render_tool_call_with_result(
+                    let rendered = tool::render_tool_call_with_result(
                         tc,
                         tool_result,
                         content_width,
                         msg.streaming,
                         ctx,
                         is_expanded,
-                    )
+                    );
+                    cache.put(
+                        tool_key,
+                        MessageRenderCacheEntry {
+                            value: MessageRenderCacheValue::ToolResult(
+                                rendered.0.clone(),
+                                rendered.1.clone(),
+                            ),
+                        },
+                    );
+                    rendered
                 };
             if !tool_lines.is_empty() {
                 let start_line = current_line_offset + lines.len();
