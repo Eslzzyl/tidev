@@ -767,7 +767,7 @@ impl Component for SettingsPanel {
                     dropdown
                         .options
                         .iter()
-                        .map(|option| ListItem::new(option.clone()))
+                        .map(|option| ListItem::new(setting_option_text(&ctx.ui_text, option)))
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
@@ -924,16 +924,23 @@ fn setting_description(ui_text: &UiText, key: SettingKey) -> String {
 }
 
 fn setting_option_text(ui_text: &UiText, option: &str) -> String {
+    let log_level_label = match option {
+        "DEBUG" => Some("Debug"),
+        "INFO" => Some("Info"),
+        "WARN" => Some("Warn"),
+        "ERROR" => Some("Error"),
+        _ => None,
+    };
+    if let Some(label) = log_level_label {
+        return label.to_string();
+    }
+
     let key = match option {
         "system" => Some(TextKey::LanguageSystem),
         "en-US" => Some(TextKey::LanguageEnglish),
         "zh-CN" => Some(TextKey::LanguageSimplifiedChinese),
         "queue" => Some(TextKey::Queue),
         "steer" => Some(TextKey::Steer),
-        "DEBUG" => Some(TextKey::LogDebug),
-        "INFO" => Some(TextKey::LogInfo),
-        "WARN" => Some(TextKey::LogWarn),
-        "ERROR" => Some(TextKey::LogError),
         _ => None,
     };
     key.map(|key| ui_text.text(key))

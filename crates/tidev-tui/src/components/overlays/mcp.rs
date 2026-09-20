@@ -15,6 +15,7 @@ use ratatui::widgets::{Block, Clear, Paragraph};
 
 use tidev_config::mcp::McpServerConfig;
 use tidev_core::mcp::{McpConnectionStatus, McpManager, McpServerSummary};
+use unicode_width::UnicodeWidthStr;
 
 use crate::action::{Action, McpAction, OverlayAction, OverlayKind};
 use crate::component::Component;
@@ -990,18 +991,34 @@ impl Component for McpServerPanel {
 
         // 2. Column header
         let left_header_area = Rect::new(left_area.x, left_area.y + 1, left_area.width, 1);
-        let name_col_w = (left_area.width as usize).saturating_sub(11).max(4);
+        let kind_label = ui_text.text(TextKey::Kind);
+        let kind_label_width = UnicodeWidthStr::width(kind_label.as_str());
+        let kind_col_width = kind_label_width.max(5) + 2;
+        let header_content_width = left_area.width.saturating_sub(1) as usize;
+        let name_col_w = header_content_width
+            .saturating_sub(3 + kind_col_width)
+            .max(4);
+        let server_label = ui_text.text(TextKey::Server);
+        let server_label_width = UnicodeWidthStr::width(server_label.as_str());
+        let server_header = format!(
+            "{server_label}{}",
+            " ".repeat(name_col_w.saturating_sub(server_label_width))
+        );
+        let kind_header = format!(
+            " {kind_label}{}",
+            " ".repeat(kind_col_width.saturating_sub(kind_label_width + 1))
+        );
         frame.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::styled("   ", Style::default().fg(palette.accent)),
                 Span::styled(
-                    format!("{:<name_col_w$}", ui_text.text(TextKey::Server)),
+                    server_header,
                     Style::default()
                         .fg(palette.accent)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
-                    format!("  {}", ui_text.text(TextKey::Kind)),
+                    kind_header,
                     Style::default()
                         .fg(palette.accent)
                         .add_modifier(Modifier::BOLD),
@@ -1066,7 +1083,8 @@ impl Component for McpServerPanel {
                 }
             };
 
-            let max_name_len = (list_content_area.width as usize).saturating_sub(10).max(4);
+            let list_content_width = list_content_area.width as usize;
+            let max_name_len = list_content_width.saturating_sub(3 + kind_col_width).max(4);
             let mut display_name = summary.name.clone();
             if display_name.len() > max_name_len {
                 display_name.truncate(max_name_len.saturating_sub(1));
@@ -1089,6 +1107,9 @@ impl Component for McpServerPanel {
                 palette.muted
             };
 
+            let kind_inner_width = kind_col_width.saturating_sub(2);
+            let kind_value_width = UnicodeWidthStr::width(summary.kind.as_str());
+            let kind_padding = " ".repeat(kind_inner_width.saturating_sub(kind_value_width));
             let line = Line::from(vec![
                 Span::styled(
                     format!(" {status_icon} "),
@@ -1108,7 +1129,7 @@ impl Component for McpServerPanel {
                         }),
                 ),
                 Span::styled(
-                    format!(" {:>4} ", summary.kind),
+                    format!(" {kind_padding}{} ", summary.kind),
                     Style::default().fg(muted_fg).bg(row_bg),
                 ),
             ]);
