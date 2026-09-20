@@ -199,6 +199,7 @@ mod tests {
 
     fn test_draw_ctx(workspace_root: &Path) -> DrawContext<'_> {
         DrawContext {
+            image_surface: None,
             palette: test_palette(),
             ui_text: crate::i18n::UiText::from_preference("en-US"),
             focused: true,

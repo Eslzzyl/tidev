@@ -33,6 +33,7 @@ use crate::i18n::{TextKey, UiText, mode_title};
 use crate::components::chat::MessageList;
 use crate::components::composer::Composer;
 use crate::components::desktop_notification::NotificationManager;
+use crate::components::image_surface::ImageSurface;
 use crate::components::notification::NotificationState;
 use crate::components::selection::MouseSelection;
 use crate::components::sidebar::Sidebar;
@@ -84,6 +85,7 @@ const MAX_QUEUED_PROMPT_LINES: usize = 3;
 pub struct App {
     pub(crate) runtime: tidev_core::Runtime,
     overlays: OverlayStack,
+    pub(crate) image_surface: ImageSurface,
     current_palette: ThemePalette,
     theme_catalog: ThemeCatalog,
     should_quit: bool,
@@ -282,6 +284,7 @@ impl App {
         Self {
             runtime,
             overlays: OverlayStack::new(),
+            image_surface: ImageSurface::new(image_picker.as_ref()),
             current_palette,
             theme_catalog,
             should_quit: false,

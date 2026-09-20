@@ -114,8 +114,13 @@ impl FormulaImage {
         self.protocol.get().and_then(|protocol| protocol.as_deref())
     }
 
+    #[cfg(test)]
     pub(crate) fn protocol(&self) -> Option<&SlicedProtocol> {
         self.protocol.get().and_then(|protocol| protocol.as_deref())
+    }
+
+    pub(crate) fn protocol_arc(&self) -> Option<Arc<SlicedProtocol>> {
+        self.protocol.get().and_then(Clone::clone)
     }
 
     fn render_protocol(&self) -> Result<SlicedProtocol, String> {

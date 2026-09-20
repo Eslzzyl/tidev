@@ -551,6 +551,14 @@ impl App {
 
     pub fn draw(&mut self, frame: &mut Frame) {
         crate::formula::acknowledge_render_wakeup();
+        // Composer popups are drawn before the deferred formula pass.  Treat
+        // them as late cell overlays so a formula cannot repaint their area.
+        let has_late_cell_overlay = !self.overlays.is_empty()
+            || self
+                .composer
+                .as_ref()
+                .is_some_and(|composer| composer.has_popup());
+        self.image_surface.begin_frame(has_late_cell_overlay);
         let palette = self.current_palette;
         let ui_text = self.ui_text();
         let area = frame.area();
@@ -575,6 +583,7 @@ impl App {
             }
             // Draw overlays on top of welcome content.
             let draw_ctx = DrawContext {
+                image_surface: Some(&self.image_surface),
                 palette,
                 ui_text: crate::i18n::UiText::from_preference(&self.runtime.config().ui.locale),
                 focused: true,
@@ -702,6 +711,7 @@ impl App {
         // Chat message area (when session is active)
         if let Some(ref mut chat) = self.message_list {
             let draw_ctx = DrawContext {
+                image_surface: Some(&self.image_surface),
                 palette,
                 ui_text: crate::i18n::UiText::from_preference(&self.runtime.config().ui.locale),
                 focused: self.overlays.is_empty(),
@@ -768,6 +778,7 @@ impl App {
             self.cursor_rendered = self.overlays.is_empty();
             let active_model = self.runtime.active_model();
             let draw_ctx = DrawContext {
+                image_surface: Some(&self.image_surface),
                 palette,
                 ui_text: crate::i18n::UiText::from_preference(&self.runtime.config().ui.locale),
                 focused: self.overlays.is_empty(),
@@ -789,6 +800,7 @@ impl App {
 
         // Build DrawContext for overlays
         let draw_ctx = DrawContext {
+            image_surface: Some(&self.image_surface),
             palette,
             ui_text: crate::i18n::UiText::from_preference(&self.runtime.config().ui.locale),
             focused: true,
@@ -831,6 +843,11 @@ impl App {
         // - Centered panels (session, message, settings, …) use the full
         //   terminal area so they appear properly centered across the screen.
         self.overlays.draw(frame, area, main_area, &draw_ctx);
+
+        // Formula images are committed only after overlays have populated the
+        // cell buffer.  The image surface can then suppress a whole formula
+        // whenever any overlay cell intersects it.
+        self.image_surface.render_formulas(frame);
 
         // ── Footer status line (right: session/footer status) ──
         let status_text = self.footer_status_text();
@@ -1053,6 +1070,7 @@ impl App {
             composer.set_placeholder(ui_text.text(TextKey::WelcomeInputPlaceholder));
             let active_model = self.runtime.active_model();
             let draw_ctx = DrawContext {
+                image_surface: Some(&self.image_surface),
                 palette,
                 ui_text: crate::i18n::UiText::from_preference(&self.runtime.config().ui.locale),
                 focused: self.overlays.is_empty(),

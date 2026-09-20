@@ -148,6 +148,11 @@ impl Component for ImageViewer {
         if let Some(protocol) = &self.cached_protocol {
             let image_widget = Image::new(protocol);
             frame.render_widget(image_widget, img_area);
+            if protocol.needs_placeholder(img_area).is_none()
+                && let Some(image_surface) = ctx.image_surface
+            {
+                image_surface.register_protocol(protocol, img_area);
+            }
         }
 
         // Hint at the bottom

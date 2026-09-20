@@ -19,6 +19,7 @@ use std::path::Path;
 use std::time::Instant;
 
 use crate::chat_context::{ChatContext, ReasoningDisplay};
+use crate::components::image_surface::ImageSurface;
 use crate::formula;
 use crate::hyperlink::{HyperlinkLine, HyperlinkRange, mark_buffer_hyperlinks};
 use crate::theme::ThemePalette;
@@ -26,7 +27,7 @@ use ratatui::layout::Rect;
 use ratatui::prelude::{Frame, Style};
 use ratatui::text::{Line, Text};
 use ratatui::widgets::Paragraph;
-use ratatui_image::sliced::{SignedPosition, SlicedImage};
+use ratatui_image::sliced::SignedPosition;
 use uuid::Uuid;
 
 use blocks::messages_text;
@@ -99,6 +100,7 @@ pub(crate) struct RenderOutput {
 pub(crate) fn render_messages(
     frame: &mut Frame,
     area: Rect,
+    image_surface: Option<&ImageSurface>,
     workspace_root: &Path,
     layout_index: &mut MessageLayoutIndex,
     render_cache: &mut lru::LruCache<MessageRenderCacheKey, MessageRenderCacheEntry>,
@@ -229,14 +231,18 @@ pub(crate) fn render_messages(
         }
         for formula in formulas {
             formula.image.request_render();
-            let Some(protocol) = formula.image.protocol() else {
+            let Some(protocol) = formula.image.protocol_arc() else {
                 continue;
             };
             let x = formula.columns.start as i16;
-            frame.render_widget(
-                SlicedImage::new(protocol, SignedPosition { x, y: y as i16 }),
-                content_area,
-            );
+            if let Some(image_surface) = image_surface {
+                image_surface.register_formula(
+                    frame.buffer_mut(),
+                    content_area,
+                    SignedPosition { x, y: y as i16 },
+                    protocol,
+                );
+            }
         }
     }
 
@@ -719,6 +725,7 @@ mod tests {
                 render_messages(
                     frame,
                     area,
+                    None,
                     Path::new("/tmp"),
                     &mut index,
                     &mut cache,
@@ -798,6 +805,7 @@ mod tests {
                 render_messages(
                     frame,
                     area,
+                    None,
                     Path::new("/tmp"),
                     &mut index,
                     &mut cache,

@@ -7,7 +7,7 @@
 //! event reading in a single execution context) while keeping the
 //! main event loop async for multiplexing with backend/request events.
 
-use std::io;
+use std::io::{self, Write};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
@@ -72,6 +72,51 @@ impl Tui {
         terminal.swap_buffers();
 
         Ok(Self { terminal })
+    }
+
+    fn render_frame(&mut self, app: &mut App) -> Result<()> {
+        self.terminal
+            .autoresize()
+            .context("failed to resize terminal")?;
+        {
+            let mut frame = self.terminal.get_frame();
+            app.draw(&mut frame);
+        }
+
+        // Native image cleanup must be written before Ratatui flushes the
+        // current cell buffer.  The following cell diff then redraws the
+        // panel/text that occupies the released image area.
+        let cleanup = app.image_surface.finish_frame();
+        self.terminal
+            .backend_mut()
+            .write_all(&cleanup)
+            .context("failed to clear stale terminal images")?;
+        self.terminal
+            .apply_buffer_with_cursor(None)
+            .context("failed to flush terminal frame")?;
+
+        // Ratatui normally hides the cursor when a frame does not request a
+        // position. Enforce the application-level policy as well: some
+        // terminals otherwise retain the cursor from the preceding composer
+        // frame when a display-only overlay is opened.
+        if let Some(position) = app.composer_cursor_position() {
+            self.terminal
+                .set_cursor_position(position)
+                .context("failed to restore composer cursor position")?;
+            self.terminal
+                .show_cursor()
+                .context("failed to show composer cursor")?;
+        } else if app.wants_terminal_cursor() {
+            self.terminal
+                .show_cursor()
+                .context("failed to show terminal cursor")?;
+        } else {
+            self.terminal
+                .hide_cursor()
+                .context("failed to hide terminal cursor")?;
+        }
+
+        Ok(())
     }
 
     pub async fn run(&mut self, app: &mut App) -> Result<()> {
@@ -142,8 +187,7 @@ impl Tui {
             .context("failed to spawn crossterm reader thread")?;
 
         // ── Initial render ───────────────────────────────────────────
-        self.terminal
-            .draw(|frame| app.draw(frame))
+        self.render_frame(app)
             .context("failed to render initial frame")?;
         app.mark_clean();
         let mut last_render = Instant::now();
@@ -336,30 +380,7 @@ impl Tui {
             //   - the UI is dirty AND enough time has passed (FPS cap).
             let now = Instant::now();
             if processed || (app.is_dirty() && now - last_render >= FRAME_BUDGET) {
-                self.terminal
-                    .draw(|frame| app.draw(frame))
-                    .context("failed to render frame")?;
-                // Ratatui normally hides the cursor when a frame does not
-                // request a position. Enforce the application-level policy
-                // as well: some terminals otherwise retain the cursor from
-                // the preceding composer frame when a display-only overlay
-                // is opened.
-                if let Some(position) = app.composer_cursor_position() {
-                    self.terminal
-                        .set_cursor_position(position)
-                        .context("failed to restore composer cursor position")?;
-                    self.terminal
-                        .show_cursor()
-                        .context("failed to show composer cursor")?;
-                } else if app.wants_terminal_cursor() {
-                    self.terminal
-                        .show_cursor()
-                        .context("failed to show terminal cursor")?;
-                } else {
-                    self.terminal
-                        .hide_cursor()
-                        .context("failed to hide terminal cursor")?;
-                }
+                self.render_frame(app).context("failed to render frame")?;
                 app.mark_clean();
                 app.last_spinner_frame = (app.spinner_elapsed().as_millis() / 100) as u64;
                 last_render = now;

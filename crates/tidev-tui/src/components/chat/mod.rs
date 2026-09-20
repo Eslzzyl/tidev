@@ -1530,6 +1530,7 @@ impl Component for MessageList {
         render_mod::render_messages(
             frame,
             rect,
+            ctx.image_surface,
             ctx.workspace_root,
             &mut self.layout_index,
             &mut self.render_cache,
