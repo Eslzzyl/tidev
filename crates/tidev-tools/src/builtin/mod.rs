@@ -350,7 +350,7 @@ mod tests {
     #[test]
     fn empty_skill_path_is_treated_as_absent() {
         let args = SkillArgs {
-            name: Some("git-workflow".to_string()),
+            name: Some("session-history".to_string()),
             path: Some(String::new()),
             offset: None,
             limit: None,

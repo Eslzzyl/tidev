@@ -1168,23 +1168,23 @@ mod tests {
     fn read_skill_file_reads_the_main_document_for_virtual_skills() {
         let skill = crate::bundled_skills::load()
             .into_iter()
-            .find(|skill| skill.name == "git-workflow")
+            .find(|skill| skill.name == "session-history")
             .unwrap();
         let catalog = catalog_from_skills(vec![skill]);
 
         let document = catalog
-            .read_skill_file("git-workflow", "SKILL.md", 1024 * 1024)
+            .read_skill_file("session-history", "SKILL.md", 1024 * 1024)
             .unwrap();
         assert!(document.starts_with("---\n"));
-        assert!(document.contains("# Git Workflow"));
+        assert!(document.contains("# Session history"));
 
-        let rendered = catalog.render_skill("git-workflow").unwrap();
-        assert!(rendered.starts_with("# Skill: git-workflow\n\nLocation: "));
-        assert!(rendered.contains("# Git Workflow"));
-        assert!(!rendered.contains("---\nname: git-workflow"));
+        let rendered = catalog.render_skill("session-history").unwrap();
+        assert!(rendered.starts_with("# Skill: session-history\n\nLocation: "));
+        assert!(rendered.contains("# Session history"));
+        assert!(!rendered.contains("---\nname: session-history"));
 
         let listing = catalog
-            .read_skill_file("git-workflow", ".", 1024 * 1024)
+            .read_skill_file("session-history", ".", 1024 * 1024)
             .unwrap();
         assert_eq!(listing, "./\nSKILL.md");
     }

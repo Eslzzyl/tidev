@@ -17,10 +17,6 @@ use crate::skills::SkillInfo;
 pub fn load() -> Vec<SkillInfo> {
     vec![
         skill_from_str(include_str!("skill-creator/SKILL.md"), "skill-creator"),
-        skill_from_str(include_str!("code-review/SKILL.md"), "code-review"),
-        skill_from_str(include_str!("debug/SKILL.md"), "debug"),
-        skill_from_str(include_str!("git-workflow/SKILL.md"), "git-workflow"),
-        skill_from_str(include_str!("powershell/SKILL.md"), "powershell"),
         skill_from_str(include_str!("session-history/SKILL.md"), "session-history"),
     ]
 }
@@ -52,7 +48,7 @@ mod tests {
     #[test]
     fn test_bundled_skills_load() {
         let skills = load();
-        assert_eq!(skills.len(), 6, "expected 6 bundled skills");
+        assert_eq!(skills.len(), 2, "expected 2 bundled skills");
 
         for skill in &skills {
             assert!(!skill.name.is_empty(), "name must not be empty");
