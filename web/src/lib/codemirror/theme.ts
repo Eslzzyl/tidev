@@ -7,21 +7,21 @@ import { tags as t } from "@lezer/highlight";
  * @param dark Whether the theme is dark mode.
  */
 export function createCodeMirrorTheme(dark: boolean) {
-  const bg = dark ? "#1a1a2e" : "#ffffff";
-  const bgGutter = dark ? "#16162a" : "#f5f5f5";
-  const text = dark ? "#e0e0e0" : "#333333";
-  const gutterText = dark ? "#6b6b8a" : "#999999";
-  const cursor = dark ? "#c9c9ff" : "#333333";
-  const selection = dark ? "rgba(100, 100, 200, 0.3)" : "rgba(0, 100, 200, 0.15)";
-  const selectionMatch = dark ? "rgba(100, 100, 200, 0.2)" : "rgba(0, 100, 200, 0.1)";
+  const bg = dark ? "#0a0b0e" : "#ffffff";
+  const bgGutter = dark ? "#0d0e11" : "#f5f5f5";
+  const text = dark ? "#e8ecf3" : "#333333";
+  const gutterText = dark ? "#6b7688" : "#999999";
+  const cursor = dark ? "#60a5fa" : "#333333";
+  const selection = dark ? "rgba(96, 165, 250, 0.25)" : "rgba(37, 99, 235, 0.15)";
+  const selectionMatch = dark ? "rgba(96, 165, 250, 0.15)" : "rgba(37, 99, 235, 0.1)";
   const lineHighlight = dark ? "rgba(255, 255, 255, 0.04)" : "rgba(0, 0, 0, 0.04)";
-  const activeLineGutter = dark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.07)";
-  const border = dark ? "#2a2a3e" : "#e5e5e5";
+  const activeLineGutter = dark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.07)";
+  const border = dark ? "#242933" : "#e5e5e5";
   const searchMatch = dark ? "rgba(200, 180, 80, 0.4)" : "rgba(255, 200, 0, 0.3)";
   const searchSel = dark ? "rgba(200, 180, 80, 0.6)" : "rgba(255, 200, 0, 0.5)";
-  const tooltipBg = dark ? "#2a2a3e" : "#ffffff";
-  const tooltipBorder = dark ? "#3a3a4e" : "#dddddd";
-  const foldPlaceholder = dark ? "#3a3a4e" : "#eeeeee";
+  const tooltipBg = dark ? "#15181d" : "#ffffff";
+  const tooltipBorder = dark ? "#242933" : "#dddddd";
+  const foldPlaceholder = dark ? "#1f242d" : "#eeeeee";
 
   return [
     EditorView.theme(

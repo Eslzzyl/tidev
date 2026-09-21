@@ -8,10 +8,10 @@ pub(crate) mod preview;
 /// Default background tints for diff added/removed rows, used when a theme
 /// does not define `diff_add_bg`/`diff_delete_bg`. Dark themes get the dark
 /// set, light themes the light set.
-pub(crate) const DARK_ADD_BG: (u8, u8, u8) = (48, 80, 60);
-pub(crate) const DARK_DEL_BG: (u8, u8, u8) = (100, 50, 42);
-pub(crate) const LIGHT_ADD_BG: (u8, u8, u8) = (218, 251, 225);
-pub(crate) const LIGHT_DEL_BG: (u8, u8, u8) = (255, 235, 233);
+pub(crate) const DARK_ADD_BG: (u8, u8, u8) = (20, 41, 30);
+pub(crate) const DARK_DEL_BG: (u8, u8, u8) = (45, 21, 24);
+pub(crate) const LIGHT_ADD_BG: (u8, u8, u8) = (236, 253, 245);
+pub(crate) const LIGHT_DEL_BG: (u8, u8, u8) = (254, 242, 242);
 
 /// Fully-resolved UI colors for one theme.
 #[derive(Clone, Copy, Debug)]

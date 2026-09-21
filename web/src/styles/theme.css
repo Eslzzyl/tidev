@@ -56,8 +56,8 @@
   --accent: #60a5fa;
   --accent-strong: #93c5fd;
   --accent-contrast: #0b1220;
-  --selected: #172554;
-  --selected-border: #1d4ed8;
+  --selected: #1a2333;
+  --selected-border: #2b3952;
 }
 
 :root[data-theme="dark"][data-ui-palette="violet"],
@@ -110,8 +110,8 @@
     --accent: #60a5fa;
     --accent-strong: #93c5fd;
     --accent-contrast: #0b1220;
-    --selected: #172554;
-    --selected-border: #1d4ed8;
+    --selected: #1a2333;
+    --selected-border: #2b3952;
   }
 
   :root:not([data-theme="light"])[data-ui-palette="violet"] {

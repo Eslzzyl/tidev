@@ -242,13 +242,10 @@ mod tests {
             "light",
             "nord",
             "one-dark",
-            "mocha",
             "solarized",
+            "solarized-light",
             "orng",
-            "github",
             "material",
-            "everforest",
-            "everforest-light",
             "dusk",
             "gruvbox",
             "gruvbox-light",
@@ -266,12 +263,12 @@ mod tests {
         let catalog = load_from(Path::new("/nonexistent"));
         let dark = catalog.get("dark").unwrap();
         assert!(dark.dark);
-        assert_eq!(dark.background, ThemeColor(12, 16, 23));
+        assert_eq!(dark.background, ThemeColor(13, 14, 17));
         assert_eq!(dark.text, ThemeColor(229, 231, 235));
         assert_eq!(dark.syntax_theme_key(), "base16-ocean.dark");
         let light = catalog.get("light").unwrap();
         assert!(!light.dark);
-        assert_eq!(light.background, ThemeColor(255, 255, 255));
+        assert_eq!(light.background, ThemeColor(248, 250, 252));
         assert_eq!(light.syntax_theme_key(), "InspiredGitHub");
     }
 
