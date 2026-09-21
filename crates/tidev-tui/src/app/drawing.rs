@@ -768,6 +768,9 @@ impl App {
                 content_rect,
             );
         } else if let Some(ref mut composer) = self.composer {
+            let active_model = self.runtime.active_model();
+            composer.set_model_is_gpt(active_model.is_gpt());
+            composer.set_fast_mode(self.runtime.config().ui.fast_mode && active_model.is_gpt());
             if composer.has_popup() {
                 composer.sync_autocomplete();
             }
@@ -776,7 +779,6 @@ impl App {
                     .text(TextKey::WelcomeInputPlaceholder),
             );
             self.cursor_rendered = self.overlays.is_empty();
-            let active_model = self.runtime.active_model();
             let draw_ctx = DrawContext {
                 image_surface: Some(&self.image_surface),
                 palette,
@@ -1064,11 +1066,13 @@ impl App {
 
         // Composer input block — pass section area directly, exactly as old TUI
         if let Some(ref mut composer) = self.composer {
+            let active_model = self.runtime.active_model();
+            composer.set_model_is_gpt(active_model.is_gpt());
+            composer.set_fast_mode(self.runtime.config().ui.fast_mode && active_model.is_gpt());
             if composer.has_popup() {
                 composer.sync_autocomplete();
             }
             composer.set_placeholder(ui_text.text(TextKey::WelcomeInputPlaceholder));
-            let active_model = self.runtime.active_model();
             let draw_ctx = DrawContext {
                 image_surface: Some(&self.image_surface),
                 palette,

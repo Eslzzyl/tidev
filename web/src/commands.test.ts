@@ -20,4 +20,9 @@ describe("getSuggestions", () => {
     expect(suggestions.length).toBeGreaterThan(0);
     expect(suggestions[0]?.spec.name).toBe("compact");
   });
+
+  it("hides fast mode for non-GPT models", () => {
+    expect(getSuggestions("fast", true).some((item) => item.spec.name === "fast")).toBe(true);
+    expect(getSuggestions("fast", false).some((item) => item.spec.name === "fast")).toBe(false);
+  });
 });

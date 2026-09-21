@@ -51,6 +51,8 @@ export interface ChatPanelProps {
   mode: "build" | "plan";
   models: Model[];
   thinkingLevel: string | undefined;
+  fastMode: boolean;
+  onToggleFastMode: () => void;
   enterToSend: boolean;
   sending: boolean;
   canceling: boolean;
@@ -168,6 +170,8 @@ export function ChatPanel({
   mode,
   models,
   thinkingLevel,
+  fastMode,
+  onToggleFastMode,
   enterToSend,
   sending,
   canceling,
@@ -338,6 +342,8 @@ export function ChatPanel({
                 messages={messages}
                 models={models}
                 activeModel={activeModel}
+                fastMode={fastMode}
+                onToggleFastMode={onToggleFastMode}
                 contextWindow={contextWindow}
                 thinkingLevel={thinkingLevel}
                 todos={todos}

@@ -23,6 +23,8 @@ export interface WelcomePageProps {
   sending: boolean;
   models: Model[];
   activeModel: Model | undefined;
+  fastMode: boolean;
+  onToggleFastMode: () => void;
   thinkingLevel: string | undefined;
   fileMention: { query: string; atPos: number } | null;
   fileMentionIndex: number;
@@ -50,6 +52,8 @@ export function WelcomePage({
   sending,
   models,
   activeModel,
+  fastMode,
+  onToggleFastMode,
   thinkingLevel,
   fileMention,
   fileMentionIndex,
@@ -115,8 +119,8 @@ export function WelcomePage({
 
   const commandQuery = commandFragment(draft, cursorPosition);
   const commandSuggestions = useMemo(
-    () => (commandQuery === null ? [] : getSuggestions(commandQuery)),
-    [commandQuery],
+    () => (commandQuery === null ? [] : getSuggestions(commandQuery, activeModel?.is_gpt === true)),
+    [activeModel?.is_gpt, commandQuery],
   );
   const commandPaletteVisible = commandPaletteOpen && commandSuggestions.length > 0 && !fileMention;
 
@@ -628,8 +632,10 @@ export function WelcomePage({
                 models={models}
                 activeModel={activeModel}
                 thinkingLevel={thinkingLevel}
+                fastMode={fastMode}
                 onSelectModel={onSelectModel}
                 onSelectThinkingLevel={onSelectThinkingLevel}
+                onToggleFastMode={onToggleFastMode}
                 onOpen={() => {
                   setCommandPaletteOpen(false);
                   onFileMentionClose();

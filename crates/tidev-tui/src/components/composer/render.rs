@@ -212,6 +212,14 @@ pub(crate) fn draw_composer(
             ));
         }
 
+        if composer.fast_mode {
+            meta_spans.push(Span::styled(" · ", Style::default().fg(palette.muted)));
+            meta_spans.push(Span::styled(
+                ctx.ui_text.text(TextKey::Fast),
+                Style::default().fg(palette.accent_soft),
+            ));
+        }
+
         // · Subagent strikethrough when disabled
         if ctx.subagent_disabled {
             meta_spans.push(Span::styled(" · ", Style::default().fg(palette.muted)));

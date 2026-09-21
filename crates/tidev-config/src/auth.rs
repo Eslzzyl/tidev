@@ -225,6 +225,12 @@ impl ActiveModel {
         after_prefix != "4" && !after_prefix.starts_with("4-")
     }
 
+    /// Whether this is a GPT model eligible for fast mode.
+    pub fn is_gpt(&self) -> bool {
+        let id = self.request_model_id.trim().to_ascii_lowercase();
+        id.starts_with("gpt-") && !id.contains("oss")
+    }
+
     pub fn api_key_present(&self) -> bool {
         self.api_key
             .as_deref()
@@ -257,6 +263,11 @@ pub struct ModelSummary {
 impl ModelSummary {
     pub fn label(&self) -> String {
         format!("{}/{}", self.provider_id, self.model_id)
+    }
+
+    pub fn is_gpt(&self) -> bool {
+        let id = self.request_model_id.trim().to_ascii_lowercase();
+        id.starts_with("gpt-") && !id.contains("oss")
     }
 }
 
@@ -324,5 +335,13 @@ mod tests {
         assert!(!make_model("claude-3-5-sonnet").use_apply_patch());
         assert!(!make_model("deepseek-v4-flash").use_apply_patch());
         assert!(!make_model("gemini-2.5-flash").use_apply_patch());
+    }
+
+    #[test]
+    fn gpt_models_are_eligible_for_fast_mode() {
+        assert!(make_model("gpt-5").is_gpt());
+        assert!(make_model("GPT-4o-mini").is_gpt());
+        assert!(!make_model("gpt-oss").is_gpt());
+        assert!(!make_model("claude-3-5-sonnet").is_gpt());
     }
 }

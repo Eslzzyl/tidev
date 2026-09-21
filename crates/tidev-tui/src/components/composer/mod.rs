@@ -136,6 +136,10 @@ pub(crate) struct Composer {
     config_dir: PathBuf,
     /// Whether the current model supports image attachments.
     model_supports_images: bool,
+    /// Whether the current model is eligible for fast mode.
+    model_is_gpt: bool,
+    /// Whether fast mode is enabled for the current composer model.
+    fast_mode: bool,
     /// Localized label used only for rendering image badges. The raw
     /// placeholder in `text` remains stable for model requests and storage.
     image_label: String,
@@ -175,6 +179,8 @@ impl Composer {
             workspace_root: PathBuf::new(),
             config_dir: PathBuf::new(),
             model_supports_images: false,
+            model_is_gpt: false,
+            fast_mode: false,
             image_label: UiText::from_preference("en-US").text(TextKey::ImageLabel),
             input_scroll_offset: 0,
             last_input_width: 0,
@@ -278,6 +284,14 @@ impl Composer {
     /// Update whether the current model supports image attachments.
     pub fn set_model_supports_images(&mut self, supports: bool) {
         self.model_supports_images = supports;
+    }
+
+    pub fn set_model_is_gpt(&mut self, is_gpt: bool) {
+        self.model_is_gpt = is_gpt;
+    }
+
+    pub fn set_fast_mode(&mut self, enabled: bool) {
+        self.fast_mode = enabled;
     }
 
     /// Record a submission in history.
@@ -1037,7 +1051,8 @@ impl Composer {
 
     /// Refresh command palette, @mention, and snippet states after input change.
     pub(crate) fn sync_autocomplete(&mut self) {
-        self.command_palette.sync(&self.text, &self.commands);
+        self.command_palette
+            .sync(&self.text, &self.commands, self.model_is_gpt);
         self.at_mention
             .sync(&self.workspace_root, &self.text, self.cursor);
 
@@ -1270,7 +1285,8 @@ impl Component for Composer {
                     if let Some(completion) = self.command_palette.completion() {
                         self.set_text(completion);
                     }
-                    self.command_palette.sync(&self.text, &self.commands);
+                    self.command_palette
+                        .sync(&self.text, &self.commands, self.model_is_gpt);
                     self.dirty = true;
                     return None;
                 }

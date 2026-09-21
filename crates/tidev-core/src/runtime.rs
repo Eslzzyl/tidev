@@ -1291,7 +1291,10 @@ impl Runtime {
         } else {
             self.active_model.read().unwrap().clone()
         };
-        let llm_config = crate::agent_ctx::to_llm_provider_config(&active_model);
+        let llm_config = crate::agent_ctx::to_llm_provider_config(
+            &active_model,
+            self.config.read().unwrap().ui.fast_mode,
+        );
 
         let filtered_tools = workspace
             .tool_registry()
@@ -1704,7 +1707,8 @@ impl Runtime {
         } else {
             self.active_model.read().unwrap().clone()
         };
-        let model_config = to_llm_provider_config(&active_model);
+        let model_config =
+            to_llm_provider_config(&active_model, self.config.read().unwrap().ui.fast_mode);
         let mut compact_model = model_config;
         compact_model.system_prompt = Some(session.system_prompt);
         let tools: Vec<tidev_llm::ToolDefinition> = self

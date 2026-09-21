@@ -414,6 +414,10 @@ const en = {
   "Unified view": "Unified view",
   "Customize how the chat input behaves": "Customize how the chat input behaves",
   "Enter to send": "Enter to send",
+  Fast: "Fast",
+  "Fast mode": "Fast mode",
+  "Use the priority service tier for eligible GPT models":
+    "Use the priority service tier for eligible GPT models",
   "Press Enter to send, Shift+Enter for new line": "Press Enter to send, Shift+Enter for new line",
   "Desktop Notifications": "Desktop Notifications",
   "Receive desktop notifications when tasks complete or need attention":
@@ -501,6 +505,8 @@ const en = {
   "Failed to send prompt": "Failed to send prompt",
   "Failed to select model": "Failed to select model",
   "Failed to set thinking level": "Failed to set thinking level",
+  "Failed to load fast mode": "Failed to load fast mode",
+  "Failed to set fast mode": "Failed to set fast mode",
   "Failed to respond": "Failed to respond",
   "Failed to cancel": "Failed to cancel",
   "Failed to load files": "Failed to load files",
@@ -1234,6 +1240,9 @@ const zhCN: Record<keyof typeof en, string> = {
   "Unified view": "统一视图",
   "Customize how the chat input behaves": "自定义聊天输入框的行为",
   "Enter to send": "按 Enter 发送",
+  Fast: "快速",
+  "Fast mode": "快速模式",
+  "Use the priority service tier for eligible GPT models": "为符合条件的 GPT 模型使用优先服务层级",
   "Press Enter to send, Shift+Enter for new line": "按 Enter 发送，Shift+Enter 换行",
   "Desktop Notifications": "桌面通知",
   "Receive desktop notifications when tasks complete or need attention":
@@ -1318,6 +1327,8 @@ const zhCN: Record<keyof typeof en, string> = {
   "Failed to send prompt": "发送提示失败",
   "Failed to select model": "选择模型失败",
   "Failed to set thinking level": "设置思考级别失败",
+  "Failed to load fast mode": "加载快速模式失败",
+  "Failed to set fast mode": "设置快速模式失败",
   "Failed to respond": "响应失败",
   "Failed to cancel": "取消失败",
   "Failed to load files": "加载文件失败",

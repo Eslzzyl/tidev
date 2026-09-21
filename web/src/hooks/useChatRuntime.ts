@@ -82,6 +82,8 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
   const checkAuthStatus = useAuthStore((state) => state.checkAuthStatus);
   const openSettingsPanel = useUIStore((state) => state.openSettingsPanel);
   const enterToSend = useUIStore((state) => state.settings.enterToSend);
+  const fastMode = useUIStore((state) => state.settings.fastMode);
+  const updateSettings = useUIStore((state) => state.updateSettings);
   const setConnectionStatus = useUIStore((state) => state.setConnectionStatus);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
@@ -254,6 +256,25 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
   useEffect(() => {
     void checkAuthStatus();
   }, [checkAuthStatus]);
+
+  useEffect(() => {
+    void api
+      .getFastMode()
+      .then((response) => updateSettings({ fastMode: response.fast_mode }))
+      .catch((reason) => {
+        setError(reason instanceof Error ? reason.message : i18n.t("Failed to load fast mode"));
+      });
+  }, [updateSettings]);
+
+  const toggleFastMode = useCallback(async () => {
+    if (!activeModel?.is_gpt) return;
+    try {
+      const response = await api.setFastMode(!fastMode);
+      updateSettings({ fastMode: response.fast_mode });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : i18n.t("Failed to set fast mode"));
+    }
+  }, [activeModel, fastMode, updateSettings]);
 
   const findAtFragment = useCallback(
     (text: string, cursor: number): { atPos: number; query: string } | null => {
@@ -1581,6 +1602,10 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
       const parsed = parseSlashCommand(raw);
       if (!parsed) return false;
       const { command, args } = parsed;
+      if (command === "fast" && !args) {
+        await toggleFastMode();
+        return true;
+      }
       if (command === "undo") {
         const lastUser = [...messages]
           .reverse()
@@ -1640,6 +1665,7 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
     },
     [
       messages,
+      toggleFastMode,
       handleRevert,
       handleRedo,
       handleFork,
@@ -1826,6 +1852,8 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
     authenticated,
     openSettingsPanel,
     enterToSend,
+    fastMode,
+    toggleFastMode,
     sessions,
     sessionWorkspaceRoots,
     sessionWorkspaceRoot,

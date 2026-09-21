@@ -124,6 +124,10 @@ impl SettingsPanel {
                         key: SettingKey::SendWhileBusy,
                     },
                     SettingItem {
+                        setting_type: SettingType::Toggle(config.ui.fast_mode),
+                        key: SettingKey::FastMode,
+                    },
+                    SettingItem {
                         setting_type: SettingType::Toggle(config.ui.right_sidebar_visible),
                         key: SettingKey::RightSidebarVisible,
                     },
@@ -889,6 +893,7 @@ fn setting_name(ui_text: &UiText, key: SettingKey) -> String {
         SettingKey::CollapseThinking => TextKey::CollapseThinking,
         SettingKey::CollapseDiffs => TextKey::CollapseDiffs,
         SettingKey::SendWhileBusy => TextKey::SendWhileBusy,
+        SettingKey::FastMode => TextKey::FastMode,
         SettingKey::RightSidebarVisible => TextKey::RightSidebar,
         SettingKey::Language => TextKey::Language,
         SettingKey::NotificationEnabled => TextKey::DesktopNotifications,
@@ -909,6 +914,7 @@ fn setting_description(ui_text: &UiText, key: SettingKey) -> String {
         SettingKey::CollapseThinking => TextKey::SettingCollapseThinkingDescription,
         SettingKey::CollapseDiffs => TextKey::SettingCollapseDiffsDescription,
         SettingKey::SendWhileBusy => TextKey::SettingSendWhileBusyDescription,
+        SettingKey::FastMode => TextKey::SettingFastModeDescription,
         SettingKey::RightSidebarVisible => TextKey::SettingRightSidebarDescription,
         SettingKey::Language => TextKey::SettingLanguageDescription,
         SettingKey::NotificationEnabled => TextKey::SettingNotificationsDescription,

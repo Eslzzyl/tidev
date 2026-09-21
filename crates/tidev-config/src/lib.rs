@@ -373,6 +373,9 @@ pub struct UiConfig {
     /// loop is busy. See [`SendWhileBusy`].
     #[serde(default)]
     pub send_while_busy: SendWhileBusy,
+    /// Use the OpenAI priority service tier for eligible GPT models.
+    #[serde(default)]
+    pub fast_mode: bool,
     #[serde(default = "default_right_sidebar_visible")]
     pub right_sidebar_visible: bool,
 }
@@ -403,6 +406,7 @@ impl Default for UiConfig {
             collapse_thinking: false,
             collapse_diffs: false,
             send_while_busy: SendWhileBusy::Queue,
+            fast_mode: false,
             right_sidebar_visible: default_right_sidebar_visible(),
         }
     }

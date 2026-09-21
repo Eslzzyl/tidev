@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown, Zap } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import type { Model } from "../types/api";
@@ -12,8 +12,10 @@ export interface ModelPickerProps {
   models: Model[];
   activeModel: Model | undefined;
   thinkingLevel: string | undefined;
+  fastMode?: boolean;
   onSelectModel: (model: Model) => void;
   onSelectThinkingLevel: (level: string) => void;
+  onToggleFastMode?: () => void;
   onOpen?: () => void;
 
   // Subagent / inherit mode options
@@ -41,8 +43,10 @@ export function ModelPicker({
   models,
   activeModel,
   thinkingLevel,
+  fastMode = false,
   onSelectModel,
   onSelectThinkingLevel,
+  onToggleFastMode,
   onOpen,
   allowInherit = false,
   isInherited = false,
@@ -69,6 +73,7 @@ export function ModelPicker({
 
   const effectiveModel = isInherited ? parentModel : activeModel;
   const supportsThinking = Boolean(effectiveModel?.thinking_levels.length);
+  const supportsFastMode = Boolean(onToggleFastMode && effectiveModel?.is_gpt);
   const selectedThinkingLevel = thinkingLevel ?? effectiveModel?.thinking_level;
 
   let currentThinking: string;
@@ -127,6 +132,14 @@ export function ModelPicker({
           disabled={disabled}
           trailingIcon={<ChevronDown size={13} />}
         >
+          {supportsFastMode && fastMode ? (
+            <span
+              className="model-picker-trigger-thinking model-picker-trigger-fast"
+              title={t("Fast")}
+            >
+              <Zap size={12} aria-label={t("Fast")} role="img" />
+            </span>
+          ) : null}
           <span className="model-picker-trigger-model">{triggerModelLabel}</span>
           {supportsThinking ? (
             <span className="model-picker-trigger-thinking">{currentThinking}</span>
@@ -282,6 +295,25 @@ export function ModelPicker({
             })}
           </Menu.SubContent>
         </Menu.Sub>
+
+        {supportsFastMode ? (
+          <>
+            <Menu.Separator />
+            <Menu.Item
+              className={
+                fastMode
+                  ? "model-picker-entry model-picker-fast-mode selected"
+                  : "model-picker-entry model-picker-fast-mode"
+              }
+              onSelect={() => onToggleFastMode?.()}
+            >
+              <span className="model-picker-entry-copy">
+                <strong>{t("Fast mode")}</strong>
+              </span>
+              {fastMode ? <Check size={14} /> : null}
+            </Menu.Item>
+          </>
+        ) : null}
       </Menu.Content>
     </Menu.Root>
   );

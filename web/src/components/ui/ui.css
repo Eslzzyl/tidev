@@ -745,6 +745,11 @@
   font-weight: 400;
 }
 
+.model-picker-trigger-fast {
+  display: inline-flex;
+  align-items: center;
+}
+
 .model-picker-entry-copy {
   display: grid;
   min-width: 0;
@@ -1104,6 +1109,7 @@
 }
 
 .ui-menu-content.model-picker-menu-content .ui-menu-item.model-picker-entry[data-highlighted],
+.ui-menu-content.model-picker-menu-content .ui-menu-item.model-picker-entry.selected,
 .ui-menu-content.model-picker-menu-content
   .ui-menu-item.model-picker-submenu-item[data-highlighted],
 .ui-menu-content.model-picker-menu-content .ui-menu-item.model-picker-submenu-item.selected {

@@ -205,7 +205,27 @@ fn child_session_id_for_tool_call(buffer: &CoreMessageBuffer, tool_call_id: &str
 // ---------------------------------------------------------------------------
 
 /// Build an [`LlmProviderConfig`] from a resolved [`ActiveModel`].
-pub fn to_llm_provider_config(model: &ActiveModel) -> LlmProviderConfig {
+pub fn to_llm_provider_config(model: &ActiveModel, fast_mode: bool) -> LlmProviderConfig {
+    let extra_body = if fast_mode
+        && model.is_gpt()
+        && matches!(
+            model.api_type,
+            tidev_llm::ApiType::OpenAiChatCompletions | tidev_llm::ApiType::OpenAiResponses
+        ) {
+        let mut extra_body = model
+            .extra_body
+            .clone()
+            .and_then(|value| value.as_object().cloned())
+            .unwrap_or_default();
+        extra_body.insert(
+            "service_tier".to_string(),
+            serde_json::Value::String("priority".to_string()),
+        );
+        Some(serde_json::Value::Object(extra_body))
+    } else {
+        model.extra_body.clone()
+    };
+
     LlmProviderConfig {
         provider_id: model.provider_id.clone(),
         api_type: model.api_type,
@@ -218,7 +238,7 @@ pub fn to_llm_provider_config(model: &ActiveModel) -> LlmProviderConfig {
         request_model_id: Some(model.request_model_id.clone()),
         system_prompt: Some(model.system_prompt.clone()),
         thinking_level: model.thinking_level.clone(),
-        extra_body: model.extra_body.clone(),
+        extra_body,
         max_output_tokens: model.max_output_tokens,
         context_window: model.context_window,
         temperature: model.temperature,
@@ -1702,6 +1722,47 @@ mod tool_result_order_tests {
     }
 }
 
+#[cfg(test)]
+mod fast_mode_tests {
+    use super::*;
+
+    fn model() -> ActiveModel {
+        ActiveModel {
+            provider_id: "openai".to_string(),
+            provider_display_name: "OpenAI".to_string(),
+            base_url: "https://api.openai.com/v1".to_string(),
+            user_agent: None,
+            headers: std::collections::BTreeMap::new(),
+            session_header: None,
+            api_type: tidev_llm::ApiType::OpenAiResponses,
+            model_id: "gpt-5".to_string(),
+            request_model_id: "gpt-5".to_string(),
+            display_name: "GPT-5".to_string(),
+            context_window: 128_000,
+            max_output_tokens: 4096,
+            temperature: None,
+            supports_images: false,
+            supports_parallel_tool_calls: true,
+            system_prompt: String::new(),
+            api_key: None,
+            extra_body: None,
+            thinking_level: tidev_llm::reasoning::ThinkingLevelType::None,
+        }
+    }
+
+    #[test]
+    fn fast_mode_adds_priority_service_tier() {
+        let fast = to_llm_provider_config(&model(), true);
+        assert_eq!(
+            fast.extra_body,
+            Some(serde_json::json!({"service_tier": "priority"}))
+        );
+
+        let normal = to_llm_provider_config(&model(), false);
+        assert_eq!(normal.extra_body, None);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Subagent support — private helpers used by execute_tools for task tool calls.
 // ---------------------------------------------------------------------------
@@ -1792,7 +1853,8 @@ async fn execute_task_tool(
             }
         }
     };
-    let child_model_config = to_llm_provider_config(&child_model);
+    let fast_mode = spawner.config.read().unwrap().ui.fast_mode;
+    let child_model_config = to_llm_provider_config(&child_model, fast_mode);
 
     // 4. Filter tools based on child model, then agent type + mode.
     let model_tools = spawner.tool_registry.definitions_for_model(&child_model);

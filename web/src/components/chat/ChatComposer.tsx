@@ -20,6 +20,8 @@ export interface ChatComposerProps {
   messages: MessageRecord[];
   models: Model[];
   activeModel: Model | undefined;
+  fastMode: boolean;
+  onToggleFastMode: () => void;
   contextWindow?: number;
   thinkingLevel: string | undefined;
   todos: TodoItem[];
@@ -61,6 +63,8 @@ export function ChatComposer({
   messages,
   models,
   activeModel,
+  fastMode,
+  onToggleFastMode,
   contextWindow,
   thinkingLevel,
   todos,
@@ -138,8 +142,8 @@ export function ChatComposer({
 
   const commandQuery = commandFragment(draft, cursorPosition);
   const commandSuggestions = useMemo(
-    () => (commandQuery === null ? [] : getSuggestions(commandQuery)),
-    [commandQuery],
+    () => (commandQuery === null ? [] : getSuggestions(commandQuery, activeModel?.is_gpt === true)),
+    [activeModel?.is_gpt, commandQuery],
   );
   const commandPaletteVisible = commandPaletteOpen && commandSuggestions.length > 0 && !fileMention;
 
@@ -388,8 +392,10 @@ export function ChatComposer({
               models={models}
               activeModel={activeModel}
               thinkingLevel={thinkingLevel}
+              fastMode={fastMode}
               onSelectModel={onSelectModel}
               onSelectThinkingLevel={onSelectThinkingLevel}
+              onToggleFastMode={onToggleFastMode}
               onOpen={() => {
                 setCommandPaletteOpen(false);
                 onFileMentionClose();

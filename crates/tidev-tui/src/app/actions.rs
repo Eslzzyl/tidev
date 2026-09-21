@@ -92,6 +92,10 @@ fn apply_setting_change(
             }
             _ => false,
         },
+        (SettingKey::FastMode, SettingValue::Bool(value)) => {
+            config.ui.fast_mode = value;
+            true
+        }
         (SettingKey::RightSidebarVisible, SettingValue::Bool(value)) => {
             config.ui.right_sidebar_visible = value;
             true
@@ -132,6 +136,14 @@ impl App {
                     } else {
                         ui_text.text(TextKey::RightSidebarHidden)
                     }));
+                    queue.push(Action::Settings(SettingsAction::Change { key, value }));
+                }
+                Action::ToggleFastMode => {
+                    if !self.runtime.active_model().is_gpt() {
+                        continue;
+                    }
+                    let key = SettingKey::FastMode;
+                    let value = SettingValue::Bool(!self.runtime.config().ui.fast_mode);
                     queue.push(Action::Settings(SettingsAction::Change { key, value }));
                 }
                 Action::Overlay(OverlayAction::Open(kind)) => {

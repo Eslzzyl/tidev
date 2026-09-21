@@ -155,6 +155,7 @@ pub(crate) enum SettingKey {
     CollapseThinking,
     CollapseDiffs,
     SendWhileBusy,
+    FastMode,
     RightSidebarVisible,
     Language,
 }
@@ -299,6 +300,8 @@ pub(crate) enum Action {
     ImageAttachmentUnsupported,
     /// Toggle the right-hand sidebar. `None` means flip current value.
     ToggleRightSidebar(Option<bool>),
+    /// Toggle the persisted fast-mode setting for eligible GPT models.
+    ToggleFastMode,
 
     // ── Tool approval pipeline ──
     /// Result from a WorkspaceBoundaryDialog.

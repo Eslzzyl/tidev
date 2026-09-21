@@ -54,6 +54,8 @@ pub(crate) enum CommandAction {
     ToggleRightSidebar,
     /// Open the MCP server management panel.
     Mcp,
+    /// Toggle the OpenAI priority service tier.
+    Fast,
 }
 
 // ---------------------------------------------------------------------------
@@ -102,6 +104,12 @@ pub(crate) static COMMANDS: &[CommandSpec] = &[
         aliases: &["models"],
         description_key: TextKey::CommandModel,
         action: CommandAction::Model,
+    },
+    CommandSpec {
+        name: "fast",
+        aliases: &[],
+        description_key: TextKey::CommandFast,
+        action: CommandAction::Fast,
     },
     CommandSpec {
         name: "mcp",
@@ -256,10 +264,11 @@ impl CommandRegistry {
         Some((name, args))
     }
 
-    pub fn suggestions(&self, query: &str) -> Vec<CommandSuggestion> {
+    pub fn suggestions_for_model(&self, query: &str, model_is_gpt: bool) -> Vec<CommandSuggestion> {
         let normalized = query.trim().trim_start_matches('/').to_ascii_lowercase();
         let mut candidates: Vec<CommandSuggestion> = COMMANDS
             .iter()
+            .filter(|spec| model_is_gpt || spec.action != CommandAction::Fast)
             .filter_map(|spec| {
                 self.score(spec, &normalized)
                     .map(|score| CommandSuggestion { spec, score })
@@ -349,7 +358,7 @@ impl CommandPaletteState {
         self.user_moved = false;
     }
 
-    pub fn sync(&mut self, input: &str, registry: &CommandRegistry) {
+    pub fn sync(&mut self, input: &str, registry: &CommandRegistry, model_is_gpt: bool) {
         let Some(fragment) = command_fragment(input) else {
             self.clear();
             return;
@@ -363,7 +372,7 @@ impl CommandPaletteState {
         }
         let previous = self.selected_command_name();
         self.query = fragment.to_string();
-        self.suggestions = registry.suggestions(fragment);
+        self.suggestions = registry.suggestions_for_model(fragment, model_is_gpt);
 
         if self.suggestions.is_empty() {
             self.selected_index = 0;
@@ -579,6 +588,13 @@ pub(crate) fn execute_command(
                 vec![Action::CommandUsage("/mcp")]
             }
         }
+        CommandAction::Fast => {
+            if args.is_empty() {
+                vec![Action::ToggleFastMode]
+            } else {
+                vec![Action::CommandUsage("/fast")]
+            }
+        }
     }
 }
 
@@ -613,7 +629,7 @@ mod tests {
     #[test]
     fn test_suggestions_exact() {
         let reg = CommandRegistry::new();
-        let results = reg.suggestions("/theme");
+        let results = reg.suggestions_for_model("/theme", true);
         assert_eq!(results[0].spec.name, "theme");
         assert!(results[0].score >= 10_000);
     }
@@ -621,7 +637,7 @@ mod tests {
     #[test]
     fn test_suggestions_prefix() {
         let reg = CommandRegistry::new();
-        let results = reg.suggestions("/se");
+        let results = reg.suggestions_for_model("/se", true);
         assert!(results.iter().any(|s| s.spec.name == "session"
             || s.spec.name == "search"
             || s.spec.name == "settings"));
@@ -630,7 +646,7 @@ mod tests {
     #[test]
     fn test_suggestions_alias() {
         let reg = CommandRegistry::new();
-        let results = reg.suggestions("/login");
+        let results = reg.suggestions_for_model("/login", true);
         assert_eq!(results[0].spec.name, "connect");
     }
 
@@ -760,6 +776,31 @@ mod tests {
     }
 
     #[test]
+    fn test_fast_command_is_available_only_for_gpt_models() {
+        let reg = CommandRegistry::new();
+        assert!(
+            reg.suggestions_for_model("fast", true)
+                .iter()
+                .any(|suggestion| suggestion.spec.action == CommandAction::Fast)
+        );
+        assert!(
+            !reg.suggestions_for_model("fast", false)
+                .iter()
+                .any(|suggestion| suggestion.spec.action == CommandAction::Fast)
+        );
+
+        let catalog = test_catalog();
+        assert!(matches!(
+            execute_command(CommandAction::Fast, &[], &catalog).as_slice(),
+            [Action::ToggleFastMode]
+        ));
+        assert!(matches!(
+            execute_command(CommandAction::Fast, &["extra".into()], &catalog).as_slice(),
+            [Action::CommandUsage("/fast")]
+        ));
+    }
+
+    #[test]
     fn test_thinking_commands_execute() {
         let catalog = test_catalog();
         assert!(matches!(
@@ -795,9 +836,9 @@ mod tests {
 
         // Typing / -> /e -> /ex without manual navigation: the selection
         // always tracks the top-ranked suggestion, so /ex lands on "exit".
-        state.sync("/", &reg);
-        state.sync("/e", &reg);
-        state.sync("/ex", &reg);
+        state.sync("/", &reg, true);
+        state.sync("/e", &reg, true);
+        state.sync("/ex", &reg, true);
         assert_eq!(state.selected().map(|s| s.spec.name), Some("exit"));
     }
 
@@ -808,13 +849,13 @@ mod tests {
 
         // At "/" all commands share the same score and sort by name, so the
         // first entries are agents(0), collapse-thinking(1), compact(2).
-        state.sync("/", &reg);
+        state.sync("/", &reg, true);
         state.move_selection(1);
         state.move_selection(1);
         assert_eq!(state.selected().map(|s| s.spec.name), Some("compact"));
 
         // Keep typing: "compact" stays selected as long as it still matches.
-        state.sync("/co", &reg);
+        state.sync("/co", &reg, true);
         assert_eq!(state.selected().map(|s| s.spec.name), Some("compact"));
     }
 
@@ -823,7 +864,7 @@ mod tests {
         let reg = CommandRegistry::new();
         let mut state = CommandPaletteState::new();
 
-        state.sync("/co", &reg);
+        state.sync("/co", &reg, true);
         state.move_selection(1); // manual navigation from `/copy` to `/compact`
         assert!(state.user_moved);
         assert_eq!(state.selected().map(|s| s.spec.name), Some("compact"));
@@ -831,7 +872,7 @@ mod tests {
         // Deleting back to "/c" resets the manual flag; the selection
         // follows the top-ranked suggestion again.  `/copy` is the
         // highest-ranked `/c` command because its name is the shortest.
-        state.sync("/c", &reg);
+        state.sync("/c", &reg, true);
         assert!(!state.user_moved);
         assert_eq!(state.selected().map(|s| s.spec.name), Some("copy"));
     }

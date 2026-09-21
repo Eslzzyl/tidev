@@ -104,6 +104,8 @@ export default function App() {
     selectedSession,
     sessionStatus,
     activeModel,
+    fastMode,
+    toggleFastMode,
     messages,
     changedFiles,
     changedFileDiffs,
@@ -219,6 +221,8 @@ export default function App() {
       mode={mode}
       models={models}
       thinkingLevel={thinkingLevel}
+      fastMode={fastMode}
+      onToggleFastMode={() => void toggleFastMode()}
       enterToSend={enterToSend}
       sending={sending}
       canceling={canceling}
@@ -235,6 +239,8 @@ export default function App() {
           sending={welcomeSending}
           models={models}
           activeModel={activeModel}
+          fastMode={fastMode}
+          onToggleFastMode={() => void toggleFastMode()}
           thinkingLevel={thinkingLevel}
           fileMention={fileMention}
           fileMentionIndex={fileMentionIndex}

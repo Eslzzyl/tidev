@@ -32,6 +32,7 @@ import type {
   SetMemoryModelRequest,
   GetModelThinkingLevelResponse,
   SetModelThinkingLevelRequest,
+  FastModeResponse,
   ListDirResponse,
   ReadFileResponse,
   WriteFileResponse,
@@ -388,6 +389,13 @@ export const api = {
     fetchJson<{ success: boolean }>(`${API_BASE}/config/model-thinking-level`, {
       method: "POST",
       body: JSON.stringify(data),
+    }),
+
+  getFastMode: () => fetchJson<FastModeResponse>(`${API_BASE}/config/fast-mode`),
+  setFastMode: (fastMode: boolean) =>
+    fetchJson<FastModeResponse>(`${API_BASE}/config/fast-mode`, {
+      method: "POST",
+      body: JSON.stringify({ fast_mode: fastMode }),
     }),
 
   // Providers

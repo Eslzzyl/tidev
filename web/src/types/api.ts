@@ -224,6 +224,7 @@ export interface Model {
   connected: boolean;
   active: boolean;
   supports_vision: boolean;
+  is_gpt: boolean;
   thinking_levels: string[];
   thinking_level: string;
 }
@@ -316,6 +317,10 @@ export interface SetModelThinkingLevelRequest {
   provider_id: string;
   model_id: string;
   thinking_level: string;
+}
+
+export interface FastModeResponse {
+  fast_mode: boolean;
 }
 
 export interface WorkspaceInfo {

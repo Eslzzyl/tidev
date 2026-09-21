@@ -13,6 +13,7 @@ function model(overrides: Partial<Model> = {}): Model {
     connected: true,
     active: false,
     supports_vision: true,
+    is_gpt: true,
     thinking_levels: [],
     thinking_level: "",
     ...overrides,

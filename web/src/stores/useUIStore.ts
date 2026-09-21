@@ -13,6 +13,7 @@ export interface SettingsState {
   terminalFontFamily: string;
   notificationEnabled: boolean;
   notificationCondition: "unfocused" | "always";
+  fastMode: boolean;
 }
 
 export interface UIState {
@@ -76,6 +77,7 @@ const defaultSettings: SettingsState = {
   terminalFontFamily: "",
   notificationEnabled: true,
   notificationCondition: "unfocused",
+  fastMode: false,
 };
 
 function loadLegacyPreferences(): { theme?: Theme; settings: Partial<SettingsState> } {

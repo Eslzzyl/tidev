@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ShieldAlert, AlertTriangle } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { api } from "../../api/client";
 import { useUIStore } from "../../stores/useUIStore";
 import { Button } from "../ui";
 import {
@@ -39,6 +40,16 @@ export function InteractionSection() {
           description={t("Press Enter to send, Shift+Enter for new line")}
           checked={settings.enterToSend}
           onCheckedChange={(checked) => updateSettings({ enterToSend: checked })}
+        />
+        <SettingsSwitchRow
+          label={t("Fast mode")}
+          description={t("Use the priority service tier for eligible GPT models")}
+          checked={settings.fastMode}
+          onCheckedChange={(checked) => {
+            void api.setFastMode(checked).then((response) => {
+              updateSettings({ fastMode: response.fast_mode });
+            });
+          }}
         />
       </SettingsGroup>
 

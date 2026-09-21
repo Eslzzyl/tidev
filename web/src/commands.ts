@@ -11,7 +11,8 @@ export type CommandAction =
   | "connect"
   | "compact"
   | "fork"
-  | "mcp";
+  | "mcp"
+  | "fast";
 
 export interface CommandSpec {
   name: string;
@@ -34,6 +35,13 @@ export const COMMANDS: CommandSpec[] = [
     description: "Manage MCP server connections and tools",
     usage: "/mcp",
     action: "mcp",
+  },
+  {
+    name: "fast",
+    aliases: [],
+    description: "Toggle fast mode for GPT models",
+    usage: "/fast",
+    action: "fast",
   },
   {
     name: "message",
@@ -137,10 +145,11 @@ function score(spec: CommandSpec, query: string): number | null {
   return s;
 }
 
-export function getSuggestions(query: string): CommandSuggestion[] {
+export function getSuggestions(query: string, modelIsGpt = true): CommandSuggestion[] {
   const normalized = query.trim().toLowerCase();
 
   const candidates = COMMANDS.map((spec) => {
+    if (!modelIsGpt && spec.action === "fast") return null;
     const s = score(spec, normalized);
     return s !== null ? { spec, score: s } : null;
   }).filter((c): c is CommandSuggestion => c !== null);

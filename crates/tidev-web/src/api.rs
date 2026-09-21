@@ -257,6 +257,11 @@ struct SetThinkingLevelRequest {
 }
 
 #[derive(Debug, Deserialize)]
+struct SetFastModeRequest {
+    fast_mode: bool,
+}
+
+#[derive(Debug, Deserialize)]
 struct SetAgentModelRequest {
     agent_type: String,
     model_str: String,
@@ -452,6 +457,7 @@ struct ModelDto {
     connected: bool,
     active: bool,
     supports_vision: bool,
+    is_gpt: bool,
     thinking_levels: Vec<String>,
     thinking_level: String,
 }
@@ -745,6 +751,7 @@ pub fn router() -> Router<Arc<AppState>> {
             "/config/model-thinking-level",
             get(get_model_thinking_level).post(set_model_thinking_level),
         )
+        .route("/config/fast-mode", get(get_fast_mode).post(set_fast_mode))
         .route("/stats/summary", get(stats_summary))
         .route("/stats/timeseries", get(stats_timeseries))
         .route("/stats/models", get(stats_models))
@@ -903,6 +910,7 @@ async fn list_models(State(state): State<Arc<AppState>>) -> Json<Vec<ModelDto>> 
                 connected: auth.api_key(&model.provider_id).is_some(),
                 active: is_active,
                 supports_vision: model.supports_images,
+                is_gpt: model.is_gpt(),
                 provider_id: model.provider_id,
                 provider_display_name: model.provider_display_name,
                 model_id: model.model_id,
@@ -937,6 +945,7 @@ async fn select_model(
         connected: model.api_key.is_some(),
         active: true,
         supports_vision: model.supports_images,
+        is_gpt: model.is_gpt(),
         thinking_levels,
         thinking_level: model.thinking_level.to_string(),
     };
@@ -961,6 +970,31 @@ async fn set_thinking_level(
         &request.thinking_level,
     )?;
     Ok(Json(AcceptedResponse { accepted: true }))
+}
+
+async fn get_fast_mode(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "fast_mode": state.runtime.config().ui.fast_mode,
+    }))
+}
+
+async fn set_fast_mode(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<SetFastModeRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let previous = state.runtime.config().ui.fast_mode;
+    state
+        .runtime
+        .update_config(|config| config.ui.fast_mode = request.fast_mode);
+    if let Err(error) = state.runtime.save_config() {
+        state
+            .runtime
+            .update_config(|config| config.ui.fast_mode = previous);
+        return Err(error.into());
+    }
+    Ok(Json(serde_json::json!({
+        "fast_mode": request.fast_mode,
+    })))
 }
 
 async fn system_restart(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
