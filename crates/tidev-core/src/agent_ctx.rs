@@ -1921,7 +1921,13 @@ async fn execute_task_tool(
             {
                 messages.push(notice);
             }
-            let app_data = HashMap::from([(user_msg.id, MessageAppData::default())]);
+            let app_data = HashMap::from([(
+                user_msg.id,
+                MessageAppData {
+                    mode: Some(spawner.mode.as_str().to_string()),
+                    ..Default::default()
+                },
+            )]);
             spawner
                 .session_manager
                 .append_messages_with_app_data_and_instruction_sources(

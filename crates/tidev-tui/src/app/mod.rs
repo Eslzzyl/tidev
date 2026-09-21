@@ -97,6 +97,13 @@ pub struct App {
     current_session_id: Option<uuid::Uuid>,
     /// Current session mode (Build / Plan).
     mode: SessionMode,
+    /// Last committed mode for each session known to this TUI instance.
+    ///
+    /// The mode is persisted on user-message application data, but a deferred
+    /// mode switch may become effective while its session is in the
+    /// background. Keep that state separately so navigating back to the
+    /// session does not fall back to another session's global `mode` value.
+    session_modes: HashMap<Uuid, SessionMode>,
     /// Per-session pending mode switch (applied on next Finished with no tool calls).
     pending_modes: HashMap<Uuid, SessionMode>,
     /// Current thinking level for the active model.
@@ -296,6 +303,7 @@ impl App {
             pending_input_copy: None,
             current_session_id: None,
             mode: SessionMode::Build,
+            session_modes: HashMap::new(),
             pending_modes: HashMap::new(),
             thinking_level,
             last_notice: None,
@@ -360,6 +368,61 @@ impl App {
 
     pub(crate) fn ui_text(&self) -> UiText {
         UiText::from_preference(&self.runtime.config().ui.locale)
+    }
+
+    fn latest_session_mode(messages: &[tidev_core::SessionMessage]) -> Option<SessionMode> {
+        messages
+            .iter()
+            .rev()
+            .find(|message| message.role == MessageRole::User && !message.is_compaction())
+            .and_then(|message| message.mode())
+    }
+
+    /// Synchronize the global rendering/submission mode with the active session.
+    ///
+    /// `mode` is kept as a rendering convenience, but its source of truth is
+    /// session-scoped. A child session inherits its parent's mode when its
+    /// initial message predates mode metadata, which also keeps older child
+    /// sessions readable after the metadata fix for newly-created children.
+    pub(crate) fn sync_mode_for_session(&mut self, session_id: Uuid) {
+        let (context_mode, parent_session_id) = self
+            .message_list
+            .as_ref()
+            .and_then(|chat| chat.active_chat_context())
+            .filter(|ctx| ctx.session_id == session_id)
+            .map(|ctx| {
+                let mode = ctx
+                    .visible_messages()
+                    .iter()
+                    .rev()
+                    .find(|message| message.role == MessageRole::User && !message.is_compaction())
+                    .and_then(|message| ctx.app_data(message.id))
+                    .and_then(|data| data.mode.as_deref()?.parse::<SessionMode>().ok());
+                (mode, ctx.parent_session_id)
+            })
+            .unwrap_or((None, None));
+
+        let inherited_mode = parent_session_id
+            .and_then(|parent_id| self.session_modes.get(&parent_id).copied())
+            .or_else(|| {
+                parent_session_id.and_then(|parent_id| {
+                    self.runtime
+                        .session_manager()
+                        .load_session_messages(parent_id)
+                        .ok()
+                        .and_then(|messages| Self::latest_session_mode(&messages))
+                })
+            });
+
+        let mode = self
+            .session_modes
+            .get(&session_id)
+            .copied()
+            .or(context_mode)
+            .or(inherited_mode)
+            .unwrap_or(SessionMode::Build);
+        self.session_modes.insert(session_id, mode);
+        self.mode = mode;
     }
 
     /// Whether any component needs re-drawing.

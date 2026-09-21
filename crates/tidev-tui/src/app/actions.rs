@@ -3,7 +3,6 @@ use super::*;
 use crate::context::UpdateContext;
 use crate::theme::resolve_palette;
 use tidev_core::ApprovedTool;
-use tidev_core::Mode as SessionMode;
 use tidev_llm::message::{Message, MessageRole, ToolExecutionResult};
 
 use crate::action::{
@@ -456,24 +455,6 @@ impl App {
                         // Restore cached context_usage for the target session.
                         self.context_usage = self.context_usage_cache.remove(&session_id);
 
-                        // Resolve session mode from the existing context.
-                        // Keep pending_mode intact so a deferred mode switch
-                        // survives session navigation.
-                        if let Some(ctx) = chat.active_chat_context() {
-                            self.mode = ctx
-                                .messages
-                                .iter()
-                                .rev()
-                                .find(|m| m.role == MessageRole::User && !m.is_compaction())
-                                .and_then(|m| ctx.app_data(m.id))
-                                .and_then(|data| {
-                                    data.mode
-                                        .as_deref()
-                                        .and_then(|value| value.parse::<SessionMode>().ok())
-                                })
-                                .unwrap_or(SessionMode::Build);
-                        }
-
                         // Clear stale interaction state on session switch.
                         self.mouse_selection.clear();
                         self.abort_confirmation_deadline = None;
@@ -520,6 +501,9 @@ impl App {
                                 .and_then(|m| m.thinking_level.clone())
                         });
                         self.sync_active_model_for_session(session_id, session_thinking_level);
+                        // Resolve the target session's mode instead of reusing
+                        // the previous session's global mode.
+                        self.sync_mode_for_session(session_id);
 
                         log::info!("Switching to session: existing context (fast path)");
 
@@ -551,18 +535,6 @@ impl App {
                         .rev()
                         .find(|m| m.role == MessageRole::User && !m.is_compaction())
                         .and_then(|m| m.thinking_level.clone());
-
-                    // Resolve session mode from the last user message.
-                    // Keep pending_mode intact so a deferred mode switch
-                    // survives session navigation.
-                    self.mode = session_messages
-                        .iter()
-                        .rev()
-                        .find(|m| {
-                            m.role == tidev_llm::message::MessageRole::User && !m.is_compaction()
-                        })
-                        .and_then(|m| m.mode())
-                        .unwrap_or(SessionMode::Build);
 
                     // Compute context_usage from stored messages (last assistant
                     // message holds cumulative token counts).
@@ -623,6 +595,7 @@ impl App {
                     self.message_list
                         .get_or_insert_with(MessageList::new)
                         .set_chat_context(chat_context);
+                    self.sync_mode_for_session(session_id);
 
                     // Reload todos for the target session.
                     if let Ok(todos) = self
@@ -801,6 +774,7 @@ impl App {
                     self.pending_inputs.retain(|input| input.session_id != sid);
                     self.pending_compacts.remove(&sid);
                     self.compacting_sessions.remove(&sid);
+                    self.session_modes.remove(&sid);
                     self.pending_modes.remove(&sid);
                     self.pending_approvals.remove(&sid);
                     if self.active_approval_session == Some(sid) {
@@ -910,6 +884,7 @@ impl App {
 
                             // Spawn submission to avoid blocking the UI.
                             let mode = self.mode;
+                            self.session_modes.insert(sid, mode);
                             let thinking_level = self.runtime.active_model().thinking_level.clone();
                             self.thinking_level = thinking_level.clone();
                             let rt = self.runtime.clone();

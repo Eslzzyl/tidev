@@ -156,17 +156,18 @@ impl App {
             } => {
                 // Apply pending mode switch on final turn (no tool calls).
                 if turn.tool_calls.is_empty() {
-                    if let Some(new_mode) = self.pending_modes.remove(&session_id)
-                        && Some(session_id) == self.current_session_id
-                    {
-                        self.mode = new_mode;
-                        let ui_text = self.ui_text();
-                        let mode = mode_title(&ui_text, self.mode);
-                        self.set_notice(ui_text.text_with_value(
-                            TextKey::ModeSwitched,
-                            "mode",
-                            &mode,
-                        ));
+                    if let Some(new_mode) = self.pending_modes.remove(&session_id) {
+                        self.session_modes.insert(session_id, new_mode);
+                        if Some(session_id) == self.current_session_id {
+                            self.mode = new_mode;
+                            let ui_text = self.ui_text();
+                            let mode = mode_title(&ui_text, self.mode);
+                            self.set_notice(ui_text.text_with_value(
+                                TextKey::ModeSwitched,
+                                "mode",
+                                &mode,
+                            ));
+                        }
                     }
                     if Some(session_id) == self.current_session_id {
                         let ui_text = self.ui_text();
@@ -274,6 +275,7 @@ impl App {
                 }
             }
             BackendEvent::UndoCompleted {
+                session_id,
                 target_id,
                 message_content,
                 ..
@@ -288,6 +290,10 @@ impl App {
                     }
                     chat.follow_tail = true;
                     chat.invalidate_layout();
+                }
+                self.session_modes.remove(&session_id);
+                if Some(session_id) == self.current_session_id {
+                    self.sync_mode_for_session(session_id);
                 }
                 if let Some(ref mut composer) = self.composer {
                     if !message_content.is_empty() {

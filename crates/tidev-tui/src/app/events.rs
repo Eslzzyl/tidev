@@ -191,6 +191,9 @@ impl App {
         } else {
             // Apply immediately.
             self.mode = self.mode.toggle();
+            if let Some(sid) = self.current_session_id {
+                self.session_modes.insert(sid, self.mode);
+            }
             let ui_text = self.ui_text();
             let mode = mode_title(&ui_text, self.mode);
             self.set_notice(ui_text.text_with_value(TextKey::ModeSwitched, "mode", &mode));
@@ -222,6 +225,7 @@ impl App {
                     chat.switch_to_session(parent_id);
                     self.current_session_id = Some(parent_id);
                 }
+                self.sync_mode_for_session(parent_id);
                 // Restore cached context_usage for parent session.
                 self.context_usage = self.context_usage_cache.remove(&parent_id);
             }
@@ -239,16 +243,19 @@ impl App {
                     .collect();
                 if let Some(target) = children.last() {
                     let target_id = target.session_id;
-                    if let Some(chat) = self.message_list.as_mut() {
-                        if chat.switch_to_session(target_id) {
-                            self.current_session_id = Some(target_id);
-                        } else {
-                            self.switch_to_session(target_id);
-                            // switch_to_session goes through SessionAction::Select
-                            // which already handles context_usage_cache internally.
-                            // Skip the manual restore below.
-                            return;
-                        }
+                    let switched = self
+                        .message_list
+                        .as_mut()
+                        .is_some_and(|chat| chat.switch_to_session(target_id));
+                    if switched {
+                        self.current_session_id = Some(target_id);
+                        self.sync_mode_for_session(target_id);
+                    } else {
+                        self.switch_to_session(target_id);
+                        // switch_to_session goes through SessionAction::Select
+                        // which already handles context_usage_cache internally.
+                        // Skip the manual restore below.
+                        return;
                     }
                     // Fast path succeeded — restore cached context_usage.
                     self.context_usage = self.context_usage_cache.remove(&target_id);
@@ -284,15 +291,18 @@ impl App {
                 };
                 if let Some(target) = children.get(next_index) {
                     let target_id = target.session_id;
-                    if let Some(chat) = self.message_list.as_mut() {
-                        if chat.switch_to_session(target_id) {
-                            self.current_session_id = Some(target_id);
-                        } else {
-                            self.switch_to_session(target_id);
-                            // switch_to_session goes through SessionAction::Select
-                            // which already handles context_usage_cache internally.
-                            return;
-                        }
+                    let switched = self
+                        .message_list
+                        .as_mut()
+                        .is_some_and(|chat| chat.switch_to_session(target_id));
+                    if switched {
+                        self.current_session_id = Some(target_id);
+                        self.sync_mode_for_session(target_id);
+                    } else {
+                        self.switch_to_session(target_id);
+                        // switch_to_session goes through SessionAction::Select
+                        // which already handles context_usage_cache internally.
+                        return;
                     }
                     // Fast path succeeded — restore cached context_usage.
                     self.context_usage = self.context_usage_cache.remove(&target_id);
