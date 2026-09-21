@@ -1,5 +1,6 @@
 use super::*;
 
+use std::cell::Cell;
 use std::time::Instant;
 
 use crate::component::Component;
@@ -565,6 +566,8 @@ impl App {
         self.terminal_area = area;
         self.cursor_rendered = false;
         self.composer_cursor_position = None;
+        self.overlay_cursor_position = None;
+        let cursor_position = Cell::new(None);
 
         // Background
         frame.render_widget(
@@ -584,6 +587,7 @@ impl App {
             // Draw overlays on top of welcome content.
             let draw_ctx = DrawContext {
                 image_surface: Some(&self.image_surface),
+                cursor_position: Some(&cursor_position),
                 palette,
                 ui_text: crate::i18n::UiText::from_preference(&self.runtime.config().ui.locale),
                 focused: true,
@@ -600,6 +604,7 @@ impl App {
                 workspace_root: self.runtime.workspace_root(),
             };
             self.overlays.draw(frame, area, area, &draw_ctx);
+            self.overlay_cursor_position = cursor_position.get();
             self.draw_toast(frame, palette, area);
             return;
         }
@@ -712,6 +717,7 @@ impl App {
         if let Some(ref mut chat) = self.message_list {
             let draw_ctx = DrawContext {
                 image_surface: Some(&self.image_surface),
+                cursor_position: Some(&cursor_position),
                 palette,
                 ui_text: crate::i18n::UiText::from_preference(&self.runtime.config().ui.locale),
                 focused: self.overlays.is_empty(),
@@ -781,6 +787,7 @@ impl App {
             self.cursor_rendered = self.overlays.is_empty();
             let draw_ctx = DrawContext {
                 image_surface: Some(&self.image_surface),
+                cursor_position: Some(&cursor_position),
                 palette,
                 ui_text: crate::i18n::UiText::from_preference(&self.runtime.config().ui.locale),
                 focused: self.overlays.is_empty(),
@@ -803,6 +810,7 @@ impl App {
         // Build DrawContext for overlays
         let draw_ctx = DrawContext {
             image_surface: Some(&self.image_surface),
+            cursor_position: Some(&cursor_position),
             palette,
             ui_text: crate::i18n::UiText::from_preference(&self.runtime.config().ui.locale),
             focused: true,
@@ -845,6 +853,7 @@ impl App {
         // - Centered panels (session, message, settings, …) use the full
         //   terminal area so they appear properly centered across the screen.
         self.overlays.draw(frame, area, main_area, &draw_ctx);
+        self.overlay_cursor_position = cursor_position.get();
 
         // Formula images are committed only after overlays have populated the
         // cell buffer.  The image surface can then suppress a whole formula
@@ -1075,6 +1084,7 @@ impl App {
             composer.set_placeholder(ui_text.text(TextKey::WelcomeInputPlaceholder));
             let draw_ctx = DrawContext {
                 image_surface: Some(&self.image_surface),
+                cursor_position: None,
                 palette,
                 ui_text: crate::i18n::UiText::from_preference(&self.runtime.config().ui.locale),
                 focused: self.overlays.is_empty(),

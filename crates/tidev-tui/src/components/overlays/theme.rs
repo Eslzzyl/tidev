@@ -8,7 +8,9 @@
 //! theme, Esc/q closes without changing anything.
 
 use anyhow::Result;
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{
+    KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use ratatui::layout::{Constraint, Layout, Margin, Position, Rect};
 use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -43,6 +45,7 @@ pub(crate) struct ThemePanel {
     preview_theme: String,
     original_theme: String,
     query: String,
+    query_active: bool,
     confirmed: bool,
     preview_scroll: usize,
     /// Cached preview: (theme, width, lines, palette of the previewed theme).
@@ -58,6 +61,7 @@ impl ThemePanel {
             preview_theme: current.clone(),
             original_theme: current,
             query: String::new(),
+            query_active: false,
             confirmed: false,
             preview_scroll: 0,
             cached_preview: None,
@@ -241,7 +245,35 @@ impl Component for ThemePanel {
         if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
             return None;
         }
+
+        if self.query_active {
+            match key.code {
+                KeyCode::Esc | KeyCode::Enter => {
+                    self.query_active = false;
+                    return Some(Action::Noop);
+                }
+                KeyCode::Backspace if key.modifiers.is_empty() => {
+                    self.backspace_query();
+                    return Some(Action::Noop);
+                }
+                KeyCode::Char(ch)
+                    if !ch.is_control()
+                        && !key.modifiers.intersects(
+                            KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER,
+                        ) =>
+                {
+                    self.append_query(ch);
+                    return Some(Action::Noop);
+                }
+                _ => return None,
+            }
+        }
+
         match key.code {
+            KeyCode::Char('/') if key.modifiers.is_empty() => {
+                self.query_active = true;
+                None
+            }
             KeyCode::Up => {
                 self.move_up();
                 None
@@ -268,14 +300,6 @@ impl Component for ThemePanel {
             }
             KeyCode::Right => {
                 self.scroll_preview_down(5);
-                None
-            }
-            KeyCode::Backspace => {
-                self.backspace_query();
-                None
-            }
-            KeyCode::Char(ch) if !ch.is_control() => {
-                self.append_query(ch);
                 None
             }
             KeyCode::Enter => {
@@ -416,10 +440,12 @@ impl Component for ThemePanel {
         // ── Search row ──
         let search_area = Rect::new(inner.x, inner.y + 1, inner.width, 1);
         let (visible_query, cursor) = single_line_input_cursor(search_area, 2, &self.query);
-        let search_text = if self.query.is_empty() {
+        let search_text = if self.query_active {
+            format!("  {visible_query}")
+        } else if self.query.is_empty() {
             format!("  {}", ctx.ui_text.text(TextKey::ThemeSearchPlaceholder))
         } else {
-            format!("  {visible_query}")
+            format!("  {}", self.query)
         };
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
@@ -429,7 +455,9 @@ impl Component for ThemePanel {
             .style(Style::default().bg(palette.panel_alt)),
             search_area,
         );
-        frame.set_cursor_position(cursor);
+        if self.query_active {
+            ctx.set_cursor_position(frame, cursor);
+        }
 
         // ── Divider below search ──
         let divider_y = inner.y + 2;
@@ -680,7 +708,11 @@ impl Component for ThemePanel {
         }
 
         // ── Footer hints ──
-        let hints = ctx.ui_text.text(TextKey::ThemeFooter);
+        let hints = if self.query_active {
+            ctx.ui_text.text(TextKey::ThemeSearchFooter)
+        } else {
+            ctx.ui_text.text(TextKey::ThemeFooter)
+        };
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 format!("  {}", hints),
@@ -704,6 +736,6 @@ impl Component for ThemePanel {
     }
 
     fn wants_terminal_cursor(&self) -> bool {
-        true
+        self.query_active
     }
 }

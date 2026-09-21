@@ -641,7 +641,7 @@ impl Component for QuestionDialog {
                     .wrap(Wrap { trim: false }),
                 sections[3],
             );
-            frame.set_cursor_position(cursor);
+            ctx.set_cursor_position(frame, cursor);
         }
 
         // Footer

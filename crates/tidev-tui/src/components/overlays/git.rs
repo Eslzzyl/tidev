@@ -967,6 +967,7 @@ mod tests {
             .draw(|frame| {
                 let context = DrawContext {
                     image_surface: None,
+                    cursor_position: None,
                     palette: test_palette(),
                     ui_text: crate::i18n::UiText::from_preference("en-US"),
                     focused: true,

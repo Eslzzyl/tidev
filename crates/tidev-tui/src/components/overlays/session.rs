@@ -96,6 +96,7 @@ pub(crate) struct SessionPanel {
     selected_indices: Vec<usize>,
     dialog: SessionPanelDialog,
     query: String,
+    query_active: bool,
     /// Session ID of the currently active session (for marking in the list).
     current_session_id: Uuid,
     /// Session IDs with active agent loops.
@@ -117,6 +118,7 @@ impl SessionPanel {
             selected_indices: Vec::new(),
             dialog: SessionPanelDialog::None,
             query: String::new(),
+            query_active: false,
             current_session_id,
             active_sessions,
         }
@@ -343,8 +345,39 @@ impl Component for SessionPanel {
             SessionPanelDialog::None => {}
         }
 
+        if self.query_active {
+            match key.code {
+                KeyCode::Esc | KeyCode::Enter => {
+                    self.query_active = false;
+                    return Some(Action::Noop);
+                }
+                KeyCode::Backspace if key.modifiers.is_empty() => {
+                    if !self.query.is_empty() {
+                        self.query.pop();
+                        self.reset_selection();
+                    }
+                    return Some(Action::Noop);
+                }
+                KeyCode::Char(ch)
+                    if !ch.is_control()
+                        && !key.modifiers.intersects(
+                            KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER,
+                        ) =>
+                {
+                    self.query.push(ch);
+                    self.reset_selection();
+                    return Some(Action::Noop);
+                }
+                _ => return None,
+            }
+        }
+
         // ── Main panel key handling ──
         match key.code {
+            KeyCode::Char('/') if key.modifiers.is_empty() => {
+                self.query_active = true;
+                Some(Action::Noop)
+            }
             KeyCode::Up => {
                 self.move_selection(-1);
                 None
@@ -424,18 +457,6 @@ impl Component for SessionPanel {
             KeyCode::Esc => Some(Action::Overlay(OverlayAction::Close(
                 OverlayKind::SessionPanel,
             ))),
-            KeyCode::Backspace => {
-                if !self.query.is_empty() {
-                    self.query.pop();
-                    self.reset_selection();
-                }
-                None
-            }
-            KeyCode::Char(ch) if !ch.is_control() => {
-                self.query.push(ch);
-                self.reset_selection();
-                None
-            }
             _ => None,
         }
     }
@@ -661,15 +682,21 @@ impl Component for SessionPanel {
             UnicodeWidthStr::width(prefix.as_str()) as u16,
             &self.query,
         );
-        frame.render_widget(
-            Paragraph::new(Line::from(vec![
+        let search_line = if self.query_active || !self.query.is_empty() {
+            Line::from(vec![
                 Span::styled(prefix, Style::default().fg(palette.muted)),
                 Span::styled(visible_query, Style::default().fg(palette.text)),
-            ]))
-            .style(input_style),
-            sections[2],
-        );
-        frame.set_cursor_position(cursor);
+            ])
+        } else {
+            Line::from(Span::styled(
+                format!("{} (/) ", prefix.trim_end()),
+                Style::default().fg(palette.muted),
+            ))
+        };
+        frame.render_widget(Paragraph::new(search_line).style(input_style), sections[2]);
+        if self.query_active {
+            ctx.set_cursor_position(frame, cursor);
+        }
 
         // Session list
         let matches = self.matching_indices();
@@ -827,7 +854,9 @@ impl Component for SessionPanel {
         }
 
         // Footer
-        let help_text = if self.operation_mode == OperationMode::MultiSelect {
+        let help_text = if self.query_active {
+            ctx.ui_text.text(TextKey::SessionSearchFooter)
+        } else if self.operation_mode == OperationMode::MultiSelect {
             ctx.ui_text.text(TextKey::SessionMultiFooter)
         } else {
             ctx.ui_text.text(TextKey::SessionFooter)
@@ -853,7 +882,7 @@ impl Component for SessionPanel {
     }
 
     fn wants_terminal_cursor(&self) -> bool {
-        matches!(self.dialog, SessionPanelDialog::None)
+        matches!(self.dialog, SessionPanelDialog::None) && self.query_active
     }
 }
 

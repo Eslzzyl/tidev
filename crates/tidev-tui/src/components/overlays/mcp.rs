@@ -7,7 +7,9 @@
 use std::collections::BTreeMap;
 
 use anyhow::Result;
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{
+    KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use ratatui::layout::{Constraint, Layout, Margin, Position, Rect};
 use ratatui::prelude::{Color, Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -708,7 +710,12 @@ impl Component for McpServerPanel {
                     }
                     return Some(Action::Noop);
                 }
-                KeyCode::Char(ch) => {
+                KeyCode::Char(ch)
+                    if !ch.is_control()
+                        && !key.modifiers.intersects(
+                            KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER,
+                        ) =>
+                {
                     self.query.push(ch);
                     self.refilter();
                     return Some(Action::Noop);
@@ -761,7 +768,7 @@ impl Component for McpServerPanel {
                 Some(Action::Noop)
             }
             KeyCode::Char('d') => self.remove_selected(),
-            KeyCode::Char('/') | KeyCode::Char('s') => {
+            KeyCode::Char('/') if key.modifiers.is_empty() => {
                 self.query_active = true;
                 Some(Action::Noop)
             }
@@ -967,13 +974,15 @@ impl Component for McpServerPanel {
         // ── Left Pane ──
         // 1. Filter bar
         let filter_area = Rect::new(left_area.x, left_area.y, left_area.width, 1);
-        let (visible_query, cursor) = single_line_input_cursor(filter_area, 10, &self.query);
+        let search_prefix = format!("  {}: ", ui_text.text(TextKey::McpSearch));
+        let (visible_query, cursor) =
+            single_line_input_cursor(filter_area, search_prefix.width() as u16, &self.query);
         let filter_text = if self.query_active {
-            format!("  {}: {visible_query}", ui_text.text(TextKey::McpSearch))
+            format!("{search_prefix}{visible_query}")
         } else if self.query.is_empty() {
             format!("  {}... (/)", ui_text.text(TextKey::McpSearch))
         } else {
-            format!("  {}: {}", ui_text.text(TextKey::McpSearch), self.query)
+            format!("{search_prefix}{}", self.query)
         };
         let filter_style = if self.query_active {
             Style::default().fg(palette.accent)
@@ -986,7 +995,7 @@ impl Component for McpServerPanel {
             filter_area,
         );
         if self.query_active {
-            frame.set_cursor_position(cursor);
+            ctx.set_cursor_position(frame, cursor);
         }
 
         // 2. Column header
@@ -1461,7 +1470,7 @@ impl McpServerPanel {
                 field_area,
             );
             if is_active && *field_id != 1 && *field_id != 8 {
-                frame.set_cursor_position(cursor);
+                ctx.set_cursor_position(frame, cursor);
             }
         }
 

@@ -168,7 +168,7 @@ impl Component for RenameDialog {
                 .wrap(Wrap { trim: false }),
             sections[4],
         );
-        frame.set_cursor_position(cursor);
+        ctx.set_cursor_position(frame, cursor);
 
         // Bottom hint
         frame.render_widget(

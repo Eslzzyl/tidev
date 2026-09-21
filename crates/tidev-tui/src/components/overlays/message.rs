@@ -59,6 +59,7 @@ pub(crate) struct MessagePanel {
     selected_index: usize,
     messages: Vec<MessagePanelMessage>,
     query: String,
+    query_active: bool,
     /// When set, closing the panel will also emit a ScrollTo for this message.
     /// Set by Enter / mouse-click, NOT by Esc.
     pending_scroll_id: Option<Uuid>,
@@ -70,6 +71,7 @@ impl MessagePanel {
             selected_index: 0,
             messages,
             query: String::new(),
+            query_active: false,
             pending_scroll_id: None,
         }
     }
@@ -123,7 +125,38 @@ impl Component for MessagePanel {
             return None;
         }
 
+        if self.query_active {
+            match key.code {
+                KeyCode::Esc | KeyCode::Enter => {
+                    self.query_active = false;
+                    return Some(Action::Noop);
+                }
+                KeyCode::Backspace if key.modifiers.is_empty() => {
+                    if !self.query.is_empty() {
+                        self.query.pop();
+                        self.reset_selection();
+                    }
+                    return Some(Action::Noop);
+                }
+                KeyCode::Char(ch)
+                    if !ch.is_control()
+                        && !key.modifiers.intersects(
+                            KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER,
+                        ) =>
+                {
+                    self.query.push(ch);
+                    self.reset_selection();
+                    return Some(Action::Noop);
+                }
+                _ => return None,
+            }
+        }
+
         match key.code {
+            KeyCode::Char('/') if key.modifiers.is_empty() => {
+                self.query_active = true;
+                Some(Action::Noop)
+            }
             KeyCode::Up => {
                 self.move_selection(-1);
                 None
@@ -175,18 +208,6 @@ impl Component for MessagePanel {
                 Some(Action::Overlay(OverlayAction::Close(
                     OverlayKind::MessagePanel,
                 )))
-            }
-            KeyCode::Backspace => {
-                if !self.query.is_empty() {
-                    self.query.pop();
-                    self.reset_selection();
-                }
-                None
-            }
-            KeyCode::Char(ch) if !ch.is_control() => {
-                self.query.push(ch);
-                self.reset_selection();
-                None
             }
             _ => None,
         }
@@ -307,15 +328,21 @@ impl Component for MessagePanel {
         let prefix = format!(" {} ", ctx.ui_text.text(TextKey::MessageSearchPrefix));
         let (visible_query, cursor) =
             single_line_input_cursor(sections[2], prefix.width() as u16, &self.query);
-        frame.render_widget(
-            Paragraph::new(Line::from(vec![
+        let search_line = if self.query_active || !self.query.is_empty() {
+            Line::from(vec![
                 Span::styled(prefix, Style::default().fg(palette.muted)),
                 Span::styled(visible_query, Style::default().fg(palette.text)),
-            ]))
-            .style(input_style),
-            sections[2],
-        );
-        frame.set_cursor_position(cursor);
+            ])
+        } else {
+            Line::from(Span::styled(
+                format!("{} (/) ", prefix.trim_end()),
+                Style::default().fg(palette.muted),
+            ))
+        };
+        frame.render_widget(Paragraph::new(search_line).style(input_style), sections[2]);
+        if self.query_active {
+            ctx.set_cursor_position(frame, cursor);
+        }
 
         // ── Message list ──
         let matches = self.matching_indices();
@@ -395,8 +422,13 @@ impl Component for MessagePanel {
         }
 
         // ── Footer ──
+        let footer = if self.query_active {
+            ctx.ui_text.text(TextKey::MessageSearchFooter)
+        } else {
+            ctx.ui_text.text(TextKey::MessageFooter)
+        };
         frame.render_widget(
-            Paragraph::new(ctx.ui_text.text(TextKey::MessageFooter))
+            Paragraph::new(footer)
                 .alignment(ratatui::layout::Alignment::Center)
                 .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
             sections[4],
@@ -416,6 +448,6 @@ impl Component for MessagePanel {
     }
 
     fn wants_terminal_cursor(&self) -> bool {
-        true
+        self.query_active
     }
 }

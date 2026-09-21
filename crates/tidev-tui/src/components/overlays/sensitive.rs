@@ -369,7 +369,7 @@ impl Component for SensitiveFileDialog {
                         .wrap(Wrap { trim: false }),
                     sections[3],
                 );
-                frame.set_cursor_position(cursor);
+                ctx.set_cursor_position(frame, cursor);
 
                 // Help
                 frame.render_widget(

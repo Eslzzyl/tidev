@@ -429,7 +429,7 @@ impl Component for SearchPanel {
                     .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
                 input_area,
             );
-            frame.set_cursor_position(cursor);
+            ctx.set_cursor_position(frame, cursor);
 
             // Footer
             let footer = Line::from(vec![

@@ -91,22 +91,18 @@ impl Tui {
             .backend_mut()
             .write_all(&cleanup)
             .context("failed to clear stale terminal images")?;
+        let cursor_position = app
+            .composer_cursor_position()
+            .or_else(|| app.overlay_cursor_position());
         self.terminal
-            .apply_buffer_with_cursor(None)
+            .apply_buffer_with_cursor(cursor_position)
             .context("failed to flush terminal frame")?;
 
         // Ratatui normally hides the cursor when a frame does not request a
         // position. Enforce the application-level policy as well: some
         // terminals otherwise retain the cursor from the preceding composer
         // frame when a display-only overlay is opened.
-        if let Some(position) = app.composer_cursor_position() {
-            self.terminal
-                .set_cursor_position(position)
-                .context("failed to restore composer cursor position")?;
-            self.terminal
-                .show_cursor()
-                .context("failed to show composer cursor")?;
-        } else if app.wants_terminal_cursor() {
+        if cursor_position.is_some() || app.wants_terminal_cursor() {
             self.terminal
                 .show_cursor()
                 .context("failed to show terminal cursor")?;

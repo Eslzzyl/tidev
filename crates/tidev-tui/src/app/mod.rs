@@ -131,6 +131,10 @@ pub struct App {
     /// Composer was the active cursor owner.
     composer_cursor_position: Option<Position>,
 
+    /// Exact cursor position requested by the most recently rendered
+    /// component, if a component owns the terminal cursor.
+    overlay_cursor_position: Option<Position>,
+
     /// Text input composer.
     pub(crate) composer: Option<Composer>,
 
@@ -327,6 +331,7 @@ impl App {
             message_list: None,
             cursor_rendered: false,
             composer_cursor_position: None,
+            overlay_cursor_position: None,
             sidebar: Sidebar::new(),
             mouse_selection: MouseSelection::default(),
             last_selection_auto_scroll: None,
@@ -384,6 +389,10 @@ impl App {
 
     pub(crate) fn composer_cursor_position(&self) -> Option<Position> {
         self.composer_cursor_position
+    }
+
+    pub(crate) fn overlay_cursor_position(&self) -> Option<Position> {
+        self.overlay_cursor_position
     }
 
     /// Mark all components as clean after rendering.

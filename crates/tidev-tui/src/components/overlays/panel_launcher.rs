@@ -88,6 +88,7 @@ fn entry_search_text(entry: &PanelEntry) -> String {
 pub(crate) struct PanelLauncher {
     visible: bool,
     query: String,
+    query_active: bool,
     selected_index: usize,
     filtered: Vec<&'static PanelEntry>,
 }
@@ -97,6 +98,7 @@ impl PanelLauncher {
         Self {
             visible: true,
             query: String::new(),
+            query_active: false,
             selected_index: 0,
             filtered: Vec::new(),
         }
@@ -134,7 +136,36 @@ impl Component for PanelLauncher {
             return None;
         }
 
+        if self.query_active {
+            match key.code {
+                KeyCode::Esc | KeyCode::Enter => {
+                    self.query_active = false;
+                    return Some(Action::Noop);
+                }
+                KeyCode::Backspace if key.modifiers.is_empty() => {
+                    self.query.pop();
+                    self.sync();
+                    return Some(Action::Noop);
+                }
+                KeyCode::Char(c)
+                    if !c.is_control()
+                        && !key.modifiers.intersects(
+                            KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER,
+                        ) =>
+                {
+                    self.query.push(c);
+                    self.sync();
+                    return Some(Action::Noop);
+                }
+                _ => return None,
+            }
+        }
+
         match key.code {
+            KeyCode::Char('/') if key.modifiers.is_empty() => {
+                self.query_active = true;
+                Some(Action::Noop)
+            }
             KeyCode::Esc => Some(Action::Overlay(OverlayAction::Close(
                 OverlayKind::PanelLauncher,
             ))),
@@ -168,20 +199,6 @@ impl Component for PanelLauncher {
                 } else {
                     None
                 }
-            }
-            KeyCode::Char(c)
-                if !key
-                    .modifiers
-                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
-            {
-                self.query.push(c);
-                self.sync();
-                None
-            }
-            KeyCode::Backspace => {
-                self.query.pop();
-                self.sync();
-                None
             }
             _ => None,
         }
@@ -236,10 +253,12 @@ impl Component for PanelLauncher {
         // Search bar
         let (visible_query, cursor) =
             single_line_input_cursor(Rect::new(inner.x, inner.y, inner.width, 1), 2, &self.query);
-        let search_text = if self.query.is_empty() {
+        let search_text = if self.query_active {
+            format!("  {visible_query}")
+        } else if self.query.is_empty() {
             format!("  {}", ctx.ui_text.text(TextKey::PanelSearchPlaceholder))
         } else {
-            format!("  {visible_query}")
+            format!("  {}", self.query)
         };
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
@@ -249,7 +268,9 @@ impl Component for PanelLauncher {
             .style(Style::default().bg(palette.panel_alt)),
             Rect::new(inner.x, inner.y, inner.width, 1),
         );
-        frame.set_cursor_position(cursor);
+        if self.query_active {
+            ctx.set_cursor_position(frame, cursor);
+        }
 
         // Divider
         let divider_y = inner.y + 1;
@@ -307,7 +328,7 @@ impl Component for PanelLauncher {
     }
 
     fn wants_terminal_cursor(&self) -> bool {
-        self.visible
+        self.visible && self.query_active
     }
 }
 

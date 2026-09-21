@@ -616,6 +616,7 @@ mod tests {
         let workspace_root = Path::new("/test");
         let draw_ctx = DrawContext {
             image_surface: None,
+            cursor_position: None,
             palette,
             ui_text: crate::i18n::UiText::from_preference("en-US"),
             focused: true,

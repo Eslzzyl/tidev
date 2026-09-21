@@ -443,7 +443,7 @@ pub(crate) fn draw_composer(
 
         let position = Position::new(cursor_x, cursor_y);
         composer.last_cursor_position = Some(position);
-        frame.set_cursor_position(position);
+        ctx.set_cursor_position(frame, position);
     }
 }
 

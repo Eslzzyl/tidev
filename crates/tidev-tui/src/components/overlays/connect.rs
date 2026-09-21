@@ -179,13 +179,6 @@ impl Component for ConnectDialog {
                         )))
                     }
                 }
-                KeyCode::Tab if key.modifiers.is_empty() => {
-                    self.provider_picker_focus = match self.provider_picker_focus {
-                        ProviderPickerFocus::List => ProviderPickerFocus::Search,
-                        ProviderPickerFocus::Search => ProviderPickerFocus::List,
-                    };
-                    None
-                }
                 KeyCode::Char('/') if key.modifiers.is_empty() => {
                     self.provider_picker_focus = ProviderPickerFocus::Search;
                     None
@@ -253,13 +246,19 @@ impl Component for ConnectDialog {
                 }
                 KeyCode::Char(c)
                     if self.provider_picker_focus == ProviderPickerFocus::Search
+                        && !key.modifiers.intersects(
+                            KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER,
+                        )
                         && !c.is_control() =>
                 {
                     self.query.push(c);
                     self.selected = 0;
                     None
                 }
-                KeyCode::Backspace if self.provider_picker_focus == ProviderPickerFocus::Search => {
+                KeyCode::Backspace
+                    if self.provider_picker_focus == ProviderPickerFocus::Search
+                        && key.modifiers.is_empty() =>
+                {
                     self.query.pop();
                     self.selected = 0;
                     None
@@ -459,7 +458,7 @@ impl Component for ConnectDialog {
                     sections[0],
                 );
                 if self.provider_picker_focus == ProviderPickerFocus::Search {
-                    frame.set_cursor_position(cursor);
+                    ctx.set_cursor_position(frame, cursor);
                 }
 
                 // Hint
@@ -610,7 +609,7 @@ impl Component for ConnectDialog {
                     .wrap(Wrap { trim: false }),
                     sections[2],
                 );
-                frame.set_cursor_position(cursor);
+                ctx.set_cursor_position(frame, cursor);
 
                 // Help
                 frame.render_widget(

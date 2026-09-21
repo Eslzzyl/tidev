@@ -3,6 +3,9 @@
 use crate::components::image_surface::ImageSurface;
 use crate::i18n::UiText;
 use crate::theme::ThemePalette;
+use ratatui::Frame;
+use ratatui::layout::Position;
+use std::cell::Cell;
 use std::path::Path;
 use tidev_core::Mode as SessionMode;
 use tidev_llm::reasoning::ThinkingLevelType;
@@ -16,6 +19,7 @@ pub(crate) struct InitContext<'a> {
 /// Read-only shared data passed to every component each frame during draw.
 pub(crate) struct DrawContext<'a> {
     pub image_surface: Option<&'a ImageSurface>,
+    pub cursor_position: Option<&'a Cell<Option<Position>>>,
     pub palette: ThemePalette,
     pub ui_text: UiText,
     pub focused: bool,
@@ -38,6 +42,15 @@ pub(crate) struct DrawContext<'a> {
     pub collapse_diffs: bool,
     /// Workspace root path, used for path clipping in tool renders.
     pub workspace_root: &'a Path,
+}
+
+impl DrawContext<'_> {
+    pub(crate) fn set_cursor_position(&self, frame: &mut Frame, position: Position) {
+        frame.set_cursor_position(position);
+        if let Some(cursor_position) = self.cursor_position {
+            cursor_position.set(Some(position));
+        }
+    }
 }
 
 /// Mutable resources provided during action processing.

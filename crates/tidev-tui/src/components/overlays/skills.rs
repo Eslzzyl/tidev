@@ -4,11 +4,14 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use anyhow::Result;
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{
+    KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use ratatui::layout::{Constraint, Layout, Margin, Position, Rect};
 use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph};
+use unicode_width::UnicodeWidthStr;
 
 use crate::action::{Action, OverlayAction, OverlayKind};
 use crate::component::Component;
@@ -167,7 +170,12 @@ impl Component for SkillsPanel {
                 KeyCode::Backspace => {
                     self.backspace_query();
                 }
-                KeyCode::Char(c) => {
+                KeyCode::Char(c)
+                    if !c.is_control()
+                        && !key.modifiers.intersects(
+                            KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER,
+                        ) =>
+                {
                     self.append_to_query(c);
                 }
                 _ => {}
@@ -182,7 +190,7 @@ impl Component for SkillsPanel {
         }
 
         match key.code {
-            KeyCode::Char('/') | KeyCode::Char('s') => {
+            KeyCode::Char('/') if key.modifiers.is_empty() => {
                 self.query_active = true;
                 None
             }
@@ -380,20 +388,15 @@ impl Component for SkillsPanel {
 
         // ── Left Pane: List ──
         let filter_area = Rect::new(left_area.x, left_area.y, left_area.width, 1);
-        let (visible_query, cursor) = single_line_input_cursor(filter_area, 10, &self.query);
+        let search_prefix = format!("  {}: ", ctx.ui_text.text(TextKey::SkillsSearchPrefix));
+        let (visible_query, cursor) =
+            single_line_input_cursor(filter_area, search_prefix.width() as u16, &self.query);
         let filter_text = if self.query_active {
-            format!(
-                "  {}: {visible_query}",
-                ctx.ui_text.text(TextKey::SkillsSearchPrefix)
-            )
+            format!("{search_prefix}{visible_query}")
         } else if self.query.is_empty() {
             format!("  {}", ctx.ui_text.text(TextKey::SkillsSearchPlaceholder))
         } else {
-            format!(
-                "  {}: {}",
-                ctx.ui_text.text(TextKey::SkillsSearchPrefix),
-                self.query
-            )
+            format!("{search_prefix}{}", self.query)
         };
         let filter_style = if self.query_active {
             Style::default().fg(palette.accent)
@@ -406,7 +409,7 @@ impl Component for SkillsPanel {
             filter_area,
         );
         if self.query_active {
-            frame.set_cursor_position(cursor);
+            ctx.set_cursor_position(frame, cursor);
         }
 
         // Name column header

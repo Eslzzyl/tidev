@@ -561,6 +561,19 @@ mod cursor_tests {
     }
 
     #[test]
+    fn single_line_cursor_uses_display_width_for_localized_prefix() {
+        let area = Rect::new(10, 4, 16, 1);
+        let prefix = "  搜索: ";
+        let (visible, position) = single_line_input_cursor(
+            area,
+            unicode_width::UnicodeWidthStr::width(prefix) as u16,
+            "test",
+        );
+        assert_eq!(visible, "test");
+        assert_eq!(position, Position::new(22, 4));
+    }
+
+    #[test]
     fn wrapped_input_cursor_scrolls_to_last_visible_line() {
         let area = Rect::new(3, 2, 4, 2);
         let (lines, position) = wrapped_input_tail("abcdefghi", area);
