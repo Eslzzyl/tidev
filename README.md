@@ -133,7 +133,7 @@ Requires Rust stable toolchain.
 ```bash
 git clone https://github.com/Eslzzyl/tidev.git
 cd tidev
-cargo install --path .
+cargo install --path . --locked
 ```
 
 > **Note**: The `tidev` crate is no longer published on [crates.io](https://crates.io/crates/tidev). Use the methods above instead.
