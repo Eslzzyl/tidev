@@ -1591,15 +1591,15 @@ impl Component for MessageList {
         }
 
         // Convert image badge infos to screen-space Rects for mouse hit-testing.
-        // Card lines have 2-space indent + "┃ " prefix before content.
-        let indent_col: u16 = 4;
+        // Badge columns are measured from the final Paragraph origin and already
+        // include the user-card "┃ " prefix.
         for info in &image_badge_infos {
             let abs_line = info.card_start_line + info.badge_line_offset;
             let screen_line = abs_line.saturating_sub(render_scroll);
             if screen_line >= viewport {
                 continue;
             }
-            let screen_x = render_content_area.x + indent_col + info.badge_col as u16;
+            let screen_x = render_content_area.x + info.badge_col as u16;
             let screen_y = render_content_area.y + screen_line as u16;
             let rect = Rect::new(screen_x, screen_y, info.badge_width as u16, 1);
             self.image_badge_bounds

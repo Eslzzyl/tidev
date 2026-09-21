@@ -119,8 +119,8 @@ pub(crate) fn draw_composer(
                     let span_end = span.end.min(vl.end);
                     if span_end > span_start {
                         let badge_style = Style::default()
-                            .fg(palette.accent)
-                            .bg(palette.panel_alt)
+                            .fg(palette.selection_fg)
+                            .bg(palette.selection_bg)
                             .add_modifier(Modifier::BOLD);
                         let badge_text = &span.display;
                         segments.push(Span::styled(badge_text.clone(), badge_style));

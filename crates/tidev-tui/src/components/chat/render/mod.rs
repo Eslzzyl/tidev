@@ -537,6 +537,7 @@ mod tests {
         let badge_infos = blocks::scan_image_badges(&cards[0].1, &message, 0);
         assert_eq!(badge_infos.len(), 1);
         assert_eq!(badge_infos[0].attachment_index, 0);
+        assert_eq!(badge_infos[0].badge_col, 2);
     }
 
     #[test]
@@ -550,6 +551,20 @@ mod tests {
 
         assert_eq!(content, "[Image: capture.png]");
         assert!(attachment.is_image());
+    }
+
+    #[test]
+    fn image_badge_display_is_localized_without_mutating_message_content() {
+        let attachment = image_attachment("capture.png");
+        let raw = "[Image: capture.png]";
+        let content = utils::localize_image_badges(
+            raw,
+            std::slice::from_ref(&attachment),
+            &UiText::from_preference("zh-CN"),
+        );
+
+        assert_eq!(content, "[图像： capture.png]");
+        assert_eq!(raw, "[Image: capture.png]");
     }
 
     #[test]

@@ -19,10 +19,16 @@ use crate::message_buf::MessageBuffer;
 // ---------------------------------------------------------------------------
 
 const SUMMARY_INSTRUCTION: &str = "Please provide a detailed summary of the conversation history above, \
-     preserving all goals, decisions, file paths, code changes, tool results, \
-     and open tasks. Keep the summary dense and factual. Use short sections such \
-     as Goal, Decisions, Files, Tool Results, Open Tasks, and Constraints. \
-     Prefer bullets over prose.";
+      preserving all goals, decisions, file paths, code changes, tool results, \
+      and open tasks. Keep the summary dense and factual. Use short sections such \
+      as Goal, Decisions, Files, Tool Results, Open Tasks, and Constraints. \
+      Prefer bullets over prose.";
+
+/// Conservative estimate for one normalized high-detail prompt image.
+///
+/// Image tokenization is provider-specific, so a byte-to-token estimate is
+/// less useful than the patch budget applied by the shared image preparer.
+const PROMPT_IMAGE_TOKEN_ESTIMATE: usize = 2_500;
 
 // ---------------------------------------------------------------------------
 // Compaction result
@@ -106,7 +112,9 @@ impl ContextManager {
                         tidev_llm::message::MessageAttachment::DirectoryReference {
                             tree, ..
                         } => tokens += Self::estimate_tokens_for_text(tree),
-                        _ => {}
+                        tidev_llm::message::MessageAttachment::Image { .. } => {
+                            tokens += PROMPT_IMAGE_TOKEN_ESTIMATE;
+                        }
                     }
                 }
                 for tc in &msg.tool_calls {
@@ -514,5 +522,24 @@ mod tests {
         let buf = MessageBuffer::new(vec![m1, m2]);
         let tokens = ContextManager::estimate_tokens_for_messages(buf.load());
         assert_eq!(tokens, 2 + 1 + 10);
+    }
+
+    #[test]
+    fn estimate_tokens_for_messages_counts_image_budget() {
+        let mut message = Message::new(MessageRole::User, "inspect this");
+        message
+            .attachments
+            .push(tidev_llm::message::MessageAttachment::Image {
+                filename: "capture.png".into(),
+                mime: "image/png".into(),
+                data: vec![1, 2, 3],
+                file_size: 3,
+            });
+        let buf = MessageBuffer::new(vec![message]);
+
+        assert_eq!(
+            ContextManager::estimate_tokens_for_messages(buf.load()),
+            "inspect this".len() / 4 + PROMPT_IMAGE_TOKEN_ESTIMATE
+        );
     }
 }

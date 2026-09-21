@@ -11,6 +11,7 @@
 
 pub mod build_info;
 pub mod encoding;
+pub mod image;
 pub mod path;
 pub mod session;
 pub mod tmp;

@@ -15,7 +15,8 @@ use crate::markdown::{WrapOptions, word_wrap_line};
 
 use super::thinking::{is_reasoning_collapsed, render_reasoning_lines, thinking_duration_str};
 use super::utils::{
-    apply_badge_styling, image_badge_labels, render_compaction_divider_line, wrap_text_lines,
+    apply_badge_styling, image_badge_labels, localize_image_badges, render_compaction_divider_line,
+    wrap_text_lines,
 };
 
 /// Render assistant message cards with reasoning, content (diff or markdown),
@@ -225,7 +226,8 @@ fn render_user_card(
 ) -> Vec<(Color, Vec<HyperlinkLine>)> {
     let palette = ctx.palette;
 
-    let display_content = strip_system_reminder_tags(&message.content);
+    let raw_content = strip_system_reminder_tags(&message.content);
+    let display_content = localize_image_badges(&raw_content, &message.attachments, &ctx.ui_text);
     let has_image_attachments = message
         .attachments
         .iter()
@@ -236,7 +238,7 @@ fn render_user_card(
         render_text_body_lines(ctx, &display_content, content_width.saturating_sub(2))
     }; // 2 for ┃ prefix
 
-    let image_labels = image_badge_labels(&display_content, &message.attachments, &ctx.ui_text);
+    let image_labels = image_badge_labels(&raw_content, &message.attachments, &ctx.ui_text);
     if !image_labels.is_empty() {
         if !content_lines.is_empty() {
             content_lines.push(HyperlinkLine::new(Line::from("")));

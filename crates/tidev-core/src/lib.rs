@@ -7,6 +7,7 @@ pub mod attachment;
 pub mod backend_event;
 mod event_hub;
 pub mod git;
+mod image;
 pub mod mcp;
 pub mod message_buf;
 pub mod mode;

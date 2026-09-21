@@ -50,7 +50,7 @@ static AT_REF_RE: LazyLock<Regex> =
 /// `[Image: filename]` is the current composer and cross-frontend form.
 pub(super) static IMAGE_BADGE_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"(?:\[\d[\d.]*\s+(?:B|KB|MB|GB)\s+[A-Z][A-Z0-9]*\]|\[Image(?:\s*:\s*[^\]\r\n]*)?\])",
+        r"(?:\[\d[\d.]*\s+(?:B|KB|MB|GB)\s+[A-Z][A-Z0-9]*\]|\[(?:Image|图片|图像)(?:\s*[:：]\s*[^\]\r\n]*)?\])",
     )
     .unwrap()
 });
@@ -84,17 +84,60 @@ pub(crate) fn display_text_with_image_badges(
     attachments: &[MessageAttachment],
     ui_text: &UiText,
 ) -> String {
+    let localized_content = localize_image_badges(content, attachments, ui_text);
     let labels = image_badge_labels(content, attachments, ui_text);
     if labels.is_empty() {
-        return content.to_string();
+        return localized_content;
     }
 
     let badges = labels.join(" ");
-    if content.trim().is_empty() {
+    if localized_content.trim().is_empty() {
         badges
     } else {
-        format!("{content}\n\n{badges}")
+        format!("{localized_content}\n\n{badges}")
     }
+}
+
+/// Replace stable raw image placeholders with the localized display label.
+///
+/// The message content remains unchanged for provider requests and storage;
+/// this only changes the TUI's rendered projection.
+pub(crate) fn localize_image_badges(
+    content: &str,
+    attachments: &[MessageAttachment],
+    ui_text: &UiText,
+) -> String {
+    let image_attachments: Vec<&MessageAttachment> = attachments
+        .iter()
+        .filter(|attachment| matches!(attachment, MessageAttachment::Image { .. }))
+        .collect();
+    if image_attachments.is_empty() || content.is_empty() {
+        return content.to_string();
+    }
+
+    let mut output = String::with_capacity(content.len());
+    let mut image_index = 0usize;
+    let mut search_start = 0usize;
+    while let Ok(Some(matched)) = IMAGE_BADGE_RE.find(&content[search_start..]) {
+        let start = search_start + matched.start();
+        let end = search_start + matched.end();
+        output.push_str(&content[search_start..start]);
+
+        let text = &content[start..end];
+        if is_named_image_badge(text)
+            && let Some(attachment) = image_attachments.get(image_index)
+            && let Some(label) = image_badge_label(attachment, ui_text)
+        {
+            output.push_str(&label);
+        } else {
+            output.push_str(text);
+        }
+
+        image_index += 1;
+        search_start = end;
+    }
+    output.push_str(&content[search_start..]);
+    output
 }
 
 fn count_image_badges(text: &str) -> usize {
@@ -126,6 +169,10 @@ fn image_badge_label(attachment: &MessageAttachment, ui_text: &UiText) -> Option
     } else {
         Some(ui_text.text_with_value(TextKey::ImageBadgeNamed, "name", safe_filename))
     }
+}
+
+fn is_named_image_badge(text: &str) -> bool {
+    text.starts_with("[Image") || text.starts_with("[图片") || text.starts_with("[图像")
 }
 
 pub(super) fn decorate_card_lines(

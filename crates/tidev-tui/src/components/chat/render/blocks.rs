@@ -10,6 +10,7 @@ use ratatui::text::{Line, Span};
 use rayon::prelude::*;
 use tidev_llm::message::{Message, MessageAttachment, MessageRole};
 use tidev_utils::tool_name::canonical_tool_name;
+use unicode_width::UnicodeWidthStr;
 use uuid::Uuid;
 
 use crate::components::chat::layout_index::{MessageBlock, MessageLayoutIndex};
@@ -209,8 +210,8 @@ pub(super) fn scan_image_badges(
                 infos.push(ImageBadgeInfo {
                     card_start_line,
                     badge_line_offset: line_offset,
-                    badge_col: abs_start,
-                    badge_width: abs_end - abs_start,
+                    badge_col: UnicodeWidthStr::width(&line_text[..abs_start]),
+                    badge_width: UnicodeWidthStr::width(&line_text[abs_start..abs_end]),
                     message_id: msg.id,
                     attachment_index: url_idx,
                 });

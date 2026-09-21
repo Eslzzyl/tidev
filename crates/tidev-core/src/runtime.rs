@@ -671,6 +671,10 @@ impl Runtime {
         session_id: Uuid,
         submission: PromptSubmission,
     ) -> Result<PromptSubmissionReceipt> {
+        let mut submission = submission;
+        // Prepare images before idempotency comparison so a retry compares the
+        // same canonical attachment bytes as the accepted submission.
+        crate::image::normalize_attachments(&mut submission.attachments);
         let _submission_guard = self.prompt_submission_lock.lock().await;
         if self
             .find_existing_prompt_submission(session_id, &submission)

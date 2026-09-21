@@ -964,6 +964,7 @@ impl CoreContext {
         self.collect_instruction_sources(session_id).await?;
         for (tool_call, result) in &mut results {
             mark_full_tool_result(tool_call, result);
+            crate::image::normalize_attachments(&mut result.attachments);
         }
         Ok(order_tool_results(tool_calls, results))
     }
@@ -1356,6 +1357,12 @@ impl AgentContext for CoreContext {
 
     // -----------------------------------------------------------------------
     async fn save_messages(&self, session_id: Uuid, messages: &[Message]) -> Result<()> {
+        let mut normalized_messages = messages.to_vec();
+        for message in &mut normalized_messages {
+            crate::image::normalize_attachments(&mut message.attachments);
+        }
+        let messages = normalized_messages.as_slice();
+
         // ── Phase 1: Round-level snapshot tracking ──────────────────────
         //
         // When the assistant message with tool calls is saved, a round is
