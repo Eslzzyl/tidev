@@ -1,3 +1,4 @@
+use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -62,6 +63,20 @@ pub fn validate_headers(
         if is_reserved_header_name(name) {
             anyhow::bail!("session_header '{name}' is managed by the provider protocol");
         }
+    }
+    Ok(())
+}
+
+/// Validate a provider identifier used by the configuration and auth stores.
+pub fn validate_provider_id(value: &str) -> anyhow::Result<()> {
+    if value.trim().is_empty() {
+        anyhow::bail!("provider_id is required");
+    }
+    if !value
+        .chars()
+        .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.'))
+    {
+        anyhow::bail!("provider_id may contain only letters, numbers, '-', '_' and '.'");
     }
     Ok(())
 }
@@ -137,6 +152,104 @@ impl ProviderConfig {
             .or_else(|| Some(self.base_url.clone()))
             .unwrap_or_default()
     }
+}
+
+/// Parse a standalone provider configuration file.
+pub fn parse_provider_toml(contents: &str) -> anyhow::Result<ProviderConfig> {
+    let value: toml::Value = toml::from_str(contents).context("failed to parse provider TOML")?;
+    reject_provider_secrets(&value)?;
+
+    let provider = value
+        .try_into()
+        .context("failed to decode provider configuration")?;
+    Ok(provider)
+}
+
+/// Serialize a standalone provider configuration file.
+pub fn serialize_provider_toml(provider: &ProviderConfig) -> anyhow::Result<String> {
+    toml::to_string_pretty(provider).context("failed to serialize provider TOML")
+}
+
+/// Validate a complete provider definition loaded from a standalone file.
+pub fn validate_provider_config(provider: &ProviderConfig) -> anyhow::Result<()> {
+    if provider.display_name.trim().is_empty() {
+        anyhow::bail!("provider display_name is required");
+    }
+    if provider.base_url.trim().is_empty() {
+        anyhow::bail!("provider base_url is required");
+    }
+
+    if let Some(api_type) = provider.api_type.as_deref() {
+        validate_api_type(api_type)?;
+    }
+    if let Some(user_agent) = provider.user_agent.as_deref() {
+        validate_user_agent(user_agent)?;
+    }
+    validate_headers(&provider.headers, provider.session_header.as_deref())?;
+
+    if provider.models.is_empty() {
+        anyhow::bail!("provider requires at least one model");
+    }
+    for (model_id, model) in &provider.models {
+        if model_id.trim().is_empty() {
+            anyhow::bail!("model_id is required");
+        }
+        if model.display_name.trim().is_empty() {
+            anyhow::bail!("model '{model_id}' display_name is required");
+        }
+        if model.context_window == 0 {
+            anyhow::bail!("model '{model_id}' context_window must be greater than zero");
+        }
+        if model.max_output_tokens == 0 {
+            anyhow::bail!("model '{model_id}' max_output_tokens must be greater than zero");
+        }
+        if let Some(api_type) = model.api_type.as_deref() {
+            validate_api_type(api_type)?;
+        }
+        if let Some(temperature) = model.temperature
+            && !temperature.is_finite()
+        {
+            anyhow::bail!("model '{model_id}' temperature must be finite");
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_api_type(value: &str) -> anyhow::Result<()> {
+    match value.to_ascii_lowercase().as_str() {
+        "openai_chat_completions"
+        | "openai"
+        | "chat"
+        | "openai_responses"
+        | "responses"
+        | "anthropic"
+        | "claude"
+        | "google_gemini"
+        | "gemini"
+        | "google" => Ok(()),
+        _ => anyhow::bail!("unsupported api_type '{value}'"),
+    }
+}
+
+fn reject_provider_secrets(value: &toml::Value) -> anyhow::Result<()> {
+    let Some(table) = value.as_table() else {
+        anyhow::bail!("provider configuration must be a TOML table");
+    };
+    if table.contains_key("api_key") {
+        anyhow::bail!("provider configuration must not contain 'api_key'");
+    }
+    if let Some(models) = table.get("models").and_then(toml::Value::as_table) {
+        for (model_id, model) in models {
+            if model
+                .as_table()
+                .is_some_and(|model| model.contains_key("api_key"))
+            {
+                anyhow::bail!("model '{model_id}' must not contain 'api_key'");
+            }
+        }
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -273,5 +386,49 @@ mod tests {
         let error = validate_headers(&BTreeMap::new(), Some("x invalid"))
             .expect_err("invalid session header names should be rejected");
         assert!(error.to_string().contains("invalid session_header"));
+    }
+
+    #[test]
+    fn standalone_provider_toml_round_trips() {
+        let contents = r#"
+display_name = "Test Provider"
+base_url = "https://api.example.com/v1"
+api_type = "openai_chat_completions"
+
+[models.test-model]
+display_name = "Test Model"
+context_window = 100000
+max_output_tokens = 8000
+request_model_id = "test-model"
+"#;
+
+        let parsed = parse_provider_toml(contents).expect("provider TOML should parse");
+        validate_provider_config(&parsed).expect("provider should be valid");
+        let serialized = serialize_provider_toml(&parsed).expect("provider should serialize");
+        let reparsed = parse_provider_toml(&serialized).expect("serialized TOML should parse");
+
+        assert_eq!(reparsed.display_name, "Test Provider");
+        assert_eq!(reparsed.base_url, "https://api.example.com/v1");
+        assert!(reparsed.models.contains_key("test-model"));
+    }
+
+    #[test]
+    fn standalone_provider_toml_rejects_api_keys() {
+        let error = parse_provider_toml(
+            r#"
+display_name = "Test Provider"
+base_url = "https://api.example.com/v1"
+api_key = "must-not-be-here"
+"#,
+        )
+        .expect_err("provider TOML must not contain API keys");
+
+        assert!(error.to_string().contains("must not contain 'api_key'"));
+    }
+
+    #[test]
+    fn provider_id_validation_rejects_unsafe_values() {
+        assert!(validate_provider_id("my-provider_1.0").is_ok());
+        assert!(validate_provider_id("provider with spaces").is_err());
     }
 }

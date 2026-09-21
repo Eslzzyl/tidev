@@ -741,11 +741,17 @@ impl AppConfig {
 
     /// Save the config to the default config file and save MCP config to mcp.json.
     pub fn save(&self, paths: &ConfigPaths) -> Result<()> {
+        self.save_config_file(paths)?;
+        self.mcp.save(paths)?;
+        Ok(())
+    }
+
+    /// Save only the application configuration file.
+    pub fn save_config_file(&self, paths: &ConfigPaths) -> Result<()> {
         paths.ensure_directories()?;
         let contents = toml::to_string_pretty(self).context("failed to serialize config")?;
         std::fs::write(&paths.config_file, contents)
             .with_context(|| format!("failed to write {}", paths.config_file.display()))?;
-        self.mcp.save(paths)?;
         Ok(())
     }
 

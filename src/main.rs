@@ -48,6 +48,19 @@ enum SearchRole {
     Error,
 }
 
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+enum ProviderListFormat {
+    Text,
+    Json,
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+enum ProviderShowFormat {
+    Text,
+    Json,
+    Toml,
+}
+
 impl SearchRole {
     fn as_str(self) -> &'static str {
         match self {
@@ -158,6 +171,11 @@ enum Command {
     #[command(subcommand)]
     Auth(AuthCommand),
 
+    // ── Provider management ──────────────────────────────────────────
+    /// Manage provider configurations
+    #[command(subcommand)]
+    Provider(ProviderCommand),
+
     // ── Model management ────────────────────────────────────────────
     /// Manage models
     #[command(subcommand)]
@@ -204,7 +222,8 @@ enum AuthCommand {
         /// Provider name (e.g. "openai", "anthropic")
         provider: String,
         /// API key value
-        key: String,
+        #[arg(long, value_name = "API_KEY")]
+        api_key: String,
     },
     /// List configured API keys (masked)
     List,
@@ -212,7 +231,52 @@ enum AuthCommand {
     Remove {
         /// Provider name
         provider: String,
-        /// Skip the confirmation prompt
+        /// Confirm removal without an interactive prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
+    },
+}
+
+// ── Provider subcommands ──────────────────────────────────────────────
+
+#[derive(clap::Subcommand, Debug)]
+enum ProviderCommand {
+    /// List provider configurations
+    List {
+        /// Output format
+        #[arg(long, value_enum, default_value_t = ProviderListFormat::Text)]
+        format: ProviderListFormat,
+    },
+    /// Show one provider configuration
+    Show {
+        /// Provider name
+        provider: String,
+        /// Output format
+        #[arg(long, value_enum, default_value_t = ProviderShowFormat::Text)]
+        format: ProviderShowFormat,
+    },
+    /// Add a provider configuration from a TOML file
+    Add {
+        /// Provider name
+        provider: String,
+        /// Standalone provider TOML file
+        #[arg(long)]
+        file: PathBuf,
+    },
+    /// Replace a provider configuration from a TOML file
+    Edit {
+        /// Provider name
+        provider: String,
+        /// Standalone provider TOML file
+        #[arg(long)]
+        file: PathBuf,
+    },
+    /// Remove a provider configuration
+    #[command(alias = "delete")]
+    Remove {
+        /// Provider name
+        provider: String,
+        /// Confirm removal without an interactive prompt
         #[arg(short = 'y', long)]
         yes: bool,
     },
@@ -394,9 +458,18 @@ async fn main() -> Result<()> {
 
         // ── Auth ────────────────────────────────────────────────
         Some(Command::Auth(cmd)) => match cmd {
-            AuthCommand::Set { provider, key } => cli::auth_set(&provider, &key),
+            AuthCommand::Set { provider, api_key } => cli::auth_set(&provider, &api_key),
             AuthCommand::List => cli::auth_list(),
             AuthCommand::Remove { provider, yes } => cli::auth_remove(&provider, yes),
+        },
+
+        // ── Provider ────────────────────────────────────────────
+        Some(Command::Provider(cmd)) => match cmd {
+            ProviderCommand::List { format } => cli::provider_list(format),
+            ProviderCommand::Show { provider, format } => cli::provider_show(&provider, format),
+            ProviderCommand::Add { provider, file } => cli::provider_add(&provider, &file),
+            ProviderCommand::Edit { provider, file } => cli::provider_edit(&provider, &file),
+            ProviderCommand::Remove { provider, yes } => cli::provider_remove(&provider, yes),
         },
 
         // ── Model ───────────────────────────────────────────────

@@ -2,11 +2,15 @@
 //!
 //! Each public function corresponds to a subcommand in [`crate::Command`].
 
-use super::{SearchField, SearchOutputFormat, SearchRole, SessionOutputFormat};
-use anyhow::{Context, Result};
+use super::{
+    ProviderListFormat, ProviderShowFormat, SearchField, SearchOutputFormat, SearchRole,
+    SessionOutputFormat,
+};
+use anyhow::{Context, Result, bail};
 use chrono::Duration;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use tidev_config::provider::{ProviderConfig, ProviderSource};
 use tidev_storage::{SessionInspection, StoredMessageView};
 use uuid::Uuid;
 
@@ -46,6 +50,21 @@ pub(crate) fn confirm_action(prompt: &str) -> Result<bool> {
 /// Set an API key for a provider.
 pub fn auth_set(provider: &str, key: &str) -> Result<()> {
     let paths = tidev_config::paths::ConfigPaths::discover()?;
+    if key.is_empty() {
+        bail!("API key cannot be empty");
+    }
+
+    // Validate the provider without creating config.toml as a side effect on
+    // a fresh installation. The auth command only writes auth.json.
+    let config = if paths.config_file.exists() {
+        tidev_config::AppConfig::load(&paths)?
+    } else {
+        tidev_config::AppConfig::default()
+    };
+    if config.provider(provider).is_none() {
+        bail!("provider '{provider}' is not configured");
+    }
+
     let mut auth = tidev_config::AuthStore::load_or_create(&paths)?;
     auth.set_api_key(provider, key);
     auth.save(&paths)?;
@@ -80,17 +99,12 @@ pub fn auth_list() -> Result<()> {
 
 /// Remove an API key for a provider.
 pub fn auth_remove(provider: &str, yes: bool) -> Result<()> {
+    if !yes {
+        bail!("refusing to remove authentication without confirmation; rerun with '--yes'");
+    }
+
     let paths = tidev_config::paths::ConfigPaths::discover()?;
     let mut auth = tidev_config::AuthStore::load_or_create(&paths)?;
-    if auth.providers.contains_key(provider)
-        && !yes
-        && !confirm_action(&format!(
-            "Remove stored authentication for provider '{provider}'"
-        ))?
-    {
-        println!("Authentication removal cancelled.");
-        return Ok(());
-    }
     if auth.providers.remove(provider).is_some() {
         auth.save(&paths)?;
         println!("Removed API key for provider '{provider}'");
@@ -98,6 +112,230 @@ pub fn auth_remove(provider: &str, yes: bool) -> Result<()> {
         println!("No API key found for provider '{provider}'");
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// tidev provider
+// ---------------------------------------------------------------------------
+
+/// List provider configurations from config.toml.
+pub fn provider_list(format: ProviderListFormat) -> Result<()> {
+    let paths = tidev_config::paths::ConfigPaths::discover()?;
+    let config = tidev_config::AppConfig::load(&paths)?;
+    let providers = config
+        .provider_ids()
+        .into_iter()
+        .filter_map(|provider_id| {
+            config.provider(&provider_id).map(|provider| {
+                let source = config.provider_source(&provider_id);
+                (provider_id, provider, source)
+            })
+        })
+        .collect::<Vec<_>>();
+
+    if providers.is_empty() {
+        println!("No providers configured.");
+        return Ok(());
+    }
+
+    match format {
+        ProviderListFormat::Text => {
+            for (provider_id, provider, source) in providers {
+                println!(
+                    "{provider_id}\t{}\t{}\t{} model(s)",
+                    provider_source_label(source),
+                    provider.display_name,
+                    provider.models.len(),
+                );
+            }
+        }
+        ProviderListFormat::Json => {
+            let entries = providers
+                .into_iter()
+                .map(|(provider_id, provider, source)| {
+                    serde_json::json!({
+                        "id": provider_id,
+                        "source": provider_source_label(source),
+                        "display_name": provider.display_name,
+                        "model_count": provider.models.len(),
+                    })
+                })
+                .collect::<Vec<_>>();
+            println!("{}", serde_json::to_string_pretty(&entries)?);
+        }
+    }
+    Ok(())
+}
+
+/// Show one effective provider configuration without credentials.
+pub fn provider_show(provider_id: &str, format: ProviderShowFormat) -> Result<()> {
+    let paths = tidev_config::paths::ConfigPaths::discover()?;
+    let config = tidev_config::AppConfig::load(&paths)?;
+    let provider = config
+        .provider(provider_id)
+        .with_context(|| format!("provider '{provider_id}' is not configured"))?;
+    let source = provider_source_label(config.provider_source(provider_id));
+
+    match format {
+        ProviderShowFormat::Text => {
+            println!("Provider:     {provider_id}");
+            println!("Source:       {source}");
+            println!("Display name: {}", provider.display_name);
+            println!("Base URL:     {}", provider.base_url);
+            println!(
+                "API type:     {}",
+                provider.api_type.as_deref().unwrap_or("default")
+            );
+            if let Some(user_agent) = provider.user_agent.as_deref() {
+                println!("User-Agent:   {user_agent}");
+            }
+            if let Some(session_header) = provider.session_header.as_deref() {
+                println!("Session header: {session_header}");
+            }
+            if !provider.headers.is_empty() {
+                println!("Headers:");
+                for (name, value) in &provider.headers {
+                    println!("  {name}: {value}");
+                }
+            }
+            println!("Models:");
+            for (model_id, model) in &provider.models {
+                println!(
+                    "  {model_id}  ({}, context: {}, max_output: {})",
+                    model.display_name, model.context_window, model.max_output_tokens
+                );
+            }
+        }
+        ProviderShowFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "id": provider_id,
+                    "source": source,
+                    "config": provider,
+                }))?
+            );
+        }
+        ProviderShowFormat::Toml => {
+            print!(
+                "{}",
+                tidev_config::provider::serialize_provider_toml(provider)?
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Add a new user-defined provider from a standalone TOML file.
+pub fn provider_add(provider_id: &str, file: &Path) -> Result<()> {
+    tidev_config::provider::validate_provider_id(provider_id)?;
+    let provider = read_provider_file(file)?;
+    let paths = tidev_config::paths::ConfigPaths::discover()?;
+    let mut config = tidev_config::AppConfig::load(&paths)?;
+
+    if config.provider_exists(provider_id) {
+        bail!("provider '{provider_id}' already exists");
+    }
+    config.set_user_provider(provider_id.to_owned(), provider)?;
+    config.save_config_file(&paths)?;
+    println!("Added provider '{provider_id}'");
+    Ok(())
+}
+
+/// Replace a provider's user configuration from a standalone TOML file.
+pub fn provider_edit(provider_id: &str, file: &Path) -> Result<()> {
+    tidev_config::provider::validate_provider_id(provider_id)?;
+    let provider = read_provider_file(file)?;
+    let paths = tidev_config::paths::ConfigPaths::discover()?;
+    let mut config = tidev_config::AppConfig::load(&paths)?;
+
+    if !config.provider_exists(provider_id) {
+        bail!("provider '{provider_id}' is not configured");
+    }
+    config.set_user_provider(provider_id.to_owned(), provider)?;
+    config.save_config_file(&paths)?;
+    println!("Updated provider '{provider_id}'");
+    Ok(())
+}
+
+/// Remove a user provider or restore a bundled provider's defaults.
+pub fn provider_remove(provider_id: &str, yes: bool) -> Result<()> {
+    if !yes {
+        bail!("refusing to remove a provider without confirmation; rerun with '--yes'");
+    }
+
+    let paths = tidev_config::paths::ConfigPaths::discover()?;
+    let mut config = tidev_config::AppConfig::load(&paths)?;
+    if !config.providers.contains_key(provider_id) {
+        if config.bundled_providers.contains_key(provider_id) {
+            bail!("bundled provider '{provider_id}' cannot be removed");
+        }
+        bail!("provider '{provider_id}' is not configured");
+    }
+
+    let is_bundled = config.bundled_providers.contains_key(provider_id);
+    if !is_bundled {
+        ensure_provider_not_referenced(&config, provider_id)?;
+        if has_stored_api_key(&paths, provider_id)? {
+            bail!(
+                "provider '{provider_id}' still has stored authentication; run 'tidev auth remove {provider_id} --yes' first"
+            );
+        }
+    }
+
+    config.remove_user_provider(provider_id)?;
+    config.save_config_file(&paths)?;
+    if is_bundled {
+        println!("Restored bundled provider '{provider_id}'");
+    } else {
+        println!("Removed provider '{provider_id}'");
+    }
+    Ok(())
+}
+
+fn read_provider_file(file: &Path) -> Result<ProviderConfig> {
+    let contents = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read provider file {}", file.display()))?;
+    let provider = tidev_config::provider::parse_provider_toml(&contents)
+        .with_context(|| format!("failed to parse provider file {}", file.display()))?;
+    tidev_config::provider::validate_provider_config(&provider)
+        .with_context(|| format!("invalid provider file {}", file.display()))?;
+    Ok(provider)
+}
+
+fn provider_source_label(source: Option<ProviderSource>) -> &'static str {
+    match source {
+        Some(ProviderSource::User) => "user",
+        Some(ProviderSource::Bundled) => "bundled",
+        None => "unknown",
+    }
+}
+
+fn ensure_provider_not_referenced(
+    config: &tidev_config::AppConfig,
+    provider_id: &str,
+) -> Result<()> {
+    if config.default_provider == provider_id {
+        bail!("provider '{provider_id}' is the default provider; run 'tidev model set' first");
+    }
+    if config.agent.default_subagent_provider == provider_id
+        || config.agent.models.values().any(|model| {
+            model
+                .split_once('/')
+                .is_some_and(|(provider, _)| provider == provider_id)
+        })
+    {
+        bail!("provider '{provider_id}' is referenced by agent configuration");
+    }
+    Ok(())
+}
+
+fn has_stored_api_key(paths: &tidev_config::paths::ConfigPaths, provider_id: &str) -> Result<bool> {
+    if !paths.auth_file.exists() {
+        return Ok(false);
+    }
+    let auth = tidev_config::AuthStore::load_or_create(paths)?;
+    Ok(auth.api_key(provider_id).is_some())
 }
 
 // ---------------------------------------------------------------------------
@@ -679,13 +917,13 @@ pub fn print_tool_output(id: &str) -> Result<()> {
 
 /// Delete sessions older than the specified number of days.
 pub fn session_prune(older_than_days: u64, yes: bool) -> Result<()> {
-    if !yes {
-        if !confirm_action(&format!(
+    if !yes
+        && !confirm_action(&format!(
             "Delete sessions older than {older_than_days} days? This cannot be undone."
-        ))? {
-            println!("Prune cancelled.");
-            return Ok(());
-        }
+        ))?
+    {
+        println!("Prune cancelled.");
+        return Ok(());
     }
 
     let (_paths, store) = open_store()?;
