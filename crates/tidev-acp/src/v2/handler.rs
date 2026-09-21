@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 use tidev_config::ThinkingMatcher;
 use tidev_core::Mode as SessionMode;
+use tidev_core::PromptSubmission;
 use tidev_core::Runtime;
 use tidev_llm::message::{MessageAttachment, MessageRole};
 use tidev_utils::session::title_from_prompt;
@@ -237,7 +238,8 @@ pub(crate) fn build_agent(
                             .compact_session(session_id, Some(0))
                             .await
                             .map_err(internal_error)?;
-                        let _ = responder.respond(acp::PromptResponse::new());
+                        let message_id = acp::MessageId::new(format!("compact-{}", Uuid::new_v4()));
+                        let _ = responder.respond(acp::PromptResponse::new(message_id));
                         return Ok(Handled::Yes);
                     }
                     let mode = if let Some(args) = command_arguments(&content, "/init") {
@@ -255,12 +257,15 @@ pub(crate) fn build_agent(
                         let _ = state.runtime.update_session_title(session_id, &title);
                         *state.session_named.write().await = true;
                     }
-                    state
+                    let mut submission = PromptSubmission::new(content, mode);
+                    submission.attachments = attachments;
+                    let receipt = state
                         .runtime
-                        .submit_prompt_with_attachments(session_id, mode, content, attachments, None)
+                        .submit_prompt_submission(session_id, submission)
                         .await
                         .map_err(internal_error)?;
-                    let _ = responder.respond(acp::PromptResponse::new());
+                    let message_id = acp::MessageId::new(receipt.message_id.to_string());
+                    let _ = responder.respond(acp::PromptResponse::new(message_id));
                     Ok(Handled::Yes)
                 }
             }
