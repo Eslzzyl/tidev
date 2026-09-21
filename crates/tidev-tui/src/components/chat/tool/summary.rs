@@ -112,13 +112,10 @@ pub(super) fn render_tool_call_summary_line_inner(
         "skill" => {
             let name = string_field("name");
             let path = normalize_skill_path(string_field("path"));
+            let action_key = skill_action_key(name.as_deref(), path.as_deref());
             match (name, path) {
                 (Some(name), Some(path)) => (
-                    format!(
-                        "{} {}",
-                        ui_text.text(TextKey::Read),
-                        ui_text.text(TextKey::Skill)
-                    ),
+                    ui_text.text(action_key),
                     vec![Span::styled(
                         format!("{name}/{path}"),
                         Style::default()
@@ -127,11 +124,7 @@ pub(super) fn render_tool_call_summary_line_inner(
                     )],
                 ),
                 (Some(name), None) => (
-                    format!(
-                        "{} {}",
-                        ui_text.text(TextKey::Loading),
-                        ui_text.text(TextKey::Skill)
-                    ),
+                    ui_text.text(action_key),
                     vec![Span::styled(
                         name,
                         Style::default()
@@ -139,7 +132,7 @@ pub(super) fn render_tool_call_summary_line_inner(
                             .add_modifier(Modifier::BOLD),
                     )],
                 ),
-                (None, _) => (ui_text.text(TextKey::Skills), Vec::new()),
+                (None, _) => (ui_text.text(action_key), Vec::new()),
             }
         }
         _ => {
@@ -405,6 +398,14 @@ fn normalize_skill_path(path: Option<String>) -> Option<String> {
     path.filter(|path| !path.is_empty())
 }
 
+fn skill_action_key(name: Option<&str>, path: Option<&str>) -> TextKey {
+    match (name, path) {
+        (Some(_), Some(_)) => TextKey::ReadSkill,
+        (Some(_), None) => TextKey::LoadSkill,
+        (None, _) => TextKey::ListSkills,
+    }
+}
+
 fn skill_result_suffix(output: &str, ui_text: &UiText) -> String {
     if tool_output_is_error(output) {
         if output.contains("unknown skill '") {
@@ -603,5 +604,24 @@ mod tests {
             normalize_skill_path(Some("docs/guide.md".to_string())),
             Some("docs/guide.md".to_string())
         );
+    }
+
+    #[test]
+    fn skill_action_labels_use_present_tense_in_supported_locales() {
+        let en = UiText::from_preference("en-US");
+        assert_eq!(en.text(skill_action_key(Some("debug"), None)), "Load skill");
+        assert_eq!(
+            en.text(skill_action_key(Some("debug"), Some("docs/guide.md"))),
+            "Read skill"
+        );
+        assert_eq!(en.text(skill_action_key(None, None)), "List skills");
+
+        let zh = UiText::from_preference("zh-CN");
+        assert_eq!(zh.text(skill_action_key(Some("debug"), None)), "加载技能");
+        assert_eq!(
+            zh.text(skill_action_key(Some("debug"), Some("docs/guide.md"))),
+            "读取技能"
+        );
+        assert_eq!(zh.text(skill_action_key(None, None)), "列出技能");
     }
 }
