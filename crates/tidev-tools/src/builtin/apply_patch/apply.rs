@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::{error::Error, fmt};
 
 use anyhow::{Context, Result, anyhow};
 use diffy::DiffOptions;
@@ -17,7 +18,7 @@ use crate::builtin::utils::{
 };
 
 /// Result of applying a patch — which files were added / modified / deleted.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct ApplyPatchResult {
     /// Paths of newly created files.
     pub added: Vec<PathBuf>,
@@ -27,29 +28,153 @@ pub struct ApplyPatchResult {
     pub deleted: Vec<PathBuf>,
     /// Per‑file diffs for modified files (keyed by absolute path).
     pub diffs: HashMap<PathBuf, String>,
+    /// Changes committed in patch order.
+    pub changes: Vec<ApplyPatchChange>,
 }
 
-/// Apply a codex‑format patch to the workspace.
+impl ApplyPatchResult {
+    pub fn is_empty(&self) -> bool {
+        self.changes.is_empty()
+    }
+}
+
+/// The kind of file operation represented by an applied patch hunk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApplyPatchOperation {
+    Add,
+    Update,
+    Delete,
+}
+
+impl ApplyPatchOperation {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Add => "Add File",
+            Self::Update => "Update File",
+            Self::Delete => "Delete File",
+        }
+    }
+
+    pub fn summary_label(self) -> &'static str {
+        match self {
+            Self::Add => "A",
+            Self::Update => "M",
+            Self::Delete => "D",
+        }
+    }
+}
+
+/// A single file operation that was successfully committed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApplyPatchChange {
+    pub path: PathBuf,
+    pub operation: ApplyPatchOperation,
+    pub diff: Option<String>,
+}
+
+/// The operation where a patch application stopped.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApplyPatchFailureLocation {
+    /// One-based operation number in the parsed patch.
+    pub operation_index: usize,
+    pub path: PathBuf,
+    pub operation: ApplyPatchOperation,
+}
+
+/// A failed patch application together with changes committed before failure.
+#[derive(Debug)]
+pub struct ApplyPatchFailure {
+    message: String,
+    partial_result: Box<ApplyPatchResult>,
+    location: Option<ApplyPatchFailureLocation>,
+}
+
+impl ApplyPatchFailure {
+    fn parse(message: String) -> Self {
+        Self {
+            message,
+            partial_result: Box::new(ApplyPatchResult::default()),
+            location: None,
+        }
+    }
+
+    fn operation(
+        message: String,
+        partial_result: ApplyPatchResult,
+        operation_index: usize,
+        hunk: &Hunk,
+    ) -> Self {
+        let (path, operation) = match hunk {
+            Hunk::AddFile { path, .. } => (path.clone(), ApplyPatchOperation::Add),
+            Hunk::DeleteFile { path } => (path.clone(), ApplyPatchOperation::Delete),
+            Hunk::UpdateFile { path, .. } => (path.clone(), ApplyPatchOperation::Update),
+        };
+
+        Self {
+            message,
+            partial_result: Box::new(partial_result),
+            location: Some(ApplyPatchFailureLocation {
+                operation_index: operation_index + 1,
+                path,
+                operation,
+            }),
+        }
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    pub fn partial_result(&self) -> &ApplyPatchResult {
+        &self.partial_result
+    }
+
+    pub fn location(&self) -> Option<&ApplyPatchFailureLocation> {
+        self.location.as_ref()
+    }
+
+    pub fn into_parts(self) -> (String, ApplyPatchResult, Option<ApplyPatchFailureLocation>) {
+        (self.message, *self.partial_result, self.location)
+    }
+}
+
+impl fmt::Display for ApplyPatchFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl Error for ApplyPatchFailure {}
+
+/// Apply a codex-format patch and retain the committed prefix when execution fails.
 ///
-/// `workspace_root` is used to resolve relative paths from the patch.
-/// `patch_text` is the raw patch body in codex `***` format.
-/// `allow_outside` controls whether paths outside the workspace are permitted.
+/// Parsing failures have an empty partial result. Execution failures stop at the
+/// first failing operation and expose all changes committed before that point.
 pub fn apply_patch(
     workspace_root: &Path,
     patch_text: &str,
     allow_outside: bool,
-) -> Result<ApplyPatchResult> {
+) -> Result<ApplyPatchResult, ApplyPatchFailure> {
     let parsed = super::parser::parse_patch(patch_text)
-        .map_err(|e| anyhow!("failed to parse patch: {e}"))?;
+        .map_err(|e| ApplyPatchFailure::parse(format!("failed to parse patch: {e}")))?;
 
     if parsed.hunks.is_empty() {
-        anyhow::bail!("patch contains no file operations");
+        return Err(ApplyPatchFailure::parse(
+            "patch contains no file operations".to_string(),
+        ));
     }
 
     let mut result = ApplyPatchResult::default();
 
-    for hunk in &parsed.hunks {
-        apply_hunk(workspace_root, hunk, allow_outside, &mut result)?;
+    for (operation_index, hunk) in parsed.hunks.iter().enumerate() {
+        if let Err(error) = apply_hunk(workspace_root, hunk, allow_outside, &mut result) {
+            return Err(ApplyPatchFailure::operation(
+                format!("{error:#}"),
+                result,
+                operation_index,
+                hunk,
+            ));
+        }
     }
 
     Ok(result)
@@ -106,7 +231,12 @@ fn apply_add_file(
         )
     })?;
 
-    result.added.push(abs_path);
+    result.added.push(abs_path.clone());
+    result.changes.push(ApplyPatchChange {
+        path: abs_path,
+        operation: ApplyPatchOperation::Add,
+        diff: None,
+    });
     Ok(())
 }
 
@@ -134,7 +264,12 @@ fn apply_delete_file(
         })?;
     }
 
-    result.deleted.push(abs_path);
+    result.deleted.push(abs_path.clone());
+    result.changes.push(ApplyPatchChange {
+        path: abs_path,
+        operation: ApplyPatchOperation::Delete,
+        diff: None,
+    });
     Ok(())
 }
 
@@ -198,14 +333,20 @@ fn apply_update_file(
                 display_workspace_relative(workspace_root, &dest)
             )
         })?;
-        // Remove original
-        if abs_path.exists() && abs_path != dest {
-            fs::remove_file(&abs_path).with_context(|| {
+        // Remove original. The destination write is already committed if this
+        // removal fails, so retain it in the partial result before returning.
+        if abs_path.exists()
+            && abs_path != dest
+            && let Err(error) = fs::remove_file(&abs_path).with_context(|| {
                 format!(
                     "failed to remove original {}",
                     display_workspace_relative(workspace_root, &abs_path)
                 )
-            })?;
+            })
+        {
+            let diff = generate_diff(old_content, &new_content, &dest, workspace_root);
+            record_modified_change(result, &dest, diff);
+            return Err(error);
         }
         dest
     } else {
@@ -236,12 +377,21 @@ fn apply_update_file(
     // Generate a unified diff for the output
     let diff = generate_diff(old_content, &new_content, &final_path, workspace_root);
 
-    if let Some(diff) = diff {
-        result.diffs.insert(final_path.clone(), diff);
-    }
-    result.modified.push(final_path);
+    record_modified_change(result, &final_path, diff);
 
     Ok(())
+}
+
+fn record_modified_change(result: &mut ApplyPatchResult, path: &Path, diff: Option<String>) {
+    if let Some(diff) = &diff {
+        result.diffs.insert(path.to_path_buf(), diff.clone());
+    }
+    result.changes.push(ApplyPatchChange {
+        path: path.to_path_buf(),
+        operation: ApplyPatchOperation::Update,
+        diff,
+    });
+    result.modified.push(path.to_path_buf());
 }
 
 /// Apply chunks to file content using seek‑and‑replace (ported from codex).
@@ -409,7 +559,7 @@ fn generate_diff(
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_replacements, derive_new_contents};
+    use super::{apply_patch, apply_replacements, derive_new_contents};
     use crate::builtin::apply_patch::UpdateFileChunk;
 
     #[test]
@@ -465,5 +615,38 @@ mod tests {
         let result = derive_new_contents(workspace.path(), &path, "a\nb\nc\nd\n", &chunks).unwrap();
 
         assert_eq!(result, "a\nB\nc\nD1\nD2\n");
+    }
+
+    #[test]
+    fn failure_exposes_committed_prefix_and_location() {
+        let workspace = tempfile::tempdir().unwrap();
+        let first = workspace.path().join("first.txt");
+        std::fs::write(&first, "old\n").unwrap();
+
+        let patch = "*** Begin Patch
+*** Update File: first.txt
+@@
+-old
++new
+*** Update File: missing.txt
+@@
+-old
++new
+*** End Patch";
+
+        let failure = apply_patch(workspace.path(), patch, false).expect_err("patch should fail");
+
+        assert_eq!(std::fs::read_to_string(&first).unwrap(), "new\n");
+        assert_eq!(failure.partial_result().changes.len(), 1);
+        assert_eq!(failure.partial_result().changes[0].path, first);
+        assert_eq!(
+            failure.location(),
+            Some(&super::ApplyPatchFailureLocation {
+                operation_index: 2,
+                path: "missing.txt".into(),
+                operation: super::ApplyPatchOperation::Update,
+            })
+        );
+        assert!(failure.message().contains("File does not exist"));
     }
 }

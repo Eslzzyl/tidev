@@ -132,6 +132,24 @@ pub struct FileChangeInfo {
     pub operation: String,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ToolFailureInfo {
+    /// Human-readable failure detail preserved alongside the tool output.
+    pub message: String,
+    /// One-based operation number when the failure occurred during a batch.
+    #[serde(default)]
+    pub operation_index: Option<usize>,
+    /// Patch path of the operation that failed, when available.
+    #[serde(default)]
+    pub path: Option<String>,
+    /// Operation label such as `Add File` or `Update File`.
+    #[serde(default)]
+    pub operation: Option<String>,
+    /// Whether at least one earlier operation was committed.
+    #[serde(default)]
+    pub committed_changes: bool,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ToolMetadata {
     #[serde(default)]
@@ -150,6 +168,8 @@ pub struct ToolMetadata {
     pub compaction_manual: Option<bool>,
     #[serde(default)]
     pub file_changes: Vec<FileChangeInfo>,
+    #[serde(default)]
+    pub failure: Option<ToolFailureInfo>,
     #[serde(default)]
     pub exit_code: Option<i32>,
     #[serde(default)]

@@ -26,8 +26,8 @@ pub(crate) fn tool_result_has_diff(result_msg: &Message) -> bool {
 /// Build collapsed per-file summary lines for edit/write/apply_patch results.
 ///
 /// Each file becomes a single line: operation label, path, and +N/-M counts
-/// (zero sides omitted). Returns None when no diff is available or the result
-/// is an error, so callers fall back to the normal rendering.
+/// (zero sides omitted). Failed apply_patch results with committed changes also
+/// render here so the user can see the successful prefix of the patch.
 pub(super) fn render_diff_summary_lines(
     message: &Message,
     content_width: usize,
@@ -36,12 +36,37 @@ pub(super) fn render_diff_summary_lines(
     ui_text: &UiText,
 ) -> Option<Vec<HyperlinkLine>> {
     let output = crate::utils::strip_system_reminder_tags(&message.content);
-    if tool_output_is_error(&output) {
+    let partial_apply_patch = canonical_name == "apply_patch"
+        && message.metadata.failure.is_some()
+        && !message.metadata.file_changes.is_empty();
+    if tool_output_is_error(&output) && !partial_apply_patch {
         return None;
     }
 
     let mut lines: Vec<Line<'static>> = Vec::new();
     let mut first = true;
+
+    if partial_apply_patch && let Some(failure) = message.metadata.failure.as_ref() {
+        let failure_location = match (
+            failure.operation_index,
+            failure.operation.as_deref(),
+            failure.path.as_deref(),
+        ) {
+            (Some(index), Some(operation), Some(path)) => {
+                format!(" (operation #{index}: {operation}: {path})")
+            }
+            (Some(index), _, _) => format!(" (operation #{index})"),
+            _ => String::new(),
+        };
+        lines.extend(wrap_tool_title(
+            Line::from(Span::styled(
+                format!("✗ {}{}", failure.message, failure_location),
+                Style::default().fg(palette.error),
+            )),
+            content_width,
+            "  ",
+        ));
+    }
 
     // Structured per-file changes (apply_patch): exact paths and operations.
     if canonical_name == "apply_patch" && !message.metadata.file_changes.is_empty() {

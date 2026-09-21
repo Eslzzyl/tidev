@@ -7,14 +7,16 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use super::apply_patch;
+use super::apply_patch::{self, ApplyPatchFailure, ApplyPatchOperation, ApplyPatchResult};
 use super::utils::{
     display_workspace_relative, read_existing_document, read_existing_text, resolve_workspace_path,
 };
 use crate::builtin::utils::decode_tool_args;
 use crate::types::{ApplyPatchArgs, EditArgs, ReadArgs, ToolDefinition, ToolPermission, WriteArgs};
 use tidev_instructions::resolve_nearby_instructions;
-use tidev_llm::message::{FileChangeInfo, MessageAttachment, ToolExecutionResult, ToolMetadata};
+use tidev_llm::message::{
+    FileChangeInfo, MessageAttachment, ToolExecutionResult, ToolFailureInfo, ToolMetadata,
+};
 
 const MAX_LINE_LENGTH: usize = 2000;
 const MAX_LINE_SUFFIX: &str = "... (line truncated to 2000 chars)";
@@ -127,93 +129,187 @@ pub fn execute_tool_call(
         }
         Some("apply_patch") => {
             let args = decode_tool_args::<ApplyPatchArgs>(tool_name, arguments)?;
-            let patch_result =
-                apply_patch::apply_patch(workspace_root, &args.patch_text, allow_outside)
-                    .with_context(|| format!("failed to apply patch for tool '{}'", tool_name))?;
-
-            // Build output summary (matching codex format)
-            let mut output = String::from("Success. Updated the following files:\n");
-            for path in &patch_result.added {
-                output.push_str(&format!(
-                    "A {}\n",
-                    display_workspace_relative(workspace_root, path)
-                ));
+            match apply_patch::apply_patch(workspace_root, &args.patch_text, allow_outside) {
+                Ok(patch_result) => Ok(apply_patch_result_output(
+                    workspace_root,
+                    tool_name,
+                    &patch_result,
+                    None,
+                )),
+                Err(failure) => Ok(apply_patch_failure_output(
+                    workspace_root,
+                    tool_name,
+                    &failure,
+                )),
             }
-            for path in &patch_result.modified {
-                output.push_str(&format!(
-                    "M {}\n",
-                    display_workspace_relative(workspace_root, path)
-                ));
-            }
-            for path in &patch_result.deleted {
-                output.push_str(&format!(
-                    "D {}\n",
-                    display_workspace_relative(workspace_root, path)
-                ));
-            }
-
-            // Build metadata from the first affected file
-            let first_path = patch_result
-                .modified
-                .first()
-                .or_else(|| patch_result.added.first())
-                .or_else(|| patch_result.deleted.first());
-            let mut metadata = ToolMetadata {
-                filepath: first_path.map(|p| display_workspace_relative(workspace_root, p)),
-                exists: Some(true),
-                ..Default::default()
-            };
-
-            // Store the first diff in metadata for backward compatibility
-            if let Some(diff) = patch_result.diffs.values().next() {
-                metadata.diff = Some(diff.clone());
-            }
-
-            // Build structured per-file change info for interleaved TUI rendering.
-            // Order matches the patch: added, modified, deleted.
-            let mut file_changes: Vec<FileChangeInfo> = Vec::new();
-            for path in &patch_result.added {
-                let rel = display_workspace_relative(workspace_root, path);
-                // Generate a diff from empty content to show the full file as added.
-                let diff = generate_added_file_diff(workspace_root, path);
-                file_changes.push(FileChangeInfo {
-                    path: rel,
-                    diff,
-                    operation: "A".to_string(),
-                });
-            }
-            for path in &patch_result.modified {
-                let rel = display_workspace_relative(workspace_root, path);
-                let diff = patch_result.diffs.get(path).cloned();
-                file_changes.push(FileChangeInfo {
-                    path: rel,
-                    diff,
-                    operation: "M".to_string(),
-                });
-            }
-            for path in &patch_result.deleted {
-                let rel = display_workspace_relative(workspace_root, path);
-                file_changes.push(FileChangeInfo {
-                    path: rel,
-                    diff: None,
-                    operation: "D".to_string(),
-                });
-            }
-            metadata.file_changes = file_changes;
-
-            if output.is_empty() {
-                output = String::from("No changes made");
-            }
-
-            Ok(ToolExecutionResult {
-                output,
-                attachments: Vec::new(),
-                metadata,
-            })
         }
         Some(other) => bail!("unsupported file tool '{}'", other),
         None => bail!("unknown tool '{}'", tool_name),
     }
+}
+
+fn apply_patch_result_output(
+    workspace_root: &Path,
+    tool_name: &str,
+    patch_result: &ApplyPatchResult,
+    failure: Option<&ApplyPatchFailure>,
+) -> ToolExecutionResult {
+    let mut output = match failure {
+        Some(failure) => {
+            let mut output = format!(
+                "Error: failed to apply patch for tool '{}': {}\n",
+                tool_name,
+                failure.message()
+            );
+            if let Some(location) = failure.location() {
+                output.push_str(&format!(
+                    "Failed at operation #{} ({}: {}).\n",
+                    location.operation_index,
+                    location.operation.label(),
+                    display_workspace_relative(workspace_root, &location.path),
+                ));
+            } else {
+                output.push_str("Patch parsing failed before any file operation was attempted.\n");
+            }
+            output.push_str("Partial changes committed before failure:\n");
+            if patch_result.is_empty() {
+                output.push_str("(none)\n");
+            } else {
+                append_ordered_patch_changes(workspace_root, patch_result, &mut output);
+            }
+            output.push_str("No later operations were attempted.");
+            output
+        }
+        None => {
+            let mut output = String::from("Success. Updated the following files:\n");
+            append_grouped_patch_changes(workspace_root, patch_result, &mut output);
+            output
+        }
+    };
+
+    if output.is_empty() {
+        output = String::from("No changes made");
+    }
+
+    ToolExecutionResult {
+        output,
+        attachments: Vec::new(),
+        metadata: apply_patch_metadata(workspace_root, patch_result, failure),
+    }
+}
+
+fn apply_patch_failure_output(
+    workspace_root: &Path,
+    tool_name: &str,
+    failure: &ApplyPatchFailure,
+) -> ToolExecutionResult {
+    apply_patch_result_output(
+        workspace_root,
+        tool_name,
+        failure.partial_result(),
+        Some(failure),
+    )
+}
+
+fn append_grouped_patch_changes(
+    workspace_root: &Path,
+    patch_result: &ApplyPatchResult,
+    output: &mut String,
+) {
+    for (operation, paths) in [
+        (ApplyPatchOperation::Add, &patch_result.added),
+        (ApplyPatchOperation::Update, &patch_result.modified),
+        (ApplyPatchOperation::Delete, &patch_result.deleted),
+    ] {
+        for path in paths {
+            append_patch_change_line(workspace_root, operation, path, output);
+        }
+    }
+}
+
+fn append_ordered_patch_changes(
+    workspace_root: &Path,
+    patch_result: &ApplyPatchResult,
+    output: &mut String,
+) {
+    for change in &patch_result.changes {
+        append_patch_change_line(workspace_root, change.operation, &change.path, output);
+    }
+}
+
+fn append_patch_change_line(
+    workspace_root: &Path,
+    operation: ApplyPatchOperation,
+    path: &Path,
+    output: &mut String,
+) {
+    output.push_str(&format!(
+        "{} {}\n",
+        operation.summary_label(),
+        display_workspace_relative(workspace_root, path)
+    ));
+}
+
+fn apply_patch_metadata(
+    workspace_root: &Path,
+    patch_result: &ApplyPatchResult,
+    failure: Option<&ApplyPatchFailure>,
+) -> ToolMetadata {
+    let first_path = patch_result
+        .changes
+        .first()
+        .map(|change| &change.path)
+        .or_else(|| failure.and_then(|failure| failure.location().map(|location| &location.path)));
+    let mut metadata = ToolMetadata {
+        filepath: first_path.map(|path| display_workspace_relative(workspace_root, path)),
+        exists: Some(true),
+        ..Default::default()
+    };
+
+    metadata.diff = patch_result
+        .changes
+        .iter()
+        .find_map(|change| change.diff.clone())
+        .or_else(|| patch_result.diffs.values().next().cloned());
+    metadata.file_changes = apply_patch_file_changes(workspace_root, patch_result);
+
+    if let Some(failure) = failure {
+        metadata.failure = Some(ToolFailureInfo {
+            message: failure.message().to_string(),
+            operation_index: failure.location().map(|location| location.operation_index),
+            path: failure
+                .location()
+                .map(|location| display_workspace_relative(workspace_root, &location.path)),
+            operation: failure
+                .location()
+                .map(|location| location.operation.label().to_string()),
+            committed_changes: !patch_result.is_empty(),
+        });
+    }
+
+    metadata
+}
+
+fn apply_patch_file_changes(
+    workspace_root: &Path,
+    patch_result: &ApplyPatchResult,
+) -> Vec<FileChangeInfo> {
+    patch_result
+        .changes
+        .iter()
+        .map(|change| {
+            let diff = match change.operation {
+                ApplyPatchOperation::Add => generate_added_file_diff(workspace_root, &change.path),
+                ApplyPatchOperation::Update => change.diff.clone(),
+                ApplyPatchOperation::Delete => None,
+            };
+            FileChangeInfo {
+                path: display_workspace_relative(workspace_root, &change.path),
+                diff,
+                operation: change.operation.summary_label().to_string(),
+            }
+        })
+        .collect()
 }
 
 /// Generate a unified diff showing all content as added for a newly created file.
@@ -1376,6 +1472,51 @@ pub fn read_file_for_at_reference(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn apply_patch_failure_result_reports_committed_prefix() -> Result<()> {
+        let workspace = tempfile::TempDir::new()?;
+        let first = workspace.path().join("first.txt");
+        std::fs::write(&first, "old\n")?;
+        let patch = "*** Begin Patch
+*** Update File: first.txt
+@@
+-old
++new
+*** Update File: missing.txt
+@@
+-old
++new
+*** End Patch";
+
+        let result = execute_tool_call(
+            workspace.path(),
+            workspace.path(),
+            "apply_patch",
+            serde_json::json!({"patch_text": patch}),
+            50_000,
+            false,
+            false,
+            None,
+        )?;
+
+        assert!(result.output.starts_with("Error: failed to apply patch"));
+        assert!(result.output.contains("Failed at operation #2"));
+        assert!(result.output.contains("M first.txt"));
+        assert!(
+            result
+                .output
+                .contains("No later operations were attempted.")
+        );
+        assert_eq!(result.metadata.file_changes.len(), 1);
+        assert_eq!(result.metadata.file_changes[0].path, "first.txt");
+        let failure = result.metadata.failure.expect("failure metadata");
+        assert_eq!(failure.operation_index, Some(2));
+        assert_eq!(failure.path.as_deref(), Some("missing.txt"));
+        assert_eq!(failure.operation.as_deref(), Some("Update File"));
+        assert!(failure.committed_changes);
+        Ok(())
+    }
 
     #[test]
     fn test_exact_unique_edit_replaces_without_fuzzy_matching() {

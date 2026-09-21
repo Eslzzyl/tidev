@@ -900,11 +900,29 @@ fn render_tool_result_detail_lines(
         );
     }
 
-    // apply_patch with structured file_changes
-    if canonical_name == "apply_patch" && !is_error && !message.metadata.file_changes.is_empty() {
+    // apply_patch with structured file_changes. Failed patches may still have
+    // committed a prefix, which must remain visible together with the error.
+    if canonical_name == "apply_patch" && !message.metadata.file_changes.is_empty() {
         let mut lines = Vec::new();
         let mut regions = Vec::new();
         let mut line_offset = 0usize;
+
+        if is_error {
+            let (normalized_output, lang) = normalize_tool_output(effective_output);
+            let error_lines = render_output_preview_lines(
+                &normalized_output,
+                lang,
+                content_width,
+                palette,
+                &ctx.ui_text,
+                is_expanded,
+                true,
+            );
+            line_offset += error_lines.len();
+            lines.extend(error_lines.into_iter().map(|line| line.line));
+            lines.push(Line::from(""));
+            line_offset += 1;
+        }
 
         for change in &message.metadata.file_changes {
             let label = match change.operation.as_str() {
@@ -1642,6 +1660,62 @@ mod tests {
         assert!(rendered.contains("Edit"));
         assert!(rendered.contains("src/main.rs"));
         assert!(rendered.contains("▶"));
+    }
+
+    #[test]
+    fn failed_apply_patch_renders_committed_changes_and_failure() {
+        let tool_call = ToolCall {
+            id: "call_1".into(),
+            name: "apply_patch".into(),
+            arguments: r#"{"patch_text":"*** Begin Patch\n*** Update File: src/main.rs\n*** Update File: missing.rs\n*** End Patch"}"#.into(),
+            thought_signature: None,
+        };
+        let mut result = ToolExecutionResult::new(
+            "Error: failed to apply patch for tool 'apply_patch': expected lines not found\nFailed at operation #2 (Update File: missing.rs).",
+        );
+        result.metadata.failure = Some(tidev_llm::message::ToolFailureInfo {
+            message: "expected lines not found".into(),
+            operation_index: Some(2),
+            path: Some("missing.rs".into()),
+            operation: Some("Update File".into()),
+            committed_changes: true,
+        });
+        result.metadata.file_changes = vec![tidev_llm::message::FileChangeInfo {
+            path: "src/main.rs".into(),
+            diff: Some("--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1 +1 @@\n-a\n+b\n".into()),
+            operation: "M".into(),
+        }];
+        let result_msg = Message::tool_result("call_1", "apply_patch", result);
+
+        let palette = test_palette();
+        let empty_set = HashSet::new();
+        let ctx = RenderContext {
+            palette,
+            ui_text: UiText::from_preference("en-US"),
+            spinner: ".",
+            workspace_root: Path::new("/test"),
+            expanded_tool_results: &empty_set,
+            hovered_card: None,
+            model_display_name: "test",
+            running_subagents: &[],
+            hovered_inline_subagent: None,
+            thinking_collapsed_overrides: &empty_set,
+            default_collapse_thinking: false,
+            default_collapse_diffs: false,
+            message_app_data: None,
+            reasoning_displays: &EMPTY_REASONING_DISPLAYS,
+        };
+
+        let (lines, _) =
+            render_tool_call_with_result(&tool_call, Some(&result_msg), 100, false, &ctx, false);
+        let rendered: String = lines
+            .iter()
+            .flat_map(|line| line.line.spans.iter().map(|span| span.content.as_ref()))
+            .collect();
+
+        assert!(rendered.contains("expected lines not found"));
+        assert!(rendered.contains("src/main.rs"));
+        assert!(rendered.contains("- a") && rendered.contains("+ b"));
     }
 
     #[test]
