@@ -49,7 +49,7 @@ pub(super) fn render_tool_call_summary_line_inner(
             let path = string_field("path").unwrap_or_else(|| ".".to_string());
             let rel = rel_path(&path);
             (
-                ui_text.text(TextKey::Search),
+                ui_text.text(TextKey::SearchText),
                 vec![
                     Span::styled(
                         format!("\"{}\"", pattern),
@@ -75,7 +75,7 @@ pub(super) fn render_tool_call_summary_line_inner(
             let path = string_field("path").unwrap_or_else(|| ".".to_string());
             let rel = rel_path(&path);
             (
-                ui_text.text(TextKey::Find),
+                ui_text.text(TextKey::FindFiles),
                 vec![
                     Span::styled(
                         pattern.clone(),
