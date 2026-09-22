@@ -131,6 +131,7 @@ impl App {
                     self.active_approval_session = None;
                 }
                 self.pending_modes.remove(&session_id);
+                self.compacting_sessions.remove(&session_id);
 
                 // Mark the last streaming message as error.
                 if let Some(ref mut chat) = self.message_list {
@@ -139,10 +140,9 @@ impl App {
 
                 if Some(session_id) == self.current_session_id {
                     let ui_text = self.ui_text();
-                    self.set_toast(
-                        ui_text.text_with_value(TextKey::RequestFailed, "error", &error),
-                        std::time::Duration::from_secs(8),
-                    );
+                    let notice = ui_text.text_with_value(TextKey::RequestFailed, "error", &error);
+                    self.set_notice(notice.clone());
+                    self.set_toast(notice, std::time::Duration::from_secs(8));
                 }
                 let ui_text = self.ui_text();
                 self.desktop_notifications.notify(&ui_text.text_with_value(
@@ -177,7 +177,7 @@ impl App {
                 }
 
                 // If a compact was queued and no request is active, run it now.
-                if self.pending_compacts.remove(&session_id)
+                if self.pending_compacts.contains(&session_id)
                     && Some(session_id) == self.current_session_id
                     && !self.has_active_request()
                 {
@@ -190,6 +190,7 @@ impl App {
                 error: Some(ref msg),
                 ..
             } => {
+                self.pending_compacts.remove(&session_id);
                 self.compacting_sessions.remove(&session_id);
                 let ui_text = self.ui_text();
                 let notice = if manual {
@@ -205,6 +206,7 @@ impl App {
                 error: None,
                 ..
             } => {
+                self.pending_compacts.remove(&session_id);
                 self.compacting_sessions.remove(&session_id);
                 let ui_text = self.ui_text();
                 self.set_notice(if manual {
@@ -216,6 +218,7 @@ impl App {
             BackendEvent::ContextCompactionStarted {
                 session_id, manual, ..
             } => {
+                self.pending_compacts.remove(&session_id);
                 self.compacting_sessions.insert(session_id);
                 let ui_text = self.ui_text();
                 self.set_notice(if manual {
@@ -362,7 +365,9 @@ impl App {
                 }
             }
             BackendEvent::StreamEnd { session_id, .. }
-                if self.pending_compacts.remove(&session_id) && !self.has_active_request() =>
+                if self.pending_compacts.contains(&session_id)
+                    && Some(session_id) == self.current_session_id
+                    && !self.has_active_request() =>
             {
                 self.flush_pending_instruction_sources(session_id);
                 // If a compact was queued and no request is active, run it now.

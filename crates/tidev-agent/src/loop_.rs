@@ -37,8 +37,39 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
         }
 
         // ─── 1. Materialize and load messages ────────────────────────────
-        ctx.prepare_request(session_id).await?;
-        let messages = ctx.load_messages(session_id).await?;
+        if let Err(error) = ctx.prepare_request(session_id).await {
+            let error_text = error.to_string();
+            ctx.emit_stream_event(AgentEvent::Failed {
+                request_id,
+                error: error_text,
+                retryable: false,
+            })
+            .await?;
+            return Err(error);
+        }
+        let messages = match ctx.load_messages(session_id).await {
+            Ok(messages) => messages,
+            Err(error) => {
+                let error_text = error.to_string();
+                ctx.emit_stream_event(AgentEvent::Failed {
+                    request_id,
+                    error: error_text,
+                    retryable: false,
+                })
+                .await?;
+                return Err(error);
+            }
+        };
+        if messages.is_empty() {
+            let error = "cannot start LLM turn: context request message list is empty".to_string();
+            ctx.emit_stream_event(AgentEvent::Failed {
+                request_id,
+                error: error.clone(),
+                retryable: false,
+            })
+            .await?;
+            return Err(anyhow::anyhow!(error));
+        }
 
         // ─── 2. Notify frontend that a new turn is starting ───────────────
         // New protocol state is durable before the streaming assistant draft

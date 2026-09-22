@@ -27,7 +27,7 @@ pub(crate) fn ensure_rustls_crypto_provider() {
 
 // Re-export types from tidev-llm (defined there as shared protocol types).
 pub use context::{AgentContext, AgentLoopConfig};
-pub use context_manager::{CompactionResult, ContextManager};
+pub use context_manager::{CompactionRequest, CompactionResult, ContextManager};
 pub use event::{
     AgentEvent, AgentEventSender, AgentEventSink, StreamEndStatus, llm_event_to_agent_event,
 };

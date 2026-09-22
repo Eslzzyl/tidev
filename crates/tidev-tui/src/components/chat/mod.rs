@@ -1140,25 +1140,90 @@ impl MessageList {
                     self.dirty = true;
                 }
             }
+            BackendEvent::ContextCompactionStarted {
+                compaction_id,
+                manual,
+                ..
+            } => {
+                chat_context.compaction_id = Some(*compaction_id);
+                let has_placeholder = chat_context.messages.iter().any(|message| {
+                    message.streaming
+                        && message.role == tidev_llm::message::MessageRole::System
+                        && message.metadata.compaction_manual == Some(*manual)
+                });
+                if !has_placeholder {
+                    let mut message = tidev_llm::message::Message::streaming(
+                        tidev_llm::message::MessageRole::System,
+                        format!("{}\n\n", tidev_llm::message::COMPACTION_MESSAGE_LABEL),
+                    );
+                    message.metadata.compaction_manual = Some(*manual);
+                    chat_context.push(message);
+                }
+                self.follow_tail = true;
+                self.layout_index.invalidate_all();
+                self.dirty = true;
+            }
+            BackendEvent::ContextCompactionDelta {
+                compaction_id,
+                content,
+                ..
+            } => {
+                if chat_context.compaction_id == Some(*compaction_id)
+                    && let Some(message) = chat_context.messages.iter_mut().rev().find(|message| {
+                        message.streaming
+                            && message.role == tidev_llm::message::MessageRole::System
+                            && message.metadata.compaction_manual.is_some()
+                    })
+                {
+                    message.content.push_str(content);
+                    self.layout_index.mark_dirty(message.id);
+                    self.follow_tail = true;
+                    self.dirty = true;
+                }
+            }
             BackendEvent::ContextCompacted {
+                compaction_id,
                 compacted,
                 manual,
                 summary,
                 model_id,
                 completed_at,
+                error,
                 ..
             } => {
-                if *compacted {
+                let is_current_compaction =
+                    compaction_id.is_none() || chat_context.compaction_id == *compaction_id;
+                if !is_current_compaction {
+                    return;
+                }
+                chat_context.compaction_id = None;
+                let placeholder = chat_context.messages.iter_mut().rev().find(|message| {
+                    message.streaming
+                        && message.role == tidev_llm::message::MessageRole::System
+                        && message.metadata.compaction_manual.is_some()
+                });
+                if let Some(error) = error {
+                    if let Some(message) = placeholder {
+                        let message_id = message.id;
+                        message.role = tidev_llm::message::MessageRole::Error;
+                        message.content = format!("Context compaction failed: {error}");
+                        message.streaming = false;
+                        message.completed_at = Some(completed_at.unwrap_or_else(Utc::now));
+                        self.layout_index.mark_dirty(message_id);
+                    }
+                    self.dirty = true;
+                } else if *compacted {
                     self.follow_tail = true;
                     if let Some(summary) = summary {
-                        // The summary was already streamed via Delta events into
-                        // the last streaming message.  If manual compaction found
-                        // a streaming System message, finalize it.  Otherwise
-                        // create a compaction message.
-                        let found = chat_context.messages.iter_mut().rev().find(|m| {
-                            m.streaming && m.role == tidev_llm::message::MessageRole::System
-                        });
-                        if let Some(msg) = found {
+                        // The final summary is authoritative. It must replace the
+                        // local placeholder even when the provider emitted no
+                        // incremental Delta events.
+                        if let Some(msg) = placeholder {
+                            msg.content = format!(
+                                "{}\n\n{}",
+                                tidev_llm::message::COMPACTION_MESSAGE_LABEL,
+                                summary
+                            );
                             msg.streaming = false;
                             msg.model_id = model_id.clone();
                             msg.completed_at = *completed_at;

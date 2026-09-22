@@ -40,7 +40,7 @@ use tidev_search::FileSearchIndex;
 use tidev_storage::{MessageAppData, SessionStore};
 use tidev_tools::types::TodoItem;
 
-use tidev_agent::{AgentContext, ContextManager};
+use tidev_agent::{AgentContext, CompactionRequest, ContextManager};
 
 use crate::approval::{ApprovalBroker, FrontendRequest, FrontendResponse};
 use crate::backend_event::{BackendEvent, CoreEventBus};
@@ -1702,17 +1702,50 @@ impl Runtime {
         use crate::agent_ctx::to_llm_provider_config;
 
         let _submission_guard = self.prompt_submission_lock.lock().await;
+        let event_bus = self.event_bus(session_id).await;
+        let compaction_id = Uuid::new_v4();
+        let emit_failure = |error: String| {
+            let _ = event_bus.send_backend(BackendEvent::ContextCompacted {
+                session_id,
+                compaction_id: Some(compaction_id),
+                compacted: false,
+                manual: true,
+                summary: None,
+                retained_from: 0,
+                model_id: None,
+                completed_at: Some(Utc::now()),
+                error: Some(error),
+            });
+        };
         if self.is_session_busy(session_id) {
-            anyhow::bail!("cannot compact a session while its agent loop is running");
+            let error = "cannot compact a session while its agent loop is running".to_string();
+            emit_failure(error.clone());
+            return Err(anyhow::anyhow!(error));
         }
-        let session = self
-            .session_manager
-            .load_session(session_id)?
-            .ok_or_else(|| anyhow::anyhow!("session {session_id} not found"))?;
+        let session = match self.session_manager.load_session(session_id) {
+            Ok(Some(session)) => session,
+            Ok(None) => {
+                let error = format!("session {session_id} not found");
+                emit_failure(error.clone());
+                return Err(anyhow::anyhow!(error));
+            }
+            Err(error) => {
+                emit_failure(error.to_string());
+                return Err(error);
+            }
+        };
         if session.system_prompt.is_empty() {
-            anyhow::bail!("session {session_id} has no persisted system prompt");
+            let error = format!("session {session_id} has no persisted system prompt");
+            emit_failure(error.clone());
+            return Err(anyhow::anyhow!(error));
         }
-        let persisted_messages = self.session_manager.load_session_messages(session_id)?;
+        let persisted_messages = match self.session_manager.load_session_messages(session_id) {
+            Ok(messages) => messages,
+            Err(error) => {
+                emit_failure(error.to_string());
+                return Err(error);
+            }
+        };
         self.set_session_message_buffer(session_id, persisted_messages)
             .await;
 
@@ -1744,9 +1777,9 @@ impl Runtime {
 
         // 2. Run compaction (async, no locks held on ContextManager).
         //    Capture prior compaction state before it gets overwritten.
-        let event_bus = self.event_bus(session_id).await;
         let _ = event_bus.send_backend(BackendEvent::ContextCompactionStarted {
             session_id,
+            compaction_id,
             manual: true,
             model_id: Some(active_model.model_id.clone()),
         });
@@ -1760,22 +1793,20 @@ impl Runtime {
                     &compact_model,
                     &tools,
                     &messages,
-                    session_id,
-                    stream_request_id.map(|_| event_bus.agent_sender()),
-                )
-                .await
-                .inspect_err(|e| {
-                    let _ = event_bus.send_backend(BackendEvent::ContextCompacted {
+                    CompactionRequest {
                         session_id,
-                        compacted: false,
-                        manual: true,
-                        summary: None,
-                        retained_from: 0,
-                        model_id: None,
-                        completed_at: Some(Utc::now()),
-                        error: Some(e.to_string()),
-                    });
-                })?;
+                        compaction_id,
+                        event_tx: stream_request_id.map(|_| event_bus.agent_sender()),
+                    },
+                )
+                .await;
+            let result = match result {
+                Ok(result) => result,
+                Err(error) => {
+                    emit_failure(error.to_string());
+                    return Err(error);
+                }
+            };
             (result, prior_summary, prior_retained_from)
         };
 
@@ -1784,12 +1815,15 @@ impl Runtime {
         let mut marker = Message::compaction_with_manual(&result.summary, true);
         marker.metadata.prior_summary = prior_summary;
         marker.metadata.prior_retained_from = Some(prior_retained_from);
-        self.session_manager.apply_compaction(
+        if let Err(error) = self.session_manager.apply_compaction(
             session_id,
             &result.summary,
             result.retained_from,
             &marker,
-        )?;
+        ) {
+            emit_failure(error.to_string());
+            return Err(error);
+        }
         let buf = self.message_buffer(session_id).await;
         buf.write().await.append(marker);
 
@@ -1798,12 +1832,11 @@ impl Runtime {
             .await
             .apply_compaction(result.summary.clone(), result.retained_from);
 
-        // 5. Notify the TUI (BackendEvent::ContextCompacted is already sent by
-        //    compact() via event_tx when streaming, but for consistency we
-        //    always send the final event here as well).
+        // 5. Notify the TUI after durable state and the marker are both ready.
         let model_id = active_model.model_id.clone();
         let _ = event_bus.send_backend(BackendEvent::ContextCompacted {
             session_id,
+            compaction_id: Some(compaction_id),
             compacted: true,
             manual: true,
             summary: Some(result.summary),
@@ -1911,6 +1944,7 @@ impl Runtime {
             .await
             .send_backend(BackendEvent::ContextCompacted {
                 session_id,
+                compaction_id: None,
                 compacted: true,
                 manual: false,
                 summary: None,
@@ -1969,6 +2003,7 @@ impl Runtime {
             .await
             .send_backend(BackendEvent::ContextCompacted {
                 session_id,
+                compaction_id: None,
                 compacted: true,
                 manual: false,
                 summary: None,
@@ -2554,7 +2589,7 @@ mod tests {
         match recv_created_event(&mut events).await {
             BackendEvent::InstructionsLoaded { sources, .. } => {
                 assert_eq!(sources.len(), 1);
-                assert!(sources[0].ends_with("/AGENTS.md"));
+                assert!(Path::new(&sources[0]).ends_with("AGENTS.md"));
             }
             other => panic!("expected InstructionsLoaded, got {other:?}"),
         }

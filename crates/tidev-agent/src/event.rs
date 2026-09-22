@@ -89,6 +89,7 @@ pub enum AgentEvent {
         result: Box<ToolExecutionResult>,
     },
     ContextCompacted {
+        compaction_id: Option<uuid::Uuid>,
         compacted: bool,
         manual: bool,
         summary: Option<String>,
@@ -96,6 +97,10 @@ pub enum AgentEvent {
         model_id: Option<String>,
         completed_at: Option<DateTime<Utc>>,
         error: Option<String>,
+    },
+    ContextCompactionDelta {
+        compaction_id: uuid::Uuid,
+        content: String,
     },
     ShellOutput {
         request_id: u64,

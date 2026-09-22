@@ -171,6 +171,10 @@ pub(super) fn build_responses_request_with_thinking(
         }
     }
 
+    if input_items.is_empty() {
+        anyhow::bail!("cannot build Responses API request with empty input");
+    }
+
     let input = serde_json::Value::Array(input_items);
 
     let chat_tools = if tools.is_empty() {
@@ -376,6 +380,33 @@ mod tests {
         assert_eq!(input[0]["role"], "user");
         assert_eq!(input[0]["content"][0]["type"], "input_text");
         assert_eq!(input[0]["content"][0]["text"], "Hello");
+    }
+
+    #[test]
+    fn test_responses_request_rejects_empty_input() {
+        let model = LlmProviderConfig {
+            provider_id: "openai-responses".to_string(),
+            base_url: "https://api.openai.com".to_string(),
+            user_agent: None,
+            headers: std::collections::BTreeMap::new(),
+            session_header: None,
+            api_type: ApiType::OpenAiResponses,
+            model_id: "gpt-4.5".to_string(),
+            request_model_id: Some("gpt-4.5".to_string()),
+            max_output_tokens: 4096,
+            temperature: Some(0.7),
+            supports_images: false,
+            supports_parallel_tool_calls: true,
+            context_window: 128000,
+            system_prompt: Some("You are helpful.".to_string()),
+            api_key: None,
+            extra_body: None,
+            thinking_level: crate::reasoning::ThinkingLevelType::None,
+        };
+
+        let error = build_responses_request(&model, Vec::new(), true, &[], None)
+            .expect_err("empty Responses input must be rejected locally");
+        assert!(error.to_string().contains("empty input"));
     }
 
     #[test]

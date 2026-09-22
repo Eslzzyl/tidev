@@ -21,7 +21,7 @@ use tidev_core::BackendEvent;
 use tidev_core::Mode as SessionMode;
 use tidev_core::{ApprovedTool, ToolCallWithViolations};
 use tidev_core::{GitDiffSnapshot, GitError, GitHistoryPage, GitStatusSnapshot};
-use tidev_llm::message::{COMPACTION_MESSAGE_LABEL, Message, MessageRole};
+use tidev_llm::message::{Message, MessageRole};
 use tidev_llm::reasoning::ThinkingLevelType;
 use tidev_tools::types::TodoItem;
 use uuid::Uuid;
@@ -708,26 +708,16 @@ impl App {
         taken
     }
 
-    /// Start compaction immediately (push streaming message, spawn task).
+    /// Start compaction immediately and let the started event create the UI
+    /// placeholder only after the backend has accepted the operation.
     fn execute_compact(&mut self) {
         let session_id = match self.current_session_id {
             Some(id) => id,
             None => return,
         };
-        // Push streaming compaction message immediately so the
-        // divider line and initial state are visible.
-        if let Some(ref mut chat) = self.message_list {
-            if let Some(ref mut ctx) = chat.active_chat_context_mut() {
-                let mut msg = Message::streaming(
-                    tidev_llm::message::MessageRole::System,
-                    format!("{}\n\n", COMPACTION_MESSAGE_LABEL),
-                );
-                msg.metadata.compaction_manual = Some(true);
-                ctx.push(msg);
-            }
-            chat.invalidate_layout();
+        if self.compacting_sessions.contains(&session_id) {
+            return;
         }
-        self.set_notice(self.ui_text().text(TextKey::CompactingSessionContext));
         self.compacting_sessions.insert(session_id);
         let rt = self.runtime.clone();
         tokio::spawn(async move {

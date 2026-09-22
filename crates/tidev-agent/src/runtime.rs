@@ -12,7 +12,7 @@ use tidev_llm::reasoning::ThinkingLevelType;
 use tidev_llm::{LlmClient, LlmProviderConfig, ToolDefinition};
 
 use crate::context::{AgentContext, AgentLoopConfig};
-use crate::context_manager::ContextManager;
+use crate::context_manager::{CompactionRequest, ContextManager};
 #[cfg(test)]
 use crate::event::AgentEvent;
 use crate::event::AgentEventSender;
@@ -332,8 +332,11 @@ impl AgentContext for AgentRuntime {
                 &self.model,
                 &self.tools.definitions(),
                 &messages,
-                session_id,
-                None,
+                CompactionRequest {
+                    session_id,
+                    compaction_id: uuid::Uuid::new_v4(),
+                    event_tx: None,
+                },
             )
             .await?;
         let marker = Message::compaction(&result.summary);
@@ -372,7 +375,7 @@ impl AgentContext for AgentRuntime {
                 .map_err(|_| anyhow::anyhow!("agent context manager is poisoned"))?;
             context_manager.clone()
         };
-        Ok(context_manager.build_request_messages(&buffer))
+        context_manager.build_request_messages(&buffer)
     }
 }
 

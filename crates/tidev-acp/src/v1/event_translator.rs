@@ -378,6 +378,7 @@ impl EventTranslator {
             BackendEvent::Finished { .. }
             | BackendEvent::StreamEnd { .. }
             | BackendEvent::InstructionsLoaded { .. }
+            | BackendEvent::ContextCompactionDelta { .. }
             | BackendEvent::UndoCompleted { .. }
             | BackendEvent::SidebarSnapshotReady { .. }
             | BackendEvent::MessagesTruncated { .. } => vec![],
@@ -865,6 +866,7 @@ mod tests {
         let mut tr = make_translator();
         let notifs = tr.translate(&BackendEvent::ContextCompacted {
             session_id: sid(),
+            compaction_id: None,
             compacted: true,
             manual: false,
             summary: Some("compressed".into()),

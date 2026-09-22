@@ -40,6 +40,13 @@ pub struct CompactionResult {
     pub retained_from: usize,
 }
 
+/// Runtime context for one compaction request.
+pub struct CompactionRequest {
+    pub session_id: Uuid,
+    pub compaction_id: Uuid,
+    pub event_tx: Option<crate::AgentEventSender>,
+}
+
 // ---------------------------------------------------------------------------
 // ContextManager
 // ---------------------------------------------------------------------------
@@ -195,11 +202,14 @@ impl ContextManager {
         model: &LlmProviderConfig,
         tools: &[ToolDefinition],
         messages: &[Message],
-        session_id: Uuid,
-        event_tx: Option<crate::AgentEventSender>,
+        request: CompactionRequest,
     ) -> Result<CompactionResult> {
         // 1. Select the persisted prefix used by the normal request path.
+        self.validate_request_state(messages)?;
         let mut compact_msgs = self.build_request_messages_raw(messages);
+        if compact_msgs.is_empty() {
+            anyhow::bail!("cannot compact an empty context");
+        }
 
         // 2. Append summary instruction.
         compact_msgs.push(Message::new(MessageRole::User, SUMMARY_INSTRUCTION));
@@ -211,10 +221,25 @@ impl ContextManager {
         let llm_tools = tools.to_vec();
 
         // 5. Call the LLM (streaming or non-streaming).
-        let summary = match &event_tx {
+        let CompactionRequest {
+            session_id,
+            compaction_id,
+            event_tx,
+        } = request;
+        let summary = match event_tx {
             Some(tx) => {
-                self.compact_streaming(llm, model, &llm_tools, compact_msgs, session_id, tx.clone())
-                    .await?
+                self.compact_streaming(
+                    llm,
+                    model,
+                    &llm_tools,
+                    compact_msgs,
+                    CompactionRequest {
+                        session_id,
+                        compaction_id,
+                        event_tx: Some(tx),
+                    },
+                )
+                .await?
             }
             None => {
                 self.compact_non_streaming(llm, model, &llm_tools, compact_msgs, session_id)
@@ -222,8 +247,12 @@ impl ContextManager {
             }
         };
 
-        // 6. Truncate to configured maximum.
-        let summary = summary.chars().take(self.maximum_summary_chars).collect();
+        // 6. Truncate to configured maximum and reject an empty result before
+        // the caller advances the persisted context cursor.
+        let summary: String = summary.chars().take(self.maximum_summary_chars).collect();
+        if summary.trim().is_empty() {
+            anyhow::bail!("context compaction returned an empty summary");
+        }
 
         Ok(CompactionResult {
             summary,
@@ -240,6 +269,25 @@ impl ContextManager {
             .filter(|message| !matches!(message.role, MessageRole::System | MessageRole::Error))
             .cloned()
             .collect()
+    }
+
+    fn validate_request_state(&self, messages: &[Message]) -> Result<()> {
+        if self.retained_from > messages.len() {
+            anyhow::bail!(
+                "invalid context state: retained_from {} exceeds message count {}",
+                self.retained_from,
+                messages.len()
+            );
+        }
+        if self.summary.is_some()
+            && !messages
+                .iter()
+                .skip(self.retained_from)
+                .any(Message::is_compaction)
+        {
+            anyhow::bail!("invalid context state: persisted summary has no compaction marker");
+        }
+        Ok(())
     }
 
     /// Apply a compaction result to this manager's state.
@@ -274,9 +322,16 @@ impl ContextManager {
         model: &LlmProviderConfig,
         tools: &[tidev_llm::ToolDefinition],
         messages: Vec<Message>,
-        session_id: Uuid,
-        event_tx: crate::AgentEventSender,
+        request: CompactionRequest,
     ) -> Result<String> {
+        let CompactionRequest {
+            session_id,
+            compaction_id,
+            event_tx: Some(event_tx),
+        } = request
+        else {
+            anyhow::bail!("streaming compaction requires an event sender");
+        };
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let llm_clone = llm.clone();
         let model = model.clone();
@@ -298,31 +353,46 @@ impl ContextManager {
         });
 
         let mut accumulated = String::new();
+        let mut completed_content = None;
+        let mut stream_error = None;
         while let Some(event) = rx.recv().await {
             match llm_event_to_agent_event(event, 0) {
                 AgentEvent::Delta { content, .. } => {
                     accumulated.push_str(&content);
                     // Forward delta to the UI so the user sees progress.
-                    let _ = event_tx.send(AgentEvent::Delta {
-                        request_id: 0,
+                    let _ = event_tx.send(AgentEvent::ContextCompactionDelta {
+                        compaction_id,
                         content,
                     });
                 }
-                AgentEvent::Finished { .. } => {
+                AgentEvent::Finished { turn, .. } => {
                     // Intercepted — not forwarded to the UI because
                     // it would trigger `finish_assistant_turn` logic.
+                    completed_content = Some(turn.content.clone());
                     break;
                 }
                 AgentEvent::Failed { error, .. } => {
-                    return Err(anyhow::anyhow!("Compaction LLM call failed: {error}"));
+                    stream_error = Some(error);
+                    break;
                 }
                 _ => {}
             }
         }
 
-        // Ensure the spawned task is done (or abort it on panic).
-        if handle.is_finished() {
-            handle.await.ok();
+        // The completed turn is authoritative when it contains content. A
+        // provider may deliver the complete text only in Finished, or may
+        // return a normalized final value after sending incremental deltas.
+        if let Some(content) = completed_content
+            && !content.trim().is_empty()
+        {
+            accumulated = content;
+        }
+
+        // Ensure the spawned task is done before returning the summary.
+        let _ = handle.await;
+
+        if let Some(error) = stream_error {
+            return Err(anyhow::anyhow!("Compaction LLM call failed: {error}"));
         }
 
         Ok(accumulated)
@@ -333,8 +403,10 @@ impl ContextManager {
     // -----------------------------------------------------------------------
 
     /// Select the persisted message list sent to the LLM for the next turn.
-    pub fn build_request_messages(&self, buffer: &MessageBuffer) -> Vec<Message> {
-        self.build_request_messages_raw(buffer.load())
+    pub fn build_request_messages(&self, buffer: &MessageBuffer) -> Result<Vec<Message>> {
+        let messages = buffer.load();
+        self.validate_request_state(messages)?;
+        Ok(self.build_request_messages_raw(messages))
     }
 }
 
@@ -371,7 +443,7 @@ mod tests {
         let cm = ContextManager::new();
         let buf = MessageBuffer::new(vec![]);
         let result = cm.build_request_messages(&buf);
-        assert!(result.is_empty());
+        assert!(result.unwrap().is_empty());
     }
 
     #[test]
@@ -381,7 +453,7 @@ mod tests {
         let done = assistant_msg("done");
         let buf = MessageBuffer::new(vec![streaming, done]);
         let cm = ContextManager::new();
-        let result = cm.build_request_messages(&buf);
+        let result = cm.build_request_messages(&buf).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].content, "done");
     }
@@ -395,7 +467,7 @@ mod tests {
         ];
         let buf = MessageBuffer::new(msgs);
         let cm = ContextManager::new();
-        let result = cm.build_request_messages(&buf);
+        let result = cm.build_request_messages(&buf).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].role, MessageRole::User);
     }
@@ -405,9 +477,37 @@ mod tests {
         let msgs = vec![user_msg("old1"), user_msg("old2"), user_msg("current")];
         let buf = MessageBuffer::new(msgs);
         let cm = ContextManager::from_state(None, 2);
-        let result = cm.build_request_messages(&buf);
+        let result = cm.build_request_messages(&buf).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].content, "current");
+    }
+
+    #[test]
+    fn build_request_messages_accepts_persisted_marker() {
+        let marker = Message::compaction("prior context");
+        let buf = MessageBuffer::new(vec![marker, user_msg("current")]);
+        let cm = ContextManager::from_state(Some("prior context".into()), 0);
+        let result = cm.build_request_messages(&buf).unwrap();
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].content, "Compaction\n\nprior context");
+        assert_eq!(result[1].content, "current");
+    }
+
+    #[test]
+    fn build_request_messages_rejects_cursor_past_buffer() {
+        let buf = MessageBuffer::new(vec![user_msg("old")]);
+        let cm = ContextManager::from_state(Some("prior context".into()), 10);
+        let error = cm.build_request_messages(&buf).unwrap_err();
+        assert!(error.to_string().contains("retained_from"));
+    }
+
+    #[test]
+    fn build_request_messages_rejects_summary_without_marker() {
+        let buf = MessageBuffer::new(vec![user_msg("current")]);
+        let cm = ContextManager::from_state(Some("prior context".into()), 0);
+        let error = cm.build_request_messages(&buf).unwrap_err();
+        assert!(error.to_string().contains("compaction marker"));
     }
 
     #[test]
@@ -425,7 +525,7 @@ mod tests {
         ];
         let buf = MessageBuffer::new(msgs);
         let cm = ContextManager::new();
-        let result = cm.build_request_messages(&buf);
+        let result = cm.build_request_messages(&buf).unwrap();
         // assistant, tool_result, user — all three present
         assert_eq!(result.len(), 3);
         assert_eq!(result[0].role, MessageRole::Assistant);
@@ -445,7 +545,7 @@ mod tests {
         let msgs = vec![assistant_with_tool_calls(vec![tc])];
         let buf = MessageBuffer::new(msgs);
         let cm = ContextManager::new();
-        let result = cm.build_request_messages(&buf);
+        let result = cm.build_request_messages(&buf).unwrap();
         assert_eq!(
             result[0].tool_calls[0].arguments,
             r#"{"file_path":"/tmp/x"}"#
@@ -469,7 +569,7 @@ mod tests {
         ];
         let buf = MessageBuffer::new(msgs);
         let cm = ContextManager::new();
-        let result = cm.build_request_messages(&buf);
+        let result = cm.build_request_messages(&buf).unwrap();
         assert_eq!(result.len(), 4);
         assert_eq!(result[0].content, "first");
         assert_eq!(result[1].role, MessageRole::Assistant);

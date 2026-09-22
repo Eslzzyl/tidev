@@ -39,6 +39,8 @@ pub struct ChatContext {
     pub parent_session_id: Option<Uuid>,
     pub model_display_name: String,
     pub provider_display_name: String,
+    /// UI-only identifier for the currently displayed compaction stream.
+    pub(crate) compaction_id: Option<Uuid>,
 }
 
 impl ChatContext {
@@ -64,6 +66,7 @@ impl ChatContext {
             parent_session_id,
             model_display_name,
             provider_display_name,
+            compaction_id: None,
         }
     }
 
@@ -100,6 +103,7 @@ impl ChatContext {
             parent_session_id,
             model_display_name,
             provider_display_name,
+            compaction_id: None,
         }
     }
 

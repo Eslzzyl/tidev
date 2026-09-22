@@ -305,6 +305,7 @@ impl EventTranslator {
             // ACP v2 has no session-history deletion or truncation update.
             BackendEvent::StreamEnd { .. }
             | BackendEvent::InstructionsLoaded { .. }
+            | BackendEvent::ContextCompactionDelta { .. }
             | BackendEvent::UndoCompleted { .. }
             | BackendEvent::SidebarSnapshotReady { .. }
             | BackendEvent::MessagesTruncated { .. } => Vec::new(),
@@ -371,6 +372,7 @@ mod tests {
         let mut translator = translator();
         let updates = translator.translate(&BackendEvent::ContextCompacted {
             session_id: Uuid::nil(),
+            compaction_id: None,
             compacted: true,
             manual: true,
             summary: Some("summary".to_string()),

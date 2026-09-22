@@ -99,11 +99,18 @@ pub enum BackendEvent {
     },
     ContextCompactionStarted {
         session_id: Uuid,
+        compaction_id: Uuid,
         manual: bool,
         model_id: Option<String>,
     },
+    ContextCompactionDelta {
+        session_id: Uuid,
+        compaction_id: Uuid,
+        content: String,
+    },
     ContextCompacted {
         session_id: Uuid,
+        compaction_id: Option<Uuid>,
         compacted: bool,
         manual: bool,
         summary: Option<String>,
@@ -177,6 +184,7 @@ impl BackendEvent {
             | Self::UsageStats { session_id, .. }
             | Self::InstructionsLoaded { session_id, .. }
             | Self::ContextCompactionStarted { session_id, .. }
+            | Self::ContextCompactionDelta { session_id, .. }
             | Self::ContextCompacted { session_id, .. }
             | Self::UndoCompleted { session_id, .. }
             | Self::UserMessageCreated { session_id, .. }
@@ -207,6 +215,7 @@ impl BackendEvent {
             | Self::StreamEnd { request_id, .. } => Some(*request_id),
             Self::InstructionsLoaded { .. }
             | Self::ContextCompactionStarted { .. }
+            | Self::ContextCompactionDelta { .. }
             | Self::ContextCompacted { .. }
             | Self::UndoCompleted { .. }
             | Self::UserMessageCreated { .. }
@@ -344,6 +353,7 @@ pub fn agent_event_to_backend_event(event: AgentEvent, session_id: Uuid) -> Back
             child_session_id: None,
         },
         AgentEvent::ContextCompacted {
+            compaction_id,
             compacted,
             manual,
             summary,
@@ -353,6 +363,7 @@ pub fn agent_event_to_backend_event(event: AgentEvent, session_id: Uuid) -> Back
             error,
         } => BackendEvent::ContextCompacted {
             session_id,
+            compaction_id,
             compacted,
             manual,
             summary,
@@ -360,6 +371,14 @@ pub fn agent_event_to_backend_event(event: AgentEvent, session_id: Uuid) -> Back
             model_id,
             completed_at,
             error,
+        },
+        AgentEvent::ContextCompactionDelta {
+            compaction_id,
+            content,
+        } => BackendEvent::ContextCompactionDelta {
+            session_id,
+            compaction_id,
+            content,
         },
         AgentEvent::ShellOutput {
             request_id: _,
@@ -579,6 +598,7 @@ mod tests {
                 result: Box::new(ToolExecutionResult::new("ok")),
             },
             AgentEvent::ContextCompacted {
+                compaction_id: None,
                 compacted: true,
                 manual: false,
                 summary: Some("summary".into()),
@@ -586,6 +606,10 @@ mod tests {
                 model_id: Some("model".into()),
                 completed_at: None,
                 error: None,
+            },
+            AgentEvent::ContextCompactionDelta {
+                compaction_id: Uuid::new_v4(),
+                content: "compaction delta".into(),
             },
             AgentEvent::ShellOutput {
                 request_id: 1,
@@ -596,7 +620,7 @@ mod tests {
             },
         ];
 
-        assert_eq!(events.len(), 13);
+        assert_eq!(events.len(), 14);
         for event in events {
             assert_eq!(
                 agent_event_to_backend_event(event, session_id).session_id(),
@@ -869,6 +893,7 @@ mod tests {
 
         match agent_event_to_backend_event(
             AgentEvent::ContextCompacted {
+                compaction_id: None,
                 compacted: true,
                 manual: true,
                 summary: Some("summary payload".into()),
@@ -881,6 +906,7 @@ mod tests {
         ) {
             BackendEvent::ContextCompacted {
                 session_id: received_session_id,
+                compaction_id,
                 compacted,
                 manual,
                 summary,
@@ -890,6 +916,7 @@ mod tests {
                 error,
             } => {
                 assert_eq!(received_session_id, session_id);
+                assert_eq!(compaction_id, None);
                 assert!(compacted);
                 assert!(manual);
                 assert_eq!(summary.as_deref(), Some("summary payload"));

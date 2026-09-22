@@ -20,9 +20,10 @@ use uuid::Uuid;
 use crate::agent_type::AgentType;
 use crate::backend_event::{BackendEvent, CoreEventBus};
 use tidev_agent::{
-    AgentContext, AgentDefinition, AgentEvent, AgentEventSender, AgentLoopConfig, ContextManager,
-    StreamEndStatus, SubagentEventSink, SubagentExecution, SubagentExecutor, ToolCallExecutor,
-    execute_subagent_calls, execute_tool_calls, order_tool_results, stream_turn,
+    AgentContext, AgentDefinition, AgentEvent, AgentEventSender, AgentLoopConfig,
+    CompactionRequest, ContextManager, StreamEndStatus, SubagentEventSink, SubagentExecution,
+    SubagentExecutor, ToolCallExecutor, execute_subagent_calls, execute_tool_calls,
+    order_tool_results, stream_turn,
 };
 use tidev_config::auth::ActiveModel;
 use tidev_config::{AppConfig, AuthStore};
@@ -1587,8 +1588,10 @@ impl AgentContext for CoreContext {
                 )
             };
             if should_compact {
+                let compaction_id = Uuid::new_v4();
                 self.emit(BackendEvent::ContextCompactionStarted {
                     session_id: self.session_id,
+                    compaction_id,
                     manual: false,
                     model_id: Some(self.active_model.model_id.clone()),
                 });
@@ -1601,8 +1604,11 @@ impl AgentContext for CoreContext {
                         &compact_model,
                         &tools,
                         &compaction_messages,
-                        session_id,
-                        None,
+                        CompactionRequest {
+                            session_id,
+                            compaction_id,
+                            event_tx: None,
+                        },
                     )
                     .await
                 };
@@ -1611,6 +1617,7 @@ impl AgentContext for CoreContext {
                     Err(error) => {
                         self.emit(BackendEvent::ContextCompacted {
                             session_id: self.session_id,
+                            compaction_id: Some(compaction_id),
                             compacted: false,
                             manual: false,
                             summary: None,
@@ -1639,6 +1646,7 @@ impl AgentContext for CoreContext {
                     .apply_compaction(result.summary.clone(), result.retained_from);
                 self.emit(BackendEvent::ContextCompacted {
                     session_id: self.session_id,
+                    compaction_id: Some(compaction_id),
                     compacted: true,
                     manual: false,
                     summary: Some(result.summary),
@@ -1682,7 +1690,7 @@ impl AgentContext for CoreContext {
 
         let messages = {
             let cm = self.context_manager.lock().await;
-            cm.build_request_messages(buffer.protocol())
+            cm.build_request_messages(buffer.protocol())?
         };
         Ok(messages)
     }
