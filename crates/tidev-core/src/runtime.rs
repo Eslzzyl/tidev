@@ -447,6 +447,26 @@ impl Runtime {
         &self.paths.config_dir
     }
 
+    /// Return the path of the user-wide AGENTS.md file.
+    pub fn global_instruction_path(&self) -> PathBuf {
+        tidev_instructions::global_instruction_path(&self.paths.config_dir)
+    }
+
+    /// Read the user-wide AGENTS.md file, if it exists.
+    pub fn load_global_instructions(&self) -> Result<Option<String>> {
+        tidev_instructions::read_global_instruction(&self.paths.config_dir)
+    }
+
+    /// Save the user-wide AGENTS.md file.
+    pub fn save_global_instructions(&self, content: &str) -> Result<()> {
+        tidev_instructions::write_global_instruction(&self.paths.config_dir, content)
+    }
+
+    /// Remove the user-wide AGENTS.md file.
+    pub fn delete_global_instructions(&self) -> Result<()> {
+        tidev_instructions::delete_global_instruction(&self.paths.config_dir)
+    }
+
     /// Get ConfigPaths (for save operations).
     pub fn paths(&self) -> &ConfigPaths {
         &self.paths

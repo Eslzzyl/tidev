@@ -6,9 +6,9 @@ use tidev_core::ApprovedTool;
 use tidev_llm::message::{Message, MessageRole, ToolExecutionResult};
 
 use crate::action::{
-    Action, BoundaryDecision, ChatAction, ConnectAction, GitAction, GitQueryKind, McpAction,
-    OverlayAction, OverlayKind, PanelLauncherAction, SearchAction, SensitiveFileDecision,
-    SessionAction, SettingKey, SettingValue, SettingsAction, ThemeAction,
+    Action, BoundaryDecision, ChatAction, ConnectAction, GitAction, GitQueryKind,
+    InstructionsAction, McpAction, OverlayAction, OverlayKind, PanelLauncherAction, SearchAction,
+    SensitiveFileDecision, SessionAction, SettingKey, SettingValue, SettingsAction, ThemeAction,
 };
 use crate::component::Component;
 
@@ -373,6 +373,72 @@ impl App {
                 Action::Mcp(action) => {
                     self.handle_mcp_action(action);
                 }
+                Action::Instructions(action) => match action {
+                    InstructionsAction::Reload => {
+                        let ctx = UpdateContext {
+                            runtime: &mut self.runtime,
+                        };
+                        queue.extend(
+                            self.overlays.update_all(
+                                &Action::Instructions(InstructionsAction::Reload),
+                                &ctx,
+                            ),
+                        );
+                    }
+                    InstructionsAction::Edit => {
+                        let content = match self.runtime.load_global_instructions() {
+                            Ok(content) => content.unwrap_or_default(),
+                            Err(error) => {
+                                self.set_notice(self.ui_text().text_with_value(
+                                    TextKey::GlobalInstructionsError,
+                                    "error",
+                                    &error.to_string(),
+                                ));
+                                continue;
+                            }
+                        };
+                        let ui_config = self.runtime.config().ui;
+                        match crate::editor::open_external_editor(&content, &ui_config) {
+                            Ok(edited) => match self.runtime.save_global_instructions(&edited) {
+                                Ok(()) => {
+                                    self.set_notice(
+                                        self.ui_text().text(TextKey::GlobalInstructionsSaved),
+                                    );
+                                    queue.push(Action::Instructions(InstructionsAction::Reload));
+                                }
+                                Err(error) => {
+                                    self.set_notice(self.ui_text().text_with_value(
+                                        TextKey::GlobalInstructionsError,
+                                        "error",
+                                        &error.to_string(),
+                                    ));
+                                }
+                            },
+                            Err(error) => {
+                                self.set_notice(self.ui_text().text_with_value(
+                                    TextKey::EditorError,
+                                    "error",
+                                    &error.to_string(),
+                                ));
+                            }
+                        }
+                    }
+                    InstructionsAction::Delete => match self.runtime.delete_global_instructions() {
+                        Ok(()) => {
+                            self.set_notice(
+                                self.ui_text().text(TextKey::GlobalInstructionsDeleted),
+                            );
+                            queue.push(Action::Instructions(InstructionsAction::Reload));
+                        }
+                        Err(error) => {
+                            self.set_notice(self.ui_text().text_with_value(
+                                TextKey::GlobalInstructionsError,
+                                "error",
+                                &error.to_string(),
+                            ));
+                        }
+                    },
+                },
                 Action::Git(action) => match action {
                     GitAction::Refresh => {
                         let request_id = self.spawn_git_status();

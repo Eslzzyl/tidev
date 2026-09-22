@@ -9,7 +9,7 @@ use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::middleware::Next;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use chrono::{DateTime, Datelike, Duration, NaiveDate, TimeZone, Timelike, Utc};
 use serde::{Deserialize, Serialize};
@@ -31,6 +31,7 @@ use crate::frontend::FrontendMode;
 
 mod filesystem;
 mod git;
+mod instructions;
 pub(crate) mod mcp;
 mod providers;
 mod session;
@@ -39,6 +40,7 @@ mod workspace;
 
 use filesystem::*;
 use git::*;
+use instructions::*;
 use mcp::*;
 use providers::*;
 use session::*;
@@ -722,6 +724,12 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/git/stash", post(git_stash))
         .route("/git/stash/pop", post(git_stash_pop))
         .route("/workspace", get(get_workspace))
+        .route(
+            "/config/global-instructions",
+            get(get_global_instructions)
+                .put(update_global_instructions)
+                .delete(delete_global_instructions),
+        )
         .route("/workspaces/context", get(workspace_context))
         .route("/workspaces/complete", get(workspace_complete))
         .route("/init", get(get_init))

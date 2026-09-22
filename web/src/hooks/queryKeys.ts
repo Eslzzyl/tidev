@@ -27,6 +27,7 @@ export const queryKeys = {
   subagentConfig: ["config", "subagent"] as const,
   memoryModel: ["config", "memory-model"] as const,
   terminalShellConfig: ["config", "terminal-shell"] as const,
+  globalInstructions: ["config", "global-instructions"] as const,
   modelThinkingLevel: (providerId: string, modelId: string) =>
     ["config", "model-thinking-level", providerId, modelId] as const,
 

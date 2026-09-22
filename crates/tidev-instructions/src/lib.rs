@@ -37,6 +37,9 @@ fn read_text_file(path: &Path) -> Result<String> {
         .with_context(|| format!("failed to decode {}", path.display()))
 }
 
+/// The name of the user-wide instruction file stored in tidev's config directory.
+pub const GLOBAL_INSTRUCTION_FILE: &str = "AGENTS.md";
+
 /// Instruction file names to search for, in order of precedence.
 const INSTRUCTION_FILES: &[&str] = &[
     "AGENTS.md",
@@ -44,6 +47,41 @@ const INSTRUCTION_FILES: &[&str] = &[
     ".github/copilot-instructions.md",
     "CONTEXT.md",
 ];
+
+/// Return the path of the user-wide instruction file.
+pub fn global_instruction_path(config_dir: &Path) -> PathBuf {
+    config_dir.join(GLOBAL_INSTRUCTION_FILE)
+}
+
+/// Read the user-wide instruction file.
+///
+/// `None` means that the file does not exist. Empty files are returned as an
+/// empty string so callers can distinguish an absent file from a present file.
+pub fn read_global_instruction(config_dir: &Path) -> Result<Option<String>> {
+    let path = global_instruction_path(config_dir);
+    if !path.exists() {
+        return Ok(None);
+    }
+    read_text_file(&path).map(Some)
+}
+
+/// Write the user-wide instruction file using UTF-8 text.
+pub fn write_global_instruction(config_dir: &Path, content: &str) -> Result<()> {
+    fs::create_dir_all(config_dir)
+        .with_context(|| format!("failed to create {}", config_dir.display()))?;
+    let path = global_instruction_path(config_dir);
+    fs::write(&path, content.as_bytes())
+        .with_context(|| format!("failed to write {}", path.display()))
+}
+
+/// Remove the user-wide instruction file if it exists.
+pub fn delete_global_instruction(config_dir: &Path) -> Result<()> {
+    let path = global_instruction_path(config_dir);
+    if path.exists() {
+        fs::remove_file(&path).with_context(|| format!("failed to remove {}", path.display()))?;
+    }
+    Ok(())
+}
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -197,7 +235,7 @@ pub fn system_paths(
         push_unique(project_path);
     }
 
-    let global_path = config_dir.join("AGENTS.md");
+    let global_path = global_instruction_path(config_dir);
     if global_path.exists() {
         push_unique(global_path);
     }

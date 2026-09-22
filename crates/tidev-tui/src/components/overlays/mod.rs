@@ -3,6 +3,7 @@ pub(crate) mod connect;
 pub(crate) mod fork;
 pub(crate) mod git;
 pub(crate) mod image;
+pub(crate) mod instructions;
 pub(crate) mod mcp;
 pub(crate) mod message;
 pub(crate) mod model;

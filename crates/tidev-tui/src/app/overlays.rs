@@ -9,6 +9,7 @@ use crate::components::overlays::connect::ConnectDialog;
 use crate::components::overlays::fork::ForkConfirmDialog;
 use crate::components::overlays::git::GitPanel;
 use crate::components::overlays::image::ImageViewer;
+use crate::components::overlays::instructions::InstructionsPanel;
 use crate::components::overlays::mcp::McpServerPanel;
 
 use crate::components::overlays::message::{MessagePanel, MessagePanelMessage};
@@ -38,6 +39,7 @@ impl App {
                 )))
             }
             OverlayKind::AgentsPanel => Some(Box::new(AgentsPanel::new())),
+            OverlayKind::InstructionsPanel => Some(Box::new(InstructionsPanel::new())),
             OverlayKind::SkillsPanel => {
                 let catalog = self.runtime.skills();
                 let skills: Vec<SkillItem> = catalog

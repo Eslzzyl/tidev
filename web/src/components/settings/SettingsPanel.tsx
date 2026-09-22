@@ -7,6 +7,7 @@ import {
   Terminal as TerminalIcon,
   Lock,
   Boxes,
+  FileText,
   Sparkles,
   Bot,
   Info,
@@ -26,6 +27,7 @@ import { TerminalSection } from "./TerminalSection";
 import { SecuritySection } from "./SecuritySection";
 import { McpSection } from "./McpSection";
 import { SkillsSection } from "./SkillsSection";
+import { InstructionsSection } from "./InstructionsSection";
 import { AgentsSection } from "./AgentsSection";
 import { AboutSection } from "./AboutSection";
 import { ProvidersSection } from "./ProvidersSection";
@@ -41,6 +43,7 @@ export type CategoryId =
   | "agents"
   | "mcp"
   | "skills"
+  | "instructions"
   | "about";
 
 interface Category {
@@ -114,6 +117,12 @@ const categoryGroups: CategoryGroup[] = [
         label: "Skills",
         description: "Browse, preview, and load agent skills",
         icon: <Sparkles className="h-4 w-4" />,
+      },
+      {
+        id: "instructions",
+        label: "Global Instructions",
+        description: "Edit the global AGENTS.md guidance",
+        icon: <FileText className="h-4 w-4" />,
       },
     ],
   },
@@ -310,6 +319,7 @@ export function SettingsPanel() {
     if (category === "agents") return <AgentsSection />;
     if (category === "mcp") return <McpSection />;
     if (category === "skills") return <SkillsSection />;
+    if (category === "instructions") return <InstructionsSection />;
     return <AboutSection />;
   };
 

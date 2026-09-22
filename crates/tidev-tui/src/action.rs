@@ -21,6 +21,7 @@ pub(crate) enum PanelAction {
     Session,
     Settings,
     Skills,
+    Instructions,
     Theme,
     Git,
 }
@@ -216,6 +217,14 @@ pub(crate) enum McpAction {
     },
 }
 
+/// Global instruction file actions.
+#[derive(Clone, Debug)]
+pub(crate) enum InstructionsAction {
+    Reload,
+    Edit,
+    Delete,
+}
+
 // ---------------------------------------------------------------------------
 // Tool approval pipeline types
 // ---------------------------------------------------------------------------
@@ -273,6 +282,7 @@ pub(crate) enum OverlayKind {
     ModelPanel,
     AgentsPanel,
     SkillsPanel,
+    InstructionsPanel,
     SearchPanel,
     MessagePanel,
     McpServerPanel,
@@ -290,6 +300,7 @@ impl PanelAction {
             Self::Session => OverlayKind::SessionPanel,
             Self::Settings => OverlayKind::SettingsPanel,
             Self::Skills => OverlayKind::SkillsPanel,
+            Self::Instructions => OverlayKind::InstructionsPanel,
             Self::Theme => OverlayKind::ThemePanel,
             Self::Git => OverlayKind::GitPanel,
         }
@@ -316,6 +327,7 @@ pub(crate) enum Action {
     Settings(SettingsAction),
     Connect(ConnectAction),
     Mcp(McpAction),
+    Instructions(InstructionsAction),
     Git(GitAction),
     /// Copy the most recent completed assistant message to the clipboard.
     CopyLastAssistant,

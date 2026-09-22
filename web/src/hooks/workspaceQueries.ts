@@ -147,6 +147,34 @@ export function useTerminalShellConfig() {
   });
 }
 
+export function useGlobalInstructions() {
+  return useQuery({
+    queryKey: queryKeys.globalInstructions,
+    queryFn: api.getGlobalInstructions,
+    staleTime: 60_000,
+  });
+}
+
+export function useSaveGlobalInstructions() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.saveGlobalInstructions,
+    onSuccess: (data) => {
+      queryClient.setQueryData(queryKeys.globalInstructions, data);
+    },
+  });
+}
+
+export function useDeleteGlobalInstructions() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.deleteGlobalInstructions,
+    onSuccess: (data) => {
+      queryClient.setQueryData(queryKeys.globalInstructions, data);
+    },
+  });
+}
+
 export function useSetTerminalShellConfig() {
   const queryClient = useQueryClient();
   return useMutation({

@@ -47,6 +47,9 @@ static PANEL_ENTRIES: &[PanelEntry] = &[
         action: PanelAction::Skills,
     },
     PanelEntry {
+        action: PanelAction::Instructions,
+    },
+    PanelEntry {
         action: PanelAction::Message,
     },
     PanelEntry {
@@ -309,6 +312,7 @@ fn panel_description(ui_text: &UiText, action: PanelAction) -> String {
         PanelAction::Settings => ui_text.text(TextKey::PanelSettingsDescription),
         PanelAction::Agents => ui_text.text(TextKey::PanelAgentsDescription),
         PanelAction::Skills => ui_text.text(TextKey::PanelSkillsDescription),
+        PanelAction::Instructions => ui_text.text(TextKey::GlobalInstructionsTitle),
         PanelAction::Message => ui_text.text(TextKey::PanelMessageDescription),
         PanelAction::Search => ui_text.text(TextKey::PanelSearchDescription),
         PanelAction::Git => ui_text.text(TextKey::PanelGitDescription),

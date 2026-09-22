@@ -62,6 +62,7 @@ import type {
   SessionListResponse,
   SessionDiffsResponse,
   BuildInfo,
+  GlobalInstructionsResponse,
 } from "../types/api";
 import { getAuthToken, useAuthStore } from "../stores/useAuthStore";
 import i18n from "../i18n";
@@ -458,6 +459,21 @@ export const api = {
 
   readFileBase64: (path: string) =>
     fetchJson<ReadBase64Response>(`${API_BASE}/fs/read-base64?path=${encodeURIComponent(path)}`),
+
+  // Global instructions
+  getGlobalInstructions: () =>
+    fetchJson<GlobalInstructionsResponse>(`${API_BASE}/config/global-instructions`),
+
+  saveGlobalInstructions: (content: string) =>
+    fetchJson<GlobalInstructionsResponse>(`${API_BASE}/config/global-instructions`, {
+      method: "PUT",
+      body: JSON.stringify({ content }),
+    }),
+
+  deleteGlobalInstructions: () =>
+    fetchJson<GlobalInstructionsResponse>(`${API_BASE}/config/global-instructions`, {
+      method: "DELETE",
+    }),
 
   // Terminal
   startTerminal: (cols?: number, rows?: number, shell?: string, label?: string) =>

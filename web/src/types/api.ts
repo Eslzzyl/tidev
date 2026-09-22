@@ -39,6 +39,12 @@ export interface BuildInfo {
   dirty: boolean;
 }
 
+export interface GlobalInstructionsResponse {
+  path: string;
+  exists: boolean;
+  content: string;
+}
+
 export interface FileDiff {
   path: string;
   file_path?: string;
