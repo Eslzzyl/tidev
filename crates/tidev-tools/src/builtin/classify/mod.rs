@@ -1013,6 +1013,25 @@ mod tests {
     }
 
     #[test]
+    fn git_tag_list_with_pattern_is_read_only() {
+        let cl = c();
+        assert_eq!(
+            cl.classify("git tag --list 'v1.0.*' --sort=version:refname"),
+            Safety::ReadOnly
+        );
+        assert_eq!(
+            cl.classify("git tag --list \"v1.0.*\" --sort=version:refname"),
+            Safety::ReadOnly
+        );
+        assert_eq!(
+            cl.classify(
+                "git tag --list 'v1.0.*' --sort=version:refname; git log --all --oneline --decorate --since='2026-08-01' --until='2026-09-16' -- codex-rs/core/src/session/mod.rs | Select-Object -First 50"
+            ),
+            Safety::ReadOnly
+        );
+    }
+
+    #[test]
     fn env_wrapper_stripped() {
         let cl = c();
         assert_eq!(cl.classify("env FOO=bar git log"), Safety::ReadOnly);

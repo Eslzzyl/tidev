@@ -237,6 +237,16 @@ fn classify_branch_tag(args: &[&str]) -> Safety {
     if args.contains(&"-d") || args.contains(&"-D") || args.contains(&"--delete") {
         return Safety::WriteOperation;
     }
+    // An explicit list flag keeps following patterns positional but read-only.
+    // This must be checked before the generic positional-argument heuristic:
+    // `git tag --list 'v1.0.*'` lists matching tags rather than creating one.
+    if args
+        .iter()
+        .skip(1)
+        .any(|arg| *arg == "-l" || *arg == "--list" || arg.starts_with("--list="))
+    {
+        return Safety::ReadOnly;
+    }
     // `git branch` (list) or `git tag` (list) is read-only
     if args.len() == 1 {
         return Safety::ReadOnly;
@@ -380,6 +390,15 @@ mod tests {
         assert_eq!(classify_git(&["rev-parse", "HEAD"]), Safety::ReadOnly);
         assert_eq!(classify_git(&["branch"]), Safety::ReadOnly);
         assert_eq!(classify_git(&["tag"]), Safety::ReadOnly);
+        assert_eq!(
+            classify_git(&["tag", "--list", "'v1.0.*'", "--sort=version:refname"]),
+            Safety::ReadOnly
+        );
+        assert_eq!(classify_git(&["tag", "-l", "\"v1.0.*\""]), Safety::ReadOnly);
+        assert_eq!(
+            classify_git(&["branch", "--list", "'feature/*'"]),
+            Safety::ReadOnly
+        );
         assert_eq!(classify_git(&["config", "user.name"]), Safety::ReadOnly);
         assert_eq!(classify_git(&["stash", "list"]), Safety::ReadOnly);
         assert_eq!(classify_git(&["stash", "show"]), Safety::ReadOnly);
