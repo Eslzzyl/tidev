@@ -45,6 +45,16 @@ impl App {
                     .iter()
                     .map(|s| SkillItem {
                         name: s.name.clone(),
+                        description: s.description.clone(),
+                        license: s.frontmatter.license.clone(),
+                        compatibility: s.frontmatter.compatibility.clone(),
+                        metadata: s
+                            .frontmatter
+                            .metadata
+                            .iter()
+                            .map(|(key, value)| (key.clone(), value.clone()))
+                            .collect(),
+                        allowed_tools: s.frontmatter.allowed_tools.clone(),
                         content: catalog.render_skill(&s.name).unwrap_or_default(),
                         is_bundled: s.directory.starts_with("__builtin__"),
                     })

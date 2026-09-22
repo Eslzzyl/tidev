@@ -553,6 +553,10 @@ pub struct UpsertMcpServerRequest {
 pub struct SkillDto {
     pub name: String,
     pub description: String,
+    pub license: Option<String>,
+    pub compatibility: Option<String>,
+    pub metadata: BTreeMap<String, String>,
+    pub allowed_tools: Option<String>,
     pub directory: String,
     pub location: String,
     pub is_bundled: bool,

@@ -24,6 +24,11 @@ use crate::utils::{centered_rect, render_scrollbar, single_line_input_cursor};
 #[derive(Clone, Debug)]
 pub(crate) struct SkillItem {
     pub name: String,
+    pub description: String,
+    pub license: Option<String>,
+    pub compatibility: Option<String>,
+    pub metadata: Vec<(String, String)>,
+    pub allowed_tools: Option<String>,
     pub content: String,
     pub is_bundled: bool,
 }
@@ -580,12 +585,107 @@ impl Component for SkillsPanel {
         }
 
         if let Some((_, _, _, rendered)) = &self.cached_preview {
-            let total_preview_lines = rendered.lines.len();
+            let mut preview_lines: Vec<Line<'static>> = Vec::new();
+            if let Some(skill) = self.selected_skill() {
+                let add_field = |lines: &mut Vec<Line<'static>>, label: String, value: &str| {
+                    let prefix = format!("{label}: ");
+                    let continuation = " ".repeat(prefix.width());
+                    let available_width = self
+                        .preview_content_width
+                        .saturating_sub(prefix.width())
+                        .max(1);
+                    let wrapped = textwrap::wrap(value, available_width);
+                    if wrapped.is_empty() {
+                        lines.push(Line::from(vec![
+                            Span::styled(
+                                prefix,
+                                Style::default()
+                                    .fg(palette.accent)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                            Span::raw(""),
+                        ]));
+                    } else {
+                        for (index, part) in wrapped.into_iter().enumerate() {
+                            let current_prefix = if index == 0 {
+                                prefix.clone()
+                            } else {
+                                continuation.clone()
+                            };
+                            lines.push(Line::from(vec![
+                                Span::styled(
+                                    current_prefix,
+                                    Style::default()
+                                        .fg(palette.accent)
+                                        .add_modifier(Modifier::BOLD),
+                                ),
+                                Span::styled(part.into_owned(), Style::default().fg(palette.text)),
+                            ]));
+                        }
+                    }
+                };
+
+                preview_lines.push(Line::from(Span::styled(
+                    format!("  {}", ctx.ui_text.text(TextKey::SkillsFrontmatter)),
+                    Style::default()
+                        .fg(palette.accent)
+                        .add_modifier(Modifier::BOLD),
+                )));
+                add_field(
+                    &mut preview_lines,
+                    ctx.ui_text.text(TextKey::SkillsName),
+                    &skill.name,
+                );
+                add_field(
+                    &mut preview_lines,
+                    ctx.ui_text.text(TextKey::SkillsDescription),
+                    &skill.description,
+                );
+                if let Some(license) = &skill.license {
+                    add_field(
+                        &mut preview_lines,
+                        ctx.ui_text.text(TextKey::SkillsLicense),
+                        license,
+                    );
+                }
+                if let Some(compatibility) = &skill.compatibility {
+                    add_field(
+                        &mut preview_lines,
+                        ctx.ui_text.text(TextKey::SkillsCompatibility),
+                        compatibility,
+                    );
+                }
+                if let Some(allowed_tools) = &skill.allowed_tools {
+                    add_field(
+                        &mut preview_lines,
+                        ctx.ui_text.text(TextKey::SkillsAllowedTools),
+                        allowed_tools,
+                    );
+                }
+                if !skill.metadata.is_empty() {
+                    preview_lines.push(Line::from(Span::styled(
+                        format!("  {}:", ctx.ui_text.text(TextKey::SkillsMetadata)),
+                        Style::default()
+                            .fg(palette.accent)
+                            .add_modifier(Modifier::BOLD),
+                    )));
+                    for (key, value) in &skill.metadata {
+                        add_field(&mut preview_lines, format!("  {key}"), value);
+                    }
+                }
+                preview_lines.push(Line::from(""));
+                preview_lines.push(Line::from(Span::styled(
+                    "─".repeat(self.preview_content_width),
+                    Style::default().fg(palette.muted),
+                )));
+            }
+            preview_lines.extend(rendered.lines.iter().cloned());
+
+            let total_preview_lines = preview_lines.len();
             let max_scroll = total_preview_lines.saturating_sub(preview_content_height as usize);
             self.preview_scroll = self.preview_scroll.min(max_scroll);
             let scroll = self.preview_scroll;
-            let visible_lines: Vec<Line<'_>> = rendered
-                .lines
+            let visible_lines: Vec<Line<'_>> = preview_lines
                 .iter()
                 .skip(scroll)
                 .take(preview_content_height as usize)

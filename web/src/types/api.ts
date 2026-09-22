@@ -383,6 +383,10 @@ export interface FileSuggestion {
 export interface SkillInfo {
   name: string;
   description: string;
+  license: string | null;
+  compatibility: string | null;
+  metadata: Record<string, string>;
+  allowed_tools: string | null;
   directory: string;
   location: string;
   is_bundled: boolean;

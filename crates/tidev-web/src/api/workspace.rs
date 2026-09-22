@@ -175,6 +175,10 @@ pub(super) async fn list_skills(State(state): State<Arc<AppState>>) -> Json<Skil
         .map(|s| SkillDto {
             name: s.name.clone(),
             description: s.description.clone(),
+            license: s.frontmatter.license.clone(),
+            compatibility: s.frontmatter.compatibility.clone(),
+            metadata: s.frontmatter.metadata.clone(),
+            allowed_tools: s.frontmatter.allowed_tools.clone(),
             directory: s.directory.to_string_lossy().to_string(),
             location: s.location.to_string_lossy().to_string(),
             is_bundled: s.directory.to_string_lossy().starts_with("__builtin__"),
@@ -201,6 +205,10 @@ pub(super) async fn get_skill(
     Ok(Json(SkillDto {
         name: s.name.clone(),
         description: s.description.clone(),
+        license: s.frontmatter.license.clone(),
+        compatibility: s.frontmatter.compatibility.clone(),
+        metadata: s.frontmatter.metadata.clone(),
+        allowed_tools: s.frontmatter.allowed_tools.clone(),
         directory: s.directory.to_string_lossy().to_string(),
         location: s.location.to_string_lossy().to_string(),
         is_bundled: s.directory.to_string_lossy().starts_with("__builtin__"),

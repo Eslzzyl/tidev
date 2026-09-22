@@ -3,12 +3,13 @@ use ignore::WalkBuilder;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{
-    collections::HashSet,
+    collections::{BTreeMap, HashSet},
     fs,
     path::{Component, Path, PathBuf},
 };
 
 use reqwest::blocking::Client;
+use yaml_rust2::{Yaml, YamlLoader};
 
 use tidev_utils::path::{canonicalize_display, canonicalize_for_comparison};
 
@@ -38,10 +39,23 @@ pub const SKILL_TOOL_DESCRIPTION: &str = "Load a reusable skill or read a file i
      offset/limit paginate the file by line (default 2000 lines and 50 KiB per page). Paths are \
      confined to the skill's own directory.";
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SkillFrontmatter {
+    /// Optional Agent Skills standard license field.
+    pub license: Option<String>,
+    /// Optional Agent Skills standard compatibility field.
+    pub compatibility: Option<String>,
+    /// Optional Agent Skills standard metadata map.
+    pub metadata: BTreeMap<String, String>,
+    /// Optional experimental Agent Skills standard allowed-tools field.
+    pub allowed_tools: Option<String>,
+}
+
 #[derive(Clone, Debug)]
 pub struct SkillInfo {
     pub name: String,
     pub description: String,
+    pub frontmatter: SkillFrontmatter,
     pub directory: PathBuf,
     pub location: PathBuf,
     /// The complete normalized SKILL.md document, including frontmatter.
@@ -779,13 +793,14 @@ fn parse_skill_content(
 ) -> Result<SkillInfo, ()> {
     log::debug!("parse_skill_content: location={}", location.display());
     let normalized_content = raw_content.replace("\r\n", "\n");
-    let (name, description, body) = parse_frontmatter(&normalized_content).map_err(|e| {
-        log::debug!(
-            "parse_skill_content: frontmatter parse error for {}: {}",
-            location.display(),
-            e
-        );
-    })?;
+    let (name, description, frontmatter, body) =
+        parse_frontmatter(&normalized_content).map_err(|e| {
+            log::debug!(
+                "parse_skill_content: frontmatter parse error for {}: {}",
+                location.display(),
+                e
+            );
+        })?;
     let body = body.trim().to_string();
 
     if !is_valid_skill_name(&name) {
@@ -833,6 +848,7 @@ fn parse_skill_content(
     Ok(SkillInfo {
         name,
         description,
+        frontmatter,
         directory: directory.unwrap_or_else(|| location.clone()),
         location,
         document: normalized_content,
@@ -907,15 +923,15 @@ fn fetch_remote_skill(url: &str) -> Result<SkillInfo, ()> {
     parse_skill_content(PathBuf::from(url), None, content)
 }
 
-/// Parse YAML frontmatter from a SKILL.md file.
+/// Parse Agent Skills standard frontmatter from a `SKILL.md` document.
 ///
-/// Extracts `name` and `description` from the `---` delimited block
-/// at the start of the content, returning them along with the body
-/// text (everything after the frontmatter).
-///
-/// This avoids pulling in the full `serde_yaml` crate, which is
-/// deprecated and no longer maintained.
-pub(crate) fn parse_frontmatter(content: &str) -> Result<(String, String, &str), String> {
+/// The required `name` and `description` fields remain available directly on
+/// [`SkillInfo`]. Optional standard fields are returned separately. Unknown
+/// fields are intentionally ignored so implementation-specific extensions do
+/// not become tidev features.
+pub(crate) fn parse_frontmatter(
+    content: &str,
+) -> Result<(String, String, SkillFrontmatter, &str), String> {
     let content = content
         .strip_prefix("---\n")
         .ok_or_else(|| "missing opening `---`".to_string())?;
@@ -923,21 +939,78 @@ pub(crate) fn parse_frontmatter(content: &str) -> Result<(String, String, &str),
         .split_once("\n---\n")
         .ok_or_else(|| "missing closing `---`".to_string())?;
 
-    let mut name: Option<&str> = None;
-    let mut description: Option<&str> = None;
+    let documents = YamlLoader::load_from_str(frontmatter)
+        .map_err(|error| format!("invalid YAML frontmatter: {error}"))?;
+    let document = documents
+        .first()
+        .ok_or_else(|| "empty YAML frontmatter".to_string())?;
+    let mapping = match document {
+        Yaml::Hash(mapping) => mapping,
+        _ => return Err("YAML frontmatter must be a mapping".to_string()),
+    };
 
-    for line in frontmatter.lines() {
-        if let Some(stripped) = line.strip_prefix("name: ") {
-            name = Some(stripped.trim());
-        } else if let Some(stripped) = line.strip_prefix("description: ") {
-            description = Some(stripped.trim());
-        }
+    let name =
+        yaml_string_field(mapping, "name")?.ok_or_else(|| "missing 'name' field".to_string())?;
+    let description = yaml_string_field(mapping, "description")?
+        .ok_or_else(|| "missing 'description' field".to_string())?;
+
+    if description.is_empty() {
+        return Err("'description' must not be empty".to_string());
+    }
+    if description.chars().count() > 1024 {
+        return Err("'description' must be at most 1024 characters".to_string());
     }
 
-    let name = name.ok_or_else(|| "missing 'name' field".to_string())?;
-    let description = description.ok_or_else(|| "missing 'description' field".to_string())?;
+    let compatibility = yaml_string_field(mapping, "compatibility")?;
+    if compatibility.as_ref().is_some_and(|value| value.is_empty()) {
+        return Err("'compatibility' must not be empty".to_string());
+    }
+    if compatibility
+        .as_ref()
+        .is_some_and(|value| value.chars().count() > 500)
+    {
+        return Err("'compatibility' must be at most 500 characters".to_string());
+    }
 
-    Ok((name.to_string(), description.to_string(), body))
+    let metadata = match mapping.get(&Yaml::String("metadata".to_string())) {
+        None | Some(Yaml::Null) => BTreeMap::new(),
+        Some(Yaml::Hash(metadata)) => {
+            let mut values = BTreeMap::new();
+            for (key, value) in metadata {
+                let key = match key {
+                    Yaml::String(key) => key.clone(),
+                    _ => return Err("'metadata' keys must be strings".to_string()),
+                };
+                let value = match value {
+                    Yaml::String(value) => value.clone(),
+                    _ => return Err("'metadata' values must be strings".to_string()),
+                };
+                values.insert(key, value);
+            }
+            values
+        }
+        Some(_) => return Err("'metadata' must be a mapping".to_string()),
+    };
+
+    let frontmatter = SkillFrontmatter {
+        license: yaml_string_field(mapping, "license")?,
+        compatibility,
+        metadata,
+        allowed_tools: yaml_string_field(mapping, "allowed-tools")?,
+    };
+
+    Ok((name, description, frontmatter, body))
+}
+
+fn yaml_string_field(
+    mapping: &yaml_rust2::yaml::Hash,
+    field: &str,
+) -> Result<Option<String>, String> {
+    match mapping.get(&Yaml::String(field.to_string())) {
+        None | Some(Yaml::Null) => Ok(None),
+        Some(Yaml::String(value)) => Ok(Some(value.clone())),
+        Some(_) => Err(format!("'{field}' must be a string")),
+    }
 }
 
 fn collect_companion_files(skill_dir: &Path, skill_file: &Path) -> Vec<PathBuf> {
@@ -1087,6 +1160,7 @@ mod tests {
         SkillInfo {
             name: name.to_string(),
             description: format!("test skill {name}"),
+            frontmatter: SkillFrontmatter::default(),
             directory: dir.to_path_buf(),
             location: dir.join(SKILL_FILE_NAME),
             document: format!(
@@ -1119,6 +1193,66 @@ mod tests {
             section,
             "Available skills:\n- demo: test skill demo\n- alpha: test skill alpha"
         );
+    }
+
+    #[test]
+    fn parse_frontmatter_supports_all_standard_optional_fields() {
+        let document = "---\nname: moderation-diagnose\ndescription: Diagnose moderation issues.\nlicense: Apache-2.0\ncompatibility: Requires git and network access.\nmetadata:\n  author: example-org\n  version: \"1.0\"\nallowed-tools: Read Bash(git:*)\n---\n\n# Instructions\n";
+
+        let (name, description, frontmatter, body) = parse_frontmatter(document).unwrap();
+
+        assert_eq!(name, "moderation-diagnose");
+        assert_eq!(description, "Diagnose moderation issues.");
+        assert_eq!(frontmatter.license.as_deref(), Some("Apache-2.0"));
+        assert_eq!(
+            frontmatter.compatibility.as_deref(),
+            Some("Requires git and network access.")
+        );
+        assert_eq!(
+            frontmatter.metadata.get("author").map(String::as_str),
+            Some("example-org")
+        );
+        assert_eq!(
+            frontmatter.metadata.get("version").map(String::as_str),
+            Some("1.0")
+        );
+        assert_eq!(
+            frontmatter.allowed_tools.as_deref(),
+            Some("Read Bash(git:*)")
+        );
+        assert_eq!(body, "\n# Instructions\n");
+    }
+
+    #[test]
+    fn parse_frontmatter_ignores_non_standard_fields() {
+        let document = "---\nname: demo\ndescription: A demo skill.\ndisable-model-invocation: true\nuser-invocable: false\n---\nBody\n";
+
+        let (_, _, frontmatter, _) = parse_frontmatter(document).unwrap();
+
+        assert_eq!(frontmatter, SkillFrontmatter::default());
+    }
+
+    #[test]
+    fn parse_frontmatter_rejects_invalid_standard_field_types_and_lengths() {
+        let invalid_metadata =
+            "---\nname: demo\ndescription: A demo skill.\nmetadata:\n  version: 1\n---\nBody\n";
+        assert!(parse_frontmatter(invalid_metadata).is_err());
+
+        let long_description = format!(
+            "---\nname: demo\ndescription: {}\n---\nBody\n",
+            "x".repeat(1025)
+        );
+        assert!(parse_frontmatter(&long_description).is_err());
+
+        let long_compatibility = format!(
+            "---\nname: demo\ndescription: A demo skill.\ncompatibility: {}\n---\nBody\n",
+            "x".repeat(501)
+        );
+        assert!(parse_frontmatter(&long_compatibility).is_err());
+
+        let empty_compatibility =
+            "---\nname: demo\ndescription: A demo skill.\ncompatibility: \"\"\n---\nBody\n";
+        assert!(parse_frontmatter(empty_compatibility).is_err());
     }
 
     #[test]

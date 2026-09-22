@@ -337,9 +337,93 @@ export function SkillsSection() {
                 {/* Detail Body */}
                 <div className="flex-1 p-4 overflow-y-auto max-h-[380px]">
                   {activeTab === "doc" ? (
-                    <div className="prose prose-xs dark:prose-invert max-w-none">
-                      <MarkdownRenderer content={selectedSkill.content || selectedSkill.document} />
-                    </div>
+                    <>
+                      <div className="mb-4 rounded-lg border border-neutral-200 bg-neutral-50/70 p-3 dark:border-neutral-800 dark:bg-neutral-950/50">
+                        <div className="mb-2 border-b border-neutral-200 pb-2 text-xs font-semibold text-neutral-700 dark:border-neutral-800 dark:text-neutral-300">
+                          {t("Frontmatter")}
+                        </div>
+                        <dl className="space-y-2 text-xs">
+                          <div className="grid grid-cols-[minmax(90px,auto)_1fr] gap-3">
+                            <dt className="font-medium text-neutral-500 dark:text-neutral-400">
+                              {t("Name")}
+                            </dt>
+                            <dd className="font-mono text-neutral-800 dark:text-neutral-200 break-words">
+                              {selectedSkill.name}
+                            </dd>
+                          </div>
+                          <div className="grid grid-cols-[minmax(90px,auto)_1fr] gap-3">
+                            <dt className="font-medium text-neutral-500 dark:text-neutral-400">
+                              {t("Description")}
+                            </dt>
+                            <dd className="whitespace-pre-wrap break-words text-neutral-800 dark:text-neutral-200">
+                              {selectedSkill.description}
+                            </dd>
+                          </div>
+                          {selectedSkill.license && (
+                            <div className="grid grid-cols-[minmax(90px,auto)_1fr] gap-3">
+                              <dt className="font-medium text-neutral-500 dark:text-neutral-400">
+                                {t("License")}
+                              </dt>
+                              <dd className="whitespace-pre-wrap break-words text-neutral-800 dark:text-neutral-200">
+                                {selectedSkill.license}
+                              </dd>
+                            </div>
+                          )}
+                          {selectedSkill.compatibility && (
+                            <div className="grid grid-cols-[minmax(90px,auto)_1fr] gap-3">
+                              <dt className="font-medium text-neutral-500 dark:text-neutral-400">
+                                {t("Compatibility")}
+                              </dt>
+                              <dd className="whitespace-pre-wrap break-words text-neutral-800 dark:text-neutral-200">
+                                {selectedSkill.compatibility}
+                              </dd>
+                            </div>
+                          )}
+                          {selectedSkill.allowed_tools && (
+                            <div className="grid grid-cols-[minmax(90px,auto)_1fr] gap-3">
+                              <dt className="font-medium text-neutral-500 dark:text-neutral-400">
+                                {t("Allowed tools")}
+                              </dt>
+                              <dd className="whitespace-pre-wrap break-words font-mono text-neutral-800 dark:text-neutral-200">
+                                {selectedSkill.allowed_tools}
+                              </dd>
+                            </div>
+                          )}
+                          {Object.entries(selectedSkill.metadata || {}).length > 0 && (
+                            <div className="grid grid-cols-[minmax(90px,auto)_1fr] gap-3">
+                              <dt className="font-medium text-neutral-500 dark:text-neutral-400">
+                                {t("Metadata")}
+                              </dt>
+                              <dd>
+                                <dl className="space-y-1.5">
+                                  {Object.entries(selectedSkill.metadata || {}).map(
+                                    ([key, value]) => (
+                                      <div
+                                        className="grid grid-cols-[minmax(80px,auto)_1fr] gap-2"
+                                        key={key}
+                                      >
+                                        <dt className="font-mono text-neutral-500 dark:text-neutral-400 break-words">
+                                          {key}
+                                        </dt>
+                                        <dd className="whitespace-pre-wrap break-words text-neutral-800 dark:text-neutral-200">
+                                          {value}
+                                        </dd>
+                                      </div>
+                                    ),
+                                  )}
+                                </dl>
+                              </dd>
+                            </div>
+                          )}
+                        </dl>
+                      </div>
+
+                      <div className="prose prose-xs dark:prose-invert max-w-none">
+                        <MarkdownRenderer
+                          content={selectedSkill.content || selectedSkill.document}
+                        />
+                      </div>
+                    </>
                   ) : (
                     /* Companion Files Viewer */
                     <div className="space-y-3">

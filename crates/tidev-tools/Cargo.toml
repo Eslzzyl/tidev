@@ -42,6 +42,7 @@ tokio = { version = "1", features = ["process", "io-std", "io-util", "macros", "
 tokio-util = "0.7"
 url = "2"
 uuid = { version = "1", features = ["v4"] }
+yaml-rust2 = "0.13"
 
 tidev-llm = { path = "../tidev-llm" }
 tidev-utils = { path = "../tidev-utils" }
