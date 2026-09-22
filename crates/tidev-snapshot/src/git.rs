@@ -57,14 +57,15 @@ fn parse_nul_name_status(bytes: &[u8]) -> Result<Vec<(String, String)>> {
         .filter(|field| !field.is_empty())
         .collect::<Vec<_>>();
     let mut result = Vec::with_capacity(fields.len() / 2);
-    for pair in fields.chunks_exact(2) {
-        let status =
-            String::from_utf8(pair[0].to_vec()).context("git returned a non-UTF-8 diff status")?;
-        let path = String::from_utf8(pair[1].to_vec())
+    let (pairs, remainder) = fields.as_chunks::<2>();
+    for [status_bytes, path_bytes] in pairs {
+        let status = String::from_utf8(status_bytes.to_vec())
+            .context("git returned a non-UTF-8 diff status")?;
+        let path = String::from_utf8(path_bytes.to_vec())
             .context("git returned a path that is not valid UTF-8")?;
         result.push((status, path));
     }
-    if fields.len() % 2 != 0 {
+    if !remainder.is_empty() {
         bail!("git returned an incomplete NUL-delimited name-status record");
     }
     Ok(result)

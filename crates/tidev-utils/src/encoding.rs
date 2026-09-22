@@ -148,11 +148,12 @@ pub fn decode_text_lossy_with_options(bytes: &[u8], options: DecodeOptions) -> T
 fn decode_utf16(bytes: &[u8], little_endian: bool) -> (String, bool) {
     let mut units = Vec::with_capacity(bytes.len().div_ceil(2));
     let mut had_decode_errors = !bytes.len().is_multiple_of(2);
-    for chunk in bytes.chunks_exact(2) {
+    let (chunks, _) = bytes.as_chunks::<2>();
+    for [first, second] in chunks {
         let unit = if little_endian {
-            u16::from_le_bytes([chunk[0], chunk[1]])
+            u16::from_le_bytes([*first, *second])
         } else {
-            u16::from_be_bytes([chunk[0], chunk[1]])
+            u16::from_be_bytes([*first, *second])
         };
         units.push(unit);
     }
