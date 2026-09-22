@@ -386,18 +386,18 @@ impl Component for SessionPanel {
                 self.move_selection(1);
                 None
             }
-            KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            KeyCode::Char('p') if key.modifiers.is_empty() => {
                 self.move_selection(-1);
                 None
             }
-            KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            KeyCode::Char('n') if key.modifiers.is_empty() => {
                 self.move_selection(1);
                 None
             }
             KeyCode::Enter => self
                 .selected_session()
                 .map(|s| Action::Session(SessionAction::Select(s.session_id))),
-            KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            KeyCode::Char('a') if key.modifiers.is_empty() => {
                 self.operation_mode = if self.operation_mode == OperationMode::MultiSelect {
                     OperationMode::Select
                 } else {
@@ -415,7 +415,7 @@ impl Component for SessionPanel {
                 }
                 None
             }
-            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            KeyCode::Char('d') if key.modifiers.is_empty() => {
                 let ids = self.get_selected_session_ids();
                 let titles = self.get_selected_session_titles();
                 if !ids.is_empty() {
@@ -426,7 +426,7 @@ impl Component for SessionPanel {
                 }
                 None
             }
-            KeyCode::Char('x') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            KeyCode::Char('x') if key.modifiers.is_empty() => {
                 let preview = CleanupPreview::from_sessions(self.sessions.clone());
                 self.dialog = SessionPanelDialog::Cleanup {
                     preview,
@@ -435,7 +435,7 @@ impl Component for SessionPanel {
                 };
                 None
             }
-            KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            KeyCode::Char('e') if key.modifiers.is_empty() => {
                 let ids = self.get_selected_session_ids();
                 let titles = self.get_selected_session_titles();
                 if !ids.is_empty() {
