@@ -15,7 +15,12 @@ use uuid::Uuid;
 /// Known GUI editors that need `--wait` (or equivalent) when spawned
 /// via auto-detect, so the process blocks until the editor window is closed.
 fn editor_wait_flag(name: &str) -> Option<&'static str> {
-    match name {
+    let name = std::path::Path::new(name)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or(name)
+        .to_ascii_lowercase();
+    match name.as_str() {
         "code" | "code-insiders" | "cursor" | "windsurf" => Some("--wait"),
         "subl" => Some("--wait"),
         "zed" => Some("--wait"),
@@ -67,15 +72,15 @@ pub fn resolve_editor(ui_config: &UiConfig) -> Option<(String, Vec<String>)> {
                 "emacs",
             ]
             .iter()
-            .find(|name| is_executable_on_path(name))
-            .map(|name| name.to_string())
+            .find_map(|name| which::which(name).ok())
+            .map(|path| path.to_string_lossy().into_owned())
         })?;
 
     let parts = shlex::split(&cmd_str)?;
     if parts.is_empty() {
         return None;
     }
-    let cmd = parts[0].clone();
+    let mut cmd = parts[0].clone();
     let mut args: Vec<String> = parts[1..].to_vec();
 
     // Auto-detected editors (no args from the user) may need --wait so the
@@ -87,28 +92,11 @@ pub fn resolve_editor(ui_config: &UiConfig) -> Option<(String, Vec<String>)> {
         args.push(flag.to_string());
     }
 
-    Some((cmd, args))
-}
+    if let Ok(path) = which::which(&cmd) {
+        cmd = path.to_string_lossy().into_owned();
+    }
 
-/// Check if an executable exists on `$PATH`.
-fn is_executable_on_path(name: &str) -> bool {
-    let (shell, flag) = if cfg!(windows) {
-        ("cmd", "/c")
-    } else {
-        ("sh", "-c")
-    };
-    Command::new(shell)
-        .arg(flag)
-        .arg(if cfg!(windows) {
-            format!("where {}", name)
-        } else {
-            format!("which {}", name)
-        })
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    Some((cmd, args))
 }
 
 // ---------------------------------------------------------------------------
@@ -208,12 +196,14 @@ pub fn open_external_editor(text: &str, ui_config: &UiConfig) -> anyhow::Result<
     suspend_tui()?;
 
     args.push(edit_file.path().to_string_lossy().to_string());
-    let status = Command::new(&cmd).args(&args).status();
+    let status_result = Command::new(&cmd).args(&args).status();
+    let resume_result = resume_tui();
 
-    resume_tui()?;
+    resume_result?;
+    let status = status_result.with_context(|| format!("Failed to start editor '{cmd}'"))?;
 
     // Report editor exit status if it failed.
-    if let Some(exit_code) = status.ok().and_then(|s| s.code())
+    if let Some(exit_code) = status.code()
         && exit_code != 0
     {
         log::warn!("Editor {cmd} exited with code {exit_code}");

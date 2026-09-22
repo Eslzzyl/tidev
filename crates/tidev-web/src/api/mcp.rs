@@ -75,7 +75,7 @@ pub(super) async fn upsert_mcp_server(
 
     mcp.upsert_server(name.clone(), request.config.clone())
         .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+        .map_err(|e| ApiError::internal(format!("{e:#}")))?;
 
     state.runtime.update_config(|cfg| {
         cfg.mcp.servers.insert(name, request.config);
@@ -94,7 +94,7 @@ pub(super) async fn delete_mcp_server(
         .mcp_manager()
         .remove_server(&name)
         .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+        .map_err(|e| ApiError::internal(format!("{e:#}")))?;
 
     state.runtime.update_config(|cfg| {
         cfg.mcp.servers.remove(&name);
@@ -115,14 +115,15 @@ pub(super) async fn connect_mcp_server(
             target_config = Some(srv.clone());
         }
     });
-    let _ = state.runtime.save_config();
+    state.runtime.save_config()?;
 
     if let Some(config) = target_config {
-        let _ = state
+        state
             .runtime
             .mcp_manager()
             .upsert_server(name.clone(), config)
-            .await;
+            .await
+            .map_err(|e| ApiError::internal(format!("{e:#}")))?;
     }
 
     state
@@ -130,7 +131,7 @@ pub(super) async fn connect_mcp_server(
         .mcp_manager()
         .refresh_server(&name)
         .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+        .map_err(|e| ApiError::internal(format!("{e:#}")))?;
     Ok(Json(AcceptedResponse { accepted: true }))
 }
 
@@ -145,14 +146,15 @@ pub(super) async fn disconnect_mcp_server(
             target_config = Some(srv.clone());
         }
     });
-    let _ = state.runtime.save_config();
+    state.runtime.save_config()?;
 
     if let Some(config) = target_config {
-        let _ = state
+        state
             .runtime
             .mcp_manager()
             .upsert_server(name.clone(), config)
-            .await;
+            .await
+            .map_err(|e| ApiError::internal(format!("{e:#}")))?;
     }
 
     state
@@ -160,7 +162,7 @@ pub(super) async fn disconnect_mcp_server(
         .mcp_manager()
         .disconnect_server(&name)
         .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+        .map_err(|e| ApiError::internal(format!("{e:#}")))?;
     Ok(Json(AcceptedResponse { accepted: true }))
 }
 
@@ -173,7 +175,7 @@ pub(super) async fn refresh_mcp_server(
         .mcp_manager()
         .refresh_server(&name)
         .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+        .map_err(|e| ApiError::internal(format!("{e:#}")))?;
     Ok(Json(AcceptedResponse { accepted: true }))
 }
 

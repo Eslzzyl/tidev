@@ -31,3 +31,7 @@ rmcp = { version = "3.4.0", features = [
 ] }
 schemars = "1"
 base64 = "0.23"
+which = "8.0.6"
+
+[dev-dependencies]
+tempfile = "3"

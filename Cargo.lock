@@ -5026,11 +5026,13 @@ dependencies = [
  "serde",
  "serde_json",
  "sse-stream",
+ "tempfile",
  "tidev-llm",
  "tokio",
  "tokio-util",
  "url",
  "uuid",
+ "which",
 ]
 
 [[package]]
@@ -5247,6 +5249,7 @@ dependencies = [
  "url",
  "urlencoding",
  "uuid",
+ "which",
 ]
 
 [[package]]
@@ -5295,6 +5298,7 @@ dependencies = [
  "tower-http 0.7.1",
  "url",
  "uuid",
+ "which",
 ]
 
 [[package]]
@@ -5984,6 +5988,15 @@ name = "weezl"
 version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
+
+[[package]]
+name = "which"
+version = "8.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bae2f2b2b816647a1cab1acc91f5bd20812d53cb344382635ec2181940c8034f"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "wide"

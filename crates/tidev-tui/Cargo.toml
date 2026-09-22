@@ -50,3 +50,4 @@ url = "2"
 urlencoding = "2"
 uuid = { version = "1", features = ["v4"] }
 two-face = { version = "0.5", default-features = false, features = ["syntect-default-fancy"] }
+which = "8.0.6"

@@ -471,7 +471,7 @@ fn to_agent_spec(workspace_root: &Path, config: &McpServerConfig) -> McpServerSp
             env,
             disabled,
         } => McpServerSpec::Stdio {
-            command: command.clone(),
+            command: resolve_stdio_command(workspace_root, command, cwd.as_deref()),
             args: args.clone(),
             cwd: cwd
                 .as_deref()
@@ -507,6 +507,18 @@ fn resolve_workspace_path(workspace_root: &Path, value: &str) -> PathBuf {
     } else {
         workspace_root.join(path)
     }
+}
+
+fn resolve_stdio_command(workspace_root: &Path, command: &str, cwd: Option<&str>) -> String {
+    let path = Path::new(command);
+    if path.is_absolute() || (!command.contains('/') && !command.contains('\\')) {
+        return command.to_string();
+    }
+
+    let base = cwd
+        .map(|value| resolve_workspace_path(workspace_root, value))
+        .unwrap_or_else(|| workspace_root.to_path_buf());
+    base.join(path).to_string_lossy().into_owned()
 }
 
 fn to_host_definition(tool: &McpToolInfo) -> ToolDefinition {
@@ -756,5 +768,27 @@ mod tests {
                     && headers.get("Authorization") == Some(&"Bearer token".to_string())
                     && disabled
         ));
+    }
+
+    #[test]
+    fn relative_stdio_command_is_resolved_from_workspace_cwd() {
+        let workspace = PathBuf::from("workspace");
+        let command = resolve_stdio_command(&workspace, "bin/server", Some(".mcp"));
+        assert_eq!(
+            command,
+            workspace
+                .join(".mcp")
+                .join("bin/server")
+                .to_string_lossy()
+                .into_owned()
+        );
+    }
+
+    #[test]
+    fn bare_stdio_command_is_left_for_path_resolution() {
+        assert_eq!(
+            resolve_stdio_command(Path::new("workspace"), "dbx-mcp-server", None),
+            "dbx-mcp-server"
+        );
     }
 }

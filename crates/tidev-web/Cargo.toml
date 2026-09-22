@@ -47,3 +47,4 @@ tower-http = { version = "0.7", features = [
 ] }
 url = "2"
 uuid = { version = "1", features = ["serde", "v4"] }
+which = "8.0.6"

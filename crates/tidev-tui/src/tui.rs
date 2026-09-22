@@ -120,6 +120,7 @@ impl Tui {
         let mut request_rx = app.request_rx.take();
         let mut event_rx = app.event_rx.take();
         let mut git_result_rx = app.git_result_rx.take();
+        let mut mcp_notice_rx = app.mcp_notice_rx.take();
 
         // ── Dedicated crossterm reader thread ─────────────────────────
         //
@@ -239,6 +240,17 @@ impl Tui {
                         processed = true;
                     }
                 }
+                result = async {
+                    match mcp_notice_rx.as_mut() {
+                        Some(rx) => rx.recv().await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    if let Some(message) = result {
+                        app.set_notice(message);
+                        processed = true;
+                    }
+                }
                 _ = tokio::time::sleep(FRAME_BUDGET) => {}
             }
 
@@ -339,6 +351,12 @@ impl Tui {
             if let Some(ref mut rx) = git_result_rx {
                 while let Ok(result) = rx.try_recv() {
                     app.handle_git_task_result(result);
+                }
+            }
+
+            if let Some(ref mut rx) = mcp_notice_rx {
+                while let Ok(message) = rx.try_recv() {
+                    app.set_notice(message);
                 }
             }
 

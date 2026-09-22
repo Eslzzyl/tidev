@@ -1181,6 +1181,7 @@ impl App {
         match action {
             McpAction::Toggle(name) => {
                 let mcp = self.runtime.mcp_manager().clone();
+                let notice_tx = self.mcp_notice_tx.clone();
                 let name_for_config = name.clone();
                 let mut target_config = None;
                 self.runtime.update_config(|cfg| {
@@ -1194,29 +1195,52 @@ impl App {
 
                 tokio::spawn(async move {
                     if let Some((disabled, cfg)) = target_config {
-                        let _ = mcp.upsert_server(name_for_config.clone(), cfg).await;
-                        if disabled {
-                            let _ = mcp.disconnect_server(&name_for_config).await;
+                        if let Err(error) = mcp.upsert_server(name_for_config.clone(), cfg).await {
+                            let _ = notice_tx.send(format!(
+                                "MCP server '{name_for_config}' update failed: {error:#}"
+                            ));
+                        } else if disabled {
+                            if let Err(error) = mcp.disconnect_server(&name_for_config).await {
+                                let _ = notice_tx.send(format!(
+                                    "MCP server '{name_for_config}' disconnect failed: {error:#}"
+                                ));
+                            }
                         } else {
-                            let _ = mcp.refresh_server(&name_for_config).await;
+                            if let Err(error) = mcp.refresh_server(&name_for_config).await {
+                                let _ = notice_tx.send(format!(
+                                    "MCP server '{name_for_config}' refresh failed: {error:#}"
+                                ));
+                            }
                         }
                     } else {
-                        let _ = mcp.toggle_server(&name).await;
+                        if let Err(error) = mcp.toggle_server(&name).await {
+                            let _ = notice_tx
+                                .send(format!("MCP server '{name}' toggle failed: {error:#}"));
+                        }
                     }
                 });
             }
             McpAction::Refresh(name) => {
                 let mcp = self.runtime.mcp_manager().clone();
+                let notice_tx = self.mcp_notice_tx.clone();
                 tokio::spawn(async move {
-                    let _ = mcp.refresh_server(&name).await;
+                    if let Err(error) = mcp.refresh_server(&name).await {
+                        let _ = notice_tx
+                            .send(format!("MCP server '{name}' refresh failed: {error:#}"));
+                    }
                 });
             }
             McpAction::Remove(name) => {
                 // Remove from McpManager.
                 let mcp = self.runtime.mcp_manager().clone();
+                let notice_tx = self.mcp_notice_tx.clone();
                 let name_for_spawn = name.clone();
                 tokio::spawn(async move {
-                    let _ = mcp.remove_server(&name_for_spawn).await;
+                    if let Err(error) = mcp.remove_server(&name_for_spawn).await {
+                        let _ = notice_tx.send(format!(
+                            "MCP server '{name_for_spawn}' removal failed: {error:#}"
+                        ));
+                    }
                 });
 
                 // Remove from persisted config.
@@ -1237,14 +1261,26 @@ impl App {
 
                 // Upsert in McpManager.
                 let mcp = self.runtime.mcp_manager().clone();
+                let notice_tx = self.mcp_notice_tx.clone();
                 tokio::spawn(async move {
                     // If renaming, remove the old entry first.
                     if let Some(ref orig) = orig_for_spawn
                         && orig != &name_for_spawn
+                        && let Err(error) = mcp.remove_server(orig).await
                     {
-                        let _ = mcp.remove_server(orig).await;
+                        let _ = notice_tx.send(format!(
+                            "MCP server '{orig}' rename cleanup failed: {error:#}"
+                        ));
+                        return;
                     }
-                    let _ = mcp.upsert_server(name_for_spawn, cfg_for_spawn).await;
+                    if let Err(error) = mcp
+                        .upsert_server(name_for_spawn.clone(), cfg_for_spawn)
+                        .await
+                    {
+                        let _ = notice_tx.send(format!(
+                            "MCP server '{name_for_spawn}' update failed: {error:#}"
+                        ));
+                    }
                 });
 
                 // Persist config change.

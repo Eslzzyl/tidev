@@ -95,6 +95,18 @@ tidev 的 MCP 配置采用业界通用的标准 JSON 文件格式（与 Claude D
 - `env`：可选，附加环境变量键值表
 - `disabled` / `enabled`：可选，是否禁用该服务器（`disabled: true` 或 `enabled: false`，禁用后启动时不会自动连接）
 
+在 Windows 上，命令会通过 `PATH` / `PATHEXT` 解析，因此 `npx`、`pnpm`、
+`dbx-mcp-server` 等由 Node 包管理器生成的 `.cmd` 命令包装器无需在配置中手动
+添加 `.cmd` 后缀。包含路径的相对命令会以 `cwd`（未指定时为工作区根目录）为基准
+解析。
+
+通过 TUI 编辑服务器时，`args` 既支持 shell 风格的空格和引号，也支持 JSON 字符串
+数组。包含 Windows 路径、反斜杠或复杂引号时，建议使用 JSON 数组，例如：
+
+```json
+["--config", "C:\\Users\\user\\AppData\\Local\\mcp\\config.json"]
+```
+
 ## 6. `http` / `sse` 配置字段
 
 ```json
@@ -156,7 +168,8 @@ TUI 和 Web 的 MCP 面板仍直接展示当前服务器及其工具状态。
 
 - 如果 MCP 服务器无法连接，请检查命令是否存在、URL 是否可达、依赖是否安装
 - `stdio` 服务器的 `cwd` 若是相对路径，会以工作区根目录解析
-- 连接失败时，tidev 会显示 `failed` 状态并保留错误消息
+- stdio 服务器的启动、握手和工具发现有超时限制，超时后会终止连接并显示失败原因
+- 连接失败时，tidev 会显示 `failed` 状态、完整错误链以及服务器 stderr 尾部诊断信息
 - 通过 MCP 面板刷新服务器，可重新读取最新工具列表
 
 ## 10. 备注

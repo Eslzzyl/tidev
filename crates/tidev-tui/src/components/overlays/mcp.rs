@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use crossterm::event::{
     KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
@@ -63,7 +63,7 @@ impl ServerDraft {
                 if self.command.trim().is_empty() {
                     anyhow::bail!("Command is required for stdio servers");
                 }
-                let args: Vec<String> = shlex::split(&self.args).unwrap_or_default();
+                let args = parse_mcp_args(&self.args)?;
                 let env: BTreeMap<String, String> = self
                     .env
                     .lines()
@@ -120,6 +120,28 @@ impl ServerDraft {
             other => anyhow::bail!("unknown MCP server kind '{other}'"),
         }
     }
+}
+
+fn parse_mcp_args(input: &str) -> Result<Vec<String>> {
+    let input = input.trim();
+    if input.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    if input.starts_with('[') {
+        return serde_json::from_str(input)
+            .context("MCP arguments JSON must be an array of strings");
+    }
+
+    shlex::split(input).ok_or_else(|| {
+        anyhow::anyhow!(
+            "MCP arguments could not be parsed; use shell-style quoting or a JSON string array"
+        )
+    })
+}
+
+fn format_mcp_args(args: &[String]) -> String {
+    serde_json::to_string(args).unwrap_or_else(|_| args.join(" "))
 }
 
 // ---------------------------------------------------------------------------
@@ -296,7 +318,7 @@ impl McpServerPanel {
                     ..
                 } => {
                     draft.command = command;
-                    draft.args = args.join(" ");
+                    draft.args = format_mcp_args(&args);
                     draft.cwd = cwd.unwrap_or_default();
                     draft.env = env
                         .iter()
@@ -1583,6 +1605,28 @@ mod tests {
                 assert_eq!(env.get("FOO"), Some(&"bar".into()));
                 assert!(disabled);
             }
+            other => panic!("expected Stdio, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_server_draft_accepts_json_args_for_windows_paths() {
+        let mut draft = ServerDraft::new();
+        draft.kind = "stdio".to_string();
+        draft.command = "node".to_string();
+        draft.args = r#"["C:\\Program Files\\mcp\\server.js", "--config", "C:\\tmp\\config.json"]"#
+            .to_string();
+
+        let config = draft.to_config().unwrap();
+        match config {
+            McpServerConfig::Stdio { args, .. } => assert_eq!(
+                args,
+                vec![
+                    r"C:\Program Files\mcp\server.js".to_string(),
+                    "--config".to_string(),
+                    r"C:\tmp\config.json".to_string(),
+                ]
+            ),
             other => panic!("expected Stdio, got {other:?}"),
         }
     }

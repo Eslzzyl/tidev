@@ -5,7 +5,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use axum::Router;
 use axum::body::Body;
 use axum::http::{HeaderValue, StatusCode, Uri, header};
@@ -128,7 +128,7 @@ async fn start_vite(config: &FrontendConfig, cancel: CancellationToken) -> Resul
     run_pnpm_install(&config.root, &cancel).await?;
 
     let port = config.port.to_string();
-    let mut child = Command::new("pnpm")
+    let mut child = Command::new(pnpm_command()?)
         .arg("--dir")
         .arg(&config.root)
         .args(["run", "dev", "--host", "127.0.0.1", "--port"])
@@ -149,7 +149,7 @@ async fn start_vite(config: &FrontendConfig, cancel: CancellationToken) -> Resul
 }
 
 async fn run_pnpm_install(root: &std::path::Path, cancel: &CancellationToken) -> Result<()> {
-    let mut child = Command::new("pnpm")
+    let mut child = Command::new(pnpm_command()?)
         .arg("--dir")
         .arg(root)
         .args(["install", "--frozen-lockfile"])
@@ -173,6 +173,10 @@ async fn run_pnpm_install(root: &std::path::Path, cancel: &CancellationToken) ->
         }
     }
     Ok(())
+}
+
+fn pnpm_command() -> Result<std::path::PathBuf> {
+    which::which("pnpm").context("pnpm was not found on PATH")
 }
 
 async fn wait_for_port(port: u16, cancel: &CancellationToken) -> Result<()> {

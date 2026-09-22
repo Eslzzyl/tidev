@@ -125,6 +125,10 @@ pub struct App {
     pub(crate) git_result_tx: tokio::sync::mpsc::UnboundedSender<GitTaskResult>,
     /// Monotonic ID used to discard stale Git query results.
     pub(crate) next_git_request_id: u64,
+    /// Receiver for asynchronous MCP operation failures.
+    pub(crate) mcp_notice_rx: Option<tokio::sync::mpsc::UnboundedReceiver<String>>,
+    /// Sender used by asynchronous MCP operations to report failures.
+    pub(crate) mcp_notice_tx: tokio::sync::mpsc::UnboundedSender<String>,
 
     /// Chat message list component.
     pub(crate) message_list: Option<MessageList>,
@@ -265,6 +269,7 @@ impl App {
         event_rx: tokio::sync::mpsc::UnboundedReceiver<BackendEvent>,
     ) -> Self {
         let (git_result_tx, git_result_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (mcp_notice_tx, mcp_notice_rx) = tokio::sync::mpsc::unbounded_channel();
         let theme_catalog =
             ThemeCatalog::load(runtime.config_dir()).expect("bundled theme presets must parse");
         let theme_str = runtime.config().theme.clone();
@@ -314,6 +319,8 @@ impl App {
             git_result_rx: Some(git_result_rx),
             git_result_tx,
             next_git_request_id: 0,
+            mcp_notice_rx: Some(mcp_notice_rx),
+            mcp_notice_tx,
             pending_approvals: HashMap::new(),
             active_approval_session: None,
             boundary_permissions: HashMap::new(),

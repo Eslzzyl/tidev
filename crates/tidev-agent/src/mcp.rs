@@ -1,8 +1,10 @@
 //! Generic Model Context Protocol client and tool registry.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::error::Error as StdError;
+use std::ffi::{OsStr, OsString};
 use std::fmt::{Display, Formatter};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
@@ -20,8 +22,9 @@ use rmcp::transport::child_process::TokioChildProcess;
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransport;
 use serde_json::{Map, Value};
 use sse_stream::SseStream;
+use tokio::io::AsyncReadExt;
 use tokio::process::Command;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use url::Url;
@@ -32,6 +35,104 @@ use tidev_llm::message::{MessageAttachment, ToolCall, ToolExecutionResult, ToolM
 use crate::{Tool, ToolContext};
 
 type McpClient = RunningService<RoleClient, ClientConfig>;
+
+const MCP_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+const MCP_STDERR_LIMIT: usize = 8 * 1024;
+
+#[derive(Debug)]
+struct StderrCapture {
+    bytes: Mutex<VecDeque<u8>>,
+    finished: AtomicBool,
+    finished_notify: Notify,
+}
+
+impl StderrCapture {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            bytes: Mutex::new(VecDeque::with_capacity(MCP_STDERR_LIMIT)),
+            finished: AtomicBool::new(false),
+            finished_notify: Notify::new(),
+        })
+    }
+
+    fn append(&self, bytes: &[u8]) {
+        let mut captured = self.bytes.lock().unwrap();
+        for byte in bytes {
+            if captured.len() == MCP_STDERR_LIMIT {
+                captured.pop_front();
+            }
+            captured.push_back(*byte);
+        }
+    }
+
+    fn snapshot(&self) -> String {
+        let captured = self.bytes.lock().unwrap();
+        let bytes: Vec<u8> = captured.iter().copied().collect();
+        String::from_utf8_lossy(&bytes).trim().to_string()
+    }
+
+    async fn wait_until_finished(&self, timeout: Duration) {
+        if self.finished.load(Ordering::Acquire) {
+            return;
+        }
+        let _ = tokio::time::timeout(timeout, self.finished_notify.notified()).await;
+    }
+}
+
+fn capture_stderr(stderr: tokio::process::ChildStderr) -> Arc<StderrCapture> {
+    let capture = StderrCapture::new();
+    let reader_capture = Arc::clone(&capture);
+    tokio::spawn(async move {
+        let mut stderr = stderr;
+        let mut buffer = [0u8; 2048];
+        loop {
+            match stderr.read(&mut buffer).await {
+                Ok(0) | Err(_) => break,
+                Ok(size) => reader_capture.append(&buffer[..size]),
+            }
+        }
+        reader_capture.finished.store(true, Ordering::Release);
+        reader_capture.finished_notify.notify_waiters();
+    });
+    capture
+}
+
+fn format_mcp_error(error: &anyhow::Error, stderr: Option<&Arc<StderrCapture>>) -> String {
+    let mut message = format!("{error:#}");
+    if let Some(stderr) = stderr {
+        let stderr = stderr.snapshot();
+        if !stderr.is_empty() {
+            message.push_str("\nserver stderr:\n");
+            message.push_str(&stderr);
+        }
+    }
+    message
+}
+
+fn resolve_stdio_command(
+    command: &str,
+    cwd: Option<&Path>,
+    env: &BTreeMap<String, String>,
+) -> Result<PathBuf> {
+    let path = env
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case("PATH"))
+        .map(|(_, value)| OsString::from(value))
+        .or_else(|| std::env::var_os("PATH"));
+
+    resolve_stdio_command_with_path(command, cwd, path.as_deref())
+}
+
+fn resolve_stdio_command_with_path(
+    command: &str,
+    cwd: Option<&Path>,
+    path: Option<&OsStr>,
+) -> Result<PathBuf> {
+    let search_cwd = cwd.unwrap_or_else(|| Path::new("."));
+
+    which::which_in(command, path, search_cwd)
+        .with_context(|| format!("MCP stdio command '{command}' was not found"))
+}
 
 /// Host-resolved MCP server connection parameters.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -157,6 +258,7 @@ struct McpServerState {
     spec: McpServerSpec,
     status: McpConnectionStatus,
     client: Option<McpClient>,
+    stderr: Option<Arc<StderrCapture>>,
     tools: Vec<Arc<McpTool>>,
     disabled: bool,
 }
@@ -414,6 +516,7 @@ impl McpRegistry {
                         spec,
                         status: McpConnectionStatus::Disconnected,
                         client: None,
+                        stderr: None,
                         tools: Vec::new(),
                         disabled,
                     },
@@ -452,7 +555,7 @@ impl McpRegistry {
             tokio::time::sleep(interval).await;
         }
 
-        Ok(())
+        bail!("timed out waiting for MCP servers to become ready")
     }
 
     /// Connect or refresh all configured servers concurrently, retaining best-effort startup.
@@ -470,7 +573,7 @@ impl McpRegistry {
 
         let futures = names.into_iter().map(|name| async move {
             if let Err(error) = self.refresh_server(&name).await {
-                self.mark_failed(&name, error.to_string());
+                log::warn!("MCP server '{name}' refresh failed: {error:#}");
             }
         });
         futures_util::future::join_all(futures).await;
@@ -479,7 +582,7 @@ impl McpRegistry {
 
     /// Connect or reconnect one configured server and discover its tools.
     pub async fn refresh_server(&self, name: &str) -> Result<()> {
-        let (spec, existing_client) = {
+        let (spec, existing_client, existing_stderr) = {
             let mut inner = self.inner.lock().unwrap();
             let state = inner
                 .servers
@@ -488,36 +591,71 @@ impl McpRegistry {
             state.disabled = false;
             state.spec.set_disabled(false);
             state.status = McpConnectionStatus::Connecting;
-            (state.spec.clone(), state.client.take())
+            (state.spec.clone(), state.client.take(), state.stderr.take())
         };
 
-        let client = match existing_client {
-            Some(client) if !client.is_closed() => client,
-            _ => match Self::connect_client(&spec).await {
-                Ok(client) => client,
-                Err(error) => {
+        let (client, stderr) = match existing_client {
+            Some(client) if !client.is_closed() => (client, existing_stderr),
+            _ => match tokio::time::timeout(MCP_CONNECT_TIMEOUT, Self::connect_client(&spec)).await
+            {
+                Ok(Ok(connection)) => connection,
+                Ok(Err(error)) => {
+                    let message = format_mcp_error(&error, None);
+                    self.mark_failed(name, message);
+                    return Err(error);
+                }
+                Err(_) => {
+                    let error = anyhow::anyhow!(
+                        "MCP server connection timed out after {} seconds",
+                        MCP_CONNECT_TIMEOUT.as_secs()
+                    );
                     self.mark_failed(name, error.to_string());
                     return Err(error);
                 }
             },
         };
-        let tools = match Self::load_tools(name, &client, &self.inner).await {
-            Ok(tools) => tools,
-            Err(error) => {
+
+        {
+            let mut inner = self.inner.lock().unwrap();
+            if let Some(state) = inner.servers.get_mut(name) {
+                state.stderr = stderr.clone();
+            }
+        }
+
+        let tools = match tokio::time::timeout(
+            MCP_CONNECT_TIMEOUT,
+            Self::load_tools(name, &client, &self.inner),
+        )
+        .await
+        {
+            Ok(Ok(tools)) => tools,
+            Ok(Err(error)) => {
+                let message = format_mcp_error(&error, stderr.as_ref());
+                let mut client = client;
+                let _ = client.close().await;
+                self.mark_failed(name, message.clone());
+                return Err(anyhow::anyhow!(message));
+            }
+            Err(_) => {
+                let error = anyhow::anyhow!(
+                    "MCP server tool discovery timed out after {} seconds",
+                    MCP_CONNECT_TIMEOUT.as_secs()
+                );
                 let mut client = client;
                 let _ = client.close().await;
                 self.mark_failed(name, error.to_string());
                 return Err(error);
             }
         };
-        Self::store_connection(&self.inner, name, client, tools);
+
+        Self::store_connection(&self.inner, name, client, stderr, tools);
         Ok(())
     }
 
     /// Add or update a server specification and reconnect it if enabled.
     pub async fn upsert_server(&self, name: String, spec: McpServerSpec) -> Result<()> {
         let disabled = spec.is_disabled();
-        let existing_client = {
+        let (existing_client, existing_stderr) = {
             let mut inner = self.inner.lock().unwrap();
             let state = inner
                 .servers
@@ -526,6 +664,7 @@ impl McpRegistry {
                     spec: spec.clone(),
                     status: McpConnectionStatus::Disconnected,
                     client: None,
+                    stderr: None,
                     tools: Vec::new(),
                     disabled,
                 });
@@ -533,9 +672,10 @@ impl McpRegistry {
             state.disabled = disabled;
             state.status = McpConnectionStatus::Disconnected;
             state.tools.clear();
-            state.client.take()
+            (state.client.take(), state.stderr.take())
         };
 
+        drop(existing_stderr);
         if let Some(mut client) = existing_client {
             let _ = client.close().await;
         }
@@ -581,6 +721,7 @@ impl McpRegistry {
                 .with_context(|| format!("unknown MCP server '{name}'"))?;
             state.status = McpConnectionStatus::Disconnected;
             state.tools.clear();
+            state.stderr.take();
             state.client.take()
         };
         if let Some(mut client) = client {
@@ -757,7 +898,9 @@ impl McpRegistry {
             .cloned()
     }
 
-    async fn connect_client(spec: &McpServerSpec) -> Result<McpClient> {
+    async fn connect_client(
+        spec: &McpServerSpec,
+    ) -> Result<(McpClient, Option<Arc<StderrCapture>>)> {
         let client_info = ClientConfig::new(
             ClientCapabilities::builder().build(),
             Implementation::new("tidev", env!("CARGO_PKG_VERSION")),
@@ -771,22 +914,39 @@ impl McpRegistry {
                 env,
                 ..
             } => {
-                let mut command = Command::new(command);
-                command.args(args);
+                let resolved_command = resolve_stdio_command(command, cwd.as_deref(), env)?;
+                let mut command_builder = Command::new(&resolved_command);
+                command_builder.args(args);
                 if let Some(cwd) = cwd {
-                    command.current_dir(cwd);
+                    command_builder.current_dir(cwd);
                 }
                 for (key, value) in env {
-                    command.env(key, value);
+                    command_builder.env(key, value);
                 }
-                let (transport, _) = TokioChildProcess::builder(command)
-                    .stderr(std::process::Stdio::null())
+                let (transport, stderr) = TokioChildProcess::builder(command_builder)
+                    .stderr(std::process::Stdio::piped())
                     .spawn()
-                    .context("failed to start stdio MCP server process")?;
-                client_info
-                    .serve(transport)
-                    .await
-                    .context("failed to connect to stdio MCP server")
+                    .with_context(|| {
+                        format!(
+                            "failed to start stdio MCP server process '{}'",
+                            resolved_command.display()
+                        )
+                    })?;
+                let stderr = stderr.map(capture_stderr);
+                let client = match client_info.serve(transport).await {
+                    Ok(client) => client,
+                    Err(error) => {
+                        if let Some(stderr) = &stderr {
+                            stderr.wait_until_finished(Duration::from_secs(1)).await;
+                        }
+                        let error = anyhow::Error::new(error).context(format!(
+                            "failed to connect to stdio MCP server '{}'",
+                            resolved_command.display()
+                        ));
+                        return Err(anyhow::anyhow!(format_mcp_error(&error, stderr.as_ref())));
+                    }
+                };
+                Ok((client, stderr))
             }
             McpServerSpec::Http { url, headers, .. } => {
                 let custom_headers = Self::to_http_headers(headers)?;
@@ -795,19 +955,21 @@ impl McpRegistry {
                     rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig::with_uri(url.as_str())
                         .custom_headers(custom_headers),
                 );
-                client_info
+                let client = client_info
                     .serve(transport)
                     .await
-                    .context("failed to connect to HTTP MCP server")
+                    .context("failed to connect to HTTP MCP server")?;
+                Ok((client, None))
             }
             McpServerSpec::Sse { url, headers, .. } => {
                 let custom_headers = Self::to_http_headers(headers)?;
                 let custom_headers = Self::to_reqwest_headers(custom_headers);
                 let transport = LegacySseTransport::connect(url, custom_headers).await?;
-                client_info
+                let client = client_info
                     .serve(transport)
                     .await
-                    .context("failed to connect to legacy SSE MCP server")
+                    .context("failed to connect to legacy SSE MCP server")?;
+                Ok((client, None))
             }
         }
     }
@@ -860,11 +1022,13 @@ impl McpRegistry {
         inner: &Arc<Mutex<McpRegistryInner>>,
         name: &str,
         client: McpClient,
+        stderr: Option<Arc<StderrCapture>>,
         tools: Vec<Arc<McpTool>>,
     ) {
         let mut inner = inner.lock().unwrap();
         if let Some(state) = inner.servers.get_mut(name) {
             state.client = Some(client);
+            state.stderr = stderr;
             state.tools = tools;
             state.status = McpConnectionStatus::Connected;
         }
@@ -891,6 +1055,7 @@ impl McpRegistry {
             state.status = McpConnectionStatus::Failed(error);
             state.tools.clear();
             state.client = None;
+            state.stderr = None;
         }
     }
 }
@@ -1223,6 +1388,50 @@ mod tests {
     fn invalid_http_headers_are_rejected_before_connecting() {
         let headers = BTreeMap::from([("invalid header".to_string(), "value".to_string())]);
         assert!(McpRegistry::to_http_headers(&headers).is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn stdio_command_resolution_finds_windows_cmd_shims() {
+        let directory = tempfile::tempdir().expect("create temporary command directory");
+        let shim = directory.path().join("fixture.cmd");
+        std::fs::write(&shim, "@echo off\r\n").expect("write command shim");
+        let env = BTreeMap::from([(
+            "PATH".to_string(),
+            directory.path().to_string_lossy().into_owned(),
+        )]);
+
+        let resolved = resolve_stdio_command("fixture", None, &env).expect("resolve command");
+        assert_eq!(resolved, shim);
+    }
+
+    #[test]
+    fn stdio_command_resolution_accepts_fallback_path() {
+        let directory = tempfile::tempdir().expect("create temporary command directory");
+        let command_name = if cfg!(windows) {
+            "fixture.cmd"
+        } else {
+            "fixture"
+        };
+        let command_path = directory.path().join(command_name);
+        std::fs::write(&command_path, "fixture").expect("write command fixture");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            let mut permissions = std::fs::metadata(&command_path)
+                .expect("read command fixture metadata")
+                .permissions();
+            permissions.set_mode(0o755);
+            std::fs::set_permissions(&command_path, permissions)
+                .expect("make command fixture executable");
+        }
+
+        let resolved =
+            resolve_stdio_command_with_path("fixture", None, Some(directory.path().as_os_str()))
+                .expect("resolve command from fallback path");
+        assert_eq!(resolved, command_path);
     }
 
     #[test]
