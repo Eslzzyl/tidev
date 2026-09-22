@@ -422,8 +422,9 @@ pub(super) fn count_lines_in_partial_json(args: &str, field: &str) -> usize {
 /// `patch_text` JSON field. Returns `(additions, deletions, file_ops)`.
 ///
 /// This works on incomplete JSON during LLM streaming — it finds the string
-/// value for `"patch_text":` and counts `+` lines, `-` lines, and `***` file
-/// operation markers inside it.
+/// value for `"patch_text":` and counts `+` lines, `-` lines, and file
+/// operation markers inside it. Patch envelope and auxiliary markers are not
+/// file operations.
 pub(super) fn count_patch_changes(args: &str) -> (usize, usize, usize) {
     let key = "\"patch_text\":";
     let start = match args.find(key) {
@@ -476,11 +477,12 @@ pub(super) fn count_patch_changes(args: &str) -> (usize, usize, usize) {
             match bytes[i] {
                 b'+' => adds += 1,
                 b'-' => dels += 1,
-                b'*'
-                    // Check if this starts a *** marker like *** Update File:
-                    if bytes[i..].starts_with(b"*** ") => {
-                        ops += 1;
-                    }
+                b'*' if bytes[i..].starts_with(b"*** Add File: ")
+                    || bytes[i..].starts_with(b"*** Update File: ")
+                    || bytes[i..].starts_with(b"*** Delete File: ") =>
+                {
+                    ops += 1;
+                }
                 _ => {}
             }
         }

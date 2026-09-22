@@ -1311,7 +1311,8 @@ mod tests {
     use uuid::Uuid;
 
     use super::diff_summary::{
-        count_diff_section_lines, diff_section_file_path, diff_section_operation,
+        count_diff_section_lines, count_patch_changes, diff_section_file_path,
+        diff_section_operation,
     };
 
     static EMPTY_REASONING_DISPLAYS: std::sync::LazyLock<
@@ -1460,6 +1461,20 @@ mod tests {
     #[test]
     fn partial_patch_file_paths_ignores_non_patch_arguments() {
         assert!(partial_patch_file_paths(r#"{"file_path":"src/main.rs"#).is_empty());
+    }
+
+    #[test]
+    fn count_patch_changes_excludes_patch_envelope_from_file_count() {
+        let args = r#"{"patch_text":"*** Begin Patch\n*** Update File: src/main.rs\n@@\n-old\n+new\n*** End Patch"}"#;
+
+        assert_eq!(count_patch_changes(args), (1, 1, 1));
+    }
+
+    #[test]
+    fn count_patch_changes_counts_only_file_operation_markers() {
+        let args = r#"{"patch_text":"*** Begin Patch\n*** Add File: src/new.rs\n+new\n*** Update File: src/old.rs\n*** Move to: src/moved.rs\n@@\n-old\n+new\n*** End of File\n*** Delete File: src/deleted.rs\n*** End Patch"}"#;
+
+        assert_eq!(count_patch_changes(args), (2, 1, 3));
     }
 
     #[test]
