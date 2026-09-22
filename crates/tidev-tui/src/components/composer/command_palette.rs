@@ -58,6 +58,28 @@ pub(crate) enum CommandAction {
     Fast,
 }
 
+impl CommandAction {
+    /// Whether this command requires an existing, persisted chat session.
+    ///
+    /// The welcome screen has a temporary nil-ID chat context for rendering,
+    /// but it does not have a real session. Keep this classification separate
+    /// from command execution so it can be used both by the palette and by
+    /// the submit-time guard.
+    pub(crate) fn requires_session(self) -> bool {
+        matches!(
+            self,
+            Self::Message
+                | Self::Rename
+                | Self::Undo
+                | Self::Redo
+                | Self::Compact
+                | Self::ExpandThinking
+                | Self::CollapseThinking
+                | Self::CopyLastAssistant
+        )
+    }
+}
+
 // ---------------------------------------------------------------------------
 // CommandSpec
 // ---------------------------------------------------------------------------
@@ -264,11 +286,17 @@ impl CommandRegistry {
         Some((name, args))
     }
 
-    pub fn suggestions_for_model(&self, query: &str, model_is_gpt: bool) -> Vec<CommandSuggestion> {
+    pub fn suggestions_for_context(
+        &self,
+        query: &str,
+        model_is_gpt: bool,
+        has_session: bool,
+    ) -> Vec<CommandSuggestion> {
         let normalized = query.trim().trim_start_matches('/').to_ascii_lowercase();
         let mut candidates: Vec<CommandSuggestion> = COMMANDS
             .iter()
             .filter(|spec| model_is_gpt || spec.action != CommandAction::Fast)
+            .filter(|spec| has_session || !spec.action.requires_session())
             .filter_map(|spec| {
                 self.score(spec, &normalized)
                     .map(|score| CommandSuggestion { spec, score })
@@ -358,7 +386,13 @@ impl CommandPaletteState {
         self.user_moved = false;
     }
 
-    pub fn sync(&mut self, input: &str, registry: &CommandRegistry, model_is_gpt: bool) {
+    pub fn sync(
+        &mut self,
+        input: &str,
+        registry: &CommandRegistry,
+        model_is_gpt: bool,
+        has_session: bool,
+    ) {
         let Some(fragment) = command_fragment(input) else {
             self.clear();
             return;
@@ -372,7 +406,7 @@ impl CommandPaletteState {
         }
         let previous = self.selected_command_name();
         self.query = fragment.to_string();
-        self.suggestions = registry.suggestions_for_model(fragment, model_is_gpt);
+        self.suggestions = registry.suggestions_for_context(fragment, model_is_gpt, has_session);
 
         if self.suggestions.is_empty() {
             self.selected_index = 0;
@@ -629,7 +663,7 @@ mod tests {
     #[test]
     fn test_suggestions_exact() {
         let reg = CommandRegistry::new();
-        let results = reg.suggestions_for_model("/theme", true);
+        let results = reg.suggestions_for_context("/theme", true, true);
         assert_eq!(results[0].spec.name, "theme");
         assert!(results[0].score >= 10_000);
     }
@@ -637,7 +671,7 @@ mod tests {
     #[test]
     fn test_suggestions_prefix() {
         let reg = CommandRegistry::new();
-        let results = reg.suggestions_for_model("/se", true);
+        let results = reg.suggestions_for_context("/se", true, true);
         assert!(results.iter().any(|s| s.spec.name == "session"
             || s.spec.name == "search"
             || s.spec.name == "settings"));
@@ -646,7 +680,7 @@ mod tests {
     #[test]
     fn test_suggestions_alias() {
         let reg = CommandRegistry::new();
-        let results = reg.suggestions_for_model("/login", true);
+        let results = reg.suggestions_for_context("/login", true, true);
         assert_eq!(results[0].spec.name, "connect");
     }
 
@@ -779,12 +813,12 @@ mod tests {
     fn test_fast_command_is_available_only_for_gpt_models() {
         let reg = CommandRegistry::new();
         assert!(
-            reg.suggestions_for_model("fast", true)
+            reg.suggestions_for_context("fast", true, true)
                 .iter()
                 .any(|suggestion| suggestion.spec.action == CommandAction::Fast)
         );
         assert!(
-            !reg.suggestions_for_model("fast", false)
+            !reg.suggestions_for_context("fast", false, true)
                 .iter()
                 .any(|suggestion| suggestion.spec.action == CommandAction::Fast)
         );
@@ -798,6 +832,47 @@ mod tests {
             execute_command(CommandAction::Fast, &["extra".into()], &catalog).as_slice(),
             [Action::CommandUsage("/fast")]
         ));
+    }
+
+    #[test]
+    fn test_session_commands_are_hidden_without_a_session() {
+        let reg = CommandRegistry::new();
+
+        let welcome_commands = reg.suggestions_for_context("", true, false);
+        for action in [
+            CommandAction::Message,
+            CommandAction::Rename,
+            CommandAction::Undo,
+            CommandAction::Redo,
+            CommandAction::Compact,
+            CommandAction::ExpandThinking,
+            CommandAction::CollapseThinking,
+            CommandAction::CopyLastAssistant,
+        ] {
+            assert!(
+                !welcome_commands
+                    .iter()
+                    .any(|suggestion| suggestion.spec.action == action)
+            );
+        }
+
+        let session_commands = reg.suggestions_for_context("", true, true);
+        for action in [
+            CommandAction::Message,
+            CommandAction::Rename,
+            CommandAction::Undo,
+            CommandAction::Redo,
+            CommandAction::Compact,
+            CommandAction::ExpandThinking,
+            CommandAction::CollapseThinking,
+            CommandAction::CopyLastAssistant,
+        ] {
+            assert!(
+                session_commands
+                    .iter()
+                    .any(|suggestion| suggestion.spec.action == action)
+            );
+        }
     }
 
     #[test]
@@ -836,9 +911,9 @@ mod tests {
 
         // Typing / -> /e -> /ex without manual navigation: the selection
         // always tracks the top-ranked suggestion, so /ex lands on "exit".
-        state.sync("/", &reg, true);
-        state.sync("/e", &reg, true);
-        state.sync("/ex", &reg, true);
+        state.sync("/", &reg, true, true);
+        state.sync("/e", &reg, true, true);
+        state.sync("/ex", &reg, true, true);
         assert_eq!(state.selected().map(|s| s.spec.name), Some("exit"));
     }
 
@@ -849,13 +924,13 @@ mod tests {
 
         // At "/" all commands share the same score and sort by name, so the
         // first entries are agents(0), collapse-thinking(1), compact(2).
-        state.sync("/", &reg, true);
+        state.sync("/", &reg, true, true);
         state.move_selection(1);
         state.move_selection(1);
         assert_eq!(state.selected().map(|s| s.spec.name), Some("compact"));
 
         // Keep typing: "compact" stays selected as long as it still matches.
-        state.sync("/co", &reg, true);
+        state.sync("/co", &reg, true, true);
         assert_eq!(state.selected().map(|s| s.spec.name), Some("compact"));
     }
 
@@ -864,7 +939,7 @@ mod tests {
         let reg = CommandRegistry::new();
         let mut state = CommandPaletteState::new();
 
-        state.sync("/co", &reg, true);
+        state.sync("/co", &reg, true, true);
         state.move_selection(1); // manual navigation from `/copy` to `/compact`
         assert!(state.user_moved);
         assert_eq!(state.selected().map(|s| s.spec.name), Some("compact"));
@@ -872,7 +947,7 @@ mod tests {
         // Deleting back to "/c" resets the manual flag; the selection
         // follows the top-ranked suggestion again.  `/copy` is the
         // highest-ranked `/c` command because its name is the shortest.
-        state.sync("/c", &reg, true);
+        state.sync("/c", &reg, true, true);
         assert!(!state.user_moved);
         assert_eq!(state.selected().map(|s| s.spec.name), Some("copy"));
     }

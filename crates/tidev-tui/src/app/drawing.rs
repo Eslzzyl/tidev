@@ -776,6 +776,7 @@ impl App {
         } else if let Some(ref mut composer) = self.composer {
             let active_model = self.runtime.active_model();
             composer.set_model_is_gpt(active_model.is_gpt());
+            composer.set_has_session(self.current_session_id.is_some());
             composer.set_fast_mode(self.runtime.config().ui.fast_mode && active_model.is_gpt());
             if composer.has_popup() {
                 composer.sync_autocomplete();
@@ -1077,6 +1078,7 @@ impl App {
         if let Some(ref mut composer) = self.composer {
             let active_model = self.runtime.active_model();
             composer.set_model_is_gpt(active_model.is_gpt());
+            composer.set_has_session(self.current_session_id.is_some());
             composer.set_fast_mode(self.runtime.config().ui.fast_mode && active_model.is_gpt());
             if composer.has_popup() {
                 composer.sync_autocomplete();

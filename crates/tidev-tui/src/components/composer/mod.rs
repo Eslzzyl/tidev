@@ -138,6 +138,8 @@ pub(crate) struct Composer {
     model_supports_images: bool,
     /// Whether the current model is eligible for fast mode.
     model_is_gpt: bool,
+    /// Whether the composer is currently attached to a real persisted session.
+    has_session: bool,
     /// Whether fast mode is enabled for the current composer model.
     fast_mode: bool,
     /// Localized label used only for rendering image badges. The raw
@@ -180,6 +182,7 @@ impl Composer {
             config_dir: PathBuf::new(),
             model_supports_images: false,
             model_is_gpt: false,
+            has_session: false,
             fast_mode: false,
             image_label: UiText::from_preference("en-US").text(TextKey::ImageLabel),
             input_scroll_offset: 0,
@@ -288,6 +291,10 @@ impl Composer {
 
     pub fn set_model_is_gpt(&mut self, is_gpt: bool) {
         self.model_is_gpt = is_gpt;
+    }
+
+    pub fn set_has_session(&mut self, has_session: bool) {
+        self.has_session = has_session;
     }
 
     pub fn set_fast_mode(&mut self, enabled: bool) {
@@ -1051,8 +1058,12 @@ impl Composer {
 
     /// Refresh command palette, @mention, and snippet states after input change.
     pub(crate) fn sync_autocomplete(&mut self) {
-        self.command_palette
-            .sync(&self.text, &self.commands, self.model_is_gpt);
+        self.command_palette.sync(
+            &self.text,
+            &self.commands,
+            self.model_is_gpt,
+            self.has_session,
+        );
         self.at_mention
             .sync(&self.workspace_root, &self.text, self.cursor);
 
@@ -1285,8 +1296,12 @@ impl Component for Composer {
                     if let Some(completion) = self.command_palette.completion() {
                         self.set_text(completion);
                     }
-                    self.command_palette
-                        .sync(&self.text, &self.commands, self.model_is_gpt);
+                    self.command_palette.sync(
+                        &self.text,
+                        &self.commands,
+                        self.model_is_gpt,
+                        self.has_session,
+                    );
                     self.dirty = true;
                     return None;
                 }

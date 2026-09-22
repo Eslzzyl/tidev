@@ -867,6 +867,17 @@ impl App {
                                 crate::components::composer::command_palette::CommandRegistry::new()
                                     .command(&name)
                             {
+                                if spec.action.requires_session()
+                                    && self.current_session_id.is_none()
+                                {
+                                    self.set_notice(self.ui_text().text_with_value(
+                                        TextKey::CommandRequiresSession,
+                                        "command",
+                                        &spec.label(),
+                                    ));
+                                    return;
+                                }
+
                                 let actions =
                                     crate::components::composer::command_palette::execute_command(
                                         spec.action,

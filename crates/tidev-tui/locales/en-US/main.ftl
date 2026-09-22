@@ -569,6 +569,7 @@ duration-milliseconds = {$milliseconds}ms
 duration-seconds-decimal = {$seconds}s
 tokens-per-second = {$value} t/s
 usage-command = Usage: {$command}
+command-requires-session = {$command} requires an active session
 clipboard-error = Clipboard error: {$error}
 command-connect = Open the provider picker
 command-model = Open the model panel

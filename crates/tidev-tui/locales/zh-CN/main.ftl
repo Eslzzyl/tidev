@@ -569,6 +569,7 @@ duration-milliseconds = {$milliseconds} 毫秒
 duration-seconds-decimal = {$seconds} 秒
 tokens-per-second = {$value} Tokens/秒
 usage-command = 用法：{$command}
+command-requires-session = {$command} 需要先进入一个会话
 clipboard-error = 剪贴板错误：{$error}
 command-connect = 打开提供商选择器
 command-model = 打开模型面板
