@@ -301,9 +301,13 @@ pub(crate) async fn stream_gemini(
 
     // ── Send usage stats ──────────────────────────────────────────────────
     if let Some(usage) = last_usage {
+        let output_tokens = usage
+            .candidates_token_count
+            .unwrap_or(0)
+            .saturating_add(usage.thoughts_token_count.unwrap_or(0));
         let _ = tx.send(LlmEvent::UsageStats {
             input_tokens: usage.prompt_token_count.unwrap_or(0),
-            output_tokens: usage.candidates_token_count.unwrap_or(0),
+            output_tokens,
             total_tokens: usage.total_token_count.unwrap_or(0),
             cache_read_tokens: 0,
             cache_write_tokens: 0,
@@ -870,6 +874,8 @@ struct GeminiUsage {
     prompt_token_count: Option<u32>,
     #[serde(alias = "candidatesTokenCount")]
     candidates_token_count: Option<u32>,
+    #[serde(alias = "thoughtsTokenCount")]
+    thoughts_token_count: Option<u32>,
     #[serde(alias = "totalTokenCount")]
     total_token_count: Option<u32>,
 }

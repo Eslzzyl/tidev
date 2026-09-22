@@ -115,15 +115,28 @@ impl Sidebar {
 
         // Tokens per second (average across session)
         if let Some(ctx) = chat_context {
-            let session_tps: Vec<f32> = ctx
+            let (session_tokens, session_duration) = ctx
                 .messages
                 .iter()
                 .filter(|m| matches!(m.role, tidev_llm::message::MessageRole::Assistant))
-                .filter_map(|m| m.tokens_per_second)
-                .collect();
+                .filter_map(|m| {
+                    let output_tokens = m.output_tokens? as f64;
+                    let tokens_per_second = m.tokens_per_second? as f64;
+                    if output_tokens > 0.0 && tokens_per_second > 0.0 {
+                        Some((output_tokens, output_tokens / tokens_per_second))
+                    } else {
+                        None
+                    }
+                })
+                .fold(
+                    (0.0, 0.0),
+                    |(tokens, duration), (message_tokens, message_duration)| {
+                        (tokens + message_tokens, duration + message_duration)
+                    },
+                );
 
-            if !session_tps.is_empty() {
-                let avg_tps = session_tps.iter().sum::<f32>() / session_tps.len() as f32;
+            if session_duration > 0.0 {
+                let avg_tps = session_tokens / session_duration;
                 lines.push(Line::from(vec![Span::styled(
                     format!(
                         "{} ({})",

@@ -241,6 +241,9 @@ pub(crate) async fn stream_responses(
                     output_index: _,
                     summary_index,
                 } => {
+                    if first_delta_time.is_none() {
+                        first_delta_time = Some(std::time::Instant::now());
+                    }
                     let cleaned = strip_think_tags(&summary_delta);
                     if !cleaned.is_empty() {
                         reasoning_text.push_str(&cleaned);
