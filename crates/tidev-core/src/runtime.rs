@@ -345,6 +345,40 @@ impl Runtime {
         buf
     }
 
+    /// Finalise abandoned assistant drafts only when a new turn is submitted
+    /// for this session. Read-only session inspection must leave every stream
+    /// untouched, including streams owned by another Runtime.
+    async fn recover_interrupted_streams_for_session(&self, session_id: Uuid) -> Result<()> {
+        let recovered = self
+            .session_manager
+            .store()
+            .recover_interrupted_streams(session_id)?;
+        if recovered.is_empty() {
+            return Ok(());
+        }
+
+        let buffer = self.message_buffer(session_id).await;
+        let mut buffer = buffer.write().await;
+        let mut events = Vec::with_capacity(recovered.len());
+        for (message_id, completed_at, app_data) in recovered {
+            buffer.mark_recovered(message_id, completed_at, app_data.clone());
+            events.push((message_id, completed_at, app_data));
+        }
+        drop(buffer);
+        for (message_id, completed_at, app_data) in events {
+            let _ = self
+                .event_bus(session_id)
+                .await
+                .send_backend(BackendEvent::StreamRecovered {
+                    session_id,
+                    message_id,
+                    completed_at,
+                    app_data: Box::new(app_data),
+                });
+        }
+        Ok(())
+    }
+
     /// Get (or create) the context manager for a session.
     pub async fn context_manager(&self, session_id: Uuid) -> Arc<Mutex<ContextManager>> {
         let mut mgrs = self.context_managers.lock().await;
@@ -724,6 +758,14 @@ impl Runtime {
         } else {
             None
         };
+
+        // Recovery belongs to the write boundary for the target session. A
+        // Runtime may browse other sessions while their streams are active;
+        // only the session receiving this new turn is inspected and updated.
+        if delivery.is_none() {
+            self.recover_interrupted_streams_for_session(session_id)
+                .await?;
+        }
 
         // 1. If undo revert is active, discard hidden messages first.
         //    Only when starting a new turn — truncating the buffer while a
@@ -2197,13 +2239,11 @@ impl RuntimeBuilder {
         let database = tidev_storage::database::Database::open(&paths.database_file)
             .context("failed to open database")?;
         let store = database.create_store()?;
-        let recovered_streams = store
-            .recover_interrupted_streams()
-            .context("failed to recover interrupted assistant streams")?;
-        if recovered_streams > 0 {
-            log::warn!(
-                "recovered {recovered_streams} interrupted assistant stream(s) from a prior process"
-            );
+        let removed_restart_notices = store
+            .delete_legacy_restart_notices()
+            .context("failed to remove legacy restart notices")?;
+        if removed_restart_notices > 0 {
+            log::info!("removed {removed_restart_notices} legacy restart notice(s)");
         }
         log::info!("startup: database opened in {:?}", _t_db.elapsed());
 

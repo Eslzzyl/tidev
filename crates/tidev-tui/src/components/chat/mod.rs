@@ -675,6 +675,27 @@ impl MessageList {
         };
 
         match event {
+            BackendEvent::StreamRecovered {
+                message_id,
+                completed_at,
+                app_data,
+                ..
+            } => {
+                if let Some(message) = chat_context
+                    .messages
+                    .iter_mut()
+                    .find(|message| message.id == *message_id)
+                {
+                    message.streaming = false;
+                    message.completed_at = Some(*completed_at);
+                    if message.reasoning_started_at.is_some() {
+                        message.reasoning_completed_at = app_data.reasoning_completed_at;
+                    }
+                    chat_context.set_app_data(*message_id, (**app_data).clone());
+                    self.layout_index.mark_dirty(*message_id);
+                    self.dirty = true;
+                }
+            }
             BackendEvent::TurnStarting {
                 assistant_message_id,
                 ..

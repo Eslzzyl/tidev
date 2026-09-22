@@ -464,8 +464,8 @@ fn interrupted_stream_recovery_is_durable_and_idempotent() {
     draft.reasoning = "partial reasoning".into();
     store.append_message(sid, &draft).unwrap();
 
-    assert_eq!(store.recover_interrupted_streams().unwrap(), 1);
-    assert_eq!(store.recover_interrupted_streams().unwrap(), 0);
+    assert_eq!(store.recover_interrupted_streams(sid).unwrap().len(), 1);
+    assert!(store.recover_interrupted_streams(sid).unwrap().is_empty());
 
     let messages = store.load_messages(sid).unwrap();
     let recovered = messages
@@ -485,16 +485,68 @@ fn interrupted_stream_recovery_is_durable_and_idempotent() {
             .map(|data| data.reason),
         Some(InterruptionReason::RuntimeRestarted)
     );
-    let notice = messages
-        .iter()
-        .find(|message| message.role == MessageRole::Error)
+    assert!(
+        !messages
+            .iter()
+            .any(|message| message.role == MessageRole::Error)
+    );
+}
+
+#[test]
+fn interrupted_stream_recovery_is_scoped_to_the_submitted_session() {
+    let (store, _tmp) = test_store();
+    let active_session = create_test_session(&store, "/workspace", "active session");
+    let untouched_session = create_test_session(&store, "/workspace", "untouched session");
+    let active_draft = Message::streaming(MessageRole::Assistant, "active partial");
+    let untouched_draft = Message::streaming(MessageRole::Assistant, "untouched partial");
+    store.append_message(active_session, &active_draft).unwrap();
+    store
+        .append_message(untouched_session, &untouched_draft)
         .unwrap();
+
+    let recovered = store.recover_interrupted_streams(active_session).unwrap();
+    assert_eq!(recovered.len(), 1);
+
+    let active_data = store.load_message_app_data(active_session).unwrap();
     assert_eq!(
-        app_data[&notice.id]
+        active_data[&active_draft.id]
             .interruption
             .as_ref()
             .map(|data| data.reason),
         Some(InterruptionReason::RuntimeRestarted)
+    );
+    let untouched_data = store.load_message_app_data(untouched_session).unwrap();
+    assert!(untouched_data[&untouched_draft.id].interruption.is_none());
+}
+
+#[test]
+fn legacy_restart_notices_are_removed_without_removing_the_draft() {
+    let (store, _tmp) = test_store();
+    let sid = create_test_session(&store, "/workspace", "legacy notice");
+    let draft = Message::streaming(MessageRole::Assistant, "partial response");
+    let notice = Message::new(MessageRole::Error, "legacy restart notice");
+    let interruption = MessageAppData {
+        interruption: Some(InterruptionData {
+            reason: InterruptionReason::RuntimeRestarted,
+            request_id: 0,
+            user_message_id: None,
+        }),
+        ..Default::default()
+    };
+    let mut app_data = HashMap::new();
+    app_data.insert(notice.id, interruption);
+    store
+        .append_messages_with_app_data(sid, &[draft.clone(), notice], &app_data)
+        .unwrap();
+
+    assert_eq!(store.delete_legacy_restart_notices().unwrap(), 1);
+    assert_eq!(store.delete_legacy_restart_notices().unwrap(), 0);
+    let messages = store.load_messages(sid).unwrap();
+    assert!(messages.iter().any(|message| message.id == draft.id));
+    assert!(
+        !messages
+            .iter()
+            .any(|message| message.role == MessageRole::Error)
     );
 }
 

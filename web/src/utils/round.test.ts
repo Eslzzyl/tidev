@@ -146,6 +146,32 @@ describe("round preview state", () => {
     expect(built.segments).toContainEqual({ type: "text", content: "partial reply" });
   });
 
+  it("keeps a runtime-recovered draft silent in the chat", () => {
+    const assistant = message("partial reply", "assistant");
+    assistant.streaming = true;
+    assistant.completed_at = "2026-08-22T00:01:00Z";
+
+    const [built] = buildRounds([
+      record(message("prompt", "user")),
+      {
+        message: assistant,
+        app_data: {
+          interruption: {
+            reason: "runtime_restarted",
+            request_id: 0,
+            user_message_id: null,
+          },
+        },
+      },
+    ]) as [Round];
+
+    expect(built).toMatchObject({
+      status: "complete",
+      interrupted: false,
+      completedAt: assistant.completed_at,
+    });
+  });
+
   it("marks unresolved tools as cancelled when the persisted round was cancelled", () => {
     const assistant = message("partial reply", "assistant");
     assistant.streaming = true;

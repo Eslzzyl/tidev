@@ -92,11 +92,13 @@ function interruptionKind(record: MessageRecord): RoundInterruptionKind | undefi
       return "cancelled";
     case "provider_failed":
       return "failed";
-    case "runtime_restarted":
-      return "interrupted";
     default:
       return undefined;
   }
+}
+
+function wasRuntimeRestarted(record: MessageRecord): boolean {
+  return record.app_data.interruption?.reason === "runtime_restarted";
 }
 
 export interface SystemMessageBlock {
@@ -226,9 +228,10 @@ export function buildRounds(records: MessageRecord[]): (Round | SystemMessageBlo
     } else if (currentRound) {
       if (msg.role === "assistant") {
         const durableInterruption = interruptionKind(record);
+        const runtimeRestarted = wasRuntimeRestarted(record);
         if (durableInterruption) {
           markInterrupted(currentRound, durableInterruption);
-        } else if (!msg.streaming && !msg.completed_at) {
+        } else if (!runtimeRestarted && !msg.streaming && !msg.completed_at) {
           markInterrupted(currentRound, "interrupted");
         }
 
@@ -279,7 +282,8 @@ export function buildRounds(records: MessageRecord[]): (Round | SystemMessageBlo
         } else if (msg.reasoning && msg.completed_at) {
           currentRound.reasoningCompletedAt = msg.completed_at;
         }
-        currentRound.status = msg.streaming && !durableInterruption ? "streaming" : "complete";
+        currentRound.status =
+          msg.streaming && !durableInterruption && !runtimeRestarted ? "streaming" : "complete";
         if (msg.model_id) {
           currentRound.modelId = msg.model_id;
         }

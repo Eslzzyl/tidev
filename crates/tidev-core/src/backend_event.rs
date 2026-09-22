@@ -129,6 +129,15 @@ pub enum BackendEvent {
         /// committing it to the visible history.
         queued: bool,
     },
+    /// A persisted assistant draft was finalized when the session received a
+    /// new user message after the owning stream had ended with the process.
+    /// Frontends update the existing draft silently and show no notice.
+    StreamRecovered {
+        session_id: Uuid,
+        message_id: Uuid,
+        completed_at: DateTime<Utc>,
+        app_data: Box<MessageAppData>,
+    },
     UndoCompleted {
         session_id: Uuid,
         target_id: Uuid,
@@ -188,6 +197,7 @@ impl BackendEvent {
             | Self::ContextCompacted { session_id, .. }
             | Self::UndoCompleted { session_id, .. }
             | Self::UserMessageCreated { session_id, .. }
+            | Self::StreamRecovered { session_id, .. }
             | Self::SidebarSnapshotReady { session_id, .. }
             | Self::ShellOutput { session_id, .. }
             | Self::TurnStarting { session_id, .. }
@@ -219,6 +229,7 @@ impl BackendEvent {
             | Self::ContextCompacted { .. }
             | Self::UndoCompleted { .. }
             | Self::UserMessageCreated { .. }
+            | Self::StreamRecovered { .. }
             | Self::ShellOutput { .. }
             | Self::MessagesTruncated { .. } => None,
         }

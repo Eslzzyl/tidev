@@ -307,6 +307,7 @@ impl EventTranslator {
             | BackendEvent::InstructionsLoaded { .. }
             | BackendEvent::ContextCompactionDelta { .. }
             | BackendEvent::UndoCompleted { .. }
+            | BackendEvent::StreamRecovered { .. }
             | BackendEvent::SidebarSnapshotReady { .. }
             | BackendEvent::MessagesTruncated { .. } => Vec::new(),
         }

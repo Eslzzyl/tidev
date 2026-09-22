@@ -90,6 +90,34 @@ impl CoreMessageBuffer {
         self.app_data.insert(id, app_data);
     }
 
+    /// Finalise a recovered draft in the in-memory projection while retaining
+    /// its `streaming` protocol flag for future request filtering.
+    pub fn mark_recovered(
+        &mut self,
+        id: uuid::Uuid,
+        completed_at: chrono::DateTime<chrono::Utc>,
+        app_data: MessageAppData,
+    ) -> bool {
+        let Some(mut message) = self
+            .protocol
+            .load()
+            .iter()
+            .find(|message| message.id == id)
+            .cloned()
+        else {
+            return false;
+        };
+        message.completed_at = Some(completed_at);
+        if message.reasoning_started_at.is_some() {
+            message.reasoning_completed_at = app_data.reasoning_completed_at;
+        }
+        if !self.protocol.replace(id, message) {
+            return false;
+        }
+        self.app_data.insert(id, app_data);
+        true
+    }
+
     /// Return protocol messages paired with their application-owned fields.
     pub fn session_messages(&self) -> Vec<SessionMessage> {
         self.protocol

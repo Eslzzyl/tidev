@@ -836,6 +836,33 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
         }
         return;
       }
+      if (kind === "StreamRecovered") {
+        const messageId = asString(payload.message_id);
+        const completedAt = asString(payload.completed_at);
+        const appData = payload.app_data as MessageRecord["app_data"] | undefined;
+        if (!messageId || !completedAt) return;
+
+        const updateRecovered = (records: MessageRecord[]): MessageRecord[] =>
+          records.map((record) =>
+            record.message.id === messageId
+              ? {
+                  ...record,
+                  message: {
+                    ...record.message,
+                    streaming: false,
+                    completed_at: completedAt,
+                  },
+                  app_data: appData ?? record.app_data,
+                }
+              : record,
+          );
+        const cached = messagesCacheRef.current.get(sessionId);
+        if (cached) messagesCacheRef.current.set(sessionId, updateRecovered(cached));
+        if (selectedSessionRef.current === sessionId) {
+          setMessages((current) => updateRecovered(current));
+        }
+        return;
+      }
       if (kind === "SidebarSnapshotReady") {
         const files = parseChangedFileSummaries(asString(payload.file_diffs_json));
         if (files === null) return;

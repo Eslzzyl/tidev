@@ -283,18 +283,26 @@ impl SessionStore {
         Ok(keep_draft)
     }
 
-    /// Mark drafts left behind by a prior process as terminal interruptions.
-    /// They intentionally remain `streaming` protocol messages so future LLM
-    /// requests continue to exclude their partial content.
-    pub fn recover_interrupted_streams(&self) -> Result<usize> {
+    /// Mark unfinished assistant drafts for one session as terminal
+    /// interruptions and return the application data written for each draft.
+    ///
+    /// Recovery is intentionally scoped to the session about to receive a new
+    /// user message. A Runtime may inspect any session concurrently, so a
+    /// startup-wide scan would mutate streams owned by another Runtime. The
+    /// drafts remain `streaming` protocol messages so future LLM requests
+    /// continue to exclude their partial content.
+    pub fn recover_interrupted_streams(
+        &self,
+        session_id: Uuid,
+    ) -> Result<Vec<(Uuid, DateTime<Utc>, MessageAppData)>> {
         let mut conn = self.write_conn.lock().unwrap();
         let tx = conn.transaction()?;
         let rows = {
             let mut stmt = tx.prepare(
                 "SELECT id, session_id, app_data FROM messages \
-                 WHERE role = 'assistant' AND streaming = 1",
+                 WHERE session_id = ?1 AND role = 'assistant' AND streaming = 1",
             )?;
-            let mapped = stmt.query_map([], |row| {
+            let mapped = stmt.query_map(params![session_id.to_string()], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
@@ -303,7 +311,7 @@ impl SessionStore {
             })?;
             mapped.collect::<rusqlite::Result<Vec<_>>>()?
         };
-        let mut recovered = 0;
+        let mut recovered = Vec::new();
         for (message_id, session_id, blob) in rows {
             let mut app_data = if blob.is_empty() {
                 MessageAppData::default()
@@ -325,29 +333,56 @@ impl SessionStore {
                  WHERE id = ?3 AND session_id = ?4",
                 params![now.to_rfc3339(), app_data_blob, message_id, session_id],
             )?;
-
-            let mut notice = Message::new(
-                MessageRole::Error,
-                "Request interrupted because Tidev restarted",
-            );
-            notice.completed_at = Some(now);
-            let notice_data = MessageAppData {
-                interruption: app_data.interruption.clone(),
-                ..MessageAppData::default()
-            };
-            let parsed_session_id = Uuid::parse_str(&session_id)?;
-            Self::insert_message_with_app_data(&tx, parsed_session_id, &notice, &notice_data)?;
-            recovered += 1;
+            recovered.push((Uuid::parse_str(&message_id)?, now, app_data));
         }
-        if recovered > 0 {
+        if !recovered.is_empty() {
             tx.execute(
-                "UPDATE sessions SET updated_at = ?1 WHERE id IN \
-                 (SELECT DISTINCT session_id FROM messages WHERE streaming = 1)",
-                params![Utc::now().to_rfc3339()],
+                "UPDATE sessions SET updated_at = ?1 WHERE id = ?2",
+                params![Utc::now().to_rfc3339(), session_id.to_string()],
             )?;
         }
         tx.commit()?;
         Ok(recovered)
+    }
+
+    /// Remove legacy restart notices created by the former startup-wide
+    /// recovery path. The cleanup is idempotent and leaves assistant drafts
+    /// plus their interruption metadata intact.
+    pub fn delete_legacy_restart_notices(&self) -> Result<usize> {
+        let mut conn = self.write_conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let rows = {
+            let mut stmt =
+                tx.prepare("SELECT id, session_id, app_data FROM messages WHERE role = 'error'")?;
+            let mapped = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Vec<u8>>(2)?,
+                ))
+            })?;
+            mapped.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        let mut deleted = Vec::new();
+        for (message_id, session_id, blob) in rows {
+            let app_data = if blob.is_empty() {
+                MessageAppData::default()
+            } else {
+                serde_json::from_str(&decompress_text(&blob)).unwrap_or_default()
+            };
+            if app_data
+                .interruption
+                .is_some_and(|data| data.reason == InterruptionReason::RuntimeRestarted)
+            {
+                tx.execute(
+                    "DELETE FROM messages WHERE id = ?1 AND session_id = ?2",
+                    params![message_id, session_id],
+                )?;
+                deleted.push(session_id);
+            }
+        }
+        tx.commit()?;
+        Ok(deleted.len())
     }
 
     /// Delete specific messages from a session.
