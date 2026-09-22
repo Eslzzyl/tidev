@@ -563,7 +563,7 @@ mod tests {
             &UiText::from_preference("zh-CN"),
         );
 
-        assert_eq!(content, "[图像： capture.png]");
+        assert_eq!(content, "[图片：capture.png]");
         assert_eq!(raw, "[Image: capture.png]");
     }
 
