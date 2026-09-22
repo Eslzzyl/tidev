@@ -24,6 +24,7 @@ use tidev_core::{GitDiffSnapshot, GitError, GitHistoryPage, GitStatusSnapshot};
 use tidev_llm::message::{Message, MessageRole};
 use tidev_llm::reasoning::ThinkingLevelType;
 use tidev_tools::types::TodoItem;
+use tidev_utils::path::display_path_with_tilde;
 use uuid::Uuid;
 
 use crate::component::Component;
@@ -521,9 +522,8 @@ impl App {
         let to_rel = |s: &str| -> String {
             let path = std::path::Path::new(s);
             path.strip_prefix(ws_root)
-                .unwrap_or(path)
-                .display()
-                .to_string()
+                .map(|relative| relative.display().to_string())
+                .unwrap_or_else(|_| display_path_with_tilde(path))
         };
         let display_paths: Vec<String> = new_sources.iter().map(|s| to_rel(s)).collect();
 
