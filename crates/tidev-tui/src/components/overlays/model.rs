@@ -117,7 +117,6 @@ pub(crate) struct ModelPanel {
     tabs: Vec<ModelPanelTab>,
     selected_tab_index: usize,
     query: String,
-    query_active: bool,
     items_cache: Vec<ModelPanelItem>,
     /// Snapshot of all connected models (for local filtering without runtime).
     connected_models: Vec<ModelSummary>,
@@ -136,7 +135,6 @@ impl ModelPanel {
             tabs,
             selected_tab_index: 0,
             query: String::new(),
-            query_active: false,
             items_cache: Vec::new(),
             connected_models,
             active_model,
@@ -315,38 +313,24 @@ impl Component for ModelPanel {
             return None;
         }
 
-        if self.query_active {
-            match key.code {
-                KeyCode::Esc | KeyCode::Enter => {
-                    self.query_active = false;
-                    return Some(Action::Noop);
-                }
-                KeyCode::Backspace if key.modifiers.is_empty() => {
-                    if !self.query.is_empty() {
-                        self.query.pop();
-                        self.rebuild_items_from_cache();
-                        self.reset_selection_for_current_tab();
-                    }
-                    return Some(Action::Noop);
-                }
-                KeyCode::Char(ch)
-                    if !ch.is_control()
-                        && !key.modifiers.intersects(
-                            KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER,
-                        ) =>
-                {
-                    self.query.push(ch);
+        match key.code {
+            KeyCode::Backspace if key.modifiers.is_empty() => {
+                if !self.query.is_empty() {
+                    self.query.pop();
                     self.rebuild_items_from_cache();
                     self.reset_selection_for_current_tab();
-                    return Some(Action::Noop);
                 }
-                _ => return None,
+                Some(Action::Noop)
             }
-        }
-
-        match key.code {
-            KeyCode::Char('/') if key.modifiers.is_empty() => {
-                self.query_active = true;
+            KeyCode::Char(ch)
+                if !ch.is_control()
+                    && !key.modifiers.intersects(
+                        KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER,
+                    ) =>
+            {
+                self.query.push(ch);
+                self.rebuild_items_from_cache();
+                self.reset_selection_for_current_tab();
                 Some(Action::Noop)
             }
             KeyCode::Up => {
@@ -695,26 +679,12 @@ impl Component for ModelPanel {
         let prefix = format!(" {} ", ctx.ui_text.text(TextKey::ModelSearchPrefix));
         let (visible_query, cursor) =
             single_line_input_cursor(sections[3], prefix.width() as u16, &self.query);
-        let search_text = if self.query_active {
-            Line::from(vec![
-                Span::styled(prefix, Style::default().fg(palette.muted)),
-                Span::styled(visible_query, Style::default().fg(palette.text)),
-            ])
-        } else if self.query.is_empty() {
-            Line::from(Span::styled(
-                format!(" {} (/)", ctx.ui_text.text(TextKey::ModelSearchPrefix)),
-                Style::default().fg(palette.muted),
-            ))
-        } else {
-            Line::from(Span::styled(
-                format!("{prefix}{}", self.query),
-                Style::default().fg(palette.muted),
-            ))
-        };
+        let search_text = Line::from(vec![
+            Span::styled(prefix, Style::default().fg(palette.muted)),
+            Span::styled(visible_query, Style::default().fg(palette.text)),
+        ]);
         frame.render_widget(Paragraph::new(search_text).style(search_style), sections[3]);
-        if self.query_active {
-            ctx.set_cursor_position(frame, cursor);
-        }
+        ctx.set_cursor_position(frame, cursor);
 
         // ── Model list ──
         let items = &self.items_cache;
@@ -922,9 +892,7 @@ impl Component for ModelPanel {
         let is_expanded = self
             .current_tab()
             .is_some_and(|t| t.thinking_level_expanded);
-        let footer = if self.query_active {
-            ctx.ui_text.text(TextKey::ModelFooterSearch)
-        } else if is_expanded {
+        let footer = if is_expanded {
             ctx.ui_text.text(TextKey::ModelFooterThinking)
         } else {
             ctx.ui_text.text(TextKey::ModelFooterGeneral)
@@ -950,7 +918,7 @@ impl Component for ModelPanel {
     }
 
     fn wants_terminal_cursor(&self) -> bool {
-        self.query_active
+        true
     }
 }
 
