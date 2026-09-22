@@ -7,8 +7,8 @@ use tidev_llm::message::{Message, MessageRole, ToolExecutionResult};
 
 use crate::action::{
     Action, BoundaryDecision, ChatAction, ConnectAction, GitAction, GitQueryKind, McpAction,
-    OverlayAction, OverlayKind, SearchAction, SensitiveFileDecision, SessionAction, SettingKey,
-    SettingValue, SettingsAction, ThemeAction,
+    OverlayAction, OverlayKind, PanelLauncherAction, SearchAction, SensitiveFileDecision,
+    SessionAction, SettingKey, SettingValue, SettingsAction, ThemeAction,
 };
 use crate::component::Component;
 
@@ -158,6 +158,11 @@ impl App {
                             composer.set_model_supports_images(model.supports_images);
                         }
                     }
+                }
+                Action::PanelLauncher(PanelLauncherAction::Select(panel)) => {
+                    let kind = panel.overlay_kind();
+                    self.close_overlay(OverlayKind::PanelLauncher, &mut queue);
+                    queue.push(Action::Overlay(OverlayAction::Open(kind)));
                 }
                 Action::Settings(SettingsAction::Change { key, value }) => {
                     let change = SettingsAction::Change {

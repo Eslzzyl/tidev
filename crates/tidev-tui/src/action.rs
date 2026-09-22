@@ -121,6 +121,12 @@ pub(crate) enum OverlayAction {
     Close(OverlayKind),
 }
 
+/// Panel launcher actions.
+#[derive(Clone, Debug)]
+pub(crate) enum PanelLauncherAction {
+    Select(PanelAction),
+}
+
 /// Theme management actions.
 #[derive(Clone, Debug)]
 pub(crate) enum ThemeAction {
@@ -273,6 +279,23 @@ pub(crate) enum OverlayKind {
     GitPanel,
 }
 
+impl PanelAction {
+    pub(crate) fn overlay_kind(self) -> OverlayKind {
+        match self {
+            Self::Agents => OverlayKind::AgentsPanel,
+            Self::McpServers => OverlayKind::McpServerPanel,
+            Self::Message => OverlayKind::MessagePanel,
+            Self::Model => OverlayKind::ModelPanel,
+            Self::Search => OverlayKind::SearchPanel,
+            Self::Session => OverlayKind::SessionPanel,
+            Self::Settings => OverlayKind::SettingsPanel,
+            Self::Skills => OverlayKind::SkillsPanel,
+            Self::Theme => OverlayKind::ThemePanel,
+            Self::Git => OverlayKind::GitPanel,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Top-level Action
 // ---------------------------------------------------------------------------
@@ -287,6 +310,7 @@ pub(crate) enum Action {
     Session(SessionAction),
     Chat(ChatAction),
     Overlay(OverlayAction),
+    PanelLauncher(PanelLauncherAction),
     Theme(ThemeAction),
     Search(SearchAction),
     Settings(SettingsAction),

@@ -10,7 +10,7 @@ use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, List, ListItem, ListState, Paragraph};
 
-use crate::action::{Action, OverlayAction, OverlayKind, PanelAction};
+use crate::action::{Action, OverlayAction, OverlayKind, PanelAction, PanelLauncherAction};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
 use crate::i18n::{TextKey, UiText};
@@ -187,48 +187,16 @@ impl Component for PanelLauncher {
                 }
                 None
             }
-            KeyCode::Enter => {
-                if self.filtered.get(self.selected_index).is_some() {
-                    // Close self, then open the chosen panel
-                    // Return two actions: first close, then the panel action
-                    // Close will come first because overlay stack pops,
-                    // and the panel open will be in update()
-                    Some(Action::Overlay(OverlayAction::Close(
-                        OverlayKind::PanelLauncher,
-                    )))
-                } else {
-                    None
-                }
-            }
+            KeyCode::Enter => self
+                .filtered
+                .get(self.selected_index)
+                .map(|entry| Action::PanelLauncher(PanelLauncherAction::Select(entry.action))),
             _ => None,
         }
     }
 
-    fn update(&mut self, action: &Action, _ctx: &UpdateContext) -> Vec<Action> {
-        match action {
-            Action::Overlay(OverlayAction::Close(OverlayKind::PanelLauncher)) => {
-                // Map the selected action to an OverlayAction::Open
-                let panel_action = self.filtered.get(self.selected_index).map(|e| e.action);
-                if let Some(action) = panel_action {
-                    let kind = match action {
-                        PanelAction::Model => OverlayKind::ModelPanel,
-                        PanelAction::McpServers => OverlayKind::McpServerPanel,
-                        PanelAction::Session => OverlayKind::SessionPanel,
-                        PanelAction::Theme => OverlayKind::ThemePanel,
-                        PanelAction::Settings => OverlayKind::SettingsPanel,
-                        PanelAction::Agents => OverlayKind::AgentsPanel,
-                        PanelAction::Skills => OverlayKind::SkillsPanel,
-                        PanelAction::Message => OverlayKind::MessagePanel,
-                        PanelAction::Search => OverlayKind::SearchPanel,
-                        PanelAction::Git => OverlayKind::GitPanel,
-                    };
-                    vec![Action::Overlay(OverlayAction::Open(kind))]
-                } else {
-                    vec![]
-                }
-            }
-            _ => vec![],
-        }
+    fn update(&mut self, _action: &Action, _ctx: &UpdateContext) -> Vec<Action> {
+        vec![]
     }
 
     fn draw(&mut self, frame: &mut Frame, rect: Rect, ctx: &DrawContext) {
@@ -344,5 +312,57 @@ fn panel_description(ui_text: &UiText, action: PanelAction) -> String {
         PanelAction::Message => ui_text.text(TextKey::PanelMessageDescription),
         PanelAction::Search => ui_text.text(TextKey::PanelSearchDescription),
         PanelAction::Git => ui_text.text(TextKey::PanelGitDescription),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn initialized_launcher() -> PanelLauncher {
+        let mut launcher = PanelLauncher::new();
+        launcher.sync();
+        launcher
+    }
+
+    #[test]
+    fn escape_closes_without_selecting_a_panel() {
+        let mut launcher = initialized_launcher();
+        let action = launcher.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+        assert!(matches!(
+            action,
+            Some(Action::Overlay(OverlayAction::Close(
+                OverlayKind::PanelLauncher
+            )))
+        ));
+    }
+
+    #[test]
+    fn enter_selects_the_current_panel() {
+        let mut launcher = initialized_launcher();
+        let action = launcher.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
+            action,
+            Some(Action::PanelLauncher(PanelLauncherAction::Select(
+                PanelAction::Model
+            )))
+        ));
+    }
+
+    #[test]
+    fn escape_while_searching_only_deactivates_search() {
+        let mut launcher = initialized_launcher();
+        assert!(matches!(
+            launcher.handle_key_event(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE)),
+            Some(Action::Noop)
+        ));
+
+        assert!(matches!(
+            launcher.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+            Some(Action::Noop)
+        ));
+        assert!(!launcher.query_active);
     }
 }
