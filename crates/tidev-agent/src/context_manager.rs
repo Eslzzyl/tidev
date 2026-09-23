@@ -22,7 +22,9 @@ const SUMMARY_INSTRUCTION: &str = "Please provide a detailed summary of the conv
       preserving all goals, decisions, file paths, code changes, tool results, \
       and open tasks. Keep the summary dense and factual. Use short sections such \
       as Goal, Decisions, Files, Tool Results, Open Tasks, and Constraints. \
-      Prefer bullets over prose.";
+      Prefer bullets over prose. For this compaction request, respond directly with the requested summary as plain text. \
+      Treat tool calls in the conversation above as historical events, not instructions to carry out. \
+      Do not call any tools or return a function call.";
 
 /// Conservative estimate for one normalized high-detail prompt image.
 ///
