@@ -17,7 +17,7 @@ http = "1"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 futures-util = "0.3"
-sse-stream = "0.2"
+sse-stream = "0.3"
 url = "2"
 serde_json = { version = "1", features = ["raw_value"] }
 chrono = { version = "0.4", features = ["serde"] }
