@@ -165,11 +165,11 @@ impl Component for MessagePanel {
                 self.move_selection(1);
                 None
             }
-            KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            KeyCode::Char('p') if key.modifiers.is_empty() => {
                 self.move_selection(-1);
                 None
             }
-            KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            KeyCode::Char('n') if key.modifiers.is_empty() => {
                 self.move_selection(1);
                 None
             }
@@ -182,7 +182,7 @@ impl Component for MessagePanel {
                     None
                 }
             }
-            KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            KeyCode::Char('g') if key.modifiers.is_empty() => {
                 if let Some(message) = self.selected_message() {
                     let message_count = message.original_index + 1;
                     Some(Action::Overlay(OverlayAction::Open(
@@ -195,7 +195,7 @@ impl Component for MessagePanel {
                     None
                 }
             }
-            KeyCode::Char('z') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            KeyCode::Char('z') if key.modifiers.is_empty() => {
                 self.selected_message().map(|message| {
                     Action::Overlay(OverlayAction::Open(OverlayKind::UndoConfirmDialog {
                         message_id: message.message_id,
@@ -449,5 +449,96 @@ impl Component for MessagePanel {
 
     fn wants_terminal_cursor(&self) -> bool {
         self.query_active
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn message_panel() -> (MessagePanel, Uuid) {
+        let message_id = Uuid::new_v4();
+        let messages = vec![
+            MessagePanelMessage {
+                message_id,
+                content: "first message".to_string(),
+                created_at: Utc::now(),
+                mode: None,
+                original_index: 2,
+            },
+            MessagePanelMessage {
+                message_id: Uuid::new_v4(),
+                content: "second message".to_string(),
+                created_at: Utc::now(),
+                mode: None,
+                original_index: 3,
+            },
+        ];
+        (MessagePanel::new(messages), message_id)
+    }
+
+    #[test]
+    fn plain_p_and_n_navigate_messages() {
+        let (mut panel, _) = message_panel();
+
+        panel.handle_key_event(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::empty()));
+        assert_eq!(panel.selected_index, 1);
+
+        panel.handle_key_event(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::empty()));
+        assert_eq!(panel.selected_index, 0);
+    }
+
+    #[test]
+    fn plain_g_and_z_open_message_actions() {
+        let (mut panel, message_id) = message_panel();
+
+        let fork_action =
+            panel.handle_key_event(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()));
+        assert!(matches!(
+            fork_action,
+            Some(Action::Overlay(OverlayAction::Open(
+                OverlayKind::ForkConfirmDialog {
+                    message_id: id,
+                    message_count: 3,
+                }
+            ))) if id == message_id
+        ));
+
+        let undo_action =
+            panel.handle_key_event(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::empty()));
+        assert!(matches!(
+            undo_action,
+            Some(Action::Overlay(OverlayAction::Open(
+                OverlayKind::UndoConfirmDialog {
+                    message_id: id,
+                    content,
+                }
+            ))) if id == message_id && content == "first message"
+        ));
+    }
+
+    #[test]
+    fn modified_shortcut_keys_are_not_dispatched() {
+        let (mut panel, _) = message_panel();
+
+        for key in ['p', 'n', 'g', 'z'] {
+            assert!(
+                panel
+                    .handle_key_event(KeyEvent::new(KeyCode::Char(key), KeyModifiers::CONTROL,))
+                    .is_none()
+            );
+        }
+        assert_eq!(panel.selected_index, 0);
+    }
+
+    #[test]
+    fn shortcut_letters_remain_search_input() {
+        let (mut panel, _) = message_panel();
+
+        panel.handle_key_event(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::empty()));
+        panel.handle_key_event(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()));
+
+        assert_eq!(panel.query, "g");
+        assert!(panel.query_active);
     }
 }
