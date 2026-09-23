@@ -1,7 +1,7 @@
 //! ImageViewer — full-screen image viewer overlay.
 
 use anyhow::Result;
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::{Alignment, Rect};
 use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -42,6 +42,13 @@ impl ImageViewer {
             cached_area: None,
         })
     }
+
+    fn close_action() -> Action {
+        Action::Overlay(OverlayAction::Close(OverlayKind::ImageViewer {
+            data: Vec::new(),
+            filename: String::new(),
+        }))
+    }
 }
 
 impl Component for ImageViewer {
@@ -55,12 +62,14 @@ impl Component for ImageViewer {
             return None;
         }
         match key.code {
-            KeyCode::Char(_) | KeyCode::Esc | KeyCode::Enter => Some(Action::Overlay(
-                OverlayAction::Close(OverlayKind::ImageViewer {
-                    data: Vec::new(),
-                    filename: String::new(),
-                }),
-            )),
+            KeyCode::Char(_) | KeyCode::Esc | KeyCode::Enter => Some(Self::close_action()),
+            _ => None,
+        }
+    }
+
+    fn handle_mouse_event(&mut self, mouse: MouseEvent, _area: Rect) -> Option<Action> {
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => Some(Self::close_action()),
             _ => None,
         }
     }
@@ -179,5 +188,70 @@ impl Component for ImageViewer {
 
     fn blocks_input(&self) -> bool {
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crossterm::event::{KeyModifiers, MouseEvent};
+    use ratatui::layout::Rect;
+
+    use super::ImageViewer;
+    use crate::action::{Action, OverlayAction, OverlayKind};
+    use crate::component::Component;
+
+    fn test_viewer() -> ImageViewer {
+        ImageViewer {
+            dyn_img: image::DynamicImage::new_rgb8(1, 1),
+            filename: "test.png".to_owned(),
+            width: 1,
+            height: 1,
+            picker: None,
+            cached_protocol: None,
+            cached_area: None,
+        }
+    }
+
+    fn mouse_event(kind: crossterm::event::MouseEventKind) -> MouseEvent {
+        MouseEvent {
+            kind,
+            column: 0,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    #[test]
+    fn left_click_closes_image_viewer() {
+        let mut viewer = test_viewer();
+        let action = viewer.handle_mouse_event(
+            mouse_event(crossterm::event::MouseEventKind::Down(
+                crossterm::event::MouseButton::Left,
+            )),
+            Rect::default(),
+        );
+
+        assert!(matches!(
+            action,
+            Some(Action::Overlay(OverlayAction::Close(
+                OverlayKind::ImageViewer { .. }
+            )))
+        ));
+    }
+
+    #[test]
+    fn other_mouse_events_leave_image_viewer_open() {
+        let mut viewer = test_viewer();
+
+        for kind in [
+            crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Right),
+            crossterm::event::MouseEventKind::ScrollDown,
+        ] {
+            assert!(
+                viewer
+                    .handle_mouse_event(mouse_event(kind), Rect::default())
+                    .is_none()
+            );
+        }
     }
 }
