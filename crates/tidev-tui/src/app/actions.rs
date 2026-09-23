@@ -487,9 +487,12 @@ impl App {
                     }
                 },
                 Action::Session(SessionAction::Select(session_id)) => {
-                    // Ignore if already on this session
+                    // Close the panel even when the selected session is already active.
                     if self.current_session_id == Some(session_id) {
-                        return;
+                        queue.push(Action::Overlay(OverlayAction::Close(
+                            OverlayKind::SessionPanel,
+                        )));
+                        continue;
                     }
 
                     // Cache current session's context_usage before switching away.
@@ -582,7 +585,8 @@ impl App {
                         queue.push(Action::Overlay(OverlayAction::Close(
                             OverlayKind::SessionPanel,
                         )));
-                        return;
+                        // Keep dispatching so the queued close action is applied.
+                        continue;
                     }
 
                     // Slow path: first time entering this session — load from DB.
@@ -1392,8 +1396,50 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use super::last_copyable_assistant_content;
+    use super::*;
+    use crate::chat_context::ChatContext;
+    use crate::components::chat::MessageList;
+    use crate::context::DrawContext;
     use tidev_llm::message::{Message, MessageRole};
+
+    struct TestOverlay;
+
+    impl Component for TestOverlay {
+        fn draw(
+            &mut self,
+            _frame: &mut ratatui::Frame<'_>,
+            _rect: ratatui::layout::Rect,
+            _ctx: &DrawContext,
+        ) {
+        }
+    }
+
+    async fn test_app() -> App {
+        let dir = std::env::temp_dir().join(format!("tidev-tui-session-select-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("temp directory should be created");
+        std::fs::write(
+            dir.join("config.toml"),
+            "default_provider = \"deepseek\"\ndefault_model = \"deepseek-flash\"\n",
+        )
+        .expect("test config should be written");
+
+        let runtime = tidev_core::Runtime::builder()
+            .workspace_root(dir.clone())
+            .config_dir(dir.clone())
+            .data_dir(dir.clone())
+            .console_logging(false)
+            .build()
+            .await
+            .expect("runtime should build");
+        let (_request_tx, request_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (_event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        App::new_with_image_picker(runtime, request_rx, event_rx, None)
+    }
+
+    async fn shutdown_test_app(app: App) {
+        app.runtime.shutdown().await;
+    }
 
     #[test]
     fn last_copyable_assistant_content_uses_latest_completed_text() {
@@ -1424,5 +1470,43 @@ mod tests {
             last_copyable_assistant_content(&messages).as_deref(),
             Some("answer")
         );
+    }
+
+    #[tokio::test]
+    async fn selecting_the_current_session_closes_the_session_panel() {
+        let mut app = test_app().await;
+        let session_id = Uuid::new_v4();
+        app.current_session_id = Some(session_id);
+        app.overlays.push(Box::new(TestOverlay));
+
+        app.process_action(Action::Session(SessionAction::Select(session_id)));
+
+        assert!(app.overlays.is_empty());
+        shutdown_test_app(app).await;
+    }
+
+    #[tokio::test]
+    async fn selecting_a_cached_session_closes_the_session_panel() {
+        let mut app = test_app().await;
+        let current_session_id = Uuid::new_v4();
+        let target_session_id = Uuid::new_v4();
+        app.current_session_id = Some(current_session_id);
+        let mut message_list = MessageList::new();
+        message_list.set_chat_context(ChatContext::new(
+            target_session_id,
+            "cached session".to_string(),
+            vec![],
+            None,
+            String::new(),
+            String::new(),
+        ));
+        app.message_list = Some(message_list);
+        app.overlays.push(Box::new(TestOverlay));
+
+        app.process_action(Action::Session(SessionAction::Select(target_session_id)));
+
+        assert_eq!(app.current_session_id, Some(target_session_id));
+        assert!(app.overlays.is_empty());
+        shutdown_test_app(app).await;
     }
 }

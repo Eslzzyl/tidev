@@ -271,6 +271,24 @@ impl App {
         request_rx: tokio::sync::mpsc::UnboundedReceiver<tidev_core::FrontendRequest>,
         event_rx: tokio::sync::mpsc::UnboundedReceiver<BackendEvent>,
     ) -> Self {
+        log::info!("[img] from_query_stdio START");
+        let image_picker = Picker::from_query_stdio();
+        log::info!(
+            "[img] from_query_stdio END: {:?}",
+            image_picker
+                .as_ref()
+                .map(|p| (p.protocol_type(), p.font_size(), p.capabilities()))
+        );
+
+        Self::new_with_image_picker(runtime, request_rx, event_rx, image_picker.ok())
+    }
+
+    fn new_with_image_picker(
+        runtime: tidev_core::Runtime,
+        request_rx: tokio::sync::mpsc::UnboundedReceiver<tidev_core::FrontendRequest>,
+        event_rx: tokio::sync::mpsc::UnboundedReceiver<BackendEvent>,
+        image_picker: Option<Picker>,
+    ) -> Self {
         let (git_result_tx, git_result_rx) = tokio::sync::mpsc::unbounded_channel();
         let (mcp_notice_tx, mcp_notice_rx) = tokio::sync::mpsc::unbounded_channel();
         let theme_catalog =
@@ -287,16 +305,6 @@ impl App {
         let thinking_level = runtime.active_model().thinking_level.clone();
         let notif_config = runtime.config().notifications.clone();
         let ui_locale = runtime.config().ui.locale.clone();
-        let image_picker = {
-            log::info!("[img] from_query_stdio START");
-            let r = Picker::from_query_stdio();
-            log::info!(
-                "[img] from_query_stdio END: {:?}",
-                r.as_ref()
-                    .map(|p| (p.protocol_type(), p.font_size(), p.capabilities()))
-            );
-            r.ok()
-        };
         crate::formula::configure_picker(Some(
             image_picker.clone().unwrap_or_else(Picker::halfblocks),
         ));
