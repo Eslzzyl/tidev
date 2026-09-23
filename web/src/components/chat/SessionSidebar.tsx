@@ -1,5 +1,5 @@
 import { Folder, Pencil, Plus, Search, Trash2, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 
 import { useWorkspace } from "../../hooks/workspaceQueries";
@@ -17,6 +17,7 @@ export interface SessionSidebarProps {
   loadingMore: boolean;
   hasMore: boolean;
   mobileOpen?: boolean;
+  sidebarWidth: number;
   sessions: Session[];
   workspaceRoots: string[];
   workspaceRootFilter: string | null;
@@ -79,6 +80,7 @@ export function SessionSidebar({
   loadingMore,
   hasMore,
   mobileOpen = false,
+  sidebarWidth,
   sessions,
   workspaceRoots,
   workspaceRootFilter,
@@ -135,7 +137,11 @@ export function SessionSidebar({
   );
 
   return (
-    <aside className={mobileOpen ? "session-sidebar mobile-open" : "session-sidebar"}>
+    <aside
+      id="session-sidebar"
+      className={mobileOpen ? "session-sidebar mobile-open" : "session-sidebar"}
+      style={{ "--session-sidebar-width": `${sidebarWidth}px` } as CSSProperties}
+    >
       <div className="sidebar-heading">
         <strong>{t("Conversations")}</strong>
         <div className="sidebar-actions">

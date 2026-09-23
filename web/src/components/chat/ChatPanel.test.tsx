@@ -5,8 +5,10 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChatPanel, type ChatPanelProps } from "./ChatPanel";
+import { useUIStore } from "../../stores/useUIStore";
 
 vi.mock("react-i18next", () => ({
+  initReactI18next: { type: "3rdParty", init: vi.fn() },
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 
@@ -34,6 +36,7 @@ let root: Root;
 
 beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  useUIStore.getState().setLeftSidebarWidth(256);
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -41,6 +44,7 @@ beforeEach(() => {
 
 afterEach(() => {
   act(() => root.unmount());
+  useUIStore.getState().setLeftSidebarWidth(256);
   container.remove();
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: false });
 });
@@ -137,5 +141,47 @@ describe("ChatPanel session switching", () => {
     expect(
       container.querySelector("[data-testid='message-list']")?.getAttribute("data-initial-session"),
     ).toBe("session-b");
+  });
+
+  it("resizes the conversations sidebar with arrow keys", () => {
+    act(() => {
+      root.render(createElement(ChatPanel, panelProps("session-a")));
+    });
+
+    const separator = container.querySelector<HTMLElement>('[role="separator"]');
+    expect(separator?.getAttribute("aria-valuenow")).toBe("256");
+
+    act(() => {
+      separator?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+    });
+
+    expect(useUIStore.getState().leftSidebarWidth).toBe(246);
+    expect(separator?.getAttribute("aria-valuenow")).toBe("246");
+  });
+
+  it("updates the sidebar width after a pointer drag", () => {
+    act(() => {
+      root.render(createElement(ChatPanel, panelProps("session-a")));
+    });
+
+    const separator = container.querySelector<HTMLElement>('[role="separator"]');
+    expect(separator).not.toBeNull();
+    if (!separator) return;
+
+    Object.defineProperty(separator, "setPointerCapture", { value: vi.fn() });
+    const dispatchPointer = (type: string, clientX: number) => {
+      const event = new Event(type, { bubbles: true });
+      Object.assign(event, { pointerId: 1, clientX, button: 0 });
+      separator.dispatchEvent(event);
+    };
+
+    act(() => {
+      dispatchPointer("pointerdown", 100);
+      dispatchPointer("pointermove", 145);
+      expect(separator.getAttribute("aria-valuenow")).toBe("301");
+      dispatchPointer("pointerup", 145);
+    });
+
+    expect(useUIStore.getState().leftSidebarWidth).toBe(301);
   });
 });

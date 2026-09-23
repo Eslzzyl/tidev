@@ -343,7 +343,9 @@ body {
   }
 }
 .session-sidebar {
-  width: 262px;
+  width: var(--session-sidebar-width, 256px);
+  min-width: 0;
+  flex: 0 0 var(--session-sidebar-width, 256px);
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--line-soft);

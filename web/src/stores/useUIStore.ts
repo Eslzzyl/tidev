@@ -64,8 +64,8 @@ export interface UIActions {
 
 const DEFAULT_LEFT_SIDEBAR_WIDTH = 256;
 const DEFAULT_RIGHT_SIDEBAR_WIDTH = 280;
-const MIN_SIDEBAR_WIDTH = 180;
-const MAX_SIDEBAR_WIDTH = 500;
+export const MIN_SIDEBAR_WIDTH = 180;
+export const MAX_SIDEBAR_WIDTH = 500;
 
 const defaultSettings: SettingsState = {
   fontFamily: "Inter, system-ui, sans-serif",
@@ -133,7 +133,7 @@ function applyVisualSettings(theme: Theme, settings: SettingsState): void {
 
 applyVisualSettings(initialState.theme, initialState.settings);
 
-function clampSidebarWidth(width: number): number {
+export function clampSidebarWidth(width: number): number {
   return Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, width));
 }
 

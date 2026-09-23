@@ -1,4 +1,10 @@
-import { useState, type ReactNode } from "react";
+import {
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from "react";
 import { AlertCircle, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -13,8 +19,15 @@ import type {
   TodoItem,
 } from "../../types/api";
 import type { CompactionNotice, InstructionNotice, StreamMessage } from "../../types/chat";
+import type { ReasoningDisplay } from "../../utils/round";
 import { ChatComposer } from "./ChatComposer";
 import { ChangedFilesPanel } from "./ChangedFilesPanel";
+import {
+  clampSidebarWidth,
+  MAX_SIDEBAR_WIDTH,
+  MIN_SIDEBAR_WIDTH,
+  useUIStore,
+} from "../../stores/useUIStore";
 import type { PendingImage } from "../../utils/imageAttachments";
 import { ApprovalCard, MessageList } from "./MessageList";
 import { SessionSidebar } from "./SessionSidebar";
@@ -39,6 +52,7 @@ export interface ChatPanelProps {
   changedFilesLoading: boolean;
   changedFilesError: string | null;
   streams: StreamMessage[];
+  reasoningDisplays?: Readonly<Record<string, ReasoningDisplay>>;
   instructionNotices: InstructionNotice[];
   compactionNotice: CompactionNotice | null;
   requests: FrontendRequest[];
@@ -158,6 +172,7 @@ export function ChatPanel({
   changedFilesLoading,
   changedFilesError,
   streams,
+  reasoningDisplays,
   instructionNotices,
   compactionNotice,
   requests,
@@ -214,6 +229,14 @@ export function ChatPanel({
   scrollToBottomRequest = 0,
 }: ChatPanelProps) {
   const { t } = useTranslation();
+  const leftSidebarWidth = useUIStore((state) => state.leftSidebarWidth);
+  const setLeftSidebarWidth = useUIStore((state) => state.setLeftSidebarWidth);
+  const resizeDrag = useRef<{
+    pointerId: number;
+    startX: number;
+    startWidth: number;
+    currentWidth: number;
+  } | null>(null);
   const [composerSelection, setComposerSelection] = useState<{
     sessionId: string;
     start: number;
@@ -245,6 +268,65 @@ export function ChatPanel({
     onCreateSession();
   };
 
+  const handleResizePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    resizeDrag.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startWidth: leftSidebarWidth,
+      currentWidth: leftSidebarWidth,
+    };
+    event.currentTarget.classList.add("is-resizing");
+  };
+
+  const handleResizePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = resizeDrag.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+
+    const width = clampSidebarWidth(drag.startWidth + event.clientX - drag.startX);
+    drag.currentWidth = width;
+    event.currentTarget.setAttribute("aria-valuenow", String(width));
+    const sidebar = event.currentTarget.previousElementSibling as HTMLElement | null;
+    sidebar?.style.setProperty("--session-sidebar-width", `${width}px`);
+  };
+
+  const handleResizePointerEnd = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = resizeDrag.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+
+    resizeDrag.current = null;
+    event.currentTarget.classList.remove("is-resizing");
+    setLeftSidebarWidth(drag.currentWidth);
+  };
+
+  const handleResizeKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const step = event.shiftKey ? 50 : 10;
+    let width: number | null = null;
+
+    switch (event.key) {
+      case "ArrowLeft":
+        width = leftSidebarWidth - step;
+        break;
+      case "ArrowRight":
+        width = leftSidebarWidth + step;
+        break;
+      case "Home":
+        width = MIN_SIDEBAR_WIDTH;
+        break;
+      case "End":
+        width = MAX_SIDEBAR_WIDTH;
+        break;
+      default:
+        return;
+    }
+
+    event.preventDefault();
+    setLeftSidebarWidth(width);
+  };
+
   return (
     <>
       <Button
@@ -264,6 +346,7 @@ export function ChatPanel({
         loadingMore={loadingMoreSessions}
         hasMore={hasMoreSessions}
         mobileOpen={mobileSidebarOpen}
+        sidebarWidth={leftSidebarWidth}
         sessions={sessions}
         workspaceRoots={workspaceRoots}
         workspaceRootFilter={workspaceRootFilter}
@@ -282,6 +365,23 @@ export function ChatPanel({
         onRename={onRename}
         onCancelRename={onCancelRename}
         onDelete={onDeleteSession}
+      />
+      <div
+        className="sidebar-resize-handle"
+        role="separator"
+        aria-label={t("Resize conversations sidebar")}
+        aria-controls="session-sidebar"
+        aria-orientation="vertical"
+        aria-valuemin={MIN_SIDEBAR_WIDTH}
+        aria-valuemax={MAX_SIDEBAR_WIDTH}
+        aria-valuenow={leftSidebarWidth}
+        tabIndex={0}
+        onPointerDown={handleResizePointerDown}
+        onPointerMove={handleResizePointerMove}
+        onPointerUp={handleResizePointerEnd}
+        onPointerCancel={handleResizePointerEnd}
+        onLostPointerCapture={handleResizePointerEnd}
+        onKeyDown={handleResizeKeyDown}
       />
       <section className={hasComposerStatus ? "chat-panel has-composer-status" : "chat-panel"}>
         {selectedSessionId === null ? (
@@ -315,6 +415,7 @@ export function ChatPanel({
                 key={selectedSessionId}
                 messages={messages}
                 streams={streams}
+                reasoningDisplays={reasoningDisplays}
                 instructionNotices={instructionNotices}
                 compactionNotice={compactionNotice}
                 sessionId={selectedSessionId}

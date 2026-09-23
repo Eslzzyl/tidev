@@ -5,6 +5,33 @@
   flex-direction: column;
   background: var(--bg);
 }
+.sidebar-resize-handle {
+  position: relative;
+  z-index: 2;
+  width: 8px;
+  flex: 0 0 8px;
+  margin-inline: -4px;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+}
+.sidebar-resize-handle::after {
+  position: absolute;
+  inset-block: 0;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+  content: "";
+  transition: background-color 120ms ease;
+}
+.sidebar-resize-handle:hover::after,
+.sidebar-resize-handle:focus-visible::after,
+.sidebar-resize-handle.is-resizing::after {
+  background: var(--accent);
+}
+.sidebar-resize-handle:focus-visible {
+  outline: none;
+}
 .changed-files-panel {
   z-index: 25;
   display: flex;
@@ -17,6 +44,11 @@
 }
 .changed-files-panel-backdrop {
   display: none;
+}
+@media (max-width: 760px) {
+  .sidebar-resize-handle {
+    display: none;
+  }
 }
 .changed-files-panel-header {
   display: flex;
