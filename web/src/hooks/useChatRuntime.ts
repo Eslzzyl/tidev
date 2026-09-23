@@ -1500,8 +1500,6 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
         title: (content || i18n.t("Image prompt")).slice(0, 80),
         workspace_root: selectedWorkspaceRoot,
       });
-      setSessionSearch("");
-      setSessionWorkspaceRoot(null);
       setSessions((current) => mergeSessions([response.session], current));
       setSessionWorkspaceRoots((current) =>
         current.includes(response.session.workspace_root)
