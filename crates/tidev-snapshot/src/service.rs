@@ -84,7 +84,7 @@ impl SnapshotService {
         let total_start = Instant::now();
 
         if !self.config.enabled {
-            log::info!("snapshot: disabled by config; skipping track()");
+            log::debug!("snapshot: disabled by config; skipping track()");
             return Ok(None);
         }
 
@@ -106,7 +106,7 @@ impl SnapshotService {
             inner.await
         };
 
-        log::info!(
+        log::debug!(
             "snapshot: track() total elapsed: {:?}",
             total_start.elapsed()
         );
@@ -127,11 +127,11 @@ impl SnapshotService {
         if !existed {
             git::init_snapshot_repo(&self.gitdir)?;
         }
-        log::info!("snapshot: init phase: {:?}", phase.elapsed());
+        log::debug!("snapshot: init phase: {:?}", phase.elapsed());
 
         let phase = Instant::now();
         let all_files = git::find_changed_files(&self.gitdir, &self.worktree).await?;
-        log::info!(
+        log::debug!(
             "snapshot: find_changed_files returned {} files in {:?}",
             all_files.len(),
             phase.elapsed()
@@ -142,7 +142,7 @@ impl SnapshotService {
         } else {
             let phase = Instant::now();
             let ignored = git::check_ignored(&self.gitdir, &self.worktree, &all_files)?;
-            log::info!(
+            log::debug!(
                 "snapshot: check_ignored: {:?} ({} ignored)",
                 phase.elapsed(),
                 ignored.len()
@@ -178,7 +178,7 @@ impl SnapshotService {
             self.config.stat_concurrency,
         )
         .await?;
-        log::info!(
+        log::debug!(
             "snapshot: filter_large_files: {:?} ({} large)",
             phase.elapsed(),
             large_files.len()
