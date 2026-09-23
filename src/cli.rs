@@ -717,7 +717,7 @@ fn resolve_session_id(store: &tidev_storage::SessionStore, value: &str) -> Resul
 
     let prefix = value.trim();
     let normalized_prefix = prefix.replace('-', "");
-    if normalized_prefix.len() < 8 || !normalized_prefix.chars().all(|ch| ch.is_ascii_hexdigit()) {
+    if normalized_prefix.len() < 6 || !normalized_prefix.chars().all(|ch| ch.is_ascii_hexdigit()) {
         anyhow::bail!("invalid session UUID or UUID prefix: {value}");
     }
 
@@ -938,4 +938,67 @@ pub fn session_prune(older_than_days: u64, yes: bool) -> Result<()> {
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_resolve_session_id_prefix_validation() {
+        let temp_dir = std::env::temp_dir().join(format!("tidev-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let db = tidev_storage::database::Database::open(temp_dir.join("test.db")).unwrap();
+        let store = db.create_store().unwrap();
+
+        // Length < 6 is rejected
+        let err = resolve_session_id(&store, "a6ee6").unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("invalid session UUID or UUID prefix: a6ee6")
+        );
+
+        // Non-hex is rejected
+        let err = resolve_session_id(&store, "a6ee6g").unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("invalid session UUID or UUID prefix: a6ee6g")
+        );
+
+        // Create a test session
+        let target_id = Uuid::parse_str("a6ee6883-bd8a-4036-b454-3d900f5d0faf").unwrap();
+        store
+            .create_session(
+                target_id,
+                "/tmp",
+                "test",
+                "Test",
+                "test-model",
+                "Test Model",
+                "Test Title",
+                "system prompt",
+                None,
+                None,
+            )
+            .unwrap();
+
+        // 6-character lowercase prefix
+        let resolved = resolve_session_id(&store, "a6ee68").unwrap();
+        assert_eq!(resolved, target_id);
+
+        // Uppercase prefix
+        let resolved_upper = resolve_session_id(&store, "A6EE68").unwrap();
+        assert_eq!(resolved_upper, target_id);
+
+        // Prefix with hyphen
+        let resolved_hyphen = resolve_session_id(&store, "a6-ee-68").unwrap();
+        assert_eq!(resolved_hyphen, target_id);
+
+        // Full UUID
+        let resolved_full =
+            resolve_session_id(&store, "a6ee6883-bd8a-4036-b454-3d900f5d0faf").unwrap();
+        assert_eq!(resolved_full, target_id);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
 }

@@ -4,7 +4,9 @@ use chrono::Local;
 use ratatui::prelude::{Modifier, Style};
 use ratatui::style::Color;
 use ratatui::text::{Line, Span};
-use tidev_llm::message::{COMPACTION_MESSAGE_LABEL, Message, MessageAttachment, MessageRole};
+use tidev_llm::message::{
+    COMPACTION_MESSAGE_LABEL, Message, MessageAttachment, MessageRole, extract_compaction_summary,
+};
 use unicode_width::UnicodeWidthStr;
 
 use crate::diff_render::render_unified_diff_text;
@@ -434,11 +436,7 @@ pub(super) fn render_system_card(
 
     // Compaction message
     if content.starts_with(COMPACTION_MESSAGE_LABEL) {
-        let summary = content
-            .split_once("\n\n")
-            .map(|(_, s)| s)
-            .unwrap_or("")
-            .trim();
+        let summary = extract_compaction_summary(content);
         let label = if message.metadata.compaction_manual == Some(false) {
             ctx.ui_text.text(crate::i18n::TextKey::AutomaticCompaction)
         } else {

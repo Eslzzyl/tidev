@@ -29,7 +29,6 @@ use crate::event::{AgentEvent, StreamEndStatus};
 /// ```
 pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> Result<()> {
     let session_id = config.session_id;
-    let mut continue_after_compaction_summary = false;
     for request_id in 1_u64.. {
         // ─── 0. Cancellation check ──────────────────────────────────────
         if config.cancel.is_cancelled() {
@@ -38,7 +37,7 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
         }
 
         // ─── 1. Materialize and load messages ────────────────────────────
-        let preparation = match ctx.prepare_request(session_id).await {
+        let _preparation = match ctx.prepare_request(session_id).await {
             Ok(preparation) => preparation,
             Err(error) => {
                 let error_text = error.to_string();
@@ -51,16 +50,6 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
                 return Err(error);
             }
         };
-        if preparation.auto_compacted {
-            continue_after_compaction_summary = !preparation.summary_had_tool_calls;
-            if preparation.summary_had_tool_calls {
-                ctx.append_compaction_continuation(
-                    session_id,
-                    compaction_continuation_message(session_id, true),
-                )
-                .await?;
-            }
-        }
         let messages = match ctx.load_messages(session_id).await {
             Ok(messages) => messages,
             Err(error) => {
@@ -151,33 +140,6 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
             let msg = build_assistant_message(&turn);
             ctx.save_messages(session_id, &[msg]).await?;
 
-            if continue_after_compaction_summary {
-                continue_after_compaction_summary = false;
-                ctx.emit_stream_event(AgentEvent::StreamEnd {
-                    request_id,
-                    reasoning_started_at: turn.reasoning_started_at,
-                    reasoning_completed_at: turn.reasoning_completed_at,
-                    status: StreamEndStatus::Completed,
-                })
-                .await?;
-                if let Err(error) = ctx
-                    .append_compaction_continuation(
-                        session_id,
-                        compaction_continuation_message(session_id, false),
-                    )
-                    .await
-                {
-                    ctx.emit_stream_event(AgentEvent::Failed {
-                        request_id,
-                        error: error.to_string(),
-                        retryable: false,
-                    })
-                    .await?;
-                    return Err(error);
-                }
-                continue;
-            }
-
             // Check for user messages steered into this session while the
             // turn was running. The host keeps them pending until the next
             // request boundary, where prepare_request performs compaction
@@ -259,22 +221,6 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
     Ok(())
 }
 
-fn compaction_continuation_message(
-    session_id: uuid::Uuid,
-    summary_had_tool_calls: bool,
-) -> Message {
-    let content = if summary_had_tool_calls {
-        format!(
-            "The context compaction summary is empty because the compaction response requested a tool call. Use the session-history skill to inspect this session and recover the unfinished task, then continue it. Session ID: {session_id}."
-        )
-    } else {
-        format!(
-            "The preceding assistant response is an intermediate context summary, not a final answer. Continue the unfinished task from this session. Use the session-history skill to inspect the original conversation when details are needed. Session ID: {session_id}."
-        )
-    };
-    Message::new(MessageRole::User, content)
-}
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -329,7 +275,6 @@ mod tests {
         preparations: VecDeque<RequestPreparation>,
         turns: VecDeque<AssistantTurn>,
         requests: Vec<Vec<Message>>,
-        continuations: Vec<Message>,
     }
 
     struct MockContext {
@@ -424,17 +369,6 @@ mod tests {
                 .unwrap_or_default())
         }
 
-        async fn append_compaction_continuation(
-            &self,
-            _session_id: uuid::Uuid,
-            message: Message,
-        ) -> anyhow::Result<()> {
-            let mut state = self.state.lock().await;
-            state.continuations.push(message.clone());
-            state.messages.push(message);
-            Ok(())
-        }
-
         async fn load_messages(&self, _session_id: uuid::Uuid) -> anyhow::Result<Vec<Message>> {
             Ok(self.state.lock().await.messages.clone())
         }
@@ -452,68 +386,49 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn successful_compaction_summary_schedules_one_continuation_request() {
+    async fn compaction_proceeds_silently_without_extra_user_message() {
         let session_id = uuid::Uuid::new_v4();
-        let context = Message::compaction("task summary");
+        let context = Message::compaction_auto("task summary", session_id);
         let (ctx, _events) = MockContext::new(
             vec![context],
-            vec![
-                RequestPreparation {
-                    auto_compacted: true,
-                    summary_had_tool_calls: false,
-                },
-                RequestPreparation::default(),
-            ],
-            vec![
-                AssistantTurn {
-                    content: "summary response".into(),
-                    ..Default::default()
-                },
-                AssistantTurn {
-                    content: "task completed".into(),
-                    ..Default::default()
-                },
-            ],
+            vec![RequestPreparation {
+                auto_compacted: true,
+            }],
+            vec![AssistantTurn {
+                content: "task completed".into(),
+                ..Default::default()
+            }],
         );
 
         run_agent_loop(&ctx, config(session_id)).await.unwrap();
 
         let state = ctx.state.lock().await;
-        assert_eq!(state.requests.len(), 2);
-        assert_eq!(state.continuations.len(), 1);
+        assert_eq!(state.requests.len(), 1);
+        let first_request = &state.requests[0];
+        assert_eq!(first_request.len(), 1);
+        assert!(first_request[0].is_compaction());
         assert!(
-            state.continuations[0]
+            first_request[0]
                 .content
-                .contains(&session_id.to_string())
+                .contains(&tidev_llm::short_session_id(session_id))
         );
-        assert!(
-            state.continuations[0]
-                .content
-                .contains("intermediate context summary")
-        );
-        assert_eq!(
-            state.requests[1].last().unwrap().content,
-            state.continuations[0].content
-        );
-        assert!(
-            state.requests[1]
-                .iter()
-                .any(|message| message.content == "summary response")
-        );
+
+        // Ensure no extra user message was appended to messages, only the assistant response
+        assert_eq!(state.messages.len(), 2);
+        assert_eq!(state.messages[1].role, MessageRole::Assistant);
+        assert_eq!(state.messages[1].content, "task completed");
     }
 
     #[tokio::test]
-    async fn successful_compaction_waits_for_text_only_response_after_tool_calls() {
+    async fn compaction_with_tool_calls_continues_immediately_without_extra_user_message() {
         let session_id = uuid::Uuid::new_v4();
-        let context = Message::compaction("task summary");
+        let context = Message::compaction_auto("task summary", session_id);
         let (ctx, _events) = MockContext::new(
             vec![context],
             vec![
                 RequestPreparation {
                     auto_compacted: true,
-                    summary_had_tool_calls: false,
                 },
-                RequestPreparation::default(),
                 RequestPreparation::default(),
             ],
             vec![
@@ -527,60 +442,6 @@ mod tests {
                     ..Default::default()
                 },
                 AssistantTurn {
-                    content: "tool results processed".into(),
-                    ..Default::default()
-                },
-                AssistantTurn {
-                    content: "task completed".into(),
-                    ..Default::default()
-                },
-            ],
-        );
-
-        run_agent_loop(&ctx, config(session_id)).await.unwrap();
-
-        let state = ctx.state.lock().await;
-        assert_eq!(state.requests.len(), 3);
-        assert_eq!(state.continuations.len(), 1);
-        assert!(state.requests[1].iter().any(|message| {
-            message.role == MessageRole::Tool && message.tool_call_id.as_deref() == Some("call-1")
-        }));
-        assert_eq!(
-            state.requests[2].last().unwrap().content,
-            state.continuations[0].content
-        );
-        assert!(
-            state.continuations[0]
-                .content
-                .contains(&session_id.to_string())
-        );
-    }
-
-    #[tokio::test]
-    async fn compaction_tool_call_injects_session_id_before_task_request() {
-        let session_id = uuid::Uuid::new_v4();
-        let initial = Message::new(MessageRole::User, "unfinished task");
-        let initial_id = initial.id;
-        let (ctx, _events) = MockContext::new(
-            vec![initial],
-            vec![
-                RequestPreparation {
-                    auto_compacted: true,
-                    summary_had_tool_calls: true,
-                },
-                RequestPreparation::default(),
-            ],
-            vec![
-                AssistantTurn {
-                    tool_calls: vec![ToolCall {
-                        id: "call-1".into(),
-                        name: "session_history".into(),
-                        arguments: "{}".into(),
-                        thought_signature: None,
-                    }],
-                    ..Default::default()
-                },
-                AssistantTurn {
                     content: "task completed".into(),
                     ..Default::default()
                 },
@@ -591,17 +452,16 @@ mod tests {
 
         let state = ctx.state.lock().await;
         assert_eq!(state.requests.len(), 2);
-        assert_eq!(state.continuations.len(), 1);
-        assert!(
-            state.continuations[0]
-                .content
-                .contains(&session_id.to_string())
-        );
-        assert!(state.continuations[0].content.contains("summary is empty"));
-        assert_eq!(state.messages[0].id, initial_id);
-        assert_eq!(
-            state.requests[0].last().unwrap().content,
-            state.continuations[0].content
-        );
+        // Turn 1 executes tool call immediately
+        assert!(state.requests[1].iter().any(|message| {
+            message.role == MessageRole::Tool && message.tool_call_id.as_deref() == Some("call-1")
+        }));
+        // Messages are: [compaction marker, assistant (tool call), tool result, assistant (final)]
+        assert_eq!(state.messages.len(), 4);
+        assert_eq!(state.messages[0].role, MessageRole::User);
+        assert!(state.messages[0].is_compaction());
+        assert_eq!(state.messages[1].role, MessageRole::Assistant);
+        assert_eq!(state.messages[2].role, MessageRole::Tool);
+        assert_eq!(state.messages[3].role, MessageRole::Assistant);
     }
 }

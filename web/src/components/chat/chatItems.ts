@@ -353,11 +353,23 @@ function buildRoundFooterParts(
   return parts;
 }
 
+const COMPACTION_CONTINUATION_PREFIX = "The conversation context before this point was compacted";
+
+function extractCompactionSummary(content: string): string | null {
+  const body = content.split("\n\n").slice(1).join("\n\n").trim();
+  if (!body) return null;
+  const footerIndex = body.lastIndexOf(COMPACTION_CONTINUATION_PREFIX);
+  if (footerIndex !== -1) {
+    return body.slice(0, footerIndex).trim() || null;
+  }
+  return body;
+}
+
 function persistedCompactionNotice(message: Message): CompactionNotice {
   return {
     status: "complete",
     manual: message.metadata.compaction_manual === true,
-    summary: message.content.split("\n\n").slice(1).join("\n\n").trim() || null,
+    summary: extractCompactionSummary(message.content),
     error: null,
     modelId: null,
     completedAt: message.created_at || null,
@@ -370,7 +382,8 @@ function matchesCompactionNotice(message: Message, notice: CompactionNotice | nu
   if (!notice || notice.status !== "complete" || !notice.summary) return false;
   return (
     message.metadata.compaction_manual === notice.manual &&
-    message.content === `Compaction\n\n${notice.summary}`
+    (message.content === `Compaction\n\n${notice.summary}` ||
+      message.content.startsWith(`Compaction\n\n${notice.summary}\n\n`))
   );
 }
 

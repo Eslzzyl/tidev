@@ -21,6 +21,7 @@ mod turn;
 mod types;
 
 pub use event::LlmEvent;
+pub use message::{COMPACTION_CONTINUATION_PREFIX, extract_compaction_summary, short_session_id};
 pub use types::{ApiType, LlmCompletion, LlmProviderConfig, LlmRequestContext, ToolDefinition};
 
 use anyhow::{Context, Result};

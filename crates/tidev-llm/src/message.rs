@@ -387,6 +387,29 @@ pub struct Message {
     pub thinking_level: Option<crate::reasoning::ThinkingLevelType>,
 }
 
+pub const COMPACTION_CONTINUATION_PREFIX: &str =
+    "The conversation context before this point was compacted into the summary above.";
+
+/// Extract the compaction summary text from a message content string,
+/// removing the leading label and any trailing continuation instruction footer.
+pub fn extract_compaction_summary(content: &str) -> &str {
+    let body = content
+        .strip_prefix(COMPACTION_MESSAGE_LABEL)
+        .unwrap_or(content)
+        .trim_start_matches('\n')
+        .trim_start();
+    if let Some(pos) = body.rfind(COMPACTION_CONTINUATION_PREFIX) {
+        body[..pos].trim()
+    } else {
+        body.trim()
+    }
+}
+
+/// Extract the first 6 hexadecimal characters of a session UUID.
+pub fn short_session_id(session_id: Uuid) -> String {
+    session_id.simple().to_string()[..6].to_string()
+}
+
 impl Message {
     pub fn new(role: MessageRole, content: impl Into<String>) -> Self {
         Self {
@@ -415,6 +438,11 @@ impl Message {
         }
     }
 
+    /// Extract the first 6 hexadecimal characters of a session UUID.
+    pub fn short_session_id(session_id: Uuid) -> String {
+        short_session_id(session_id)
+    }
+
     pub fn compaction(summary: impl Into<String>) -> Self {
         Self::compaction_with_manual(summary, false)
     }
@@ -426,6 +454,57 @@ impl Message {
         );
         message.metadata.compaction_manual = Some(manual);
         message
+    }
+
+    /// Build an automatic context compaction message that includes task continuation
+    /// instructions and the short session ID for inspection.
+    pub fn compaction_auto(summary: impl Into<String>, session_id: Uuid) -> Self {
+        let short_id = short_session_id(session_id);
+        let summary = summary.into();
+        let summary_body = if summary.trim().is_empty() {
+            "Context compaction completed without a text summary."
+        } else {
+            summary.as_str()
+        };
+        let content = format!(
+            "{COMPACTION_MESSAGE_LABEL}\n\n{summary_body}\n\n\
+            {COMPACTION_CONTINUATION_PREFIX} \
+            Continue the unfinished task from this session. When details from the compacted history are needed, \
+            use the session-history skill to inspect this session. Session ID: {short_id}."
+        );
+        let mut message = Self::new(MessageRole::User, content);
+        message.metadata.compaction_manual = Some(false);
+        message
+    }
+
+    /// Build a manual context compaction message that summarizes context and includes
+    /// the short session ID for history inspection.
+    pub fn compaction_manual(summary: impl Into<String>, session_id: Uuid) -> Self {
+        let short_id = short_session_id(session_id);
+        let summary = summary.into();
+        let summary_body = if summary.trim().is_empty() {
+            "Context compaction completed without a text summary."
+        } else {
+            summary.as_str()
+        };
+        let content = format!(
+            "{COMPACTION_MESSAGE_LABEL}\n\n{summary_body}\n\n\
+            {COMPACTION_CONTINUATION_PREFIX} \
+            When details from the compacted history are needed, \
+            use the session-history skill to inspect this session. Session ID: {short_id}."
+        );
+        let mut message = Self::new(MessageRole::User, content);
+        message.metadata.compaction_manual = Some(true);
+        message
+    }
+
+    /// If this is a compaction message, return the extracted summary text.
+    pub fn compaction_summary(&self) -> Option<&str> {
+        if self.is_compaction() || self.content.starts_with(COMPACTION_MESSAGE_LABEL) {
+            Some(extract_compaction_summary(&self.content))
+        } else {
+            None
+        }
     }
 
     /// Return whether this is a persisted compaction summary marker.
@@ -1036,5 +1115,43 @@ mod tests {
         };
         let json = serde_json::to_value(&img).unwrap();
         assert_eq!(json["type"], "image");
+    }
+
+    #[test]
+    fn test_short_session_id() {
+        let id = Uuid::parse_str("a1521d2f-d493-4f5e-8d17-13ea4a1daa45").unwrap();
+        assert_eq!(short_session_id(id), "a1521d");
+        assert_eq!(Message::short_session_id(id), "a1521d");
+    }
+
+    #[test]
+    fn test_compaction_auto_and_summary_extraction() {
+        let id = Uuid::parse_str("a1521d2f-d493-4f5e-8d17-13ea4a1daa45").unwrap();
+        let msg = Message::compaction_auto("Summary of task A", id);
+        assert!(msg.is_compaction());
+        assert_eq!(msg.metadata.compaction_manual, Some(false));
+        assert!(msg.content.contains("Session ID: a1521d"));
+        assert!(msg.content.contains(COMPACTION_CONTINUATION_PREFIX));
+        assert_eq!(msg.compaction_summary(), Some("Summary of task A"));
+    }
+
+    #[test]
+    fn test_compaction_manual_and_summary_extraction() {
+        let id = Uuid::parse_str("a1521d2f-d493-4f5e-8d17-13ea4a1daa45").unwrap();
+        let msg = Message::compaction_manual("Manual summary", id);
+        assert!(msg.is_compaction());
+        assert_eq!(msg.metadata.compaction_manual, Some(true));
+        assert!(msg.content.contains("Session ID: a1521d"));
+        assert_eq!(msg.compaction_summary(), Some("Manual summary"));
+    }
+
+    #[test]
+    fn test_legacy_compaction_summary_extraction() {
+        let msg = Message::compaction("Legacy summary text without continuation");
+        assert!(msg.is_compaction());
+        assert_eq!(
+            msg.compaction_summary(),
+            Some("Legacy summary text without continuation")
+        );
     }
 }

@@ -1556,41 +1556,6 @@ impl AgentContext for CoreContext {
         Ok(())
     }
 
-    async fn append_compaction_continuation(
-        &self,
-        session_id: Uuid,
-        message: Message,
-    ) -> Result<()> {
-        if session_id != self.session_id {
-            anyhow::bail!(
-                "agent context is bound to session {}, got {}",
-                self.session_id,
-                session_id
-            );
-        }
-        let app_data = MessageAppData {
-            mode: Some(self.request_mode().as_str().to_string()),
-            ..Default::default()
-        };
-        let app_data_by_message = [(message.id, app_data.clone())].into_iter().collect();
-        self.session_manager.append_messages_with_app_data(
-            session_id,
-            std::slice::from_ref(&message),
-            &app_data_by_message,
-        )?;
-        self.buffer
-            .write()
-            .await
-            .append_with_app_data(message.clone(), app_data.clone());
-        self.emit(BackendEvent::UserMessageCreated {
-            session_id,
-            message: Box::new(message),
-            app_data: Box::new(app_data),
-            queued: false,
-        });
-        Ok(())
-    }
-
     async fn prepare_request(&self, session_id: Uuid) -> Result<RequestPreparation> {
         if session_id != self.session_id {
             anyhow::bail!(
@@ -1665,9 +1630,8 @@ impl AgentContext for CoreContext {
                         return Err(error);
                     }
                 };
-                let summary_had_tool_calls = result.had_tool_calls;
 
-                let mut marker = Message::compaction(&result.summary);
+                let mut marker = Message::compaction_auto(&result.summary, self.session_id);
                 marker.metadata.prior_summary = prior_summary;
                 marker.metadata.prior_retained_from = Some(prior_retained_from);
                 self.session_manager.apply_compaction(
@@ -1694,7 +1658,6 @@ impl AgentContext for CoreContext {
                 });
                 preparation = RequestPreparation {
                     auto_compacted: true,
-                    summary_had_tool_calls,
                 };
             }
         }

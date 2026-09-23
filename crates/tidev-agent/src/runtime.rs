@@ -342,8 +342,7 @@ impl AgentContext for AgentRuntime {
                 },
             )
             .await?;
-        let summary_had_tool_calls = result.had_tool_calls;
-        let marker = Message::compaction(&result.summary);
+        let marker = Message::compaction_auto(&result.summary, session_id);
         self.store
             .apply_compaction(session_id, &result.summary, result.retained_from, &marker)
             .await?;
@@ -362,7 +361,6 @@ impl AgentContext for AgentRuntime {
         *shared_context_manager = context_manager;
         Ok(crate::context::RequestPreparation {
             auto_compacted: true,
-            summary_had_tool_calls,
         })
     }
 

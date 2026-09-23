@@ -22,7 +22,7 @@ retained tool output. Image bytes are not keyword-searchable and are skipped.
 Use a short or complete session ID to scope the search:
 
 ```bash
-tidev session search "keyword" --field all --session a1b2c3d4e5f6 --format json
+tidev session search "keyword" --field all --session a1b2c3 --format json
 ```
 
 Each result contains `session_id`, `message_id`, `sequence`, `role`, `field`,

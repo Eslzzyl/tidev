@@ -723,7 +723,7 @@ fn parse_search_uuid(value: &str) -> Uuid {
 }
 
 fn short_session_id(session_id: Uuid) -> String {
-    session_id.simple().to_string()[..12].to_string()
+    tidev_llm::short_session_id(session_id)
 }
 
 fn make_search_snippet(

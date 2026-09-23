@@ -1871,7 +1871,7 @@ impl Runtime {
 
         // 3. Persist the state and provider-visible marker together before
         // exposing either to a later request.
-        let mut marker = Message::compaction_with_manual(&result.summary, true);
+        let mut marker = Message::compaction_manual(&result.summary, session_id);
         marker.metadata.prior_summary = prior_summary;
         marker.metadata.prior_retained_from = Some(prior_retained_from);
         if let Err(error) = self.session_manager.apply_compaction(
