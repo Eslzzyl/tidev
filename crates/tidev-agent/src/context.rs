@@ -43,6 +43,15 @@ pub struct AgentLoopConfig {
     pub steer_signal: Arc<AtomicBool>,
 }
 
+/// State materialized before one provider request.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RequestPreparation {
+    /// Whether this preparation completed automatic context compaction.
+    pub auto_compacted: bool,
+    /// Whether the compaction response contained tool calls instead of a summary.
+    pub summary_had_tool_calls: bool,
+}
+
 // ---------------------------------------------------------------------------
 // AgentContext trait
 // ---------------------------------------------------------------------------
@@ -113,8 +122,17 @@ pub trait AgentContext: Send + Sync {
     ///
     /// Implementations must persist that state before returning. Request
     /// assembly itself then reads only durable messages.
-    async fn prepare_request(&self, _session_id: uuid::Uuid) -> Result<()> {
-        Ok(())
+    async fn prepare_request(&self, _session_id: uuid::Uuid) -> Result<RequestPreparation> {
+        Ok(RequestPreparation::default())
+    }
+
+    /// Persist a continuation prompt before the next request is assembled.
+    async fn append_compaction_continuation(
+        &self,
+        session_id: uuid::Uuid,
+        message: Message,
+    ) -> Result<()> {
+        self.save_messages(session_id, &[message]).await
     }
 
     /// Load all messages for the current session.

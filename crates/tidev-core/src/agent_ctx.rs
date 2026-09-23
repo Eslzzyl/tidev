@@ -21,9 +21,9 @@ use crate::agent_type::AgentType;
 use crate::backend_event::{BackendEvent, CoreEventBus};
 use tidev_agent::{
     AgentContext, AgentDefinition, AgentEvent, AgentEventSender, AgentLoopConfig,
-    CompactionRequest, ContextManager, StreamEndStatus, SubagentEventSink, SubagentExecution,
-    SubagentExecutor, ToolCallExecutor, execute_subagent_calls, execute_tool_calls,
-    order_tool_results, stream_turn,
+    CompactionRequest, ContextManager, RequestPreparation, StreamEndStatus, SubagentEventSink,
+    SubagentExecution, SubagentExecutor, ToolCallExecutor, execute_subagent_calls,
+    execute_tool_calls, order_tool_results, stream_turn,
 };
 use tidev_config::auth::ActiveModel;
 use tidev_config::{AppConfig, AuthStore};
@@ -1556,7 +1556,42 @@ impl AgentContext for CoreContext {
         Ok(())
     }
 
-    async fn prepare_request(&self, session_id: Uuid) -> Result<()> {
+    async fn append_compaction_continuation(
+        &self,
+        session_id: Uuid,
+        message: Message,
+    ) -> Result<()> {
+        if session_id != self.session_id {
+            anyhow::bail!(
+                "agent context is bound to session {}, got {}",
+                self.session_id,
+                session_id
+            );
+        }
+        let app_data = MessageAppData {
+            mode: Some(self.request_mode().as_str().to_string()),
+            ..Default::default()
+        };
+        let app_data_by_message = [(message.id, app_data.clone())].into_iter().collect();
+        self.session_manager.append_messages_with_app_data(
+            session_id,
+            std::slice::from_ref(&message),
+            &app_data_by_message,
+        )?;
+        self.buffer
+            .write()
+            .await
+            .append_with_app_data(message.clone(), app_data.clone());
+        self.emit(BackendEvent::UserMessageCreated {
+            session_id,
+            message: Box::new(message),
+            app_data: Box::new(app_data),
+            queued: false,
+        });
+        Ok(())
+    }
+
+    async fn prepare_request(&self, session_id: Uuid) -> Result<RequestPreparation> {
         if session_id != self.session_id {
             anyhow::bail!(
                 "agent context is bound to session {}, got {}",
@@ -1573,6 +1608,7 @@ impl AgentContext for CoreContext {
         let mut compact_model = self.model_config.clone();
         compact_model.system_prompt = Some(self.system_prompt.clone());
 
+        let mut preparation = RequestPreparation::default();
         {
             let mut buffer = self.buffer.write().await;
             let (should_compact, prior_summary, prior_retained_from) = {
@@ -1629,6 +1665,7 @@ impl AgentContext for CoreContext {
                         return Err(error);
                     }
                 };
+                let summary_had_tool_calls = result.had_tool_calls;
 
                 let mut marker = Message::compaction(&result.summary);
                 marker.metadata.prior_summary = prior_summary;
@@ -1655,13 +1692,17 @@ impl AgentContext for CoreContext {
                     completed_at: Some(Utc::now()),
                     error: None,
                 });
+                preparation = RequestPreparation {
+                    auto_compacted: true,
+                    summary_had_tool_calls,
+                };
             }
         }
 
         // Busy prompts are appended only after compaction so the next user
         // message remains verbatim after the summary marker.
         self.materialize_pending_prompts().await?;
-        Ok(())
+        Ok(preparation)
     }
 
     async fn load_messages(&self, session_id: Uuid) -> Result<Vec<Message>> {

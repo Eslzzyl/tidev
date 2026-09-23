@@ -319,7 +319,7 @@ pub(crate) async fn complete_openai(
     max_request_files: usize,
     save_response_body: bool,
     max_response_files: usize,
-) -> Result<String> {
+) -> Result<crate::types::LlmCompletion> {
     let api_key = model
         .api_key
         .clone()
@@ -380,13 +380,28 @@ pub(crate) async fn complete_openai(
     save_complete_response_for_debugging(&body_text, save_response_body, max_response_files);
 
     let response: ChatCompletionResponse = serde_json::from_str(&body_text)?;
+    Ok(chat_completion_to_llm_completion(response))
+}
+
+fn chat_completion_to_llm_completion(
+    response: ChatCompletionResponse,
+) -> crate::types::LlmCompletion {
+    let has_tool_calls = response.choices.iter().any(|choice| {
+        choice
+            .message
+            .tool_calls
+            .as_ref()
+            .is_some_and(|tool_calls| !tool_calls.is_empty())
+    });
     let content = response
         .choices
         .into_iter()
         .find_map(|choice| choice.message.content)
         .unwrap_or_default();
-
-    Ok(content)
+    crate::types::LlmCompletion {
+        content,
+        has_tool_calls,
+    }
 }
 
 fn build_openai_request(
@@ -813,6 +828,8 @@ struct ChatCompletionResponseChoice {
 struct ChatCompletionResponseMessage {
     #[serde(default)]
     content: Option<String>,
+    #[serde(default)]
+    tool_calls: Option<Vec<serde_json::Value>>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -892,6 +909,19 @@ mod tests {
     #[test]
     fn completion_chunk_is_not_mistaken_for_a_stream_error() {
         assert!(parse_openai_stream_error(r#"{"choices":[]}"#).is_none());
+    }
+
+    #[test]
+    fn completion_response_preserves_tool_call_metadata() {
+        let response: ChatCompletionResponse = serde_json::from_str(
+            r#"{"choices":[{"message":{"content":"partial","tool_calls":[{"id":"call-1","type":"function","function":{"name":"read_file","arguments":"{}"}}]}}]}"#,
+        )
+        .expect("tool-call completion response should parse");
+
+        let completion = chat_completion_to_llm_completion(response);
+
+        assert_eq!(completion.content, "partial");
+        assert!(completion.has_tool_calls);
     }
 
     #[test]

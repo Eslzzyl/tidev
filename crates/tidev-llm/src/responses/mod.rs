@@ -615,7 +615,7 @@ pub(crate) async fn complete_responses(
     max_request_files: usize,
     save_response_body: bool,
     max_response_files: usize,
-) -> Result<String> {
+) -> Result<crate::types::LlmCompletion> {
     let api_key = model
         .api_key
         .clone()
@@ -690,15 +690,15 @@ pub(crate) async fn complete_responses(
     }
 
     // Check for result error
-    if let Some(result) = response.result
+    if let Some(result) = response.result.as_ref()
         && result.result_type == "error"
     {
         return Err(anyhow::anyhow!("API result error"));
     }
 
     // Preserve all output text parts, including text split across multiple
-    // message items. Function calls are intentionally not exposed by this
-    // string-only API, but must not hide later assistant text.
+    // message items. Function calls are reported separately as metadata and
+    // must not hide later assistant text.
     if let Some(usage) = response.usage.as_ref()
         && let Some(tx) = tx
     {
@@ -718,6 +718,16 @@ pub(crate) async fn complete_responses(
         });
     }
 
+    Ok(responses_complete_to_completion(response))
+}
+
+fn responses_complete_to_completion(
+    response: ResponsesCompleteResponse,
+) -> crate::types::LlmCompletion {
+    let has_tool_calls = response
+        .output
+        .iter()
+        .any(|output| output.kind == "function_call");
     let content = response
         .output
         .into_iter()
@@ -727,8 +737,10 @@ pub(crate) async fn complete_responses(
         .filter_map(|part| part.text)
         .collect::<Vec<_>>()
         .join("");
-
-    Ok(content)
+    crate::types::LlmCompletion {
+        content,
+        has_tool_calls,
+    }
 }
 
 fn finalize_turn(
@@ -802,6 +814,19 @@ impl SseParser {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn complete_response_preserves_function_call_metadata() {
+        let response: ResponsesCompleteResponse = serde_json::from_str(
+            r#"{"output":[{"type":"message","content":[{"type":"output_text","text":"partial"}]},{"type":"function_call","name":"read_file","arguments":"{}"}]}"#,
+        )
+        .expect("function-call completion response should parse");
+
+        let completion = responses_complete_to_completion(response);
+
+        assert_eq!(completion.content, "partial");
+        assert!(completion.has_tool_calls);
+    }
 
     #[test]
     fn sse_parser_combines_multiline_data_at_event_boundary() {

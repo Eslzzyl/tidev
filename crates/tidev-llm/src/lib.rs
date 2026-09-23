@@ -21,7 +21,7 @@ mod turn;
 mod types;
 
 pub use event::LlmEvent;
-pub use types::{ApiType, LlmProviderConfig, LlmRequestContext, ToolDefinition};
+pub use types::{ApiType, LlmCompletion, LlmProviderConfig, LlmRequestContext, ToolDefinition};
 
 use anyhow::{Context, Result};
 use reqwest::{
@@ -285,6 +285,21 @@ impl LlmClient {
         tx: Option<UnboundedSender<LlmEvent>>,
         context: LlmRequestContext,
     ) -> Result<String> {
+        Ok(self
+            .complete_with_messages_with_context_result(model, messages, tools, tx, context)
+            .await?
+            .content)
+    }
+
+    /// Non-streaming completion with structured tool-call metadata.
+    pub async fn complete_with_messages_with_context_result(
+        &self,
+        model: LlmProviderConfig,
+        messages: Vec<Message>,
+        tools: Vec<ToolDefinition>,
+        tx: Option<UnboundedSender<LlmEvent>>,
+        context: LlmRequestContext,
+    ) -> Result<LlmCompletion> {
         let model = prepare_model_for_request(model, context)?;
         let result = self.complete_with_retry(model, messages, tools, tx).await;
         result.context("LLM completion failed after retries")
@@ -348,7 +363,7 @@ impl LlmClient {
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
         tx: Option<UnboundedSender<LlmEvent>>,
-    ) -> Result<String> {
+    ) -> Result<LlmCompletion> {
         let debug = self.debug_config();
         for attempt in 1..=MAX_RETRIES {
             let result = match model.api_type {

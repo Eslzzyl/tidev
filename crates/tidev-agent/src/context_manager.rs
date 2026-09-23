@@ -40,6 +40,7 @@ const PROMPT_IMAGE_TOKEN_ESTIMATE: usize = 2_500;
 pub struct CompactionResult {
     pub summary: String,
     pub retained_from: usize,
+    pub had_tool_calls: bool,
 }
 
 /// Runtime context for one compaction request.
@@ -228,7 +229,7 @@ impl ContextManager {
             compaction_id,
             event_tx,
         } = request;
-        let summary = match event_tx {
+        let completion = match event_tx {
             Some(tx) => {
                 self.compact_streaming(
                     llm,
@@ -249,17 +250,34 @@ impl ContextManager {
             }
         };
 
-        // 6. Truncate to configured maximum and reject an empty result before
-        // the caller advances the persisted context cursor.
-        let summary: String = summary.chars().take(self.maximum_summary_chars).collect();
-        if summary.trim().is_empty() {
-            anyhow::bail!("context compaction returned an empty summary");
-        }
+        // 6. Tool calls make this a history lookup request rather than a usable
+        // summary. Preserve the request result as an empty summary so the host
+        // can ask the normal agent loop to inspect this session.
+        let (summary, had_tool_calls) = self.normalize_compaction_completion(completion)?;
 
         Ok(CompactionResult {
             summary,
             retained_from,
+            had_tool_calls,
         })
+    }
+
+    fn normalize_compaction_completion(
+        &self,
+        completion: tidev_llm::LlmCompletion,
+    ) -> Result<(String, bool)> {
+        if completion.has_tool_calls {
+            return Ok((String::new(), true));
+        }
+        let summary: String = completion
+            .content
+            .chars()
+            .take(self.maximum_summary_chars)
+            .collect();
+        if summary.trim().is_empty() {
+            anyhow::bail!("context compaction returned an empty summary");
+        }
+        Ok((summary, false))
     }
 
     /// Select persisted protocol messages from a raw message slice.
@@ -305,8 +323,8 @@ impl ContextManager {
         tools: &[tidev_llm::ToolDefinition],
         messages: Vec<Message>,
         session_id: Uuid,
-    ) -> Result<String> {
-        llm.complete_with_messages_with_context(
+    ) -> Result<tidev_llm::LlmCompletion> {
+        llm.complete_with_messages_with_context_result(
             model.clone(),
             messages,
             tools.to_vec(),
@@ -325,7 +343,7 @@ impl ContextManager {
         tools: &[tidev_llm::ToolDefinition],
         messages: Vec<Message>,
         request: CompactionRequest,
-    ) -> Result<String> {
+    ) -> Result<tidev_llm::LlmCompletion> {
         let CompactionRequest {
             session_id,
             compaction_id,
@@ -356,6 +374,7 @@ impl ContextManager {
 
         let mut accumulated = String::new();
         let mut completed_content = None;
+        let mut has_tool_calls = false;
         let mut stream_error = None;
         while let Some(event) = rx.recv().await {
             match llm_event_to_agent_event(event, 0) {
@@ -370,6 +389,7 @@ impl ContextManager {
                 AgentEvent::Finished { turn, .. } => {
                     // Intercepted — not forwarded to the UI because
                     // it would trigger `finish_assistant_turn` logic.
+                    has_tool_calls = !turn.tool_calls.is_empty();
                     completed_content = Some(turn.content.clone());
                     break;
                 }
@@ -397,7 +417,10 @@ impl ContextManager {
             return Err(anyhow::anyhow!("Compaction LLM call failed: {error}"));
         }
 
-        Ok(accumulated)
+        Ok(tidev_llm::LlmCompletion {
+            content: accumulated,
+            has_tool_calls,
+        })
     }
 
     // -----------------------------------------------------------------------
@@ -580,6 +603,31 @@ mod tests {
     }
 
     // ── compaction_budget ─────────────────────────────────────────────────
+
+    #[test]
+    fn compaction_tool_call_produces_an_empty_summary() {
+        let cm = ContextManager::new();
+        let completion = tidev_llm::LlmCompletion {
+            content: "partial summary".into(),
+            has_tool_calls: true,
+        };
+
+        let (summary, had_tool_calls) = cm.normalize_compaction_completion(completion).unwrap();
+
+        assert!(summary.is_empty());
+        assert!(had_tool_calls);
+    }
+
+    #[test]
+    fn empty_compaction_text_without_tool_calls_is_an_error() {
+        let cm = ContextManager::new();
+        let completion = tidev_llm::LlmCompletion {
+            content: "  ".into(),
+            has_tool_calls: false,
+        };
+
+        assert!(cm.normalize_compaction_completion(completion).is_err());
+    }
 
     #[test]
     fn compaction_budget_zero_context_uses_fallback() {

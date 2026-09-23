@@ -90,6 +90,13 @@ pub struct LlmRequestContext {
     pub session_id: Option<Uuid>,
 }
 
+/// Text content and tool-call metadata from a non-streaming completion.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LlmCompletion {
+    pub content: String,
+    pub has_tool_calls: bool,
+}
+
 impl LlmProviderConfig {
     /// Provider-specific API endpoint URL.
     ///

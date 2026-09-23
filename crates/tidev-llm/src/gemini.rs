@@ -343,7 +343,7 @@ pub(crate) async fn complete_gemini(
     max_request_files: usize,
     save_response_body: bool,
     max_response_files: usize,
-) -> Result<String> {
+) -> Result<crate::types::LlmCompletion> {
     let api_key = model
         .api_key
         .clone()
@@ -400,12 +400,24 @@ pub(crate) async fn complete_gemini(
     save_complete_response_for_debugging(&body_text, save_response_body, max_response_files);
 
     let gemini_response: GeminiResponse = serde_json::from_str(&body_text)?;
+    Ok(gemini_response_to_completion(gemini_response))
+}
 
-    // Extract text from the first candidate's parts
-    let text = gemini_response
+fn gemini_response_to_completion(response: GeminiResponse) -> crate::types::LlmCompletion {
+    let candidate = response
         .candidates
-        .and_then(|candidates| candidates.into_iter().next())
-        .and_then(|c| c.content)
+        .and_then(|candidates| candidates.into_iter().next());
+    let has_tool_calls = candidate
+        .as_ref()
+        .and_then(|candidate| candidate.content.as_ref())
+        .is_some_and(|content| {
+            content
+                .parts
+                .iter()
+                .any(|part| part.function_call.is_some())
+        });
+    let text = candidate
+        .and_then(|candidate| candidate.content)
         .map(|content| {
             content
                 .parts
@@ -416,7 +428,10 @@ pub(crate) async fn complete_gemini(
         })
         .unwrap_or_default();
 
-    Ok(text)
+    crate::types::LlmCompletion {
+        content: text,
+        has_tool_calls,
+    }
 }
 
 // ============================================================================
@@ -865,6 +880,24 @@ struct GeminiResponsePart {
     thought: Option<bool>,
     /// Opaque signature that must be echoed back.
     thought_signature: Option<String>,
+}
+
+#[cfg(test)]
+mod completion_tests {
+    use super::*;
+
+    #[test]
+    fn completion_response_preserves_function_call_metadata() {
+        let response: GeminiResponse = serde_json::from_str(
+            r#"{"candidates":[{"content":{"parts":[{"text":"partial"},{"function_call":{"name":"read_file","args":{}}}]}}]}"#,
+        )
+        .expect("function-call completion response should parse");
+
+        let completion = gemini_response_to_completion(response);
+
+        assert_eq!(completion.content, "partial");
+        assert!(completion.has_tool_calls);
+    }
 }
 
 /// Usage metadata (camelCase from the API).

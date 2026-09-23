@@ -301,7 +301,7 @@ pub(crate) async fn complete_anthropic(
     max_request_files: usize,
     save_response_body: bool,
     max_response_files: usize,
-) -> Result<String> {
+) -> Result<crate::types::LlmCompletion> {
     let api_key = model
         .api_key
         .clone()
@@ -361,6 +361,14 @@ pub(crate) async fn complete_anthropic(
     save_complete_response_for_debugging(&body_text, save_response_body, max_response_files);
 
     let response: AnthropicResponse = serde_json::from_str(&body_text)?;
+    Ok(anthropic_response_to_completion(response))
+}
+
+fn anthropic_response_to_completion(response: AnthropicResponse) -> crate::types::LlmCompletion {
+    let has_tool_calls = response
+        .content
+        .iter()
+        .any(|block| matches!(block, AnthropicContentBlockResponse::ToolUse { .. }));
     let content = response
         .content
         .into_iter()
@@ -374,7 +382,10 @@ pub(crate) async fn complete_anthropic(
         .collect::<Vec<_>>()
         .join("");
 
-    Ok(content)
+    crate::types::LlmCompletion {
+        content,
+        has_tool_calls,
+    }
 }
 
 /// Set `cache_control: ephemeral` on the last content block of the last message.
@@ -827,4 +838,22 @@ struct AnthropicStreamError {
     error_type: String,
     #[allow(dead_code)]
     message: String,
+}
+
+#[cfg(test)]
+mod completion_tests {
+    use super::*;
+
+    #[test]
+    fn completion_response_preserves_tool_use_metadata() {
+        let response: AnthropicResponse = serde_json::from_str(
+            r#"{"content":[{"type":"text","text":"partial"},{"type":"tool_use","id":"call-1","name":"read_file","input":{}}]}"#,
+        )
+        .expect("tool-use completion response should parse");
+
+        let completion = anthropic_response_to_completion(response);
+
+        assert_eq!(completion.content, "partial");
+        assert!(completion.has_tool_calls);
+    }
 }

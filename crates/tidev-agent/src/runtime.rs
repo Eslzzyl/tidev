@@ -303,7 +303,10 @@ impl AgentContext for AgentRuntime {
         Ok(())
     }
 
-    async fn prepare_request(&self, session_id: uuid::Uuid) -> Result<()> {
+    async fn prepare_request(
+        &self,
+        session_id: uuid::Uuid,
+    ) -> Result<crate::context::RequestPreparation> {
         self.ensure_session(session_id)?;
         let messages = {
             let messages = self
@@ -323,7 +326,7 @@ impl AgentContext for AgentRuntime {
             self.model.context_window,
             self.model.max_output_tokens,
         ) {
-            return Ok(());
+            return Ok(crate::context::RequestPreparation::default());
         }
 
         let result = context_manager
@@ -339,6 +342,7 @@ impl AgentContext for AgentRuntime {
                 },
             )
             .await?;
+        let summary_had_tool_calls = result.had_tool_calls;
         let marker = Message::compaction(&result.summary);
         self.store
             .apply_compaction(session_id, &result.summary, result.retained_from, &marker)
@@ -356,7 +360,10 @@ impl AgentContext for AgentRuntime {
             .lock()
             .map_err(|_| anyhow::anyhow!("agent context manager is poisoned"))?;
         *shared_context_manager = context_manager;
-        Ok(())
+        Ok(crate::context::RequestPreparation {
+            auto_compacted: true,
+            summary_had_tool_calls,
+        })
     }
 
     async fn load_messages(&self, session_id: uuid::Uuid) -> Result<Vec<Message>> {
