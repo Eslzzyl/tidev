@@ -31,7 +31,7 @@ pub(crate) struct ImageBadgeInfo {
     pub badge_width: usize,
     /// The message that contains the image attachment.
     pub message_id: Uuid,
-    /// Index into the message's Image attachments.
+    /// Index into the message's attachment list.
     pub attachment_index: usize,
 }
 
@@ -54,13 +54,6 @@ pub(super) static IMAGE_BADGE_RE: LazyLock<Regex> = LazyLock::new(|| {
     )
     .unwrap()
 });
-
-/// Kind of inline badge detected in user message content.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum MessageBadgeKind {
-    AtReference,
-    Image,
-}
 
 /// Return display labels for image attachments that do not already have a
 /// corresponding image badge in the message content.
@@ -385,77 +378,88 @@ pub fn wrap_text_lines(text: &str, max_width: usize, max_lines: usize) -> Vec<St
 }
 
 /// Post-process rendered markdown lines to replace badge text with styled spans.
-/// Scans each span for `@path` and `[size TYPE]` patterns and splits the span
-/// at badge boundaries, applying bold accent for AtReference and white-on-teal
-/// for Image badges. Hyperlink ranges are unaffected (spans are only split).
+/// Scans each line for `@path` and image badge patterns, including text split
+/// across Markdown spans, and applies bold accent styling to each badge.
+/// Hyperlink ranges are unaffected because line text and column positions stay fixed.
 pub(super) fn apply_badge_styling(lines: &mut [HyperlinkLine], palette: ThemePalette) {
     for line in lines.iter_mut() {
         let old_spans: Vec<Span<'static>> = std::mem::take(&mut line.line.spans);
-        for span in old_spans {
-            let text = span.content.to_string();
-            let mut parts: Vec<(String, Style)> = Vec::new();
-            let mut offset = 0usize;
+        let text: String = old_spans.iter().map(|span| span.content.as_ref()).collect();
+        let mut badges: Vec<(usize, usize)> = Vec::new();
 
-            let mut badges_in_span: Vec<(usize, usize, MessageBadgeKind)> = Vec::new();
-
-            // @ references
-            {
-                let mut search_start = 0;
-                while let Ok(Some(caps)) = AT_REF_RE.captures(&text[search_start..]) {
-                    if let Some(path_match) = caps.get(1) {
-                        if path_match.as_str().is_empty() {
-                            break;
-                        }
-                        let abs_start = search_start + path_match.start() - 1;
-                        let abs_end = search_start + path_match.end();
-                        badges_in_span.push((abs_start, abs_end, MessageBadgeKind::AtReference));
-                        search_start += path_match.end();
-                    } else {
+        // @ references
+        {
+            let mut search_start = 0;
+            while let Ok(Some(caps)) = AT_REF_RE.captures(&text[search_start..]) {
+                if let Some(path_match) = caps.get(1) {
+                    if path_match.as_str().is_empty() {
                         break;
                     }
+                    let abs_start = search_start + path_match.start() - 1;
+                    let abs_end = search_start + path_match.end();
+                    badges.push((abs_start, abs_end));
+                    search_start += path_match.end();
+                } else {
+                    break;
+                }
+            }
+        }
+
+        // Image badge patterns like `[100KB PNG]`
+        {
+            let mut search_start = 0;
+            while let Ok(Some(m)) = IMAGE_BADGE_RE.find(&text[search_start..]) {
+                let abs_start = search_start + m.start();
+                let abs_end = search_start + m.end();
+                badges.push((abs_start, abs_end));
+                search_start += m.end();
+            }
+        }
+
+        if badges.is_empty() {
+            line.line.spans = old_spans;
+            continue;
+        }
+
+        badges.sort_unstable_by_key(|badge| badge.0);
+        let badge_style = Style::default()
+            .fg(palette.accent)
+            .add_modifier(Modifier::BOLD);
+        let mut span_start = 0usize;
+
+        for span in old_spans {
+            let span_text = span.content.to_string();
+            let span_end = span_start + span_text.len();
+            let mut local_offset = 0usize;
+
+            for (badge_start, badge_end) in &badges {
+                if *badge_end <= span_start || *badge_start >= span_end {
+                    continue;
+                }
+
+                let start = badge_start.saturating_sub(span_start).max(local_offset);
+                let end = (*badge_end).min(span_end) - span_start;
+                if start > local_offset {
+                    line.line.spans.push(Span::styled(
+                        span_text[local_offset..start].to_string(),
+                        span.style,
+                    ));
+                }
+                if end > start {
+                    line.line
+                        .spans
+                        .push(Span::styled(span_text[start..end].to_string(), badge_style));
+                    local_offset = end;
                 }
             }
 
-            // Image badge patterns like `[100KB PNG]`
-            {
-                let mut search_start = 0;
-                while let Ok(Some(m)) = IMAGE_BADGE_RE.find(&text[search_start..]) {
-                    let abs_start = search_start + m.start();
-                    let abs_end = search_start + m.end();
-                    badges_in_span.push((abs_start, abs_end, MessageBadgeKind::Image));
-                    search_start += m.end();
-                }
+            if local_offset < span_text.len() {
+                line.line.spans.push(Span::styled(
+                    span_text[local_offset..].to_string(),
+                    span.style,
+                ));
             }
-
-            badges_in_span.sort_by_key(|b| b.0);
-
-            if badges_in_span.is_empty() {
-                parts.push((text, span.style));
-            } else {
-                for (start, end, kind) in &badges_in_span {
-                    if *start > offset {
-                        parts.push((text[offset..*start].to_string(), span.style));
-                    }
-                    let badge_style = match kind {
-                        MessageBadgeKind::AtReference => Style::default()
-                            .fg(palette.accent)
-                            .add_modifier(Modifier::BOLD),
-                        MessageBadgeKind::Image => Style::default()
-                            .bg(palette.selection_bg)
-                            .fg(palette.selection_fg)
-                            .add_modifier(Modifier::BOLD),
-                    };
-                    parts.push((text[*start..*end].to_string(), badge_style));
-                    offset = *end;
-                }
-                if offset < text.len() {
-                    parts.push((text[offset..].to_string(), span.style));
-                }
-            }
-
-            for (content, style) in parts {
-                line.line.spans.push(Span::styled(content, style));
-            }
+            span_start = span_end;
         }
     }
 }

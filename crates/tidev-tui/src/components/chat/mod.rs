@@ -1991,6 +1991,82 @@ mod tests {
     }
 
     #[test]
+    fn image_badge_click_resolves_image_after_file_reference_attachment() {
+        let session_id = Uuid::from_u128(100);
+        let mut message = Message::new(
+            tidev_llm::message::MessageRole::User,
+            "@src/main.rs [Image: capture.png]",
+        );
+        message.id = Uuid::from_u128(1);
+        message.attachments.push(MessageAttachment::FileReference {
+            path: "src/main.rs".into(),
+            content: std::sync::Arc::new("fn main() {}".into()),
+            tool_output: None,
+            truncated: false,
+        });
+        message.attachments.push(MessageAttachment::Image {
+            data: vec![137, 80, 78, 71],
+            filename: "capture.png".into(),
+            mime: "image/png".into(),
+            file_size: 4,
+        });
+
+        let mut list = MessageList::new();
+        list.set_chat_context(ChatContext::new(
+            session_id,
+            "test".into(),
+            vec![message],
+            None,
+            "model".into(),
+            "provider".into(),
+        ));
+
+        let themes = tidev_config::ThemeCatalog::load(std::path::Path::new("/nonexistent"))
+            .expect("bundled theme presets must parse");
+        let palette = crate::theme::ThemePalette::from_definition(
+            themes.get("dark").expect("dark theme bundled"),
+        );
+        let draw_context = DrawContext {
+            image_surface: None,
+            cursor_position: None,
+            palette,
+            ui_text: UiText::from_preference("en-US"),
+            focused: false,
+            mode: SessionMode::Build,
+            pending_mode: None,
+            model_display: None,
+            provider_display: None,
+            thinking_level: None,
+            subagent_disabled: false,
+            collapse_thinking: false,
+            collapse_diffs: false,
+            workspace_root: std::path::Path::new("."),
+        };
+
+        let backend = ratatui::backend::TestBackend::new(80, 20);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                list.draw(frame, area, &draw_context);
+            })
+            .unwrap();
+
+        let (badge_bounds, _, _) = list
+            .image_badge_bounds
+            .first()
+            .expect("image badge hit target should be rendered");
+        let action = list.handle_mouse_click(badge_bounds.x, badge_bounds.y);
+        assert!(matches!(
+            action,
+            Some(Action::Overlay(OverlayAction::Open(OverlayKind::ImageViewer {
+                filename,
+                ..
+            }))) if filename == "capture.png"
+        ));
+    }
+
+    #[test]
     fn expand_all_thinking_forces_expanded_state() {
         // default_collapse = true: overrides must invert the default → inserted.
         let mut list = message_list_with_thinking();

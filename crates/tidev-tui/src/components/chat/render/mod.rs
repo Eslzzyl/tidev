@@ -516,6 +516,50 @@ mod tests {
     }
 
     #[test]
+    fn message_badges_use_accent_bold_style() {
+        let palette = test_palette();
+        let expanded = HashSet::new();
+        let subagents = Vec::new();
+        let collapsed = HashSet::new();
+        let ctx = test_render_ctx(&palette, &expanded, &subagents, &collapsed);
+        let mut message = user_msg("@src/main.rs [Image: capture.png]", 1);
+        message.attachments.push(image_attachment("capture.png"));
+        let cards = cards::render_single_card(&ctx, &message, 80, false);
+
+        for badge in ["@src/main.rs", "[Image: capture.png]"] {
+            let mut found = false;
+            for line in &cards[0].1 {
+                let line_text: String = line
+                    .line
+                    .spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect();
+                let Some(badge_start) = line_text.find(badge) else {
+                    continue;
+                };
+                found = true;
+                let badge_end = badge_start + badge.len();
+                let mut span_start = 0;
+                for span in &line.line.spans {
+                    let span_end = span_start + span.content.len();
+                    if span_start < badge_end && span_end > badge_start {
+                        assert_eq!(span.style.fg, Some(palette.accent));
+                        assert_eq!(span.style.bg, None);
+                        assert!(
+                            span.style
+                                .add_modifier
+                                .contains(ratatui::style::Modifier::BOLD)
+                        );
+                    }
+                    span_start = span_end;
+                }
+            }
+            assert!(found, "missing badge text: {badge}");
+        }
+    }
+
+    #[test]
     fn existing_image_badge_is_not_duplicated_and_remains_clickable() {
         let palette = test_palette();
         let expanded = HashSet::new();

@@ -189,12 +189,15 @@ pub(super) fn scan_image_badges(
     msg: &Message,
     card_start_line: usize,
 ) -> Vec<ImageBadgeInfo> {
-    let image_attachments: Vec<&MessageAttachment> = msg
+    let image_attachment_indices: Vec<usize> = msg
         .attachments
         .iter()
-        .filter(|a| matches!(a, MessageAttachment::Image { .. }))
+        .enumerate()
+        .filter_map(|(index, attachment)| {
+            matches!(attachment, MessageAttachment::Image { .. }).then_some(index)
+        })
         .collect();
-    if image_attachments.is_empty() {
+    if image_attachment_indices.is_empty() {
         return Vec::new();
     }
 
@@ -206,14 +209,14 @@ pub(super) fn scan_image_badges(
         while let Ok(Some(m)) = IMAGE_BADGE_RE.find(&line_text[search_start..]) {
             let abs_start = search_start + m.start();
             let abs_end = search_start + m.end();
-            if url_idx < image_attachments.len() {
+            if let Some(&attachment_index) = image_attachment_indices.get(url_idx) {
                 infos.push(ImageBadgeInfo {
                     card_start_line,
                     badge_line_offset: line_offset,
                     badge_col: UnicodeWidthStr::width(&line_text[..abs_start]),
                     badge_width: UnicodeWidthStr::width(&line_text[abs_start..abs_end]),
                     message_id: msg.id,
-                    attachment_index: url_idx,
+                    attachment_index,
                 });
             }
             url_idx += 1;
