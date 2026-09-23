@@ -232,6 +232,8 @@ export function ChatPanel({
   const contextWindow = sessionModel?.context_window ?? activeModel?.context_window;
   const initialComposerSelection =
     composerSelection?.sessionId === selectedSessionId ? composerSelection : undefined;
+  const hasComposerStatus =
+    pendingRequests.length === 0 && (todos.length > 0 || changedFiles.length > 0);
 
   const handleSelectSession = (sessionId: string) => {
     onMobileSidebarClose();
@@ -281,7 +283,7 @@ export function ChatPanel({
         onCancelRename={onCancelRename}
         onDelete={onDeleteSession}
       />
-      <section className="chat-panel">
+      <section className={hasComposerStatus ? "chat-panel has-composer-status" : "chat-panel"}>
         {selectedSessionId === null ? (
           welcome
         ) : sessionStatus === "missing" ? (
