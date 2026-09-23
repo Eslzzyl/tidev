@@ -182,7 +182,7 @@ impl Component for MessagePanel {
                     None
                 }
             }
-            KeyCode::Char('g') if key.modifiers.is_empty() => {
+            KeyCode::Char('f') if key.modifiers.is_empty() => {
                 if let Some(message) = self.selected_message() {
                     let message_count = message.original_index + 1;
                     Some(Action::Overlay(OverlayAction::Open(
@@ -489,11 +489,11 @@ mod tests {
     }
 
     #[test]
-    fn plain_g_and_z_open_message_actions() {
+    fn plain_f_and_z_open_message_actions() {
         let (mut panel, message_id) = message_panel();
 
         let fork_action =
-            panel.handle_key_event(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()));
+            panel.handle_key_event(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::empty()));
         assert!(matches!(
             fork_action,
             Some(Action::Overlay(OverlayAction::Open(
@@ -521,7 +521,7 @@ mod tests {
     fn modified_shortcut_keys_are_not_dispatched() {
         let (mut panel, _) = message_panel();
 
-        for key in ['p', 'n', 'g', 'z'] {
+        for key in ['p', 'n', 'f', 'z'] {
             assert!(
                 panel
                     .handle_key_event(KeyEvent::new(KeyCode::Char(key), KeyModifiers::CONTROL,))
@@ -536,9 +536,9 @@ mod tests {
         let (mut panel, _) = message_panel();
 
         panel.handle_key_event(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::empty()));
-        panel.handle_key_event(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()));
+        panel.handle_key_event(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::empty()));
 
-        assert_eq!(panel.query, "g");
+        assert_eq!(panel.query, "f");
         assert!(panel.query_active);
     }
 }
