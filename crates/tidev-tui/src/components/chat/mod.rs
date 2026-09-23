@@ -1370,7 +1370,10 @@ impl MessageList {
             if let Some(sa) = self.running_subagents.get(exec_idx)
                 && let Some(csid) = sa.child_session_id
             {
-                return Some(Action::Session(SessionAction::Select(csid)));
+                return Some(Action::Session(SessionAction::Select {
+                    session_id: csid,
+                    close_overlay: None,
+                }));
             }
         }
 

@@ -486,12 +486,15 @@ impl App {
                         queue.extend(self.overlays.update_all(&Action::Git(action), &ctx));
                     }
                 },
-                Action::Session(SessionAction::Select(session_id)) => {
+                Action::Session(SessionAction::Select {
+                    session_id,
+                    close_overlay,
+                }) => {
                     // Close the panel even when the selected session is already active.
                     if self.current_session_id == Some(session_id) {
-                        queue.push(Action::Overlay(OverlayAction::Close(
-                            OverlayKind::SessionPanel,
-                        )));
+                        if let Some(kind) = close_overlay {
+                            queue.push(Action::Overlay(OverlayAction::Close(kind)));
+                        }
                         continue;
                     }
 
@@ -581,10 +584,9 @@ impl App {
 
                         log::info!("Switching to session: existing context (fast path)");
 
-                        // Close the session panel overlay.
-                        queue.push(Action::Overlay(OverlayAction::Close(
-                            OverlayKind::SessionPanel,
-                        )));
+                        if let Some(kind) = close_overlay {
+                            queue.push(Action::Overlay(OverlayAction::Close(kind)));
+                        }
                         // Keep dispatching so the queued close action is applied.
                         continue;
                     }
@@ -694,10 +696,9 @@ impl App {
 
                     log::info!("Switching to session: {} ({})", session_title, session_id);
 
-                    // Close the session panel overlay (mirrors old Enter → select + close).
-                    queue.push(Action::Overlay(OverlayAction::Close(
-                        OverlayKind::SessionPanel,
-                    )));
+                    if let Some(kind) = close_overlay {
+                        queue.push(Action::Overlay(OverlayAction::Close(kind)));
+                    }
                 }
                 Action::Session(SessionAction::Reload) => {
                     // Broadcast to overlays so SessionPanel reloads its list.
@@ -738,10 +739,12 @@ impl App {
                             }
                         };
 
-                    // Switch to the new session
-                    self.current_session_id = Some(new_session_id);
+                    // Load the fork into the active chat context and close its source panel.
+                    queue.push(Action::Session(SessionAction::Select {
+                        session_id: new_session_id,
+                        close_overlay: Some(OverlayKind::MessagePanel),
+                    }));
                     self.shown_instruction_sources.clear();
-                    self.scroll_target = None;
 
                     self.set_notice(self.ui_text().text_with_value(
                         TextKey::ForkedSession,
@@ -1400,6 +1403,8 @@ mod tests {
     use crate::chat_context::ChatContext;
     use crate::components::chat::MessageList;
     use crate::context::DrawContext;
+    use std::cell::Cell;
+    use std::rc::Rc;
     use tidev_llm::message::{Message, MessageRole};
 
     struct TestOverlay;
@@ -1411,6 +1416,29 @@ mod tests {
             _rect: ratatui::layout::Rect,
             _ctx: &DrawContext,
         ) {
+        }
+    }
+
+    struct CloseTrackingOverlay {
+        expected_kind: OverlayKind,
+        was_closed: Rc<Cell<bool>>,
+    }
+
+    impl Component for CloseTrackingOverlay {
+        fn draw(
+            &mut self,
+            _frame: &mut ratatui::Frame<'_>,
+            _rect: ratatui::layout::Rect,
+            _ctx: &DrawContext,
+        ) {
+        }
+
+        fn update(&mut self, action: &Action, _ctx: &crate::context::UpdateContext) -> Vec<Action> {
+            if let Action::Overlay(OverlayAction::Close(kind)) = action {
+                assert_eq!(kind, &self.expected_kind);
+                self.was_closed.set(true);
+            }
+            Vec::new()
         }
     }
 
@@ -1479,7 +1507,10 @@ mod tests {
         app.current_session_id = Some(session_id);
         app.overlays.push(Box::new(TestOverlay));
 
-        app.process_action(Action::Session(SessionAction::Select(session_id)));
+        app.process_action(Action::Session(SessionAction::Select {
+            session_id,
+            close_overlay: Some(OverlayKind::SessionPanel),
+        }));
 
         assert!(app.overlays.is_empty());
         shutdown_test_app(app).await;
@@ -1503,10 +1534,78 @@ mod tests {
         app.message_list = Some(message_list);
         app.overlays.push(Box::new(TestOverlay));
 
-        app.process_action(Action::Session(SessionAction::Select(target_session_id)));
+        app.process_action(Action::Session(SessionAction::Select {
+            session_id: target_session_id,
+            close_overlay: Some(OverlayKind::SessionPanel),
+        }));
 
         assert_eq!(app.current_session_id, Some(target_session_id));
         assert!(app.overlays.is_empty());
+        shutdown_test_app(app).await;
+    }
+
+    #[tokio::test]
+    async fn forking_from_message_panel_activates_new_session_and_closes_panel() {
+        let mut app = test_app().await;
+        let source_session_id = Uuid::new_v4();
+        let source_message = Message::new(MessageRole::User, "fork point");
+        let model = app.runtime.active_model();
+        let workspace_root = app.runtime.workspace_root().display().to_string();
+        app.runtime
+            .session_manager()
+            .create_session(
+                source_session_id,
+                &workspace_root,
+                &model.provider_id,
+                &model.provider_display_name,
+                &model.model_id,
+                &model.display_name,
+                "source session",
+                "test system prompt",
+                None,
+                None,
+            )
+            .expect("source session should be created");
+        app.runtime
+            .session_manager()
+            .store()
+            .append_messages(source_session_id, std::slice::from_ref(&source_message))
+            .expect("source message should be stored");
+
+        app.current_session_id = Some(source_session_id);
+        let mut message_list = MessageList::new();
+        message_list.set_chat_context(ChatContext::new(
+            source_session_id,
+            "source session".to_string(),
+            vec![source_message.clone()],
+            None,
+            model.display_name.clone(),
+            model.provider_display_name.clone(),
+        ));
+        app.message_list = Some(message_list);
+
+        let was_closed = Rc::new(Cell::new(false));
+        app.overlays.push(Box::new(CloseTrackingOverlay {
+            expected_kind: OverlayKind::MessagePanel,
+            was_closed: Rc::clone(&was_closed),
+        }));
+
+        app.process_action(Action::Session(SessionAction::Fork(source_message.id)));
+
+        let forked_session_id = app
+            .current_session_id
+            .expect("forked session should become active");
+        assert_ne!(forked_session_id, source_session_id);
+        assert_eq!(app.screen, AppScreen::Chat);
+        assert_eq!(
+            app.message_list
+                .as_ref()
+                .and_then(|list| list.active_chat_context())
+                .map(|context| context.session_id),
+            Some(forked_session_id)
+        );
+        assert!(app.overlays.is_empty());
+        assert!(was_closed.get());
         shutdown_test_app(app).await;
     }
 }

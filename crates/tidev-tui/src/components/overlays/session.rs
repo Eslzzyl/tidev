@@ -394,9 +394,12 @@ impl Component for SessionPanel {
                 self.move_selection(1);
                 None
             }
-            KeyCode::Enter => self
-                .selected_session()
-                .map(|s| Action::Session(SessionAction::Select(s.session_id))),
+            KeyCode::Enter => self.selected_session().map(|s| {
+                Action::Session(SessionAction::Select {
+                    session_id: s.session_id,
+                    close_overlay: Some(OverlayKind::SessionPanel),
+                })
+            }),
             KeyCode::Char('a') if key.modifiers.is_empty() => {
                 self.operation_mode = if self.operation_mode == OperationMode::MultiSelect {
                     OperationMode::Select

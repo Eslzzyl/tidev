@@ -321,7 +321,10 @@ impl App {
 
     /// Switch to a different session (via SessionAction::Select).
     fn switch_to_session(&mut self, session_id: Uuid) {
-        self.process_action(Action::Session(SessionAction::Select(session_id)));
+        self.process_action(Action::Session(SessionAction::Select {
+            session_id,
+            close_overlay: None,
+        }));
     }
 
     pub fn handle_mouse_event(&mut self, mouse: MouseEvent) {

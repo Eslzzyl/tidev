@@ -40,7 +40,10 @@ pub(crate) enum PanelAction {
 #[derive(Debug)]
 pub(crate) enum SessionAction {
     Create,
-    Select(Uuid),
+    Select {
+        session_id: Uuid,
+        close_overlay: Option<OverlayKind>,
+    },
     Rename(Uuid, String),
     Fork(Uuid),
     Undo,
