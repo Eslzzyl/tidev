@@ -7,9 +7,11 @@ import { ActivityRipple } from "./ActivityRipple";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { formatThinkingDuration } from "../../utils/format";
 import { Button } from "../ui";
+import type { ReasoningDisplay } from "../../utils/round";
 
 interface Props {
   content: string;
+  display?: ReasoningDisplay;
   tokenCount?: number;
   active?: boolean;
   startedAt?: string;
@@ -77,6 +79,7 @@ function ElapsedTimer({
 
 export const ThinkingBlock = memo(function ThinkingBlock({
   content,
+  display,
   tokenCount,
   active = false,
   startedAt,
@@ -87,6 +90,13 @@ export const ThinkingBlock = memo(function ThinkingBlock({
   const { t } = useTranslation();
   const [localExpanded, setLocalExpanded] = useState(false);
   const expanded = controlledExpanded ?? localExpanded;
+  const displaySegments = display
+    ? [...display.summaries.map((summary) => summary.content), display.ordinary]
+        .filter((segment) => segment.trim())
+        .map((segment, index) => ({ segment, key: index }))
+    : content
+      ? [{ segment: content, key: 0 }]
+      : [];
 
   function toggleExpanded() {
     const next = !expanded;
@@ -122,7 +132,9 @@ export const ThinkingBlock = memo(function ThinkingBlock({
       </div>
       <ExpandableBody expanded={expanded} className="thinking-body">
         <div className="thinking-markdown">
-          <MarkdownRenderer content={content} />
+          {displaySegments.map(({ segment, key }) => (
+            <MarkdownRenderer content={segment} key={key} />
+          ))}
         </div>
       </ExpandableBody>
     </div>

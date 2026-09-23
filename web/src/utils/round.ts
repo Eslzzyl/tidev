@@ -20,6 +20,16 @@ export interface ToolCallEntry {
   subagentReasoningDelta?: string;
 }
 
+export interface ReasoningSummary {
+  summaryIndex: number | null;
+  content: string;
+}
+
+export interface ReasoningDisplay {
+  ordinary: string;
+  summaries: ReasoningSummary[];
+}
+
 export type RoundSegment =
   | { type: "text"; content: string }
   | {
@@ -27,6 +37,7 @@ export type RoundSegment =
       content: string;
       startedAt?: string;
       completedAt?: string;
+      display?: ReasoningDisplay;
     }
   | { type: "instruction"; message: Message }
   | { type: "compaction"; message: Message }
@@ -184,6 +195,7 @@ export function buildRounds(
   records: MessageRecord[],
   liveStreamAssistantMessageIds: ReadonlySet<string> = new Set(),
   liveStreamUserMessageIds: ReadonlySet<string> = new Set(),
+  reasoningDisplays: Readonly<Record<string, ReasoningDisplay>> = {},
 ): (Round | SystemMessageBlock)[] {
   const rounds: (Round | SystemMessageBlock)[] = [];
   let currentRound: Round | null = null;
@@ -254,6 +266,9 @@ export function buildRounds(
             content: msg.reasoning,
             startedAt: msg.reasoning_started_at ?? undefined,
             completedAt: reasoningCompletedAt,
+            ...(reasoningDisplays[msg.id] || reasoningDisplays[msg.reasoning]
+              ? { display: reasoningDisplays[msg.id] || reasoningDisplays[msg.reasoning] }
+              : {}),
           });
         }
 

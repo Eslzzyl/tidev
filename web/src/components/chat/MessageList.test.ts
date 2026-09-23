@@ -338,6 +338,36 @@ describe("interrupted stream rendering", () => {
       "user",
     ]);
   });
+
+  it("carries provider summaries into the live reasoning segment display", () => {
+    const stream: StreamMessage = {
+      ...interruptedStream(),
+      status: "streaming",
+      segments: [{ type: "reasoning", content: "Summary textordinary reasoning" }],
+      reasoningDisplay: {
+        summaries: [{ summaryIndex: 0, content: "Summary text" }],
+        ordinary: "ordinary reasoning",
+      },
+    };
+
+    const items = buildChatItems([round()], [stream], {}, [], "", [], undefined, translate);
+    const reasoningItem = items.find(
+      (item) => item.kind === "assistant-segment" && item.item.segment.type === "reasoning",
+    );
+
+    expect(reasoningItem).toMatchObject({
+      item: {
+        segment: {
+          type: "reasoning",
+          content: "Summary textordinary reasoning",
+          display: {
+            summaries: [{ summaryIndex: 0, content: "Summary text" }],
+            ordinary: "ordinary reasoning",
+          },
+        },
+      },
+    });
+  });
 });
 
 describe("live reasoning rendering", () => {

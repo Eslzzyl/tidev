@@ -24,6 +24,7 @@ import { useTranslation } from "react-i18next";
 
 import type { MessageRecord, Model, Session } from "../../types/api";
 import type { CompactionNotice, InstructionNotice, StreamMessage } from "../../types/chat";
+import type { ReasoningDisplay } from "../../utils/round";
 import { ProviderErrorCard } from "./ApprovalCards";
 import {
   buildChatItems,
@@ -51,6 +52,7 @@ import { formatDurationHuman, formatTime, stripSystemReminderTags } from "../../
 export interface MessageListProps {
   messages: MessageRecord[];
   streams: StreamMessage[];
+  reasoningDisplays?: Readonly<Record<string, ReasoningDisplay>>;
   instructionNotices?: InstructionNotice[];
   compactionNotice?: CompactionNotice | null;
   sessionId?: string;
@@ -359,6 +361,7 @@ function renderSegment(
     return (
       <ThinkingBlock
         content={segment.content}
+        display={segment.display}
         active={item.active}
         expanded={expanded}
         onExpandedChange={onExpandedChange}
@@ -427,6 +430,7 @@ const SegmentItemView = memo(function SegmentItemView({
 export const MessageList = memo(function MessageList({
   messages,
   streams,
+  reasoningDisplays = {},
   instructionNotices = [],
   compactionNotice = null,
   sessionId,
@@ -460,8 +464,14 @@ export const MessageList = memo(function MessageList({
     [streams],
   );
   const rounds = useMemo(
-    () => buildRounds(messages, liveStreamAssistantMessageIds, liveStreamUserMessageIds),
-    [liveStreamAssistantMessageIds, liveStreamUserMessageIds, messages],
+    () =>
+      buildRounds(
+        messages,
+        liveStreamAssistantMessageIds,
+        liveStreamUserMessageIds,
+        reasoningDisplays,
+      ),
+    [liveStreamAssistantMessageIds, liveStreamUserMessageIds, messages, reasoningDisplays],
   );
 
   const items = useMemo(

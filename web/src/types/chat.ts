@@ -1,4 +1,4 @@
-import type { ToolCallEntry, RoundSegment } from "../utils/round";
+import type { ReasoningDisplay, ToolCallEntry, RoundSegment } from "../utils/round";
 import type { ProviderErrorData } from "./api";
 
 export type Feature = "chat" | "files" | "terminal" | "git" | "stats";
@@ -23,6 +23,7 @@ export interface StreamMessage {
   key: string;
   requestId: number;
   segments: RoundSegment[];
+  reasoningDisplay?: ReasoningDisplay;
   toolCallMap: Record<string, ToolCallEntry>;
   status: "streaming" | "cancelled" | "failed" | "interrupted";
   providerFinished: boolean;

@@ -32,10 +32,14 @@ import {
   type PendingImage,
 } from "../utils/imageAttachments";
 import { emitDesktopNotification } from "../utils/notifications";
-import { toolResultStatus } from "../utils/round";
+import { toolResultStatus, type ReasoningDisplay } from "../utils/round";
 import i18n from "../i18n";
 import {
   appendSegment,
+  appendReasoningDelta,
+  appendReasoningDisplayDelta,
+  appendReasoningDisplaySummary,
+  appendReasoningSummaryDelta,
   cloneStream,
   createStream,
   ensureToolCall,
@@ -103,6 +107,7 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
   const [instructionNotices, setInstructionNotices] = useState<InstructionNotice[]>([]);
   const [compactionNotice, setCompactionNotice] = useState<CompactionNotice | null>(null);
   const [streams, setStreams] = useState<Record<string, StreamMessage>>({});
+  const [reasoningDisplays, setReasoningDisplays] = useState<Record<string, ReasoningDisplay>>({});
   const [requests, setRequests] = useState<FrontendRequest[]>([]);
   const [models, setModels] = useState<Model[]>([]);
   const [startupModelFallback, setStartupModelFallback] =
@@ -182,6 +187,7 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
   const pendingQueuedMessageSessionsRef = useRef(new Map<string, string>());
   const pendingImagesRef = useRef<PendingImage[]>([]);
   const streamsRef = useRef<Record<string, StreamMessage>>({});
+  const reasoningDisplayCacheRef = useRef<Record<string, ReasoningDisplay>>({});
   const cursorRef = useRef<number | null>(
     (() => {
       try {
@@ -987,6 +993,7 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
         const requestId = Number(payload.request_id);
         if (Number.isFinite(requestId)) {
           const key = `${sessionId}:${requestId}`;
+          const assistantMessageId = asString(payload.assistant_message_id);
           scheduleStreamUpdate((current) => {
             const stream = current[key] ?? createStream(key, requestId);
             return {
@@ -998,8 +1005,7 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
                 error: undefined,
                 providerError: undefined,
                 retrying: undefined,
-                assistantMessageId:
-                  asString(payload.assistant_message_id) || stream.assistantMessageId || null,
+                assistantMessageId: assistantMessageId || stream.assistantMessageId || null,
                 userMessageId: asString(payload.user_message_id) || stream.userMessageId || null,
               },
             };
@@ -1017,6 +1023,25 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
         const requestId = Number(payload.request_id);
         if (!Number.isFinite(requestId)) return;
         const key = `${sessionId}:${requestId}`;
+        const content = asString(payload.content);
+        if (content && kind === "ReasoningSummaryDelta") {
+          const rawSummaryIndex = payload.summary_index;
+          const summaryIndex =
+            typeof rawSummaryIndex === "number" && Number.isInteger(rawSummaryIndex)
+              ? rawSummaryIndex
+              : null;
+          const display = (reasoningDisplayCacheRef.current[key] ??= {
+            ordinary: "",
+            summaries: [],
+          });
+          appendReasoningDisplaySummary(display, summaryIndex, content);
+        } else if (content && kind === "ReasoningDelta") {
+          const display = (reasoningDisplayCacheRef.current[key] ??= {
+            ordinary: "",
+            summaries: [],
+          });
+          appendReasoningDisplayDelta(display, content);
+        }
         if (kind === "ToolCallUpdated") instructionToolSessionsRef.current.add(sessionId);
         scheduleStreamUpdate((current) => {
           const next = cloneStream(current[key] ?? createStream(key, requestId));
@@ -1035,10 +1060,17 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
               entry.status = "pending";
             }
           } else if (kind === "Delta") {
-            appendSegment(next, "text", asString(payload.content));
+            appendSegment(next, "text", content);
+          } else if (kind === "ReasoningSummaryDelta") {
+            const rawSummaryIndex = payload.summary_index;
+            const summaryIndex =
+              typeof rawSummaryIndex === "number" && Number.isInteger(rawSummaryIndex)
+                ? rawSummaryIndex
+                : null;
+            appendReasoningSummaryDelta(next, summaryIndex, content);
+            if (content) next.reasoningStartedAt ??= new Date().toISOString();
           } else {
-            const content = asString(payload.content);
-            appendSegment(next, "reasoning", content);
+            appendReasoningDelta(next, content);
             if (content) next.reasoningStartedAt ??= new Date().toISOString();
           }
           return { ...current, [key]: next };
@@ -1274,6 +1306,21 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
         const key = `${sessionId}:${requestId}`;
         const endStatus = asString(payload.status);
         instructionToolSessionsRef.current.delete(sessionId);
+        const display = reasoningDisplayCacheRef.current[key];
+        const reasoning = streamsRef.current[key]?.segments
+          .filter((segment) => segment.type === "reasoning")
+          .map((segment) => segment.content)
+          .join("");
+        if (display?.summaries.length) {
+          setReasoningDisplays((current) => ({
+            ...current,
+            [reasoning ?? ""]: {
+              ordinary: display.ordinary,
+              summaries: display.summaries.map((summary) => ({ ...summary })),
+            },
+          }));
+        }
+        delete reasoningDisplayCacheRef.current[key];
         scheduleStreamUpdate((current) => {
           const stream = current[key];
           if (!stream) return current;
@@ -1922,6 +1969,7 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
     startupModelFallback,
     startupStatusLoaded,
     messages,
+    reasoningDisplays,
     changedFiles,
     changedFileDiffs,
     changedFilesPanelOpen,

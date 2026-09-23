@@ -69,12 +69,16 @@ function hasAssistant(round: Round) {
   return round.segments.length > 0 || round.status !== "user_only" || round.interrupted;
 }
 
-function mergeStreamReasoningSegments(segments: RoundSegment[]): RoundSegment[] {
+function mergeStreamReasoningSegments(
+  segments: RoundSegment[],
+  display?: StreamMessage["reasoningDisplay"],
+): RoundSegment[] {
   const reasoningSegments = segments.filter(
     (segment): segment is Extract<RoundSegment, { type: "reasoning" }> =>
       segment.type === "reasoning",
   );
-  if (reasoningSegments.length < 2) return segments;
+  if (reasoningSegments.length === 0 || (reasoningSegments.length === 1 && !display))
+    return segments;
 
   const first = reasoningSegments[0];
   const last = reasoningSegments[reasoningSegments.length - 1];
@@ -82,6 +86,7 @@ function mergeStreamReasoningSegments(segments: RoundSegment[]): RoundSegment[] 
     ...first,
     content: reasoningSegments.map((segment) => segment.content).join(""),
     completedAt: last.completedAt,
+    ...(display ? { display } : {}),
   };
 
   return [mergedReasoning, ...segments.filter((segment) => segment.type !== "reasoning")];
@@ -456,7 +461,9 @@ export function buildChatItems(
     if (!assistant) continue;
 
     const insertInstructionBeforeStream = Boolean(turnStream && pendingInstructions.length > 0);
-    const liveSegments = turnStream ? mergeStreamReasoningSegments(turnStream.segments) : [];
+    const liveSegments = turnStream
+      ? mergeStreamReasoningSegments(turnStream.segments, turnStream.reasoningDisplay)
+      : [];
     let mergedSegments = turnStream ? [...persistedSegments, ...liveSegments] : persistedSegments;
     let activeFromIndex = persistedSegments.length;
     if (pendingInstructions.length > 0) {

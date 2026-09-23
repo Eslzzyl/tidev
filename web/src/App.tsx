@@ -123,6 +123,7 @@ export default function App() {
     fastMode,
     toggleFastMode,
     messages,
+    reasoningDisplays,
     changedFiles,
     changedFileDiffs,
     changedFilesPanelOpen,
@@ -225,6 +226,7 @@ export default function App() {
       sessionStatus={sessionStatus}
       activeModel={activeModel}
       messages={messages}
+      reasoningDisplays={reasoningDisplays}
       changedFiles={changedFiles}
       changedFileDiffs={changedFileDiffs}
       changedFilesPanelOpen={changedFilesPanelOpen}

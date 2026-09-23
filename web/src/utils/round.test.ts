@@ -210,6 +210,25 @@ describe("round preview state", () => {
     });
   });
 
+  it("retains summary display metadata when the completed assistant ID differs from the stream ID", () => {
+    const assistant = message("answer", "assistant");
+    assistant.id = "completed-assistant-id";
+    assistant.reasoning = "summaryordinary";
+    const display = {
+      ordinary: "ordinary",
+      summaries: [{ summaryIndex: 0, content: "summary" }],
+    };
+
+    const [built] = buildRounds(
+      [record(message("prompt", "user")), record(assistant)],
+      new Set(),
+      new Set(),
+      { [assistant.reasoning]: display },
+    ) as [Round];
+
+    expect(built.segments[0]).toMatchObject({ type: "reasoning", display });
+  });
+
   it("keeps direct tool metadata and derives completed status", () => {
     const assistant = message("", "assistant");
     assistant.completed_at = "2026-08-22T00:01:00Z";
@@ -362,6 +381,33 @@ describe("round preview state", () => {
       },
     );
     expect(parseInstructionMessage("Compaction\n\nsummary")).toBeNull();
+  });
+});
+
+describe("reasoning display metadata", () => {
+  it("restores live summary segmentation onto the persisted assistant message", () => {
+    const assistant = message("", "assistant");
+    assistant.reasoning = "First summarySecond summaryOrdinary reasoning";
+    const display = {
+      summaries: [
+        { summaryIndex: 0, content: "First summary" },
+        { summaryIndex: 1, content: "Second summary" },
+      ],
+      ordinary: "Ordinary reasoning",
+    };
+
+    const [built] = buildRounds(
+      [record(message("prompt", "user")), record(assistant)],
+      new Set(),
+      new Set(),
+      { [assistant.id]: display },
+    ) as [Round];
+
+    expect(built.segments[0]).toMatchObject({
+      type: "reasoning",
+      content: "First summarySecond summaryOrdinary reasoning",
+      display,
+    });
   });
 });
 

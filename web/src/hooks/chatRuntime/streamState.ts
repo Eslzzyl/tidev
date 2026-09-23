@@ -1,6 +1,11 @@
 import { ApiError } from "../../api/client";
 import { asString } from "../../utils/events";
-import { toolCallEntry, toolResultStatus, type ToolCallEntry } from "../../utils/round";
+import {
+  toolCallEntry,
+  toolResultStatus,
+  type ReasoningDisplay,
+  type ToolCallEntry,
+} from "../../utils/round";
 import type { ProviderErrorData, Session, ToolCall, ToolExecutionResult } from "../../types/api";
 import type { StreamMessage } from "../../types/chat";
 import i18n from "../../i18n";
@@ -36,8 +41,54 @@ export function cloneStream(stream: StreamMessage): StreamMessage {
   return {
     ...stream,
     segments: stream.segments.slice(),
+    reasoningDisplay: stream.reasoningDisplay
+      ? {
+          ordinary: stream.reasoningDisplay.ordinary,
+          summaries: stream.reasoningDisplay.summaries.map((summary) => ({ ...summary })),
+        }
+      : undefined,
     toolCallMap: { ...stream.toolCallMap },
   };
+}
+
+// Keep provider summaries as display metadata while preserving the exact
+// reasoning delta sequence in the stream segment.
+function reasoningDisplay(stream: StreamMessage): ReasoningDisplay {
+  return (stream.reasoningDisplay ??= { ordinary: "", summaries: [] });
+}
+
+export function appendReasoningDisplayDelta(display: ReasoningDisplay, content: string) {
+  display.ordinary += content;
+}
+
+export function appendReasoningDisplaySummary(
+  display: ReasoningDisplay,
+  summaryIndex: number | null,
+  content: string,
+) {
+  if (!content) return;
+  const last = display.summaries.at(-1);
+  if (last?.summaryIndex === summaryIndex) {
+    last.content += content;
+  } else {
+    display.summaries.push({ summaryIndex, content });
+  }
+}
+
+export function appendReasoningDelta(stream: StreamMessage, content: string) {
+  if (!content) return;
+  appendSegment(stream, "reasoning", content);
+  appendReasoningDisplayDelta(reasoningDisplay(stream), content);
+}
+
+export function appendReasoningSummaryDelta(
+  stream: StreamMessage,
+  summaryIndex: number | null,
+  content: string,
+) {
+  if (!content) return;
+  appendSegment(stream, "reasoning", content);
+  appendReasoningDisplaySummary(reasoningDisplay(stream), summaryIndex, content);
 }
 
 export function freezeReasoning(stream: StreamMessage) {
