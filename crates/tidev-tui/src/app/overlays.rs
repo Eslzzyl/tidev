@@ -20,6 +20,7 @@ use crate::components::overlays::search::SearchPanel;
 use crate::components::overlays::session::SessionPanel;
 use crate::components::overlays::settings::SettingsPanel;
 use crate::components::overlays::skills::{SkillItem, SkillsPanel};
+use crate::components::overlays::startup_provider::StartupProviderDialog;
 use crate::components::overlays::theme::ThemePanel;
 use crate::components::overlays::undo::UndoConfirmDialog;
 use crate::context::{InitContext, UpdateContext};
@@ -192,6 +193,7 @@ impl App {
             OverlayKind::PanelLauncher => Some(Box::new(PanelLauncher::new())),
             OverlayKind::GitPanel => Some(Box::new(GitPanel::new())),
             OverlayKind::StartupModelFallbackDialog => None,
+            OverlayKind::StartupProviderDialog => Some(Box::new(StartupProviderDialog::new())),
             // Permission/security dialogs are triggered by handle_tui_request,
             // not by user keystrokes. These branches exist as fallback placeholders.
             OverlayKind::QuestionDialog

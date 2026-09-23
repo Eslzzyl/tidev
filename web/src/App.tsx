@@ -17,6 +17,7 @@ import { AuthGate } from "./components/AuthGate";
 import { ChatPanel } from "./components/chat/ChatPanel";
 import { WelcomePage } from "./components/chat/WelcomePage";
 import { SettingsPanel } from "./components/settings/SettingsPanel";
+import { StartupProviderDialog } from "./components/StartupProviderDialog";
 import { ComponentShowcase } from "./components/ui/ComponentShowcase";
 import { ConfirmDialog } from "./components/ui/ConfirmDialog";
 import { InfoDialog } from "./components/ui/InfoDialog";
@@ -70,6 +71,7 @@ export default function App() {
   const [dismissedStartupModelFallbackId, setDismissedStartupModelFallbackId] = useState<
     string | null
   >(null);
+  const [startupProviderPromptDismissed, setStartupProviderPromptDismissed] = useState(false);
   const featureNavRef = useRef<HTMLElement>(null);
   const featureButtonRefs = useRef<Partial<Record<Feature, HTMLButtonElement | null>>>({});
   const [featureIndicator, setFeatureIndicator] = useState({
@@ -120,6 +122,7 @@ export default function App() {
     activeModel,
     startupModelFallback,
     startupStatusLoaded,
+    startupProviderStatus,
     fastMode,
     toggleFastMode,
     messages,
@@ -434,6 +437,22 @@ export default function App() {
             }
             setDismissedStartupModelFallbackId(startupModelFallback.notice_id);
           }}
+        />
+      ) : null}
+      {startupProviderStatus === "needs-setup" && !startupProviderPromptDismissed ? (
+        <StartupProviderDialog
+          onOpenSettings={() => {
+            setStartupProviderPromptDismissed(true);
+            if (startupModelFallback) {
+              setDismissedStartupModelFallbackId(startupModelFallback.notice_id);
+            }
+            if (location.startsWith("/settings")) {
+              navigate(routes.settings("providers"));
+            } else {
+              openSettingsPanel("providers");
+            }
+          }}
+          onDismiss={() => setStartupProviderPromptDismissed(true)}
         />
       ) : null}
       {sessionToDelete ? (

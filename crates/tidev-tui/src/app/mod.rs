@@ -30,6 +30,7 @@ use uuid::Uuid;
 use crate::component::Component;
 use crate::components::overlay_stack::OverlayStack;
 use crate::components::overlays::model_fallback::ModelFallbackDialog;
+use crate::components::overlays::startup_provider::has_connected_provider;
 use crate::context::InitContext;
 use crate::i18n::{TextKey, UiText, mode_title};
 
@@ -390,6 +391,15 @@ impl App {
             };
             let _ = dialog.init(&init_ctx);
             app.overlays.push(dialog);
+        }
+
+        let show_startup_provider_dialog = {
+            let config = app.runtime.config();
+            let auth = app.runtime.auth();
+            !has_connected_provider(&config, &auth)
+        };
+        if show_startup_provider_dialog {
+            app.open_overlay(crate::action::OverlayKind::StartupProviderDialog);
         }
 
         app

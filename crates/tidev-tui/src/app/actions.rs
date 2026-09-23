@@ -1442,7 +1442,7 @@ mod tests {
         }
     }
 
-    async fn test_app() -> App {
+    async fn test_app(show_startup_provider_dialog: bool) -> App {
         let dir = std::env::temp_dir().join(format!("tidev-tui-session-select-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&dir).expect("temp directory should be created");
         std::fs::write(
@@ -1462,11 +1462,34 @@ mod tests {
         let (_request_tx, request_rx) = tokio::sync::mpsc::unbounded_channel();
         let (_event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
 
-        App::new_with_image_picker(runtime, request_rx, event_rx, None)
+        let mut app = App::new_with_image_picker(runtime, request_rx, event_rx, None);
+        if !show_startup_provider_dialog {
+            app.close_overlay(OverlayKind::StartupProviderDialog, &mut Vec::new());
+        }
+        app
     }
 
     async fn shutdown_test_app(app: App) {
         app.runtime.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn startup_without_a_connected_provider_shows_the_setup_dialog() {
+        let mut app = test_app(true).await;
+
+        let action = app
+            .overlays
+            .handle_key_event(crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Enter,
+                crossterm::event::KeyModifiers::NONE,
+            ));
+        assert!(matches!(
+            action,
+            Some(Action::Overlay(OverlayAction::Close(
+                OverlayKind::StartupProviderDialog
+            )))
+        ));
+        shutdown_test_app(app).await;
     }
 
     #[test]
@@ -1502,7 +1525,7 @@ mod tests {
 
     #[tokio::test]
     async fn selecting_the_current_session_closes_the_session_panel() {
-        let mut app = test_app().await;
+        let mut app = test_app(false).await;
         let session_id = Uuid::new_v4();
         app.current_session_id = Some(session_id);
         app.overlays.push(Box::new(TestOverlay));
@@ -1518,7 +1541,7 @@ mod tests {
 
     #[tokio::test]
     async fn selecting_a_cached_session_closes_the_session_panel() {
-        let mut app = test_app().await;
+        let mut app = test_app(false).await;
         let current_session_id = Uuid::new_v4();
         let target_session_id = Uuid::new_v4();
         app.current_session_id = Some(current_session_id);
@@ -1546,7 +1569,7 @@ mod tests {
 
     #[tokio::test]
     async fn forking_from_message_panel_activates_new_session_and_closes_panel() {
-        let mut app = test_app().await;
+        let mut app = test_app(false).await;
         let source_session_id = Uuid::new_v4();
         let source_message = Message::new(MessageRole::User, "fork point");
         let model = app.runtime.active_model();

@@ -18,6 +18,7 @@ import type {
   SessionListCursor,
   TodoItem,
 } from "../types/api";
+import { hasConnectedProvider } from "../utils/providers";
 import type { CompactionNotice, InstructionNotice, StreamMessage } from "../types/chat";
 import { parseSlashCommand } from "../commands";
 import { asString, eventPayload } from "../utils/events";
@@ -113,6 +114,9 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
   const [startupModelFallback, setStartupModelFallback] =
     useState<StartupStatusResponse["model_fallback"]>(null);
   const [startupStatusLoaded, setStartupStatusLoaded] = useState(false);
+  const [startupProviderStatus, setStartupProviderStatus] = useState<
+    "loading" | "connected" | "needs-setup" | "unavailable"
+  >("loading");
   const [todos, setTodos] = useState<TodoItem[]>([]);
   const [draft, setDraft] = useState("");
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
@@ -806,6 +810,21 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
     if (authChecking || (authRequired && !authenticated)) return;
 
     let cancelled = false;
+    setStartupProviderStatus("loading");
+    void api
+      .listProviders()
+      .then(({ providers }) => {
+        if (!cancelled) {
+          setStartupProviderStatus(hasConnectedProvider(providers) ? "connected" : "needs-setup");
+        }
+      })
+      .catch((reason) => {
+        if (!cancelled) {
+          setStartupProviderStatus("unavailable");
+          setError(reason instanceof Error ? reason.message : i18n.t("Failed to load providers"));
+        }
+      });
+
     void api
       .getStartupStatus()
       .then((status) => {
@@ -1968,6 +1987,7 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
     activeModel,
     startupModelFallback,
     startupStatusLoaded,
+    startupProviderStatus,
     messages,
     reasoningDisplays,
     changedFiles,

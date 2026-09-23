@@ -666,6 +666,11 @@ const en = {
   Providers: "Providers",
   "Manage provider API keys and custom model endpoints":
     "Manage provider API keys and custom model endpoints",
+  "Connect a provider": "Connect a provider",
+  "Connect a provider in Settings to start using tidev.":
+    "Connect a provider in Settings to start using tidev.",
+  "Open provider settings": "Open provider settings",
+  Later: "Later",
   "Add Provider": "Add Provider",
   "Loading providers...": "Loading providers...",
   "Failed to load providers": "Failed to load providers",
@@ -1495,6 +1500,11 @@ const zhCN: Record<keyof typeof en, string> = {
   Month: "月",
   Providers: "模型供应商",
   "Manage provider API keys and custom model endpoints": "管理模型供应商 API Key 和自定义模型端点",
+  "Connect a provider": "连接 Provider",
+  "Connect a provider in Settings to start using tidev.":
+    "在设置中的 Providers 页面连接 Provider，即可开始使用 tidev。",
+  "Open provider settings": "打开 Provider 设置",
+  Later: "稍后",
   "Add Provider": "添加模型供应商",
   "Loading providers...": "正在加载模型供应商…",
   "Failed to load providers": "加载模型供应商失败",

@@ -56,6 +56,7 @@ beforeEach(() => {
 
   vi.spyOn(api, "getFastMode").mockResolvedValue({ fast_mode: false });
   vi.spyOn(api, "getStartupStatus").mockResolvedValue({ model_fallback: null });
+  vi.spyOn(api, "listProviders").mockResolvedValue({ providers: [] });
   vi.spyOn(api, "listModels").mockResolvedValue([]);
   vi.spyOn(api, "listSessions").mockResolvedValue({
     items: [],
@@ -81,6 +82,8 @@ describe("useChatRuntime welcome submission", () => {
       root.render(createElement(RuntimeProbe));
       await new Promise((resolve) => window.setTimeout(resolve, 0));
     });
+
+    expect(runtime.startupProviderStatus).toBe("needs-setup");
 
     act(() => {
       runtime.setSessionSearch("important conversation");

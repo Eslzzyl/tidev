@@ -16,6 +16,7 @@ pub(crate) mod sensitive;
 pub(crate) mod session;
 pub(crate) mod settings;
 pub(crate) mod skills;
+pub(crate) mod startup_provider;
 pub(crate) mod theme;
 pub(crate) mod undo;
 pub(crate) mod workspace;
