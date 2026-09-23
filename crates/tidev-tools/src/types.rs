@@ -371,7 +371,7 @@ tool_args! {
     /// Read a file or directory.
     pub struct ReadArgs {
         file_path: string("Path to read (relative to workspace root, or absolute)"),
-        offset: optional_integer("1-indexed line number to start reading from"),
+        offset: optional_integer("Number of lines to skip from the start (0-indexed)"),
         limit: optional_integer("Maximum number of lines to read"),
     }
 }
@@ -534,7 +534,7 @@ tool_args! {
         url: string("The URL to fetch"),
         format: optional_string("Output format: text, markdown, or html"),
         timeout: optional_integer("Timeout in seconds (max 120)"),
-        offset: optional_integer("1-indexed line number to start reading from"),
+        offset: optional_integer("Number of lines to skip from the start (0-indexed)"),
         limit: optional_integer("Maximum number of lines to return"),
     }
 }

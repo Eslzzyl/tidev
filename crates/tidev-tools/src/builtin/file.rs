@@ -487,10 +487,10 @@ pub(super) fn read_path(
     })?;
 
     let has_requested_range = offset.is_some() || limit.is_some();
-    let offset = offset.unwrap_or(1);
+    let offset = offset.unwrap_or(0);
     let limit = limit.unwrap_or(2000);
-    if offset < 1 {
-        bail!("offset must be greater than or equal to 1");
+    if offset < 0 {
+        bail!("offset must be greater than or equal to 0");
     }
     if limit < 1 {
         bail!("limit must be greater than or equal to 1");
@@ -509,7 +509,7 @@ pub(super) fn read_path(
 
     for (index, raw_line) in all_lines.iter().enumerate() {
         total_lines = index + 1;
-        if total_lines < offset as usize {
+        if index < offset as usize {
             continue;
         }
 
@@ -536,7 +536,7 @@ pub(super) fn read_path(
         total_lines = all_lines.len();
     }
 
-    if total_lines < offset as usize && !(total_lines == 0 && offset == 1) {
+    if offset as usize > total_lines {
         bail!(
             "Offset {} is out of range for this file ({} lines)",
             offset,
@@ -544,9 +544,9 @@ pub(super) fn read_path(
         );
     }
 
-    let start = offset as usize;
+    let start = offset as usize + 1;
     let last = start + lines.len().saturating_sub(1);
-    let next_offset = start as i64 + lines.len() as i64;
+    let next_offset = offset + lines.len() as i64;
     let mut content_str = lines
         .into_iter()
         .enumerate()
@@ -578,10 +578,10 @@ pub(super) fn read_path(
     };
     let mut metadata = format!("<line_range>{}-{}</line_range>\n", start, last);
     if has_requested_range {
-        let requested_end = offset + limit - 1;
+        let requested_end = offset + limit;
         metadata.push_str(&format!(
             "<requested_range>{}-{}</requested_range>\n",
-            offset, requested_end
+            start, requested_end
         ));
     }
     if let Some(reason) = truncated_by {
@@ -1681,6 +1681,54 @@ mod tests {
             result.output.contains("<system-reminder>"),
             "output should embed instructions as system-reminder"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn read_uses_zero_based_offset_and_continuation() -> Result<()> {
+        let workspace = tempfile::TempDir::new()?;
+        let config_dir = tempfile::TempDir::new()?;
+        std::fs::write(
+            workspace.path().join("sample.txt"),
+            "first\nsecond\nthird\nfourth\n",
+        )?;
+
+        let first_page = read_path(
+            workspace.path(),
+            config_dir.path(),
+            "sample.txt",
+            Some(0),
+            Some(2),
+            false,
+            false,
+            None,
+        )?;
+        assert!(first_page.output.contains("<line_range>1-2</line_range>"));
+        assert!(
+            first_page
+                .output
+                .contains("<requested_range>1-2</requested_range>")
+        );
+        assert!(first_page.output.contains("1: first\n2: second"));
+        assert!(first_page.output.contains("Use offset=2 to continue."));
+
+        let second_page = read_path(
+            workspace.path(),
+            config_dir.path(),
+            "sample.txt",
+            Some(2),
+            Some(2),
+            false,
+            false,
+            None,
+        )?;
+        assert!(second_page.output.contains("<line_range>3-4</line_range>"));
+        assert!(
+            second_page
+                .output
+                .contains("<requested_range>3-4</requested_range>")
+        );
+        assert!(second_page.output.contains("3: third\n4: fourth"));
         Ok(())
     }
 

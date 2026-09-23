@@ -111,11 +111,15 @@ pub async fn fetch(args: WebFetchArgs) -> Result<String> {
         bail!("fetched page is empty");
     }
 
-    // Apply line-based offset/limit (matching read tool behavior)
-    let offset = args.offset.unwrap_or(1);
+    // Apply line-based offset/limit.
+    let offset = args.offset.unwrap_or(0);
     let limit = args.limit.unwrap_or(FETCH_DEFAULT_LINE_LIMIT);
-    if offset < 1 {
-        bail!("offset must be greater than or equal to 1");
+    paginate_output(&output, offset, limit)
+}
+
+fn paginate_output(output: &str, offset: i64, limit: i64) -> Result<String> {
+    if offset < 0 {
+        bail!("offset must be greater than or equal to 0");
     }
     if limit < 1 {
         bail!("limit must be greater than or equal to 1");
@@ -124,7 +128,7 @@ pub async fn fetch(args: WebFetchArgs) -> Result<String> {
     let lines: Vec<&str> = output.lines().collect();
     let total_lines = lines.len();
 
-    if total_lines < offset as usize && !(total_lines == 0 && offset == 1) {
+    if offset as usize > total_lines {
         bail!(
             "Offset {} is out of range for this page ({} lines)",
             offset,
@@ -132,7 +136,7 @@ pub async fn fetch(args: WebFetchArgs) -> Result<String> {
         );
     }
 
-    let start = (offset as usize).saturating_sub(1);
+    let start = offset as usize;
     let selected: Vec<&str> = lines
         .iter()
         .skip(start)
@@ -144,7 +148,7 @@ pub async fn fetch(args: WebFetchArgs) -> Result<String> {
     let mut content = selected
         .iter()
         .enumerate()
-        .map(|(i, line)| format!("{}: {}", offset as usize + i, line))
+        .map(|(i, line)| format!("{}: {}", start + i + 1, line))
         .collect::<Vec<_>>()
         .join("\n");
 
@@ -153,8 +157,8 @@ pub async fn fetch(args: WebFetchArgs) -> Result<String> {
     if has_more {
         content.push_str(&format!(
             "\n\n(Showing lines {}-{} of {}. Use offset={} to continue.)",
-            offset,
-            offset + selected.len() as i64 - 1,
+            offset + 1,
+            offset + selected.len() as i64,
             total_lines,
             next_offset,
         ));
@@ -306,6 +310,32 @@ mod tests {
         assert_eq!(
             decode_response_body(&[0xC4, 0xE3, 0xBA, 0xC3], Some("text/plain; charset=gbk")),
             "你好"
+        );
+    }
+
+    #[test]
+    fn paginates_from_zero_based_offset() {
+        assert_eq!(
+            paginate_output("first\nsecond\nthird", 0, 2).unwrap(),
+            "1: first\n2: second\n\n(Showing lines 1-2 of 3. Use offset=2 to continue.)"
+        );
+    }
+
+    #[test]
+    fn paginates_continuation_with_zero_based_offset() {
+        assert_eq!(
+            paginate_output("first\nsecond\nthird\nfourth\nfifth", 2, 2).unwrap(),
+            "3: third\n4: fourth\n\n(Showing lines 3-4 of 5. Use offset=4 to continue.)"
+        );
+    }
+
+    #[test]
+    fn rejects_offset_past_end() {
+        assert!(
+            paginate_output("first", 2, 1)
+                .unwrap_err()
+                .to_string()
+                .contains("out of range")
         );
     }
 }
