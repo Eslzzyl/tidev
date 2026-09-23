@@ -1,7 +1,11 @@
 import { useEffect, useState } from "react";
 import { FileText, RefreshCw, Save, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useGlobalInstructions, useSaveGlobalInstructions, useDeleteGlobalInstructions } from "../../hooks/workspaceQueries";
+import {
+  useGlobalInstructions,
+  useSaveGlobalInstructions,
+  useDeleteGlobalInstructions,
+} from "../../hooks/workspaceQueries";
 import { getEffectiveTheme, useUIStore } from "../../stores/useUIStore";
 import { CodeMirrorEditor } from "../ui/CodeMirrorEditor";
 import { Button } from "../ui";
@@ -54,7 +58,9 @@ export function InstructionsSection() {
             variant="ghost"
             onClick={() => void refetch()}
             disabled={isLoading || isMutating}
-            leadingIcon={<RefreshCw className={isLoading ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} />}
+            leadingIcon={
+              <RefreshCw className={isLoading ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} />
+            }
           >
             {t("Reload")}
           </Button>
