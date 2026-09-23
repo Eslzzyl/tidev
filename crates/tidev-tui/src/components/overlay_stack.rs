@@ -35,6 +35,12 @@ impl OverlayStack {
         self.overlays.is_empty()
     }
 
+    pub fn captures_all_input(&self) -> bool {
+        self.overlays
+            .last()
+            .is_some_and(|overlay| overlay.captures_all_input())
+    }
+
     /// Only the topmost overlay may own the terminal cursor.
     pub fn wants_terminal_cursor(&self) -> bool {
         self.overlays

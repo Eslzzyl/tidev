@@ -13,6 +13,8 @@ pub mod theme;
 pub mod types;
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use include_dir::{Dir, include_dir};
@@ -755,6 +757,54 @@ impl AppConfig {
         Ok(())
     }
 
+    /// Persist the active model to the config file that currently overrides it.
+    ///
+    /// Project-level config takes precedence over global config, so update the
+    /// project file when it explicitly sets either default-model field. TOML
+    /// editing preserves comments and unrelated configuration values.
+    pub fn save_default_model_for_workspace(
+        paths: &ConfigPaths,
+        workspace_root: &Path,
+        provider_id: &str,
+        model_id: &str,
+    ) -> Result<()> {
+        let project_config_file = workspace_root.join(".tidev").join("config.toml");
+        let project_document = if project_config_file.exists() {
+            let contents = fs::read_to_string(&project_config_file)
+                .with_context(|| format!("failed to read {}", project_config_file.display()))?;
+            let document = contents
+                .parse::<toml_edit::DocumentMut>()
+                .with_context(|| format!("failed to parse {}", project_config_file.display()))?;
+            Some(document)
+        } else {
+            None
+        };
+
+        let updates_project_config = project_document.as_ref().is_some_and(|document| {
+            document.contains_key("default_provider") || document.contains_key("default_model")
+        });
+        let (config_file, mut document) = if updates_project_config {
+            (
+                project_config_file,
+                project_document.expect("project config document should exist"),
+            )
+        } else {
+            paths.ensure_directories()?;
+            let contents = fs::read_to_string(&paths.config_file)
+                .with_context(|| format!("failed to read {}", paths.config_file.display()))?;
+            let document = contents
+                .parse::<toml_edit::DocumentMut>()
+                .with_context(|| format!("failed to parse {}", paths.config_file.display()))?;
+            (paths.config_file.clone(), document)
+        };
+
+        document["default_provider"] = toml_edit::value(provider_id);
+        document["default_model"] = toml_edit::value(model_id);
+        fs::write(&config_file, document.to_string())
+            .with_context(|| format!("failed to write {}", config_file.display()))?;
+        Ok(())
+    }
+
     // ── Provider helpers ─────────────────────────────────────────────
 
     /// Add or replace a user-defined provider and rebuild the effective catalog.
@@ -1279,6 +1329,120 @@ mod tests {
         assert_eq!(
             config.provider_source("deepseek"),
             Some(ProviderSource::Bundled)
+        );
+    }
+
+    #[test]
+    fn save_default_model_updates_project_override_and_preserves_comments() {
+        let root = tempfile::tempdir().expect("temp directory should be created");
+        let config_dir = root.path().join("global");
+        let project_root = root.path().join("workspace");
+        let project_config_dir = project_root.join(".tidev");
+        std::fs::create_dir_all(&config_dir).expect("global config directory should be created");
+        std::fs::create_dir_all(&project_config_dir)
+            .expect("project config directory should be created");
+
+        let paths = ConfigPaths {
+            config_file: config_dir.join("config.toml"),
+            config_dir,
+            data_dir: root.path().join("data"),
+            mcp_file: root.path().join("mcp.json"),
+            auth_file: root.path().join("auth.json"),
+            database_file: root.path().join("sessions.sqlite3"),
+        };
+        std::fs::write(
+            &paths.config_file,
+            "default_provider = \"global\"\ndefault_model = \"global-model\"\n",
+        )
+        .expect("global config should be written");
+        let project_config = project_config_dir.join("config.toml");
+        std::fs::write(
+            &project_config,
+            "# Keep this project-specific configuration.\ndefault_model = \"missing-model\"\n\n[ui]\nlocale = \"zh-CN\"\n",
+        )
+        .expect("project config should be written");
+
+        AppConfig::save_default_model_for_workspace(
+            &paths,
+            &project_root,
+            "deepseek",
+            "deepseek-flash",
+        )
+        .expect("fallback model should be persisted");
+
+        let project_contents =
+            std::fs::read_to_string(project_config).expect("project config should remain readable");
+        let project_document = project_contents
+            .parse::<toml_edit::DocumentMut>()
+            .expect("project config should remain valid TOML");
+        assert_eq!(
+            project_document["default_provider"].as_str(),
+            Some("deepseek")
+        );
+        assert_eq!(
+            project_document["default_model"].as_str(),
+            Some("deepseek-flash")
+        );
+        assert!(project_contents.contains("# Keep this project-specific configuration."));
+        assert_eq!(project_document["ui"]["locale"].as_str(), Some("zh-CN"));
+
+        let global_contents = std::fs::read_to_string(&paths.config_file)
+            .expect("global config should remain readable");
+        assert!(global_contents.contains("default_provider = \"global\""));
+        assert!(global_contents.contains("default_model = \"global-model\""));
+    }
+
+    #[test]
+    fn save_default_model_updates_global_when_project_has_no_default_override() {
+        let root = tempfile::tempdir().expect("temp directory should be created");
+        let config_dir = root.path().join("global");
+        let project_root = root.path().join("workspace");
+        let project_config_dir = project_root.join(".tidev");
+        std::fs::create_dir_all(&config_dir).expect("global config directory should be created");
+        std::fs::create_dir_all(&project_config_dir)
+            .expect("project config directory should be created");
+
+        let paths = ConfigPaths {
+            config_file: config_dir.join("config.toml"),
+            config_dir,
+            data_dir: root.path().join("data"),
+            mcp_file: root.path().join("mcp.json"),
+            auth_file: root.path().join("auth.json"),
+            database_file: root.path().join("sessions.sqlite3"),
+        };
+        std::fs::write(
+            &paths.config_file,
+            "default_provider = \"missing\"\ndefault_model = \"missing-model\"\n",
+        )
+        .expect("global config should be written");
+        let project_config = project_config_dir.join("config.toml");
+        std::fs::write(&project_config, "[ui]\nlocale = \"zh-CN\"\n")
+            .expect("project config should be written");
+
+        AppConfig::save_default_model_for_workspace(
+            &paths,
+            &project_root,
+            "deepseek",
+            "deepseek-flash",
+        )
+        .expect("fallback model should be persisted");
+
+        let global_contents = std::fs::read_to_string(&paths.config_file)
+            .expect("global config should remain readable");
+        let global_document = global_contents
+            .parse::<toml_edit::DocumentMut>()
+            .expect("global config should remain valid TOML");
+        assert_eq!(
+            global_document["default_provider"].as_str(),
+            Some("deepseek")
+        );
+        assert_eq!(
+            global_document["default_model"].as_str(),
+            Some("deepseek-flash")
+        );
+        assert_eq!(
+            std::fs::read_to_string(project_config).expect("project config should remain readable"),
+            "[ui]\nlocale = \"zh-CN\"\n"
         );
     }
 

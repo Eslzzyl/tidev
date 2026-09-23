@@ -62,6 +62,7 @@ import type {
   SessionListResponse,
   SessionDiffsResponse,
   BuildInfo,
+  StartupStatusResponse,
   GlobalInstructionsResponse,
 } from "../types/api";
 import { getAuthToken, useAuthStore } from "../stores/useAuthStore";
@@ -336,6 +337,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ approved_tools: approvedTools }),
     }),
+
+  getStartupStatus: () => fetchJson<StartupStatusResponse>(`${API_BASE}/startup-status`),
 
   // Init prompt
   getInitPrompt: (args?: string) =>

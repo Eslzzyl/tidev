@@ -36,7 +36,7 @@ pub use git::{
 pub use message_buf::CoreMessageBuffer;
 pub use mode::Mode;
 pub use registry::ToolRegistry;
-pub use runtime::{PromptSubmission, PromptSubmissionReceipt, Runtime};
+pub use runtime::{ModelFallbackNotice, PromptSubmission, PromptSubmissionReceipt, Runtime};
 pub use session::SessionManager;
 pub use session_message::SessionMessage;
 pub use tidev_agent::StreamEndStatus;

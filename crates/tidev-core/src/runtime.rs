@@ -100,6 +100,9 @@ pub struct Runtime {
     /// Resolved model (for loop construction). Behind RwLock so the TUI can
     /// update it when the user switches providers.
     active_model: Arc<StdRwLock<tidev_config::auth::ActiveModel>>,
+    /// Set when startup repaired an unavailable configured model by selecting
+    /// the first available model.
+    startup_model_fallback: Option<ModelFallbackNotice>,
     /// Per-session cancellation tokens for active agent loops.
     active_loop_cancels: Arc<std::sync::Mutex<HashMap<Uuid, CancellationToken>>>,
 
@@ -164,6 +167,15 @@ pub struct Runtime {
 
     /// Cancellation token for background cleanup tasks.
     cleanup_cancel: CancellationToken,
+}
+
+/// Startup information for frontends to tell the user that the configured
+/// active model was unavailable and a fallback is now active.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ModelFallbackNotice {
+    pub notice_id: Uuid,
+    pub unavailable_model: String,
+    pub fallback_model: String,
 }
 
 /// RAII guard that removes a session from `busy_sessions` and
@@ -567,6 +579,11 @@ impl Runtime {
     /// Get a clone of the currently resolved active model.
     pub fn active_model(&self) -> tidev_config::auth::ActiveModel {
         self.active_model.read().unwrap().clone()
+    }
+
+    /// Get the fallback notice produced while building this runtime.
+    pub fn startup_model_fallback(&self) -> Option<ModelFallbackNotice> {
+        self.startup_model_fallback.clone()
     }
 
     /// Resolve the configured active model with its persisted thinking level.
@@ -2164,18 +2181,37 @@ impl RuntimeBuilder {
         self
     }
 
-    /// Resolve the active model, falling back to the first available model
-    /// if the default is not configured.
-    fn resolve_fallback_model(config: &AppConfig, auth: &AuthStore) -> Result<ActiveModel> {
-        if let Ok(model) = config.resolve_active_model(auth) {
-            return Ok(model);
+    /// Resolve the configured active model, falling back to the first
+    /// available model when it no longer exists in the provider catalog.
+    fn resolve_fallback_model(
+        config: &AppConfig,
+        auth: &AuthStore,
+    ) -> Result<(ActiveModel, Option<ModelFallbackNotice>)> {
+        match config.resolve_active_model(auth) {
+            Ok(model) => Ok((model, None)),
+            Err(error) => {
+                let unavailable_model =
+                    format!("{}/{}", config.default_provider, config.default_model);
+                let summary = config
+                    .available_models()
+                    .into_iter()
+                    .next()
+                    .context("no models are configured")?;
+                let model =
+                    config.resolve_model_by_ids(auth, &summary.provider_id, &summary.model_id)?;
+                let notice = ModelFallbackNotice {
+                    notice_id: Uuid::new_v4(),
+                    unavailable_model,
+                    fallback_model: model.label(),
+                };
+                log::warn!(
+                    "Configured active model '{}' is unavailable ({error:#}); falling back to '{}'",
+                    notice.unavailable_model,
+                    notice.fallback_model
+                );
+                Ok((model, Some(notice)))
+            }
         }
-        let summary = config
-            .available_models()
-            .into_iter()
-            .next()
-            .context("no models are configured")?;
-        config.resolve_model_by_ids(auth, &summary.provider_id, &summary.model_id)
     }
 
     /// Build the runtime.
@@ -2199,7 +2235,7 @@ impl RuntimeBuilder {
 
         // 2. Config + auth (with project-level overlay).
         let workspace_root = self.workspace_root.clone().unwrap_or_default();
-        let config = AppConfig::load_with_overlay(&paths, &workspace_root)?;
+        let mut config = AppConfig::load_with_overlay(&paths, &workspace_root)?;
         let effective_logging = effective_logging_config(&config.logging, console_logging_override);
         let auth = AuthStore::load_or_create(&paths)?;
 
@@ -2257,8 +2293,21 @@ impl RuntimeBuilder {
 
         // 7. LLM client + model resolution (with fallback).
         let _t_llm = Instant::now();
-        let active_model = Self::resolve_fallback_model(&config, &auth)
-            .context("no models are configured — set up a provider API key first")?;
+        let (active_model, startup_model_fallback) =
+            Self::resolve_fallback_model(&config, &auth)
+                .context("no models are configured — set up a provider API key first")?;
+        if startup_model_fallback.is_some() {
+            config.default_provider = active_model.provider_id.clone();
+            config.default_model = active_model.model_id.clone();
+            if let Err(error) = AppConfig::save_default_model_for_workspace(
+                &paths,
+                &workspace_root,
+                &active_model.provider_id,
+                &active_model.model_id,
+            ) {
+                log::warn!("failed to persist fallback active model: {error:#}");
+            }
+        }
         let llm = tidev_llm::LlmClient::new_with_user_agent(
             config.logging.save_request_body,
             config.logging.max_request_files,
@@ -2398,6 +2447,7 @@ impl RuntimeBuilder {
             session_manager,
             llm,
             active_model,
+            startup_model_fallback,
             active_loop_cancels: Arc::new(std::sync::Mutex::new(HashMap::new())),
             default_workspace,
             workspaces: Arc::new(std::sync::Mutex::new(workspaces)),
@@ -2473,6 +2523,56 @@ mod tests {
         assert!(!saved.lines().any(|line| line.trim() == "console = true"));
 
         runtime.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn unavailable_default_model_falls_back_persists_and_exposes_notice() {
+        let dir =
+            std::env::temp_dir().join(format!("tidev-runtime-model-fallback-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("temp directory should be created");
+        std::fs::write(
+            dir.join("config.toml"),
+            "default_provider = \"deepseek\"\ndefault_model = \"missing-model\"\n",
+        )
+        .expect("config should be written");
+
+        let runtime = Runtime::builder()
+            .workspace_root(dir.clone())
+            .config_dir(dir.clone())
+            .data_dir(dir.clone())
+            .build()
+            .await
+            .expect("runtime should build with a fallback model");
+
+        let fallback = runtime
+            .startup_model_fallback()
+            .expect("startup should expose fallback details");
+        let active_model = runtime.active_model();
+        assert_eq!(fallback.unavailable_model, "deepseek/missing-model");
+        assert_eq!(fallback.fallback_model, active_model.label());
+        assert_eq!(runtime.config().default_provider, active_model.provider_id);
+        assert_eq!(runtime.config().default_model, active_model.model_id);
+
+        let persisted = std::fs::read_to_string(dir.join("config.toml"))
+            .expect("repaired config should be readable");
+        assert!(persisted.contains(&format!(
+            "default_provider = \"{}\"",
+            active_model.provider_id
+        )));
+        assert!(persisted.contains(&format!("default_model = \"{}\"", active_model.model_id)));
+
+        runtime.shutdown().await;
+        drop(runtime);
+
+        let restarted = Runtime::builder()
+            .workspace_root(dir.clone())
+            .config_dir(dir.clone())
+            .data_dir(dir.clone())
+            .build()
+            .await
+            .expect("runtime should build with the repaired config");
+        assert!(restarted.startup_model_fallback().is_none());
+        restarted.shutdown().await;
     }
 
     async fn recv_created_event(

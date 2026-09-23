@@ -84,6 +84,12 @@ pub(crate) trait Component {
         false
     }
 
+    /// Whether this overlay captures all input, including global shortcuts
+    /// and background scroll handling.
+    fn captures_all_input(&self) -> bool {
+        false
+    }
+
     /// Whether this overlay should be drawn in the main area only
     /// (as opposed to the full terminal area including sidebar).
     #[allow(dead_code)]

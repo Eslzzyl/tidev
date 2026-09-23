@@ -12,6 +12,7 @@ import type {
   Message,
   MessageRecord,
   Model,
+  StartupStatusResponse,
   Session,
   SessionFileDiff,
   SessionListCursor,
@@ -104,6 +105,9 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
   const [streams, setStreams] = useState<Record<string, StreamMessage>>({});
   const [requests, setRequests] = useState<FrontendRequest[]>([]);
   const [models, setModels] = useState<Model[]>([]);
+  const [startupModelFallback, setStartupModelFallback] =
+    useState<StartupStatusResponse["model_fallback"]>(null);
+  const [startupStatusLoaded, setStartupStatusLoaded] = useState(false);
   const [todos, setTodos] = useState<TodoItem[]>([]);
   const [draft, setDraft] = useState("");
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
@@ -791,6 +795,31 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
       setError(reason instanceof Error ? reason.message : i18n.t("Failed to load models"));
     }
   }, []);
+
+  useEffect(() => {
+    if (authChecking || (authRequired && !authenticated)) return;
+
+    let cancelled = false;
+    void api
+      .getStartupStatus()
+      .then((status) => {
+        if (!cancelled) setStartupModelFallback(status.model_fallback);
+      })
+      .catch((reason) => {
+        if (!cancelled) {
+          setError(
+            reason instanceof Error ? reason.message : i18n.t("Failed to load startup status"),
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setStartupStatusLoaded(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authChecking, authRequired, authenticated]);
 
   useEffect(() => {
     void refreshModels();
@@ -1890,6 +1919,8 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
     selectedSession,
     sessionStatus,
     activeModel,
+    startupModelFallback,
+    startupStatusLoaded,
     messages,
     changedFiles,
     changedFileDiffs,

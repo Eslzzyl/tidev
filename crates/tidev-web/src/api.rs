@@ -676,6 +676,7 @@ pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/health", get(health))
         .route("/build-info", get(build_info))
+        .route("/startup-status", get(startup_status))
         .route("/auth/status", get(auth_status))
         .route("/auth/verify", post(auth_verify))
         .route("/auth/configure", post(auth_configure))
@@ -827,6 +828,17 @@ async fn health(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         service: "tidev-web",
         frontend: frontend_name(state.frontend_mode),
     })
+}
+
+async fn startup_status(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
+    let model_fallback = state.runtime.startup_model_fallback().map(|notice| {
+        serde_json::json!({
+            "notice_id": notice.notice_id,
+            "unavailable_model": notice.unavailable_model,
+            "fallback_model": notice.fallback_model,
+        })
+    });
+    Json(serde_json::json!({ "model_fallback": model_fallback }))
 }
 
 async fn build_info() -> Json<BuildInfoResponse> {

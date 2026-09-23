@@ -29,6 +29,8 @@ use uuid::Uuid;
 
 use crate::component::Component;
 use crate::components::overlay_stack::OverlayStack;
+use crate::components::overlays::model_fallback::ModelFallbackDialog;
+use crate::context::InitContext;
 use crate::i18n::{TextKey, UiText, mode_title};
 
 use crate::components::chat::MessageList;
@@ -275,6 +277,7 @@ impl App {
             ThemeCatalog::load(runtime.config_dir()).expect("bundled theme presets must parse");
         let theme_str = runtime.config().theme.clone();
         let current_palette = resolve_palette(&theme_catalog, &theme_str);
+        let startup_model_fallback = runtime.startup_model_fallback();
 
         // Capture before runtime is moved into Self.
         let file_index = runtime.file_search_index();
@@ -298,7 +301,7 @@ impl App {
             image_picker.clone().unwrap_or_else(Picker::halfblocks),
         ));
 
-        Self {
+        let mut app = Self {
             runtime,
             overlays: OverlayStack::new(),
             image_surface: ImageSurface::new(image_picker.as_ref()),
@@ -367,7 +370,21 @@ impl App {
                 c.set_model_supports_images(supports_images);
                 Some(c)
             },
+        };
+
+        if let Some(notice) = startup_model_fallback {
+            let config = app.runtime.config();
+            let auth = app.runtime.auth();
+            let mut dialog = Box::new(ModelFallbackDialog::new(notice));
+            let init_ctx = InitContext {
+                config: &config,
+                auth: &auth,
+            };
+            let _ = dialog.init(&init_ctx);
+            app.overlays.push(dialog);
         }
+
+        app
     }
 
     pub fn should_quit(&self) -> bool {

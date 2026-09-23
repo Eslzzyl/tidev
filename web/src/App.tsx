@@ -19,6 +19,7 @@ import { WelcomePage } from "./components/chat/WelcomePage";
 import { SettingsPanel } from "./components/settings/SettingsPanel";
 import { ComponentShowcase } from "./components/ui/ComponentShowcase";
 import { ConfirmDialog } from "./components/ui/ConfirmDialog";
+import { InfoDialog } from "./components/ui/InfoDialog";
 import { useChatRuntime } from "./hooks/useChatRuntime";
 import { useWorkspace } from "./hooks/workspaceQueries";
 import { getActiveFeature, routes } from "./lib/routes";
@@ -47,6 +48,16 @@ const features: { id: Feature; label: string; icon: typeof MessageSquare }[] = [
   { id: "stats", label: "Stats", icon: BarChart3 },
 ];
 
+const STARTUP_MODEL_FALLBACK_NOTICE_KEY = "tidev:startup-model-fallback-notice";
+
+function getDismissedStartupModelFallbackNoticeId(): string | null {
+  try {
+    return window.localStorage.getItem(STARTUP_MODEL_FALLBACK_NOTICE_KEY);
+  } catch {
+    return null;
+  }
+}
+
 export default function App() {
   const { t } = useTranslation();
   const [location, navigate] = useLocation();
@@ -56,6 +67,9 @@ export default function App() {
   const feature: Feature = getActiveFeature(location);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [sessionToDelete, setSessionToDelete] = useState<Session | null>(null);
+  const [dismissedStartupModelFallbackId, setDismissedStartupModelFallbackId] = useState<
+    string | null
+  >(null);
   const featureNavRef = useRef<HTMLElement>(null);
   const featureButtonRefs = useRef<Partial<Record<Feature, HTMLButtonElement | null>>>({});
   const [featureIndicator, setFeatureIndicator] = useState({
@@ -104,6 +118,8 @@ export default function App() {
     selectedSession,
     sessionStatus,
     activeModel,
+    startupModelFallback,
+    startupStatusLoaded,
     fastMode,
     toggleFastMode,
     messages,
@@ -173,6 +189,12 @@ export default function App() {
   }
 
   if (authRequired && !authenticated) return <AuthGate />;
+  if (!startupStatusLoaded) return <AuthLoading />;
+
+  const startupModelFallbackDismissed =
+    startupModelFallback !== null &&
+    (dismissedStartupModelFallbackId === startupModelFallback.notice_id ||
+      getDismissedStartupModelFallbackNoticeId() === startupModelFallback.notice_id);
 
   const handleFeatureNav = (id: Feature) => {
     setMobileSidebarOpen(false);
@@ -389,6 +411,29 @@ export default function App() {
         </Suspense>
       </main>
       <SettingsPanel />
+      {startupModelFallback && !startupModelFallbackDismissed ? (
+        <InfoDialog
+          title={t("Configured model unavailable")}
+          message={t(
+            'Configured model "{{configured}}" is unavailable. The runtime has fallen back to "{{fallback}}".',
+            {
+              configured: startupModelFallback.unavailable_model,
+              fallback: startupModelFallback.fallback_model,
+            },
+          )}
+          onClose={() => {
+            try {
+              window.localStorage.setItem(
+                STARTUP_MODEL_FALLBACK_NOTICE_KEY,
+                startupModelFallback.notice_id,
+              );
+            } catch {
+              // The in-memory dismissal still applies when storage is unavailable.
+            }
+            setDismissedStartupModelFallbackId(startupModelFallback.notice_id);
+          }}
+        />
+      ) : null}
       {sessionToDelete ? (
         <ConfirmDialog
           danger

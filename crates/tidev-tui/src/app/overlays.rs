@@ -191,6 +191,7 @@ impl App {
             OverlayKind::ConnectDialog => Some(Box::new(ConnectDialog::new())),
             OverlayKind::PanelLauncher => Some(Box::new(PanelLauncher::new())),
             OverlayKind::GitPanel => Some(Box::new(GitPanel::new())),
+            OverlayKind::StartupModelFallbackDialog => None,
             // Permission/security dialogs are triggered by handle_tui_request,
             // not by user keystrokes. These branches exist as fallback placeholders.
             OverlayKind::QuestionDialog

@@ -39,6 +39,14 @@ export interface BuildInfo {
   dirty: boolean;
 }
 
+export interface StartupStatusResponse {
+  model_fallback: {
+    notice_id: string;
+    unavailable_model: string;
+    fallback_model: string;
+  } | null;
+}
+
 export interface GlobalInstructionsResponse {
   path: string;
   exists: boolean;

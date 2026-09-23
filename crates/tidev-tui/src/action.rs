@@ -276,6 +276,7 @@ pub(crate) enum OverlayKind {
     },
     ConnectDialog,
     RenameDialog,
+    StartupModelFallbackDialog,
     SessionPanel,
     SettingsPanel,
     ThemePanel,

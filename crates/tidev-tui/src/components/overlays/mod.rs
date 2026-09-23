@@ -7,6 +7,7 @@ pub(crate) mod instructions;
 pub(crate) mod mcp;
 pub(crate) mod message;
 pub(crate) mod model;
+pub(crate) mod model_fallback;
 pub(crate) mod panel_launcher;
 pub(crate) mod question;
 pub(crate) mod rename;

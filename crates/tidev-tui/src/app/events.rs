@@ -9,6 +9,13 @@ use crate::component::Component;
 
 impl App {
     pub(crate) fn handle_key_event(&mut self, key: KeyEvent) {
+        if self.overlays.captures_all_input() {
+            if let Some(action) = self.overlays.handle_key_event(key) {
+                self.process_action(action);
+            }
+            return;
+        }
+
         // 0. Esc: close any composer popup first (overrides abort confirmation).
         if key.code == KeyCode::Esc
             && self.composer.as_ref().is_some_and(|c| c.has_popup())
@@ -320,6 +327,13 @@ impl App {
     pub fn handle_mouse_event(&mut self, mouse: MouseEvent) {
         use crossterm::event::MouseButton;
         use crossterm::event::MouseEventKind;
+
+        if self.overlays.captures_all_input() {
+            if let Some(action) = self.overlays.handle_mouse_event(mouse, self.terminal_area) {
+                self.process_action(action);
+            }
+            return;
+        }
 
         let position = ratatui::layout::Position::new(mouse.column, mouse.row);
 
