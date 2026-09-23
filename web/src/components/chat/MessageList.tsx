@@ -443,7 +443,26 @@ export const MessageList = memo(function MessageList({
   const [expandedTurns, setExpandedTurns] = useState<Record<string, boolean>>({});
   const [expandedDetails, setExpandedDetails] = useState<Record<string, boolean>>({});
 
-  const rounds = useMemo(() => buildRounds(messages), [messages]);
+  const liveStreamAssistantMessageIds = useMemo(
+    () =>
+      new Set(
+        streams.flatMap((stream) => (stream.assistantMessageId ? [stream.assistantMessageId] : [])),
+      ),
+    [streams],
+  );
+  const liveStreamUserMessageIds = useMemo(
+    () =>
+      new Set(
+        streams.flatMap((stream) =>
+          stream.segments.length > 0 && stream.userMessageId ? [stream.userMessageId] : [],
+        ),
+      ),
+    [streams],
+  );
+  const rounds = useMemo(
+    () => buildRounds(messages, liveStreamAssistantMessageIds, liveStreamUserMessageIds),
+    [liveStreamAssistantMessageIds, liveStreamUserMessageIds, messages],
+  );
 
   const items = useMemo(
     () =>

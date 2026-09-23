@@ -312,6 +312,7 @@ export function ChatPanel({
             ) : null}
             <div className="message-stage">
               <MessageList
+                key={selectedSessionId}
                 messages={messages}
                 streams={streams}
                 instructionNotices={instructionNotices}

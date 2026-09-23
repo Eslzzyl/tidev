@@ -69,6 +69,24 @@ function hasAssistant(round: Round) {
   return round.segments.length > 0 || round.status !== "user_only" || round.interrupted;
 }
 
+function mergeStreamReasoningSegments(segments: RoundSegment[]): RoundSegment[] {
+  const reasoningSegments = segments.filter(
+    (segment): segment is Extract<RoundSegment, { type: "reasoning" }> =>
+      segment.type === "reasoning",
+  );
+  if (reasoningSegments.length < 2) return segments;
+
+  const first = reasoningSegments[0];
+  const last = reasoningSegments[reasoningSegments.length - 1];
+  const mergedReasoning: RoundSegment = {
+    ...first,
+    content: reasoningSegments.map((segment) => segment.content).join(""),
+    completedAt: last.completedAt,
+  };
+
+  return [mergedReasoning, ...segments.filter((segment) => segment.type !== "reasoning")];
+}
+
 export function turnContentId(turnId: string) {
   return `assistant-content-${turnId.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
 }
@@ -438,9 +456,8 @@ export function buildChatItems(
     if (!assistant) continue;
 
     const insertInstructionBeforeStream = Boolean(turnStream && pendingInstructions.length > 0);
-    let mergedSegments = turnStream
-      ? [...persistedSegments, ...turnStream.segments]
-      : persistedSegments;
+    const liveSegments = turnStream ? mergeStreamReasoningSegments(turnStream.segments) : [];
+    let mergedSegments = turnStream ? [...persistedSegments, ...liveSegments] : persistedSegments;
     let activeFromIndex = persistedSegments.length;
     if (pendingInstructions.length > 0) {
       const instructionSegments = pendingInstructions.map(({ message }) => ({
@@ -448,11 +465,7 @@ export function buildChatItems(
         message,
       }));
       if (insertInstructionBeforeStream) {
-        mergedSegments = [
-          ...persistedSegments,
-          ...instructionSegments,
-          ...(turnStream?.segments ?? []),
-        ];
+        mergedSegments = [...persistedSegments, ...instructionSegments, ...liveSegments];
         activeFromIndex += instructionSegments.length;
       } else {
         mergedSegments = [...mergedSegments, ...instructionSegments];
@@ -571,7 +584,7 @@ export function buildChatItems(
           turnStream.status === "streaming" &&
           !turnStream.providerFinished));
     const streamSegmentIndex = streamIsAfterAutomaticCompaction
-      ? segments.findIndex((segment) => turnStream.segments.includes(segment.segment))
+      ? segments.findIndex((segment) => liveSegments.includes(segment.segment))
       : -1;
     const appendSegment = (segment: SegmentItem) => {
       if (segment.segment.type === "compaction") {

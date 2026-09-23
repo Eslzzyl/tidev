@@ -180,7 +180,11 @@ export function parseInstructionMessage(content: string): InstructionMessageDeta
  * Adapted from last-full web/src/utils/round.ts to work with the
  * new tidev-core message shape (MessageRecord wraps Message + app_data).
  */
-export function buildRounds(records: MessageRecord[]): (Round | SystemMessageBlock)[] {
+export function buildRounds(
+  records: MessageRecord[],
+  liveStreamAssistantMessageIds: ReadonlySet<string> = new Set(),
+  liveStreamUserMessageIds: ReadonlySet<string> = new Set(),
+): (Round | SystemMessageBlock)[] {
   const rounds: (Round | SystemMessageBlock)[] = [];
   let currentRound: Round | null = null;
 
@@ -227,6 +231,13 @@ export function buildRounds(records: MessageRecord[]): (Round | SystemMessageBlo
       }
     } else if (currentRound) {
       if (msg.role === "assistant") {
+        if (
+          liveStreamAssistantMessageIds.has(msg.id) ||
+          (msg.streaming && liveStreamUserMessageIds.has(currentRound.userMessage.id))
+        ) {
+          continue;
+        }
+
         const durableInterruption = interruptionKind(record);
         const runtimeRestarted = wasRuntimeRestarted(record);
         if (durableInterruption) {

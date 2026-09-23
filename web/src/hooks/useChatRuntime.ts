@@ -998,6 +998,8 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
                 error: undefined,
                 providerError: undefined,
                 retrying: undefined,
+                assistantMessageId:
+                  asString(payload.assistant_message_id) || stream.assistantMessageId || null,
                 userMessageId: asString(payload.user_message_id) || stream.userMessageId || null,
               },
             };

@@ -339,3 +339,35 @@ describe("interrupted stream rendering", () => {
     ]);
   });
 });
+
+describe("live reasoning rendering", () => {
+  it("renders reasoning deltas as one block when other deltas are interleaved", () => {
+    const stream: StreamMessage = {
+      key: "session-1:4",
+      requestId: 4,
+      segments: [
+        { type: "reasoning", content: "First thought." },
+        { type: "text", content: "A streamed answer." },
+        { type: "reasoning", content: " Continued thought." },
+      ],
+      toolCallMap: {},
+      status: "streaming",
+      providerFinished: false,
+      reasoningStartedAt: "2026-09-04T00:00:00.000Z",
+      reasoningCompletedAt: null,
+      userMessageId: "user-1",
+    };
+    const items = buildChatItems([round()], [stream], {}, [], "", [], undefined, translate);
+    const reasoningItems = items.filter(
+      (item) => item.kind === "assistant-segment" && item.item.segment.type === "reasoning",
+    );
+
+    expect(reasoningItems).toHaveLength(1);
+    expect(reasoningItems[0]).toMatchObject({
+      kind: "assistant-segment",
+      item: {
+        segment: { type: "reasoning", content: "First thought. Continued thought." },
+      },
+    });
+  });
+});

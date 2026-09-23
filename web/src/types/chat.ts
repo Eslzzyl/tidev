@@ -31,6 +31,7 @@ export interface StreamMessage {
   completedAt?: string | null;
   error?: string;
   providerError?: ProviderErrorData;
+  assistantMessageId?: string | null;
   userMessageId?: string | null;
   retrying?: {
     attempt: number;

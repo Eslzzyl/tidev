@@ -364,3 +364,42 @@ describe("round preview state", () => {
     expect(parseInstructionMessage("Compaction\n\nsummary")).toBeNull();
   });
 });
+
+describe("live stream draft reconciliation", () => {
+  it("uses the live stream instead of its persisted assistant message", () => {
+    const userMessage = message("prompt", "user");
+    userMessage.id = "user-live";
+    const previousReply = message("previous assistant reply");
+    previousReply.id = "assistant-complete";
+    previousReply.completed_at = "2026-08-22T00:01:00Z";
+    const draft = message("", "assistant");
+    draft.id = "assistant-live-draft";
+    draft.reasoning = "Persisted reasoning snapshot";
+    draft.streaming = true;
+
+    const [built] = buildRounds(
+      [record(userMessage), record(previousReply), record(draft)],
+      new Set([draft.id]),
+    ) as [Round];
+
+    expect(built.segments).toEqual([{ type: "text", content: "previous assistant reply" }]);
+    expect(built.status).toBe("complete");
+  });
+
+  it("matches a persisted streaming draft to its user turn when the assistant id is absent", () => {
+    const userMessage = message("prompt", "user");
+    userMessage.id = "user-live";
+    const draft = message("", "assistant");
+    draft.reasoning = "Persisted reasoning snapshot";
+    draft.streaming = true;
+
+    const [built] = buildRounds(
+      [record(userMessage), record(draft)],
+      new Set(),
+      new Set([userMessage.id]),
+    ) as [Round];
+
+    expect(built.segments).toEqual([]);
+    expect(built.status).toBe("user_only");
+  });
+});
