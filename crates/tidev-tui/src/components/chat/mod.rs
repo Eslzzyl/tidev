@@ -1180,7 +1180,6 @@ impl MessageList {
                     message.metadata.compaction_manual = Some(*manual);
                     chat_context.push(message);
                 }
-                self.follow_tail = true;
                 self.layout_index.invalidate_all();
                 self.dirty = true;
             }
@@ -1198,7 +1197,6 @@ impl MessageList {
                 {
                     message.content.push_str(content);
                     self.layout_index.mark_dirty(message.id);
-                    self.follow_tail = true;
                     self.dirty = true;
                 }
             }
@@ -1234,7 +1232,6 @@ impl MessageList {
                     }
                     self.dirty = true;
                 } else if *compacted {
-                    self.follow_tail = true;
                     if let Some(summary) = summary {
                         // The final summary is authoritative. It must replace the
                         // local placeholder even when the provider emitted no

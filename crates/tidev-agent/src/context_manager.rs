@@ -88,7 +88,8 @@ pub struct ContextManager {
     pub prune_threshold_tokens: usize,
     /// Tokens to retain uncompressed below the threshold.
     pub retain_recent_tokens: usize,
-    /// Maximum character length of a generated summary.
+    /// Soft character target for generated summaries. Longer summaries are
+    /// logged and preserved in full rather than truncated.
     pub maximum_summary_chars: usize,
 }
 
@@ -290,11 +291,15 @@ impl ContextManager {
         if completion.has_tool_calls {
             return Ok((String::new(), true));
         }
-        let summary: String = completion
-            .content
-            .chars()
-            .take(self.maximum_summary_chars)
-            .collect();
+        let summary = completion.content;
+        let summary_chars = summary.chars().count();
+        if summary_chars > self.maximum_summary_chars {
+            log::warn!(
+                "Context compaction summary exceeded the soft length target ({} > {} characters); preserving the full response",
+                summary_chars,
+                self.maximum_summary_chars,
+            );
+        }
         if summary.trim().is_empty() {
             anyhow::bail!("context compaction returned an empty summary");
         }
