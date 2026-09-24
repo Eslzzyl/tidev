@@ -52,6 +52,15 @@ function round(overrides: Partial<Round> = {}): Round {
   };
 }
 
+function instructionMessage(id: string, content: string) {
+  return {
+    ...round().userMessage,
+    id,
+    role: "system" as const,
+    content,
+  };
+}
+
 function interruptedStream(): StreamMessage {
   return {
     key: "session-1:3",
@@ -367,6 +376,112 @@ describe("interrupted stream rendering", () => {
         },
       },
     });
+  });
+});
+
+describe("instruction notice rendering", () => {
+  it("deduplicates persisted and live notices across Windows path separators", () => {
+    const persisted = instructionMessage(
+      "instruction-1",
+      String.raw`Loaded 2 instruction files: AGENTS.md, C:\Users\dev\.config\tidev\AGENTS.md`,
+    );
+    const items = buildChatItems(
+      [round({ leadingInstructions: [persisted], status: "complete" })],
+      [],
+      {},
+      [
+        {
+          sources: [
+            String.raw`c:\users\DEV\.CONFIG\tidev\agents.md`,
+            String.raw`c:\WORKSPACE\agents.md`,
+          ],
+          deferred: false,
+        },
+      ],
+      String.raw`C:\WORKSPACE`,
+      [],
+      undefined,
+      translate,
+    );
+
+    const instructionItems = items.filter(
+      (item) => item.kind === "assistant-segment" && item.item.segment.type === "instruction",
+    );
+
+    expect(instructionItems).toHaveLength(1);
+    expect(instructionItems[0]).toMatchObject({
+      kind: "assistant-segment",
+      item: { segment: { type: "instruction", message: { id: "instruction-1" } } },
+    });
+  });
+
+  it("keeps notices with distinct instruction sources", () => {
+    const persisted = instructionMessage("instruction-1", "Loaded instructions from AGENTS.md");
+    const items = buildChatItems(
+      [round({ leadingInstructions: [persisted] })],
+      [],
+      {},
+      [{ sources: [String.raw`C:\Users\dev\.config\tidev\CLAUDE.md`], deferred: false }],
+      String.raw`C:\workspace`,
+      [],
+      undefined,
+      translate,
+    );
+
+    const instructionItems = items.filter(
+      (item) => item.kind === "assistant-segment" && item.item.segment.type === "instruction",
+    );
+
+    expect(instructionItems).toHaveLength(2);
+    expect(instructionItems[1]).toMatchObject({
+      item: {
+        segment: {
+          type: "instruction",
+          message: {
+            content: String.raw`Loaded instructions from C:\Users\dev\.config\tidev\CLAUDE.md`,
+          },
+        },
+      },
+    });
+  });
+
+  it("deduplicates the same persisted source across system blocks and turns", () => {
+    const noticeContent = String.raw`Loaded 2 instruction files: AGENTS.md, C:\Users\dev\.config\tidev\AGENTS.md`;
+    const items = buildChatItems(
+      [
+        {
+          id: "system-instruction-1",
+          message: instructionMessage("instruction-1", noticeContent),
+          kind: "system",
+        },
+        round({
+          leadingInstructions: [instructionMessage("instruction-2", noticeContent)],
+          status: "complete",
+        }),
+      ],
+      [],
+      {},
+      [
+        {
+          sources: [
+            String.raw`C:\workspace\AGENTS.md`,
+            String.raw`C:\Users\dev\.config\tidev\AGENTS.md`,
+          ],
+          deferred: false,
+        },
+      ],
+      String.raw`C:\workspace`,
+      [],
+      undefined,
+      translate,
+    );
+
+    expect(items.filter((item) => item.kind === "system")).toHaveLength(1);
+    expect(
+      items.filter(
+        (item) => item.kind === "assistant-segment" && item.item.segment.type === "instruction",
+      ),
+    ).toHaveLength(0);
   });
 });
 

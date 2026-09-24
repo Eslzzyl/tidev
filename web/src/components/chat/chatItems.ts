@@ -105,11 +105,16 @@ function roundAssistantStatus(round: Round): AssistantStatus {
 function relativeInstructionPath(source: string, workspaceRoot: string) {
   const normalizedSource = source.replaceAll("\\", "/");
   const normalizedRoot = workspaceRoot.replaceAll("\\", "/").replace(/\/+$/, "");
-  if (!normalizedRoot) return normalizedSource;
-  if (normalizedSource === normalizedRoot) return ".";
-  return normalizedSource.startsWith(`${normalizedRoot}/`)
-    ? normalizedSource.slice(normalizedRoot.length + 1)
-    : normalizedSource;
+  const relativePath = !normalizedRoot
+    ? normalizedSource
+    : normalizedSource === normalizedRoot
+      ? "."
+      : normalizedSource.startsWith(`${normalizedRoot}/`)
+        ? normalizedSource.slice(normalizedRoot.length + 1)
+        : normalizedSource;
+  return isWindowsInstructionPath(source) || isWindowsInstructionPath(workspaceRoot)
+    ? relativePath.replaceAll("/", "\\")
+    : relativePath;
 }
 
 function instructionMessageContent(sources: string[], workspaceRoot: string) {
@@ -117,6 +122,76 @@ function instructionMessageContent(sources: string[], workspaceRoot: string) {
   return displayPaths.length === 1
     ? `Loaded instructions from ${displayPaths[0]}`
     : `Loaded ${displayPaths.length} instruction files: ${displayPaths.join(", ")}`;
+}
+
+function isWindowsInstructionPath(path: string) {
+  const normalized = path.replaceAll("\\", "/");
+  return /^[a-z]:\//i.test(normalized) || normalized.startsWith("//");
+}
+
+function collapseInstructionPath(path: string) {
+  const normalized = path.trim().replaceAll("\\", "/");
+  let prefix = "";
+  let remainder = normalized;
+
+  if (normalized.startsWith("//")) {
+    prefix = "//";
+    remainder = normalized.slice(2);
+  } else if (/^[a-z]:\//i.test(normalized)) {
+    prefix = `${normalized.slice(0, 2).toLowerCase()}/`;
+    remainder = normalized.slice(3);
+  } else if (normalized.startsWith("/")) {
+    prefix = "/";
+    remainder = normalized.slice(1);
+  }
+
+  const segments: string[] = [];
+  for (const segment of remainder.split("/")) {
+    if (!segment || segment === ".") continue;
+    if (segment === ".." && segments.length > 0 && segments.at(-1) !== "..") {
+      segments.pop();
+    } else if (segment !== ".." || !prefix) {
+      segments.push(segment);
+    }
+  }
+
+  return `${prefix}${segments.join("/")}` || prefix || ".";
+}
+
+function instructionSourceIdentity(source: string, workspaceRoot: string) {
+  const caseInsensitive =
+    isWindowsInstructionPath(source) || isWindowsInstructionPath(workspaceRoot);
+  const normalizedSource = collapseInstructionPath(source);
+  const normalizedRoot = workspaceRoot ? collapseInstructionPath(workspaceRoot) : "";
+  const sourceKey = caseInsensitive ? normalizedSource.toLowerCase() : normalizedSource;
+  const rootKey = caseInsensitive ? normalizedRoot.toLowerCase() : normalizedRoot;
+
+  if (!rootKey) return sourceKey;
+  if (sourceKey === rootKey) return ".";
+
+  const rootPrefix = rootKey.endsWith("/") ? rootKey : `${rootKey}/`;
+  return sourceKey.startsWith(rootPrefix) ? sourceKey.slice(rootPrefix.length) : sourceKey;
+}
+
+function instructionSourcesIdentity(sources: string[], workspaceRoot: string) {
+  if (sources.length === 0) return null;
+  return JSON.stringify(
+    sources.map((source) => instructionSourceIdentity(source, workspaceRoot)).sort(),
+  );
+}
+
+function persistedInstructionSourcesIdentity(content: string, workspaceRoot: string) {
+  const details = parseInstructionMessage(content);
+  if (!details) return null;
+  const sources =
+    details.count === null
+      ? [details.sources]
+      : details.sources
+          .split(",")
+          .map((source) => source.trim())
+          .filter(Boolean);
+  if (details.count !== null && sources.length !== details.count) return null;
+  return instructionSourcesIdentity(sources, workspaceRoot);
 }
 
 function instructionReminderBlocks(content: string) {
@@ -400,6 +475,7 @@ export function buildChatItems(
 ): ChatItem[] {
   const items: ChatItem[] = [];
   const mergedStreamKeys = new Set<string>();
+  const displayedInstructionIdentities = new Set<string>();
   const latestRound = [...rounds].reverse().find((item): item is Round => !isSystemBlock(item));
   const instructionTurnId = latestRound?.userMessage.id;
   const liveProviderErrorUserIds = new Set(
@@ -418,6 +494,13 @@ export function buildChatItems(
   );
   const liveCompactionNotice = persistedLiveCompaction ? null : compactionNotice;
   let liveCompactionInserted = false;
+  const registerPersistedInstruction = (content: string) => {
+    const identity = persistedInstructionSourcesIdentity(content, workspaceRoot);
+    if (identity === null) return true;
+    if (displayedInstructionIdentities.has(identity)) return false;
+    displayedInstructionIdentities.add(identity);
+    return true;
+  };
   const userMessageTimestampMap = new Map<string, string>();
   for (const value of rounds) {
     if (!isSystemBlock(value) && value.userMessage.created_at) {
@@ -427,6 +510,7 @@ export function buildChatItems(
 
   for (const value of rounds) {
     if (isSystemBlock(value)) {
+      if (!registerPersistedInstruction(value.message.content)) continue;
       items.push({ kind: "system", key: value.id, block: value });
       continue;
     }
@@ -434,8 +518,13 @@ export function buildChatItems(
     const round = value;
     const turnId = round.userMessage.id;
     const persistedSegments: RoundSegment[] = [
-      ...round.leadingInstructions.map((message) => ({ type: "instruction" as const, message })),
-      ...round.segments,
+      ...round.leadingInstructions
+        .filter((message) => registerPersistedInstruction(message.content))
+        .map((message) => ({ type: "instruction" as const, message })),
+      ...round.segments.filter(
+        (segment) =>
+          segment.type !== "instruction" || registerPersistedInstruction(segment.message.content),
+      ),
     ];
     const turnStream = latestTurnStream(streams, turnId);
     for (const stream of streams) {
@@ -456,16 +545,16 @@ export function buildChatItems(
                 workspaceRoot,
                 index,
               ),
+              identity: instructionSourcesIdentity(notice.sources, workspaceRoot),
               deferred: notice.deferred,
             }))
-            .filter(
-              ({ message, deferred }) =>
-                (!deferred || !turnStream || !turnStreamHasToolCall) &&
-                !persistedSegments.some(
-                  (segment) =>
-                    segment.type === "instruction" && segment.message.content === message.content,
-                ),
-            )
+            .filter(({ identity, deferred }) => {
+              if (deferred && turnStream && turnStreamHasToolCall) return false;
+              if (identity === null) return true;
+              if (displayedInstructionIdentities.has(identity)) return false;
+              displayedInstructionIdentities.add(identity);
+              return true;
+            })
         : [];
     const assistant = hasAssistant(round) || Boolean(turnStream) || pendingInstructions.length > 0;
 
