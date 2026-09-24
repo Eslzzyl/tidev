@@ -1632,6 +1632,10 @@ impl AgentContext for CoreContext {
                 };
 
                 let mut marker = Message::compaction_auto(&result.summary, self.session_id);
+                tidev_agent::context_manager::inherit_compaction_thinking_level(
+                    &mut marker,
+                    &compaction_messages,
+                );
                 marker.metadata.prior_summary = prior_summary;
                 marker.metadata.prior_retained_from = Some(prior_retained_from);
                 self.session_manager.apply_compaction(

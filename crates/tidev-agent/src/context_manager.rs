@@ -50,6 +50,27 @@ pub struct CompactionRequest {
     pub event_tx: Option<crate::AgentEventSender>,
 }
 
+/// Carry the latest request's thinking level onto a compaction marker.
+///
+/// The marker becomes the visible user message after compaction, so it retains
+/// the level needed by continuation requests that have no ordinary user
+/// message in their request view.
+pub fn inherit_compaction_thinking_level(marker: &mut Message, previous_messages: &[Message]) {
+    let level = previous_messages
+        .iter()
+        .rev()
+        .find(|message| message.role == MessageRole::User && !message.is_compaction())
+        .map(|message| message.thinking_level.clone())
+        .or_else(|| {
+            previous_messages
+                .iter()
+                .rev()
+                .find(|message| message.is_compaction())
+                .map(|message| message.thinking_level.clone())
+        });
+    marker.thinking_level = level.flatten();
+}
+
 // ---------------------------------------------------------------------------
 // ContextManager
 // ---------------------------------------------------------------------------
@@ -284,10 +305,19 @@ impl ContextManager {
     fn build_request_messages_raw(&self, messages: &[Message]) -> Vec<Message> {
         messages
             .iter()
+            .enumerate()
             .skip(self.retained_from)
-            .filter(|message| !message.streaming)
-            .filter(|message| !matches!(message.role, MessageRole::System | MessageRole::Error))
-            .cloned()
+            .filter(|(_, message)| !message.streaming)
+            .filter(|(_, message)| {
+                !matches!(message.role, MessageRole::System | MessageRole::Error)
+            })
+            .map(|(index, message)| {
+                let mut message = message.clone();
+                if message.is_compaction() && message.thinking_level.is_none() {
+                    inherit_compaction_thinking_level(&mut message, &messages[..index]);
+                }
+                message
+            })
             .collect()
     }
 
@@ -443,6 +473,7 @@ impl ContextManager {
 mod tests {
     use super::*;
     use tidev_llm::message::{Message, MessageRole, ToolCall, ToolExecutionResult};
+    use tidev_llm::reasoning::ThinkingLevelType;
     use uuid::Uuid;
 
     fn user_msg(content: &str) -> Message {
@@ -517,6 +548,36 @@ mod tests {
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].content, "Compaction\n\nprior context");
         assert_eq!(result[1].content, "current");
+    }
+
+    #[test]
+    fn build_request_messages_restores_legacy_marker_thinking_level() {
+        let level = ThinkingLevelType::from_string("gpt5:high");
+        let mut previous_user = user_msg("continue task");
+        previous_user.thinking_level = Some(level.clone());
+        let marker = Message::compaction_auto("task summary", Uuid::new_v4());
+        let marker_content = marker.content.clone();
+        let buffer = MessageBuffer::new(vec![previous_user, marker]);
+        let manager = ContextManager::from_state(Some("task summary".into()), 1);
+
+        let request_messages = manager.build_request_messages(&buffer).unwrap();
+
+        assert_eq!(request_messages.len(), 1);
+        assert_eq!(request_messages[0].content, marker_content);
+        assert_eq!(request_messages[0].thinking_level, Some(level));
+    }
+
+    #[test]
+    fn compaction_thinking_level_uses_latest_user_message_state() {
+        let mut previous_marker = Message::compaction("previous summary");
+        previous_marker.thinking_level = Some(ThinkingLevelType::from_string("gpt5:high"));
+        let mut latest_user = user_msg("new request");
+        latest_user.thinking_level = None;
+        let mut marker = Message::compaction_auto("new summary", Uuid::new_v4());
+
+        inherit_compaction_thinking_level(&mut marker, &[previous_marker, latest_user]);
+
+        assert_eq!(marker.thinking_level, None);
     }
 
     #[test]

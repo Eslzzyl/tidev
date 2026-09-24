@@ -11,6 +11,7 @@ use anyhow::Result;
 use chrono::Utc;
 
 use tidev_llm::message::{AssistantTurn, Message, MessageRole};
+use tidev_llm::reasoning::ThinkingLevelType;
 
 use crate::context::{AgentContext, AgentLoopConfig};
 use crate::event::{AgentEvent, StreamEndStatus};
@@ -93,15 +94,9 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
         let system_prompt = config.system_prompt.clone();
 
         // ─── 6. Stream LLM turn ──────────────────────────────────────────
-        // Per-turn thinking level: prefer the last user message's level so
-        // that “high” sent with a message is both used for the request and
-        // shown in the footer. Falls back to the session's default.
-        let thinking_level = messages
-            .iter()
-            .rev()
-            .find(|message| message.role == MessageRole::User && !message.is_compaction())
-            .and_then(|m| m.thinking_level.clone())
-            .unwrap_or_else(|| config.thinking_level.clone());
+        // Per-turn thinking level: prefer the latest ordinary user message,
+        // then the compaction marker for continuation-only requests.
+        let thinking_level = resolve_thinking_level(&messages, &config.thinking_level);
         let turn = match ctx
             .stream_turn(
                 &messages,
@@ -221,6 +216,27 @@ pub async fn run_agent_loop(ctx: &dyn AgentContext, config: AgentLoopConfig) -> 
     Ok(())
 }
 
+fn resolve_thinking_level(messages: &[Message], default: &ThinkingLevelType) -> ThinkingLevelType {
+    let latest_user = messages
+        .iter()
+        .rev()
+        .find(|message| message.role == MessageRole::User && !message.is_compaction());
+
+    if let Some(message) = latest_user {
+        return message
+            .thinking_level
+            .clone()
+            .unwrap_or_else(|| default.clone());
+    }
+
+    messages
+        .iter()
+        .rev()
+        .find(|message| message.is_compaction())
+        .and_then(|message| message.thinking_level.clone())
+        .unwrap_or_else(|| default.clone())
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -275,6 +291,7 @@ mod tests {
         preparations: VecDeque<RequestPreparation>,
         turns: VecDeque<AssistantTurn>,
         requests: Vec<Vec<Message>>,
+        thinking_levels: Vec<ThinkingLevelType>,
     }
 
     struct MockContext {
@@ -318,12 +335,13 @@ mod tests {
             &self,
             messages: &[Message],
             _system_prompt: &str,
-            _thinking_level: &ThinkingLevelType,
+            thinking_level: &ThinkingLevelType,
             _session_id: uuid::Uuid,
             _request_id: u64,
         ) -> anyhow::Result<AssistantTurn> {
             let mut state = self.state.lock().await;
             state.requests.push(messages.to_vec());
+            state.thinking_levels.push(thinking_level.clone());
             state
                 .turns
                 .pop_front()
@@ -388,7 +406,9 @@ mod tests {
     #[tokio::test]
     async fn compaction_proceeds_silently_without_extra_user_message() {
         let session_id = uuid::Uuid::new_v4();
-        let context = Message::compaction_auto("task summary", session_id);
+        let mut context = Message::compaction_auto("task summary", session_id);
+        let level = ThinkingLevelType::from_string("gpt5:high");
+        context.thinking_level = Some(level.clone());
         let (ctx, _events) = MockContext::new(
             vec![context],
             vec![RequestPreparation {
@@ -404,6 +424,7 @@ mod tests {
 
         let state = ctx.state.lock().await;
         assert_eq!(state.requests.len(), 1);
+        assert_eq!(state.thinking_levels, [level]);
         let first_request = &state.requests[0];
         assert_eq!(first_request.len(), 1);
         assert!(first_request[0].is_compaction());
@@ -422,7 +443,9 @@ mod tests {
     #[tokio::test]
     async fn compaction_with_tool_calls_continues_immediately_without_extra_user_message() {
         let session_id = uuid::Uuid::new_v4();
-        let context = Message::compaction_auto("task summary", session_id);
+        let mut context = Message::compaction_auto("task summary", session_id);
+        let level = ThinkingLevelType::from_string("gpt5:high");
+        context.thinking_level = Some(level.clone());
         let (ctx, _events) = MockContext::new(
             vec![context],
             vec![
@@ -452,6 +475,7 @@ mod tests {
 
         let state = ctx.state.lock().await;
         assert_eq!(state.requests.len(), 2);
+        assert_eq!(state.thinking_levels, [level.clone(), level]);
         // Turn 1 executes tool call immediately
         assert!(state.requests[1].iter().any(|message| {
             message.role == MessageRole::Tool && message.tool_call_id.as_deref() == Some("call-1")
@@ -463,5 +487,31 @@ mod tests {
         assert_eq!(state.messages[1].role, MessageRole::Assistant);
         assert_eq!(state.messages[2].role, MessageRole::Tool);
         assert_eq!(state.messages[3].role, MessageRole::Assistant);
+    }
+
+    #[tokio::test]
+    async fn new_user_message_none_uses_default_instead_of_marker_level() {
+        let session_id = uuid::Uuid::new_v4();
+        let mut context = Message::compaction_auto("task summary", session_id);
+        context.thinking_level = Some(ThinkingLevelType::from_string("gpt5:high"));
+        let user = Message::new(MessageRole::User, "continue");
+        let (ctx, _events) = MockContext::new(
+            vec![context, user],
+            Vec::new(),
+            vec![AssistantTurn {
+                content: "task completed".into(),
+                ..Default::default()
+            }],
+        );
+        let mut loop_config = config(session_id);
+        loop_config.thinking_level = ThinkingLevelType::from_string("gpt5:medium");
+
+        run_agent_loop(&ctx, loop_config).await.unwrap();
+
+        let state = ctx.state.lock().await;
+        assert_eq!(
+            state.thinking_levels,
+            [ThinkingLevelType::from_string("gpt5:medium")]
+        );
     }
 }
