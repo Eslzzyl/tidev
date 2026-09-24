@@ -849,6 +849,21 @@ const en = {
     "Choose the display language for the application",
   "Code Diff Layout": "Code Diff Layout",
   "Choose how file differences are displayed": "Choose how file differences are displayed",
+  "Global Instructions": "Global Instructions",
+  "Edit the global AGENTS.md guidance": "Edit the global AGENTS.md guidance",
+  "Instructions applied at the beginning of new conversations":
+    "Instructions applied at the beginning of new conversations",
+  Reload: "Reload",
+  "File not created": "File not created",
+  "Location: {{path}}": "Location: {{path}}",
+  "A global AGENTS.md file has not been created yet":
+    "A global AGENTS.md file has not been created yet",
+  "Loading global instructions...": "Loading global instructions...",
+  "Failed to load global instructions": "Failed to load global instructions",
+  "Changes apply to conversations that have not loaded this file yet":
+    "Changes apply to conversations that have not loaded this file yet",
+  "Failed to save global instructions": "Failed to save global instructions",
+  Save: "Save",
 } as const;
 
 const zhCN: Record<keyof typeof en, string> = {
@@ -1678,6 +1693,19 @@ const zhCN: Record<keyof typeof en, string> = {
   "Choose the display language for the application": "选择应用界面的显示语言",
   "Code Diff Layout": "差异对比布局",
   "Choose how file differences are displayed": "选择代码差异的展示形式（并排对比或单栏内联）",
+  "Global Instructions": "全局指令",
+  "Edit the global AGENTS.md guidance": "编辑全局 AGENTS.md 指引",
+  "Instructions applied at the beginning of new conversations": "在新对话开始时应用的指令",
+  Reload: "重新加载",
+  "File not created": "文件尚未创建",
+  "Location: {{path}}": "位置：{{path}}",
+  "A global AGENTS.md file has not been created yet": "尚未创建全局 AGENTS.md 文件",
+  "Loading global instructions...": "正在加载全局指令…",
+  "Failed to load global instructions": "加载全局指令失败",
+  "Changes apply to conversations that have not loaded this file yet":
+    "更改将应用于尚未加载此文件的对话",
+  "Failed to save global instructions": "保存全局指令失败",
+  Save: "保存",
 };
 
 export const resources = {
