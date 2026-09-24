@@ -3,7 +3,14 @@
 //! All functions operate on an isolated snapshot repository (separate `GIT_DIR`).
 
 use anyhow::{Context, Result, bail};
-use std::{collections::HashSet, ffi::OsString, fs, path::Path, process::Command};
+use std::{
+    collections::{HashMap, HashSet},
+    ffi::OsString,
+    fs,
+    io::Write,
+    path::Path,
+    process::{Command, Output, Stdio},
+};
 use tokio::task::JoinSet;
 
 use tidev_utils::encoding::{decode_command_output, decode_text};
@@ -518,32 +525,32 @@ pub fn diff_name_status(
     from: &str,
     to: &str,
 ) -> Result<Vec<(String, String)>> {
-    let output = Command::new("git")
-        .args([
-            "-c",
-            "core.autocrlf=false",
-            "-c",
-            "core.longpaths=true",
-            "-c",
-            "core.symlinks=true",
-            "-c",
-            "core.quotepath=false",
-            "--git-dir",
-            &gitdir.to_string_lossy(),
-            "--work-tree",
-            &worktree.to_string_lossy(),
-            "diff",
-            "--no-ext-diff",
-            "--name-status",
-            "-z",
-            "--no-renames",
-            from,
-            to,
-            "--",
-            ".",
-        ])
+    diff_name_status_for_paths(gitdir, worktree, from, to, None, false)
+}
+
+pub fn diff_name_status_for_paths(
+    gitdir: &Path,
+    worktree: &Path,
+    from: &str,
+    to: &str,
+    paths: Option<&[String]>,
+    ignore_cr_at_eol: bool,
+) -> Result<Vec<(String, String)>> {
+    if paths.is_some_and(<[String]>::is_empty) {
+        return Ok(Vec::new());
+    }
+
+    let mut command = snapshot_git_command(gitdir, worktree);
+    command.args(["diff", "--no-ext-diff"]);
+    if ignore_cr_at_eol {
+        command.arg("--ignore-cr-at-eol");
+    }
+    command.args(["--name-status", "-z", "--no-renames", from, to]);
+    append_pathspecs(&mut command, paths);
+    let output = command
         .output()
         .context("failed to run git diff --name-status")?;
+    ensure_diff_success(&output, "git diff --name-status")?;
 
     parse_nul_name_status(&output.stdout)
 }
@@ -554,32 +561,32 @@ pub fn diff_numstat(
     from: &str,
     to: &str,
 ) -> Result<Vec<(String, String, String)>> {
-    let output = Command::new("git")
-        .args([
-            "-c",
-            "core.autocrlf=false",
-            "-c",
-            "core.longpaths=true",
-            "-c",
-            "core.symlinks=true",
-            "-c",
-            "core.quotepath=false",
-            "--git-dir",
-            &gitdir.to_string_lossy(),
-            "--work-tree",
-            &worktree.to_string_lossy(),
-            "diff",
-            "--no-ext-diff",
-            "--numstat",
-            "-z",
-            "--no-renames",
-            from,
-            to,
-            "--",
-            ".",
-        ])
+    diff_numstat_for_paths(gitdir, worktree, from, to, None, false)
+}
+
+pub fn diff_numstat_for_paths(
+    gitdir: &Path,
+    worktree: &Path,
+    from: &str,
+    to: &str,
+    paths: Option<&[String]>,
+    ignore_cr_at_eol: bool,
+) -> Result<Vec<(String, String, String)>> {
+    if paths.is_some_and(<[String]>::is_empty) {
+        return Ok(Vec::new());
+    }
+
+    let mut command = snapshot_git_command(gitdir, worktree);
+    command.args(["diff", "--no-ext-diff"]);
+    if ignore_cr_at_eol {
+        command.arg("--ignore-cr-at-eol");
+    }
+    command.args(["--numstat", "-z", "--no-renames", from, to]);
+    append_pathspecs(&mut command, paths);
+    let output = command
         .output()
         .context("failed to run git diff --numstat")?;
+    ensure_diff_success(&output, "git diff --numstat")?;
 
     let mut result = Vec::new();
     for record in output
@@ -614,7 +621,155 @@ pub fn diff_file(
     to: &str,
     file: &str,
 ) -> Result<String> {
+    diff_file_with_options(gitdir, worktree, from, to, file, false)
+}
+
+pub fn diff_file_with_options(
+    gitdir: &Path,
+    worktree: &Path,
+    from: &str,
+    to: &str,
+    file: &str,
+    ignore_cr_at_eol: bool,
+) -> Result<String> {
+    let mut command = snapshot_git_command(gitdir, worktree);
+    command.args(["diff", "--no-ext-diff"]);
+    if ignore_cr_at_eol {
+        command.arg("--ignore-cr-at-eol");
+    }
+    command.args(["--no-renames", from, to]);
+    append_pathspecs(&mut command, Some(&[file.to_string()]));
+    let output = command
+        .output()
+        .context("failed to run git diff for file")?;
+    ensure_diff_success(&output, "git diff for file")?;
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+pub fn crlf_normalized_paths(
+    gitdir: &Path,
+    worktree: &Path,
+    paths: &[String],
+) -> Result<HashSet<String>> {
+    if paths.is_empty() {
+        return Ok(HashSet::new());
+    }
+
+    let autocrlf = worktree_uses_autocrlf(worktree)?;
+    let attributes = read_worktree_attributes(gitdir, worktree, paths)?;
+    let mut normalized = HashSet::new();
+
+    for path in paths {
+        let (text, eol) = attributes
+            .get(path)
+            .map(|(text, eol)| (text.as_str(), eol.as_str()))
+            .unwrap_or(("unspecified", "unspecified"));
+
+        let normalizes_eol = match text {
+            "unset" => false,
+            "set" | "auto" => true,
+            _ => matches!(eol, "lf" | "crlf") || autocrlf,
+        };
+        if normalizes_eol {
+            normalized.insert(path.clone());
+        }
+    }
+
+    Ok(normalized)
+}
+
+fn worktree_uses_autocrlf(worktree: &Path) -> Result<bool> {
     let output = Command::new("git")
+        .arg("-C")
+        .arg(worktree)
+        .args(["config", "--get", "core.autocrlf"])
+        .output()
+        .context("failed to query worktree core.autocrlf")?;
+    if !output.status.success() {
+        return Ok(false);
+    }
+
+    let value = String::from_utf8_lossy(&output.stdout);
+    Ok(matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "true" | "yes" | "on" | "1" | "input"
+    ))
+}
+
+fn read_worktree_attributes(
+    gitdir: &Path,
+    worktree: &Path,
+    paths: &[String],
+) -> Result<HashMap<String, (String, String)>> {
+    let mut source_command = Command::new("git");
+    source_command
+        .arg("-C")
+        .arg(worktree)
+        .args(["check-attr", "--stdin", "-z", "text", "eol"]);
+    let source_output = run_check_attr(source_command, paths)?;
+
+    let output = if let Some(output) = source_output {
+        output
+    } else {
+        let mut snapshot_command = snapshot_git_command(gitdir, worktree);
+        snapshot_command.args(["check-attr", "--stdin", "-z", "text", "eol"]);
+        run_check_attr(snapshot_command, paths)?.unwrap_or_default()
+    };
+
+    let fields = output
+        .split(|byte| *byte == 0)
+        .filter(|field| !field.is_empty())
+        .collect::<Vec<_>>();
+    let (records, remainder) = fields.as_chunks::<3>();
+    if !remainder.is_empty() {
+        bail!("git returned an incomplete check-attr record");
+    }
+
+    let mut attributes: HashMap<String, (String, String)> = HashMap::new();
+    for [path, attribute, value] in records {
+        let path = String::from_utf8(path.to_vec())
+            .context("git returned a path that is not valid UTF-8")?;
+        let value = String::from_utf8(value.to_vec())
+            .context("git returned a non-UTF-8 attribute value")?;
+        let entry = attributes
+            .entry(path)
+            .or_insert_with(|| ("unspecified".to_string(), "unspecified".to_string()));
+        match *attribute {
+            b"text" => entry.0 = value,
+            b"eol" => entry.1 = value,
+            _ => {}
+        }
+    }
+
+    Ok(attributes)
+}
+
+fn run_check_attr(mut command: Command, paths: &[String]) -> Result<Option<Vec<u8>>> {
+    let mut child = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .context("failed to run git check-attr")?;
+    if let Some(mut stdin) = child.stdin.take() {
+        for path in paths {
+            stdin
+                .write_all(path.as_bytes())
+                .and_then(|()| stdin.write_all(&[0]))
+                .context("failed to write paths to git check-attr")?;
+        }
+    }
+
+    let output = child
+        .wait_with_output()
+        .context("failed to collect git check-attr output")?;
+    Ok(output.status.success().then_some(output.stdout))
+}
+
+fn snapshot_git_command(gitdir: &Path, worktree: &Path) -> Command {
+    let mut command = Command::new("git");
+    command
         .args([
             "-c",
             "core.autocrlf=false",
@@ -625,21 +780,33 @@ pub fn diff_file(
             "-c",
             "core.quotepath=false",
             "--git-dir",
-            &gitdir.to_string_lossy(),
-            "--work-tree",
-            &worktree.to_string_lossy(),
-            "diff",
-            "--no-ext-diff",
-            "--no-renames",
-            from,
-            to,
-            "--",
-            file,
         ])
-        .output()
-        .context("failed to run git diff for file")?;
+        .arg(gitdir)
+        .arg("--work-tree")
+        .arg(worktree);
+    command
+}
 
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+fn append_pathspecs(command: &mut Command, paths: Option<&[String]>) {
+    command.arg("--");
+    if let Some(paths) = paths {
+        for path in paths {
+            command.arg(format!(":(literal){path}"));
+        }
+    } else {
+        command.arg(".");
+    }
+}
+
+fn ensure_diff_success(output: &Output, action: &str) -> Result<()> {
+    if output.status.success() {
+        Ok(())
+    } else {
+        bail!(
+            "{action} failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )
+    }
 }
 
 // ---------------------------------------------------------------------------

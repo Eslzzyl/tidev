@@ -14,6 +14,11 @@ use tidev_utils::path::canonicalize_display;
 use crate::git;
 
 const BATCH_SIZE: usize = 100;
+type DiffMetadata = (
+    Vec<(String, String)>,
+    Vec<(String, String, String)>,
+    HashSet<String>,
+);
 
 /// SHA-1 of Git's well-known empty tree.
 pub const EMPTY_TREE_HASH: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
@@ -379,8 +384,7 @@ impl SnapshotService {
     pub async fn diff_lightweight(&self, from: &str, to: &str) -> Result<Vec<FileDiff>> {
         let _guard = self.lock.lock().await;
 
-        let statuses = git::diff_name_status(&self.gitdir, &self.worktree, from, to)?;
-        let numstat = git::diff_numstat(&self.gitdir, &self.worktree, from, to)?;
+        let (statuses, numstat, _) = self.diff_metadata(from, to)?;
 
         let mut status_map: HashMap<String, String> = HashMap::new();
         for (status, file) in &statuses {
@@ -414,8 +418,7 @@ impl SnapshotService {
 
         self.update_index().await?;
 
-        let statuses = git::diff_name_status(&self.gitdir, &self.worktree, from, to)?;
-        let numstat = git::diff_numstat(&self.gitdir, &self.worktree, from, to)?;
+        let (statuses, numstat, normalized_paths) = self.diff_metadata(from, to)?;
 
         let mut status_map: HashMap<String, String> = HashMap::new();
         for (status, file) in &statuses {
@@ -454,7 +457,14 @@ impl SnapshotService {
             let patch = if binary {
                 String::new()
             } else {
-                let content = git::diff_file(&self.gitdir, &self.worktree, from, to, file)?;
+                let content = git::diff_file_with_options(
+                    &self.gitdir,
+                    &self.worktree,
+                    from,
+                    to,
+                    file,
+                    normalized_paths.contains(file),
+                )?;
                 total_patch_size += content.len();
                 if total_patch_size > max_patch_size {
                     return Err(anyhow::anyhow!(
@@ -475,6 +485,51 @@ impl SnapshotService {
         }
 
         Ok(result)
+    }
+
+    fn diff_metadata(&self, from: &str, to: &str) -> Result<DiffMetadata> {
+        let mut statuses = git::diff_name_status(&self.gitdir, &self.worktree, from, to)?;
+        let mut numstat = git::diff_numstat(&self.gitdir, &self.worktree, from, to)?;
+        let paths = statuses
+            .iter()
+            .map(|(_, path)| path.clone())
+            .chain(numstat.iter().map(|(_, _, path)| path.clone()))
+            .collect::<HashSet<_>>();
+        let normalized_paths = git::crlf_normalized_paths(
+            &self.gitdir,
+            &self.worktree,
+            &paths.into_iter().collect::<Vec<_>>(),
+        )?;
+
+        if normalized_paths.is_empty() {
+            return Ok((statuses, numstat, normalized_paths));
+        }
+
+        let normalized_paths = normalized_paths.into_iter().collect::<Vec<_>>();
+        let normalized_statuses = git::diff_name_status_for_paths(
+            &self.gitdir,
+            &self.worktree,
+            from,
+            to,
+            Some(&normalized_paths),
+            true,
+        )?;
+        let normalized_numstat = git::diff_numstat_for_paths(
+            &self.gitdir,
+            &self.worktree,
+            from,
+            to,
+            Some(&normalized_paths),
+            true,
+        )?;
+        let normalized_set = normalized_paths.into_iter().collect::<HashSet<_>>();
+
+        statuses.retain(|(_, path)| !normalized_set.contains(path));
+        statuses.extend(normalized_statuses);
+        numstat.retain(|(_, _, path)| !normalized_set.contains(path));
+        numstat.extend(normalized_numstat);
+
+        Ok((statuses, numstat, normalized_set))
     }
 
     async fn update_index(&self) -> Result<()> {
@@ -516,7 +571,7 @@ fn clash(a: &str, b: &str) -> bool {
 mod tests {
     use super::{ConfigPaths, SnapshotConfig, SnapshotService};
     use std::sync::Arc;
-    use std::{fs, path::PathBuf};
+    use std::{fs, path::PathBuf, process::Command};
 
     fn unique_temp_dir(prefix: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("{}-{}", prefix, uuid::Uuid::new_v4()));
@@ -623,6 +678,171 @@ mod tests {
 
         let _ = fs::remove_dir_all(&workspace_root);
         let _ = fs::remove_dir_all(&data_dir);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn diff_lightweight_matches_autocrlf_git_for_crlf_to_lf_updates() {
+        let workspace_root = unique_temp_dir("tidev-autocrlf-worktree");
+        let data_dir = unique_temp_dir("tidev-autocrlf-data");
+        let file_path = workspace_root.join("Cargo.lock");
+        let paths = test_paths(&data_dir);
+
+        let initial = cargo_lock_fixture("\r\n", false);
+        fs::write(&file_path, initial).expect("CRLF lockfile should be written");
+        run_git(&workspace_root, &["init", "-q"]);
+        run_git(&workspace_root, &["config", "core.autocrlf", "true"]);
+        run_git(&workspace_root, &["config", "user.name", "Snapshot Test"]);
+        run_git(
+            &workspace_root,
+            &["config", "user.email", "snapshot@example.invalid"],
+        );
+        run_git(&workspace_root, &["add", "--", "Cargo.lock"]);
+
+        let snapshot = SnapshotService::new(&workspace_root, &paths, default_snapshot_config())
+            .expect("snapshot should init");
+        let before = snapshot
+            .track()
+            .expect("initial track should succeed")
+            .expect("initial snapshot should exist");
+
+        fs::write(&file_path, cargo_lock_fixture("\n", true))
+            .expect("LF lockfile should be written");
+        let after = snapshot
+            .track()
+            .expect("updated track should succeed")
+            .expect("updated snapshot should exist");
+
+        let git_output = run_git(&workspace_root, &["diff", "--numstat", "--", "Cargo.lock"]);
+        let git_numstat = String::from_utf8(git_output.stdout).expect("numstat should be UTF-8");
+        let expected = parse_numstat_counts(&git_numstat);
+        assert_eq!(expected, (20, 20));
+
+        let diffs = snapshot
+            .diff_lightweight(&before, &after)
+            .await
+            .expect("lightweight diff should succeed");
+        let lockfile_diff = diffs
+            .iter()
+            .find(|diff| diff.file == "Cargo.lock")
+            .expect("Cargo.lock should be present in the diff");
+        assert_eq!((lockfile_diff.additions, lockfile_diff.deletions), expected);
+
+        let full_diffs = snapshot
+            .diff_full(&before, &after)
+            .await
+            .expect("full diff should succeed");
+        let lockfile_diff = full_diffs
+            .iter()
+            .find(|diff| diff.file == "Cargo.lock")
+            .expect("Cargo.lock should be present in the full diff");
+        assert_eq!((lockfile_diff.additions, lockfile_diff.deletions), expected);
+        let patch_counts = (
+            lockfile_diff
+                .patch
+                .lines()
+                .filter(|line| line.starts_with('+') && !line.starts_with("+++"))
+                .count(),
+            lockfile_diff
+                .patch
+                .lines()
+                .filter(|line| line.starts_with('-') && !line.starts_with("---"))
+                .count(),
+        );
+        assert_eq!(patch_counts, expected);
+
+        let _ = fs::remove_dir_all(&workspace_root);
+        let _ = fs::remove_dir_all(&data_dir);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn diff_lightweight_honors_text_unset_attribute() {
+        let workspace_root = unique_temp_dir("tidev-no-text-worktree");
+        let data_dir = unique_temp_dir("tidev-no-text-data");
+        let paths = test_paths(&data_dir);
+        let file_path = workspace_root.join("raw.txt");
+
+        fs::write(workspace_root.join(".gitattributes"), "raw.txt -text\n")
+            .expect("attributes should be written");
+        fs::write(&file_path, "first\r\nsecond\r\n").expect("CRLF file should be written");
+        run_git(&workspace_root, &["init", "-q"]);
+        run_git(&workspace_root, &["config", "core.autocrlf", "true"]);
+        run_git(&workspace_root, &["config", "user.name", "Snapshot Test"]);
+        run_git(
+            &workspace_root,
+            &["config", "user.email", "snapshot@example.invalid"],
+        );
+        run_git(&workspace_root, &["add", "--", ".gitattributes", "raw.txt"]);
+
+        let snapshot = SnapshotService::new(&workspace_root, &paths, default_snapshot_config())
+            .expect("snapshot should init");
+        let before = snapshot
+            .track()
+            .expect("initial track should succeed")
+            .expect("initial snapshot should exist");
+
+        fs::write(&file_path, "first\nsecond\n").expect("LF file should be written");
+        let after = snapshot
+            .track()
+            .expect("updated track should succeed")
+            .expect("updated snapshot should exist");
+
+        let diffs = snapshot
+            .diff_lightweight(&before, &after)
+            .await
+            .expect("lightweight diff should succeed");
+        let raw_diff = diffs
+            .iter()
+            .find(|diff| diff.file == "raw.txt")
+            .expect("raw.txt should be present in the diff");
+        assert_eq!((raw_diff.additions, raw_diff.deletions), (2, 2));
+
+        let _ = fs::remove_dir_all(&workspace_root);
+        let _ = fs::remove_dir_all(&data_dir);
+    }
+
+    fn cargo_lock_fixture(line_ending: &str, updated: bool) -> String {
+        let mut contents = String::new();
+        for package in 0..1000 {
+            let version = if updated && package < 20 {
+                "2.0.0"
+            } else {
+                "1.0.0"
+            };
+            contents.push_str(&format!("[[package]]{line_ending}"));
+            contents.push_str(&format!("name = \"package-{package}\"{line_ending}"));
+            contents.push_str(&format!("version = \"{version}\"{line_ending}"));
+        }
+        contents
+    }
+
+    fn run_git(worktree: &std::path::Path, args: &[&str]) -> std::process::Output {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(worktree)
+            .args(args)
+            .output()
+            .expect("git command should start");
+        assert!(
+            output.status.success(),
+            "git command should succeed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output
+    }
+
+    fn parse_numstat_counts(numstat: &str) -> (usize, usize) {
+        let mut fields = numstat.split('\t');
+        let additions = fields
+            .next()
+            .expect("numstat should include additions")
+            .parse()
+            .expect("additions should be numeric");
+        let deletions = fields
+            .next()
+            .expect("numstat should include deletions")
+            .parse()
+            .expect("deletions should be numeric");
+        (additions, deletions)
     }
 
     #[tokio::test(flavor = "multi_thread")]
