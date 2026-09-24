@@ -977,19 +977,14 @@ pub(crate) fn parse_frontmatter(
         Some(Yaml::Hash(metadata)) => {
             let mut values = BTreeMap::new();
             for (key, value) in metadata {
-                let key = match key {
-                    Yaml::String(key) => key.clone(),
-                    _ => return Err("'metadata' keys must be strings".to_string()),
+                let (Yaml::String(key), Yaml::String(value)) = (key, value) else {
+                    continue;
                 };
-                let value = match value {
-                    Yaml::String(value) => value.clone(),
-                    _ => return Err("'metadata' values must be strings".to_string()),
-                };
-                values.insert(key, value);
+                values.insert(key.clone(), value.clone());
             }
             values
         }
-        Some(_) => return Err("'metadata' must be a mapping".to_string()),
+        Some(_) => BTreeMap::new(),
     };
 
     let frontmatter = SkillFrontmatter {
@@ -1094,11 +1089,11 @@ mod tests {
 
     fn write_skill(root: &Path, name: &str) {
         fs::create_dir_all(root.join(name)).unwrap();
-        fs::write(
-            root.join(name).join(SKILL_FILE_NAME),
-            format!("---\nname: {name}\ndescription: test skill {name}\n---\nBody of {name}.\n"),
-        )
-        .unwrap();
+        let skill_file = root.join(name).join(SKILL_FILE_NAME);
+        let contents = format!(
+            "---\nname: {name}\ndescription: test skill {name}\nmetadata:\n  requires:\n    bins: [lark-cli]\n  cliHelp: lark-cli --help\n---\nBody of {name}.\n"
+        );
+        fs::write(skill_file, contents).unwrap();
     }
 
     #[test]
@@ -1123,6 +1118,18 @@ mod tests {
         assert!(
             names.contains(&"claude-skill"),
             "expected claude-skill in {names:?}"
+        );
+        assert_eq!(
+            catalog
+                .skills
+                .iter()
+                .find(|skill| skill.name == "agents-skill")
+                .unwrap()
+                .frontmatter
+                .metadata
+                .get("cliHelp")
+                .map(String::as_str),
+            Some("lark-cli --help")
         );
     }
 
@@ -1233,11 +1240,20 @@ mod tests {
     }
 
     #[test]
-    fn parse_frontmatter_rejects_invalid_standard_field_types_and_lengths() {
-        let invalid_metadata =
-            "---\nname: demo\ndescription: A demo skill.\nmetadata:\n  version: 1\n---\nBody\n";
-        assert!(parse_frontmatter(invalid_metadata).is_err());
+    fn parse_frontmatter_ignores_unsupported_metadata_values() {
+        let document = "---\nname: demo\ndescription: A demo skill.\nmetadata:\n  requires:\n    bins: [lark-cli]\n  cliHelp: lark-cli --help\n  version: 1\n---\nBody\n";
 
+        let (_, _, frontmatter, _) = parse_frontmatter(document).unwrap();
+        assert_eq!(
+            frontmatter.metadata.get("cliHelp").map(String::as_str),
+            Some("lark-cli --help")
+        );
+        assert!(!frontmatter.metadata.contains_key("requires"));
+        assert!(!frontmatter.metadata.contains_key("version"));
+    }
+
+    #[test]
+    fn parse_frontmatter_rejects_invalid_field_lengths() {
         let long_description = format!(
             "---\nname: demo\ndescription: {}\n---\nBody\n",
             "x".repeat(1025)
