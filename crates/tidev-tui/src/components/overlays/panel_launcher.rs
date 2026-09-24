@@ -66,8 +66,8 @@ static PANEL_ENTRIES: &[PanelEntry] = &[
 
 /// Simple fuzzy score: exact match > starts_with > contains.
 fn fuzzy_score(query: &str, text: &str) -> i32 {
-    let query = query.to_ascii_lowercase();
-    let text = text.to_ascii_lowercase();
+    let query = query.to_lowercase();
+    let text = text.to_lowercase();
     if text == query {
         100
     } else if text.starts_with(&query) {
@@ -80,8 +80,12 @@ fn fuzzy_score(query: &str, text: &str) -> i32 {
 }
 
 /// Return the description text that will be searched.
-fn entry_search_text(entry: &PanelEntry) -> String {
-    format!("{:?}", entry.action)
+fn entry_search_text(ui_text: &UiText, entry: &PanelEntry) -> String {
+    format!(
+        "{:?} {}",
+        entry.action,
+        panel_description(ui_text, entry.action)
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -94,6 +98,7 @@ pub(crate) struct PanelLauncher {
     query_active: bool,
     selected_index: usize,
     filtered: Vec<&'static PanelEntry>,
+    locale: String,
 }
 
 impl PanelLauncher {
@@ -104,17 +109,19 @@ impl PanelLauncher {
             query_active: false,
             selected_index: 0,
             filtered: Vec::new(),
+            locale: "en-US".to_string(),
         }
     }
 
     fn sync(&mut self) {
+        let ui_text = UiText::from_preference(&self.locale);
         if self.query.is_empty() {
             self.filtered = PANEL_ENTRIES.iter().collect();
         } else {
             let mut scored: Vec<(&'static PanelEntry, i32)> = PANEL_ENTRIES
                 .iter()
                 .map(|e| {
-                    let score = fuzzy_score(&self.query, &entry_search_text(e));
+                    let score = fuzzy_score(&self.query, &entry_search_text(&ui_text, e));
                     (e, score)
                 })
                 .filter(|(_, s)| *s > 0)
@@ -129,7 +136,8 @@ impl PanelLauncher {
 }
 
 impl Component for PanelLauncher {
-    fn init(&mut self, _ctx: &InitContext) -> Result<()> {
+    fn init(&mut self, ctx: &InitContext) -> Result<()> {
+        self.locale = ctx.config.ui.locale.clone();
         self.sync();
         Ok(())
     }
@@ -327,6 +335,17 @@ mod tests {
         let mut launcher = PanelLauncher::new();
         launcher.sync();
         launcher
+    }
+
+    #[test]
+    fn chinese_description_filters_panels() {
+        let mut launcher = initialized_launcher();
+        launcher.locale = "zh-CN".to_string();
+        launcher.query = "设置".to_string();
+        launcher.sync();
+
+        assert_eq!(launcher.filtered.len(), 1);
+        assert!(matches!(launcher.filtered[0].action, PanelAction::Settings));
     }
 
     #[test]
