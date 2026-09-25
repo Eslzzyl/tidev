@@ -75,6 +75,16 @@ function latestUserMessageId(
   );
 }
 
+function latestUserThinkingLevel(records: readonly MessageRecord[]): string | undefined {
+  const value = [...records]
+    .reverse()
+    .find(
+      (record) =>
+        record.message.role === "user" && record.message.metadata.compaction_manual == null,
+    )?.message.thinking_level;
+  return typeof value === "string" ? value : undefined;
+}
+
 export interface UseChatRuntimeOptions {
   routeSessionId?: string | null;
   onSelectSessionRoute?: (sessionId: string | null) => void;
@@ -486,6 +496,17 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
         }
         const mergedMessages = mergeMessageRecords(response.messages, pendingCached);
         messagesCacheRef.current.set(sessionId, mergedMessages);
+        const session = sessionsRef.current.find((item) => item.session_id === sessionId);
+        const sessionModel = session
+          ? models.find(
+              (model) =>
+                model.provider_id === session.provider_id && model.model_id === session.model_id,
+            )
+          : undefined;
+        const sessionThinkingLevel = latestUserThinkingLevel(mergedMessages);
+        if (selectedSessionRef.current === sessionId) {
+          setThinkingLevel(sessionThinkingLevel ?? sessionModel?.thinking_level);
+        }
         applyChangedFileSummary(
           sessionId,
           latestChangedFiles(mergedMessages),
@@ -512,7 +533,13 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
         return false;
       }
     },
-    [applyChangedFileSummary, changedFilesPanelOpen, loadChangedFileDiffs, markSessionMissing],
+    [
+      applyChangedFileSummary,
+      changedFilesPanelOpen,
+      loadChangedFileDiffs,
+      markSessionMissing,
+      models,
+    ],
   );
 
   const loadTodos = useCallback(
@@ -585,6 +612,13 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
       setCompactionNotice(null);
       const cached = messagesCacheRef.current.get(sessionId);
       setMessages(cached ?? []);
+      const sessionModel = summary
+        ? models.find(
+            (model) =>
+              model.provider_id === summary.provider_id && model.model_id === summary.model_id,
+          )
+        : undefined;
+      setThinkingLevel(latestUserThinkingLevel(cached ?? []) ?? sessionModel?.thinking_level);
       setChangedFiles(
         changedFilesCacheRef.current.get(sessionId) ?? latestChangedFiles(cached ?? []),
       );
@@ -626,7 +660,14 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
           });
       }
     },
-    [loadMessages, loadTodos, markSessionMissing, onSelectSessionRoute, resetInstructionState],
+    [
+      loadMessages,
+      loadTodos,
+      markSessionMissing,
+      models,
+      onSelectSessionRoute,
+      resetInstructionState,
+    ],
   );
 
   const selectSessionRef = useRef(selectSession);
@@ -1920,11 +1961,16 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
 
   const chooseThinkingLevel = async (level: string) => {
     if (!activeModel) return;
+    const modelKey = `${activeModel.provider_id}:${activeModel.model_id}`;
     setThinkingLevel(level);
     try {
       await api.setThinkingLevel(activeModel.provider_id, activeModel.model_id, level);
       setModels((current) =>
-        current.map((item) => (item.active ? { ...item, thinking_level: level } : item)),
+        current.map((item) =>
+          `${item.provider_id}:${item.model_id}` === modelKey
+            ? { ...item, thinking_level: level }
+            : item,
+        ),
       );
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : i18n.t("Failed to set thinking level"));
