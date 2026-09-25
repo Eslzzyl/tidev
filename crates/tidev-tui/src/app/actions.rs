@@ -153,6 +153,12 @@ impl App {
                     self.close_overlay(kind, &mut queue);
                     if is_model_panel {
                         self.thinking_level = self.runtime.active_model().thinking_level.clone();
+                        if let Some(session_id) = self.current_session_id {
+                            self.runtime.set_session_thinking_level(
+                                session_id,
+                                self.thinking_level.clone(),
+                            );
+                        }
                         if let Some(ref mut composer) = self.composer {
                             let model = self.runtime.active_model();
                             composer.set_model_supports_images(model.supports_images);
@@ -570,13 +576,8 @@ impl App {
 
                         // Switch the runtime's active model to match this
                         // session's model and restore its latest thinking level.
-                        let session_thinking_level = chat.active_chat_context().and_then(|ctx| {
-                            ctx.messages
-                                .iter()
-                                .rev()
-                                .find(|m| m.role == MessageRole::User && !m.is_compaction())
-                                .and_then(|m| m.thinking_level.clone())
-                        });
+                        let session_thinking_level =
+                            self.runtime.session_thinking_level(session_id).ok();
                         self.sync_active_model_for_session(session_id, session_thinking_level);
                         // Resolve the target session's mode instead of reusing
                         // the previous session's global mode.
@@ -607,11 +608,8 @@ impl App {
                         .map(|message| message.message.clone())
                         .collect();
 
-                    let session_thinking_level = messages
-                        .iter()
-                        .rev()
-                        .find(|m| m.role == MessageRole::User && !m.is_compaction())
-                        .and_then(|m| m.thinking_level.clone());
+                    let session_thinking_level =
+                        self.runtime.session_thinking_level(session_id).ok();
 
                     // Compute context_usage from stored messages (last assistant
                     // message holds cumulative token counts).
@@ -817,6 +815,10 @@ impl App {
                 Action::Session(SessionAction::CycleThinkingLevel) => {
                     let next = self.thinking_level.next();
                     self.thinking_level = next.clone();
+                    if let Some(session_id) = self.current_session_id {
+                        self.runtime
+                            .set_session_thinking_level(session_id, next.clone());
+                    }
                     let model = self.runtime.active_model();
                     let _ = self.runtime.set_model_thinking_level(
                         &model.provider_id,

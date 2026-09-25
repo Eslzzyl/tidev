@@ -75,15 +75,6 @@ function latestUserMessageId(
   );
 }
 
-function latestUserThinkingLevel(records: readonly MessageRecord[]): string | undefined {
-  const value = [...records]
-    .reverse()
-    .find(
-      (record) =>
-        record.message.role === "user" && record.message.metadata.compaction_manual == null,
-    )?.message.thinking_level;
-  return typeof value === "string" ? value : undefined;
-}
 
 export interface UseChatRuntimeOptions {
   routeSessionId?: string | null;
@@ -496,16 +487,18 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
         }
         const mergedMessages = mergeMessageRecords(response.messages, pendingCached);
         messagesCacheRef.current.set(sessionId, mergedMessages);
-        const session = sessionsRef.current.find((item) => item.session_id === sessionId);
-        const sessionModel = session
-          ? models.find(
-              (model) =>
-                model.provider_id === session.provider_id && model.model_id === session.model_id,
-            )
-          : undefined;
-        const sessionThinkingLevel = latestUserThinkingLevel(mergedMessages);
         if (selectedSessionRef.current === sessionId) {
-          setThinkingLevel(sessionThinkingLevel ?? sessionModel?.thinking_level);
+          const session = sessionsRef.current.find((item) => item.session_id === sessionId);
+          const sessionModel = session
+            ? models.find(
+                (model) =>
+                  model.provider_id === session.provider_id && model.model_id === session.model_id,
+              )
+            : undefined;
+          const fallback = session?.thinking_level ?? sessionModel?.thinking_level;
+          if (fallback) {
+            setThinkingLevel((current) => current ?? fallback);
+          }
         }
         applyChangedFileSummary(
           sessionId,
@@ -618,7 +611,7 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
               model.provider_id === summary.provider_id && model.model_id === summary.model_id,
           )
         : undefined;
-      setThinkingLevel(latestUserThinkingLevel(cached ?? []) ?? sessionModel?.thinking_level);
+      setThinkingLevel(summary?.thinking_level ?? sessionModel?.thinking_level);
       setChangedFiles(
         changedFilesCacheRef.current.get(sessionId) ?? latestChangedFiles(cached ?? []),
       );
@@ -640,7 +633,13 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
           .getSession(sessionId)
           .then((loaded) => {
             if (selectedSessionRef.current === sessionId) {
+              const loadedModel = models.find(
+                (model) =>
+                  model.provider_id === loaded.provider_id && model.model_id === loaded.model_id,
+              );
               setSelectedSession(loaded);
+              setThinkingLevel(loaded.thinking_level ?? loadedModel?.thinking_level);
+              setSessions((current) => mergeSessions([loaded], current));
               setSessionStatus("ready");
               void loadMessages(sessionId);
               void loadTodos(sessionId);
@@ -839,9 +838,11 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
     try {
       const available = await api.listModels();
       setModels(available);
-      setThinkingLevel(
-        (current) => current ?? available.find((model) => model.active)?.thinking_level,
-      );
+      if (selectedSessionRef.current === null) {
+        setThinkingLevel(
+          (current) => current ?? available.find((model) => model.active)?.thinking_level,
+        );
+      }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : i18n.t("Failed to load models"));
     }
@@ -1916,7 +1917,11 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
   const chooseModel = async (model: Model) => {
     try {
       if (selectedSessionId) {
-        await api.updateSessionModel(selectedSessionId, model.provider_id, model.model_id);
+        const updated = await api.updateSessionModel(
+          selectedSessionId,
+          model.provider_id,
+          model.model_id,
+        );
         setSelectedSession((current) =>
           current
             ? {
@@ -1925,6 +1930,7 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
                 provider_display_name: model.provider_display_name,
                 model_id: model.model_id,
                 model_display_name: model.model_display_name,
+                thinking_level: updated.thinking_level,
               }
             : current,
         );
@@ -1937,6 +1943,7 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
                   provider_display_name: model.provider_display_name,
                   model_id: model.model_id,
                   model_display_name: model.model_display_name,
+                  thinking_level: updated.thinking_level,
                 }
               : item,
           ),
@@ -1964,6 +1971,17 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
     const modelKey = `${activeModel.provider_id}:${activeModel.model_id}`;
     setThinkingLevel(level);
     try {
+      if (selectedSessionId) {
+        await api.updateSessionThinkingLevel(selectedSessionId, level);
+        setSelectedSession((current) =>
+          current ? { ...current, thinking_level: level } : current,
+        );
+        setSessions((current) =>
+          current.map((item) =>
+            item.session_id === selectedSessionId ? { ...item, thinking_level: level } : item,
+          ),
+        );
+      }
       await api.setThinkingLevel(activeModel.provider_id, activeModel.model_id, level);
       setModels((current) =>
         current.map((item) =>

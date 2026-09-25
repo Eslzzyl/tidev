@@ -103,6 +103,8 @@ pub struct Runtime {
     /// Set when startup repaired an unavailable configured model by selecting
     /// the first available model.
     startup_model_fallback: Option<ModelFallbackNotice>,
+    /// Per-session thinking level cache / overrides.
+    session_thinking_levels: Arc<StdRwLock<HashMap<Uuid, ThinkingLevelType>>>,
     /// Per-session cancellation tokens for active agent loops.
     active_loop_cancels: Arc<std::sync::Mutex<HashMap<Uuid, CancellationToken>>>,
 
@@ -607,25 +609,104 @@ impl Runtime {
         self.default_workspace.file_search_index()
     }
 
-    /// Save a thinking level preference to config.
+    /// Save a thinking level preference for a model.
     pub fn set_model_thinking_level(
         &self,
-        _provider_id: &str,
-        _model_id: &str,
+        provider_id: &str,
+        model_id: &str,
         thinking_level: &str,
     ) -> Result<()> {
+        let level = tidev_llm::reasoning::ThinkingLevelType::from_string(thinking_level);
         let mut active = self.active_model.write().unwrap();
-        active.thinking_level =
-            tidev_llm::reasoning::ThinkingLevelType::from_string(thinking_level);
-        let level_owned = thinking_level.to_string();
+        if active.provider_id == provider_id && active.model_id == model_id {
+            active.thinking_level = level.clone();
+        }
         drop(active);
-        self.update_config(|cfg| {
-            cfg.default_thinking_level = level_owned;
-        });
-        if let Err(e) = self.save_config() {
-            log::warn!("failed to save thinking level to config: {}", e);
+        let is_default = {
+            let cfg = self.config.read().unwrap();
+            cfg.default_provider == provider_id && cfg.default_model == model_id
+        };
+        if is_default {
+            let level_owned = thinking_level.to_string();
+            self.update_config(|cfg| {
+                cfg.default_thinking_level = level_owned;
+            });
+            if let Err(e) = self.save_config() {
+                log::warn!("failed to save thinking level to config: {}", e);
+            }
         }
         Ok(())
+    }
+
+    /// Return the effective thinking level for the given session.
+    pub fn session_thinking_level(&self, session_id: Uuid) -> Result<ThinkingLevelType> {
+        if let Some(level) = self
+            .session_thinking_levels
+            .read()
+            .unwrap()
+            .get(&session_id)
+        {
+            return Ok(level.clone());
+        }
+
+        let session = self
+            .session_manager
+            .load_session(session_id)?
+            .ok_or_else(|| anyhow::anyhow!("session not found: {session_id}"))?;
+
+        let messages = self.session_manager.load_messages(session_id)?;
+
+        let latest_user = messages
+            .iter()
+            .rev()
+            .find(|m| m.role == MessageRole::User && !m.is_compaction())
+            .and_then(|m| m.thinking_level.clone());
+
+        let (request_model_id, default_level) = {
+            let config = self.config();
+            let auth = self.auth();
+            if let Ok(model) =
+                config.resolve_model_by_ids(&auth, &session.provider_id, &session.model_id)
+            {
+                (model.request_model_id, model.thinking_level)
+            } else {
+                (session.model_id.clone(), ThinkingLevelType::default())
+            }
+        };
+
+        let resolved = if let Some(level) = latest_user {
+            tidev_config::reasoning::ThinkingMatcher::coerce_saved(
+                &level.to_string(),
+                &request_model_id,
+            )
+        } else if let Some(marker_level) = messages
+            .iter()
+            .rev()
+            .find(|m| m.is_compaction())
+            .and_then(|m| m.thinking_level.clone())
+        {
+            tidev_config::reasoning::ThinkingMatcher::coerce_saved(
+                &marker_level.to_string(),
+                &request_model_id,
+            )
+        } else {
+            default_level
+        };
+
+        self.session_thinking_levels
+            .write()
+            .unwrap()
+            .insert(session_id, resolved.clone());
+
+        Ok(resolved)
+    }
+
+    /// Set an explicit thinking level preference for a session.
+    pub fn set_session_thinking_level(&self, session_id: Uuid, level: ThinkingLevelType) {
+        self.session_thinking_levels
+            .write()
+            .unwrap()
+            .insert(session_id, level);
     }
 
     /// Create a new session in the default workspace.
@@ -667,6 +748,28 @@ impl Runtime {
     pub fn update_session_title(&self, session_id: Uuid, title: &str) -> Result<()> {
         self.session_manager
             .update_session(session_id, Some(title), None)
+    }
+
+    /// Update the provider/model info for a session and clear cached thinking level.
+    pub fn update_session_model(
+        &self,
+        session_id: Uuid,
+        provider_id: &str,
+        provider_display_name: &str,
+        model_id: &str,
+        model_display_name: &str,
+    ) -> Result<()> {
+        self.session_thinking_levels
+            .write()
+            .unwrap()
+            .remove(&session_id);
+        self.session_manager.update_session_model(
+            session_id,
+            provider_id,
+            provider_display_name,
+            model_id,
+            model_display_name,
+        )
     }
 
     // -----------------------------------------------------------------------
@@ -764,6 +867,10 @@ impl Runtime {
             attachments,
             thinking_level,
         } = submission;
+
+        if let Some(ref level) = thinking_level {
+            self.set_session_thinking_level(session_id, level.clone());
+        }
 
         // Decide delivery before mutating anything. start_agent_loop
         // re-checks busy under a mutex for atomicity.
@@ -1433,7 +1540,9 @@ impl Runtime {
         let loop_config = tidev_agent::AgentLoopConfig {
             session_id,
             system_prompt,
-            thinking_level: active_model.thinking_level.clone(),
+            thinking_level: self
+                .session_thinking_level(session_id)
+                .unwrap_or_else(|_| active_model.thinking_level.clone()),
             event_tx: ctx.event_tx(),
             cancel: cancel.clone(),
             steer_signal: steer_signal.clone(),
@@ -2468,6 +2577,7 @@ impl RuntimeBuilder {
             session_outcomes: Arc::new(StdMutex::new(HashMap::new())),
             session_start_lock: Arc::new(std::sync::Mutex::new(())),
             prompt_submission_lock: Arc::new(Mutex::new(())),
+            session_thinking_levels: Arc::new(StdRwLock::new(HashMap::new())),
             cleanup_cancel,
         })
     }
@@ -2887,5 +2997,51 @@ mod tests {
             .to_string_lossy()
             .to_string();
         assert_eq!(session.workspace_root, expected);
+    }
+
+    #[tokio::test]
+    async fn session_thinking_level_resolves_and_caches_correctly() {
+        let rt = make_test_runtime().await;
+        let sid = rt
+            .create_default_session("test thinking level session")
+            .expect("session created");
+
+        // 1. Initial resolution falls back to model default (deepseek-flash -> high)
+        let level = rt.session_thinking_level(sid).expect("resolved level");
+        assert_eq!(
+            level,
+            ThinkingLevelType::DeepSeek(tidev_llm::reasoning::DeepSeekV4ThinkingLevel::High)
+        );
+
+        // 2. Explicitly setting thinking level on the session overrides it
+        rt.set_session_thinking_level(
+            sid,
+            ThinkingLevelType::DeepSeek(tidev_llm::reasoning::DeepSeekV4ThinkingLevel::Off),
+        );
+        let updated = rt.session_thinking_level(sid).expect("resolved updated");
+        assert_eq!(
+            updated,
+            ThinkingLevelType::DeepSeek(tidev_llm::reasoning::DeepSeekV4ThinkingLevel::Off)
+        );
+    }
+
+    #[tokio::test]
+    async fn set_model_thinking_level_does_not_corrupt_unrelated_active_model() {
+        let rt = make_test_runtime().await;
+        let initial_active = rt.active_model();
+        assert_eq!(initial_active.provider_id, "deepseek");
+        assert_eq!(initial_active.model_id, "deepseek-flash");
+
+        // Attempting to set thinking level for an unrelated model should not change active_model
+        rt.set_model_thinking_level("anthropic", "claude-3-7-sonnet", "claude:low")
+            .expect("setter returns ok");
+
+        let active_after = rt.active_model();
+        assert_eq!(active_after.provider_id, "deepseek");
+        assert_eq!(active_after.model_id, "deepseek-flash");
+        assert_ne!(
+            active_after.thinking_level,
+            ThinkingLevelType::Claude(tidev_llm::reasoning::ClaudeEffortLevel::Low)
+        );
     }
 }

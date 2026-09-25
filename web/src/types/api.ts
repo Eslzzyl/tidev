@@ -14,6 +14,7 @@ export interface Session {
   context_summary: string | null;
   context_retained_from: number;
   busy: boolean;
+  thinking_level?: string;
 }
 
 export interface SessionDetail extends Session {

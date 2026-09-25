@@ -185,6 +185,7 @@ struct UpdateSessionRequest {
     title: Option<String>,
     provider_id: Option<String>,
     model_id: Option<String>,
+    thinking_level: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -372,6 +373,7 @@ struct SessionDto {
     context_summary: Option<String>,
     context_retained_from: usize,
     busy: bool,
+    thinking_level: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -1086,6 +1088,10 @@ fn default_shell() -> String {
 }
 
 fn session_dto(runtime: &tidev_core::Runtime, session: tidev_core::SessionRecord) -> SessionDto {
+    let thinking_level = runtime
+        .session_thinking_level(session.session_id)
+        .map(|l| l.to_string())
+        .unwrap_or_else(|_| "none".to_string());
     SessionDto {
         session_id: session.session_id,
         parent_session_id: session.parent_session_id,
@@ -1102,6 +1108,7 @@ fn session_dto(runtime: &tidev_core::Runtime, session: tidev_core::SessionRecord
         context_summary: session.context_summary,
         context_retained_from: session.context_retained_from,
         busy: runtime.is_session_busy(session.session_id),
+        thinking_level,
     }
 }
 

@@ -98,4 +98,166 @@ describe("useChatRuntime welcome submission", () => {
     expect(runtime.sessionSearch).toBe("important conversation");
     expect(runtime.sessionWorkspaceRoot).toBe("/existing-workspace");
   });
+
+  it("updates activeModel and thinkingLevel when selecting a session", async () => {
+    const modelGpt6 = {
+      provider_id: "cpa",
+      provider_display_name: "CLIProxyAPI",
+      model_id: "gpt-6-luna",
+      model_display_name: "GPT-6 Luna",
+      context_window: 272000,
+      connected: true,
+      active: true,
+      supports_vision: true,
+      is_gpt: true,
+      thinking_levels: ["gpt5:low", "gpt5:medium", "gpt5:high", "gpt5:xhigh", "gpt5:max"],
+      thinking_level: "gpt5:xhigh",
+    };
+    const modelGpt5 = {
+      provider_id: "cpa",
+      provider_display_name: "CLIProxyAPI",
+      model_id: "gpt-5-6-luna",
+      model_display_name: "GPT-5.6 Luna",
+      context_window: 272000,
+      connected: true,
+      active: false,
+      supports_vision: true,
+      is_gpt: true,
+      thinking_levels: ["gpt5:off", "gpt5:low", "gpt5:medium", "gpt5:high", "gpt5:xhigh", "gpt5:max"],
+      thinking_level: "gpt5:medium",
+    };
+
+    const sessionGpt6: Session = {
+      session_id: "session-6",
+      parent_session_id: null,
+      workspace_root: "/test",
+      provider_id: "cpa",
+      provider_display_name: "CLIProxyAPI",
+      model_id: "gpt-6-luna",
+      model_display_name: "GPT-6 Luna",
+      title: "Session 6",
+      created_at: "2026-09-24T00:00:00Z",
+      updated_at: "2026-09-24T00:00:00Z",
+      status: "idle",
+      ended_at: null,
+      context_summary: null,
+      context_retained_from: 0,
+      busy: false,
+      thinking_level: "gpt5:xhigh",
+    };
+    const sessionGpt5: Session = {
+      session_id: "session-5",
+      parent_session_id: null,
+      workspace_root: "/test",
+      provider_id: "cpa",
+      provider_display_name: "CLIProxyAPI",
+      model_id: "gpt-5-6-luna",
+      model_display_name: "GPT-5.6 Luna",
+      title: "Session 5",
+      created_at: "2026-09-25T00:00:00Z",
+      updated_at: "2026-09-25T00:00:00Z",
+      status: "idle",
+      ended_at: null,
+      context_summary: null,
+      context_retained_from: 0,
+      busy: false,
+      thinking_level: "gpt5:medium",
+    };
+
+    vi.spyOn(api, "listModels").mockResolvedValue([modelGpt6, modelGpt5]);
+    vi.spyOn(api, "listSessions").mockResolvedValue({
+      items: [sessionGpt6, sessionGpt5],
+      next_cursor: null,
+      workspace_roots: ["/test"],
+    });
+
+    await act(async () => {
+      root.render(createElement(RuntimeProbe));
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+
+    expect(runtime.models.length).toBe(2);
+    expect(runtime.thinkingLevel).toBe("gpt5:xhigh");
+
+    await act(async () => {
+      runtime.selectSession("session-5");
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+
+    expect(runtime.selectedSessionId).toBe("session-5");
+    expect(runtime.selectedSession?.model_id).toBe("gpt-5-6-luna");
+    expect(runtime.activeModel?.model_id).toBe("gpt-5-6-luna");
+    expect(runtime.thinkingLevel).toBe("gpt5:medium");
+  });
+
+  it("updates activeModel and thinkingLevel when mounted with routeSessionId", async () => {
+    const modelGpt6 = {
+      provider_id: "cpa",
+      provider_display_name: "CLIProxyAPI",
+      model_id: "gpt-6-luna",
+      model_display_name: "GPT-6 Luna",
+      context_window: 272000,
+      connected: true,
+      active: true,
+      supports_vision: true,
+      is_gpt: true,
+      thinking_levels: ["gpt5:low", "gpt5:medium", "gpt5:high", "gpt5:xhigh", "gpt5:max"],
+      thinking_level: "gpt5:xhigh",
+    };
+    const modelGpt5 = {
+      provider_id: "cpa",
+      provider_display_name: "CLIProxyAPI",
+      model_id: "gpt-5-6-luna",
+      model_display_name: "GPT-5.6 Luna",
+      context_window: 272000,
+      connected: true,
+      active: false,
+      supports_vision: true,
+      is_gpt: true,
+      thinking_levels: ["gpt5:off", "gpt5:low", "gpt5:medium", "gpt5:high", "gpt5:xhigh", "gpt5:max"],
+      thinking_level: "gpt5:medium",
+    };
+
+    const sessionGpt5: Session = {
+      session_id: "session-5",
+      parent_session_id: null,
+      workspace_root: "/test",
+      provider_id: "cpa",
+      provider_display_name: "CLIProxyAPI",
+      model_id: "gpt-5-6-luna",
+      model_display_name: "GPT-5.6 Luna",
+      title: "Session 5",
+      created_at: "2026-09-25T00:00:00Z",
+      updated_at: "2026-09-25T00:00:00Z",
+      status: "idle",
+      ended_at: null,
+      context_summary: null,
+      context_retained_from: 0,
+      busy: false,
+      thinking_level: "gpt5:medium",
+    };
+
+    vi.spyOn(api, "listModels").mockResolvedValue([modelGpt6, modelGpt5]);
+    vi.spyOn(api, "getSession").mockResolvedValue(sessionGpt5);
+    vi.spyOn(api, "listSessions").mockResolvedValue({
+      items: [sessionGpt5],
+      next_cursor: null,
+      workspace_roots: ["/test"],
+    });
+
+    function RoutedProbe() {
+      runtime = useChatRuntime({ routeSessionId: "session-5" });
+      return null;
+    }
+
+    await act(async () => {
+      root.render(createElement(RoutedProbe));
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+
+    expect(runtime.selectedSessionId).toBe("session-5");
+    expect(runtime.selectedSession?.model_id).toBe("gpt-5-6-luna");
+    expect(runtime.activeModel?.model_id).toBe("gpt-5-6-luna");
+    expect(runtime.thinkingLevel).toBe("gpt5:medium");
+  });
 });

@@ -122,13 +122,18 @@ pub(super) async fn update_session(
         let config = state.runtime.config();
         let auth = state.runtime.auth();
         let model = config.resolve_model_by_ids(&auth, provider_id, model_id)?;
-        state.runtime.session_manager().update_session_model(
+        state.runtime.update_session_model(
             session_id,
             &model.provider_id,
             &model.provider_display_name,
             &model.model_id,
             &model.display_name,
         )?;
+        updated = true;
+    }
+    if let Some(ref thinking_level) = request.thinking_level {
+        let level = tidev_llm::reasoning::ThinkingLevelType::from_string(thinking_level);
+        state.runtime.set_session_thinking_level(session_id, level);
         updated = true;
     }
     if !updated {
@@ -415,23 +420,7 @@ pub(super) async fn fork_session(
         .session_manager()
         .load_session(new_session_id)?
         .ok_or_else(|| ApiError::not_found("forked session not found"))?;
-    Ok(Json(SessionDto {
-        session_id: record.session_id,
-        parent_session_id: record.parent_session_id,
-        workspace_root: record.workspace_root,
-        provider_id: record.provider_id,
-        provider_display_name: record.provider_display_name,
-        model_id: record.model_id,
-        model_display_name: record.model_display_name,
-        title: record.title,
-        created_at: record.created_at.to_rfc3339(),
-        updated_at: record.updated_at.to_rfc3339(),
-        status: record.status,
-        ended_at: record.ended_at.map(|time| time.to_rfc3339()),
-        context_summary: record.context_summary,
-        context_retained_from: record.context_retained_from,
-        busy: false,
-    }))
+    Ok(Json(session_dto(&state.runtime, record)))
 }
 
 pub(super) async fn compact(

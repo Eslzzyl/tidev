@@ -301,7 +301,7 @@ export const api = {
   // Update session
   updateSession: (
     sessionId: string,
-    data: { title?: string; provider_id?: string; model_id?: string },
+    data: { title?: string; provider_id?: string; model_id?: string; thinking_level?: string },
   ) =>
     fetchJson<Session>(sessionPath(sessionId), {
       method: "PATCH",
@@ -314,6 +314,10 @@ export const api = {
   // Update session model
   updateSessionModel: (sessionId: string, providerId: string, modelId: string) =>
     api.updateSession(sessionId, { provider_id: providerId, model_id: modelId }),
+
+  // Update session thinking level
+  updateSessionThinkingLevel: (sessionId: string, thinkingLevel: string) =>
+    api.updateSession(sessionId, { thinking_level: thinkingLevel }),
 
   // Chat controls
   selectModel: (providerId: string, modelId: string) =>
