@@ -445,6 +445,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub instructions: Vec<String>,
     #[serde(default)]
+    pub model_instructions: BTreeMap<String, Vec<String>>,
+    #[serde(default)]
     pub skills: Vec<String>,
     #[serde(default)]
     pub access_control: AccessControlConfig,
@@ -578,6 +580,7 @@ impl Default for AppConfig {
             logging: LogConfig::default(),
             providers: BTreeMap::new(),
             instructions: Vec::new(),
+            model_instructions: BTreeMap::new(),
             skills: Vec::new(),
             access_control: AccessControlConfig::default(),
             notifications: NotificationConfig::default(),
@@ -683,6 +686,9 @@ impl AppConfig {
         // Lists: append
         if has("instructions") {
             self.instructions.extend(overlay.instructions);
+        }
+        if has("model_instructions") {
+            self.model_instructions.extend(overlay.model_instructions);
         }
         if has("skills") {
             self.skills.extend(overlay.skills);
@@ -872,6 +878,14 @@ impl AppConfig {
         ids.extend(self.providers.keys().cloned());
         ids.extend(self.bundled_providers.keys().cloned());
         ids.into_iter().collect()
+    }
+
+    /// Return instruction sources configured for one provider/model pair.
+    pub fn model_instruction_files(&self, provider_id: &str, model_id: &str) -> Vec<String> {
+        self.model_instructions
+            .get(&format!("{provider_id}/{model_id}"))
+            .cloned()
+            .unwrap_or_default()
     }
 
     pub fn available_models(&self) -> Vec<ModelSummary> {
@@ -1678,6 +1692,47 @@ max_output_tokens = 20000
         assert!(provider.models.contains_key("global-model"));
         assert!(provider.models.contains_key("project-model"));
         assert!(provider.models.contains_key("deepseek-flash"));
+    }
+
+    #[test]
+    fn model_instruction_files_parse_and_merge_independently() {
+        let mut config: AppConfig = toml::from_str(
+            r#"
+instructions = ["global.md"]
+
+[model_instructions]
+"deepseek/deepseek-flash" = ["deepseek.md"]
+"openai/gpt-5" = ["openai.md"]
+"shared/model" = ["global-shared.md"]
+"#,
+        )
+        .expect("config should parse");
+        assert_eq!(
+            config.model_instruction_files("deepseek", "deepseek-flash"),
+            vec!["deepseek.md".to_owned()]
+        );
+
+        let overlay_toml = r#"
+[model_instructions]
+"shared/model" = ["project-shared.md"]
+"anthropic/claude" = ["claude.md"]
+"#;
+        let overlay: AppConfig = toml::from_str(overlay_toml).expect("overlay should parse");
+        config.merge(overlay, overlay_toml);
+
+        assert_eq!(config.instructions, vec!["global.md".to_owned()]);
+        assert_eq!(
+            config.model_instruction_files("shared", "model"),
+            vec!["project-shared.md".to_owned()]
+        );
+        assert_eq!(
+            config.model_instruction_files("anthropic", "claude"),
+            vec!["claude.md".to_owned()]
+        );
+        assert_eq!(
+            config.model_instruction_files("deepseek", "deepseek-flash"),
+            vec!["deepseek.md".to_owned()]
+        );
     }
 
     #[test]

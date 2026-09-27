@@ -1149,8 +1149,13 @@ impl Runtime {
                 }
             }
         }
-
-        let configured_instructions = self.config.read().unwrap().instructions.clone();
+        let mut configured_instructions = self.config.read().unwrap().instructions.clone();
+        configured_instructions.extend(
+            self.config
+                .read()
+                .unwrap()
+                .model_instruction_files(&session.provider_id, &session.model_id),
+        );
         let (instruction_reminder, instruction_sources) =
             crate::agent_ctx::instruction_reminder_for_new_message(
                 workspace.root(),
@@ -2686,6 +2691,105 @@ mod tests {
         restarted.shutdown().await;
     }
 
+    #[tokio::test]
+    async fn first_session_prompt_includes_global_and_model_instructions() {
+        let dir = std::env::temp_dir().join(format!(
+            "tidev-runtime-model-instructions-{}",
+            Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).expect("temp directory should be created");
+        std::fs::write(dir.join("common.md"), "# Common instructions\n")
+            .expect("common instructions should be written");
+        std::fs::write(dir.join("model.md"), "# Model instructions\n")
+            .expect("model instructions should be written");
+        std::fs::write(
+            dir.join("config.toml"),
+            r#"default_provider = "deepseek"
+default_model = "deepseek-flash"
+instructions = ["common.md"]
+
+[model_instructions]
+"deepseek/deepseek-flash" = ["model.md"]
+"#,
+        )
+        .expect("config should be written");
+
+        let runtime = Runtime::builder()
+            .workspace_root(dir.clone())
+            .config_dir(dir.clone())
+            .data_dir(dir.clone())
+            .build()
+            .await
+            .expect("runtime should build");
+        let session_id = runtime
+            .create_default_session("model instructions")
+            .expect("session should be created");
+        let session = runtime
+            .session_manager()
+            .load_session(session_id)
+            .unwrap()
+            .expect("session should load");
+        assert!(!session.system_prompt.contains("# Common instructions"));
+        assert!(!session.system_prompt.contains("# Model instructions"));
+
+        runtime
+            .submit_prompt_with_attachments(
+                session_id,
+                Mode::Build,
+                "fresh turn".into(),
+                Vec::new(),
+                None,
+            )
+            .await
+            .expect("prompt should be submitted");
+        let buffer = runtime.message_buffer(session_id).await;
+        let messages = buffer.read().await.load().to_vec();
+        let user_message = messages
+            .iter()
+            .find(|message| message.role == MessageRole::User)
+            .expect("user message should be persisted");
+        assert!(user_message.content.contains("Instructions from:"));
+        assert!(user_message.content.contains("# Common instructions"));
+        assert!(user_message.content.contains("# Model instructions"));
+        assert!(user_message.content.ends_with("\n\nfresh turn"));
+
+        let sources = runtime
+            .session_manager()
+            .store()
+            .load_instruction_sources(session_id)
+            .unwrap();
+        assert_eq!(sources.len(), 2);
+        assert!(sources.iter().any(|source| source.ends_with("common.md")));
+        assert!(sources.iter().any(|source| source.ends_with("model.md")));
+
+        std::fs::write(dir.join("model.md"), "# Changed model instructions\n")
+            .expect("model instructions should be updated");
+        runtime
+            .update_session_model(
+                session_id,
+                "switched",
+                "Switched Provider",
+                "switched-model",
+                "Switched Model",
+            )
+            .expect("session model should update");
+        let switched_session = runtime
+            .session_manager()
+            .load_session(session_id)
+            .unwrap()
+            .expect("session should reload");
+        assert_eq!(switched_session.provider_id, "switched");
+        let sources_after_switch = runtime
+            .session_manager()
+            .store()
+            .load_instruction_sources(session_id)
+            .unwrap();
+        assert_eq!(sources_after_switch, sources);
+
+        runtime.cancel_session(session_id).await;
+        runtime.shutdown().await;
+    }
+
     async fn recv_created_event(
         rx: &mut tokio::sync::mpsc::UnboundedReceiver<BackendEvent>,
     ) -> BackendEvent {
@@ -2805,12 +2909,12 @@ mod tests {
     async fn idle_submit_persists_and_starts_loop() {
         let rt = make_test_runtime().await;
         let sid = rt.create_default_session("idle test").unwrap();
-        let mut events = rt.event_rx().await;
         std::fs::write(
             rt.workspace_root().join("AGENTS.md"),
             "# Test instructions\n",
         )
         .expect("instruction file should be written");
+        let mut events = rt.event_rx().await;
 
         rt.config.write().unwrap().ui.send_while_busy = SendWhileBusy::Steer;
 
@@ -2831,6 +2935,13 @@ mod tests {
         assert!(messages[0].content.contains("# Test instructions"));
         assert!(messages[0].content.ends_with("\n\nfresh turn"));
         assert_eq!(messages[1].content, "Loaded instructions from AGENTS.md");
+        let sources = rt
+            .session_manager
+            .store()
+            .load_instruction_sources(sid)
+            .unwrap();
+        assert_eq!(sources.len(), 1);
+        assert!(Path::new(&sources[0]).ends_with("AGENTS.md"));
         assert!(rt.is_session_busy(sid), "loop should be running");
 
         match recv_created_event(&mut events).await {

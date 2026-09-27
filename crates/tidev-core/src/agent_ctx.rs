@@ -1926,7 +1926,14 @@ async fn execute_task_tool(
                 )
                 .context("failed to create child session")?;
 
-            let configured_instructions = spawner.config.read().unwrap().instructions.clone();
+            let configured_instructions = {
+                let cfg = spawner.config.read().unwrap();
+                let mut sources = cfg.instructions.clone();
+                sources.extend(
+                    cfg.model_instruction_files(&child_model.provider_id, &child_model.model_id),
+                );
+                sources
+            };
             let (instruction_reminder, instruction_sources) = instruction_reminder_for_new_message(
                 &spawner.workspace_root,
                 &spawner.config_dir,
