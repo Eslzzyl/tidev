@@ -440,7 +440,7 @@ mod tests {
     fn theme_panel_does_not_use_main_area() {
         let catalog = tidev_config::ThemeCatalog::load(std::path::Path::new("/nonexistent"))
             .expect("bundled themes parse");
-        let panel = ThemePanel::new(catalog, "dark".to_string());
+        let panel = ThemePanel::new(catalog, "dark".to_string(), "dark");
         assert!(!panel.overlay_uses_main_area());
     }
 

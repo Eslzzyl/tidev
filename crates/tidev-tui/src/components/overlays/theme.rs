@@ -23,7 +23,7 @@ use crate::context::{DrawContext, InitContext, UpdateContext};
 use crate::i18n::TextKey;
 use crate::markdown::set_syntax_theme_by_key;
 use crate::theme::preview::build_preview_lines;
-use crate::theme::{ThemePalette, resolve_palette};
+use crate::theme::{SYSTEM_THEME_ID, ThemePalette, effective_theme_id, resolve_palette};
 use crate::utils::{centered_rect, render_scrollbar, single_line_input_cursor};
 
 #[derive(Clone, Debug)]
@@ -40,6 +40,7 @@ enum ThemeGroup {
 
 pub(crate) struct ThemePanel {
     catalog: ThemeCatalog,
+    system_theme: &'static str,
     display_items: Vec<DisplayItem>,
     selected_index: usize,
     preview_theme: String,
@@ -53,9 +54,10 @@ pub(crate) struct ThemePanel {
 }
 
 impl ThemePanel {
-    pub(crate) fn new(catalog: ThemeCatalog, current: String) -> Self {
+    pub(crate) fn new(catalog: ThemeCatalog, current: String, system_theme: &'static str) -> Self {
         let mut panel = Self {
             catalog,
+            system_theme,
             display_items: Vec::new(),
             selected_index: 0,
             preview_theme: current.clone(),
@@ -81,25 +83,35 @@ impl ThemePanel {
 
         let mut items = Vec::new();
 
-        let light: Vec<_> = self
+        let mut light: Vec<_> = self
             .catalog
             .iter()
-            .filter(|(id, def)| !def.dark && matches_query(id))
+            .filter(|(id, def)| *id != SYSTEM_THEME_ID && !def.dark && matches_query(id))
             .map(|(id, _)| id.to_string())
             .collect();
+        let mut dark: Vec<_> = self
+            .catalog
+            .iter()
+            .filter(|(id, def)| *id != SYSTEM_THEME_ID && def.dark && matches_query(id))
+            .map(|(id, _)| id.to_string())
+            .collect();
+        if q.is_empty()
+            || SYSTEM_THEME_ID.contains(q.as_str())
+            || self.system_theme.contains(q.as_str())
+        {
+            let group = if self.system_theme == "light" {
+                &mut light
+            } else {
+                &mut dark
+            };
+            group.insert(0, SYSTEM_THEME_ID.to_string());
+        }
         if !light.is_empty() {
             items.push(DisplayItem::Header(ThemeGroup::Light));
             for t in light {
                 items.push(DisplayItem::Theme(t));
             }
         }
-
-        let dark: Vec<_> = self
-            .catalog
-            .iter()
-            .filter(|(id, def)| def.dark && matches_query(id))
-            .map(|(id, _)| id.to_string())
-            .collect();
         if !dark.is_empty() {
             items.push(DisplayItem::Header(ThemeGroup::Dark));
             for t in dark {
@@ -220,13 +232,19 @@ impl ThemePanel {
             Some((theme, w, _, _)) if *theme == self.preview_theme && *w == width
         );
         if !up_to_date {
-            let palette = resolve_palette(&self.catalog, &self.preview_theme);
-            let def = self.catalog.get(&self.preview_theme);
-            let lines = build_preview_lines(&self.preview_theme, palette, def, width, ui_text);
+            let effective_theme = effective_theme_id(&self.preview_theme, self.system_theme);
+            let palette = resolve_palette(&self.catalog, effective_theme);
+            let def = self.catalog.get(effective_theme);
+            let preview_name = if self.preview_theme == SYSTEM_THEME_ID {
+                ui_text.text(TextKey::System)
+            } else {
+                self.preview_theme.clone()
+            };
+            let lines = build_preview_lines(&preview_name, palette, def, width, ui_text);
             if self.preview_theme != self.original_theme
                 && let Some(orig) = self
                     .catalog
-                    .get(&self.original_theme)
+                    .get(effective_theme_id(&self.original_theme, self.system_theme))
                     .or_else(|| self.catalog.get("dark"))
             {
                 set_syntax_theme_by_key(orig.syntax_theme_key());
@@ -429,7 +447,14 @@ impl Component for ThemePanel {
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
-                    format!(" {}", self.preview_theme),
+                    format!(
+                        " {}",
+                        if self.preview_theme == SYSTEM_THEME_ID {
+                            ctx.ui_text.text(TextKey::System)
+                        } else {
+                            self.preview_theme.clone()
+                        }
+                    ),
                     Style::default().fg(palette.muted),
                 ),
             ]))
@@ -599,7 +624,12 @@ impl Component for ThemePanel {
                         )
                     };
                     frame.render_widget(bg_block, Rect::new(list_area.x, y, list_area.width, 1));
-                    let name = format!("  {}", t.as_str());
+                    let label = if t == SYSTEM_THEME_ID {
+                        ctx.ui_text.text(TextKey::System)
+                    } else {
+                        t.clone()
+                    };
+                    let name = format!("  {label}");
                     frame.render_widget(
                         Paragraph::new(Line::from(Span::styled(name, text_style))),
                         Rect::new(list_area.x, y, list_area.width, 1),

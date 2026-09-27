@@ -17,6 +17,7 @@ use tidev_config::ThemeCatalog;
 
 use crate::action::{Action, ChatAction, OverlayAction, OverlayKind, SessionAction, ThemeAction};
 use crate::i18n::TextKey;
+use crate::theme::SYSTEM_THEME_ID;
 
 // ---------------------------------------------------------------------------
 // CommandAction
@@ -532,7 +533,7 @@ pub(crate) fn execute_command(
                 ))]
             } else {
                 let name = args.join(" ");
-                if catalog.get(&name).is_some() {
+                if name == SYSTEM_THEME_ID || catalog.get(&name).is_some() {
                     vec![Action::Theme(ThemeAction::Set(name))]
                 } else {
                     vec![]

@@ -36,7 +36,7 @@ commits. They can be managed through the TUI or by editing the file directly.
 ```
 default_provider = "openai"
 default_model = "gpt-4o-mini"
-theme = "dark"
+theme = "dark" # or "system"
 instructions = []
 skills = []
 ```
@@ -54,7 +54,10 @@ key under the default provider.
 ### theme
 
 The colour theme of the terminal UI. The value is a theme id matching a theme
-file in the bundled `themes/` directory or in `~/.config/tidev/themes/`.
+file in the bundled `themes/` directory or in `~/.config/tidev/themes/`, or
+`system` to choose between the bundled `light` and `dark` themes from the
+terminal background color reported through OSC 11. When the terminal does not
+report its background color, tidev uses `dark`.
 
 Bundled themes:
 
@@ -76,6 +79,8 @@ Bundled themes:
 - `rose-pine`
 - `rose-pine-dawn`
 - `contrast`
+
+The id `system` is reserved for automatic light/dark selection.
 
 #### Custom themes
 

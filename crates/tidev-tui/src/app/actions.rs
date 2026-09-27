@@ -1,7 +1,7 @@
 use super::*;
 
 use crate::context::UpdateContext;
-use crate::theme::resolve_palette;
+use crate::theme::{effective_theme_id, resolve_palette};
 use tidev_core::ApprovedTool;
 use tidev_llm::message::{Message, MessageRole, ToolExecutionResult};
 
@@ -209,7 +209,10 @@ impl App {
                     queue.extend(self.overlays.update_all(&Action::Settings(change), &ctx));
                 }
                 Action::Theme(ThemeAction::Set(name)) => {
-                    self.current_palette = resolve_palette(&self.theme_catalog, &name);
+                    self.current_palette = resolve_palette(
+                        &self.theme_catalog,
+                        effective_theme_id(&name, self.system_theme),
+                    );
                     self.runtime.update_config(|cfg| cfg.set_theme(&name));
                     let _ = self.runtime.save_config();
                     if let Some(ref mut chat) = self.message_list {

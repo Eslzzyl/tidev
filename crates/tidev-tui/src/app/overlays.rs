@@ -37,6 +37,7 @@ impl App {
                 Some(Box::new(ThemePanel::new(
                     self.theme_catalog.clone(),
                     current,
+                    self.system_theme,
                 )))
             }
             OverlayKind::AgentsPanel => Some(Box::new(AgentsPanel::new())),

@@ -1,7 +1,48 @@
 use ratatui::style::Color;
+use ratatui_image::picker::{Capability, Picker};
 
 use tidev_config::{ThemeCatalog, ThemeDefinition};
 use tidev_core::Mode as SessionMode;
+
+pub(crate) const SYSTEM_THEME_ID: &str = "system";
+
+/// Detect whether the terminal's reported background should use the light palette.
+/// Dark is the startup fallback when the terminal does not report OSC 11 colors.
+pub(crate) fn detect_system_theme(picker: Option<&Picker>) -> &'static str {
+    let background = picker.and_then(|picker| {
+        picker.capabilities().iter().find_map(|capability| {
+            if let Capability::Background(r, g, b) = capability {
+                Some((*r, *g, *b))
+            } else {
+                None
+            }
+        })
+    });
+
+    let Some((r, g, b)) = background else {
+        return "dark";
+    };
+
+    let linearize = |channel: u8| {
+        let value = channel as f32 / 255.0;
+        if value <= 0.04045 {
+            value / 12.92
+        } else {
+            ((value + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    let luminance = 0.2126 * linearize(r) + 0.7152 * linearize(g) + 0.0722 * linearize(b);
+
+    if luminance >= 0.5 { "light" } else { "dark" }
+}
+
+pub(crate) fn effective_theme_id<'a>(preference: &'a str, system_theme: &'a str) -> &'a str {
+    if preference == SYSTEM_THEME_ID {
+        system_theme
+    } else {
+        preference
+    }
+}
 
 pub(crate) mod preview;
 

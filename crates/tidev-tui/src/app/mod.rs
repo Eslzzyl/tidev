@@ -14,7 +14,7 @@ mod tools;
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
-use crate::theme::{ThemePalette, resolve_palette};
+use crate::theme::{ThemePalette, detect_system_theme, effective_theme_id, resolve_palette};
 use ratatui::layout::{Position, Rect};
 use tidev_config::ThemeCatalog;
 use tidev_core::BackendEvent;
@@ -92,6 +92,7 @@ pub struct App {
     pub(crate) image_surface: ImageSurface,
     current_palette: ThemePalette,
     theme_catalog: ThemeCatalog,
+    system_theme: &'static str,
     should_quit: bool,
     /// Pending scroll target set by ChatAction::ScrollTo (consumed by Chat component).
     scroll_target: Option<uuid::Uuid>,
@@ -273,7 +274,12 @@ impl App {
         event_rx: tokio::sync::mpsc::UnboundedReceiver<BackendEvent>,
     ) -> Self {
         log::info!("[img] from_query_stdio START");
-        let image_picker = Picker::from_query_stdio();
+        let image_picker = Picker::from_query_stdio_with_options(
+            ratatui_image::picker::cap_parser::QueryStdioOptions {
+                terminal_background_color_osc: true,
+                ..Default::default()
+            },
+        );
         log::info!(
             "[img] from_query_stdio END: {:?}",
             image_picker
@@ -295,7 +301,9 @@ impl App {
         let theme_catalog =
             ThemeCatalog::load(runtime.config_dir()).expect("bundled theme presets must parse");
         let theme_str = runtime.config().theme.clone();
-        let current_palette = resolve_palette(&theme_catalog, &theme_str);
+        let system_theme = detect_system_theme(image_picker.as_ref());
+        let current_palette =
+            resolve_palette(&theme_catalog, effective_theme_id(&theme_str, system_theme));
         let startup_model_fallback = runtime.startup_model_fallback();
 
         // Capture before runtime is moved into Self.
@@ -316,6 +324,7 @@ impl App {
             image_surface: ImageSurface::new(image_picker.as_ref()),
             current_palette,
             theme_catalog,
+            system_theme,
             should_quit: false,
             scroll_target: None,
             pending_input_copy: None,
