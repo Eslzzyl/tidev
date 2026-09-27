@@ -47,8 +47,10 @@ pub(crate) struct MessageBlock {
 pub(crate) struct MessageLayoutIndex {
     /// Sorted list of message blocks in render order.
     pub blocks: Vec<MessageBlock>,
-    /// Total lines across all blocks.
+    /// Total lines across all blocks, including inter-block spacing.
     pub total_lines: usize,
+    /// Total rendered lines, including headers and transient status cards.
+    pub scroll_total_lines: usize,
     /// Width used for calculating line counts.
     pub width: usize,
     /// Whether the index is valid and up-to-date.
@@ -63,6 +65,7 @@ impl MessageLayoutIndex {
         Self {
             blocks: Vec::new(),
             total_lines: 0,
+            scroll_total_lines: 0,
             width: 0,
             valid: false,
             dirty_messages: Vec::new(),
@@ -73,6 +76,7 @@ impl MessageLayoutIndex {
     pub fn reset(&mut self, width: usize) {
         self.blocks.clear();
         self.total_lines = 0;
+        self.scroll_total_lines = 0;
         self.width = width;
         self.valid = true;
         self.dirty_messages.clear();
@@ -105,6 +109,7 @@ impl MessageLayoutIndex {
     pub fn invalidate_all(&mut self) {
         self.valid = false;
         self.dirty_messages.clear();
+        self.scroll_total_lines = 0;
     }
 
     /// Mark a message's block as needing recomputation (content-only change).

@@ -1525,9 +1525,7 @@ impl Component for MessageList {
                 None
             }
             KeyCode::End => {
-                let total = self.layout_index.total_lines;
-                let max_scroll = total.saturating_sub(20);
-                self.scroll_offset = max_scroll;
+                self.scroll_offset = self.max_scroll();
                 self.follow_tail = true;
                 self.dirty = true;
                 None
@@ -1540,13 +1538,7 @@ impl Component for MessageList {
         match action {
             Action::Chat(ChatAction::ScrollDelta(delta)) => {
                 if self.active_session_id.is_some() {
-                    let total = self.layout_index.total_lines;
-                    let viewport = self
-                        .content_area
-                        .map(|r| r.height as usize)
-                        .unwrap_or(20)
-                        .max(1);
-                    let max_scroll = total.saturating_sub(viewport);
+                    let max_scroll = self.max_scroll();
                     let current = if self.follow_tail {
                         max_scroll
                     } else {

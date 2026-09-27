@@ -84,9 +84,11 @@ impl MessageList {
 
     /// Maximum scroll offset.
     pub fn max_scroll(&self) -> usize {
-        self.layout_index
-            .total_lines
-            .saturating_sub(self.content_area.map_or(0, |a| a.height as usize))
+        self.layout_index.scroll_total_lines.saturating_sub(
+            self.content_area
+                .map_or(20, |area| area.height as usize)
+                .max(1),
+        )
     }
 }
 

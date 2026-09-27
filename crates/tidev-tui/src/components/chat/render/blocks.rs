@@ -726,6 +726,9 @@ pub(super) fn update_layout_index(
         for (key, entry) in &comp.cache_entries {
             cache.put(key.clone(), entry.clone());
         }
+        if !index.blocks.is_empty() {
+            current_line += 1;
+        }
         index.blocks.push(MessageBlock {
             message_id: comp.message_id,
             message_start_idx: 0, // will be fixed below
@@ -785,6 +788,7 @@ pub(super) fn messages_text(
         )));
         lines.push(empty_line);
         let total = lines.len().max(1);
+        index.scroll_total_lines = total;
         return RenderOutput {
             hyperlink_lines: lines,
             total_lines: total,
@@ -865,27 +869,19 @@ pub(super) fn messages_text(
     let retry_hint_height = precomputed_hint_lines.len();
 
     // Calculate visible range (clamp scroll and respect follow_tail)
-    let mut total_overall_lines = header_line_count + index.total_lines + retry_hint_height;
+    let total_overall_lines = header_line_count + index.total_lines + retry_hint_height;
     let viewport = viewport.max(1);
     let max_scroll = total_overall_lines.saturating_sub(viewport);
-    let mut scroll = if follow_tail {
+    let scroll = if follow_tail {
         max_scroll
     } else {
         scroll.min(max_scroll)
     };
-    let mut message_scroll = scroll.saturating_sub(header_line_count);
+    let message_scroll = scroll.saturating_sub(header_line_count);
 
     // Find visible blocks
-    let mut visible_blocks = index.find_visible_blocks(message_scroll, viewport);
-
-    // Inter-block spacing: account for spacer lines in total and scroll.
-    let num_spacers = visible_blocks.len().saturating_sub(1);
-    total_overall_lines += num_spacers;
-    if follow_tail {
-        scroll = total_overall_lines.saturating_sub(viewport);
-        message_scroll = scroll.saturating_sub(header_line_count);
-        visible_blocks = index.find_visible_blocks(message_scroll, viewport);
-    }
+    let visible_blocks = index.find_visible_blocks(message_scroll, viewport);
+    index.scroll_total_lines = total_overall_lines;
 
     lines.extend(header_lines);
 
@@ -938,7 +934,6 @@ pub(super) fn messages_text(
 
     // Append the pre-computed retrying hint card at the bottom of the chat area
     if !precomputed_hint_lines.is_empty() {
-        total_overall_lines += precomputed_hint_lines.len();
         lines.extend(precomputed_hint_lines);
     }
 
