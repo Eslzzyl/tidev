@@ -13,6 +13,7 @@ export interface Session {
   ended_at: string | null;
   context_summary: string | null;
   context_retained_from: number;
+  revert_message_id?: string | null;
   busy: boolean;
   thinking_level?: string;
 }
@@ -20,7 +21,6 @@ export interface Session {
 export interface SessionDetail extends Session {
   context_summary: string | null;
   context_retained_from: number;
-  revert_message_id?: string | null;
 }
 
 export interface SessionListCursor {

@@ -5,6 +5,36 @@ use super::*;
 // ---------------------------------------------------------------------------
 
 impl SessionStore {
+    /// Save undo state and the active context state in one transaction.
+    pub fn save_revert_state_with_context(
+        &self,
+        session_id: Uuid,
+        message_id: Uuid,
+        redo_snapshot: Option<&str>,
+        context_summary: Option<&str>,
+        context_retained_from: usize,
+    ) -> Result<()> {
+        let msg_id_opt = (!message_id.is_nil()).then(|| message_id.to_string());
+        let context_summary = context_summary
+            .map(crate::compression::compress_text)
+            .unwrap_or_default();
+        let mut conn = self.write_conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        tx.execute(
+            "UPDATE sessions SET revert_message_id = ?1, revert_redo_snapshot = ?2, context_summary = ?3, context_retained_from = ?4, updated_at = ?5 WHERE id = ?6",
+            params![
+                msg_id_opt,
+                redo_snapshot,
+                context_summary,
+                context_retained_from as i64,
+                chrono::Utc::now().to_rfc3339(),
+                session_id.to_string(),
+            ],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Save revert state for a session.
     pub fn save_revert_state(
         &self,

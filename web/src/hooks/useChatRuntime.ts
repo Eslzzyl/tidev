@@ -34,6 +34,7 @@ import {
   type PendingImage,
 } from "../utils/imageAttachments";
 import { emitDesktopNotification } from "../utils/notifications";
+import { stripSystemReminderTags } from "../utils/format";
 import { toolResultStatus, type ReasoningDisplay } from "../utils/round";
 import i18n from "../i18n";
 import {
@@ -147,6 +148,7 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [revertingMessageId, setRevertingMessageId] = useState<string | null>(null);
   const [fileMention, setFileMention] = useState<{ query: string; atPos: number } | null>(null);
   const [fileMentionIndex, setFileMentionIndex] = useState(0);
   const [completedSessions, setCompletedSessions] = useState<Set<string>>(new Set());
@@ -186,6 +188,23 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
     [models, selectedSession],
   );
   const selectedSessionRef = useRef<string | null>(null);
+  const revertingMessageIdRef = useRef<string | null>(null);
+  const updateSessionRevertTarget = useCallback((sessionId: string, targetId: string | null) => {
+    setSessions((current) =>
+      current.map((session) =>
+        session.session_id === sessionId ? { ...session, revert_message_id: targetId } : session,
+      ),
+    );
+    setSelectedSession((current) =>
+      current?.session_id === sessionId ? { ...current, revert_message_id: targetId } : current,
+    );
+  }, []);
+  const visibleMessages = useMemo(() => {
+    const revertMessageId = selectedSession?.revert_message_id;
+    if (!revertMessageId) return messages;
+    const targetIndex = messages.findIndex((record) => record.message.id === revertMessageId);
+    return targetIndex < 0 ? messages : messages.slice(0, targetIndex);
+  }, [messages, selectedSession?.revert_message_id]);
   useEffect(() => {
     if (modelsError) {
       setError(
@@ -400,6 +419,7 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
       if (selectedSessionRef.current !== sessionId) return;
       setSessionStatus("missing");
       setSelectedSession(undefined);
+      setDraft("");
       setMessages([]);
       setChangedFiles([]);
       setChangedFileDiffs([]);
@@ -992,6 +1012,28 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
         setInstructionNotices(merged);
         return;
       }
+      if (kind === "UndoCompleted") {
+        const targetId = asString(payload.target_id);
+        const revertMessageId =
+          targetId && targetId !== "00000000-0000-0000-0000-000000000000" ? targetId : null;
+        updateSessionRevertTarget(sessionId, revertMessageId);
+        if (selectedSessionRef.current !== sessionId) return;
+        const restoredDraft = revertMessageId
+          ? stripSystemReminderTags(asString(payload.message_content))
+          : "";
+        setDraft(restoredDraft);
+        setFileMention(null);
+        currentDraftStateRef.current = {
+          ...currentDraftStateRef.current,
+          draft: restoredDraft,
+          fileMention: null,
+        };
+        setScrollToBottomRequest((current) => current + 1);
+        setCompactionNotice(null);
+        void loadMessages(sessionId);
+        void loadTodos(sessionId);
+        return;
+      }
       if (kind === "ContextCompactionStarted") {
         if (selectedSessionRef.current !== sessionId) return;
         const pendingQueuedIds = new Set(
@@ -1460,8 +1502,9 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
         }
         return;
       }
-      if (kind === "MessagesTruncated" && selectedSessionRef.current === sessionId) {
-        void loadMessages(sessionId);
+      if (kind === "MessagesTruncated") {
+        updateSessionRevertTarget(sessionId, null);
+        if (selectedSessionRef.current === sessionId) void loadMessages(sessionId);
       }
     },
     [
@@ -1473,6 +1516,7 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
       loadTodos,
       scheduleStreamUpdate,
       touchSession,
+      updateSessionRevertTarget,
     ],
   );
 
@@ -1651,11 +1695,29 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
   };
 
   const handleRevert = useCallback(
-    async (messageId: string) => {
-      const sessionId = selectedSessionRef.current;
-      if (!sessionId) return;
+    async (sessionId: string, messageId: string) => {
+      if (revertingMessageIdRef.current !== null) return;
+      revertingMessageIdRef.current = messageId;
+      setRevertingMessageId(messageId);
+      setError(null);
       try {
         await api.revertToMessage(sessionId, messageId);
+        if (selectedSessionRef.current === sessionId) {
+          const target = (messagesCacheRef.current.get(sessionId) ?? []).find(
+            (record) => record.message.id === messageId,
+          );
+          updateSessionRevertTarget(sessionId, messageId);
+          const restoredDraft = target ? stripSystemReminderTags(target.message.content) : "";
+          setDraft(restoredDraft);
+          setFileMention(null);
+          currentDraftStateRef.current = {
+            ...currentDraftStateRef.current,
+            draft: restoredDraft,
+            fileMention: null,
+          };
+          setScrollToBottomRequest((current) => current + 1);
+          setCompactionNotice(null);
+        }
         await loadMessages(sessionId);
         await loadTodos(sessionId);
       } catch (reason) {
@@ -1664,9 +1726,14 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
         } else {
           setError(reason instanceof Error ? reason.message : i18n.t("Failed to revert"));
         }
+      } finally {
+        if (revertingMessageIdRef.current === messageId) {
+          revertingMessageIdRef.current = null;
+          setRevertingMessageId(null);
+        }
       }
     },
-    [loadMessages, loadTodos, markSessionMissing],
+    [loadMessages, loadTodos, markSessionMissing, updateSessionRevertTarget],
   );
 
   const handleRetryProviderError = useCallback(
@@ -1711,6 +1778,17 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
     if (!sessionId) return;
     try {
       await api.redoSession(sessionId);
+      if (selectedSessionRef.current === sessionId) {
+        updateSessionRevertTarget(sessionId, null);
+        setDraft("");
+        setFileMention(null);
+        currentDraftStateRef.current = {
+          ...currentDraftStateRef.current,
+          draft: "",
+          fileMention: null,
+        };
+        setCompactionNotice(null);
+      }
       await loadMessages(sessionId);
       await loadTodos(sessionId);
     } catch (reason) {
@@ -1720,7 +1798,7 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
         setError(reason instanceof Error ? reason.message : i18n.t("Failed to redo"));
       }
     }
-  }, [loadMessages, loadTodos, markSessionMissing]);
+  }, [loadMessages, loadTodos, markSessionMissing, updateSessionRevertTarget]);
 
   const handleFork = useCallback(
     async (messageId: string) => {
@@ -1769,10 +1847,11 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
         return true;
       }
       if (command === "undo") {
-        const lastUser = [...messages]
+        const sessionId = selectedSessionRef.current;
+        const lastUser = [...visibleMessages]
           .reverse()
           .find((r) => r.message.role === "user" && r.message.metadata.compaction_manual == null);
-        if (lastUser) await handleRevert(lastUser.message.id);
+        if (sessionId && lastUser) await handleRevert(sessionId, lastUser.message.id);
         else setError(i18n.t("No user message to undo"));
         return true;
       }
@@ -1785,7 +1864,7 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
         return true;
       }
       if (command === "fork") {
-        const target = [...messages]
+        const target = [...visibleMessages]
           .reverse()
           .find((r) => r.message.role === "user" && r.message.metadata.compaction_manual == null);
         if (target) await handleFork(target.message.id);
@@ -1826,7 +1905,7 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
       return false;
     },
     [
-      messages,
+      visibleMessages,
       toggleFastMode,
       handleRevert,
       handleRedo,
@@ -2026,8 +2105,11 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
   );
 
   const visibleStreams = useMemo(
-    () => Object.values(streams).filter((item) => item.key.startsWith(`${selectedSessionId}:`)),
-    [selectedSessionId, streams],
+    () =>
+      selectedSession?.revert_message_id
+        ? []
+        : Object.values(streams).filter((item) => item.key.startsWith(`${selectedSessionId}:`)),
+    [selectedSession?.revert_message_id, selectedSessionId, streams],
   );
 
   return {
@@ -2050,7 +2132,7 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
     startupModelFallback,
     startupStatusLoaded,
     startupProviderStatus,
-    messages,
+    messages: visibleMessages,
     reasoningDisplays,
     changedFiles,
     changedFileDiffs,
@@ -2095,6 +2177,7 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
     deleteSession,
     submitWelcome,
     handleRevert,
+    revertingMessageId,
     handleRetryProviderError,
     handleRedo,
     handleFork,

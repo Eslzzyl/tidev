@@ -9,6 +9,12 @@ use uuid::Uuid;
 
 use crate::SessionMessage;
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ContextState {
+    pub summary: Option<String>,
+    pub retained_from: usize,
+}
+
 // ---------------------------------------------------------------------------
 // Message navigation
 // ---------------------------------------------------------------------------
@@ -86,6 +92,52 @@ pub fn restore_context_from_compaction(
         }
     }
     false
+}
+
+/// Resolve the context state active when a target message was submitted.
+///
+/// A later marker records the exact state that preceded its compaction. When
+/// no such marker exists, the latest marker before the target establishes the
+/// active summary and retained cursor.
+pub fn context_state_for_target(
+    messages: &[SessionMessage],
+    target_id: Uuid,
+) -> Option<ContextState> {
+    let target_index = messages
+        .iter()
+        .position(|message| message.id == target_id)?;
+
+    if let Some(marker) = messages
+        .iter()
+        .skip(target_index + 1)
+        .find(|message| message.is_compaction())
+    {
+        if let Some(retained_from) = marker.metadata.prior_retained_from {
+            return Some(ContextState {
+                summary: marker.metadata.prior_summary.clone(),
+                retained_from,
+            });
+        }
+    }
+
+    Some(context_state_at_history_end(&messages[..=target_index]))
+}
+
+/// Resolve the context state at the end of the stored message history.
+pub fn context_state_at_history_end(messages: &[SessionMessage]) -> ContextState {
+    messages
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, message)| message.is_compaction())
+        .map(|(index, message)| ContextState {
+            summary: message
+                .compaction_summary()
+                .map(str::to_owned)
+                .filter(|summary| !summary.trim().is_empty()),
+            retained_from: index,
+        })
+        .unwrap_or_default()
 }
 
 /// Extract prior context state stored on a compaction message's metadata.

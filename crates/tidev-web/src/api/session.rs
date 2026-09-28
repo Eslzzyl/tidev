@@ -39,7 +39,7 @@ pub(super) async fn list_sessions(
     let items = sessions
         .into_iter()
         .map(|session| session_dto(&state.runtime, session))
-        .collect();
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(Json(SessionListResponse {
         items,
         next_cursor,
@@ -88,7 +88,7 @@ pub(super) async fn create_session(
         .load_session(session_id)?
         .ok_or_else(|| ApiError::not_found("created session is unavailable"))?;
     Ok(Json(SessionCreatedResponse {
-        session: session_dto(&state.runtime, session),
+        session: session_dto(&state.runtime, session)?,
     }))
 }
 
@@ -101,7 +101,7 @@ pub(super) async fn get_session(
         .session_manager()
         .load_session(session_id)?
         .ok_or_else(|| ApiError::not_found("session not found"))?;
-    Ok(Json(session_dto(&state.runtime, session)))
+    Ok(Json(session_dto(&state.runtime, session)?))
 }
 
 pub(super) async fn update_session(
@@ -420,7 +420,7 @@ pub(super) async fn fork_session(
         .session_manager()
         .load_session(new_session_id)?
         .ok_or_else(|| ApiError::not_found("forked session not found"))?;
-    Ok(Json(session_dto(&state.runtime, record)))
+    Ok(Json(session_dto(&state.runtime, record)?))
 }
 
 pub(super) async fn compact(

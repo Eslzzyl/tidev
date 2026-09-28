@@ -172,6 +172,7 @@ export default function App() {
     deleteSession,
     submitWelcome,
     handleRevert,
+    revertingMessageId,
     handleRetryProviderError,
     handleFork,
     submit,
@@ -300,6 +301,7 @@ export default function App() {
       onCancelRename={() => setRenamingSessionId(null)}
       onDeleteSession={(session) => setSessionToDelete(session)}
       onRevert={handleRevert}
+      revertingMessageId={revertingMessageId}
       onRetryProviderError={handleRetryProviderError}
       onOpenChangedFiles={openChangedFilesPanel}
       onCloseChangedFiles={closeChangedFilesPanel}

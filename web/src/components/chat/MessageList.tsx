@@ -59,7 +59,8 @@ export interface MessageListProps {
   session?: Session;
   models?: Model[];
   workspaceRoot?: string;
-  onRevert?: (messageId: string) => void;
+  onRevert?: (sessionId: string, messageId: string) => void;
+  revertingMessageId?: string | null;
   onFork?: (messageId: string) => void;
   onRetryProviderError?: (messageId: string) => void;
   scrollToBottomRequest?: number;
@@ -74,11 +75,15 @@ function getChatItemKey(item: ChatItem | undefined, index: number) {
 
 function UserMessageItem({
   round,
+  sessionId,
   onRevert,
+  revertingMessageId,
   onFork,
 }: {
   round: Round;
-  onRevert?: (messageId: string) => void;
+  sessionId?: string;
+  onRevert?: (sessionId: string, messageId: string) => void;
+  revertingMessageId?: string | null;
   onFork?: (messageId: string) => void;
 }) {
   const { t } = useTranslation();
@@ -98,15 +103,21 @@ function UserMessageItem({
           {userTime ? <time>{userTime}</time> : null}
           <CopyButton content={content} />
           <span className="user-message-actions">
-            {onRevert ? (
+            {onRevert && sessionId ? (
               <IconButton
                 label={t("Revert to this message (undo later messages)")}
                 size="sm"
                 className="message-action"
-                onClick={() => onRevert(round.userMessage.id)}
+                disabled={revertingMessageId !== null && revertingMessageId !== undefined}
+                aria-busy={revertingMessageId === round.userMessage.id}
+                onClick={() => onRevert(sessionId, round.userMessage.id)}
                 title={t("Revert to this message (undo later messages)")}
               >
-                <Undo2 size={16} />
+                {revertingMessageId === round.userMessage.id ? (
+                  <LoaderCircle className="spin" size={16} />
+                ) : (
+                  <Undo2 size={16} />
+                )}
               </IconButton>
             ) : null}
             {onFork ? (
@@ -440,6 +451,7 @@ export const MessageList = memo(function MessageList({
   models = [],
   workspaceRoot = "",
   onRevert,
+  revertingMessageId,
   onFork,
   onRetryProviderError,
   scrollToBottomRequest = 0,
@@ -578,7 +590,15 @@ export const MessageList = memo(function MessageList({
   function renderItem(item: ChatItem): ReactNode {
     switch (item.kind) {
       case "user":
-        return <UserMessageItem round={item.round} onRevert={onRevert} onFork={onFork} />;
+        return (
+          <UserMessageItem
+            round={item.round}
+            sessionId={sessionId}
+            onRevert={onRevert}
+            revertingMessageId={revertingMessageId}
+            onFork={onFork}
+          />
+        );
       case "assistant-meta":
         return (
           <AssistantMetaItem

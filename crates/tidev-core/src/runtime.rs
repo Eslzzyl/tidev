@@ -53,6 +53,42 @@ use crate::tool_def::to_llm_tool_def;
 use crate::workspace::Workspace;
 
 const TIDEV_USER_AGENT: &str = concat!("tidev/", env!("CARGO_PKG_VERSION"));
+const REVERT_CHECKPOINT_VERSION: u8 = 1;
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+struct RevertCheckpoint {
+    version: u8,
+    workspace_snapshot: Option<String>,
+    context_state: crate::undo::ContextState,
+}
+
+impl RevertCheckpoint {
+    fn new(workspace_snapshot: Option<String>, context_state: crate::undo::ContextState) -> Self {
+        Self {
+            version: REVERT_CHECKPOINT_VERSION,
+            workspace_snapshot,
+            context_state,
+        }
+    }
+
+    fn from_stored_snapshot(bytes: &[u8], messages: &[crate::SessionMessage]) -> Self {
+        if let Ok(checkpoint) = serde_json::from_slice::<Self>(bytes)
+            && checkpoint.version == REVERT_CHECKPOINT_VERSION
+        {
+            return checkpoint;
+        }
+
+        // Older sessions stored the workspace snapshot hash directly.
+        Self::new(
+            Some(String::from_utf8_lossy(bytes).into_owned()),
+            crate::undo::context_state_at_history_end(messages),
+        )
+    }
+
+    fn encode(&self) -> Result<String> {
+        Ok(serde_json::to_string(self)?)
+    }
+}
 
 // ---------------------------------------------------------------------------
 // TodoPersistence impl — bridges tidev-tools to tidev-storage.
@@ -1854,8 +1890,16 @@ impl Runtime {
                 .await?;
         } else {
             // At the end of history — restore the original pre-undo state.
-            self.unrevert(session_id, redo_snapshot.as_deref().unwrap_or_default())
-                .await?;
+            let checkpoint = redo_snapshot
+                .as_deref()
+                .map(|bytes| RevertCheckpoint::from_stored_snapshot(bytes, &messages))
+                .unwrap_or_else(|| {
+                    RevertCheckpoint::new(
+                        None,
+                        crate::undo::context_state_at_history_end(&messages),
+                    )
+                });
+            self.unrevert(session_id, &checkpoint).await?;
         }
 
         log::info!("redo completed for session {session_id}");
@@ -2041,23 +2085,39 @@ impl Runtime {
             self.workspace_for(&session.workspace_root).await?
         };
         let snapshot = workspace.snapshot().cloned();
+        let target_context_state = crate::undo::context_state_for_target(messages, target_id)
+            .ok_or_else(|| anyhow::anyhow!("target message {target_id} not found"))?;
 
-        // 1. Reuse existing redo_snapshot if one exists (maintains undo chain),
-        //    otherwise capture current workspace as the redo point.
-        let redo_hash: Option<Vec<u8>> = match self.session_manager.load_revert_state(session_id)? {
-            Some((_, Some(existing))) => {
-                // Restore workspace to the pre-undo state first.
-                let s = String::from_utf8_lossy(&existing).to_string();
-                if let Some(ref snap) = snapshot {
-                    snap.restore(&s).await?;
+        // 1. Reuse the original redo checkpoint while moving its history cursor.
+        let existing_revert = self.session_manager.load_revert_state(session_id)?;
+        let redo_checkpoint = match existing_revert {
+            Some((current_id, Some(stored_snapshot))) if current_id != Uuid::nil() => {
+                let checkpoint = RevertCheckpoint::from_stored_snapshot(&stored_snapshot, messages);
+                if let Some(workspace_snapshot) = &checkpoint.workspace_snapshot
+                    && let Some(ref snap) = snapshot
+                {
+                    snap.restore(workspace_snapshot).await?;
                 }
-                Some(existing)
+                checkpoint
             }
-            _ => snapshot
-                .as_ref()
-                .and_then(|s| s.track().ok())
-                .flatten()
-                .map(|h| h.into_bytes()),
+            Some((current_id, None)) if current_id != Uuid::nil() => {
+                RevertCheckpoint::new(None, crate::undo::context_state_at_history_end(messages))
+            }
+            _ => {
+                let workspace_snapshot = snapshot
+                    .as_ref()
+                    .and_then(|snapshot| snapshot.track().ok())
+                    .flatten();
+                let context_manager = self.context_manager(session_id).await;
+                let context_state = {
+                    let context_manager = context_manager.lock().await;
+                    crate::undo::ContextState {
+                        summary: context_manager.summary.clone(),
+                        retained_from: context_manager.retained_from,
+                    }
+                };
+                RevertCheckpoint::new(workspace_snapshot, context_state)
+            }
         };
 
         // 2. Collect patches after target, then revert to roll files back.
@@ -2068,65 +2128,21 @@ impl Runtime {
             snap.revert(&patches).await?;
         }
 
-        // 3. Adjust context compaction state.
-        let cm = self.context_manager(session_id).await;
-        let mut cm_lock = cm.lock().await;
-        let mut summary = cm_lock.summary.clone();
-        let mut retained_from = cm_lock.retained_from;
+        // 3. Persist the undo cursor, redo checkpoint, and active context state.
+        self.session_manager.save_revert_state_with_context(
+            session_id,
+            target_id,
+            Some(&redo_checkpoint.encode()?),
+            target_context_state.summary.as_deref(),
+            target_context_state.retained_from,
+        )?;
 
-        // Determine whether the target lies within the compacted range
-        // (index < retained_from) or the visible range (index >= retained_from).
-        let target_idx = messages.iter().position(|m| m.id == target_id);
-        let target_in_compacted = target_idx.map(|i| i < retained_from).unwrap_or(false);
-
-        if target_in_compacted {
-            // Target was covered by a previous compaction — restore the context
-            // state that was active when the target was created by walking forward
-            // to the first compaction marker after it.
-            if !crate::undo::restore_context_from_compaction(
-                messages,
-                target_id,
-                &mut summary,
-                &mut retained_from,
-            ) {
-                // No compaction marker found — target predates any compaction.
-                summary = None;
-                retained_from = 0;
-            }
+        let context_manager = self.context_manager(session_id).await;
+        {
+            let mut context_manager = context_manager.lock().await;
+            context_manager.summary = target_context_state.summary;
+            context_manager.retained_from = target_context_state.retained_from;
         }
-        // Otherwise the target is in the visible (uncompacted) range and the
-        // current compaction state was already active when the target was
-        // created — keep it unchanged.
-
-        cm_lock.summary = summary;
-        cm_lock.retained_from = retained_from;
-        drop(cm_lock);
-
-        // 4. Persist revert state.
-        if let Some(ref hash) = redo_hash {
-            let s = std::str::from_utf8(hash)?;
-            self.session_manager
-                .save_revert_state(session_id, target_id, Some(s))?;
-        } else {
-            self.session_manager
-                .save_revert_state(session_id, target_id, None)?;
-        }
-
-        // 5. Notify TUI.
-        let _ = self
-            .event_bus(session_id)
-            .await
-            .send_backend(BackendEvent::ContextCompacted {
-                session_id,
-                compaction_id: None,
-                compacted: true,
-                manual: false,
-                summary: None,
-                retained_from: 0,
-                model_id: None,
-                completed_at: None,
-                error: None,
-            });
 
         let message_content = messages
             .iter()
@@ -2145,8 +2161,8 @@ impl Runtime {
         Ok(())
     }
 
-    /// Full unrevert: restore the pre-undo workspace snapshot and clear state.
-    async fn unrevert(&self, session_id: Uuid, redo_snapshot: &[u8]) -> Result<()> {
+    /// Full unrevert: restore the pre-undo workspace and context state.
+    async fn unrevert(&self, session_id: Uuid, checkpoint: &RevertCheckpoint) -> Result<()> {
         let session = self
             .session_manager
             .load_session(session_id)?
@@ -2156,36 +2172,27 @@ impl Runtime {
         } else {
             self.workspace_for(&session.workspace_root).await?
         };
-        let hash_str = String::from_utf8_lossy(redo_snapshot);
-        if let Some(snap) = workspace.snapshot() {
-            snap.restore(&hash_str).await?;
+        if let Some(workspace_snapshot) = &checkpoint.workspace_snapshot
+            && let Some(snap) = workspace.snapshot()
+        {
+            snap.restore(workspace_snapshot).await?;
         }
 
-        // Clear revert state.
-        self.session_manager
-            .save_revert_state(session_id, Uuid::nil(), None)?;
+        // Clear the undo cursor and restore the original active context state.
+        self.session_manager.save_revert_state_with_context(
+            session_id,
+            Uuid::nil(),
+            None,
+            checkpoint.context_state.summary.as_deref(),
+            checkpoint.context_state.retained_from,
+        )?;
 
-        // Reset context.
-        let cm = self.context_manager(session_id).await;
-        let mut cm_lock = cm.lock().await;
-        cm_lock.summary = None;
-        cm_lock.retained_from = 0;
-        drop(cm_lock);
-
-        let _ = self
-            .event_bus(session_id)
-            .await
-            .send_backend(BackendEvent::ContextCompacted {
-                session_id,
-                compaction_id: None,
-                compacted: true,
-                manual: false,
-                summary: None,
-                retained_from: 0,
-                model_id: None,
-                completed_at: None,
-                error: None,
-            });
+        let context_manager = self.context_manager(session_id).await;
+        {
+            let mut context_manager = context_manager.lock().await;
+            context_manager.summary = checkpoint.context_state.summary.clone();
+            context_manager.retained_from = checkpoint.context_state.retained_from;
+        }
 
         let _ = self
             .event_bus(session_id)

@@ -103,6 +103,7 @@ function panelProps(sessionId: string): ChatPanelProps {
     onCancelRename: noop,
     onDeleteSession: noop,
     onRevert: noop,
+    revertingMessageId: null,
     onFork: noop,
     onRetryProviderError: noop,
     onOpenChangedFiles: noop,

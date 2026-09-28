@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "../api/client";
 import { useAuthStore } from "../stores/useAuthStore";
-import type { Model, Session } from "../types/api";
+import type { MessageRecord, Model, Session } from "../types/api";
 import { queryKeys } from "./queryKeys";
 import { useChatRuntime } from "./useChatRuntime";
 
@@ -33,6 +33,17 @@ const createdSession: Session = {
   context_retained_from: 0,
   busy: false,
 };
+
+const undoMessage = {
+  message: {
+    id: "undo-user-message",
+    role: "user",
+    content: "Undo this turn",
+    attachments: [],
+    metadata: {},
+  },
+  app_data: {},
+} as unknown as MessageRecord;
 
 let container: HTMLDivElement;
 let root: Root;
@@ -318,5 +329,92 @@ describe("useChatRuntime welcome submission", () => {
     expect(runtime.selectedSession?.model_id).toBe("gpt-5-6-luna");
     expect(runtime.activeModel?.model_id).toBe("gpt-5-6-luna");
     expect(runtime.thinkingLevel).toBe("gpt5:medium");
+  });
+});
+
+describe("useChatRuntime message revert", () => {
+  it("sends a revert for the session attached to the message without reading selection state", async () => {
+    vi.spyOn(api, "revertToMessage").mockResolvedValue({ accepted: true });
+
+    await act(async () => {
+      renderWithQueryClient(createElement(RuntimeProbe));
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+
+    await act(async () => {
+      await runtime.handleRevert("message-session", undoMessage.message.id);
+    });
+
+    expect(api.revertToMessage).toHaveBeenCalledWith("message-session", undoMessage.message.id);
+  });
+
+  it("shows progress while the revert request is pending and updates the cursor on success", async () => {
+    const session = { ...createdSession, session_id: "undo-session" };
+    vi.mocked(api.listSessions).mockResolvedValue({
+      items: [session],
+      next_cursor: null,
+      workspace_roots: [session.workspace_root],
+    });
+    vi.mocked(api.listMessages).mockResolvedValue({ messages: [undoMessage] });
+
+    let resolveRevert: ((value: { accepted: boolean }) => void) | undefined;
+    vi.spyOn(api, "revertToMessage").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveRevert = resolve;
+        }),
+    );
+
+    await act(async () => {
+      renderWithQueryClient(createElement(RuntimeProbe));
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+    await act(async () => {
+      runtime.selectSession(session.session_id);
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+    expect(runtime.selectedSessionId).toBe(session.session_id);
+
+    let revertPromise!: Promise<void>;
+    act(() => {
+      revertPromise = runtime.handleRevert(session.session_id, undoMessage.message.id);
+    });
+
+    expect(api.revertToMessage).toHaveBeenCalledWith(session.session_id, undoMessage.message.id);
+    expect(runtime.revertingMessageId).toBe(undoMessage.message.id);
+
+    await act(async () => {
+      resolveRevert?.({ accepted: true });
+      await revertPromise;
+    });
+
+    expect(runtime.revertingMessageId).toBeNull();
+    expect(runtime.selectedSession?.revert_message_id).toBe(undoMessage.message.id);
+  });
+
+  it("clears progress and reports a failed revert request", async () => {
+    const session = { ...createdSession, session_id: "undo-session" };
+    vi.mocked(api.listSessions).mockResolvedValue({
+      items: [session],
+      next_cursor: null,
+      workspace_roots: [session.workspace_root],
+    });
+    vi.spyOn(api, "revertToMessage").mockRejectedValue(new Error("revert failed"));
+
+    await act(async () => {
+      renderWithQueryClient(createElement(RuntimeProbe));
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+    await act(async () => {
+      runtime.selectSession(session.session_id);
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+
+    await act(async () => {
+      await runtime.handleRevert(session.session_id, undoMessage.message.id);
+    });
+
+    expect(runtime.revertingMessageId).toBeNull();
+    expect(runtime.error).toBe("revert failed");
   });
 });

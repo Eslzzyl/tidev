@@ -85,7 +85,8 @@ export interface ChatPanelProps {
   onRename: (sessionId: string) => void;
   onCancelRename: () => void;
   onDeleteSession: (session: Session) => void;
-  onRevert: (messageId: string) => void;
+  onRevert: (sessionId: string, messageId: string) => void;
+  revertingMessageId: string | null;
   onFork: (messageId: string) => void;
   onRetryProviderError: (messageId: string) => void;
   onOpenChangedFiles: () => void;
@@ -206,6 +207,7 @@ export function ChatPanel({
   onCancelRename,
   onDeleteSession,
   onRevert,
+  revertingMessageId,
   onFork,
   onRetryProviderError,
   onOpenChangedFiles,
@@ -423,6 +425,7 @@ export function ChatPanel({
                 models={models}
                 workspaceRoot={selectedSession?.workspace_root}
                 onRevert={onRevert}
+                revertingMessageId={revertingMessageId}
                 onFork={onFork}
                 onRetryProviderError={onRetryProviderError}
                 scrollToBottomRequest={scrollToBottomRequest}

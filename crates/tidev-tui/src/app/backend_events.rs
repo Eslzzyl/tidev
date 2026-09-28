@@ -283,6 +283,8 @@ impl App {
                 message_content,
                 ..
             } => {
+                self.pending_compacts.remove(&session_id);
+                self.compacting_sessions.remove(&session_id);
                 if let Some(ref mut chat) = self.message_list {
                     if let Some(ref mut ctx) = chat.active_chat_context_mut() {
                         if target_id == Uuid::nil() {

@@ -1161,6 +1161,19 @@ impl MessageList {
                     self.dirty = true;
                 }
             }
+            BackendEvent::UndoCompleted { .. } => {
+                let had_active_compaction = chat_context.compaction_id.take().is_some();
+                let previous_len = chat_context.messages.len();
+                chat_context.messages.retain(|message| {
+                    !(message.streaming
+                        && message.role == tidev_llm::message::MessageRole::System
+                        && message.metadata.compaction_manual.is_some())
+                });
+                if had_active_compaction || chat_context.messages.len() != previous_len {
+                    self.layout_index.invalidate_all();
+                    self.dirty = true;
+                }
+            }
             BackendEvent::ContextCompactionStarted {
                 compaction_id,
                 manual,

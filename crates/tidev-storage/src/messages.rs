@@ -216,6 +216,27 @@ impl SessionStore {
         Ok(())
     }
 
+    /// Replace the persisted context state, including clearing an old summary.
+    pub fn update_context_state(
+        &self,
+        session_id: Uuid,
+        summary: Option<&str>,
+        retained_from: usize,
+    ) -> Result<()> {
+        let summary = summary.map(compress_text).unwrap_or_default();
+        let conn = self.write_conn.lock().unwrap();
+        conn.execute(
+            "UPDATE sessions SET context_summary = ?1, context_retained_from = ?2, updated_at = ?3 WHERE id = ?4",
+            params![
+                summary,
+                retained_from as i64,
+                Utc::now().to_rfc3339(),
+                session_id.to_string(),
+            ],
+        )?;
+        Ok(())
+    }
+
     /// Append a single message to a session.
     pub fn append_message(&self, session_id: Uuid, msg: &Message) -> Result<()> {
         let conn = self.write_conn.lock().unwrap();

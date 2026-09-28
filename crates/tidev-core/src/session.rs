@@ -155,17 +155,8 @@ impl SessionManager {
         summary: Option<&str>,
         retained_from: usize,
     ) -> Result<()> {
-        self.store.update_session(
-            session_id,
-            None,
-            None,
-            summary,
-            Some(retained_from),
-            None,
-            None,
-            None,
-            None,
-        )
+        self.store
+            .update_context_state(session_id, summary, retained_from)
     }
 
     /// General session metadata update.
@@ -243,6 +234,24 @@ impl SessionManager {
     ) -> Result<()> {
         self.store
             .save_revert_state(session_id, message_id, redo_snapshot.map(|s| s.as_bytes()))
+    }
+
+    /// Save undo position, redo checkpoint, and active context state atomically.
+    pub fn save_revert_state_with_context(
+        &self,
+        session_id: Uuid,
+        message_id: Uuid,
+        redo_snapshot: Option<&str>,
+        context_summary: Option<&str>,
+        context_retained_from: usize,
+    ) -> Result<()> {
+        self.store.save_revert_state_with_context(
+            session_id,
+            message_id,
+            redo_snapshot,
+            context_summary,
+            context_retained_from,
+        )
     }
 
     /// Load revert state for undo/redo.

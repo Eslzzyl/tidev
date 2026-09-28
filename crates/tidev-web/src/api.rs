@@ -372,6 +372,7 @@ struct SessionDto {
     ended_at: Option<String>,
     context_summary: Option<String>,
     context_retained_from: usize,
+    revert_message_id: Option<Uuid>,
     busy: bool,
     thinking_level: String,
 }
@@ -1087,12 +1088,19 @@ fn default_shell() -> String {
     }
 }
 
-fn session_dto(runtime: &tidev_core::Runtime, session: tidev_core::SessionRecord) -> SessionDto {
+fn session_dto(
+    runtime: &tidev_core::Runtime,
+    session: tidev_core::SessionRecord,
+) -> Result<SessionDto, ApiError> {
     let thinking_level = runtime
         .session_thinking_level(session.session_id)
         .map(|l| l.to_string())
         .unwrap_or_else(|_| "none".to_string());
-    SessionDto {
+    let revert_message_id = runtime
+        .session_manager()
+        .load_revert_state(session.session_id)?
+        .map(|(message_id, _)| message_id);
+    Ok(SessionDto {
         session_id: session.session_id,
         parent_session_id: session.parent_session_id,
         workspace_root: session.workspace_root,
@@ -1107,9 +1115,10 @@ fn session_dto(runtime: &tidev_core::Runtime, session: tidev_core::SessionRecord
         ended_at: session.ended_at.map(|date| date.to_rfc3339()),
         context_summary: session.context_summary,
         context_retained_from: session.context_retained_from,
+        revert_message_id,
         busy: runtime.is_session_busy(session.session_id),
         thinking_level,
-    }
+    })
 }
 
 fn event_stream(
