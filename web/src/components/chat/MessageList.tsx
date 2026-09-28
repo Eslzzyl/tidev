@@ -416,13 +416,15 @@ const SegmentItemView = memo(function SegmentItemView({
 
   return (
     <article className={className} id={item.contentId}>
-      <ExpandableBody expanded={!collapsed} className="assistant-segment-expandable">
-        <div className="assistant-message-inner">
-          <div className="assistant-message-content message-content">
-            <div className="chat-segment-content">{content}</div>
+      {collapsed ? null : (
+        <div className="assistant-segment-expandable">
+          <div className="assistant-message-inner">
+            <div className="assistant-message-content message-content">
+              <div className="chat-segment-content">{content}</div>
+            </div>
           </div>
         </div>
-      </ExpandableBody>
+      )}
     </article>
   );
 });

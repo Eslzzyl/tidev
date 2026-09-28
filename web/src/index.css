@@ -330,6 +330,7 @@ summary {
 .markdown-body {
   min-width: 0;
   max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .markdown-body .katex-display {
