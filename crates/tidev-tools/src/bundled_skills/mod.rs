@@ -22,12 +22,25 @@ pub fn load() -> Vec<SkillInfo> {
 }
 
 fn skill_from_str(content: &'static str, dir_name: &str) -> SkillInfo {
+    skill_from_str_with_files(content, dir_name, &[])
+}
+
+fn skill_from_str_with_files(
+    content: &'static str,
+    dir_name: &str,
+    companion_files: &[(&str, &str)],
+) -> SkillInfo {
     // Normalize CRLF to LF to handle Windows line endings (git may convert
     // to CRLF on checkout).  This mirrors what parse_skill_content does.
     let content = content.replace("\r\n", "\n");
     let (name, description, frontmatter, body) = crate::skills::parse_frontmatter(&content)
         .expect("bundled SKILL.md must have valid YAML frontmatter");
     let body = body.trim().to_string();
+    let embedded_companion_files = companion_files
+        .iter()
+        .map(|(path, content)| (PathBuf::from(path), content.replace("\r\n", "\n")))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let companion_files = embedded_companion_files.keys().cloned().collect();
 
     SkillInfo {
         name,
@@ -37,7 +50,8 @@ fn skill_from_str(content: &'static str, dir_name: &str) -> SkillInfo {
         location: PathBuf::from(format!("__builtin__/{}/SKILL.md", dir_name)),
         document: content,
         content: body,
-        companion_files: Vec::new(),
+        companion_files,
+        embedded_companion_files,
     }
 }
 

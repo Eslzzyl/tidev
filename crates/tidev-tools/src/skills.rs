@@ -63,6 +63,8 @@ pub struct SkillInfo {
     /// The body of SKILL.md after frontmatter.
     pub content: String,
     pub companion_files: Vec<PathBuf>,
+    /// Content for companion files embedded into the binary.
+    pub embedded_companion_files: BTreeMap<PathBuf, String>,
 }
 
 #[derive(Debug, Default)]
@@ -311,6 +313,12 @@ impl SkillCatalog {
             return Ok(document);
         }
 
+        if let Some(document) = skill.embedded_companion_files.get(&normalized_path) {
+            let mut document = document.clone();
+            crate::builtin::utils::truncate_in_place(&mut document, max_output_bytes);
+            return Ok(document);
+        }
+
         let resolved = resolve_skill_relative_path(&skill.directory, relative_path)?;
 
         if resolved.is_dir() {
@@ -376,6 +384,10 @@ impl SkillCatalog {
                 offset as usize,
                 limit as usize,
             );
+        }
+
+        if let Some(document) = skill.embedded_companion_files.get(&normalized_path) {
+            return paginate_skill_text(relative_path, document, offset as usize, limit as usize);
         }
 
         let resolved = resolve_skill_relative_path(&skill.directory, relative_path)?;
@@ -854,6 +866,7 @@ fn parse_skill_content(
         document: normalized_content,
         content: body,
         companion_files,
+        embedded_companion_files: BTreeMap::new(),
     })
 }
 
@@ -1175,6 +1188,7 @@ mod tests {
             ),
             content: format!("Body of {name}."),
             companion_files: Vec::new(),
+            embedded_companion_files: BTreeMap::new(),
         }
     }
 
