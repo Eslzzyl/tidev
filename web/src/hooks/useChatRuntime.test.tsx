@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
 
-import { act, createElement } from "react";
+import { act, createElement, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "../api/client";
 import { useAuthStore } from "../stores/useAuthStore";
-import type { Session } from "../types/api";
+import type { Model, Session } from "../types/api";
+import { queryKeys } from "./queryKeys";
 import { useChatRuntime } from "./useChatRuntime";
 
 vi.mock("../api/events", () => ({
@@ -34,7 +36,12 @@ const createdSession: Session = {
 
 let container: HTMLDivElement;
 let root: Root;
+let queryClient: QueryClient;
 let runtime: ReturnType<typeof useChatRuntime>;
+
+function renderWithQueryClient(children: ReactNode) {
+  root.render(createElement(QueryClientProvider, { client: queryClient }, children));
+}
 
 function RuntimeProbe() {
   runtime = useChatRuntime();
@@ -43,6 +50,7 @@ function RuntimeProbe() {
 
 beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -71,6 +79,7 @@ beforeEach(() => {
 
 afterEach(() => {
   act(() => root.unmount());
+  queryClient.clear();
   container.remove();
   vi.restoreAllMocks();
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: false });
@@ -79,7 +88,7 @@ afterEach(() => {
 describe("useChatRuntime welcome submission", () => {
   it("preserves sidebar filters when the first message creates a session", async () => {
     await act(async () => {
-      root.render(createElement(RuntimeProbe));
+      renderWithQueryClient(createElement(RuntimeProbe));
       await new Promise((resolve) => window.setTimeout(resolve, 0));
     });
 
@@ -97,6 +106,42 @@ describe("useChatRuntime welcome submission", () => {
 
     expect(runtime.sessionSearch).toBe("important conversation");
     expect(runtime.sessionWorkspaceRoot).toBe("/existing-workspace");
+  });
+
+  it("updates composer models after the model query is invalidated", async () => {
+    const model: Model = {
+      provider_id: "custom",
+      provider_display_name: "Custom",
+      model_id: "custom-model",
+      model_display_name: "Custom Model",
+      context_window: 8192,
+      connected: false,
+      active: true,
+      supports_vision: false,
+      is_gpt: false,
+      thinking_levels: [],
+      thinking_level: "",
+    };
+    vi.mocked(api.listModels)
+      .mockReset()
+      .mockResolvedValueOnce([model])
+      .mockResolvedValueOnce([{ ...model, connected: true }]);
+
+    await act(async () => {
+      renderWithQueryClient(createElement(RuntimeProbe));
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+
+    expect(runtime.models[0]?.connected).toBe(false);
+
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.models });
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+
+    expect(api.listModels).toHaveBeenCalledTimes(2);
+    expect(queryClient.getQueryData<Model[]>(queryKeys.models)?.[0]?.connected).toBe(true);
+    expect(runtime.models[0]?.connected).toBe(true);
   });
 
   it("updates activeModel and thinkingLevel when selecting a session", async () => {
@@ -123,7 +168,14 @@ describe("useChatRuntime welcome submission", () => {
       active: false,
       supports_vision: true,
       is_gpt: true,
-      thinking_levels: ["gpt5:off", "gpt5:low", "gpt5:medium", "gpt5:high", "gpt5:xhigh", "gpt5:max"],
+      thinking_levels: [
+        "gpt5:off",
+        "gpt5:low",
+        "gpt5:medium",
+        "gpt5:high",
+        "gpt5:xhigh",
+        "gpt5:max",
+      ],
       thinking_level: "gpt5:medium",
     };
 
@@ -172,7 +224,7 @@ describe("useChatRuntime welcome submission", () => {
     });
 
     await act(async () => {
-      root.render(createElement(RuntimeProbe));
+      renderWithQueryClient(createElement(RuntimeProbe));
       await new Promise((resolve) => window.setTimeout(resolve, 0));
     });
 
@@ -214,7 +266,14 @@ describe("useChatRuntime welcome submission", () => {
       active: false,
       supports_vision: true,
       is_gpt: true,
-      thinking_levels: ["gpt5:off", "gpt5:low", "gpt5:medium", "gpt5:high", "gpt5:xhigh", "gpt5:max"],
+      thinking_levels: [
+        "gpt5:off",
+        "gpt5:low",
+        "gpt5:medium",
+        "gpt5:high",
+        "gpt5:xhigh",
+        "gpt5:max",
+      ],
       thinking_level: "gpt5:medium",
     };
 
@@ -251,7 +310,7 @@ describe("useChatRuntime welcome submission", () => {
     }
 
     await act(async () => {
-      root.render(createElement(RoutedProbe));
+      renderWithQueryClient(createElement(RoutedProbe));
       await new Promise((resolve) => window.setTimeout(resolve, 0));
     });
 

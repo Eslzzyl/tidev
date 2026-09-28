@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { ApiError, api } from "../api/client";
 import { openBackendEvents, openFrontendRequests } from "../api/events";
@@ -54,8 +55,11 @@ import {
   updateSubagentEntry,
 } from "./chatRuntime/streamState";
 import { mergeMessageRecords } from "./chatRuntime/messageState";
+import { queryKeys } from "./queryKeys";
+import { useModels } from "./workspaceQueries";
 
 const SESSION_PAGE_SIZE = 50;
+const EMPTY_MODELS: Model[] = [];
 
 type SessionStatus = "idle" | "loading" | "ready" | "missing" | "error";
 
@@ -75,7 +79,6 @@ function latestUserMessageId(
   );
 }
 
-
 export interface UseChatRuntimeOptions {
   routeSessionId?: string | null;
   onSelectSessionRoute?: (sessionId: string | null) => void;
@@ -83,6 +86,8 @@ export interface UseChatRuntimeOptions {
 
 export function useChatRuntime(options?: UseChatRuntimeOptions) {
   const { routeSessionId, onSelectSessionRoute } = options ?? {};
+  const queryClient = useQueryClient();
+  const { data: models = EMPTY_MODELS, error: modelsError } = useModels();
   const authChecking = useAuthStore((state) => state.isLoading);
   const authRequired = useAuthStore((state) => state.isAuthRequired);
   const authenticated = useAuthStore((state) => state.isAuthenticated);
@@ -111,7 +116,6 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
   const [streams, setStreams] = useState<Record<string, StreamMessage>>({});
   const [reasoningDisplays, setReasoningDisplays] = useState<Record<string, ReasoningDisplay>>({});
   const [requests, setRequests] = useState<FrontendRequest[]>([]);
-  const [models, setModels] = useState<Model[]>([]);
   const [startupModelFallback, setStartupModelFallback] =
     useState<StartupStatusResponse["model_fallback"]>(null);
   const [startupStatusLoaded, setStartupStatusLoaded] = useState(false);
@@ -182,6 +186,18 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
     [models, selectedSession],
   );
   const selectedSessionRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (modelsError) {
+      setError(
+        modelsError instanceof Error ? modelsError.message : i18n.t("Failed to load models"),
+      );
+    }
+  }, [modelsError]);
+  useEffect(() => {
+    if (selectedSessionRef.current !== null) return;
+    setThinkingLevel((current) => current ?? models.find((model) => model.active)?.thinking_level);
+  }, [models]);
+
   const sessionsRef = useRef<Session[]>([]);
   const instructionNoticesRef = useRef<InstructionNotice[]>([]);
   const instructionNoticeRevisionRef = useRef(0);
@@ -834,20 +850,6 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
     );
   }, []);
 
-  const refreshModels = useCallback(async () => {
-    try {
-      const available = await api.listModels();
-      setModels(available);
-      if (selectedSessionRef.current === null) {
-        setThinkingLevel(
-          (current) => current ?? available.find((model) => model.active)?.thinking_level,
-        );
-      }
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : i18n.t("Failed to load models"));
-    }
-  }, []);
-
   useEffect(() => {
     if (authChecking || (authRequired && !authenticated)) return;
 
@@ -887,10 +889,6 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
       cancelled = true;
     };
   }, [authChecking, authRequired, authenticated]);
-
-  useEffect(() => {
-    void refreshModels();
-  }, [refreshModels]);
 
   const applyEvent = useCallback(
     (envelope: EventEnvelope) => {
@@ -1950,8 +1948,8 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
         );
       }
       const selected = await api.selectModel(model.provider_id, model.model_id);
-      setModels((current) =>
-        current.map((item) => ({
+      queryClient.setQueryData<Model[]>(queryKeys.models, (current) =>
+        current?.map((item) => ({
           ...item,
           active: item.provider_id === selected.provider_id && item.model_id === selected.model_id,
           thinking_level:
@@ -1983,8 +1981,8 @@ export function useChatRuntime(options?: UseChatRuntimeOptions) {
         );
       }
       await api.setThinkingLevel(activeModel.provider_id, activeModel.model_id, level);
-      setModels((current) =>
-        current.map((item) =>
+      queryClient.setQueryData<Model[]>(queryKeys.models, (current) =>
+        current?.map((item) =>
           `${item.provider_id}:${item.model_id}` === modelKey
             ? { ...item, thinking_level: level }
             : item,
