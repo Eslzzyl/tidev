@@ -5,6 +5,7 @@ pub mod agent_type;
 pub mod approval;
 pub mod attachment;
 pub mod backend_event;
+pub mod codex_auth;
 mod event_hub;
 pub mod git;
 mod image;
@@ -28,6 +29,7 @@ pub use approval::{
     FrontendResponse, ToolCallWithViolations,
 };
 pub use backend_event::{BackendEvent, agent_event_to_backend_event};
+pub use codex_auth::{CodexAuthEndpoints, CodexAuthEvent, CodexAuthService, CodexLoginMode};
 pub use event_hub::{EventCursor, EventEnvelope, EventReplay, EventSubscription};
 pub use git::{
     GitChangeKind, GitCommitSummary, GitDiffFile, GitDiffScope, GitDiffSnapshot, GitError,

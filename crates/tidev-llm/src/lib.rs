@@ -30,10 +30,44 @@ use reqwest::{
     header::{HeaderName, HeaderValue, USER_AGENT},
 };
 use std::{
+    collections::BTreeMap,
+    future::Future,
+    pin::Pin,
     sync::{Arc, RwLock},
     time::Duration,
 };
 use tokio::sync::mpsc::UnboundedSender;
+
+use crate::message::Message;
+
+use error::{MAX_RETRIES, backoff_delay, backoff_sleep, classify_anyhow_error};
+
+/// Authentication material resolved immediately before an LLM request.
+#[derive(Clone)]
+pub struct RequestAuth {
+    pub bearer_token: String,
+    pub headers: BTreeMap<String, String>,
+}
+
+impl std::fmt::Debug for RequestAuth {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RequestAuth")
+            .field("bearer_token", &"<redacted>")
+            .field("headers", &self.headers)
+            .finish()
+    }
+}
+
+/// Resolve dynamic provider authentication without coupling the protocol crate
+/// to tidev's configuration or persistence crates.
+pub trait RequestAuthResolver: Send + Sync + std::fmt::Debug {
+    fn resolve<'a>(
+        &'a self,
+        provider_id: &'a str,
+        force_refresh: bool,
+    ) -> Pin<Box<dyn Future<Output = Result<RequestAuth>> + Send + 'a>>;
+}
 
 #[derive(Clone, Debug)]
 pub struct LlmDebugConfig {
@@ -42,10 +76,6 @@ pub struct LlmDebugConfig {
     pub save_response_body: bool,
     pub max_response_files: usize,
 }
-
-use crate::message::Message;
-
-use error::{MAX_RETRIES, backoff_delay, backoff_sleep, classify_anyhow_error};
 
 /// Ensures Reqwest can build Rustls clients with the Ring provider.
 fn ensure_rustls_crypto_provider() {
@@ -98,26 +128,95 @@ pub(crate) fn apply_request_headers(
         })
 }
 
+pub(crate) async fn resolve_request_auth(
+    model: &LlmProviderConfig,
+    resolver: Option<&dyn RequestAuthResolver>,
+    force_refresh: bool,
+) -> Result<RequestAuth> {
+    if model.api_type == ApiType::OpenAiCodexResponses {
+        let resolver = resolver.with_context(|| {
+            format!(
+                "missing request auth resolver for Codex provider '{}'",
+                model.provider_id
+            )
+        })?;
+        return resolver.resolve(&model.provider_id, force_refresh).await;
+    }
+
+    let bearer_token = model
+        .api_key
+        .clone()
+        .with_context(|| format!("missing API key for provider '{}'", model.provider_id))?;
+    Ok(RequestAuth {
+        bearer_token,
+        headers: BTreeMap::new(),
+    })
+}
+
+pub(crate) fn apply_request_auth(
+    request: RequestBuilder,
+    model: &LlmProviderConfig,
+    auth: &RequestAuth,
+) -> Result<RequestBuilder> {
+    let request = request.bearer_auth(&auth.bearer_token);
+    let request = auth.headers.iter().try_fold(
+        request,
+        |request, (name, value)| -> Result<RequestBuilder> {
+            let header_name = HeaderName::from_bytes(name.as_bytes())
+                .with_context(|| format!("invalid auth header name '{name}'"))?;
+            let header_value = HeaderValue::from_str(value)
+                .with_context(|| format!("invalid auth header value '{name}'"))?;
+            Ok(request.header(header_name, header_value))
+        },
+    )?;
+
+    if model.api_type == ApiType::OpenAiCodexResponses {
+        Ok(request
+            .header("originator", "tidev")
+            .header("OpenAI-Beta", "responses=experimental")
+            .header("Accept", "text/event-stream")
+            .header("Content-Type", "application/json"))
+    } else {
+        Ok(request)
+    }
+}
+
 fn prepare_model_for_request(
     mut model: LlmProviderConfig,
     context: LlmRequestContext,
 ) -> Result<LlmProviderConfig> {
-    let Some(session_header) = model.session_header.clone() else {
-        return Ok(model);
-    };
-    let session_id = context
-        .session_id
-        .with_context(|| {
-            format!(
-                "provider '{}' requires a session id for header '{session_header}'",
-                model.provider_id
-            )
-        })?
-        .to_string();
-    model
-        .headers
-        .retain(|name, _| !name.eq_ignore_ascii_case(&session_header));
-    model.headers.insert(session_header, session_id);
+    if let Some(session_header) = model.session_header.clone() {
+        let session_id = context
+            .session_id
+            .with_context(|| {
+                format!(
+                    "provider '{}' requires a session id for header '{session_header}'",
+                    model.provider_id
+                )
+            })?
+            .to_string();
+        model
+            .headers
+            .retain(|name, _| !name.eq_ignore_ascii_case(&session_header));
+        model.headers.insert(session_header, session_id);
+    }
+
+    if model.api_type == ApiType::OpenAiCodexResponses {
+        model.headers.retain(|name, _| {
+            !name.eq_ignore_ascii_case("session-id")
+                && !name.eq_ignore_ascii_case("x-client-request-id")
+        });
+        if let Some(session_id) = context.session_id {
+            let session_id = session_id.to_string();
+            model
+                .headers
+                .insert("session-id".to_string(), session_id.clone());
+            model
+                .headers
+                .insert("x-client-request-id".to_string(), session_id);
+        }
+    }
+
     Ok(model)
 }
 
@@ -130,6 +229,7 @@ fn prepare_model_for_request(
 pub struct LlmClient {
     http: Client,
     debug_config: Arc<RwLock<LlmDebugConfig>>,
+    auth_resolver: Option<Arc<dyn RequestAuthResolver>>,
 }
 
 impl LlmClient {
@@ -144,11 +244,12 @@ impl LlmClient {
         save_response_body: bool,
         max_response_files: usize,
     ) -> Result<Self> {
-        Self::new_with_user_agent(
+        Self::new_with_user_agent_and_auth_resolver(
             save_request_body,
             max_request_files,
             save_response_body,
             max_response_files,
+            None,
             None,
         )
     }
@@ -163,6 +264,24 @@ impl LlmClient {
         save_response_body: bool,
         max_response_files: usize,
         user_agent: Option<&str>,
+    ) -> Result<Self> {
+        Self::new_with_user_agent_and_auth_resolver(
+            save_request_body,
+            max_request_files,
+            save_response_body,
+            max_response_files,
+            user_agent,
+            None,
+        )
+    }
+
+    pub fn new_with_user_agent_and_auth_resolver(
+        save_request_body: bool,
+        max_request_files: usize,
+        save_response_body: bool,
+        max_response_files: usize,
+        user_agent: Option<&str>,
+        auth_resolver: Option<Arc<dyn RequestAuthResolver>>,
     ) -> Result<Self> {
         ensure_rustls_crypto_provider();
         let mut builder = Client::builder();
@@ -183,6 +302,7 @@ impl LlmClient {
                 save_response_body,
                 max_response_files,
             })),
+            auth_resolver,
         })
     }
 
@@ -315,6 +435,13 @@ impl LlmClient {
         tx: UnboundedSender<LlmEvent>,
         thinking_level: crate::reasoning::ThinkingLevelType,
     ) -> std::result::Result<(), error::NetworkError> {
+        if model.api_type == ApiType::OpenAiCodexResponses {
+            return self
+                .stream_chat_inner(model, messages, tools, tx, thinking_level)
+                .await
+                .map_err(classify_anyhow_error);
+        }
+
         // Determine how many retries we can afford.
         let max = MAX_RETRIES;
 
@@ -365,6 +492,23 @@ impl LlmClient {
         tools: Vec<ToolDefinition>,
         tx: Option<UnboundedSender<LlmEvent>>,
     ) -> Result<LlmCompletion> {
+        if model.api_type == ApiType::OpenAiCodexResponses {
+            let debug = self.debug_config();
+            return responses::complete_responses(
+                &self.http,
+                model,
+                messages,
+                tools,
+                tx.as_ref(),
+                debug.save_request_body,
+                debug.max_request_files,
+                debug.save_response_body,
+                debug.max_response_files,
+                self.auth_resolver.as_deref(),
+            )
+            .await;
+        }
+
         let debug = self.debug_config();
         for attempt in 1..=MAX_RETRIES {
             let result = match model.api_type {
@@ -394,7 +538,7 @@ impl LlmClient {
                     )
                     .await
                 }
-                ApiType::OpenAiResponses => {
+                ApiType::OpenAiResponses | ApiType::OpenAiCodexResponses => {
                     responses::complete_responses(
                         &self.http,
                         model.clone(),
@@ -405,6 +549,7 @@ impl LlmClient {
                         debug.max_request_files,
                         debug.save_response_body,
                         debug.max_response_files,
+                        self.auth_resolver.as_deref(),
                     )
                     .await
                 }
@@ -496,7 +641,7 @@ impl LlmClient {
                 )
                 .await
             }
-            ApiType::OpenAiResponses => {
+            ApiType::OpenAiResponses | ApiType::OpenAiCodexResponses => {
                 responses::stream_responses(
                     &self.http,
                     model,
@@ -508,6 +653,7 @@ impl LlmClient {
                     debug.max_request_files,
                     debug.save_response_body,
                     debug.max_response_files,
+                    self.auth_resolver.as_deref(),
                 )
                 .await
             }
@@ -531,7 +677,19 @@ impl LlmClient {
 
 #[cfg(test)]
 mod tests {
-    use super::{LlmClient, LlmDebugConfig};
+    use super::{
+        ApiType, LlmClient, LlmDebugConfig, LlmProviderConfig, RequestAuth, RequestAuthResolver,
+    };
+    use crate::message::{Message, MessageRole};
+    use crate::reasoning::ThinkingLevelType;
+    use std::collections::BTreeMap;
+    use std::future::Future;
+    use std::io;
+    use std::pin::Pin;
+    use std::sync::Arc;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+    use tokio::sync::Mutex;
 
     #[test]
     fn cloned_clients_share_debug_configuration() {
@@ -550,5 +708,235 @@ mod tests {
         assert_eq!(current.max_request_files, 9);
         assert!(current.save_response_body);
         assert_eq!(current.max_response_files, 7);
+    }
+    #[derive(Debug)]
+    struct TestResolver {
+        force_refresh: Arc<Mutex<Vec<bool>>>,
+    }
+
+    impl RequestAuthResolver for TestResolver {
+        fn resolve<'a>(
+            &'a self,
+            _provider_id: &'a str,
+            force_refresh: bool,
+        ) -> Pin<Box<dyn Future<Output = anyhow::Result<RequestAuth>> + Send + 'a>> {
+            let force_refreshes = self.force_refresh.clone();
+            Box::pin(async move {
+                force_refreshes.lock().await.push(force_refresh);
+                Ok(RequestAuth {
+                    bearer_token: if force_refresh {
+                        "refreshed-access-token".into()
+                    } else {
+                        "initial-access-token".into()
+                    },
+                    headers: BTreeMap::new(),
+                })
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn codex_retries_401_with_the_exact_same_body() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let mut requests = Vec::new();
+            for index in 0..2 {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let (headers, body) = read_http_request(&mut stream).await.unwrap();
+                requests.push((headers, body));
+                let response = if index == 0 {
+                    "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                        .to_string()
+                } else {
+                    let body = r#"{"output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}"#;
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        body.len(),
+                        body
+                    )
+                };
+                stream.write_all(response.as_bytes()).await.unwrap();
+            }
+            requests
+        });
+
+        let force_refresh = Arc::new(Mutex::new(Vec::new()));
+        let resolver = Arc::new(TestResolver {
+            force_refresh: force_refresh.clone(),
+        });
+        let client = LlmClient::new_with_user_agent_and_auth_resolver(
+            false,
+            1,
+            false,
+            1,
+            None,
+            Some(resolver),
+        )
+        .unwrap();
+        let model = LlmProviderConfig {
+            provider_id: "openai-codex".into(),
+            api_type: ApiType::OpenAiCodexResponses,
+            api_key: None,
+            base_url: format!("http://{address}/codex"),
+            user_agent: None,
+            headers: BTreeMap::new(),
+            session_header: None,
+            model_id: "gpt-5.5".into(),
+            request_model_id: Some("gpt-5.5".into()),
+            system_prompt: None,
+            thinking_level: ThinkingLevelType::None,
+            extra_body: None,
+            max_output_tokens: 256,
+            context_window: 128_000,
+            temperature: None,
+            supports_images: false,
+            supports_parallel_tool_calls: true,
+        };
+
+        let result = client
+            .complete_with_messages(
+                model,
+                vec![Message::new(MessageRole::User, "same request")],
+                Vec::new(),
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(result, "ok");
+        assert_eq!(*force_refresh.lock().await, vec![false, true]);
+
+        let requests = server.await.unwrap();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0].1, requests[1].1);
+        assert!(requests[0].0.starts_with("POST /codex/responses HTTP/1.1"));
+        let first_headers = requests[0].0.to_ascii_lowercase();
+        let second_headers = requests[1].0.to_ascii_lowercase();
+        assert!(first_headers.contains("authorization: bearer initial-access-token"));
+        assert!(second_headers.contains("authorization: bearer refreshed-access-token"));
+        assert!(first_headers.contains("originator: tidev"));
+        assert!(first_headers.contains("openai-beta: responses=experimental"));
+    }
+
+    #[tokio::test]
+    async fn codex_does_not_retry_after_partial_stream_output() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let _ = read_http_request(&mut stream).await.unwrap();
+            let body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n";
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+        });
+
+        let resolver = Arc::new(TestResolver {
+            force_refresh: Arc::new(Mutex::new(Vec::new())),
+        });
+        let client = LlmClient::new_with_user_agent_and_auth_resolver(
+            false,
+            1,
+            false,
+            1,
+            None,
+            Some(resolver),
+        )
+        .unwrap();
+        let model = LlmProviderConfig {
+            provider_id: "openai-codex".into(),
+            api_type: ApiType::OpenAiCodexResponses,
+            api_key: None,
+            base_url: format!("http://{address}/codex"),
+            user_agent: None,
+            headers: BTreeMap::new(),
+            session_header: None,
+            model_id: "gpt-5.5".into(),
+            request_model_id: Some("gpt-5.5".into()),
+            system_prompt: None,
+            thinking_level: ThinkingLevelType::None,
+            extra_body: None,
+            max_output_tokens: 256,
+            context_window: 128_000,
+            temperature: None,
+            supports_images: false,
+            supports_parallel_tool_calls: true,
+        };
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        client
+            .stream_chat(
+                model,
+                vec![Message::new(MessageRole::User, "partial")],
+                Vec::new(),
+                tx,
+                ThinkingLevelType::None,
+            )
+            .await;
+
+        let mut saw_delta = false;
+        let mut saw_non_retryable_failure = false;
+        while let Ok(event) = rx.try_recv() {
+            match event {
+                super::event::LlmEvent::Delta { content } if content == "partial" => {
+                    saw_delta = true;
+                }
+                super::event::LlmEvent::Failed { retryable, .. } => {
+                    saw_non_retryable_failure = !retryable;
+                }
+                _ => {}
+            }
+        }
+        assert!(saw_delta);
+        assert!(saw_non_retryable_failure);
+        server.await.unwrap();
+    }
+
+    async fn read_http_request(
+        stream: &mut tokio::net::TcpStream,
+    ) -> io::Result<(String, Vec<u8>)> {
+        let mut request = Vec::new();
+        let header_end;
+        loop {
+            let mut chunk = [0_u8; 4096];
+            let count = stream.read(&mut chunk).await?;
+            if count == 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "request closed before headers",
+                ));
+            }
+            request.extend_from_slice(&chunk[..count]);
+            if let Some(index) = request.windows(4).position(|window| window == b"\r\n\r\n") {
+                header_end = index + 4;
+                break;
+            }
+        }
+        let headers = String::from_utf8_lossy(&request[..header_end]).into_owned();
+        let content_length = headers
+            .lines()
+            .find_map(|line| {
+                line.strip_prefix("Content-Length: ")
+                    .or_else(|| line.strip_prefix("content-length: "))
+            })
+            .and_then(|value| value.trim().parse::<usize>().ok())
+            .unwrap_or(0);
+        while request.len() < header_end + content_length {
+            let mut chunk = [0_u8; 4096];
+            let count = stream.read(&mut chunk).await?;
+            if count == 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "request closed before body",
+                ));
+            }
+            request.extend_from_slice(&chunk[..count]);
+        }
+        Ok((
+            headers,
+            request[header_end..header_end + content_length].to_vec(),
+        ))
     }
 }

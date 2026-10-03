@@ -8,6 +8,7 @@ pub(super) fn normalized_api_type(value: Option<&str>) -> Result<Option<String>,
     let api_type = match value.to_ascii_lowercase().as_str() {
         "openai_chat_completions" | "openai" | "chat" => ApiType::OpenAiChatCompletions,
         "openai_responses" | "responses" => ApiType::OpenAiResponses,
+        "openai_codex_responses" | "openai_codex" | "codex" => ApiType::OpenAiCodexResponses,
         "anthropic" | "claude" => ApiType::Anthropic,
         "google_gemini" | "gemini" | "google" => ApiType::GoogleGemini,
         _ => {
@@ -48,6 +49,11 @@ pub(super) fn build_provider_config(
     let display_name = required_provider_field(&request.display_name, "display_name")?;
     let base_url = required_provider_field(&request.base_url, "base_url")?;
     let api_type = normalized_api_type(request.api_type.as_deref())?;
+    if api_type.as_deref() == Some("openai_codex_responses") {
+        return Err(ApiError::bad_request(
+            "Codex OAuth providers are managed by the bundled openai-codex provider; use 'tidev auth login' or TUI /connect",
+        ));
+    }
     if let Some(user_agent) = request.user_agent.as_deref() {
         tidev_config::provider::validate_user_agent(user_agent)
             .map_err(|error| ApiError::bad_request(format!("invalid user_agent: {error}")))?;
@@ -158,12 +164,24 @@ pub(super) fn provider_dto(
 ) -> Option<ProviderDto> {
     let provider = config.provider(provider_id)?;
     let is_bundled = config.bundled_providers.contains_key(provider_id);
+    let connected = provider
+        .models
+        .iter()
+        .any(|(_, model)| auth.is_connected_for(provider_id, provider.resolve_api_type(model)));
+    let is_codex = provider
+        .models
+        .values()
+        .any(|model| provider.resolve_api_type(model) == ApiType::OpenAiCodexResponses);
+    let oauth = is_codex.then(|| auth.codex_oauth(provider_id)).flatten();
     Some(ProviderDto {
         id: provider_id.to_owned(),
         display_name: provider.display_name.clone(),
         source: if is_bundled { "bundled" } else { "user" },
         can_delete: !is_bundled && config.providers.contains_key(provider_id),
-        connected: auth.api_key(provider_id).is_some(),
+        connected,
+        auth_method: if is_codex { "oauth" } else { "api_key" },
+        oauth_account_id: oauth.map(|credential| credential.account_id.clone()),
+        oauth_expires_at_ms: oauth.map(|credential| credential.expires_at_ms),
         base_url: provider.base_url.clone(),
         api_type: provider.api_type.clone(),
         user_agent: provider.user_agent.clone(),
@@ -288,7 +306,7 @@ pub(super) async fn delete_provider(
 
     let auth_before = state.runtime.auth();
     state.runtime.update_auth(|auth| {
-        auth.remove_api_key(&provider_id);
+        auth.remove_credentials(&provider_id);
     });
     if let Err(error) = state.runtime.save_auth() {
         state.runtime.update_auth(|auth| *auth = auth_before);
@@ -314,6 +332,21 @@ pub(super) async fn connect_provider(
         return Err(ApiError::not_found(format!(
             "provider '{provider_id}' not found"
         )));
+    }
+    if state
+        .runtime
+        .config()
+        .provider(&provider_id)
+        .is_some_and(|provider| {
+            provider
+                .models
+                .values()
+                .any(|model| provider.resolve_api_type(model) == ApiType::OpenAiCodexResponses)
+        })
+    {
+        return Err(ApiError::bad_request(
+            "Codex subscriptions require OAuth login from the tidev CLI or TUI",
+        ));
     }
     let api_key = required_provider_field(&request.api_key, "api_key")?;
     let auth_before = state.runtime.auth();
@@ -341,7 +374,7 @@ pub(super) async fn disconnect_provider(
     }
     let auth_before = state.runtime.auth();
     state.runtime.update_auth(|auth| {
-        auth.remove_api_key(&provider_id);
+        auth.remove_credentials(&provider_id);
     });
     if let Err(error) = state.runtime.save_auth() {
         state.runtime.update_auth(|auth| *auth = auth_before);

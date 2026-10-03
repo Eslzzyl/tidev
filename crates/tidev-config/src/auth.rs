@@ -1,6 +1,10 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::fmt;
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::paths::ConfigPaths;
 use crate::reasoning::ThinkingLevelType;
@@ -42,15 +46,102 @@ impl AuthStore {
         paths.ensure_directories()?;
         let contents =
             serde_json::to_string_pretty(self).context("failed to serialize auth store")?;
-        std::fs::write(&paths.auth_file, contents)
-            .with_context(|| format!("failed to write {}", paths.auth_file.display()))?;
-        Ok(())
+        let parent = paths
+            .auth_file
+            .parent()
+            .context("auth file has no parent directory")?;
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let temp_path = parent.join(format!(
+            ".{}.tmp-{}-{}",
+            paths
+                .auth_file
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("auth.json"),
+            std::process::id(),
+            nonce
+        ));
+        let mut file = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temp_path)
+            .with_context(|| format!("failed to create {}", temp_path.display()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        }
+        let result = (|| -> Result<()> {
+            file.write_all(contents.as_bytes())
+                .with_context(|| format!("failed to write {}", temp_path.display()))?;
+            file.sync_all()
+                .with_context(|| format!("failed to sync {}", temp_path.display()))?;
+            std::fs::rename(&temp_path, &paths.auth_file)
+                .with_context(|| format!("failed to replace {}", paths.auth_file.display()))?;
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = std::fs::remove_file(&temp_path);
+        }
+        result
     }
 
     pub fn set_api_key(&mut self, provider_id: impl Into<String>, api_key: impl Into<String>) {
         let provider_id = provider_id.into();
         let api_key = api_key.into();
-        self.providers.entry(provider_id).or_default().api_key = Some(api_key);
+        let auth = self.providers.entry(provider_id).or_default();
+        auth.api_key = Some(api_key);
+        auth.codex_oauth = None;
+    }
+
+    pub fn set_codex_oauth(
+        &mut self,
+        provider_id: impl Into<String>,
+        credential: CodexOAuthCredential,
+    ) {
+        let auth = self.providers.entry(provider_id.into()).or_default();
+        auth.api_key = None;
+        auth.codex_oauth = Some(credential);
+    }
+
+    pub fn codex_oauth(&self, provider_id: &str) -> Option<&CodexOAuthCredential> {
+        self.providers
+            .get(provider_id)
+            .and_then(|provider| provider.codex_oauth.as_ref())
+    }
+
+    pub fn is_connected_for(&self, provider_id: &str, api_type: ApiType) -> bool {
+        match api_type {
+            ApiType::OpenAiCodexResponses => self.codex_oauth(provider_id).is_some(),
+            _ => self.api_key(provider_id).is_some(),
+        }
+    }
+
+    pub fn remove_credentials(&mut self, provider_id: &str) -> bool {
+        let Some(auth) = self.providers.get_mut(provider_id) else {
+            return false;
+        };
+        let removed = auth.api_key.take().is_some() || auth.codex_oauth.take().is_some();
+        if auth.api_key.is_none() && auth.codex_oauth.is_none() {
+            self.providers.remove(provider_id);
+        }
+        removed
+    }
+
+    /// Remove an OAuth credential for a single provider.
+    pub fn remove_codex_oauth(&mut self, provider_id: &str) -> bool {
+        if let Some(auth) = self.providers.get_mut(provider_id)
+            && auth.codex_oauth.take().is_some()
+        {
+            if auth.api_key.is_none() {
+                self.providers.remove(provider_id);
+            }
+            return true;
+        }
+        false
     }
 
     pub fn api_key(&self, provider_id: &str) -> Option<&str> {
@@ -83,10 +174,54 @@ impl AuthStore {
 // ProviderAuth
 // ---------------------------------------------------------------------------
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct ProviderAuth {
     #[serde(default)]
     pub api_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codex_oauth: Option<CodexOAuthCredential>,
+}
+
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CodexOAuthCredential {
+    pub access_token: String,
+    pub refresh_token: String,
+    pub expires_at_ms: u64,
+    pub account_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id_token: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub is_fedramp: Option<bool>,
+}
+
+impl CodexOAuthCredential {
+    pub fn is_expiring(&self, now_ms: u64, skew_ms: u64) -> bool {
+        self.expires_at_ms <= now_ms.saturating_add(skew_ms)
+    }
+}
+
+impl fmt::Debug for CodexOAuthCredential {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CodexOAuthCredential")
+            .field("access_token", &"<redacted>")
+            .field("refresh_token", &"<redacted>")
+            .field("expires_at_ms", &self.expires_at_ms)
+            .field("account_id", &self.account_id)
+            .field("id_token", &self.id_token.as_ref().map(|_| "<redacted>"))
+            .field("is_fedramp", &self.is_fedramp)
+            .finish()
+    }
+}
+
+impl fmt::Debug for ProviderAuth {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ProviderAuth")
+            .field("api_key", &self.api_key.as_ref().map(|_| "<redacted>"))
+            .field("codex_oauth", &self.codex_oauth)
+            .finish()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -160,7 +295,22 @@ impl ActiveModel {
                 format!("{}/chat/completions", self.base_url.trim_end_matches('/'))
             }
             ApiType::OpenAiResponses => {
-                format!("{}/v1/responses", self.base_url.trim_end_matches('/'))
+                let base = self.base_url.trim_end_matches('/');
+                if base.ends_with("/v1/responses") {
+                    base.to_string()
+                } else {
+                    format!("{base}/v1/responses")
+                }
+            }
+            ApiType::OpenAiCodexResponses => {
+                let base = self.base_url.trim_end_matches('/');
+                if base.ends_with("/responses") {
+                    base.to_string()
+                } else if base.ends_with("/codex") {
+                    format!("{base}/responses")
+                } else {
+                    format!("{base}/codex/responses")
+                }
             }
             ApiType::GoogleGemini => {
                 format!(
@@ -255,6 +405,7 @@ pub struct ModelSummary {
     pub request_model_id: String,
     pub model_display_name: String,
     pub base_url: String,
+    pub api_type: ApiType,
     pub context_window: usize,
     pub max_output_tokens: usize,
     pub supports_images: bool,
@@ -343,5 +494,89 @@ mod tests {
         assert!(make_model("GPT-4o-mini").is_gpt());
         assert!(!make_model("gpt-oss").is_gpt());
         assert!(!make_model("claude-3-5-sonnet").is_gpt());
+    }
+    #[test]
+    fn codex_oauth_credentials_are_backward_compatible_and_redacted() {
+        let mut auth: AuthStore =
+            serde_json::from_str(r#"{"providers":{"openai":{"api_key":"legacy-key"}}}"#).unwrap();
+        assert_eq!(auth.api_key("openai"), Some("legacy-key"));
+        assert!(!auth.is_connected_for("openai", ApiType::OpenAiCodexResponses));
+
+        auth.set_codex_oauth(
+            "openai",
+            CodexOAuthCredential {
+                access_token: "access-secret".into(),
+                refresh_token: "refresh-secret".into(),
+                expires_at_ms: 2_000,
+                account_id: "account-123".into(),
+                id_token: Some("id-secret".into()),
+                is_fedramp: Some(false),
+            },
+        );
+        assert!(auth.api_key("openai").is_none());
+        assert!(auth.is_connected_for("openai", ApiType::OpenAiCodexResponses));
+        let debug = format!("{:?}", auth.providers["openai"]);
+        assert!(!debug.contains("access-secret"));
+        assert!(!debug.contains("refresh-secret"));
+        assert!(!debug.contains("id-secret"));
+        assert!(debug.contains("account-123"));
+    }
+
+    #[test]
+    fn auth_save_round_trips_oauth_credentials_atomically() {
+        let root = std::env::temp_dir().join(format!(
+            "tidev-auth-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let paths = ConfigPaths {
+            config_dir: root.join("config"),
+            data_dir: root.join("data"),
+            config_file: root.join("config/config.toml"),
+            mcp_file: root.join("config/mcp.json"),
+            auth_file: root.join("data/auth.json"),
+            database_file: root.join("data/sessions.sqlite3"),
+        };
+        let mut auth = AuthStore::default();
+        auth.set_codex_oauth(
+            "openai-codex",
+            CodexOAuthCredential {
+                access_token: "access".into(),
+                refresh_token: "refresh".into(),
+                expires_at_ms: 123,
+                account_id: "account".into(),
+                id_token: None,
+                is_fedramp: None,
+            },
+        );
+        auth.save(&paths).unwrap();
+        let loaded = AuthStore::load_or_create(&paths).unwrap();
+        assert_eq!(
+            loaded.codex_oauth("openai-codex").unwrap().account_id,
+            "account"
+        );
+        assert!(!std::fs::read_dir(&paths.data_dir).unwrap().any(|entry| {
+            entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .contains(".tmp-")
+        }));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&paths.auth_file)
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

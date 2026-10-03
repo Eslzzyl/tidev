@@ -30,6 +30,7 @@ use tidev_core::BackendEvent;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
+use crate::action::{Action, ConnectAction};
 use crate::app::App;
 
 /// Maximum backend events to drain per frame (mirrors old TUI's 200).
@@ -121,6 +122,8 @@ impl Tui {
         let mut event_rx = app.event_rx.take();
         let mut git_result_rx = app.git_result_rx.take();
         let mut mcp_notice_rx = app.mcp_notice_rx.take();
+        let mut oauth_url_rx = app.oauth_url_rx.take();
+        let mut oauth_success_rx = app.oauth_success_rx.take();
 
         // ── Dedicated crossterm reader thread ─────────────────────────
         //
@@ -251,6 +254,32 @@ impl Tui {
                         processed = true;
                     }
                 }
+                result = async {
+                    match oauth_url_rx.as_mut() {
+                        Some(rx) => rx.recv().await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    if let Some(url) = result {
+                        app.process_action(Action::Connect(ConnectAction::OAuthAuthorizationUrl {
+                            url,
+                        }));
+                        processed = true;
+                    }
+                }
+                result = async {
+                    match oauth_success_rx.as_mut() {
+                        Some(rx) => rx.recv().await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    if let Some(display_name) = result {
+                        app.process_action(Action::Connect(ConnectAction::OAuthSuccess {
+                            display_name,
+                        }));
+                        processed = true;
+                    }
+                }
                 _ = tokio::time::sleep(FRAME_BUDGET) => {}
             }
 
@@ -357,6 +386,22 @@ impl Tui {
             if let Some(ref mut rx) = mcp_notice_rx {
                 while let Ok(message) = rx.try_recv() {
                     app.set_notice(message);
+                }
+            }
+
+            if let Some(ref mut rx) = oauth_url_rx {
+                while let Ok(url) = rx.try_recv() {
+                    app.process_action(Action::Connect(ConnectAction::OAuthAuthorizationUrl {
+                        url,
+                    }));
+                }
+            }
+
+            if let Some(ref mut rx) = oauth_success_rx {
+                while let Ok(display_name) = rx.try_recv() {
+                    app.process_action(Action::Connect(ConnectAction::OAuthSuccess {
+                        display_name,
+                    }));
                 }
             }
 

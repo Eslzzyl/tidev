@@ -225,9 +225,18 @@ enum AuthCommand {
         #[arg(long, value_name = "API_KEY")]
         api_key: String,
     },
-    /// List configured API keys (masked)
+    /// Log in to a Codex subscription provider with OAuth
+    Login {
+        /// Provider name
+        #[arg(long, default_value = "openai-codex")]
+        provider: String,
+        /// Use the headless device-code flow
+        #[arg(long)]
+        device_code: bool,
+    },
+    /// List configured credentials (masked)
     List,
-    /// Remove an API key for a provider
+    /// Remove all credentials for a provider
     Remove {
         /// Provider name
         provider: String,
@@ -459,6 +468,10 @@ async fn main() -> Result<()> {
         // ── Auth ────────────────────────────────────────────────
         Some(Command::Auth(cmd)) => match cmd {
             AuthCommand::Set { provider, api_key } => cli::auth_set(&provider, &api_key),
+            AuthCommand::Login {
+                provider,
+                device_code,
+            } => cli::auth_login(&provider, device_code).await,
             AuthCommand::List => cli::auth_list(),
             AuthCommand::Remove { provider, yes } => cli::auth_remove(&provider, yes),
         },

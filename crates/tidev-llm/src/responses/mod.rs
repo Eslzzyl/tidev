@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use bytes::Bytes;
 use reqwest::Client;
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -14,8 +15,10 @@ use crate::event::LlmEvent;
 use crate::message::{Message, ToolCall};
 use crate::reasoning::ThinkingLevelType;
 use crate::think_parser::strip_think_tags;
-use crate::{apply_request_headers, types::LlmProviderConfig, types::ToolDefinition};
-
+use crate::{
+    RequestAuthResolver, apply_request_auth, apply_request_headers, resolve_request_auth,
+    types::LlmProviderConfig, types::ToolDefinition,
+};
 use log::{debug as log_debug, error as log_error};
 
 use self::error::{classify_responses_stream_error, response_error_details};
@@ -30,8 +33,6 @@ mod event;
 mod request;
 mod types;
 
-/// Responses API endpoint
-const RESPONSES_ENDPOINT: &str = "/responses";
 const RESPONSES_STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[allow(clippy::too_many_arguments)]
@@ -46,12 +47,8 @@ pub(crate) async fn stream_responses(
     max_request_files: usize,
     save_response_body: bool,
     max_response_files: usize,
+    resolver: Option<&dyn RequestAuthResolver>,
 ) -> Result<()> {
-    let api_key = model
-        .api_key
-        .clone()
-        .with_context(|| format!("missing API key for provider '{}'", model.provider_id))?;
-
     let request = build_responses_request_with_thinking(
         &model,
         messages,
@@ -60,28 +57,43 @@ pub(crate) async fn stream_responses(
         None,
         thinking_level,
     )?;
-    let request_body = serde_json::to_string(&request).unwrap_or_default();
+    let request_body = Bytes::from(serde_json::to_vec(&request)?);
+    let request_body_text = String::from_utf8_lossy(&request_body).into_owned();
     let request_body_size = request_body.len();
-    save_request_for_debugging(&request_body, save_request_body, max_request_files);
+    save_request_for_debugging(&request_body_text, save_request_body, max_request_files);
 
-    let endpoint = format!(
-        "{}{}",
-        model.base_url.trim_end_matches('/'),
-        RESPONSES_ENDPOINT
-    );
-
-    let send_result = apply_request_headers(http.post(&endpoint), &model)?
-        .bearer_auth(api_key)
-        .json(&request)
+    let endpoint = model.endpoint();
+    let mut auth = resolve_request_auth(&model, resolver, false).await?;
+    let mut auth_refreshed = false;
+    let response = loop {
+        let send_result = apply_request_auth(
+            apply_request_headers(http.post(&endpoint), &model)?,
+            &model,
+            &auth,
+        )?
+        .body(request_body.clone())
         .send()
         .await;
 
-    let response = match send_result {
-        Ok(resp) => {
-            let status = resp.status();
-            if status.is_success() {
-                resp
-            } else {
+        match send_result {
+            Ok(resp) if resp.status().is_success() => break resp,
+            Ok(resp)
+                if resp.status().as_u16() == 401
+                    && model.api_type == crate::ApiType::OpenAiCodexResponses
+                    && !auth_refreshed =>
+            {
+                let error_body = resp.text().await.unwrap_or_default();
+                log_error!(
+                    "codex responses request unauthorized: method=POST url={} request_body_size={} error_body={}",
+                    endpoint,
+                    request_body_size,
+                    error_body
+                );
+                auth = resolve_request_auth(&model, resolver, true).await?;
+                auth_refreshed = true;
+            }
+            Ok(resp) => {
+                let status = resp.status();
                 let error_body = resp.text().await.unwrap_or_default();
                 log_error!(
                     "openai responses request failed: method=POST url={} request_body_size={} status={} error_body={}",
@@ -92,15 +104,15 @@ pub(crate) async fn stream_responses(
                 );
                 return Err(classify_response_status(status, Some(error_body)).into());
             }
-        }
-        Err(e) => {
-            log_error!(
-                "openai responses request failed: method=POST url={} request_body_size={} error={}",
-                endpoint,
-                request_body_size,
-                e
-            );
-            return Err(e.into());
+            Err(error) => {
+                log_error!(
+                    "openai responses request failed: method=POST url={} request_body_size={} error={}",
+                    endpoint,
+                    request_body_size,
+                    error
+                );
+                return Err(error.into());
+            }
         }
     };
 
@@ -121,17 +133,29 @@ pub(crate) async fn stream_responses(
     let mut first_delta_time: Option<std::time::Instant> = None;
     let mut sse_parser = SseParser::default();
     let mut raw_payloads: Vec<String> = Vec::new();
+    let mut emitted_any = false;
 
     use futures_util::StreamExt;
 
     loop {
         let next_chunk = tokio::time::timeout(RESPONSES_STREAM_IDLE_TIMEOUT, stream.next())
             .await
-            .map_err(|_| NetworkError::Retryable {
-                message: format!(
-                    "Responses stream idle timeout after {} seconds",
-                    RESPONSES_STREAM_IDLE_TIMEOUT.as_secs()
-                ),
+            .map_err(|_| {
+                if emitted_any {
+                    NetworkError::NonRetryable {
+                        message: format!(
+                            "Responses stream idle timeout after {} seconds after emitting events",
+                            RESPONSES_STREAM_IDLE_TIMEOUT.as_secs()
+                        ),
+                    }
+                } else {
+                    NetworkError::Retryable {
+                        message: format!(
+                            "Responses stream idle timeout after {} seconds",
+                            RESPONSES_STREAM_IDLE_TIMEOUT.as_secs()
+                        ),
+                    }
+                }
             })?;
         let Some(chunk) = next_chunk else {
             break;
@@ -154,6 +178,9 @@ pub(crate) async fn stream_responses(
             let payload = payload.trim().to_string();
 
             raw_payloads.push(payload.clone());
+            if payload != "[DONE]" {
+                emitted_any = true;
+            }
 
             if payload == "[DONE]" {
                 save_raw_response_for_debugging(
@@ -586,12 +613,17 @@ pub(crate) async fn stream_responses(
         }
     }
 
-    save_raw_response_for_debugging(&raw_payloads, save_response_body, max_response_files);
-
-    Err(NetworkError::Retryable {
-        message: "Responses stream closed before response.completed".to_string(),
-    }
-    .into())
+    let error = if emitted_any {
+        NetworkError::NonRetryable {
+            message: "Responses stream closed before response.completed after emitting events"
+                .to_string(),
+        }
+    } else {
+        NetworkError::Retryable {
+            message: "Responses stream closed before response.completed".to_string(),
+        }
+    };
+    Err(error.into())
 }
 
 /// Serialize the final output list from `response.completed` for stateless
@@ -615,35 +647,46 @@ pub(crate) async fn complete_responses(
     max_request_files: usize,
     save_response_body: bool,
     max_response_files: usize,
+    resolver: Option<&dyn RequestAuthResolver>,
 ) -> Result<crate::types::LlmCompletion> {
-    let api_key = model
-        .api_key
-        .clone()
-        .with_context(|| format!("missing API key for provider '{}'", model.provider_id))?;
-
     let request = build_responses_request(&model, messages, false, &tools, None)?;
-    let request_body = serde_json::to_string(&request).unwrap_or_default();
+    let request_body = Bytes::from(serde_json::to_vec(&request)?);
+    let request_body_text = String::from_utf8_lossy(&request_body).into_owned();
     let request_body_size = request_body.len();
-    save_request_for_debugging(&request_body, save_request_body, max_request_files);
+    save_request_for_debugging(&request_body_text, save_request_body, max_request_files);
 
-    let endpoint = format!(
-        "{}{}",
-        model.base_url.trim_end_matches('/'),
-        RESPONSES_ENDPOINT
-    );
-
-    let send_result = apply_request_headers(http.post(&endpoint), &model)?
-        .bearer_auth(api_key)
-        .json(&request)
+    let endpoint = model.endpoint();
+    let mut auth = resolve_request_auth(&model, resolver, false).await?;
+    let mut auth_refreshed = false;
+    let response = loop {
+        let send_result = apply_request_auth(
+            apply_request_headers(http.post(&endpoint), &model)?,
+            &model,
+            &auth,
+        )?
+        .body(request_body.clone())
         .send()
         .await;
 
-    let response = match send_result {
-        Ok(resp) => {
-            let status = resp.status();
-            if status.is_success() {
-                resp
-            } else {
+        match send_result {
+            Ok(resp) if resp.status().is_success() => break resp,
+            Ok(resp)
+                if resp.status().as_u16() == 401
+                    && model.api_type == crate::ApiType::OpenAiCodexResponses
+                    && !auth_refreshed =>
+            {
+                let error_body = resp.text().await.unwrap_or_default();
+                log_error!(
+                    "codex responses request (complete) unauthorized: method=POST url={} request_body_size={} error_body={}",
+                    endpoint,
+                    request_body_size,
+                    error_body
+                );
+                auth = resolve_request_auth(&model, resolver, true).await?;
+                auth_refreshed = true;
+            }
+            Ok(resp) => {
+                let status = resp.status();
                 let error_body = resp.text().await.unwrap_or_default();
                 log_error!(
                     "openai responses request (complete) failed: method=POST url={} request_body_size={} status={} error_body={}",
@@ -654,25 +697,17 @@ pub(crate) async fn complete_responses(
                 );
                 return Err(classify_response_status(status, Some(error_body)).into());
             }
-        }
-        Err(e) => {
-            log_error!(
-                "openai responses request (complete) failed: method=POST url={} request_body_size={} error={}",
-                endpoint,
-                request_body_size,
-                e
-            );
-            return Err(e.into());
+            Err(error) => {
+                log_error!(
+                    "openai responses request (complete) failed: method=POST url={} request_body_size={} error={}",
+                    endpoint,
+                    request_body_size,
+                    error
+                );
+                return Err(error.into());
+            }
         }
     };
-
-    log_debug!(
-        "openai responses request (complete): method=POST url={} request_body_size={} status={}",
-        endpoint,
-        request_body_size,
-        response.status()
-    );
-
     let body_text = response.text().await?;
     save_complete_response_for_debugging(&body_text, save_response_body, max_response_files);
 

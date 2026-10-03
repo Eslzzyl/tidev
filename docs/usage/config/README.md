@@ -25,11 +25,13 @@ always available without needing to be declared in the user config.
 | File | Purpose |
 |------|---------|
 | `~/.config/tidev/config.toml` | Main configuration file |
-| `~/.local/share/tidev/auth.json` | API keys and authentication tokens |
+| `~/.local/share/tidev/auth.json` | API keys and OAuth credentials |
 | `~/.local/share/tidev/sessions.sqlite3` | Main database |
 
-API keys are stored separately from the config in `auth.json` to avoid accidental
-commits. They can be managed through the TUI or by editing the file directly.
+API keys and Codex OAuth credentials are stored separately from the config in
+`auth.json` to avoid accidental commits. Manage them through the TUI or the
+CLI (`tidev auth login`, `tidev auth list`, and `tidev auth remove`). Never
+paste access or refresh tokens into configuration files or issue output.
 
 ## Top-level keys
 

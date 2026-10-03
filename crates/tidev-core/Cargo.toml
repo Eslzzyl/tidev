@@ -19,8 +19,17 @@ tidev-search = { path = "../tidev-search" }
 tidev-utils = { path = "../tidev-utils" }
 anyhow = "1"
 thiserror = "2"
-tokio = { version = "1", features = ["sync", "rt", "process"] }
+base64 = "0.23"
+reqwest = { version = "0.13", default-features = false, features = [
+    "json",
+    "form",
+    "rustls-no-provider",
+]}
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+sha2 = "0.10"
+tokio = { version = "1", features = ["sync", "rt", "process", "net", "io-util", "time"] }
 tokio-util = "0.7"
+url = "2"
 log = "0.4"
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }

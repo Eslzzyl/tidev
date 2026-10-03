@@ -44,6 +44,7 @@ use tidev_agent::{AgentContext, CompactionRequest, ContextManager};
 
 use crate::approval::{ApprovalBroker, FrontendRequest, FrontendResponse};
 use crate::backend_event::{BackendEvent, CoreEventBus};
+use crate::codex_auth::CodexAuthService;
 use crate::event_hub::EventHub;
 use crate::mcp::McpManager;
 use crate::message_buf::CoreMessageBuffer;
@@ -459,6 +460,10 @@ impl Runtime {
     /// Get the LLM client.
     pub fn llm(&self) -> &tidev_llm::LlmClient {
         &self.llm
+    }
+    /// Construct a Codex OAuth service sharing this Runtime's auth store.
+    pub fn codex_auth_service(&self) -> Result<CodexAuthService> {
+        CodexAuthService::new(self.auth.clone(), self.paths.clone())
     }
 
     /// Get the session manager.
@@ -2359,7 +2364,11 @@ impl RuntimeBuilder {
         let workspace_root = self.workspace_root.clone().unwrap_or_default();
         let mut config = AppConfig::load_with_overlay(&paths, &workspace_root)?;
         let effective_logging = effective_logging_config(&config.logging, console_logging_override);
-        let auth = AuthStore::load_or_create(&paths)?;
+        let auth = Arc::new(StdRwLock::new(AuthStore::load_or_create(&paths)?));
+        let auth_snapshot = auth
+            .read()
+            .map_err(|_| anyhow::anyhow!("auth store lock poisoned"))?
+            .clone();
 
         // ── Startup initialisation ─────────────────────────────────
         //
@@ -2416,8 +2425,8 @@ impl RuntimeBuilder {
         // 7. LLM client + model resolution (with fallback).
         let _t_llm = Instant::now();
         let (active_model, startup_model_fallback) =
-            Self::resolve_fallback_model(&config, &auth)
-                .context("no models are configured — set up a provider API key first")?;
+            Self::resolve_fallback_model(&config, &auth_snapshot)
+                .context("no models are configured — set up a provider credential first")?;
         if startup_model_fallback.is_some() {
             config.default_provider = active_model.provider_id.clone();
             config.default_model = active_model.model_id.clone();
@@ -2430,12 +2439,14 @@ impl RuntimeBuilder {
                 log::warn!("failed to persist fallback active model: {error:#}");
             }
         }
-        let llm = tidev_llm::LlmClient::new_with_user_agent(
+        let codex_auth = Arc::new(CodexAuthService::new(auth.clone(), paths.clone())?);
+        let llm = tidev_llm::LlmClient::new_with_user_agent_and_auth_resolver(
             config.logging.save_request_body,
             config.logging.max_request_files,
             config.logging.save_response_body,
             config.logging.max_response_files,
             Some(TIDEV_USER_AGENT),
+            Some(codex_auth),
         )?;
         log::info!("startup: LLM client ready in {:?}", _t_llm.elapsed());
 
@@ -2452,7 +2463,7 @@ impl RuntimeBuilder {
             workspace_root,
             &paths,
             &config,
-            &auth,
+            &auth_snapshot,
             max_output_bytes,
             todo.clone(),
         )?);
@@ -2564,7 +2575,7 @@ impl RuntimeBuilder {
         Ok(Runtime {
             config: Arc::new(StdRwLock::new(config)),
             console_logging_override,
-            auth: Arc::new(StdRwLock::new(auth)),
+            auth,
             paths,
             session_manager,
             llm,

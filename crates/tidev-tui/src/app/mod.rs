@@ -134,6 +134,14 @@ pub struct App {
     pub(crate) mcp_notice_rx: Option<tokio::sync::mpsc::UnboundedReceiver<String>>,
     /// Sender used by asynchronous MCP operations to report failures.
     pub(crate) mcp_notice_tx: tokio::sync::mpsc::UnboundedSender<String>,
+    /// Receiver for the browser authorization URL produced by OAuth login.
+    pub(crate) oauth_url_rx: Option<tokio::sync::mpsc::UnboundedReceiver<String>>,
+    /// Sender used by the asynchronous OAuth login task to deliver its URL.
+    pub(crate) oauth_url_tx: tokio::sync::mpsc::UnboundedSender<String>,
+    /// Receiver for successful OAuth completion events.
+    pub(crate) oauth_success_rx: Option<tokio::sync::mpsc::UnboundedReceiver<String>>,
+    /// Sender used by the asynchronous OAuth login task to report success.
+    pub(crate) oauth_success_tx: tokio::sync::mpsc::UnboundedSender<String>,
 
     /// Chat message list component.
     pub(crate) message_list: Option<MessageList>,
@@ -298,6 +306,8 @@ impl App {
     ) -> Self {
         let (git_result_tx, git_result_rx) = tokio::sync::mpsc::unbounded_channel();
         let (mcp_notice_tx, mcp_notice_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (oauth_url_tx, oauth_url_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (oauth_success_tx, oauth_success_rx) = tokio::sync::mpsc::unbounded_channel();
         let theme_catalog =
             ThemeCatalog::load(runtime.config_dir()).expect("bundled theme presets must parse");
         let theme_str = runtime.config().theme.clone();
@@ -343,6 +353,10 @@ impl App {
             next_git_request_id: 0,
             mcp_notice_rx: Some(mcp_notice_rx),
             mcp_notice_tx,
+            oauth_url_rx: Some(oauth_url_rx),
+            oauth_url_tx,
+            oauth_success_rx: Some(oauth_success_rx),
+            oauth_success_tx,
             pending_approvals: HashMap::new(),
             active_approval_session: None,
             boundary_permissions: HashMap::new(),

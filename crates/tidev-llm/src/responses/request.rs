@@ -201,11 +201,13 @@ pub(super) fn build_responses_request_with_thinking(
         parallel_tool_calls: model.supports_parallel_tool_calls && tools.len() > 1,
         temperature: model.temperature,
         max_output_tokens: Some(model.max_output_tokens),
-        store: false,
         stream,
+        store: false,
         thinking,
         include,
         prompt_cache_key,
+        text: (model.api_type == crate::ApiType::OpenAiCodexResponses)
+            .then_some(ResponseText { verbosity: "low" }),
         // Responses reasoning is already represented by the dedicated
         // `reasoning` field above. Do not flatten the thinking-level object a
         // second time into the top-level request.
@@ -309,8 +311,15 @@ pub(super) struct ResponsesRequest {
     include: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     prompt_cache_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    text: Option<ResponseText>,
     #[serde(flatten)]
     extra_body: Option<serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct ResponseText {
+    verbosity: &'static str,
 }
 
 // ============================================================================
@@ -921,5 +930,37 @@ mod tests {
         assert_eq!(json["reasoning"]["summary"], "auto");
         assert!(json.get("effort").is_none());
         assert!(json.get("summary").is_none());
+    }
+    #[test]
+    fn codex_requests_set_low_text_verbosity() {
+        let model = LlmProviderConfig {
+            provider_id: "openai-codex".into(),
+            base_url: "https://chatgpt.com/backend-api".into(),
+            user_agent: None,
+            headers: std::collections::BTreeMap::new(),
+            session_header: None,
+            api_type: ApiType::OpenAiCodexResponses,
+            model_id: "gpt-5.5".into(),
+            request_model_id: Some("gpt-5.5".into()),
+            max_output_tokens: 4096,
+            temperature: None,
+            supports_images: false,
+            supports_parallel_tool_calls: true,
+            context_window: 128000,
+            system_prompt: None,
+            api_key: None,
+            extra_body: None,
+            thinking_level: crate::reasoning::ThinkingLevelType::None,
+        };
+        let request = build_responses_request(
+            &model,
+            vec![Message::new(MessageRole::User, "Hello")],
+            true,
+            &[],
+            None,
+        )
+        .unwrap();
+        let json = serde_json::to_value(request).unwrap();
+        assert_eq!(json["text"]["verbosity"], "low");
     }
 }

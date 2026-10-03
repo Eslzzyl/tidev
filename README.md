@@ -19,7 +19,7 @@ AI coding agent built in pure Rust. tidev reimplements the interaction model of 
   - If you are using Windows Terminal, you will not have access to the multi-line paste feature; this is a known limitation of Windows Terminal.
   - If you are using a terminal that does not support graphics protocols (such as Alacritty), tidev will not be able to display images. However, this will not affect other functions.
 
-- **Multi-Provider LLM Support** -- Anthropic (Claude), OpenAI Chat Completions, OpenAI Responses, and Gemini (Not tested yet). Configurable presets with fallback providers and models.
+- **Multi-Provider LLM Support** -- Anthropic (Claude), OpenAI Chat Completions, OpenAI Responses, Gemini, and the OpenAI Codex subscription provider. Codex uses OAuth PKCE/device-code login and never accepts an API key. Configurable presets with fallback providers and models.
 
 - **Specialized Sub-Agents** -- Four agent roles for delegating tasks: Explorer (code search), Librarian (documentation), Oracle (architecture review), and Fixer (fast implementation). Each agent has a tailored system prompt and tool set. Different subagents can be bound to different models. tidev allows you to temporarily disable the subagent to prevent model abuse.
 

@@ -905,6 +905,7 @@ impl AppConfig {
                         .unwrap_or_else(|| model_id.clone()),
                     model_display_name: model.display_name.clone(),
                     base_url: provider.base_url.clone(),
+                    api_type: provider.resolve_api_type(model),
                     context_window: model.context_window,
                     max_output_tokens: model.max_output_tokens,
                     supports_images: model.supports_images,
@@ -917,7 +918,7 @@ impl AppConfig {
     pub fn connected_models(&self, auth: &AuthStore) -> Vec<ModelSummary> {
         self.available_models()
             .into_iter()
-            .filter(|summary| auth.api_key(&summary.provider_id).is_some())
+            .filter(|summary| auth.is_connected_for(&summary.provider_id, summary.api_type))
             .collect()
     }
 
@@ -981,8 +982,10 @@ impl AppConfig {
             .get(model_id)
             .with_context(|| format!("unknown model '{model_id}' for provider '{provider_id}'"))?;
 
-        let api_key = self.resolve_api_key(auth, provider_id);
         let api_type = provider.resolve_api_type(model);
+        let api_key = (api_type != ApiType::OpenAiCodexResponses)
+            .then(|| self.resolve_api_key(auth, provider_id))
+            .flatten();
         let base_url = provider.resolve_base_url(model);
 
         let request_model_id = model

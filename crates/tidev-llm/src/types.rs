@@ -15,6 +15,8 @@ pub enum ApiType {
     OpenAiChatCompletions,
     #[serde(rename = "openai_responses")]
     OpenAiResponses,
+    #[serde(rename = "openai_codex_responses")]
+    OpenAiCodexResponses,
     #[serde(rename = "anthropic")]
     Anthropic,
     #[serde(rename = "google_gemini")]
@@ -27,6 +29,7 @@ impl ApiType {
             Self::OpenAiChatCompletions => "openai_chat_completions",
             Self::Anthropic => "anthropic",
             Self::OpenAiResponses => "openai_responses",
+            Self::OpenAiCodexResponses => "openai_codex_responses",
             Self::GoogleGemini => "google_gemini",
         }
     }
@@ -36,6 +39,7 @@ impl ApiType {
         match s.to_ascii_lowercase().as_str() {
             "openai_chat_completions" | "openai" | "chat" => Self::OpenAiChatCompletions,
             "openai_responses" | "responses" => Self::OpenAiResponses,
+            "openai_codex_responses" | "openai_codex" | "codex" => Self::OpenAiCodexResponses,
             "anthropic" | "claude" => Self::Anthropic,
             "google_gemini" | "gemini" | "google" => Self::GoogleGemini,
             _ => Self::OpenAiChatCompletions,
@@ -45,12 +49,7 @@ impl ApiType {
 
 impl std::fmt::Display for ApiType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::OpenAiChatCompletions => write!(f, "openai_chat_completions"),
-            Self::OpenAiResponses => write!(f, "openai_responses"),
-            Self::Anthropic => write!(f, "anthropic"),
-            Self::GoogleGemini => write!(f, "google_gemini"),
-        }
+        f.write_str(self.as_str())
     }
 }
 
@@ -126,6 +125,15 @@ impl LlmProviderConfig {
                     base.to_string()
                 } else {
                     format!("{}/v1/responses", base)
+                }
+            }
+            ApiType::OpenAiCodexResponses => {
+                if base.ends_with("/responses") {
+                    base.to_string()
+                } else if base.ends_with("/codex") {
+                    format!("{base}/responses")
+                } else {
+                    format!("{base}/codex/responses")
                 }
             }
             ApiType::GoogleGemini => {
@@ -215,6 +223,7 @@ mod tests {
             ApiType::OpenAiChatCompletions,
             ApiType::Anthropic,
             ApiType::OpenAiResponses,
+            ApiType::OpenAiCodexResponses,
             ApiType::GoogleGemini,
         ] {
             assert_eq!(ApiType::parse(v.as_str()), v, "round-trip failed for {v:?}");
@@ -225,5 +234,42 @@ mod tests {
     fn api_type_parse_default() {
         assert_eq!(ApiType::parse("unknown"), ApiType::OpenAiChatCompletions);
         assert_eq!(ApiType::parse(""), ApiType::OpenAiChatCompletions);
+    }
+    #[test]
+    fn codex_endpoint_is_idempotent() {
+        fn model(base_url: &str) -> LlmProviderConfig {
+            LlmProviderConfig {
+                provider_id: "openai-codex".into(),
+                api_type: ApiType::OpenAiCodexResponses,
+                api_key: None,
+                base_url: base_url.into(),
+                user_agent: None,
+                headers: BTreeMap::new(),
+                session_header: None,
+                model_id: "gpt-5.5".into(),
+                request_model_id: Some("gpt-5.5".into()),
+                system_prompt: None,
+                thinking_level: crate::reasoning::ThinkingLevelType::None,
+                extra_body: None,
+                max_output_tokens: 1024,
+                context_window: 128_000,
+                temperature: None,
+                supports_images: false,
+                supports_parallel_tool_calls: true,
+            }
+        }
+
+        assert_eq!(
+            model("https://chatgpt.com/backend-api").endpoint(),
+            "https://chatgpt.com/backend-api/codex/responses"
+        );
+        assert_eq!(
+            model("https://chatgpt.com/backend-api/codex").endpoint(),
+            "https://chatgpt.com/backend-api/codex/responses"
+        );
+        assert_eq!(
+            model("https://chatgpt.com/backend-api/codex/responses").endpoint(),
+            "https://chatgpt.com/backend-api/codex/responses"
+        );
     }
 }

@@ -489,6 +489,9 @@ struct ProviderDto {
     source: &'static str,
     can_delete: bool,
     connected: bool,
+    auth_method: &'static str,
+    oauth_account_id: Option<String>,
+    oauth_expires_at_ms: Option<u64>,
     base_url: String,
     api_type: Option<String>,
     user_agent: Option<String>,
@@ -934,7 +937,7 @@ async fn list_models(State(state): State<Arc<AppState>>) -> Json<Vec<ModelDto>> 
                     .to_string()
             };
             ModelDto {
-                connected: auth.api_key(&model.provider_id).is_some(),
+                connected: auth.is_connected_for(&model.provider_id, model.api_type),
                 active: is_active,
                 supports_vision: model.supports_images,
                 is_gpt: model.is_gpt(),

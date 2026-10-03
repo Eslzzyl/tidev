@@ -539,22 +539,28 @@ export function ProvidersSection() {
                       </p>
                       <p className="mt-1 text-[11px] text-neutral-400 dark:text-neutral-500">
                         {t("{{count}} models", { count: provider.models.length })} ·{" "}
-                        {provider.connected ? t("API key configured") : t("API key not configured")}
+                        {provider.auth_method === "oauth"
+                          ? `OAuth${provider.oauth_account_id ? ` · ${provider.oauth_account_id}` : ""}`
+                          : provider.connected
+                            ? t("API key configured")
+                            : t("API key not configured")}
                       </p>
                     </div>
                   </div>
 
                   <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant={provider.connected ? "secondary" : "primary"}
-                      leadingIcon={<KeyRound className="h-3.5 w-3.5" />}
-                      onClick={() => openConnect(provider)}
-                      disabled={isBusy}
-                    >
-                      {provider.connected ? t("Update key") : t("Configure key")}
-                    </Button>
+                    {provider.auth_method !== "oauth" ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={provider.connected ? "secondary" : "primary"}
+                        leadingIcon={<KeyRound className="h-3.5 w-3.5" />}
+                        onClick={() => openConnect(provider)}
+                        disabled={isBusy}
+                      >
+                        {provider.connected ? t("Update key") : t("Configure key")}
+                      </Button>
+                    ) : null}
                     {provider.connected ? (
                       <Button
                         type="button"

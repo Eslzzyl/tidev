@@ -238,6 +238,98 @@ impl App {
                     });
                     let _ = self.runtime.save_auth();
                 }
+                Action::Connect(ConnectAction::StartOAuth {
+                    provider_id,
+                    display_name,
+                }) => {
+                    let service = match self.runtime.codex_auth_service() {
+                        Ok(service) => service,
+                        Err(error) => {
+                            self.set_notice(format!("Codex OAuth unavailable: {error:#}"));
+                            continue;
+                        }
+                    };
+
+                    let runtime = self.runtime.clone();
+                    let notice_tx = self.mcp_notice_tx.clone();
+                    let oauth_url_tx = self.oauth_url_tx.clone();
+                    let oauth_success_tx = self.oauth_success_tx.clone();
+                    tokio::spawn(async move {
+                        let (event_tx, mut event_rx) =
+                            tokio::sync::mpsc::unbounded_channel::<tidev_core::CodexAuthEvent>();
+                        let login = tokio::spawn({
+                            let service = service.clone();
+                            let provider_id = provider_id.clone();
+                            async move {
+                                service
+                                    .login(
+                                        &provider_id,
+                                        tidev_core::CodexLoginMode::Browser,
+                                        event_tx,
+                                    )
+                                    .await
+                            }
+                        });
+
+                        while let Some(event) = event_rx.recv().await {
+                            let message = match event {
+                                tidev_core::CodexAuthEvent::AuthorizationUrl(url) => {
+                                    let _ = oauth_url_tx.send(url);
+                                    continue;
+                                }
+                                tidev_core::CodexAuthEvent::DeviceCode {
+                                    user_code,
+                                    verification_uri,
+                                    ..
+                                } => format!(
+                                    "Codex device code {user_code}; open {verification_uri}"
+                                ),
+                                tidev_core::CodexAuthEvent::Progress(message) => message,
+                            };
+                            let _ = notice_tx.send(message);
+                        }
+
+                        match login.await {
+                            Ok(Ok(())) => {
+                                if let Ok(model) = runtime
+                                    .config()
+                                    .resolve_provider_default_model(&runtime.auth(), &provider_id)
+                                {
+                                    runtime.update_config(|config| {
+                                        config.default_provider = model.provider_id.clone();
+                                        config.default_model = model.model_id.clone();
+                                    });
+                                    let _ = runtime.save_config();
+                                    runtime.set_active_model(model);
+                                }
+                                let _ = oauth_success_tx.send(display_name.clone());
+                                let _ = notice_tx
+                                    .send(format!("Connected to {display_name} with Codex OAuth"));
+                            }
+                            Ok(Err(error)) => {
+                                let _ = notice_tx.send(format!("Codex OAuth failed: {error:#}"));
+                            }
+                            Err(error) => {
+                                let _ =
+                                    notice_tx.send(format!("Codex OAuth task failed: {error:#}"));
+                            }
+                        }
+                    });
+                }
+                Action::Connect(ConnectAction::OAuthAuthorizationUrl { url }) => {
+                    let action = Action::Connect(ConnectAction::OAuthAuthorizationUrl { url });
+                    let ctx = UpdateContext {
+                        runtime: &mut self.runtime,
+                    };
+                    queue.extend(self.overlays.update_all(&action, &ctx));
+                }
+                Action::Connect(ConnectAction::OAuthSuccess { display_name }) => {
+                    let action = Action::Connect(ConnectAction::OAuthSuccess { display_name });
+                    let ctx = UpdateContext {
+                        runtime: &mut self.runtime,
+                    };
+                    queue.extend(self.overlays.update_all(&action, &ctx));
+                }
                 Action::Connect(ConnectAction::SaveApiKey { provider_id, key }) => {
                     if key.trim().is_empty() {
                         self.set_notice(self.ui_text().text(TextKey::ApiKeyEmpty));
@@ -351,7 +443,7 @@ impl App {
                 }) => {
                     let mut removed = false;
                     self.runtime.update_auth(|auth| {
-                        removed = auth.remove_api_key(&provider_id);
+                        removed = auth.remove_credentials(&provider_id);
                     });
                     if removed {
                         let _ = self.runtime.save_auth();

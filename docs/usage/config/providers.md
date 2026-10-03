@@ -90,6 +90,7 @@ configure them as separate providers.
 | `"openai_chat_completions"` | OpenAI Chat Completions API. This is the default and is compatible with many OpenAI-compatible providers |
 | `"anthropic"` | Anthropic Messages API |
 | `"openai_responses"` | OpenAI Responses API |
+| `"openai_codex_responses"` | OpenAI Codex subscription Responses API. OAuth-only; use `tidev auth login` or the TUI Connect panel |
 | `"google_gemini"` | Google Gemini API |
 
 ### base_url rules per api_type
@@ -103,6 +104,7 @@ convention** for `base_url`:
 | `openai_chat_completions` | `/chat/completions` | `https://api.example.com/v1` — already includes `/v1` | `https://api.example.com/v1/chat/completions` |
 | `anthropic` | `/v1/messages` | `https://api.example.com` — does **not** include `/v1` | `https://api.example.com/v1/messages` |
 | `openai_responses` | `/v1/responses` | `https://api.example.com` — does **not** include `/v1` | `https://api.example.com/v1/responses` |
+| `openai_codex_responses` | `/codex/responses` | `https://chatgpt.com/backend-api` | `https://chatgpt.com/backend-api/codex/responses` |
 | `google_gemini` | `/models/{model_id}:generateContent` | `https://generativelanguage.googleapis.com` | `https://generativelanguage.googleapis.com/models/gemini-pro:generateContent` |
 
 **Why the difference?** The OpenAI Chat Completions convention places `/v1` in
@@ -146,6 +148,56 @@ base_url = "https://api.openai.com/v1/chat/completions"  # → https://api.opena
 **Recommendation:** Use the standard convention for clarity, but when a
 provider gives you a full endpoint URL, you can use it directly without
 modification.
+
+### OpenAI Codex subscription
+
+The bundled `openai-codex` preset exposes the Codex subscription models through
+`openai_codex_responses`. This protocol is intentionally separate from
+`openai_responses`: it uses the Codex endpoint, SSE responses, subscription
+OAuth credentials, and Codex-specific headers. The preset includes:
+
+```text
+gpt-5.3-codex-spark
+gpt-5.5
+gpt-5.6-luna
+gpt-5.6-sol
+gpt-5.6-terra
+gpt-6-astra
+gpt-6-luna
+gpt-6-sol
+```
+
+Codex providers are OAuth-only. Do not put an API key in `auth.json` for this
+provider. Start the browser PKCE flow with:
+
+```bash
+tidev auth login --provider openai-codex
+```
+
+For environments without a usable browser, use the device-code flow:
+
+```bash
+tidev auth login --provider openai-codex --device-code
+```
+
+The TUI Connect panel starts the same browser flow and reports the
+authorization URL and progress without displaying access or refresh tokens.
+`tidev auth list` shows only the OAuth account ID and expiry. The TUI and CLI
+never display access or refresh tokens. `tidev auth remove openai-codex --yes`
+removes both OAuth and API-key credentials for that provider. The Web and ACP
+surfaces expose connection status only; they do not accept or return OAuth
+tokens.
+
+OAuth credentials are stored under `providers.<id>.codex_oauth` in
+`~/.local/share/tidev/auth.json`. Auth-file writes use a private temporary file
+and an atomic rename. Access tokens are refreshed before expiry and a single
+refresh is shared by concurrent requests. A Codex HTTP 401 causes one refresh
+and one retry with the exact same prepared request body; a partially emitted
+SSE stream is never replayed.
+
+The OAuth callback binds to `127.0.0.1:1455` and falls back to `1457`. The
+device-code flow polls for up to 15 minutes and handles pending and
+`slow_down` responses.
 
 ### Per-model api_type override
 

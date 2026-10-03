@@ -941,6 +941,7 @@ mod tests {
                 model_display_name: model_display_name.into(),
                 base_url: "https://test.com".into(),
                 context_window: 128000,
+                api_type: tidev_llm::ApiType::OpenAiChatCompletions,
                 max_output_tokens: 4096,
                 supports_images: false,
             },

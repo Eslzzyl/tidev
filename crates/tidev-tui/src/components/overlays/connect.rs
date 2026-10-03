@@ -7,10 +7,12 @@ use ratatui::prelude::{Frame, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
 use tidev_config::provider::ProviderSource;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::action::{Action, ConnectAction, OverlayAction, OverlayKind};
 use crate::component::Component;
 use crate::context::{DrawContext, InitContext, UpdateContext};
+use crate::hyperlink::{HyperlinkRange, mark_buffer_hyperlinks};
 use crate::i18n::{TextKey, UiText};
 use crate::utils::{centered_rect, paste_from_clipboard, single_line_input_cursor};
 
@@ -25,6 +27,13 @@ enum ConnectPhase {
         /// The API key being typed.
         buffer: String,
     },
+    /// Running the Codex OAuth login flow.
+    OAuth {
+        display_name: String,
+        authorization_url: Option<String>,
+    },
+    /// OAuth login completed successfully.
+    OAuthSuccess { display_name: String },
     /// Confirm before disconnecting a provider.
     DisconnectConfirm {
         provider_id: String,
@@ -59,6 +68,7 @@ pub(crate) struct ProviderItem {
     pub display_name: String,
     pub source: ProviderSource,
     pub connected: bool,
+    pub oauth: bool,
     /// Masked API key preview. The full key must never be kept in the item.
     pub key_preview: Option<String>,
 }
@@ -92,13 +102,27 @@ impl ConnectDialog {
                 let source = config
                     .provider_source(&provider_id)
                     .unwrap_or(ProviderSource::User);
-                let key_preview = auth.api_key(&provider_id).map(mask_api_key);
-                let connected = key_preview.is_some();
+                let provider = config.provider(&provider_id);
+                let oauth = provider.is_some_and(|provider| {
+                    provider.models.values().any(|model| {
+                        provider.resolve_api_type(model)
+                            == tidev_config::ApiType::OpenAiCodexResponses
+                    })
+                });
+                let connected = provider.is_some_and(|provider| {
+                    provider.models.iter().any(|(_, model)| {
+                        auth.is_connected_for(&provider_id, provider.resolve_api_type(model))
+                    })
+                });
+                let key_preview = (!oauth)
+                    .then(|| auth.api_key(&provider_id).map(mask_api_key))
+                    .flatten();
                 ProviderItem {
                     provider_id,
                     display_name,
                     source,
                     connected,
+                    oauth,
                     key_preview,
                 }
             })
@@ -134,6 +158,9 @@ impl ConnectDialog {
         match self.phase {
             ConnectPhase::ProviderPicker => format!(" {} ", ui_text.text(TextKey::ConnectProvider)),
             ConnectPhase::ApiKey { .. } => format!(" {} ", ui_text.text(TextKey::ApiKey)),
+            ConnectPhase::OAuth { .. } | ConnectPhase::OAuthSuccess { .. } => {
+                format!(" {} ", ui_text.text(TextKey::CodexOAuth))
+            }
             ConnectPhase::DisconnectConfirm { .. } => {
                 format!(" {} ", ui_text.text(TextKey::DisconnectProvider))
             }
@@ -190,6 +217,18 @@ impl Component for ConnectDialog {
                     if self.provider_picker_focus == ProviderPickerFocus::Search {
                         self.provider_picker_focus = ProviderPickerFocus::List;
                     } else if let Some(item) = self.visible_provider(self.selected) {
+                        if item.oauth {
+                            let provider_id = item.provider_id.clone();
+                            let display_name = item.display_name.clone();
+                            self.phase = ConnectPhase::OAuth {
+                                display_name: display_name.clone(),
+                                authorization_url: None,
+                            };
+                            return Some(Action::Connect(ConnectAction::StartOAuth {
+                                provider_id,
+                                display_name,
+                            }));
+                        }
                         self.switch_to_api_key(item.provider_id.clone(), item.display_name.clone());
                     }
                     None
@@ -218,11 +257,13 @@ impl Component for ConnectDialog {
                     if self.provider_picker_focus == ProviderPickerFocus::List
                         && key.modifiers.is_empty() =>
                 {
-                    self.visible_provider(self.selected).map(|item| {
-                        Action::Connect(ConnectAction::CopyApiKey {
-                            provider_id: item.provider_id.clone(),
+                    self.visible_provider(self.selected)
+                        .filter(|item| !item.oauth)
+                        .map(|item| {
+                            Action::Connect(ConnectAction::CopyApiKey {
+                                provider_id: item.provider_id.clone(),
+                            })
                         })
-                    })
                 }
                 KeyCode::Char('d' | 'D')
                     if self.provider_picker_focus == ProviderPickerFocus::List
@@ -307,6 +348,18 @@ impl Component for ConnectDialog {
                 }
                 _ => None,
             },
+            ConnectPhase::OAuth { .. } => match key.code {
+                KeyCode::Esc => Some(Action::Overlay(OverlayAction::Close(
+                    OverlayKind::ConnectDialog,
+                ))),
+                _ => None,
+            },
+            ConnectPhase::OAuthSuccess { .. } => match key.code {
+                KeyCode::Enter | KeyCode::Esc => Some(Action::Overlay(OverlayAction::Close(
+                    OverlayKind::ConnectDialog,
+                ))),
+                _ => None,
+            },
             ConnectPhase::DisconnectConfirm {
                 provider_id: _,
                 display_name: _,
@@ -373,6 +426,21 @@ impl Component for ConnectDialog {
                 self.provider_picker_focus = ProviderPickerFocus::List;
                 vec![]
             }
+            Action::Connect(ConnectAction::OAuthAuthorizationUrl { url }) => {
+                if let ConnectPhase::OAuth {
+                    authorization_url, ..
+                } = &mut self.phase
+                {
+                    *authorization_url = Some(url.clone());
+                }
+                vec![]
+            }
+            Action::Connect(ConnectAction::OAuthSuccess { display_name }) => {
+                self.phase = ConnectPhase::OAuthSuccess {
+                    display_name: display_name.clone(),
+                };
+                vec![]
+            }
             _ => {
                 // Initial build or refresh after any action.
                 if self.all_providers.is_empty() {
@@ -391,6 +459,8 @@ impl Component for ConnectDialog {
         let (overlay_width, overlay_height) = match &self.phase {
             ConnectPhase::ProviderPicker => (rect.width.min(92), rect.height.min(28)),
             ConnectPhase::ApiKey { .. } => (rect.width.min(80), rect.height.min(24)),
+            ConnectPhase::OAuth { .. } => (rect.width.min(100), rect.height.min(18)),
+            ConnectPhase::OAuthSuccess { .. } => (rect.width.min(72), rect.height.min(10)),
             ConnectPhase::DisconnectConfirm { .. } => (rect.width.min(60), rect.height.min(12)),
         };
         let overlay = centered_rect(overlay_width, overlay_height, rect);
@@ -508,7 +578,9 @@ impl Component for ConnectDialog {
                     } else {
                         Style::default().fg(palette.muted).bg(bg)
                     };
-                    let connection_label = if let Some(preview) = item.key_preview.as_deref() {
+                    let connection_label = if item.oauth && item.connected {
+                        ui_text.text_with_value(TextKey::ConnectedPreview, "preview", "OAuth")
+                    } else if let Some(preview) = item.key_preview.as_deref() {
                         ui_text.text_with_value(TextKey::ConnectedPreview, "preview", preview)
                     } else {
                         ui_text.text(TextKey::NotConnected)
@@ -558,6 +630,106 @@ impl Component for ConnectDialog {
                     )
                     .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
                     sections[3],
+                );
+            }
+            ConnectPhase::OAuth {
+                display_name,
+                authorization_url,
+            } => {
+                let sections = Layout::vertical([
+                    Constraint::Length(2),
+                    Constraint::Length(2),
+                    Constraint::Min(4),
+                    Constraint::Length(1),
+                ])
+                .split(body);
+                frame.render_widget(
+                    Paragraph::new(ui_text.text_with_value(
+                        TextKey::CodexOAuthStarted,
+                        "name",
+                        display_name,
+                    ))
+                    .style(Style::default().bg(palette.panel_alt).fg(palette.text)),
+                    sections[0],
+                );
+                frame.render_widget(
+                    Paragraph::new(ui_text.text(TextKey::CodexOAuthInstructions))
+                        .style(Style::default().bg(palette.panel_alt).fg(palette.muted))
+                        .wrap(Wrap { trim: false }),
+                    sections[1],
+                );
+                let url_label = ui_text.text(TextKey::CodexOAuthUrl);
+                let url_lines = wrapped_authorization_url_lines(
+                    &url_label,
+                    authorization_url.as_deref().unwrap_or_default(),
+                    sections[2].width as usize,
+                    Style::default().fg(palette.accent),
+                    Style::default().fg(palette.accent_soft),
+                );
+                let url_links: Vec<Vec<HyperlinkRange>> = url_lines
+                    .iter()
+                    .enumerate()
+                    .map(|(index, line)| {
+                        if index == 0 || line.width() == 0 {
+                            Vec::new()
+                        } else {
+                            vec![HyperlinkRange::web(
+                                0..line.width(),
+                                authorization_url.clone().unwrap_or_default(),
+                            )]
+                        }
+                    })
+                    .collect();
+                frame.render_widget(
+                    Paragraph::new(url_lines).style(Style::default().bg(palette.panel_alt)),
+                    sections[2],
+                );
+                mark_buffer_hyperlinks(frame.buffer_mut(), sections[2], &url_links, 0);
+                frame.render_widget(
+                    Paragraph::new(ui_text.text(TextKey::ConnectPickerFooter))
+                        .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
+                    sections[3],
+                );
+            }
+            ConnectPhase::OAuthSuccess { display_name } => {
+                let sections = Layout::vertical([
+                    Constraint::Length(3),
+                    Constraint::Min(2),
+                    Constraint::Length(1),
+                ])
+                .split(body);
+                frame.render_widget(
+                    Paragraph::new(Line::from(vec![
+                        Span::styled(
+                            "✓ ",
+                            Style::default()
+                                .fg(palette.success)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            ui_text.text_with_value(
+                                TextKey::CodexOAuthSuccess,
+                                "name",
+                                display_name,
+                            ),
+                            Style::default()
+                                .fg(palette.success)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    ]))
+                    .style(Style::default().bg(palette.panel_alt)),
+                    sections[0],
+                );
+                frame.render_widget(
+                    Paragraph::new(ui_text.text(TextKey::CodexOAuthSuccessHint))
+                        .style(Style::default().bg(palette.panel_alt).fg(palette.text))
+                        .wrap(Wrap { trim: false }),
+                    sections[1],
+                );
+                frame.render_widget(
+                    Paragraph::new(ui_text.text(TextKey::CodexOAuthSuccessFooter))
+                        .style(Style::default().bg(palette.panel_alt).fg(palette.muted)),
+                    sections[2],
                 );
             }
             ConnectPhase::ApiKey {
@@ -674,6 +846,7 @@ impl Component for ConnectDialog {
                 self.provider_picker_focus == ProviderPickerFocus::Search
             }
             ConnectPhase::ApiKey { .. } => true,
+            ConnectPhase::OAuth { .. } | ConnectPhase::OAuthSuccess { .. } => false,
             ConnectPhase::DisconnectConfirm { .. } => false,
         }
     }
@@ -686,6 +859,86 @@ impl Component for ConnectDialog {
         }
         None
     }
+}
+
+fn wrapped_authorization_url_lines(
+    label: &str,
+    url: &str,
+    width: usize,
+    label_style: Style,
+    url_style: Style,
+) -> Vec<Line<'static>> {
+    let width = width.max(1);
+    let mut lines = vec![Line::from(Span::styled(label.to_owned(), label_style))];
+    if url.is_empty() {
+        return lines;
+    }
+
+    let mut url_lines = Vec::new();
+    let mut current = String::new();
+    for (index, parameter) in url.split('&').enumerate() {
+        let segment = if index == 0 {
+            parameter.to_owned()
+        } else {
+            format!("&{parameter}")
+        };
+        append_authorization_url_segment(&mut url_lines, &mut current, segment, width);
+    }
+    if !current.is_empty() {
+        url_lines.push(current);
+    }
+
+    lines.extend(
+        url_lines
+            .into_iter()
+            .map(|line| Line::from(Span::styled(line, url_style))),
+    );
+    lines
+}
+
+fn append_authorization_url_segment(
+    lines: &mut Vec<String>,
+    current: &mut String,
+    segment: String,
+    width: usize,
+) {
+    if current.is_empty() {
+        *current = segment;
+    } else if UnicodeWidthStr::width(current.as_str()) + UnicodeWidthStr::width(segment.as_str())
+        <= width
+    {
+        current.push_str(&segment);
+    } else {
+        lines.push(std::mem::take(current));
+        *current = segment;
+    }
+
+    if UnicodeWidthStr::width(current.as_str()) > width {
+        let mut pieces = split_text_to_width(current, width);
+        *current = pieces.pop().unwrap_or_default();
+        lines.extend(pieces);
+    }
+}
+
+fn split_text_to_width(text: &str, width: usize) -> Vec<String> {
+    let mut pieces = Vec::new();
+    let mut current = String::new();
+    let mut current_width = 0;
+
+    for ch in text.chars() {
+        let char_width = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if !current.is_empty() && current_width + char_width > width {
+            pieces.push(std::mem::take(&mut current));
+            current_width = 0;
+        }
+        current.push(ch);
+        current_width += char_width;
+    }
+
+    if !current.is_empty() {
+        pieces.push(current);
+    }
+    pieces
 }
 
 fn provider_picker_matches(query: &str, provider_id: &str, display_name: &str) -> bool {
@@ -728,6 +981,7 @@ mod tests {
             display_name: "OpenAI".into(),
             source: ProviderSource::Bundled,
             connected,
+            oauth: false,
             key_preview: connected.then(|| "sk-***8f".into()),
         }
     }
@@ -741,6 +995,49 @@ mod tests {
     fn fully_masks_short_api_keys() {
         assert_eq!(mask_api_key("short"), "***");
         assert_eq!(mask_api_key("   "), "");
+    }
+
+    #[test]
+    fn authorization_url_wraps_before_query_separators() {
+        let url = "https://example.com/path?a=1&b=2&c=3";
+        let lines = wrapped_authorization_url_lines(
+            "Authorization URL:",
+            url,
+            30,
+            Style::default(),
+            Style::default(),
+        );
+        let url_lines: Vec<String> = lines
+            .iter()
+            .skip(1)
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect()
+            })
+            .collect();
+
+        assert_eq!(url_lines.concat(), url);
+        assert!(url_lines.iter().all(|line| !line.ends_with('&')));
+        assert!(url_lines.iter().skip(1).all(|line| line.starts_with('&')));
+    }
+
+    #[test]
+    fn oauth_success_closes_on_enter() {
+        let mut dialog = ConnectDialog::new();
+        dialog.phase = ConnectPhase::OAuthSuccess {
+            display_name: "OpenAI".into(),
+        };
+
+        let action = dialog.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert!(matches!(
+            action,
+            Some(Action::Overlay(OverlayAction::Close(
+                OverlayKind::ConnectDialog
+            )))
+        ));
     }
 
     #[test]

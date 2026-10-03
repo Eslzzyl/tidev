@@ -103,6 +103,13 @@ fn is_reserved_header_name(name: &str) -> bool {
             | "x-goog-api-key"
             | "anthropic-version"
             | "anthropic-beta"
+            | "chatgpt-account-id"
+            | "originator"
+            | "openai-beta"
+            | "accept"
+            | "session-id"
+            | "x-client-request-id"
+            | "x-openai-fedramp"
     )
 }
 
@@ -223,6 +230,9 @@ fn validate_api_type(value: &str) -> anyhow::Result<()> {
         | "chat"
         | "openai_responses"
         | "responses"
+        | "openai_codex_responses"
+        | "openai_codex"
+        | "codex"
         | "anthropic"
         | "claude"
         | "google_gemini"

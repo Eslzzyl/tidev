@@ -656,7 +656,7 @@ impl ThinkingLevelType {
             // Responses API: unified reasoning.effort format
             // Gpt5 adds summary support.
             // Qwen On/Off needs explicit handling since it has no effort levels.
-            "openai_responses" => {
+            "openai_responses" | "openai_codex_responses" => {
                 let effort = self.effort_str();
                 match (self, effort) {
                     // Qwen(On) → enable with default effort

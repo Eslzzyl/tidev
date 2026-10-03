@@ -439,11 +439,15 @@ export interface ProviderInfo {
   source: "bundled" | "user";
   can_delete: boolean;
   connected: boolean;
+  auth_method: "api_key" | "oauth";
+  oauth_account_id: string | null;
+  oauth_expires_at_ms: number | null;
   base_url: string;
   api_type: string | null;
   user_agent: string | null;
   session_header: string | null;
   models: ProviderModelInfo[];
+
 }
 
 export interface ConnectProviderRequest {

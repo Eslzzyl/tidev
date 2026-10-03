@@ -10,8 +10,11 @@ use anyhow::{Context, Result, bail};
 use chrono::Duration;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, RwLock};
 use tidev_config::provider::{ProviderConfig, ProviderSource};
+use tidev_core::{CodexAuthEvent, CodexAuthService, CodexLoginMode};
 use tidev_storage::{SessionInspection, StoredMessageView};
+use tokio::sync::mpsc::unbounded_channel;
 use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
@@ -61,8 +64,13 @@ pub fn auth_set(provider: &str, key: &str) -> Result<()> {
     } else {
         tidev_config::AppConfig::default()
     };
-    if config.provider(provider).is_none() {
-        bail!("provider '{provider}' is not configured");
+    let provider_config = config
+        .provider(provider)
+        .with_context(|| format!("provider '{provider}' is not configured"))?;
+    if provider_config.models.values().any(|model| {
+        provider_config.resolve_api_type(model) == tidev_config::ApiType::OpenAiCodexResponses
+    }) {
+        bail!("Codex subscriptions use OAuth; run 'tidev auth login --provider {provider}'");
     }
 
     let mut auth = tidev_config::AuthStore::load_or_create(&paths)?;
@@ -72,32 +80,101 @@ pub fn auth_set(provider: &str, key: &str) -> Result<()> {
     Ok(())
 }
 
-/// List all configured API keys (masked).
+/// Log in to a Codex subscription provider with OAuth.
+pub async fn auth_login(provider: &str, device_code: bool) -> Result<()> {
+    let paths = tidev_config::paths::ConfigPaths::discover()?;
+    let config = if paths.config_file.exists() {
+        tidev_config::AppConfig::load(&paths)?
+    } else {
+        tidev_config::AppConfig::default()
+    };
+    let provider_config = config
+        .provider(provider)
+        .with_context(|| format!("provider '{provider}' is not configured"))?;
+    if !provider_config.models.values().any(|model| {
+        provider_config.resolve_api_type(model) == tidev_config::ApiType::OpenAiCodexResponses
+    }) {
+        bail!("provider '{provider}' is not an OpenAI Codex OAuth provider");
+    }
+
+    let auth = tidev_config::AuthStore::load_or_create(&paths)?;
+    let shared_auth = Arc::new(RwLock::new(auth));
+    let service = CodexAuthService::new(shared_auth, paths)?;
+    let (event_tx, mut event_rx) = unbounded_channel();
+    let mode = if device_code {
+        CodexLoginMode::DeviceCode
+    } else {
+        CodexLoginMode::Browser
+    };
+    let login = {
+        let service = service.clone();
+        let provider = provider.to_string();
+        tokio::spawn(async move { service.login(&provider, mode, event_tx).await })
+    };
+    while let Some(event) = event_rx.recv().await {
+        match event {
+            CodexAuthEvent::AuthorizationUrl(url) => {
+                println!("Open this URL to log in to OpenAI Codex:\n{url}");
+            }
+            CodexAuthEvent::DeviceCode {
+                user_code,
+                verification_uri,
+                expires_in_secs,
+            } => {
+                println!(
+                    "Open {verification_uri}, enter {user_code} (expires in {expires_in_secs}s)"
+                );
+            }
+            CodexAuthEvent::Progress(message) => eprintln!("{message}"),
+        }
+    }
+    login.await.context("Codex OAuth login task failed")??;
+    println!("OAuth login saved for provider '{provider}'");
+    Ok(())
+}
+
+/// List configured credentials (masked).
 pub fn auth_list() -> Result<()> {
     let paths = tidev_config::paths::ConfigPaths::discover()?;
     let auth = tidev_config::AuthStore::load_or_create(&paths)?;
-    if auth.providers.is_empty() {
-        println!("No API keys configured.");
+    let configured = auth.providers.values().any(|provider| {
+        provider
+            .api_key
+            .as_deref()
+            .is_some_and(|key| !key.trim().is_empty())
+            || provider.codex_oauth.is_some()
+    });
+    if !configured {
+        println!("No credentials configured.");
     } else {
         for (provider, pa) in &auth.providers {
+            if let Some(oauth) = pa.codex_oauth.as_ref() {
+                println!(
+                    "{provider}: oauth account={} expires_at_ms={}",
+                    oauth.account_id, oauth.expires_at_ms
+                );
+                continue;
+            }
             let masked = pa
                 .api_key
                 .as_ref()
-                .map(|k| {
-                    if k.len() > 8 {
-                        format!("{}…{}", &k[..4], &k[k.len() - 4..])
+                .map(|key| {
+                    if key.len() > 8 {
+                        format!("{}…{}", &key[..4], &key[key.len() - 4..])
                     } else {
                         "****".to_string()
                     }
                 })
                 .unwrap_or_default();
-            println!("{provider}: {masked}");
+            if !masked.is_empty() {
+                println!("{provider}: api_key={masked}");
+            }
         }
     }
     Ok(())
 }
 
-/// Remove an API key for a provider.
+/// Remove all credentials for a provider.
 pub fn auth_remove(provider: &str, yes: bool) -> Result<()> {
     if !yes {
         bail!("refusing to remove authentication without confirmation; rerun with '--yes'");
@@ -105,11 +182,11 @@ pub fn auth_remove(provider: &str, yes: bool) -> Result<()> {
 
     let paths = tidev_config::paths::ConfigPaths::discover()?;
     let mut auth = tidev_config::AuthStore::load_or_create(&paths)?;
-    if auth.providers.remove(provider).is_some() {
+    if auth.remove_credentials(provider) {
         auth.save(&paths)?;
-        println!("Removed API key for provider '{provider}'");
+        println!("Removed credentials for provider '{provider}'");
     } else {
-        println!("No API key found for provider '{provider}'");
+        println!("No credentials found for provider '{provider}'");
     }
     Ok(())
 }
@@ -276,7 +353,7 @@ pub fn provider_remove(provider_id: &str, yes: bool) -> Result<()> {
     let is_bundled = config.bundled_providers.contains_key(provider_id);
     if !is_bundled {
         ensure_provider_not_referenced(&config, provider_id)?;
-        if has_stored_api_key(&paths, provider_id)? {
+        if has_stored_credentials(&paths, provider_id)? {
             bail!(
                 "provider '{provider_id}' still has stored authentication; run 'tidev auth remove {provider_id} --yes' first"
             );
@@ -330,12 +407,15 @@ fn ensure_provider_not_referenced(
     Ok(())
 }
 
-fn has_stored_api_key(paths: &tidev_config::paths::ConfigPaths, provider_id: &str) -> Result<bool> {
+fn has_stored_credentials(
+    paths: &tidev_config::paths::ConfigPaths,
+    provider_id: &str,
+) -> Result<bool> {
     if !paths.auth_file.exists() {
         return Ok(false);
     }
     let auth = tidev_config::AuthStore::load_or_create(paths)?;
-    Ok(auth.api_key(provider_id).is_some())
+    Ok(auth.api_key(provider_id).is_some() || auth.codex_oauth(provider_id).is_some())
 }
 
 // ---------------------------------------------------------------------------

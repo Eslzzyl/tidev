@@ -190,9 +190,18 @@ pub(crate) enum SettingsAction {
 pub(crate) enum ConnectAction {
     /// Save an API key for the given LLM provider.
     SaveApiKey { provider_id: String, key: String },
+    /// Start the Codex OAuth browser login flow.
+    StartOAuth {
+        provider_id: String,
+        display_name: String,
+    },
+    /// Deliver the browser authorization URL to the connect dialog.
+    OAuthAuthorizationUrl { url: String },
+    /// Deliver successful OAuth completion to the connect dialog.
+    OAuthSuccess { display_name: String },
     /// Copy an existing provider API key to the system clipboard.
     CopyApiKey { provider_id: String },
-    /// Remove a provider's API key (disconnect).
+    /// Remove all credentials for a provider (disconnect).
     Disconnect {
         provider_id: String,
         display_name: String,

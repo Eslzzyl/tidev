@@ -12,6 +12,7 @@ name = "tidev_llm"
 [dependencies]
 anyhow = "1.0"
 base64 = "0.23"
+bytes = "1"
 futures-util = "0.3"
 chrono = { version = "0.4", features = ["serde"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
@@ -25,5 +26,5 @@ reqwest = { version = "0.13", default-features = false, features = [
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
-tokio = { version = "=1.53.1", features = ["sync", "time"] }
+tokio = { version = "=1.53.1", features = ["sync", "time", "macros", "net", "io-util"] }
 uuid = { version = "1.26", features = ["v4", "serde"] }

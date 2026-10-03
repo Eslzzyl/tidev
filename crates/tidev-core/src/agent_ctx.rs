@@ -211,7 +211,9 @@ pub fn to_llm_provider_config(model: &ActiveModel, fast_mode: bool) -> LlmProvid
         && model.is_gpt()
         && matches!(
             model.api_type,
-            tidev_llm::ApiType::OpenAiChatCompletions | tidev_llm::ApiType::OpenAiResponses
+            tidev_llm::ApiType::OpenAiChatCompletions
+                | tidev_llm::ApiType::OpenAiResponses
+                | tidev_llm::ApiType::OpenAiCodexResponses
         ) {
         let mut extra_body = model
             .extra_body

@@ -17,10 +17,14 @@ pub(crate) fn has_connected_provider(
     config: &tidev_config::AppConfig,
     auth: &tidev_config::auth::AuthStore,
 ) -> bool {
-    config
-        .provider_ids()
-        .iter()
-        .any(|provider_id| auth.api_key(provider_id).is_some())
+    config.provider_ids().iter().any(|provider_id| {
+        config.provider(provider_id).is_some_and(|provider| {
+            provider
+                .models
+                .values()
+                .any(|model| auth.is_connected_for(provider_id, provider.resolve_api_type(model)))
+        })
+    })
 }
 
 pub(crate) struct StartupProviderDialog;
