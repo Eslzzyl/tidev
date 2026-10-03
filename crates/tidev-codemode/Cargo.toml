@@ -1,0 +1,18 @@
+[package]
+name = "tidev-codemode"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Monty Code Mode runtime integration for tidev"
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+monty = "1.0.0"
+monty-types = "1.0.0"
+serde_json = "1"
+tokio = { version = "1", features = ["time"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt", "time"] }

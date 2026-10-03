@@ -143,6 +143,7 @@ write = Write
 edit = Edit
 delete = Delete
 shell = Shell
+code-mode = Code Mode
 todo = Todo
 question = Question
 question-label = Q

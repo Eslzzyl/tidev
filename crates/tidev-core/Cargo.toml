@@ -9,6 +9,7 @@ description = "Core orchestration layer for tidev"
 [dependencies]
 tidev-agent = { path = "../tidev-agent" }
 tidev-tools = { path = "../tidev-tools" }
+tidev-codemode = { path = "../tidev-codemode" }
 tidev-config = { path = "../tidev-config" }
 tidev-storage = { path = "../tidev-storage" }
 tidev-llm = { path = "../tidev-llm" }

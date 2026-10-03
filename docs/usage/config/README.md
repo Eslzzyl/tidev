@@ -476,6 +476,36 @@ fixer = "deepseek:High"
 | `models` | `{}` | Per-agent model overrides. Keyed by agent type name (`explorer`, `oracle`, `fixer`, `librarian`). Value can be a plain model ID or `"provider/model_id"` format |
 | `thinking_levels` | `{}` | Per-agent thinking level overrides. Value format matches the thinking level string representation, e.g. `"deepseek:Off"`, `"deepseek:High"`, `"qwen:On"`, `"glm:On"`. Overrides the auto-detected thinking level for the agent's model |
 
+## Code Mode
+
+Code Mode runs one Python script inside the tidev process through the embedded
+Monty runtime. The model-facing description stays fixed and exposes two generic host functions:
+`search_tools` discovers the current tidev and MCP catalog at runtime, and
+`call_tool` invokes one selected tool by name and arguments. Each invocation
+starts a fresh interpreter session; interpreter state is released after the
+result is returned. The interpreter shares tidev's process memory, so Code Mode
+has no separate worker memory limit.
+
+```python
+matches = search_tools({"query": "search repositories", "limit": 5})
+result = call_tool({
+    "name": matches[0]["name"],
+    "arguments": {"query": "rust"},
+})
+return result
+```
+
+```
+[code_mode]
+exposure = "on"
+timeout_seconds = 120
+```
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `exposure` | `"off"` | Tool visibility: `"off"`, `"on"` to add `codemode`, or `"only"` to expose `codemode` as the model tool |
+| `timeout_seconds` | `120` | Maximum Code Mode request and feed duration |
+
 ## Reasoning and thinking
 
 Certain models support extended reasoning or thinking. tidev auto-

@@ -507,7 +507,15 @@ impl Runtime {
 
         let workspace = tokio::task::spawn_blocking(move || {
             let config = AppConfig::load_with_overlay(&paths, &path_key)?;
-            Workspace::new(path_key, &paths, &config, &auth, max_output_bytes, todo)
+            Workspace::new(
+                path_key,
+                &paths,
+                &config,
+                &auth,
+                max_output_bytes,
+                todo,
+                &config.code_mode,
+            )
         })
         .await
         .context("workspace initialisation panicked")??;
@@ -1535,6 +1543,7 @@ impl Runtime {
         let filtered_tools = workspace
             .tool_registry()
             .definitions_for_model(&active_model);
+        let code_mode_tools = workspace.tool_registry().code_mode_tools();
         // The buffer and pending prompt store are shared with the CoreContext.
         let buffer = self.message_buffer(session_id).await;
         let pending_prompts = self.pending_prompts.clone();
@@ -1552,6 +1561,7 @@ impl Runtime {
             llm_config,
             cancel.clone(),
             filtered_tools,
+            code_mode_tools,
             workspace.root().to_path_buf(),
             active_model.clone(),
             workspace.snapshot().cloned(),
@@ -2466,6 +2476,7 @@ impl RuntimeBuilder {
             &auth_snapshot,
             max_output_bytes,
             todo.clone(),
+            &config.code_mode,
         )?);
         log::info!(
             "startup: default workspace ready in {:?}",

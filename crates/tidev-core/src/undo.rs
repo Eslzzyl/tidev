@@ -111,13 +111,12 @@ pub fn context_state_for_target(
         .iter()
         .skip(target_index + 1)
         .find(|message| message.is_compaction())
+        && let Some(retained_from) = marker.metadata.prior_retained_from
     {
-        if let Some(retained_from) = marker.metadata.prior_retained_from {
-            return Some(ContextState {
-                summary: marker.metadata.prior_summary.clone(),
-                retained_from,
-            });
-        }
+        return Some(ContextState {
+            summary: marker.metadata.prior_summary.clone(),
+            retained_from,
+        });
     }
 
     Some(context_state_at_history_end(&messages[..=target_index]))

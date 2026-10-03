@@ -440,6 +440,40 @@ fn render_tool_call_lines(
                 }
             }
         }
+        "codemode" => {
+            let code = string_field("code").unwrap_or_default();
+            let first_line = code.lines().next().unwrap_or_default();
+            let title = if first_line.is_empty() {
+                ui_text.text(TextKey::CodeMode)
+            } else {
+                format!("{} {}", ui_text.text(TextKey::CodeMode), first_line)
+            };
+            lines.extend(wrap_tool_title(
+                Line::from(vec![Span::styled(
+                    title,
+                    Style::default()
+                        .fg(palette.accent_soft)
+                        .add_modifier(Modifier::BOLD),
+                )]),
+                content_width,
+                "            ",
+            ));
+
+            for code_line in code.lines().skip(1) {
+                let code_line = Line::from(code_line.to_string());
+                let wrapped = word_wrap_line(
+                    &code_line,
+                    WrapOptions::new(content_width.saturating_sub(4)).break_words(true),
+                );
+                for wrapped_line in wrapped {
+                    let mut spans = vec![Span::styled("  │ ", Style::default().fg(palette.accent))];
+                    spans.extend(wrapped_line.spans.iter().map(|span| {
+                        Span::styled(span.content.to_string(), Style::default().fg(palette.text))
+                    }));
+                    lines.push(Line::from(spans));
+                }
+            }
+        }
         "write" => {
             let path = string_field("file_path").unwrap_or_else(|| ui_text.text(TextKey::File));
             let rel = display_workspace_relative(workspace_root, Path::new(&path));
@@ -1261,6 +1295,7 @@ pub(crate) fn render_output_preview_lines(
 fn preparing_text_for_tool(canonical_name: &str, ui_text: &UiText) -> String {
     let name = match canonical_name {
         "shell" => ui_text.text(TextKey::Shell),
+        "codemode" => ui_text.text(TextKey::CodeMode),
         "write" => ui_text.text(TextKey::Write),
         "edit" => ui_text.text(TextKey::Edit),
         "websearch" => ui_text.text(TextKey::WebSearch),

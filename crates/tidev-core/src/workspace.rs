@@ -48,6 +48,7 @@ impl Workspace {
         auth: &AuthStore,
         max_output_bytes: usize,
         todo: Arc<dyn TodoPersistence + Send + Sync + 'static>,
+        code_mode: &tidev_config::CodeModeConfig,
     ) -> Result<Self> {
         let root = canonicalize_display(&root);
         if !std::fs::metadata(&root)
@@ -68,6 +69,7 @@ impl Workspace {
             auth.clone(),
             max_output_bytes,
             mcp_manager.clone(),
+            code_mode,
         ));
 
         let snapshot = if config.snapshot.enabled {

@@ -61,6 +61,7 @@ const TOOL_LABELS: Record<string, string> = {
   bash: "Run command",
   shell: "Run command",
   task: "Subagent",
+  codemode: "Code Mode",
   todowrite: "Update to-do",
   websearch: "Web search",
   webfetch: "Fetch web page",
@@ -116,6 +117,8 @@ function toolIcon(name: string): ComponentType<{ size?: number; className?: stri
       return Sparkles;
     case "task":
       return LayoutTemplate;
+    case "codemode":
+      return Sparkles;
     case "todowrite":
       return ListTodo;
     case "mcp_list":
@@ -214,6 +217,10 @@ function summarizeArguments(
         : stringArgument(args, "name");
     case "task":
       return stringArgument(args, "description") || t("No description");
+    case "codemode": {
+      const code = stringArgument(args, "code");
+      return code.split("\n")[0] || t("No code");
+    }
     case "todowrite": {
       const todos = args.todos;
       return Array.isArray(todos) ? t("{{count}} to-dos", { count: todos.length }) : t("No to-dos");
@@ -357,6 +364,9 @@ const ToolCallBody = memo(function ToolCallBody({
         />
       ) : null}
       {entry.result && entry.name === "todowrite" ? <TodoRenderer output={displayText} /> : null}
+      {entry.result && entry.name === "codemode" && stringArgument(args, "code") ? (
+        <pre className="tool-raw-output tool-codemode-code">{stringArgument(args, "code")}</pre>
+      ) : null}
       {entry.result && mcpCatalog ? (
         <McpCatalogRenderer catalog={mcpCatalog} search={entry.name === "mcp_search"} />
       ) : null}

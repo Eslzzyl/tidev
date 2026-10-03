@@ -195,6 +195,40 @@ impl Default for SubagentConfig {
 }
 
 // ---------------------------------------------------------------------------
+// CodeModeConfig
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CodeModeExposure {
+    #[default]
+    Off,
+    On,
+    Only,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CodeModeConfig {
+    #[serde(default, alias = "mode")]
+    pub exposure: CodeModeExposure,
+    #[serde(default = "default_codemode_timeout_seconds")]
+    pub timeout_seconds: u64,
+}
+
+fn default_codemode_timeout_seconds() -> u64 {
+    120
+}
+
+impl Default for CodeModeConfig {
+    fn default() -> Self {
+        Self {
+            exposure: CodeModeExposure::Off,
+            timeout_seconds: default_codemode_timeout_seconds(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // SnapshotConfig
 // ---------------------------------------------------------------------------
 
@@ -466,6 +500,8 @@ pub struct AppConfig {
     pub snapshot: SnapshotConfig,
     #[serde(default)]
     pub subagent: SubagentConfig,
+    #[serde(default)]
+    pub code_mode: CodeModeConfig,
     #[serde(skip)]
     pub bundled_providers: BTreeMap<String, ProviderConfig>,
     /// Effective provider catalog after applying user overrides.
@@ -591,6 +627,7 @@ impl Default for AppConfig {
             mcp: McpConfig::default(),
             snapshot: SnapshotConfig::default(),
             subagent: SubagentConfig::default(),
+            code_mode: CodeModeConfig::default(),
             effective_providers: bundled_providers.clone(),
             bundled_providers,
         }
@@ -727,6 +764,9 @@ impl AppConfig {
         }
         if has("subagent") {
             self.subagent = overlay.subagent;
+        }
+        if has("code_mode") {
+            self.code_mode = overlay.code_mode;
         }
     }
 

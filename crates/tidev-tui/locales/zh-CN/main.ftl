@@ -143,6 +143,7 @@ write = 写入
 edit = 编辑
 delete = 删除
 shell = Shell
+code-mode = 代码模式
 todo = 待办
 question = 提问
 question-label = 问

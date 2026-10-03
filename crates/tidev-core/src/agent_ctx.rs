@@ -4,8 +4,9 @@
 //! LLM calls, tool execution, message persistence, context compaction, and
 //! permission approvals.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, RwLock as StdRwLock};
 use std::time::Instant;
 
@@ -25,6 +26,7 @@ use tidev_agent::{
     SubagentExecution, SubagentExecutor, ToolCallExecutor, execute_subagent_calls,
     execute_tool_calls, order_tool_results, stream_turn,
 };
+use tidev_codemode::CodeModeHost;
 use tidev_config::auth::ActiveModel;
 use tidev_config::{AppConfig, AuthStore};
 use tidev_llm::message::{AssistantTurn, Message, MessageRole, ToolCall, ToolExecutionResult};
@@ -44,7 +46,9 @@ use crate::approval::{
 };
 use crate::message_buf::CoreMessageBuffer;
 use crate::mode::Mode;
-use crate::registry::ToolRegistry;
+use crate::registry::{
+    CODE_MODE_CALL_TOOL_NAME, CODE_MODE_SEARCH_TOOL_NAME, CODE_MODE_TOOL_NAME, ToolRegistry,
+};
 use crate::runtime::PendingPromptStore;
 use crate::session::SessionManager;
 use crate::tool_def::to_llm_tool_def;
@@ -685,6 +689,8 @@ pub struct CoreContext {
     cancel: CancellationToken,
     /// Tools available to this session.
     tools: Vec<ToolDefinition>,
+    /// Host tools available to Code Mode for this session.
+    code_mode_tools: Vec<tidev_codemode::CodeModeTool>,
     /// Workspace root (used for tool execution and child contexts).
     workspace_root: PathBuf,
     /// Resolved active model (for subagents / provider info).
@@ -726,6 +732,103 @@ struct CoreToolExecutor {
     cancel: CancellationToken,
     event_tx: AgentEventSender,
     permissions: HashMap<String, (bool, bool)>,
+}
+
+struct CoreCodeModeHost {
+    registry: Arc<ToolRegistry>,
+    workspace_root: PathBuf,
+    config: Arc<StdRwLock<AppConfig>>,
+    approval_broker: ApprovalBroker,
+    session_id: Uuid,
+    request_id: u64,
+    mode: Mode,
+    cancel: CancellationToken,
+    active_model: ActiveModel,
+    call_prefix: String,
+    allowed_tools: HashSet<String>,
+    next_call_id: AtomicU64,
+}
+
+#[async_trait]
+impl CodeModeHost for CoreCodeModeHost {
+    async fn call(&self, name: &str, arguments: Value) -> Result<Value> {
+        let canonical = tidev_utils::tool_name::canonical_tool_name(name).unwrap_or(name);
+        if matches!(canonical, "task" | "question" | CODE_MODE_TOOL_NAME) {
+            anyhow::bail!("tool '{name}' is unavailable inside Code Mode");
+        }
+        if !self.allowed_tools.contains(name) {
+            anyhow::bail!("tool '{name}' is unavailable in this Code Mode session");
+        }
+
+        if name == CODE_MODE_SEARCH_TOOL_NAME {
+            return self
+                .registry
+                .search_code_mode_tools(&self.active_model, self.mode, arguments);
+        }
+
+        if name != CODE_MODE_CALL_TOOL_NAME {
+            anyhow::bail!("tool '{name}' is unavailable in this Code Mode session");
+        }
+
+        let mut tool_call =
+            self.registry
+                .prepare_code_mode_call(&self.active_model, self.mode, arguments)?;
+        tool_call.id = format!(
+            "{}-{}",
+            self.call_prefix,
+            self.next_call_id.fetch_add(1, Ordering::Relaxed)
+        );
+        let tool_call = tool_call;
+        let approved = request_tool_approval_impl(
+            self.registry.clone(),
+            self.workspace_root.clone(),
+            self.config.clone(),
+            self.approval_broker.clone(),
+            self.session_id,
+            self.cancel.clone(),
+            std::slice::from_ref(&tool_call),
+            self.mode,
+            true,
+        )
+        .await?
+        .into_iter()
+        .find(|approved| approved.tool_call.id == tool_call.id)
+        .unwrap_or(ApprovedTool {
+            tool_call: tool_call.clone(),
+            rejection: Some(ToolExecutionResult::new("Tool approval was not granted.")),
+            child_session_id: None,
+            allow_outside: false,
+            sensitive_file_approved: false,
+            user_reason: None,
+        });
+
+        if let Some(rejection) = approved.rejection {
+            return Ok(serde_json::json!({
+                "status": "rejected",
+                "output": rejection.output,
+            }));
+        }
+
+        let result = self
+            .registry
+            .execute_via_agent(
+                &tool_call,
+                self.session_id,
+                self.request_id,
+                self.mode,
+                approved.allow_outside,
+                approved.sensitive_file_approved,
+                &self.cancel,
+                None,
+                false,
+            )
+            .await;
+        Ok(serde_json::json!({
+            "status": "completed",
+            "output": result.output,
+            "metadata": result.metadata,
+        }))
+    }
 }
 
 /// Executes tidev task calls through the generic subagent scheduler.
@@ -844,6 +947,7 @@ impl CoreContext {
         model_config: LlmProviderConfig,
         cancel: CancellationToken,
         tools: Vec<ToolDefinition>,
+        code_mode_tools: Vec<tidev_codemode::CodeModeTool>,
         workspace_root: PathBuf,
         active_model: ActiveModel,
         snapshot: Option<SnapshotService>,
@@ -870,6 +974,7 @@ impl CoreContext {
             model_config,
             cancel,
             tools,
+            code_mode_tools,
             workspace_root,
             active_model,
             snapshot,
@@ -977,39 +1082,54 @@ impl CoreContext {
         tool_calls: &[ToolCall],
         mode: Mode,
     ) -> Result<Vec<ApprovedTool>> {
-        let sensitive_patterns = load_sensitive_patterns(&self.workspace_root);
-        let access_control = {
-            let cfg = self.config.read().unwrap();
-            cfg.access_control.clone()
-        };
+        request_tool_approval_impl(
+            self.tool_registry.clone(),
+            self.workspace_root.clone(),
+            self.config.clone(),
+            self.approval_broker.clone(),
+            self.session_id,
+            self.cancel.clone(),
+            tool_calls,
+            mode,
+            false,
+        )
+        .await
+    }
+}
 
-        let mut approved = Vec::with_capacity(tool_calls.len());
-        let mut pending = Vec::new();
-        for tc in tool_calls {
-            let can_execute = match self.tool_registry.can_execute_call(tc, mode) {
-                Ok(can_execute) => can_execute,
-                Err(error) => {
-                    approved.push(ApprovedTool {
-                        tool_call: tc.clone(),
-                        rejection: Some(ToolExecutionResult::new(format!(
-                            "Tool '{}' has invalid arguments: {error:#}",
-                            tc.name,
-                        ))),
-                        child_session_id: None,
-                        allow_outside: false,
-                        sensitive_file_approved: false,
-                        user_reason: None,
-                    });
-                    continue;
-                }
-            };
-            if !can_execute {
+#[allow(clippy::too_many_arguments)]
+async fn request_tool_approval_impl(
+    tool_registry: Arc<ToolRegistry>,
+    workspace_root: PathBuf,
+    config: Arc<StdRwLock<AppConfig>>,
+    approval_broker: ApprovalBroker,
+    session_id: Uuid,
+    cancel: CancellationToken,
+    tool_calls: &[ToolCall],
+    mode: Mode,
+    allow_code_mode_tools: bool,
+) -> Result<Vec<ApprovedTool>> {
+    let sensitive_patterns = load_sensitive_patterns(&workspace_root);
+    let access_control = {
+        let cfg = config.read().unwrap();
+        cfg.access_control.clone()
+    };
+
+    let mut approved = Vec::with_capacity(tool_calls.len());
+    let mut pending = Vec::new();
+    for tc in tool_calls {
+        let can_execute = match if allow_code_mode_tools {
+            tool_registry.can_execute_code_mode_call(tc, mode)
+        } else {
+            tool_registry.can_execute_call(tc, mode)
+        } {
+            Ok(can_execute) => can_execute,
+            Err(error) => {
                 approved.push(ApprovedTool {
                     tool_call: tc.clone(),
                     rejection: Some(ToolExecutionResult::new(format!(
-                        "Tool '{}' is disabled in {} mode.",
+                        "Tool '{}' has invalid arguments: {error:#}",
                         tc.name,
-                        mode.as_str(),
                     ))),
                     child_session_id: None,
                     allow_outside: false,
@@ -1018,70 +1138,79 @@ impl CoreContext {
                 });
                 continue;
             }
-
-            let arguments: Value = serde_json::from_str(&tc.arguments).unwrap_or(Value::Null);
-            let boundary_violation = if access_control.allow_outside_workspace_access {
-                None
-            } else {
-                extract_boundary_violation_path(&self.workspace_root, &tc.name, &arguments)
-            };
-            let sensitive_violation = if access_control.allow_sensitive_file_access {
-                None
-            } else {
-                extract_sensitive_file_path(
-                    &self.workspace_root,
-                    &tc.name,
-                    &arguments,
-                    &sensitive_patterns,
-                )
-            };
-
-            if tidev_utils::tool_name::canonical_tool_name(&tc.name) == Some("question") {
-                pending.push(ToolCallWithViolations {
-                    tool_call: tc.clone(),
-                    workspace_boundary_violation: None,
-                    sensitive_file_violation: None,
-                });
-                continue;
-            }
-
-            if boundary_violation.is_none() && sensitive_violation.is_none() {
-                approved.push(ApprovedTool {
-                    tool_call: tc.clone(),
-                    rejection: None,
-                    child_session_id: None,
-                    allow_outside: access_control.allow_outside_workspace_access,
-                    sensitive_file_approved: access_control.allow_sensitive_file_access,
-                    user_reason: None,
-                });
-            } else {
-                pending.push(ToolCallWithViolations {
-                    tool_call: tc.clone(),
-                    workspace_boundary_violation: boundary_violation,
-                    sensitive_file_violation: sensitive_violation,
-                });
-            }
-        }
-
-        if pending.is_empty() {
-            return Ok(approved);
-        }
-
-        let user_approved = match self
-            .approval_broker
-            .request(
-                self.session_id,
-                FrontendRequestKind::ToolApproval(pending),
-                &self.cancel,
-            )
-            .await
-        {
-            Ok(FrontendResponse::ToolApproval(tools)) => tools,
-            Err(_) => Vec::new(),
         };
-        approved.extend(user_approved);
-        Ok(approved)
+        if !can_execute {
+            approved.push(ApprovedTool {
+                tool_call: tc.clone(),
+                rejection: Some(ToolExecutionResult::new(format!(
+                    "Tool '{}' is disabled in {} mode.",
+                    tc.name,
+                    mode.as_str(),
+                ))),
+                child_session_id: None,
+                allow_outside: false,
+                sensitive_file_approved: false,
+                user_reason: None,
+            });
+            continue;
+        }
+
+        let arguments: Value = serde_json::from_str(&tc.arguments).unwrap_or(Value::Null);
+        let boundary_violation = if access_control.allow_outside_workspace_access {
+            None
+        } else {
+            extract_boundary_violation_path(&workspace_root, &tc.name, &arguments)
+        };
+        let sensitive_violation = if access_control.allow_sensitive_file_access {
+            None
+        } else {
+            extract_sensitive_file_path(&workspace_root, &tc.name, &arguments, &sensitive_patterns)
+        };
+
+        if tidev_utils::tool_name::canonical_tool_name(&tc.name) == Some("question") {
+            pending.push(ToolCallWithViolations {
+                tool_call: tc.clone(),
+                workspace_boundary_violation: None,
+                sensitive_file_violation: None,
+            });
+            continue;
+        }
+
+        if boundary_violation.is_none() && sensitive_violation.is_none() {
+            approved.push(ApprovedTool {
+                tool_call: tc.clone(),
+                rejection: None,
+                child_session_id: None,
+                allow_outside: access_control.allow_outside_workspace_access,
+                sensitive_file_approved: access_control.allow_sensitive_file_access,
+                user_reason: None,
+            });
+        } else {
+            pending.push(ToolCallWithViolations {
+                tool_call: tc.clone(),
+                workspace_boundary_violation: boundary_violation,
+                sensitive_file_violation: sensitive_violation,
+            });
+        }
     }
+
+    if pending.is_empty() {
+        return Ok(approved);
+    }
+
+    let user_approved = match approval_broker
+        .request(
+            session_id,
+            FrontendRequestKind::ToolApproval(pending),
+            &cancel,
+        )
+        .await
+    {
+        Ok(FrontendResponse::ToolApproval(tools)) => tools,
+        Err(_) => Vec::new(),
+    };
+    approved.extend(user_approved);
+    Ok(approved)
 }
 
 impl CoreContext {
@@ -1150,6 +1279,65 @@ impl CoreContext {
             }
         }
         Ok(())
+    }
+
+    async fn execute_code_mode(
+        &self,
+        tool_call: &ToolCall,
+        request_id: u64,
+    ) -> Result<ToolExecutionResult> {
+        let arguments: Value = match serde_json::from_str(&tool_call.arguments) {
+            Ok(arguments) => arguments,
+            Err(error) => {
+                return Ok(ToolExecutionResult::new(format!(
+                    "Error: invalid Code Mode arguments: {error}"
+                )));
+            }
+        };
+        let Some(code) = arguments.get("code").and_then(Value::as_str) else {
+            return Ok(ToolExecutionResult::new(
+                "Error: Code Mode requires a string field named 'code'.",
+            ));
+        };
+
+        let started_at = Instant::now();
+        let allowed_tools = self
+            .code_mode_tools
+            .iter()
+            .map(|tool| tool.name.clone())
+            .collect();
+        let host = CoreCodeModeHost {
+            registry: self.tool_registry.clone(),
+            workspace_root: self.workspace_root.clone(),
+            config: self.config.clone(),
+            approval_broker: self.approval_broker.clone(),
+            session_id: self.session_id,
+            request_id,
+            mode: self.request_mode(),
+            cancel: self.cancel.clone(),
+            active_model: self.active_model.clone(),
+            call_prefix: format!("codemode-{}-{}", request_id, tool_call.id),
+            allowed_tools,
+            next_call_id: AtomicU64::new(0),
+        };
+        let runtime = self.tool_registry.code_mode_runtime();
+        let execution = tokio::select! {
+            _ = self.cancel.cancelled() => {
+                return Ok(ToolExecutionResult::new("User cancelled the request"));
+            }
+            result = runtime.execute(code, &self.code_mode_tools, &host) => result,
+        };
+
+        let mut result = match execution {
+            Ok(execution) => ToolExecutionResult::new(execution.output),
+            Err(error) => {
+                ToolExecutionResult::new(format!("Error: Code Mode unavailable: {error:#}"))
+            }
+        };
+        result.metadata.duration_ms =
+            Some(u64::try_from(started_at.elapsed().as_millis().max(1)).unwrap_or(u64::MAX));
+        result.metadata.preserve_full_output = true;
+        Ok(result)
     }
 }
 
@@ -1250,6 +1438,7 @@ impl AgentContext for CoreContext {
         // generic agent scheduler handles ordinary read/write execution.
         let mut task_calls: Vec<(ToolCall, Option<Uuid>)> = Vec::new();
         let mut ordinary_calls = Vec::new();
+        let mut code_mode_calls = Vec::new();
         let mut permissions = HashMap::new();
 
         for approved in approved_tools {
@@ -1261,6 +1450,8 @@ impl AgentContext for CoreContext {
 
             if tidev_utils::tool_name::canonical_tool_name(&tc.name) == Some("task") {
                 task_calls.push((tc, approved.child_session_id));
+            } else if tc.name == CODE_MODE_TOOL_NAME {
+                code_mode_calls.push(tc);
             } else {
                 permissions.insert(
                     tc.id.clone(),
@@ -1288,6 +1479,36 @@ impl AgentContext for CoreContext {
         )
         .await?;
         results.extend(ordinary_results);
+
+        for tool_call in code_mode_calls {
+            if self.cancel.is_cancelled() {
+                let result = ToolExecutionResult::new("User cancelled the request");
+                self.emit(BackendEvent::ToolCompleted {
+                    session_id,
+                    request_id,
+                    tool_call: tool_call.clone(),
+                    result: Box::new(result.clone()),
+                    child_session_id: None,
+                });
+                results.push((tool_call, result));
+                continue;
+            }
+
+            self.emit(BackendEvent::ToolStarting {
+                session_id,
+                request_id,
+                tool_call: tool_call.clone(),
+            });
+            let result = self.execute_code_mode(&tool_call, request_id).await?;
+            self.emit(BackendEvent::ToolCompleted {
+                session_id,
+                request_id,
+                tool_call: tool_call.clone(),
+                result: Box::new(result.clone()),
+                child_session_id: None,
+            });
+            results.push((tool_call, result));
+        }
 
         // --- Task tools (subagents): parallel with immediate cancellation ---
         // When subagent is disabled by config, return an error instead of spawning.
@@ -1566,12 +1787,8 @@ impl AgentContext for CoreContext {
                 session_id
             );
         }
-        let tools: Vec<tidev_llm::ToolDefinition> = self
-            .tool_registry
-            .definitions_for_model(&self.active_model)
-            .iter()
-            .map(to_llm_tool_def)
-            .collect();
+        let tools: Vec<tidev_llm::ToolDefinition> =
+            self.tools.iter().map(to_llm_tool_def).collect();
         let mut compact_model = self.model_config.clone();
         compact_model.system_prompt = Some(self.system_prompt.clone());
 
@@ -2061,6 +2278,7 @@ async fn execute_task_tool(
         child_model_config,
         config.cancel_token.clone(),
         sub_tools,
+        Vec::new(),
         spawner.workspace_root,
         child_model,
         spawner.snapshot,
