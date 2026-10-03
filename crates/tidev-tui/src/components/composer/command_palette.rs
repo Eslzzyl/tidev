@@ -118,7 +118,7 @@ pub(crate) struct CommandSuggestion {
 pub(crate) static COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "connect",
-        aliases: &["login"],
+        aliases: &["provider", "providers", "login"],
         description_key: TextKey::CommandConnect,
         action: CommandAction::Connect,
     },
@@ -681,8 +681,10 @@ mod tests {
     #[test]
     fn test_suggestions_alias() {
         let reg = CommandRegistry::new();
-        let results = reg.suggestions_for_context("/login", true, true);
-        assert_eq!(results[0].spec.name, "connect");
+        for alias in ["provider", "providers", "login"] {
+            let results = reg.suggestions_for_context(&format!("/{alias}"), true, true);
+            assert_eq!(results[0].spec.name, "connect");
+        }
     }
 
     #[test]
